@@ -6,6 +6,18 @@ This project was originally built to run on a **Raspberry Pi** (alongside Homebr
 
 The MQTT protocol is based on community reverse-engineering documented in [home-assistant-yarbo](https://github.com/markus-lassfolk/home-assistant-yarbo) and [python-yarbo](https://github.com/markus-lassfolk/python-yarbo).
 
+> **Disclaimer — read before use**
+>
+> This is **unofficial** software. It is **not** affiliated with, endorsed by, or supported by Yarbo. By using this project you agree that:
+>
+> - You use it **entirely at your own risk**.
+> - The author accepts **no liability** for any damage, injury, data loss, property damage, robot malfunction, or any other harm arising from its use.
+> - There is **no guarantee** that it will work with your robot, firmware version, or network setup.
+> - Commands sent via this panel (including manual drive) can move or stop your machine and may conflict with the official Yarbo app.
+> - The MQTT protocol is reverse-engineered and **may change** without notice in future Yarbo firmware updates.
+>
+> If you are not comfortable with these risks, do not use this software.
+
 ---
 
 ## What it does
@@ -15,7 +27,7 @@ Open the panel in a browser and you can:
 - **View live status** — battery, working state, charging, heading, attached head type, error codes (polled every 5 seconds)
 - **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
-- **Camera streams** *(optional)* — front/left/right/rear RTSP proxies when cameras are reachable on your network
+- **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
 Commands acquire the MQTT **controller role** first (`get_controller`), which may take control away from the official Yarbo mobile app while you are using the panel.
 
@@ -45,7 +57,7 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 | **PHP zlib extension** | Usually included by default |
 | **Composer** | To install the MQTT client dependency |
 | **Same network as Yarbo** | The host must reach the robot on port **1883** |
-| **ffmpeg** | Only if `cameras_enabled` is `true` |
+| **ffmpeg** | Only relevant if experimenting with cameras (not working for most users — see below) |
 
 ---
 
@@ -64,7 +76,7 @@ Edit `config.php` — at minimum set `broker_host`, `serial`, and optionally `ca
 'broker_host' => '192.168.1.223',   // Yarbo IP on your LAN
 'broker_port' => 1883,
 'serial'      => 'YOUR_SERIAL_HERE',
-'cameras_enabled' => false,           // recommended unless RTSP works for you
+'cameras_enabled' => false,           // keep false — camera support does not work yet (see README)
 ```
 
 Verify the broker is reachable:
@@ -171,8 +183,6 @@ php -S 0.0.0.0:8080 -t public
 
 Open **http://localhost:8080**.
 
-For cameras, also install ffmpeg: `brew install ffmpeg`
-
 macOS does not use systemd. To keep it running in the background you can use `launchd`, a terminal multiplexer, or run it on a Pi instead.
 
 ---
@@ -221,9 +231,9 @@ Copy `config.example.php` to `config.php`. **`config.php` is git-ignored** — n
 | `broker_host` | Yarbo robot IP address (MQTT broker) |
 | `broker_port` | Usually `1883` |
 | `serial` | Robot serial number, e.g. `24460102QU2KB269` |
-| `cameras_enabled` | `false` to hide the camera section (recommended for most users) |
-| `camera_host` | Override RTSP host; `null` uses `broker_host` |
-| `ffmpeg_path` | Path to ffmpeg binary |
+| `cameras_enabled` | `false` — **keep disabled**; local camera streams do not work yet (see below) |
+| `camera_host` | Override RTSP host; `null` uses `broker_host` (experimental only) |
+| `ffmpeg_path` | Path to ffmpeg binary (only needed if experimenting with cameras) |
 
 ---
 
@@ -241,18 +251,27 @@ Copy `config.example.php` to `config.php`. **`config.php` is git-ignored** — n
 
 ---
 
-## Camera streams (optional)
+## Camera support (not currently working)
 
-Yarbo has four RTSP cameras (front, left, right, rear). They are **not** served over MQTT — the panel uses ffmpeg to proxy RTSP into the browser.
+**Local camera streams do not work in practice on current Yarbo hardware/firmware.** This is not a bug in this project — Yarbo has not opened up local camera access to third-party tools.
 
-| Camera | Port | URL |
-|--------|------|-----|
+What we know from testing and community documentation:
+
+- The official Yarbo app uses **cloud-based video** (Smart Vision), not LAN RTSP streams exposed to your network.
+- The robot has internal RTSP cameras, but they sit on a private internal network and are **not reachable** from a normal home LAN connection to the robot's Wi‑Fi IP.
+- MQTT commands such as `camera_toggle` and `smart_vision_control` can be sent, but they do **not** make local RTSP streams available to this panel.
+- Ports 19201–19204 are documented in community reverse-engineering, but in real-world use they are not open on the broker IP for most owners.
+
+For these reasons, **leave `cameras_enabled` set to `false`** in `config.php`. The camera-related code remains in the repository for future use if Yarbo ever enables local stream access, but it should be treated as **experimental and non-functional** today.
+
+| Camera | Documented port | Documented URL |
+|--------|-----------------|----------------|
 | Front | 19201 | `rtsp://HOST:19201/live/chn0` |
 | Left | 19202 | `rtsp://HOST:19202/live/chn0` |
 | Right | 19203 | `rtsp://HOST:19203/live/chn0` |
 | Rear | 19204 | `rtsp://HOST:19204/live/chn0` |
 
-On many Yarbo units the cameras live on an internal network and are **not** exposed on the broker IP. The Yarbo app uses cloud video instead. Set `cameras_enabled` to `false` unless you have working local RTSP access (e.g. via SSH tunnel).
+Do not install ffmpeg or spend time on camera tunnels unless you have independently verified RTSP access on your specific unit.
 
 ---
 
@@ -304,6 +323,8 @@ yarbo-control-panel/
 
 ---
 
-## License
+## License and disclaimer
 
-This is unofficial community software — not affiliated with Yarbo. Use at your own risk.
+This is unofficial community software — **not affiliated with Yarbo**.
+
+See the [disclaimer at the top of this README](#yarbo-php-control-panel) for the full terms. In short: **no warranty, no guarantee of fitness for any purpose, and no liability** to the author for any consequences of using this software. You assume all responsibility for how you use it and for the safety of people, property, and equipment around your robot.
