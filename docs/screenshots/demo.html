@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yarbo Control Panel</title>
+    <link rel="stylesheet" href="../../public/assets/style.css">
+    <style>
+        /* Screenshot demo — static sample data, no live API */
+        body.screenshot-demo { min-height: auto; }
+    </style>
+</head>
+<body class="screenshot-demo">
+    <main class="container">
+        <header>
+            <h1>Yarbo Control Panel</h1>
+            <p class="subtitle">Local MQTT control</p>
+        </header>
+
+        <section class="card status-card">
+            <h2>Status</h2>
+            <div class="status-grid">
+                <div class="stat">
+                    <span class="label">Battery</span>
+                    <span class="value">87%</span>
+                </div>
+                <div class="stat">
+                    <span class="label">State</span>
+                    <span class="value badge active">active</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Charging</span>
+                    <span class="value">No</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Heading</span>
+                    <span class="value">142°</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Head</span>
+                    <span class="value">Lawn Mower</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Error</span>
+                    <span class="value">0</span>
+                </div>
+            </div>
+            <p class="updated">Last updated: <span>1 Jul 2026, 17:36:21</span></p>
+        </section>
+
+        <section class="card drive-card">
+            <h2>Manual Drive</h2>
+            <p class="hint">Hold a direction to move. Release to stop. Takes controller from the Yarbo app — use with care.</p>
+            <div class="dpad">
+                <button type="button" class="btn btn-drive" aria-label="Forward">▲</button>
+                <button type="button" class="btn btn-drive" aria-label="Turn left">◀</button>
+                <button type="button" class="btn btn-drive btn-drive-stop" aria-label="Stop">■</button>
+                <button type="button" class="btn btn-drive" aria-label="Turn right">▶</button>
+                <button type="button" class="btn btn-drive" aria-label="Backward">▼</button>
+            </div>
+            <p class="drive-status">Ready</p>
+        </section>
+
+        <section class="card controls-card">
+            <h2>Controls</h2>
+            <p class="hint">Commands acquire controller role and may take control from the Yarbo app.</p>
+            <div class="button-grid">
+                <button type="button" class="btn">Lights On</button>
+                <button type="button" class="btn">Lights Off</button>
+                <button type="button" class="btn">Buzzer</button>
+                <button type="button" class="btn">Pause</button>
+                <button type="button" class="btn">Resume</button>
+                <button type="button" class="btn">Return to Dock</button>
+                <button type="button" class="btn btn-danger">Stop</button>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

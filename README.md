@@ -20,6 +20,33 @@ The MQTT protocol is based on community reverse-engineering documented in [home-
 
 ---
 
+## Screenshots
+
+Sample telemetry data shown for illustration.
+
+<p align="center">
+  <img src="docs/screenshots/panel-desktop.png" alt="Yarbo Control Panel — desktop view showing status, manual drive, and controls" width="720">
+</p>
+
+<p align="center">
+  <em>Status, manual drive D-pad, and command buttons — runs in any modern browser on your LAN.</em>
+</p>
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/panel-status.png" alt="Status panel with battery, state, heading, and head type" width="100%"><br>
+      <sub>Live status from MQTT</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/panel-mobile.png" alt="Yarbo Control Panel on a phone-sized screen" width="280"><br>
+      <sub>Mobile-friendly layout</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## What it does
 
 Open the panel in a browser and you can:
