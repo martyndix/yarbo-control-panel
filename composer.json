@@ -1,0 +1,14 @@
+{
+    "name": "yarbo/control-panel",
+    "description": "Local PHP control panel for Yarbo robot mowers via MQTT",
+    "type": "project",
+    "require": {
+        "php": ">=8.1",
+        "php-mqtt/client": "^2.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Yarbo\\": "src/"
+        }
+    }
+}

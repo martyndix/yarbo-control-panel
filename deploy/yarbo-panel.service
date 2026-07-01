@@ -1,0 +1,15 @@
+[Unit]
+Description=Yarbo PHP Control Panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/yarbo
+ExecStart=/usr/bin/php -S 0.0.0.0:8080 -t /home/admin/yarbo/public
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

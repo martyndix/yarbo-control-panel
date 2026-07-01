@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Yarbo Pi — Quick Reference</title>
+    <style>
+        @media print {
+            body { margin: 1.5cm; }
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+            color: #1a1a1a;
+            max-width: 700px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        h1 {
+            font-size: 1.5rem;
+            border-bottom: 2px solid #3d9a5f;
+            padding-bottom: 0.5rem;
+        }
+        h2 {
+            font-size: 1.1rem;
+            margin-top: 1.75rem;
+            color: #2d4a3e;
+        }
+        pre {
+            background: #f4f6f8;
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            overflow-x: auto;
+        }
+        code {
+            font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+        th, td {
+            border: 1px solid #d0d7de;
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+        }
+        th {
+            background: #f4f6f8;
+        }
+        .meta {
+            color: #57606a;
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+        }
+        .note {
+            background: #fff8e6;
+            border: 1px solid #e6d9a8;
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>Yarbo Control Panel — Raspberry Pi Quick Reference</h1>
+    <p class="meta">Pi: <strong>admin@192.168.9.253</strong> &nbsp;|&nbsp; Panel URL: <strong>http://192.168.9.253:8080</strong></p>
+
+    <h2>SSH into the Pi</h2>
+    <pre><code>ssh admin@192.168.9.253</code></pre>
+
+    <h2>Edit configuration</h2>
+    <pre><code>nano ~/yarbo/config.php</code></pre>
+    <p>Common settings: <code>broker_host</code>, <code>serial</code>, <code>cameras_enabled</code></p>
+    <ul>
+        <li><strong>Save:</strong> Ctrl+O, then Enter</li>
+        <li><strong>Exit:</strong> Ctrl+X</li>
+    </ul>
+
+    <h2>Restart the service (after saving config)</h2>
+    <pre><code>sudo systemctl restart yarbo-panel</code></pre>
+
+    <h2>Check the service is running</h2>
+    <pre><code>sudo systemctl status yarbo-panel</code></pre>
+    <p>Press <strong>q</strong> to exit.</p>
+
+    <h2>View recent logs</h2>
+    <pre><code>sudo journalctl -u yarbo-panel -n 30</code></pre>
+
+    <h2>Follow logs live</h2>
+    <pre><code>sudo journalctl -u yarbo-panel -f</code></pre>
+    <p>Press <strong>Ctrl+C</strong> to stop.</p>
+
+    <h2>Test API from the Pi</h2>
+    <pre><code>curl -s http://127.0.0.1:8080/api/status.php</code></pre>
+
+    <h2>Test connection to Yarbo MQTT</h2>
+    <pre><code>nc -zv 192.168.1.223 1883</code></pre>
+    <p class="note">Replace <code>192.168.1.223</code> with your Yarbo IP if it has changed.</p>
+
+    <h2>Edit the systemd service (rare)</h2>
+    <pre><code>sudo nano /etc/systemd/system/yarbo-panel.service</code></pre>
+    <p>After changing the service file:</p>
+    <pre><code>sudo systemctl daemon-reload
+sudo systemctl restart yarbo-panel</code></pre>
+
+    <h2>Handy commands</h2>
+    <table>
+        <tr><th>Task</th><th>Command</th></tr>
+        <tr><td>Stop service</td><td><code>sudo systemctl stop yarbo-panel</code></td></tr>
+        <tr><td>Start service</td><td><code>sudo systemctl start yarbo-panel</code></td></tr>
+        <tr><td>Disable auto-start on boot</td><td><code>sudo systemctl disable yarbo-panel</code></td></tr>
+        <tr><td>Enable auto-start on boot</td><td><code>sudo systemctl enable yarbo-panel</code></td></tr>
+        <tr><td>Reboot Pi</td><td><code>sudo reboot</code></td></tr>
+    </table>
+</body>
+</html>
