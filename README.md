@@ -32,6 +32,11 @@ Sample telemetry data shown for illustration.
   <em>Status, manual drive D-pad, and command buttons — runs in any modern browser on your LAN.</em>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/panel-location-map.png" alt="Location map mock showing live GPS marker, heading line, and Street/Satellite toggle" width="720"><br>
+  <sub>Location Map mock-up (example data)</sub>
+</p>
+
 <table>
   <tr>
     <td align="center" width="50%">

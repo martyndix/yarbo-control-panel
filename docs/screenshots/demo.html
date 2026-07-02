@@ -8,6 +8,71 @@
     <style>
         /* Screenshot demo — static sample data, no live API */
         body.screenshot-demo { min-height: auto; }
+        .map-mock {
+            position: relative;
+            width: 100%;
+            height: 320px;
+            border: 1px solid #2d3a4f;
+            border-radius: 10px;
+            overflow: hidden;
+            background:
+                linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px) 0 0 / 64px 64px,
+                linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px) 0 0 / 64px 64px,
+                radial-gradient(circle at 20% 25%, #243247 0 18%, transparent 19%),
+                radial-gradient(circle at 72% 38%, #1f2c41 0 16%, transparent 17%),
+                radial-gradient(circle at 44% 74%, #25364a 0 20%, transparent 21%),
+                #101824;
+        }
+        .map-mock::before {
+            content: "Map data © OpenStreetMap contributors | Tiles © Esri";
+            position: absolute;
+            left: 8px;
+            bottom: 6px;
+            color: #8b9cb3;
+            font-size: 11px;
+            opacity: 0.85;
+        }
+        .map-path {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+        .map-marker {
+            position: absolute;
+            left: 56%;
+            top: 52%;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #3d9a5f;
+            border: 2px solid #7ddea0;
+            box-shadow: 0 0 0 6px rgba(125, 222, 160, 0.16);
+            transform: translate(-50%, -50%);
+        }
+        .map-heading {
+            position: absolute;
+            left: 56%;
+            top: 52%;
+            width: 78px;
+            height: 3px;
+            background: #7ddea0;
+            transform-origin: left center;
+            transform: rotate(-28deg);
+            border-radius: 2px;
+            opacity: 0.95;
+        }
+        .map-pill {
+            display: inline-flex;
+            gap: 0.4rem;
+            align-items: center;
+            margin-top: 0.55rem;
+            font-size: 0.78rem;
+            color: #7ddea0;
+            background: rgba(30, 77, 50, 0.6);
+            border: 1px solid #2f6f48;
+            border-radius: 999px;
+            padding: 0.2rem 0.55rem;
+        }
     </style>
 </head>
 <body class="screenshot-demo">
@@ -46,6 +111,35 @@
                 </div>
             </div>
             <p class="updated">Last updated: <span>1 Jul 2026, 17:36:21</span></p>
+        </section>
+
+        <section class="card map-card">
+            <div class="section-header">
+                <h2>Location Map</h2>
+                <div class="map-mode">
+                    <label>
+                        <input type="radio" name="map-layer-demo" checked>
+                        Street
+                    </label>
+                    <label>
+                        <input type="radio" name="map-layer-demo">
+                        Satellite
+                    </label>
+                </div>
+            </div>
+            <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors).</p>
+            <div class="map-mock">
+                <svg class="map-path" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <polyline points="15,72 28,66 37,59 46,56 57,52 67,47" fill="none" stroke="#67b3ff" stroke-width="1.5" opacity="0.8" />
+                    <polyline points="14,75 26,70 35,63 45,58 54,55" fill="none" stroke="#67b3ff" stroke-width="1" opacity="0.35" />
+                </svg>
+                <span class="map-marker" aria-hidden="true"></span>
+                <span class="map-heading" aria-hidden="true"></span>
+            </div>
+            <p class="map-status">
+                GPS locked (fix_quality=1) at 51.177684, -0.622751 | altitude 84.0m
+                <span class="map-pill">Live fix</span>
+            </p>
         </section>
 
         <section class="card drive-card">
