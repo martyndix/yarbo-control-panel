@@ -19,13 +19,56 @@ final class YarboTelemetry
     public static function parse(array $raw): array
     {
         $battery = $raw['BatteryMSG']['capacity'] ?? null;
+        $batteryMsg = is_array($raw['BatteryMSG'] ?? null) ? $raw['BatteryMSG'] : [];
+        $stateMsg = is_array($raw['StateMSG'] ?? null) ? $raw['StateMSG'] : [];
         $workingState = $raw['StateMSG']['working_state'] ?? null;
         $chargingStatus = $raw['StateMSG']['charging_status'] ?? 0;
         $errorCode = $raw['StateMSG']['error_code'] ?? 0;
         $heading = $raw['RTKMSG']['heading'] ?? null;
+        $rtkMsg = is_array($raw['RTKMSG'] ?? null) ? $raw['RTKMSG'] : [];
+        $netMsg = is_array($raw['NetMSG'] ?? null) ? $raw['NetMSG'] : [];
         $headType = $raw['HeadMsg']['head_type'] ?? null;
         $roverGngga = (string) ($raw['rtk_base_data']['rover']['gngga'] ?? '');
         [$latitude, $longitude, $altitude, $fixQuality] = self::parseGngga($roverGngga);
+        $netTypeRaw = $raw['net_type'] ?? ($netMsg['net_type'] ?? null);
+        $halowStatusRaw = $raw['halow_status'] ?? ($netMsg['halow_status'] ?? null);
+        $connectionType = self::connectionTypeName($netTypeRaw, $halowStatusRaw);
+        $connectionStatus = self::connectionStatusName($netTypeRaw, $halowStatusRaw, $raw['net_module_status'] ?? null);
+        $batteryTemp = self::firstNumeric(
+            $batteryMsg['temperature'] ?? null,
+            $batteryMsg['temp'] ?? null,
+            $batteryMsg['temp_c'] ?? null,
+            $batteryMsg['battery_temp'] ?? null,
+            self::averageNumeric(
+                $batteryMsg['temperature1'] ?? null,
+                $batteryMsg['temperature2'] ?? null,
+                $batteryMsg['temperature3'] ?? null,
+                $batteryMsg['temperature4'] ?? null,
+                $batteryMsg['temperature5'] ?? null,
+                $batteryMsg['temperature6'] ?? null
+            )
+        );
+        $batteryTempSource = self::firstNumeric(
+            $batteryMsg['temperature'] ?? null,
+            $batteryMsg['temp'] ?? null,
+            $batteryMsg['temp_c'] ?? null,
+            $batteryMsg['battery_temp'] ?? null
+        ) !== null ? 'direct' : (self::averageNumeric(
+            $batteryMsg['temperature1'] ?? null,
+            $batteryMsg['temperature2'] ?? null,
+            $batteryMsg['temperature3'] ?? null,
+            $batteryMsg['temperature4'] ?? null,
+            $batteryMsg['temperature5'] ?? null,
+            $batteryMsg['temperature6'] ?? null
+        ) !== null ? 'avg_cells' : null);
+        $wirelessChargeVoltage = self::firstNumeric(
+            $batteryMsg['wireless_charge_voltage'] ?? null,
+            $raw['wireless_charge_voltage'] ?? null
+        );
+        $wirelessChargeCurrent = self::firstNumeric(
+            $batteryMsg['wireless_charge_current'] ?? null,
+            $raw['wireless_charge_current'] ?? null
+        );
 
         return [
             'battery'             => $battery !== null ? (int) $battery : null,
@@ -50,8 +93,83 @@ final class YarboTelemetry
             'returning_to_dock'   => (bool) ($raw['StateMSG']['on_going_recharging'] ?? 0),
             'plan_running'        => (bool) ($raw['StateMSG']['on_going_planning'] ?? 0),
             'camera_state'        => $raw['camera_state'] ?? null,
+            'connection_type'     => $connectionType,
+            'connection_status'   => $connectionStatus,
+            'network'             => [
+                'net_type_raw'      => $netTypeRaw,
+                'halow_status'      => $halowStatusRaw,
+                'net_module_status' => $raw['net_module_status'] ?? ($netMsg['net_module_status'] ?? null),
+                'route_priority'    => $raw['route_priority'] ?? ($netMsg['route_priority'] ?? null),
+                'rtcm_age'          => $raw['rtcm_age'] ?? ($rtkMsg['rtcm_age'] ?? null),
+            ],
+            'battery_diagnostics' => [
+                'temperature_c'          => $batteryTemp !== null ? round($batteryTemp, 1) : null,
+                'temperature_source'     => $batteryTempSource,
+                'wireless_charge_voltage' => $wirelessChargeVoltage !== null ? round($wirelessChargeVoltage, 2) : null,
+                'wireless_charge_current' => $wirelessChargeCurrent !== null ? round($wirelessChargeCurrent, 2) : null,
+            ],
+            'rtk_diagnostics' => [
+                'rtk_status'  => $rtkMsg['status'] ?? ($raw['rtk_status'] ?? null),
+                'heading_dop' => isset($rtkMsg['heading_dop']) ? round((float) $rtkMsg['heading_dop'], 2) : null,
+                'fix_quality' => $fixQuality,
+                'gps_valid'   => $fixQuality > 0 && $latitude !== null && $longitude !== null,
+            ],
             'updated_at'          => gmdate('c'),
         ];
+    }
+
+    private static function connectionTypeName(mixed $netTypeRaw, mixed $halowStatusRaw): string
+    {
+        if ((int) ($halowStatusRaw ?? 0) > 0) {
+            return 'HaLow';
+        }
+
+        $value = strtolower((string) $netTypeRaw);
+        return match ($value) {
+            '0', 'wifi', 'wlan' => 'WiFi',
+            '1', '4g', 'lte', 'cellular' => '4G',
+            '2', 'halow', 'ha_low' => 'HaLow',
+            default => 'Unknown',
+        };
+    }
+
+    private static function connectionStatusName(mixed $netTypeRaw, mixed $halowStatusRaw, mixed $moduleStatusRaw): string
+    {
+        $module = (int) ($moduleStatusRaw ?? 0);
+        if ($module > 0) {
+            return 'Connected';
+        }
+        if ((int) ($halowStatusRaw ?? 0) > 0) {
+            return 'Connected';
+        }
+        if ($netTypeRaw !== null && $netTypeRaw !== '') {
+            return 'Degraded';
+        }
+        return 'Unknown';
+    }
+
+    private static function firstNumeric(mixed ...$values): ?float
+    {
+        foreach ($values as $v) {
+            if (is_numeric($v)) {
+                return (float) $v;
+            }
+        }
+        return null;
+    }
+
+    private static function averageNumeric(mixed ...$values): ?float
+    {
+        $nums = [];
+        foreach ($values as $v) {
+            if (is_numeric($v)) {
+                $nums[] = (float) $v;
+            }
+        }
+        if ($nums === []) {
+            return null;
+        }
+        return array_sum($nums) / count($nums);
     }
 
     /**

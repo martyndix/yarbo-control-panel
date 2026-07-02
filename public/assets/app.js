@@ -21,6 +21,14 @@ const els = {
     map: document.getElementById('map'),
     mapStatus: document.getElementById('map-status'),
     mapAreasStatus: document.getElementById('map-areas-status'),
+    connectionType: document.getElementById('connection-type'),
+    connectionStatus: document.getElementById('connection-status'),
+    batteryTemp: document.getElementById('battery-temp'),
+    wirelessCharge: document.getElementById('wireless-charge'),
+    rtkStatus: document.getElementById('rtk-status'),
+    rtcmAge: document.getElementById('rtcm-age'),
+    routePriority: document.getElementById('route-priority'),
+    netModuleStatus: document.getElementById('net-module-status'),
 };
 
 const DRIVE_VECTORS = {
@@ -110,6 +118,111 @@ function updateMapStatus(message) {
 
 function updateMapAreasStatus(message) {
     if (els.mapAreasStatus) els.mapAreasStatus.textContent = message;
+}
+
+function fmtOrDash(value) {
+    return value == null || value === '' ? '—' : String(value);
+}
+
+function formatStructured(value) {
+    if (value == null || value === '') return '—';
+    if (Array.isArray(value)) {
+        if (value.length === 0) return '—';
+        return value.map((item) => formatStructured(item)).join(', ');
+    }
+    if (typeof value === 'object') {
+        const entries = Object.entries(value);
+        if (entries.length === 0) return '—';
+        return entries
+            .map(([k, v]) => `${k}: ${formatStructured(v)}`)
+            .join(', ');
+    }
+    return String(value);
+}
+
+function toNumberOrNull(value) {
+    return value == null || value === '' || Number.isNaN(Number(value)) ? null : Number(value);
+}
+
+function formatRoutePriority(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return formatStructured(value);
+    }
+
+    const ifaceNames = {
+        hg0: 'HaLow',
+        wlan0: 'WiFi',
+        wwan0: '4G',
+    };
+
+    const ranked = Object.entries(value)
+        .map(([iface, priority]) => ({
+            iface,
+            label: ifaceNames[iface] || iface,
+            priority: toNumberOrNull(priority),
+        }))
+        .filter((row) => row.priority != null)
+        .sort((a, b) => a.priority - b.priority);
+
+    if (ranked.length === 0) {
+        return 'No route data';
+    }
+
+    const primary = ranked[0];
+    const backups = ranked.slice(1).map((r) => `${r.label} (${r.priority})`).join(', ');
+    return backups
+        ? `Primary: ${primary.label} (${primary.priority}) | Backup: ${backups}`
+        : `Primary: ${primary.label} (${primary.priority})`;
+}
+
+function formatNetModuleStatus(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return formatStructured(value);
+    }
+
+    const statusRaw = toNumberOrNull(value.lte_status);
+    const statusLabel = statusRaw === 1 ? 'Connected' : statusRaw === 0 ? 'Disconnected' : 'Unknown';
+
+    const csq = toNumberOrNull(value.lte_csq);
+    const signalLabel = csq == null || csq === 99
+        ? 'Unknown'
+        : `${Math.round((Math.max(0, Math.min(31, csq)) / 31) * 100)}%`;
+
+    const rsrp = toNumberOrNull(value.lte_rsrp);
+    const rssi = toNumberOrNull(value.lte_rssi);
+    const radioLabel = rsrp && rsrp < 0
+        ? `RSRP ${rsrp} dBm`
+        : rssi && rssi < 0
+            ? `RSSI ${rssi} dBm`
+            : 'Radio n/a';
+
+    const iccid = String(value.lte_iccid ?? '');
+    const simLabel = iccid.length >= 4 ? `SIM ****${iccid.slice(-4)}` : 'SIM n/a';
+
+    return `LTE: ${statusLabel} | Signal: ${signalLabel} | ${radioLabel} | ${simLabel}`;
+}
+
+function formatTemp(value) {
+    if (value == null || Number.isNaN(Number(value))) return '—';
+    return `${Number(value).toFixed(1)}°C`;
+}
+
+function formatBatteryTemp(diag) {
+    const temp = formatTemp(diag?.temperature_c);
+    if (temp === '—') return temp;
+    if (diag?.temperature_source === 'avg_cells') return `${temp} (avg cells)`;
+    return temp;
+}
+
+function formatWirelessCharge(diag) {
+    const volts = diag?.wireless_charge_voltage;
+    const amps = diag?.wireless_charge_current;
+    if (volts == null && amps == null) return '—';
+    if (volts != null && amps != null) {
+        return `${Number(volts).toFixed(2)}V / ${Number(amps).toFixed(2)}A`;
+    }
+    if (volts != null) return `${Number(volts).toFixed(2)}V`;
+    return `${Number(amps).toFixed(2)}A`;
 }
 
 function updateRobotOnMap(data) {
@@ -245,6 +358,47 @@ function updateStatus(data) {
     els.errorCode.textContent = data.error_code ?? '—';
     els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
     updateRobotOnMap(data);
+    renderDiagnostics(data);
+}
+
+function renderDiagnostics(data) {
+    const network = data.network || {};
+    const batteryDiag = data.battery_diagnostics || {};
+    const rtkDiag = data.rtk_diagnostics || {};
+
+    if (els.connectionType) {
+        els.connectionType.textContent = fmtOrDash(data.connection_type);
+    }
+    if (els.connectionStatus) {
+        const status = String(data.connection_status || 'Unknown');
+        els.connectionStatus.textContent = status;
+        const badgeClass = status.toLowerCase();
+        els.connectionStatus.className = `value badge ${badgeClass}`;
+    }
+    if (els.batteryTemp) {
+        els.batteryTemp.textContent = formatBatteryTemp(batteryDiag);
+    }
+    if (els.wirelessCharge) {
+        els.wirelessCharge.textContent = formatWirelessCharge(batteryDiag);
+    }
+    if (els.rtkStatus) {
+        const rtk = rtkDiag.rtk_status;
+        const fix = rtkDiag.fix_quality;
+        const suffix = fix != null ? ` (fix ${fix})` : '';
+        els.rtkStatus.textContent = rtk != null ? `${rtk}${suffix}` : '—';
+    }
+    if (els.rtcmAge) {
+        const age = network.rtcm_age;
+        els.rtcmAge.textContent = age != null ? `${age}` : '—';
+    }
+    if (els.routePriority) {
+        els.routePriority.textContent = formatRoutePriority(network.route_priority);
+        els.routePriority.classList.add('compact');
+    }
+    if (els.netModuleStatus) {
+        els.netModuleStatus.textContent = formatNetModuleStatus(network.net_module_status);
+        els.netModuleStatus.classList.add('compact');
+    }
 }
 
 async function fetchStatus() {

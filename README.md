@@ -63,6 +63,7 @@ Open the panel in a browser and you can:
 
 - **View live status** — battery, working state, charging, heading, attached head type, error codes (polled every 5 seconds)
 - **View live GPS on a map** — Leaflet map with Street/Satellite layers, robot position, heading line, and GPS lock status
+- **View connection & health diagnostics** — network type/status (HaLow/4G/WiFi when available), battery temperature, wireless charge telemetry, RTK status, and link diagnostics
 - **Probe saved mowing areas (beta)** — attempts map extraction via MQTT (`get_map`, `read_clean_area`, `read_all_plan`, `read_recharge_point`) and overlays detected geometry
 - **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
@@ -346,6 +347,26 @@ If you are testing with a stored map and it does not render, please share:
 - `debug/map-dumps/map_discovery_*.json` output from `php scripts/discover_map.php`
 - Your firmware version
 - Whether the robot has at least one saved map/area in the official app
+
+---
+
+## Connection & health diagnostics
+
+The dashboard now includes a **Connection & Health** card with additional operational metrics when your firmware reports them.
+
+Metrics shown:
+
+- `connection_type` and `connection_status` (derived from `net_type`, `halow_status`, `net_module_status`)
+- battery temperature (`battery_diagnostics.temperature_c`), with `(avg cells)` shown when derived from `temperature1`..`temperature6`
+- wireless charging voltage/current
+- RTK status and fix quality
+- RTCM age and route priority
+
+Notes:
+
+- Some robots/firmware variants do not expose all fields all the time.
+- Missing values are shown as `—` by design.
+- Connection labels are best-effort interpretations of Yarbo telemetry keys and may vary by firmware.
 
 ---
 

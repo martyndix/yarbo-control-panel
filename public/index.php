@@ -56,6 +56,44 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p class="updated">Last updated: <span id="updated-at">never</span></p>
         </section>
 
+        <section class="card diagnostics-card">
+            <h2>Connection &amp; Health</h2>
+            <div class="diagnostics-grid">
+                <div class="stat">
+                    <span class="label">Connection Type</span>
+                    <span id="connection-type" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Connection Status</span>
+                    <span id="connection-status" class="value badge">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Battery Temp</span>
+                    <span id="battery-temp" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Wireless Charge</span>
+                    <span id="wireless-charge" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">RTK Status</span>
+                    <span id="rtk-status" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">RTCM Age</span>
+                    <span id="rtcm-age" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Route Priority</span>
+                    <span id="route-priority" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Net Module</span>
+                    <span id="net-module-status" class="value">—</span>
+                </div>
+            </div>
+        </section>
+
         <section class="card map-card">
             <div class="section-header">
                 <h2>Location Map</h2>

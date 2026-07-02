@@ -66,6 +66,12 @@ header h1 {
     gap: 1rem;
 }
 
+.diagnostics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem 1rem;
+}
+
 .stat .label {
     display: block;
     font-size: 0.75rem;
@@ -79,6 +85,14 @@ header h1 {
     font-weight: 600;
 }
 
+.stat .value.compact {
+    font-size: 0.86rem;
+    font-weight: 500;
+    line-height: 1.35;
+    display: block;
+    overflow-wrap: anywhere;
+}
+
 .badge {
     display: inline-block;
     padding: 0.15rem 0.5rem;
@@ -90,6 +104,21 @@ header h1 {
 .badge.active {
     background: #1e4d32;
     color: #7ddea0;
+}
+
+.badge.connected {
+    background: #1e4d32;
+    color: #7ddea0;
+}
+
+.badge.degraded {
+    background: #3d2f1a;
+    color: #f0c674;
+}
+
+.badge.offline {
+    background: #3d1a1a;
+    color: #f07474;
 }
 
 .updated {
@@ -419,5 +448,9 @@ header h1 {
 
     .map {
         height: 260px;
+    }
+
+    .diagnostics-grid {
+        grid-template-columns: 1fr;
     }
 }
