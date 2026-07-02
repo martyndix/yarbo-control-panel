@@ -58,6 +58,10 @@ const els = {
     settingsCloudTest: document.getElementById('settings-cloud-test'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
+    settingsUpdateStatus: document.getElementById('settings-update-status'),
+    settingsUpdateResult: document.getElementById('settings-update-result'),
+    settingsUpdateCheck: document.getElementById('settings-update-check'),
+    settingsUpdateRun: document.getElementById('settings-update-run'),
     mapDataSource: document.getElementById('map-data-source'),
     plansDataSource: document.getElementById('plans-data-source'),
     headControlsCard: document.getElementById('head-controls-card'),
@@ -989,7 +993,9 @@ function openSettingsModal() {
     els.settingsModal.classList.remove('hidden');
     document.body.classList.add('modal-open');
     setCloudTestResult(null);
+    setUpdateResult(null);
     loadSettings();
+    loadUpdateStatus();
     els.settingsHost?.focus();
 }
 
@@ -999,6 +1005,7 @@ function closeSettingsModal() {
     document.body.classList.remove('modal-open');
     setSettingsError(null);
     setCloudTestResult(null);
+    setUpdateResult(null);
 }
 
 async function loadSettings() {
@@ -1111,6 +1118,130 @@ async function testCloudConnection(button) {
         showToast(message, 'error');
     } finally {
         if (button) button.disabled = false;
+    }
+}
+
+function formatUpdateStatus(data) {
+    if (!data?.git_install) {
+        return 'Not a git clone — reinstall with git clone to enable updates.';
+    }
+    if (!data.ok) {
+        return data.error || 'Could not check for updates';
+    }
+    const version = data.changelog_version ? ` (v${data.changelog_version})` : '';
+    const current = data.current_commit_short || data.current_commit || 'unknown';
+    if (data.update_available) {
+        const remote = data.remote_commit_short || data.remote_commit || 'latest';
+        return `Update available: ${current} → ${remote}${version}`;
+    }
+    return `Up to date at ${current}${version}`;
+}
+
+function setUpdateResult(message, type) {
+    if (!els.settingsUpdateResult) return;
+    if (!message) {
+        els.settingsUpdateResult.textContent = '';
+        els.settingsUpdateResult.className = 'settings-cloud-result hidden';
+        return;
+    }
+    els.settingsUpdateResult.textContent = message;
+    els.settingsUpdateResult.className = `settings-cloud-result ${type || ''}`.trim();
+    els.settingsUpdateResult.classList.remove('hidden');
+    els.settingsUpdateResult.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function setUpdateButtonState(data) {
+    if (!els.settingsUpdateRun) return;
+    const canUpdate = Boolean(data?.git_install && data?.ok && data?.update_available);
+    els.settingsUpdateRun.disabled = !canUpdate;
+}
+
+async function loadUpdateStatus() {
+    if (!els.settingsUpdateStatus) return;
+    els.settingsUpdateStatus.textContent = 'Checking for updates…';
+    setUpdateResult(null);
+    if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = true;
+    if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
+    try {
+        const res = await fetch('/api/update.php');
+        const data = await parseJsonResponse(res);
+        els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
+        setUpdateButtonState(data);
+    } catch (err) {
+        els.settingsUpdateStatus.textContent = err.message || 'Could not check for updates';
+        if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
+    } finally {
+        if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
+    }
+}
+
+async function checkPanelUpdates(button) {
+    if (button) button.disabled = true;
+    setUpdateResult('Checking for updates…');
+    try {
+        const res = await fetch('/api/update.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'check' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Update check failed');
+        if (els.settingsUpdateStatus) {
+            els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
+        }
+        setUpdateButtonState(data);
+        if (data.update_available) {
+            setUpdateResult('A newer version is available. Click Update to latest.', 'success');
+        } else {
+            setUpdateResult('You are on the latest version.', 'success');
+        }
+    } catch (err) {
+        setUpdateResult(err.message || 'Update check failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function runPanelUpdate(button) {
+    if (!window.confirm('Update the panel to the latest version from GitHub? The page will reload after the service restarts.')) {
+        return;
+    }
+    if (button) button.disabled = true;
+    if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = true;
+    setUpdateResult('Updating… this may take a minute.');
+    try {
+        const res = await fetch('/api/update.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update', confirm: true }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Update failed');
+        if (data.updated) {
+            const steps = Array.isArray(data.steps) ? data.steps.join('\n') : '';
+            const restartNote = data.restarted
+                ? 'Service restarted — reloading…'
+                : 'Update complete. Restart the panel if it is still running old code.';
+            setUpdateResult(`${data.message || 'Updated'}\n${restartNote}${steps ? `\n${steps}` : ''}`, 'success');
+            showToast(data.message || 'Panel updated', 'success');
+            if (data.restarted) {
+                setTimeout(() => window.location.reload(), 2500);
+            } else {
+                await loadUpdateStatus();
+            }
+        } else {
+            setUpdateResult(data.message || 'Already on latest version.', 'success');
+            if (els.settingsUpdateStatus) {
+                els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
+            }
+            setUpdateButtonState(data);
+        }
+    } catch (err) {
+        setUpdateResult(err.message || 'Update failed', 'error');
+        showToast(err.message || 'Update failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+        if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
     }
 }
 
@@ -1467,6 +1598,8 @@ if (document.getElementById('waypoints-list')) {
 els.settingsOpen?.addEventListener('click', openSettingsModal);
 els.settingsForm?.addEventListener('submit', saveSettings);
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
+els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));
+els.settingsUpdateRun?.addEventListener('click', (e) => runPanelUpdate(e.currentTarget));
 document.querySelectorAll('[data-settings-close]').forEach((el) => {
     el.addEventListener('click', closeSettingsModal);
 });

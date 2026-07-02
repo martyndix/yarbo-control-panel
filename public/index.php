@@ -271,67 +271,89 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
             <button type="button" class="modal-backdrop" data-settings-close aria-label="Close settings"></button>
-            <div class="modal-panel card">
-                <div class="section-header">
-                    <h2 id="settings-title">Connection settings</h2>
+            <div class="modal-panel card settings-modal">
+                <div class="settings-modal-header">
+                    <h2 id="settings-title">Settings</h2>
+                    <p class="hint settings-modal-lead">Connection, optional cloud reads, and panel updates.</p>
                 </div>
                 <form id="settings-form" class="settings-form">
-                    <label class="settings-field">
-                        <span class="label">Broker IP (Yarbo host)</span>
-                        <input
-                            type="text"
-                            id="settings-host"
-                            name="broker_host"
-                            required
-                            placeholder="192.168.1.24"
-                            autocomplete="off"
-                            inputmode="decimal"
-                        >
-                    </label>
-                    <label class="settings-field">
-                        <span class="label">Serial number</span>
-                        <input
-                            type="text"
-                            id="settings-serial"
-                            name="serial"
-                            required
-                            placeholder="24460102..."
-                            autocomplete="off"
-                            spellcheck="false"
-                        >
-                    </label>
+                    <div class="settings-modal-scroll">
+                        <section class="settings-section">
+                            <h3 class="settings-subtitle">Connection</h3>
+                            <label class="settings-field">
+                                <span class="label">Broker IP (Yarbo host)</span>
+                                <input
+                                    type="text"
+                                    id="settings-host"
+                                    name="broker_host"
+                                    required
+                                    placeholder="192.168.1.24"
+                                    autocomplete="off"
+                                    inputmode="decimal"
+                                >
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Serial number</span>
+                                <input
+                                    type="text"
+                                    id="settings-serial"
+                                    name="serial"
+                                    required
+                                    placeholder="24460102..."
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                >
+                            </label>
+                        </section>
 
-                    <h3 class="settings-subtitle">Cloud reads (optional)</h3>
-                    <p class="hint">Use your Yarbo account for map/plan data when local MQTT returns nothing. Controls always use local MQTT.</p>
-                    <label class="settings-field settings-checkbox">
-                        <input type="checkbox" id="settings-cloud-enabled" name="cloud_enabled">
-                        <span>Enable cloud fallback reads</span>
-                    </label>
-                    <label class="settings-field">
-                        <span class="label">Yarbo account email</span>
-                        <input type="email" id="settings-cloud-email" name="cloud_email" autocomplete="username">
-                    </label>
-                    <label class="settings-field">
-                        <span class="label">Yarbo account password</span>
-                        <input type="password" id="settings-cloud-password" name="cloud_password" autocomplete="current-password" placeholder="Leave blank to keep saved password">
-                    </label>
-                    <label class="settings-field">
-                        <span class="label">Default data source</span>
-                        <select id="settings-data-source" name="data_source">
-                            <option value="auto">Auto (local, then cloud)</option>
-                            <option value="local">Local MQTT only</option>
-                            <option value="cloud">Cloud only</option>
-                        </select>
-                    </label>
-                    <p id="settings-cloud-status" class="hint">Cloud bridge: checking…</p>
-                    <p id="settings-cloud-result" class="settings-cloud-result hidden" role="status"></p>
-                    <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
+                        <section class="settings-section">
+                            <h3 class="settings-subtitle">Cloud reads (optional)</h3>
+                            <p class="hint">Map/plan data from your Yarbo account when local MQTT returns nothing. Controls always use local MQTT.</p>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-cloud-enabled" name="cloud_enabled">
+                                <span>Enable cloud fallback reads</span>
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Yarbo account email</span>
+                                <input type="email" id="settings-cloud-email" name="cloud_email" autocomplete="username">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Yarbo account password</span>
+                                <input type="password" id="settings-cloud-password" name="cloud_password" autocomplete="current-password" placeholder="Leave blank to keep saved password">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Default data source</span>
+                                <select id="settings-data-source" name="data_source">
+                                    <option value="auto">Auto (local, then cloud)</option>
+                                    <option value="local">Local MQTT only</option>
+                                    <option value="cloud">Cloud only</option>
+                                </select>
+                            </label>
+                            <p id="settings-cloud-status" class="hint">Cloud bridge: checking…</p>
+                            <p id="settings-cloud-result" class="settings-cloud-result hidden" role="status"></p>
+                            <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
+                        </section>
 
-                    <p class="hint">Updates <code>config.php</code> and <code>data/cloud-config.json</code> on this server. Use only on a trusted home network.</p>
-                    <p id="settings-error" class="settings-error hidden" role="alert"></p>
-                    <div class="modal-actions">
-                        <button type="submit" class="btn" id="settings-save">Save</button>
-                        <button type="button" class="btn btn-secondary" data-settings-close>Cancel</button>
+                        <section class="settings-section">
+                            <h3 class="settings-subtitle">Panel updates</h3>
+                            <p class="hint">Pull the latest code from GitHub. <code>config.php</code> and <code>data/</code> are preserved.</p>
+                            <p id="settings-update-status" class="hint">Checking for updates…</p>
+                            <p id="settings-update-result" class="settings-cloud-result hidden" role="status"></p>
+                            <div class="settings-update-actions">
+                                <button type="button" class="btn btn-secondary" id="settings-update-check">Check for updates</button>
+                                <button type="button" class="btn" id="settings-update-run" disabled>Update to latest</button>
+                            </div>
+                        </section>
+
+                        <p class="hint settings-trusted-note">Use only on a trusted home network.</p>
+                    </div>
+
+                    <div class="settings-modal-footer">
+                        <p id="settings-error" class="settings-error hidden" role="alert"></p>
+                        <div class="modal-actions">
+                            <button type="submit" class="btn" id="settings-save">Save</button>
+                            <button type="button" class="btn btn-secondary" data-settings-close>Cancel</button>
+                        </div>
                     </div>
                 </form>
             </div>

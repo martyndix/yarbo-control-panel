@@ -87,6 +87,7 @@ install_project() {
   fi
 
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
+  chmod +x scripts/update.sh 2>/dev/null || true
 
   local python=""
   if command -v python3 >/dev/null 2>&1; then
@@ -152,6 +153,30 @@ EOF
     echo "    Service is running"
   else
     echo "    WARNING: service failed to start — check: journalctl -u ${SERVICE_NAME} -n 30"
+  fi
+
+  install_update_sudoers "${owner}"
+}
+
+install_update_sudoers() {
+  local owner="$1"
+  local sudoers_path="/etc/sudoers.d/yarbo-panel-update"
+  local systemctl_bin
+  systemctl_bin="$(command -v systemctl)"
+
+  if [[ -z "$systemctl_bin" ]]; then
+    return 0
+  fi
+
+  echo "==> Allowing ${owner} to restart ${SERVICE_NAME} for one-click UI updates"
+  cat > "${sudoers_path}" <<EOF
+# Yarbo Control Panel — passwordless restart for web UI updates (installed by scripts/install.sh)
+${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} restart ${SERVICE_NAME}
+EOF
+  chmod 440 "${sudoers_path}"
+  if ! visudo -cf "${sudoers_path}" >/dev/null 2>&1; then
+    rm -f "${sudoers_path}"
+    echo "    WARNING: could not install sudoers rule — UI updates may require manual restart"
   fi
 }
 

@@ -169,8 +169,51 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
 | **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
+| **Update panel** | Settings → **Panel updates**, or `./scripts/update.sh` (see [Updating](#updating-an-existing-install)) |
 
 The install script runs `composer install`, creates `config.php` if missing, creates the `data/` directory, and optionally installs the Python `yarbo-data-sdk` package for cloud map/plan reads.
+
+## Updating an existing install
+
+When new commits are published on GitHub, update your panel without losing `config.php` or `data/`.
+
+**Requirements:** the panel must be installed with `git clone` (not a zip download).
+
+### From the web UI (recommended)
+
+1. Open the panel → **Settings**
+2. Scroll to **Panel updates**
+3. Click **Check for updates**
+4. If an update is available, click **Update to latest** and confirm
+
+On a Pi with systemd, the installer configures passwordless `sudo systemctl restart yarbo-panel` so the panel restarts automatically after updating. The page reloads when the service is back.
+
+### From the command line
+
+```bash
+cd ~/yarbo
+./scripts/update.sh
+```
+
+Check only (no changes):
+
+```bash
+./scripts/update.sh --check-only
+```
+
+Manual equivalent:
+
+```bash
+cd ~/yarbo
+git fetch origin main
+git pull --ff-only origin main
+composer install --no-dev --optimize-autoloader
+sudo systemctl restart yarbo-panel   # if using systemd
+```
+
+If `git pull` fails because of local changes, stash or reset them first. `config.php` and `data/` are gitignored and are not overwritten.
+
+Re-run `sudo ./scripts/install.sh` only if you need to refresh the systemd service or sudoers rule — not for normal code updates.
 
 Legacy manual install (if you prefer):
 
@@ -515,6 +558,7 @@ yarbo-control-panel/
 ├── src/                  # MQTT client, telemetry, map, cloud helpers
 ├── scripts/
 │   ├── install.sh        # One-command install (+ systemd when run with sudo)
+│   └── update.sh         # Pull latest from GitHub, composer install, restart service
 │   └── cloud_bridge.py   # Optional Yarbo cloud map/plan reads
 ├── deploy/               # Reference systemd unit (install.sh generates the real one)
 └── docs/                 # Screenshots and Pi quick-reference (HTML)

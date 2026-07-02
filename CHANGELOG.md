@@ -6,6 +6,9 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+### Added
+- **Panel updates**: Settings UI to check for and install updates from GitHub; `scripts/update.sh` CLI; passwordless `systemctl restart yarbo-panel` when installed with `sudo ./scripts/install.sh`
+
 ## [1.1.0] - 2026-07-02
 
 ### Added
