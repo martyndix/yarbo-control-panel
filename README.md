@@ -509,21 +509,22 @@ curl -X POST -d "action=lights_on" http://localhost:8080/api/command.php
 
 ```
 yarbo-control-panel/
-├── CHANGELOG.md          # Release notes (updated each publish)
-├── config.example.php    # Copy to config.php (not in git)
+├── CHANGELOG.md          # Release notes
+├── config.example.php    # Template for config.php (created by install.sh)
 ├── public/               # Web root (index.php, assets, api/)
-├── src/                  # MQTT codec, client, telemetry
-├── deploy/               # systemd service template for Pi/Linux
-├── docs/                 # Pi quick-reference (PDF + HTML)
-└── scripts/              # Helper scripts (camera tunnel)
+├── src/                  # MQTT client, telemetry, map, cloud helpers
+├── scripts/
+│   ├── install.sh        # One-command install (+ systemd when run with sudo)
+│   └── cloud_bridge.py   # Optional Yarbo cloud map/plan reads
+├── deploy/               # Reference systemd unit (install.sh generates the real one)
+└── docs/                 # Screenshots and Pi quick-reference (HTML)
 ```
 
 ---
 
 ## Changelog
 
-Release notes are tracked in [`CHANGELOG.md`](CHANGELOG.md).  
-For each published update, add an entry with date, version tag (or `Unreleased`), and key changes.
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.1.0** (2026-07-02).
 
 ---
 
