@@ -37,6 +37,11 @@ Sample telemetry data shown for illustration.
   <sub>Location Map mock-up (example data)</sub>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/panel-location-map-satellite.png" alt="Location map example using satellite imagery with GPS marker overlay" width="720"><br>
+  <sub>Location Map satellite example (sample GPS fix)</sub>
+</p>
+
 <table>
   <tr>
     <td align="center" width="50%">
