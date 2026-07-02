@@ -121,45 +121,65 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 
 ---
 
-## Quick start (any platform)
+## Quick start
+
+### Raspberry Pi / Linux (recommended — 2 commands)
+
+On a fresh **Raspberry Pi OS** or Debian/Ubuntu host:
+
+```bash
+git clone https://github.com/martyndix/yarbo-control-panel.git ~/yarbo
+cd ~/yarbo && sudo ./scripts/install.sh --deps
+```
+
+This one command:
+
+1. Installs PHP, Composer, Git, and Python (apt)
+2. Runs `composer install` and creates `config.php`
+3. Installs and **enables a systemd service** so the panel starts on boot
+4. Starts the panel immediately
+
+Then open the URL printed at the end (e.g. `http://192.168.0.50:8080`), click **Settings**, and enter your **Yarbo broker IP** and **serial number**. No need to edit `config.php` by hand.
+
+If PHP and Composer are already installed:
+
+```bash
+git clone https://github.com/martyndix/yarbo-control-panel.git ~/yarbo
+cd ~/yarbo && sudo ./scripts/install.sh
+```
+
+(`--deps` is only needed the first time on a bare system.)
+
+### macOS / manual / development
 
 ```bash
 git clone https://github.com/martyndix/yarbo-control-panel.git
 cd yarbo-control-panel
 ./scripts/install.sh
+php -S 0.0.0.0:8080 -t public
 ```
+
+Open **http://localhost:8080**, click **Settings**, and enter broker IP and serial. macOS has no systemd — keep the terminal open, or run on a Pi for always-on use.
+
+### After install
+
+| Step | What to do |
+|------|------------|
+| **Connect robot** | Pi/host must be on the same network as Yarbo; port **1883** reachable |
+| **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
+| **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
+| **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
 
 The install script runs `composer install`, creates `config.php` if missing, creates the `data/` directory, and optionally installs the Python `yarbo-data-sdk` package for cloud map/plan reads.
 
-Or install manually:
+Legacy manual install (if you prefer):
 
 ```bash
 composer install
 cp config.example.php config.php
-```
-
-Edit `config.php` — at minimum set `broker_host`, `serial`, and optionally `cameras_enabled`:
-
-```php
-'broker_host' => '192.168.1.223',   // Yarbo IP on your LAN
-'broker_port' => 1883,
-'serial'      => 'YOUR_SERIAL_HERE',
-'cameras_enabled' => false,           // keep false — camera support does not work yet (see README)
-```
-
-Verify the broker is reachable:
-
-```bash
-nc -zv <yarbo-ip> 1883
-```
-
-Start the panel:
-
-```bash
 php -S 0.0.0.0:8080 -t public
+# Then use the web Settings page — editing config.php is optional
 ```
-
-Open **http://localhost:8080** (or `http://<host-ip>:8080` from another device on your network).
 
 ---
 
@@ -169,6 +189,37 @@ Open **http://localhost:8080** (or `http://<host-ip>:8080` from another device o
 
 Ideal for a Pi running 24/7 (e.g. next to Homebridge). Tested on Raspberry Pi OS with PHP 8.4.
 
+**Full install (copy-paste):**
+
+```bash
+git clone https://github.com/martyndix/yarbo-control-panel.git ~/yarbo
+cd ~/yarbo && sudo ./scripts/install.sh --deps
+```
+
+Open the URL shown in the terminal, then **Settings** → enter Yarbo IP and serial.
+
+**What `--deps` installs:** `php`, `composer`, `git`, `python3`, and related packages via apt.
+
+**What the installer configures automatically:**
+
+- PHP dependencies (`composer install`)
+- `config.php` from the example template
+- `data/` directory for waypoints and optional cloud credentials
+- **systemd service** `yarbo-panel` — enabled on boot, restarts on failure
+
+**Useful commands after install:**
+
+```bash
+sudo systemctl status yarbo-panel     # is it running?
+sudo systemctl restart yarbo-panel    # after manual config.php edits (Settings usually avoids this)
+sudo journalctl -u yarbo-panel -f     # live logs
+```
+
+A printable quick-reference for Pi administration is in [`docs/yarbo-pi-commands.html`](docs/yarbo-pi-commands.html).
+
+<details>
+<summary>Manual Pi steps (if you prefer not to use the installer)</summary>
+
 **1. Install PHP and Composer**
 
 ```bash
@@ -176,96 +227,54 @@ sudo apt update
 sudo apt install -y php php-cli php-mbstring php-xml php-zlib composer unzip git
 ```
 
-If `composer` is not in apt, install it manually:
-
-```bash
-cd ~
-php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
-sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
-php -r "unlink('composer-setup.php');"
-```
-
-**2. Clone and configure**
+**2. Clone and run installer (without apt deps)**
 
 ```bash
 git clone https://github.com/martyndix/yarbo-control-panel.git ~/yarbo
-cd ~/yarbo
-./scripts/install.sh
-nano config.php   # or use the web Settings page after first launch
-```
+cd ~/yarbo && sudo ./scripts/install.sh
 ```
 
-**3. Test manually**
+**3. Configure in the browser**
 
-```bash
-cd ~/yarbo
-php -S 0.0.0.0:8080 -t public
-```
+Open `http://<pi-ip>:8080` → **Settings** → broker IP and serial.
 
-Visit `http://<pi-ip>:8080` from your browser, then stop the server with `Ctrl+C`.
-
-**4. Auto-start on boot (systemd)**
-
-A sample service file is included at `deploy/yarbo-panel.service`. Adjust the `User`, paths, and `ExecStart` PHP path if needed (`which php`).
-
-```bash
-sudo cp deploy/yarbo-panel.service /etc/systemd/system/yarbo-panel.service
-# Edit paths/user if your setup differs:
-sudo nano /etc/systemd/system/yarbo-panel.service
-
-sudo systemctl daemon-reload
-sudo systemctl enable yarbo-panel
-sudo systemctl start yarbo-panel
-sudo systemctl status yarbo-panel
-```
-
-Useful commands:
-
-```bash
-sudo systemctl restart yarbo-panel    # after config changes
-sudo journalctl -u yarbo-panel -f     # live logs
-```
-
-A printable quick-reference for Pi administration is in [`docs/yarbo-pi-quick-reference.pdf`](docs/yarbo-pi-quick-reference.pdf) (also available as [HTML](docs/yarbo-pi-commands.html)).
+</details>
 
 ---
 
 ### macOS
 
-**1. Install PHP and Composer** (if not already present)
-
 ```bash
 brew install php composer
-```
-
-**2. Clone, configure, and run**
-
-```bash
 git clone https://github.com/martyndix/yarbo-control-panel.git
 cd yarbo-control-panel
-composer install
-cp config.example.php config.php
-nano config.php
+./scripts/install.sh
 php -S 0.0.0.0:8080 -t public
 ```
 
-Open **http://localhost:8080**.
+Open **http://localhost:8080** → **Settings** → broker IP and serial.
 
-macOS does not use systemd. To keep it running in the background you can use `launchd`, a terminal multiplexer, or run it on a Pi instead.
+macOS does not use systemd. For always-on hosting, use a Raspberry Pi with `sudo ./scripts/install.sh --deps`.
 
 ---
 
 ### Linux (Debian/Ubuntu and similar)
 
-Same steps as Raspberry Pi — install PHP and Composer via your package manager, clone the repo, run `composer install`, configure `config.php`, and either:
-
-- Run manually: `php -S 0.0.0.0:8080 -t public`
-- Install the systemd unit from `deploy/yarbo-panel.service` (adjust user and paths)
-
-**Fedora/RHEL:**
+Same as Raspberry Pi:
 
 ```bash
-sudo dnf install php php-cli composer git
+git clone https://github.com/martyndix/yarbo-control-panel.git ~/yarbo
+cd ~/yarbo && sudo ./scripts/install.sh --deps
+```
+
+Configure in the browser via **Settings** (no need to edit `config.php`).
+
+**Fedora/RHEL** (install packages manually, then run the installer):
+
+```bash
+sudo dnf install php php-cli composer git python3 python3-pip
+git clone https://github.com/martyndix/yarbo-control-panel.git ~/yarbo
+cd ~/yarbo && sudo ./scripts/install.sh
 ```
 
 ---
@@ -276,11 +285,11 @@ Not the primary target platform, but it works if you have PHP and Composer insta
 
 1. Install [PHP for Windows](https://windows.php.net/download/) (8.1+) and [Composer](https://getcomposer.org/download/)
 2. Clone this repo in PowerShell or Git Bash
-3. Run `composer install`, copy `config.example.php` to `config.php`, edit your settings
+3. Run `./scripts/install.sh` (or `composer install` and copy `config.example.php` to `config.php`)
 4. Start the server: `php -S 0.0.0.0:8080 -t public`
-5. Open **http://localhost:8080**
+5. Open **http://localhost:8080** → **Settings** → broker IP and serial
 
-For an always-on setup, a Raspberry Pi or Linux VM is simpler than running a Windows service.
+For an always-on setup, a Raspberry Pi with `sudo ./scripts/install.sh --deps` is simpler.
 
 ---
 
@@ -292,18 +301,20 @@ Docker is not included yet. The panel is a single PHP process with no database �
 
 ## Configuration
 
-Copy `config.example.php` to `config.php`. **`config.php` is git-ignored** — never commit your serial number or network details.
+The installer creates `config.php` from `config.example.php`. **`config.php` is git-ignored** — never commit your serial number or network details.
 
-You can also edit **broker IP** and **serial number** from the panel UI: click **Settings** in the header.
+**Recommended:** click **Settings** in the panel header to set **broker IP** and **serial number**. This writes `config.php` for you — no SSH or text editor required.
 
 | Setting | Description |
 |---------|-------------|
-| `broker_host` | Yarbo robot IP address (MQTT broker) |
+| `broker_host` | Yarbo robot IP address (MQTT broker) — set via **Settings** |
 | `broker_port` | Usually `1883` |
-| `serial` | Robot serial number, e.g. `24460102QU2KB269` |
+| `serial` | Robot serial number — set via **Settings** |
 | `cameras_enabled` | `false` — **keep disabled**; local camera streams do not work yet (see below) |
 | `camera_host` | Override RTSP host; `null` uses `broker_host` (experimental only) |
 | `ffmpeg_path` | Path to ffmpeg binary (only needed if experimenting with cameras) |
+
+Optional cloud map/plan credentials are stored in `data/cloud-config.json` (also via **Settings**), not in `config.php`.
 
 ---
 

@@ -5,9 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=admin
-WorkingDirectory=/home/admin/yarbo
-ExecStart=/usr/bin/php -S 0.0.0.0:8080 -t /home/admin/yarbo/public
+# install.sh generates /etc/systemd/system/yarbo-panel.service with your user and paths.
+# Or copy this file and adjust User, WorkingDirectory, and ExecStart (run: which php).
+User=pi
+WorkingDirectory=/home/pi/yarbo-control-panel
+ExecStart=/usr/bin/php -S 0.0.0.0:8080 -t /home/pi/yarbo-control-panel/public
 Restart=on-failure
 RestartSec=5
 

@@ -7,7 +7,7 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ## [Unreleased]
 
 ### Added
-- One-command installer: `scripts/install.sh` (Composer, `config.php`, `data/`, optional `yarbo-data-sdk`)
+- One-command installer: `scripts/install.sh` — Composer, `config.php`, `data/`, optional `yarbo-data-sdk`, and **systemd auto-start on boot** when run with `sudo`
 - Optional Yarbo cloud bridge for map/plan **reads** (`scripts/cloud_bridge.py`, `GET/POST /api/cloud.php`)
 - Web **Settings** cloud section: account credentials, data source (`auto` / `local` / `cloud`), test connection
 - Map/plan data source selectors on the main UI (local MQTT with optional cloud fallback)

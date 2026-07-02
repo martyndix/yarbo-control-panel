@@ -66,20 +66,21 @@
 </head>
 <body>
     <h1>Yarbo Control Panel — Raspberry Pi Quick Reference</h1>
-    <p class="meta">Pi: <strong>admin@192.168.9.253</strong> &nbsp;|&nbsp; Panel URL: <strong>http://192.168.9.253:8080</strong></p>
+    <p class="meta">Panel URL: <strong>http://&lt;pi-ip&gt;:8080</strong> &nbsp;|&nbsp; Install: <code>sudo ./scripts/install.sh --deps</code></p>
+
+    <h2>First-time install</h2>
+    <pre><code>git clone https://github.com/martyndix/yarbo-control-panel.git ~/yarbo
+cd ~/yarbo && sudo ./scripts/install.sh --deps</code></pre>
+    <p>Open the panel URL in a browser → <strong>Settings</strong> → enter Yarbo broker IP and serial.</p>
 
     <h2>SSH into the Pi</h2>
-    <pre><code>ssh admin@192.168.9.253</code></pre>
+    <pre><code>ssh &lt;user&gt;@&lt;pi-ip&gt;</code></pre>
 
-    <h2>Edit configuration</h2>
-    <pre><code>nano ~/yarbo/config.php</code></pre>
-    <p>Common settings: <code>broker_host</code>, <code>serial</code>, <code>cameras_enabled</code></p>
-    <ul>
-        <li><strong>Save:</strong> Ctrl+O, then Enter</li>
-        <li><strong>Exit:</strong> Ctrl+X</li>
-    </ul>
+    <h2>Change broker IP or serial (recommended)</h2>
+    <p>Use the web <strong>Settings</strong> page — no file editing required.</p>
+    <p class="note">Advanced: edit <code>~/yarbo/config.php</code> only if needed.</p>
 
-    <h2>Restart the service (after saving config)</h2>
+    <h2>Restart the service</h2>
     <pre><code>sudo systemctl restart yarbo-panel</code></pre>
 
     <h2>Check the service is running</h2>
@@ -97,14 +98,10 @@
     <pre><code>curl -s http://127.0.0.1:8080/api/status.php</code></pre>
 
     <h2>Test connection to Yarbo MQTT</h2>
-    <pre><code>nc -zv 192.168.1.223 1883</code></pre>
-    <p class="note">Replace <code>192.168.1.223</code> with your Yarbo IP if it has changed.</p>
+    <pre><code>nc -zv &lt;yarbo-ip&gt; 1883</code></pre>
 
-    <h2>Edit the systemd service (rare)</h2>
-    <pre><code>sudo nano /etc/systemd/system/yarbo-panel.service</code></pre>
-    <p>After changing the service file:</p>
-    <pre><code>sudo systemctl daemon-reload
-sudo systemctl restart yarbo-panel</code></pre>
+    <h2>Re-run installer (update paths / service)</h2>
+    <pre><code>cd ~/yarbo && sudo ./scripts/install.sh</code></pre>
 
     <h2>Handy commands</h2>
     <table>
