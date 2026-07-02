@@ -186,7 +186,7 @@ When new commits are published on GitHub, update your panel without losing `conf
 3. Click **Check for updates**
 4. If an update is available, click **Update to latest** and confirm
 
-On a Pi with systemd, the installer configures passwordless `sudo systemctl restart yarbo-panel` so the panel restarts automatically after updating. The page reloads when the service is back.
+On a Pi with systemd, the installer configures passwordless `sudo systemctl restart yarbo-panel` so the panel restarts automatically after updating. The browser waits for the panel to come back and reloads the page (a brief outage during restart is normal).
 
 ### From the command line
 

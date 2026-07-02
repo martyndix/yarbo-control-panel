@@ -1202,13 +1202,86 @@ async function checkPanelUpdates(button) {
     }
 }
 
+function isUpdateNetworkError(err) {
+    const message = String(err?.message || '');
+    return message === 'Load failed'
+        || message === 'Failed to fetch'
+        || message.includes('NetworkError')
+        || message.includes('network error');
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchUpdateProgress() {
+    try {
+        const res = await fetch('/api/update.php?action=progress', { cache: 'no-store' });
+        return await parseJsonResponse(res);
+    } catch {
+        return null;
+    }
+}
+
+async function waitForPanelRestart(maxWaitMs = 120000) {
+    const deadline = Date.now() + maxWaitMs;
+    let sawDisconnect = false;
+
+    while (Date.now() < deadline) {
+        await sleep(2500);
+
+        let progress = null;
+        try {
+            progress = await fetchUpdateProgress();
+            if (progress?.state === 'failed') {
+                throw new Error(progress.error || progress.message || 'Update failed');
+            }
+            if (progress?.state === 'done') {
+                window.location.reload();
+                return;
+            }
+        } catch (err) {
+            if (!isUpdateNetworkError(err)) {
+                throw err;
+            }
+        }
+
+        try {
+            const res = await fetch('/api/status.php', { cache: 'no-store' });
+            if (!res.ok) {
+                sawDisconnect = true;
+                continue;
+            }
+            const data = await res.json();
+            if (!data.ok) {
+                sawDisconnect = true;
+                continue;
+            }
+
+            if (sawDisconnect || progress?.state === 'restarting') {
+                window.location.reload();
+                return;
+            }
+        } catch (err) {
+            if (isUpdateNetworkError(err)) {
+                sawDisconnect = true;
+                continue;
+            }
+            throw err;
+        }
+    }
+
+    throw new Error('Panel did not come back in time. Check: sudo systemctl status yarbo-panel and ~/yarbo/data/update.log');
+}
+
 async function runPanelUpdate(button) {
     if (!window.confirm('Update the panel to the latest version from GitHub? The page will reload after the service restarts.')) {
         return;
     }
     if (button) button.disabled = true;
     if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = true;
-    setUpdateResult('Updating… this may take a minute.');
+    if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
+    setUpdateResult('Starting update…');
     try {
         const res = await fetch('/api/update.php', {
             method: 'POST',
@@ -1217,31 +1290,46 @@ async function runPanelUpdate(button) {
         });
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Update failed');
+
+        if (data.started) {
+            const from = data.current_commit_short || 'current';
+            const to = data.remote_commit_short || 'latest';
+            setUpdateResult(`Update started (${from} → ${to}). Waiting for panel to restart…`, 'success');
+            showToast('Update started', 'success');
+            await waitForPanelRestart();
+            return;
+        }
+
         if (data.updated) {
             const steps = Array.isArray(data.steps) ? data.steps.join('\n') : '';
-            const restartNote = data.restarted
-                ? 'Service restarted — reloading…'
-                : 'Update complete. Restart the panel if it is still running old code.';
-            setUpdateResult(`${data.message || 'Updated'}\n${restartNote}${steps ? `\n${steps}` : ''}`, 'success');
+            setUpdateResult(`${data.message || 'Updated'}${steps ? `\n${steps}` : ''}`, 'success');
             showToast(data.message || 'Panel updated', 'success');
-            if (data.restarted) {
-                setTimeout(() => window.location.reload(), 2500);
-            } else {
-                await loadUpdateStatus();
-            }
-        } else {
-            setUpdateResult(data.message || 'Already on latest version.', 'success');
-            if (els.settingsUpdateStatus) {
-                els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
-            }
-            setUpdateButtonState(data);
+            await loadUpdateStatus();
+            return;
         }
+
+        setUpdateResult(data.message || 'Already on latest version.', 'success');
+        if (els.settingsUpdateStatus) {
+            els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
+        }
+        setUpdateButtonState(data);
     } catch (err) {
+        if (isUpdateNetworkError(err)) {
+            setUpdateResult('Update may be in progress — waiting for panel to restart…', 'success');
+            try {
+                await waitForPanelRestart();
+                return;
+            } catch (waitErr) {
+                setUpdateResult(waitErr.message || 'Update status unknown', 'error');
+                showToast(waitErr.message || 'Update status unknown', 'error');
+                return;
+            }
+        }
         setUpdateResult(err.message || 'Update failed', 'error');
         showToast(err.message || 'Update failed', 'error');
     } finally {
-        if (button) button.disabled = false;
         if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
+        if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = false;
     }
 }
 

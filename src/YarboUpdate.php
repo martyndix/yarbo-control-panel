@@ -6,6 +6,8 @@ namespace Yarbo;
 
 final class YarboUpdate
 {
+    private const LOCK_STALE_SECONDS = 900;
+
     public function __construct(private readonly string $projectRoot)
     {
     }
@@ -42,7 +44,7 @@ final class YarboUpdate
     /**
      * @return array<string, mixed>
      */
-    public function runUpdate(): array
+    public function runUpdateAsync(): array
     {
         if (!$this->isGitInstall()) {
             return [
@@ -51,12 +53,177 @@ final class YarboUpdate
             ];
         }
 
-        return $this->runScript(false);
+        if ($this->isUpdateRunning()) {
+            return [
+                'ok' => false,
+                'error' => 'An update is already running',
+                'progress' => $this->readProgress(),
+            ];
+        }
+
+        $check = $this->runScript(true);
+        if (!($check['ok'] ?? false)) {
+            return $check;
+        }
+
+        if (!($check['update_available'] ?? false)) {
+            return array_merge($check, [
+                'started' => false,
+                'updated' => false,
+                'message' => (string) ($check['message'] ?? 'Already on latest commit'),
+            ]);
+        }
+
+        if (!$this->ensureDataDir()) {
+            return ['ok' => false, 'error' => 'Could not create data directory'];
+        }
+
+        $this->writeProgress([
+            'state' => 'running',
+            'message' => 'Update started',
+            'started_at' => gmdate('c'),
+        ]);
+        file_put_contents($this->lockPath(), (string) time() . "\n");
+
+        $script = $this->projectRoot . '/scripts/update.sh';
+        $logFile = $this->projectRoot . '/data/update.log';
+        $cmd = sprintf(
+            'nohup bash %s >> %s 2>&1 &',
+            escapeshellarg($script),
+            escapeshellarg($logFile)
+        );
+
+        if (!$this->spawnBackgroundCommand($cmd)) {
+            return ['ok' => false, 'error' => 'Could not start background update'];
+        }
+
+        return [
+            'ok' => true,
+            'started' => true,
+            'message' => 'Update started. The panel will restart when finished.',
+            'update_available' => true,
+            'current_commit_short' => $check['current_commit_short'] ?? null,
+            'remote_commit_short' => $check['remote_commit_short'] ?? null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function readProgress(): array
+    {
+        $path = $this->progressPath();
+        if (!is_file($path)) {
+            return ['ok' => true, 'state' => 'idle'];
+        }
+
+        $raw = file_get_contents($path);
+        if ($raw === false || trim($raw) === '') {
+            return ['ok' => true, 'state' => 'unknown'];
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return ['ok' => true, 'state' => 'unknown'];
+        }
+
+        return array_merge(['ok' => true], $decoded);
     }
 
     public function isGitInstall(): bool
     {
         return is_dir($this->projectRoot . '/.git') && is_file($this->projectRoot . '/scripts/update.sh');
+    }
+
+    public function isUpdateRunning(): bool
+    {
+        $lock = $this->lockPath();
+        if (!is_file($lock)) {
+            return false;
+        }
+
+        $age = time() - (int) filemtime($lock);
+        if ($age > self::LOCK_STALE_SECONDS) {
+            @unlink($lock);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function writeProgress(array $payload): void
+    {
+        $this->ensureDataDir();
+        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if ($json !== false) {
+            file_put_contents($this->progressPath(), $json . "\n", LOCK_EX);
+        }
+    }
+
+    private function progressPath(): string
+    {
+        return $this->projectRoot . '/data/update-status.json';
+    }
+
+    private function lockPath(): string
+    {
+        return $this->projectRoot . '/data/.update-running';
+    }
+
+    private function ensureDataDir(): bool
+    {
+        $dataDir = $this->projectRoot . '/data';
+
+        return is_dir($dataDir) || mkdir($dataDir, 0755, true) || is_dir($dataDir);
+    }
+
+    private function spawnBackgroundCommand(string $command): bool
+    {
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = proc_open(
+            ['bash', '-c', $command],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot,
+            $this->processEnvironment()
+        );
+
+        if (!is_resource($process)) {
+            return false;
+        }
+
+        fclose($pipes[0]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($process);
+
+        return true;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function processEnvironment(): array
+    {
+        $home = getenv('HOME') ?: '';
+        if ($home === '') {
+            $home = $this->projectRoot;
+        }
+
+        return [
+            'HOME' => $home,
+            'PATH' => getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'GIT_TERMINAL_PROMPT' => '0',
+        ];
     }
 
     /**
@@ -80,7 +247,7 @@ final class YarboUpdate
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open($args, $descriptorSpec, $pipes, $this->projectRoot);
+        $process = proc_open($args, $descriptorSpec, $pipes, $this->projectRoot, $this->processEnvironment());
         if (!is_resource($process)) {
             return ['ok' => false, 'error' => 'Could not start update script'];
         }

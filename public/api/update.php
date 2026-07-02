@@ -13,6 +13,11 @@ $update = new YarboUpdate($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
+    $action = (string) ($_GET['action'] ?? 'status');
+    if ($action === 'progress') {
+        json_response($update->readProgress());
+    }
+
     json_response($update->status(true));
 }
 
@@ -42,7 +47,7 @@ if ($action === 'update') {
         json_response(['ok' => false, 'error' => 'confirm=true is required'], 400);
     }
 
-    json_response($update->runUpdate());
+    json_response($update->runUpdateAsync());
 }
 
 json_response(['ok' => false, 'error' => 'Unknown action. Valid: check, update'], 400);

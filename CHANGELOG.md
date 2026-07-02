@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-07-02
+
+### Fixed
+- **Settings panel update "Load failed"**: updates now run in the background so the service restart no longer drops the HTTP response; the UI polls until the panel is back and reloads automatically
+
 ## [1.1.1] - 2026-07-02
 
 ### Fixed

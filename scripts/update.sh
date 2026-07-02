@@ -14,6 +14,9 @@ SERVICE_NAME="yarbo-panel"
 BRANCH="${YARBO_PANEL_BRANCH:-main}"
 CHECK_ONLY=false
 STEPS=()
+STATUS_FILE="${ROOT}/data/update-status.json"
+LOCK_FILE="${ROOT}/data/.update-running"
+UPDATE_LOCK_ACTIVE=false
 
 for arg in "$@"; do
   case "$arg" in
@@ -25,8 +28,51 @@ for arg in "$@"; do
   esac
 done
 
+write_status() {
+  local state="$1"
+  local message="${2:-}"
+  local error="${3:-}"
+  mkdir -p "${ROOT}/data"
+  php -r 'file_put_contents($argv[1], json_encode([
+    "state" => $argv[2],
+    "message" => $argv[3] !== "" ? $argv[3] : null,
+    "error" => $argv[4] !== "" ? $argv[4] : null,
+    "updated_at" => gmdate("c"),
+  ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");' \
+    "$STATUS_FILE" "$state" "$message" "$error"
+}
+
+acquire_update_lock() {
+  if [[ -f "$LOCK_FILE" ]]; then
+    local age=$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || stat -f %m "$LOCK_FILE") ))
+    if (( age < 900 )); then
+      write_status "failed" "" "Another update is already running"
+      exit 1
+    fi
+    rm -f "$LOCK_FILE"
+  fi
+  mkdir -p "${ROOT}/data"
+  touch "$LOCK_FILE"
+  UPDATE_LOCK_ACTIVE=true
+  write_status "running" "Preparing update"
+}
+
+release_update_lock() {
+  if $UPDATE_LOCK_ACTIVE; then
+    rm -f "$LOCK_FILE"
+    UPDATE_LOCK_ACTIVE=false
+  fi
+}
+
+cleanup_update_lock() {
+  release_update_lock
+}
+
 fail() {
   local message="$1"
+  if $UPDATE_LOCK_ACTIVE; then
+    write_status "failed" "" "$message"
+  fi
   php -r 'echo json_encode([
     "ok" => false,
     "error" => $argv[1],
@@ -107,6 +153,7 @@ if $CHECK_ONLY; then
 fi
 
 if ! $BEHIND; then
+  write_status "done" "Already on latest commit"
   php -r 'echo json_encode([
     "ok" => true,
     "updated" => false,
@@ -126,7 +173,11 @@ if ! $BEHIND; then
   exit 0
 fi
 
+acquire_update_lock
+trap cleanup_update_lock EXIT
+
 step "Pulling origin/${BRANCH} (fast-forward only)"
+write_status "pulling" "Pulling latest code from GitHub"
 if ! run_owner "git pull --ff-only origin ${BRANCH}"; then
   fail "git pull failed. Resolve local changes (e.g. git stash) and try again."
 fi
@@ -140,6 +191,7 @@ if ! command -v composer >/dev/null 2>&1; then
 fi
 
 step "Running composer install"
+write_status "composer" "Installing PHP dependencies"
 if ! run_owner "composer install --no-dev --optimize-autoloader"; then
   fail "composer install failed"
 fi
@@ -153,6 +205,7 @@ fi
 
 if [[ -n "$PYTHON" ]]; then
   step "Checking optional yarbo-data-sdk"
+  write_status "composer" "Checking optional yarbo-data-sdk"
   # shellcheck source=scripts/lib/python_sdk.sh
   source "${ROOT}/scripts/lib/python_sdk.sh"
   if ! yarbo_sdk_installed "$PYTHON"; then
@@ -172,12 +225,19 @@ fi
 RESTARTED=false
 if $SYSTEMD_ACTIVE; then
   step "Restarting systemd service ${SERVICE_NAME}"
+  write_status "restarting" "Restarting panel service"
+  release_update_lock
+  trap - EXIT
   if sudo -n systemctl restart "${SERVICE_NAME}" 2>/dev/null; then
     RESTARTED=true
     step "Service restarted"
+    write_status "done" "Panel updated successfully"
   else
     step "Could not restart automatically — run: sudo systemctl restart ${SERVICE_NAME}"
+    write_status "done" "Update complete — restart the panel manually"
   fi
+else
+  write_status "done" "Panel updated successfully"
 fi
 
 php -r 'echo json_encode([

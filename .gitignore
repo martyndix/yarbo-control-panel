@@ -2,5 +2,8 @@
 /config.php
 /data/waypoints.json
 /data/cloud-config.json
+/data/update-status.json
+/data/update.log
+/data/.update-running
 .DS_Store
 /debug/map-dumps/*.json
