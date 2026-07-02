@@ -153,8 +153,19 @@ fi
 
 if [[ -n "$PYTHON" ]]; then
   step "Checking optional yarbo-data-sdk"
-  if ! run_owner "$PYTHON -c 'import yarbo_data_sdk'" 2>/dev/null; then
-    run_owner "$PYTHON -m pip install --user yarbo-data-sdk" >/dev/null 2>&1 || true
+  # shellcheck source=scripts/lib/python_sdk.sh
+  source "${ROOT}/scripts/lib/python_sdk.sh"
+  if ! yarbo_sdk_installed "$PYTHON"; then
+    if [[ "${EUID}" -eq 0 ]]; then
+      ensure_python_pip "$PYTHON" || true
+    fi
+    if run_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_yarbo_data_sdk '${PYTHON}'"; then
+      step "yarbo-data-sdk installed"
+    else
+      step "yarbo-data-sdk install skipped (run ./scripts/install.sh to retry)"
+    fi
+  else
+    step "yarbo-data-sdk already installed"
   fi
 fi
 

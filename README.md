@@ -401,7 +401,7 @@ If future runs start returning structured payloads, overlays appear automaticall
 
 Local MQTT remains the default for **all controls** (drive, pause, plans start/delete, etc.). Cloud is only used for **reading** map/plan data when you enable it in **Settings**:
 
-1. Run `./scripts/install.sh` (installs `yarbo-data-sdk` when Python/pip are available)
+1. Run `./scripts/install.sh` (or `sudo ./scripts/install.sh --deps` on a fresh Pi — installs `python3-pip` and `yarbo-data-sdk` automatically, including on Python 3.13+ / Debian externally-managed environments)
 2. Open **Settings** in the panel
 3. Enable cloud fallback, enter Yarbo account email/password, choose data source (`auto` / `local` / `cloud`)
 4. Use **Test cloud connection** to verify the bridge
@@ -558,7 +558,8 @@ yarbo-control-panel/
 ├── src/                  # MQTT client, telemetry, map, cloud helpers
 ├── scripts/
 │   ├── install.sh        # One-command install (+ systemd when run with sudo)
-│   └── update.sh         # Pull latest from GitHub, composer install, restart service
+│   ├── lib/python_sdk.sh # Shared yarbo-data-sdk install helpers
+│   ├── update.sh         # Pull latest from GitHub, composer install, restart service
 │   └── cloud_bridge.py   # Optional Yarbo cloud map/plan reads
 ├── deploy/               # Reference systemd unit (install.sh generates the real one)
 └── docs/                 # Screenshots and Pi quick-reference (HTML)

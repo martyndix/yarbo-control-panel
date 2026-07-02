@@ -58,7 +58,7 @@ if ($action === 'test') {
         'ok' => $configured && $sdkReady,
         'status' => $status,
         'message' => !$sdkReady
-            ? 'Python SDK not installed. Run ./scripts/install.sh or: pip install yarbo-data-sdk'
+            ? 'Python SDK not installed. Run ./scripts/install.sh (or sudo ./scripts/install.sh --deps on a fresh Pi).'
             : ($configured
                 ? 'Cloud credentials saved. SDK bridge is ready for map/plan fallback reads.'
                 : 'Enter Yarbo email and password, then test again (password is required on first save).'),

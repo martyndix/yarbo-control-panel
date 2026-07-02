@@ -89,21 +89,24 @@ install_project() {
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
   chmod +x scripts/update.sh 2>/dev/null || true
 
-  local python=""
-  if command -v python3 >/dev/null 2>&1; then
-    python=python3
-  elif command -v python >/dev/null 2>&1; then
-    python=python
-  fi
+  # shellcheck source=scripts/lib/python_sdk.sh
+  source "${ROOT}/scripts/lib/python_sdk.sh"
+
+  local python
+  python="$(yarbo_python_bin || true)"
 
   if [[ -n "$python" ]]; then
     echo "==> Optional: Yarbo cloud bridge (map/plan fallback reads)"
-    if "$python" -c "import yarbo_data_sdk" 2>/dev/null; then
+    if [[ "${EUID}" -eq 0 ]]; then
+      ensure_python_pip "$python" || true
+    fi
+    if yarbo_sdk_installed "$python"; then
       echo "    yarbo-data-sdk already installed"
-    elif run_as_owner "$python -m pip install --user yarbo-data-sdk" 2>/dev/null; then
+    elif run_as_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_yarbo_data_sdk '${python}'"; then
       echo "    yarbo-data-sdk installed for ${owner}"
     else
-      echo "    Skipped yarbo-data-sdk (install later: pip install yarbo-data-sdk)"
+      echo "    WARNING: could not install yarbo-data-sdk automatically"
+      echo "    Try: ${python} -m pip install --user yarbo-data-sdk --break-system-packages"
     fi
   else
     echo "==> Python not found — cloud map/plan reads unavailable until Python 3 is installed"

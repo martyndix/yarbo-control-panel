@@ -27,11 +27,11 @@ def load_config(path: Path) -> dict[str, Any]:
 
 def sdk_installed() -> bool:
     try:
-        import yarbo_data_sdk  # noqa: F401
+        import yarbo_robot_sdk  # noqa: F401
         return True
     except ImportError:
         try:
-            import yarbo_robot_sdk  # noqa: F401
+            import yarbo_data_sdk  # noqa: F401
             return True
         except ImportError:
             return False
@@ -44,9 +44,9 @@ async def login_and_run(action: str, serial: str, timeout: float, config: dict[s
         raise ValueError("Cloud email and password are required in cloud-config.json")
 
     try:
-        from yarbo_data_sdk import YarboClient
+        from yarbo_robot_sdk import YarboClient
     except ImportError:
-        from yarbo_robot_sdk import YarboClient  # type: ignore
+        from yarbo_data_sdk import YarboClient  # type: ignore
 
     client = YarboClient()
     await client.login(email, password)

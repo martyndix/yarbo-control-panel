@@ -553,7 +553,7 @@ function formatCloudStatus(cloudStatus) {
     if (!cloudStatus) return 'Cloud bridge: unknown';
     const parts = [];
     if (cloudStatus.sdk_installed) parts.push('SDK installed');
-    else parts.push('SDK not installed (run install script or pip install yarbo-data-sdk)');
+    else parts.push('SDK not installed (run ./scripts/install.sh)');
     if (cloudStatus.configured) parts.push('credentials saved');
     if (cloudStatus.error) parts.push(cloudStatus.error);
     return `Cloud bridge: ${parts.join(' · ')}`;
