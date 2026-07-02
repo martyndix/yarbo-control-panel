@@ -29,6 +29,25 @@ const els = {
     rtcmAge: document.getElementById('rtcm-age'),
     routePriority: document.getElementById('route-priority'),
     netModuleStatus: document.getElementById('net-module-status'),
+    planStartPercent: document.getElementById('plan-start-percent'),
+    planStartPercentLabel: document.getElementById('plan-start-percent-label'),
+    plansLoad: document.getElementById('plans-load'),
+    plansStatus: document.getElementById('plans-status'),
+    plansNote: document.getElementById('plans-note'),
+    plansList: document.getElementById('plans-list'),
+    waypointIndex: document.getElementById('waypoint-index'),
+    waypointName: document.getElementById('waypoint-name'),
+    waypointSaveForm: document.getElementById('waypoint-save-form'),
+    waypointSave: document.getElementById('waypoint-save'),
+    waypointsList: document.getElementById('waypoints-list'),
+    waypointsNote: document.getElementById('waypoints-note'),
+    settingsOpen: document.getElementById('settings-open'),
+    settingsModal: document.getElementById('settings-modal'),
+    settingsForm: document.getElementById('settings-form'),
+    settingsHost: document.getElementById('settings-host'),
+    settingsSerial: document.getElementById('settings-serial'),
+    settingsError: document.getElementById('settings-error'),
+    settingsSave: document.getElementById('settings-save'),
 };
 
 const DRIVE_VECTORS = {
@@ -56,6 +75,7 @@ let robotMarker = null;
 let headingLine = null;
 let mapHasCentered = false;
 let areasLayer = null;
+let loadedPlans = [];
 
 function initMap() {
     if (!els.map || typeof L === 'undefined') return;
@@ -359,6 +379,7 @@ function updateStatus(data) {
     els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
     updateRobotOnMap(data);
     renderDiagnostics(data);
+    updatePlanActivity(data);
 }
 
 function renderDiagnostics(data) {
@@ -398,6 +419,482 @@ function renderDiagnostics(data) {
     if (els.netModuleStatus) {
         els.netModuleStatus.textContent = formatNetModuleStatus(network.net_module_status);
         els.netModuleStatus.classList.add('compact');
+    }
+}
+
+function updatePlanActivity(data) {
+    if (!els.plansStatus) return;
+
+    const parts = [];
+    if (data.plan_running) parts.push('plan running');
+    if (data.planning_paused) parts.push('paused');
+    if (data.returning_to_dock) parts.push('returning to dock');
+    els.plansStatus.textContent = parts.length
+        ? `Plan activity: ${parts.join(', ')}`
+        : 'Plan activity: idle';
+}
+
+function renderPlansList(plans, note) {
+    if (!els.plansList || !els.plansNote) return;
+
+    loadedPlans = plans;
+    els.plansNote.textContent = note || (plans.length ? `${plans.length} plan(s) loaded.` : 'No saved plans returned.');
+
+    if (!plans.length) {
+        els.plansList.innerHTML = '';
+        return;
+    }
+
+    els.plansList.innerHTML = plans.map((plan) => {
+        const areas = Array.isArray(plan.area_ids) && plan.area_ids.length
+            ? `Areas: ${plan.area_ids.join(', ')}`
+            : 'No area IDs';
+        return `
+            <article class="plan-item">
+                <div>
+                    <strong>${escapeHtml(plan.name)}</strong>
+                    <p class="hint">ID ${escapeHtml(String(plan.id))} · ${escapeHtml(areas)}</p>
+                </div>
+                <div class="plan-actions">
+                    <button type="button" class="btn" data-plan-start="${escapeHtml(String(plan.id))}">Start</button>
+                    <button type="button" class="btn btn-danger" data-plan-delete="${escapeHtml(String(plan.id))}">Delete</button>
+                </div>
+            </article>
+        `;
+    }).join('');
+
+    els.plansList.querySelectorAll('[data-plan-start]').forEach((button) => {
+        button.addEventListener('click', () => startPlan(button.dataset.planStart, button));
+    });
+    els.plansList.querySelectorAll('[data-plan-delete]').forEach((button) => {
+        button.addEventListener('click', () => deletePlan(button.dataset.planDelete, button));
+    });
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function planStartPercent() {
+    return Number(els.planStartPercent?.value ?? 0);
+}
+
+async function loadPlans(button) {
+    if (button) button.disabled = true;
+    if (els.plansNote) els.plansNote.textContent = 'Loading plans from robot...';
+
+    try {
+        const res = await fetch('/api/plans.php');
+        const data = await res.json();
+        if (!data.ok) {
+            throw new Error(data.error || 'Failed to load plans');
+        }
+        renderPlansList(data.plans || [], data.note || null);
+        if ((data.plans || []).length) {
+            showToast(`Loaded ${data.plans.length} plan(s)`, 'success');
+        } else if (!data.responded) {
+            showToast('No response — try again while the robot is active', 'error');
+        }
+    } catch (err) {
+        if (els.plansNote) els.plansNote.textContent = err.message || 'Could not load plans';
+        showToast(err.message || 'Could not load plans', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function startPlan(planId, button) {
+    if (!planId) return;
+    if (!confirm(`Start plan ${planId} at ${planStartPercent()}%?`)) return;
+
+    button.disabled = true;
+    try {
+        const res = await fetch('/api/plans.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'start',
+                plan_id: planId,
+                percent: planStartPercent(),
+            }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Start failed');
+        showToast(`Plan ${planId} started`, 'success');
+        await fetchStatus();
+    } catch (err) {
+        showToast(err.message || 'Start failed', 'error');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function deletePlan(planId, button) {
+    if (!planId) return;
+    if (!confirm(`Delete plan ${planId}? This cannot be undone.`)) return;
+
+    button.disabled = true;
+    try {
+        const res = await fetch('/api/plans.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'delete',
+                plan_id: planId,
+                confirm: true,
+            }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Delete failed');
+        showToast(`Plan ${planId} deleted`, 'success');
+        await loadPlans();
+    } catch (err) {
+        showToast(err.message || 'Delete failed', 'error');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function goToWaypointIndex(index, label, button) {
+    if (!Number.isInteger(index) || index < 0 || index > 9999) {
+        showToast('Waypoint index must be between 0 and 9999', 'error');
+        return;
+    }
+
+    const targetLabel = label || `waypoint ${index}`;
+    if (!confirm(`Send Yarbo to ${targetLabel}?`)) return;
+
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/waypoints.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'go', index }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Waypoint command failed');
+        showToast(`Sent to ${targetLabel}`, 'success');
+        await fetchStatus();
+    } catch (err) {
+        showToast(err.message || 'Waypoint command failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function closeWaypointMenus() {
+    document.querySelectorAll('.item-menu-dropdown').forEach((menu) => {
+        menu.classList.add('hidden');
+    });
+    document.querySelectorAll('[data-waypoint-menu][aria-expanded="true"]').forEach((button) => {
+        button.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function closeWaypointEdits() {
+    document.querySelectorAll('.waypoint-item.is-editing').forEach((item) => {
+        item.classList.remove('is-editing');
+        item.querySelector('.waypoint-view')?.classList.remove('hidden');
+        item.querySelector('.waypoint-edit')?.classList.add('hidden');
+    });
+}
+
+function bindWaypointItemEvents() {
+    if (!els.waypointsList) return;
+
+    els.waypointsList.querySelectorAll('[data-waypoint-go]').forEach((button) => {
+        button.addEventListener('click', () => {
+            closeWaypointMenus();
+            goToWaypointIndex(
+                Number(button.dataset.waypointGo),
+                button.dataset.waypointLabel,
+                button
+            );
+        });
+    });
+
+    els.waypointsList.querySelectorAll('[data-waypoint-menu]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const menu = button.parentElement?.querySelector('.item-menu-dropdown');
+            const isOpen = button.getAttribute('aria-expanded') === 'true';
+            closeWaypointMenus();
+            if (!isOpen && menu) {
+                menu.classList.remove('hidden');
+                button.setAttribute('aria-expanded', 'true');
+            }
+        });
+    });
+
+    els.waypointsList.querySelectorAll('[data-waypoint-edit]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const item = button.closest('.waypoint-item');
+            if (!item) return;
+            closeWaypointMenus();
+            closeWaypointEdits();
+            item.classList.add('is-editing');
+            item.querySelector('.waypoint-view')?.classList.add('hidden');
+            item.querySelector('.waypoint-edit')?.classList.remove('hidden');
+            item.querySelector('.waypoint-edit-name')?.focus();
+        });
+    });
+
+    els.waypointsList.querySelectorAll('[data-waypoint-delete]').forEach((button) => {
+        button.addEventListener('click', () => {
+            closeWaypointMenus();
+            deleteWaypointBookmark(button.dataset.waypointDelete, button);
+        });
+    });
+
+    els.waypointsList.querySelectorAll('.waypoint-edit-form').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const item = form.closest('.waypoint-item');
+            const id = item?.dataset.waypointId;
+            const name = form.querySelector('.waypoint-edit-name')?.value.trim() ?? '';
+            const index = Number(form.querySelector('.waypoint-edit-index')?.value ?? NaN);
+            if (!id) return;
+            updateWaypointBookmark(id, name, index, form.querySelector('button[type="submit"]'));
+        });
+    });
+
+    els.waypointsList.querySelectorAll('[data-waypoint-edit-cancel]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const item = button.closest('.waypoint-item');
+            if (!item) return;
+            item.classList.remove('is-editing');
+            item.querySelector('.waypoint-view')?.classList.remove('hidden');
+            item.querySelector('.waypoint-edit')?.classList.add('hidden');
+        });
+    });
+}
+
+function renderWaypointsList(waypoints, note) {
+    if (!els.waypointsList || !els.waypointsNote) return;
+
+    els.waypointsNote.textContent = note
+        || (waypoints.length ? `${waypoints.length} saved waypoint(s).` : 'No saved waypoints yet.');
+
+    if (!waypoints.length) {
+        els.waypointsList.innerHTML = '';
+        return;
+    }
+
+    els.waypointsList.innerHTML = waypoints.map((waypoint) => `
+        <article class="waypoint-item" data-waypoint-id="${escapeHtml(waypoint.id)}">
+            <div class="waypoint-view">
+                <div class="waypoint-summary">
+                    <strong>${escapeHtml(waypoint.name)}</strong>
+                    <p class="hint">Index ${escapeHtml(String(waypoint.index))}</p>
+                </div>
+                <div class="waypoint-actions">
+                    <button type="button" class="btn" data-waypoint-go="${escapeHtml(String(waypoint.index))}" data-waypoint-label="${escapeHtml(waypoint.name)}">Go</button>
+                    <div class="item-menu">
+                        <button
+                            type="button"
+                            class="btn-menu"
+                            data-waypoint-menu
+                            aria-label="Waypoint options for ${escapeHtml(waypoint.name)}"
+                            aria-expanded="false"
+                            aria-haspopup="menu"
+                        >⋯</button>
+                        <div class="item-menu-dropdown hidden" role="menu">
+                            <button type="button" role="menuitem" data-waypoint-edit="${escapeHtml(waypoint.id)}">Edit</button>
+                            <button type="button" role="menuitem" class="menu-danger" data-waypoint-delete="${escapeHtml(waypoint.id)}">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="waypoint-edit hidden">
+                <form class="waypoint-edit-form">
+                    <label class="settings-field">
+                        <span class="label">Name</span>
+                        <input type="text" class="waypoint-edit-name" maxlength="80" value="${escapeHtml(waypoint.name)}" required>
+                    </label>
+                    <label class="settings-field">
+                        <span class="label">Robot index</span>
+                        <input type="number" class="waypoint-edit-index" min="0" max="9999" value="${escapeHtml(String(waypoint.index))}" required>
+                    </label>
+                    <div class="waypoint-edit-actions">
+                        <button type="submit" class="btn btn-secondary">Save</button>
+                        <button type="button" class="btn btn-secondary" data-waypoint-edit-cancel>Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </article>
+    `).join('');
+
+    bindWaypointItemEvents();
+}
+
+async function loadWaypoints() {
+    try {
+        const res = await fetch('/api/waypoints.php');
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Could not load waypoints');
+        renderWaypointsList(data.waypoints || [], data.note || null);
+    } catch (err) {
+        if (els.waypointsNote) els.waypointsNote.textContent = err.message || 'Could not load waypoints';
+    }
+}
+
+async function saveWaypointBookmark(event) {
+    event.preventDefault();
+
+    const name = els.waypointName?.value.trim() ?? '';
+    const index = Number(els.waypointIndex?.value ?? NaN);
+    if (!name) {
+        showToast('Enter a waypoint name', 'error');
+        return;
+    }
+    if (!Number.isInteger(index) || index < 0 || index > 9999) {
+        showToast('Enter a valid robot index (0-9999)', 'error');
+        return;
+    }
+
+    if (els.waypointSave) els.waypointSave.disabled = true;
+    try {
+        const res = await fetch('/api/waypoints.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'save', name, index }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Save failed');
+        renderWaypointsList(data.waypoints || [], null);
+        if (els.waypointName) els.waypointName.value = '';
+        showToast(`Saved "${name}"`, 'success');
+    } catch (err) {
+        showToast(err.message || 'Save failed', 'error');
+    } finally {
+        if (els.waypointSave) els.waypointSave.disabled = false;
+    }
+}
+
+async function updateWaypointBookmark(id, name, index, button) {
+    if (!id) return;
+    if (!name) {
+        showToast('Enter a waypoint name', 'error');
+        return;
+    }
+    if (!Number.isInteger(index) || index < 0 || index > 9999) {
+        showToast('Enter a valid robot index (0-9999)', 'error');
+        return;
+    }
+
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/waypoints.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update', id, name, index }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Update failed');
+        renderWaypointsList(data.waypoints || [], null);
+        showToast(`Updated "${name}"`, 'success');
+    } catch (err) {
+        showToast(err.message || 'Update failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function deleteWaypointBookmark(id, button) {
+    if (!id) return;
+    if (!confirm('Delete this saved waypoint?')) return;
+
+    button.disabled = true;
+    try {
+        const res = await fetch('/api/waypoints.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'delete', id }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Delete failed');
+        renderWaypointsList(data.waypoints || [], null);
+        showToast('Waypoint deleted', 'success');
+    } catch (err) {
+        showToast(err.message || 'Delete failed', 'error');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function setSettingsError(message) {
+    if (!els.settingsError) return;
+    if (!message) {
+        els.settingsError.textContent = '';
+        els.settingsError.classList.add('hidden');
+        return;
+    }
+    els.settingsError.textContent = message;
+    els.settingsError.classList.remove('hidden');
+}
+
+function openSettingsModal() {
+    if (!els.settingsModal) return;
+    els.settingsModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+    loadSettings();
+    els.settingsHost?.focus();
+}
+
+function closeSettingsModal() {
+    if (!els.settingsModal) return;
+    els.settingsModal.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+    setSettingsError(null);
+}
+
+async function loadSettings() {
+    setSettingsError(null);
+    try {
+        const res = await fetch('/api/settings.php');
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Could not load settings');
+        if (els.settingsHost) els.settingsHost.value = data.broker_host || '';
+        if (els.settingsSerial) els.settingsSerial.value = data.serial || '';
+        if (!data.writable) {
+            setSettingsError('config.php is not writable on the server.');
+        }
+    } catch (err) {
+        setSettingsError(err.message || 'Could not load settings');
+    }
+}
+
+async function saveSettings(event) {
+    event.preventDefault();
+    setSettingsError(null);
+
+    const brokerHost = els.settingsHost?.value.trim() ?? '';
+    const serial = els.settingsSerial?.value.trim() ?? '';
+    if (!brokerHost || !serial) {
+        setSettingsError('Broker IP and serial number are required.');
+        return;
+    }
+
+    if (els.settingsSave) els.settingsSave.disabled = true;
+    try {
+        const res = await fetch('/api/settings.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ broker_host: brokerHost, serial }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Save failed');
+        showToast('Settings saved', 'success');
+        closeSettingsModal();
+        await fetchStatus();
+    } catch (err) {
+        setSettingsError(err.message || 'Save failed');
+    } finally {
+        if (els.settingsSave) els.settingsSave.disabled = false;
     }
 }
 
@@ -728,6 +1225,38 @@ document.getElementById('camera-recheck')?.addEventListener('click', async (e) =
 
 document.getElementById('map-load-areas')?.addEventListener('click', (e) => {
     loadSavedAreas(e.currentTarget);
+});
+
+els.planStartPercent?.addEventListener('input', () => {
+    if (els.planStartPercentLabel) {
+        els.planStartPercentLabel.textContent = `${els.planStartPercent.value}%`;
+    }
+});
+
+els.plansLoad?.addEventListener('click', (e) => {
+    loadPlans(e.currentTarget);
+});
+
+els.waypointSaveForm?.addEventListener('submit', saveWaypointBookmark);
+
+if (document.getElementById('waypoints-list')) {
+    loadWaypoints();
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.item-menu')) {
+            closeWaypointMenus();
+        }
+    });
+}
+
+els.settingsOpen?.addEventListener('click', openSettingsModal);
+els.settingsForm?.addEventListener('submit', saveSettings);
+document.querySelectorAll('[data-settings-close]').forEach((el) => {
+    el.addEventListener('click', closeSettingsModal);
+});
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && els.settingsModal && !els.settingsModal.classList.contains('hidden')) {
+        closeSettingsModal();
+    }
 });
 
 if (document.getElementById('camera-grid')) {

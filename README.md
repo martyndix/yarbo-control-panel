@@ -66,6 +66,8 @@ Open the panel in a browser and you can:
 - **View connection & health diagnostics** — network type/status (HaLow/4G/WiFi when available), battery temperature, wireless charge telemetry, RTK status, and link diagnostics
 - **Probe saved mowing areas (beta)** — attempts map extraction via MQTT (`get_map`, `read_clean_area`, `read_all_plan`, `read_recharge_point`) and overlays detected geometry
 - **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop
+- **Run work plans** — load saved plans, start at a chosen percentage, delete plans
+- **Navigate to waypoints** — send the robot to a stored waypoint by index
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
@@ -268,6 +270,8 @@ Docker is not included yet. The panel is a single PHP process with no database �
 
 Copy `config.example.php` to `config.php`. **`config.php` is git-ignored** — never commit your serial number or network details.
 
+You can also edit **broker IP** and **serial number** from the panel UI: click **Settings** in the header.
+
 | Setting | Description |
 |---------|-------------|
 | `broker_host` | Yarbo robot IP address (MQTT broker) |
@@ -370,6 +374,31 @@ Notes:
 
 ---
 
+## Work plans & waypoints
+
+The panel can manage saved work plans and waypoint navigation using the same MQTT commands as the [Home Assistant Yarbo integration services](https://github.com/markus-lassfolk/home-assistant-yarbo/blob/main/docs/services.md).
+
+### Work plans
+
+- **Load plans** — `read_all_plan` via `GET /api/plans.php`
+- **Start plan** — `start_plan` with `planId` and `percent` (0–100)
+- **Delete plan** — `del_plan` with confirmation
+
+UI: **Work Plans** card → adjust start percentage → **Load plans** → **Start** or **Delete** on a plan.
+
+Note: some robots/firmware only respond to `read_all_plan` when the robot is active or while a plan is running. If loading returns empty, try again after waking the robot or starting a job from the Yarbo app.
+
+### Waypoints
+
+- **Go to waypoint** — `start_way_point` with `index` (0–9999)
+- **Named bookmarks** — save friendly labels mapped to robot indices in `data/waypoints.json` (panel-side; not on the robot)
+
+UI: **Waypoints** card → save **Name** + **Robot index** → **Go** on a saved entry. Use the **⋯** menu to edit or delete.
+
+The robot does not expose a documented MQTT command to list stored waypoint names (probed commands such as `read_all_way_point` returned no response on test hardware). Named bookmarks live on the panel server so you do not have to remember indices.
+
+---
+
 ## Controls
 
 | UI control | MQTT command | Notes |
@@ -380,6 +409,9 @@ Notes:
 | Resume | `resume` | |
 | Return to Dock | `cmd_recharge` | |
 | Stop | `dstop` | Graceful stop |
+| Start work plan | `start_plan` | `planId`, `percent` |
+| Delete work plan | `del_plan` | Destructive — requires confirm in UI |
+| Go to waypoint | `start_way_point` | `index` 0–9999 |
 | Manual drive D-pad | `set_working_state` + `cmd_vel` | Hold to move; enters manual mode |
 
 ---

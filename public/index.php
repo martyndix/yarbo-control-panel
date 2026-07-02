@@ -18,9 +18,18 @@ $config = require dirname(__DIR__) . '/config.php';
 $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 ?>
     <main class="container">
-        <header>
-            <h1>Yarbo Control Panel</h1>
-            <p class="subtitle">Local MQTT control</p>
+        <header class="app-header">
+            <div>
+                <h1>Yarbo Control Panel</h1>
+                <p class="subtitle">Local MQTT control</p>
+            </div>
+            <button
+                type="button"
+                id="settings-open"
+                class="btn btn-secondary btn-settings"
+                aria-haspopup="dialog"
+                aria-controls="settings-modal"
+            >Settings</button>
         </header>
 
         <section id="error-banner" class="banner error hidden" role="alert"></section>
@@ -157,6 +166,40 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p class="drive-status" id="drive-status">Ready</p>
         </section>
 
+        <section class="card plans-card">
+            <h2>Work Plans</h2>
+            <p class="hint">Load saved plans from the robot, then start at a chosen progress percentage. Some firmware only responds to <code>read_all_plan</code> while the robot is active.</p>
+            <div class="plans-toolbar">
+                <label class="plan-percent">
+                    Start at
+                    <input type="range" id="plan-start-percent" min="0" max="100" value="0">
+                    <span id="plan-start-percent-label">0%</span>
+                </label>
+                <button type="button" class="btn btn-secondary" id="plans-load">Load plans</button>
+            </div>
+            <p id="plans-status" class="plans-status">Plan activity: —</p>
+            <p id="plans-note" class="plans-note">No plans loaded yet.</p>
+            <div id="plans-list" class="plans-list"></div>
+        </section>
+
+        <section class="card waypoints-card">
+            <h2>Waypoints</h2>
+            <p class="hint">The robot does not expose a documented MQTT command to list stored waypoints. Save friendly names here (mapped to robot indices) for one-click navigation via <code>start_way_point</code>.</p>
+            <div id="waypoints-list" class="waypoints-list"></div>
+            <p id="waypoints-note" class="waypoints-note">No saved waypoints yet.</p>
+            <form id="waypoint-save-form" class="waypoint-save-form">
+                <label class="settings-field">
+                    <span class="label">Name</span>
+                    <input type="text" id="waypoint-name" maxlength="80" placeholder="Front gate" required>
+                </label>
+                <label class="settings-field">
+                    <span class="label">Robot index</span>
+                    <input type="number" id="waypoint-index" min="0" max="9999" value="0" inputmode="numeric" required>
+                </label>
+                <button type="submit" class="btn btn-secondary" id="waypoint-save">Save waypoint</button>
+            </form>
+        </section>
+
         <section class="card controls-card">
             <h2>Controls</h2>
             <p class="hint">Commands acquire controller role and may take control from the Yarbo app.</p>
@@ -170,6 +213,47 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn btn-danger" data-action="stop">Stop</button>
             </div>
         </section>
+
+        <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <button type="button" class="modal-backdrop" data-settings-close aria-label="Close settings"></button>
+            <div class="modal-panel card">
+                <div class="section-header">
+                    <h2 id="settings-title">Connection settings</h2>
+                </div>
+                <form id="settings-form" class="settings-form">
+                    <label class="settings-field">
+                        <span class="label">Broker IP (Yarbo host)</span>
+                        <input
+                            type="text"
+                            id="settings-host"
+                            name="broker_host"
+                            required
+                            placeholder="192.168.1.24"
+                            autocomplete="off"
+                            inputmode="decimal"
+                        >
+                    </label>
+                    <label class="settings-field">
+                        <span class="label">Serial number</span>
+                        <input
+                            type="text"
+                            id="settings-serial"
+                            name="serial"
+                            required
+                            placeholder="24460102..."
+                            autocomplete="off"
+                            spellcheck="false"
+                        >
+                    </label>
+                    <p class="hint">Updates <code>config.php</code> on this server. Use only on a trusted home network.</p>
+                    <p id="settings-error" class="settings-error hidden" role="alert"></p>
+                    <div class="modal-actions">
+                        <button type="submit" class="btn" id="settings-save">Save</button>
+                        <button type="button" class="btn btn-secondary" data-settings-close>Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
 
         <section id="toast" class="toast hidden" role="status"></section>
     </main>

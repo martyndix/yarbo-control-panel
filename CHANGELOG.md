@@ -28,6 +28,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
   - battery temperature
   - wireless charging telemetry (voltage/current)
   - RTK status/fix diagnostics and link metrics (`rtcm_age`, `route_priority`, `net_module_status`)
+- Work plans and waypoints:
+  - `GET/POST /api/plans.php` for `read_all_plan`, `start_plan`, `del_plan`
+  - `GET/POST /api/waypoints.php` for `start_way_point` and named waypoint bookmarks (`data/waypoints.json`)
+  - UI cards for loading plans, start percentage, and waypoint navigation
+- In-panel connection settings (`Settings` button) to edit broker IP and serial via `GET/POST /api/settings.php`
 
 ### Changed
 - Telemetry parsing now reads GNSS coordinates from `rtk_base_data.rover.gngga` (NMEA GNGGA) when available.

@@ -39,9 +39,101 @@ header h1 {
 }
 
 .subtitle {
-    margin: 0.25rem 0 1.25rem;
+    margin: 0.25rem 0 0;
     color: var(--muted);
     font-size: 0.9rem;
+}
+
+.app-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.btn-settings {
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.85rem;
+}
+
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    padding: 0;
+    background: rgba(8, 12, 18, 0.72);
+    cursor: pointer;
+}
+
+.modal-panel {
+    position: relative;
+    width: min(100%, 420px);
+    margin: 0;
+    z-index: 1;
+}
+
+.settings-form {
+    display: grid;
+    gap: 1rem;
+}
+
+.settings-field {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.settings-field .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+.settings-field input {
+    width: 100%;
+    padding: 0.6rem 0.7rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 1rem;
+}
+
+.settings-error {
+    margin: 0;
+    color: var(--error-text);
+    font-size: 0.9rem;
+}
+
+.settings-error.hidden {
+    display: none;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+
+body.modal-open {
+    overflow: hidden;
 }
 
 .card {
@@ -167,6 +259,22 @@ header h1 {
 
 .btn-danger:hover:not(:disabled) {
     background: var(--danger-hover);
+}
+
+.btn-text-danger {
+    border: 0;
+    background: none;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.35rem 0.45rem;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+.btn-text-danger:hover:not(:disabled) {
+    color: var(--error-text);
+    background: rgba(240, 116, 116, 0.08);
 }
 
 .banner {
@@ -441,6 +549,216 @@ header h1 {
     color: var(--muted);
 }
 
+.plans-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.plan-percent {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.plan-percent input[type="range"] {
+    width: 140px;
+}
+
+.plans-status,
+.plans-note {
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.plans-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.plan-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(15, 20, 25, 0.35);
+}
+
+.plan-item p {
+    margin: 0.2rem 0 0;
+}
+
+.plan-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.waypoint-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: end;
+}
+
+.waypoint-form input[type="number"],
+.waypoint-form select {
+    min-width: 200px;
+    flex: 1;
+    padding: 0.55rem 0.65rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 1rem;
+}
+
+.waypoint-form select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.waypoints-list {
+    display: grid;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.waypoint-item {
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(15, 20, 25, 0.35);
+}
+
+.waypoint-view {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.waypoint-summary p {
+    margin: 0.2rem 0 0;
+}
+
+.waypoint-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+}
+
+.waypoint-edit {
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    margin-top: 0.75rem;
+}
+
+.waypoint-edit-form {
+    display: grid;
+    grid-template-columns: 1fr 120px;
+    gap: 0.75rem;
+    align-items: end;
+}
+
+.waypoint-edit-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+.item-menu {
+    position: relative;
+}
+
+.btn-menu {
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.btn-menu:hover,
+.btn-menu[aria-expanded="true"] {
+    color: var(--text);
+    border-color: var(--accent);
+    background: rgba(61, 154, 95, 0.08);
+}
+
+.item-menu-dropdown {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    min-width: 7.5rem;
+    padding: 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    z-index: 20;
+}
+
+.item-menu-dropdown.hidden {
+    display: none;
+}
+
+.item-menu-dropdown button {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: none;
+    color: var(--text);
+    text-align: left;
+    padding: 0.5rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.item-menu-dropdown button:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.item-menu-dropdown .menu-danger {
+    color: var(--muted);
+}
+
+.item-menu-dropdown .menu-danger:hover {
+    color: var(--error-text);
+    background: rgba(240, 116, 116, 0.08);
+}
+
+.waypoints-note {
+    margin: 0 0 1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.waypoint-save-form {
+    display: grid;
+    grid-template-columns: 1fr 120px auto;
+    gap: 0.75rem;
+    align-items: end;
+    margin-bottom: 0;
+    padding-top: 0.25rem;
+    border-top: 1px solid var(--border);
+}
+
 @media (max-width: 560px) {
     .camera-grid {
         grid-template-columns: 1fr;
@@ -451,6 +769,37 @@ header h1 {
     }
 
     .diagnostics-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .plan-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .plan-actions {
+        justify-content: flex-end;
+    }
+
+    .waypoint-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .waypoint-view {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .waypoint-actions {
+        justify-content: space-between;
+    }
+
+    .waypoint-edit-form {
+        grid-template-columns: 1fr;
+    }
+
+    .waypoint-save-form {
         grid-template-columns: 1fr;
     }
 }
