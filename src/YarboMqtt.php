@@ -93,6 +93,49 @@ final class YarboMqtt
         $this->briefLoop(1.0);
     }
 
+    /**
+     * Publish a command and wait for matching data_feedback response.
+     *
+     * @return array<string, mixed>|null Full decoded feedback envelope, or null on timeout.
+     */
+    public function requestDataFeedback(
+        string $cmd,
+        array $payload = [],
+        float $timeoutSeconds = 5.0,
+        bool $acquireController = true
+    ): ?array {
+        $feedbackTopic = $this->topic('device', 'data_feedback');
+        /** @var array<string, mixed>|null $feedbackResponse */
+        $feedbackResponse = null;
+
+        $this->client->subscribe($feedbackTopic, function (string $topic, string $message) use ($cmd, &$feedbackResponse): void {
+            $decoded = YarboCodec::decode($message);
+            if (($decoded['topic'] ?? '') === $cmd) {
+                $feedbackResponse = $decoded;
+            }
+        }, 0);
+
+        $this->waitForSubscriptions(0.3);
+
+        if ($acquireController) {
+            $this->acquireController();
+        }
+
+        $this->publish($cmd, $payload);
+
+        $loopStarted = microtime(true);
+        $deadline = $loopStarted + $timeoutSeconds;
+        while ($feedbackResponse === null && microtime(true) < $deadline) {
+            $this->client->loopOnce($loopStarted, true);
+        }
+
+        if (!is_array($feedbackResponse)) {
+            return null;
+        }
+
+        return $feedbackResponse;
+    }
+
     private function acquireController(): void
     {
         $feedbackTopic = $this->topic('device', 'data_feedback');

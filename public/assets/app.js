@@ -20,6 +20,7 @@ const els = {
     driveStatus: document.getElementById('drive-status'),
     map: document.getElementById('map'),
     mapStatus: document.getElementById('map-status'),
+    mapAreasStatus: document.getElementById('map-areas-status'),
 };
 
 const DRIVE_VECTORS = {
@@ -46,6 +47,7 @@ let currentMapLayer = 'street';
 let robotMarker = null;
 let headingLine = null;
 let mapHasCentered = false;
+let areasLayer = null;
 
 function initMap() {
     if (!els.map || typeof L === 'undefined') return;
@@ -68,6 +70,23 @@ function initMap() {
     );
 
     mapLayers.street.addTo(map);
+    areasLayer = L.geoJSON([], {
+        style: {
+            color: '#67b3ff',
+            weight: 2,
+            fillColor: '#67b3ff',
+            fillOpacity: 0.2,
+        },
+        pointToLayer(_feature, latlng) {
+            return L.circleMarker(latlng, {
+                radius: 5,
+                color: '#67b3ff',
+                weight: 2,
+                fillColor: '#67b3ff',
+                fillOpacity: 0.75,
+            });
+        },
+    }).addTo(map);
 }
 
 function setMapLayer(layer) {
@@ -87,6 +106,10 @@ function headingEndpoint(lat, lon, headingDegrees, meters = 3) {
 
 function updateMapStatus(message) {
     if (els.mapStatus) els.mapStatus.textContent = message;
+}
+
+function updateMapAreasStatus(message) {
+    if (els.mapAreasStatus) els.mapAreasStatus.textContent = message;
 }
 
 function updateRobotOnMap(data) {
@@ -135,6 +158,56 @@ function updateRobotOnMap(data) {
     updateMapStatus(
         `GPS locked (fix_quality=${fixQuality}) at ${lat.toFixed(6)}, ${lon.toFixed(6)} | altitude ${altitudeLabel}`
     );
+}
+
+async function loadSavedAreas(button = null) {
+    if (!map || !areasLayer) return;
+    if (button) button.disabled = true;
+    updateMapAreasStatus('Loading saved map areas...');
+
+    try {
+        const res = await fetch('/api/map.php');
+        const data = await res.json();
+        if (!data.ok) {
+            updateMapAreasStatus(`Saved areas unavailable: ${data.error || 'request failed'}`);
+            showToast(data.error || 'Failed to load saved map areas', 'error');
+            return;
+        }
+
+        areasLayer.clearLayers();
+        const featureCollection = data.geojson || { type: 'FeatureCollection', features: [] };
+        const features = Array.isArray(featureCollection.features) ? featureCollection.features : [];
+
+        if (features.length > 0) {
+            areasLayer.addData(featureCollection);
+            updateMapAreasStatus(`Saved areas loaded (${features.length} feature${features.length === 1 ? '' : 's'}) from ${data.source || 'map commands'}.`);
+            showToast('Saved mowing areas loaded', 'success');
+            if (!mapHasCentered) {
+                const bounds = areasLayer.getBounds?.();
+                if (bounds && bounds.isValid && bounds.isValid()) {
+                    map.fitBounds(bounds.pad(0.15));
+                }
+            }
+            return;
+        }
+
+        const warning = (data.warnings && data.warnings[0]) || null;
+        if (data.status === 'empty') {
+            updateMapAreasStatus('No saved map areas returned yet. Create/save a map in Yarbo app, then try again.');
+            showToast('No saved map data yet', 'error');
+        } else if (data.status === 'structured_no_geometry') {
+            updateMapAreasStatus('Map data returned but no drawable geometry detected yet (firmware format may differ).');
+            showToast('Map data found but not drawable yet', 'error');
+        } else {
+            updateMapAreasStatus(warning || 'Saved areas not available on this mower/firmware.');
+            showToast('Saved area extraction not supported yet', 'error');
+        }
+    } catch (err) {
+        updateMapAreasStatus(`Saved areas request failed: ${err.message || 'network error'}`);
+        showToast(err.message || 'Network error', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
 }
 
 function showToast(message, type = 'success') {
@@ -497,6 +570,10 @@ document.getElementById('camera-recheck')?.addEventListener('click', async (e) =
     await loadCameras();
     button.disabled = false;
     showToast(streamsAvailable ? 'Streams available' : 'Still no RTSP — is the tunnel running?', streamsAvailable ? 'success' : 'error');
+});
+
+document.getElementById('map-load-areas')?.addEventListener('click', (e) => {
+    loadSavedAreas(e.currentTarget);
 });
 
 if (document.getElementById('camera-grid')) {

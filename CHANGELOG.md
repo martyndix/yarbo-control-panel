@@ -18,7 +18,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
   - `altitude`
   - `fix_quality`
   - `gps_valid`
+- `scripts/discover_map.php` feasibility tool to probe map-related MQTT commands (`get_map`, `read_clean_area`, `read_all_plan`, `read_recharge_point`) and dump raw results to `debug/map-dumps/`.
+- Beta saved-area extraction support:
+  - new endpoint `public/api/map.php`
+  - new normalizer `src/YarboMap.php`
+  - UI button **Load saved mowing areas (beta)** with map overlay/empty-state handling
 
 ### Changed
 - Telemetry parsing now reads GNSS coordinates from `rtk_base_data.rover.gngga` (NMEA GNGGA) when available.
+
+### Notes
+- Current discovery on test mower returned no matching `data_feedback` responses for map commands, so mowing-area overlays remain blocked until the robot returns structured map payloads.
 

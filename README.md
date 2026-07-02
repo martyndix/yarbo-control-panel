@@ -63,6 +63,7 @@ Open the panel in a browser and you can:
 
 - **View live status** — battery, working state, charging, heading, attached head type, error codes (polled every 5 seconds)
 - **View live GPS on a map** — Leaflet map with Street/Satellite layers, robot position, heading line, and GPS lock status
+- **Probe saved mowing areas (beta)** — attempts map extraction via MQTT (`get_map`, `read_clean_area`, `read_all_plan`, `read_recharge_point`) and overlays detected geometry
 - **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
@@ -290,6 +291,61 @@ Notes:
 - GPS depends on the robot reporting valid `gngga` telemetry.
 - Indoors / under cover / without RTK lock, `gps_valid` may be `false`.
 - If coordinates are missing, move the robot outdoors and wait for lock.
+
+---
+
+## Mowing map extraction status
+
+At the moment, saved mowing-area overlays are **not available** on this test mower.
+
+Feasibility probe results (MQTT commands):
+
+- `get_map` → no matching `data_feedback` response
+- `read_clean_area` → no matching `data_feedback` response
+- `read_all_plan` → no matching `data_feedback` response
+- `read_recharge_point` → no matching `data_feedback` response
+
+This likely means one of:
+
+- the mower firmware does not expose these endpoints locally,
+- map extraction requires additional robot state/setup,
+- or no map/area data exists yet for the robot to return.
+
+### How to re-test later
+
+After creating/saving a map in the official Yarbo workflow, run:
+
+```bash
+php scripts/discover_map.php
+```
+
+Discovery output is written to `debug/map-dumps/map_discovery_YYYYMMDD_HHMMSS.json` for inspection.
+
+If future runs start returning structured payloads, this project can then add map-area overlay parsing/rendering.
+
+---
+
+### Community testing for saved areas (beta)
+
+The UI now includes **Load saved mowing areas (beta)** in the Location Map card.
+
+What it does:
+
+- Calls `/api/map.php`
+- Probes map-related MQTT commands
+- Tries to extract lat/lon geometry and draw overlays on the map
+
+Expected outcomes:
+
+- **Works** on firmware/robots that return drawable geometry
+- **Empty** if no saved map exists yet
+- **Structured but not drawable** when payload format differs (helps reverse-engineering)
+
+If you are testing with a stored map and it does not render, please share:
+
+- `debug/map-dumps/map_discovery_*.json` output from `php scripts/discover_map.php`
+- Your firmware version
+- Whether the robot has at least one saved map/area in the official app
 
 ---
 

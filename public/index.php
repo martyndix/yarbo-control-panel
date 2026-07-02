@@ -71,8 +71,12 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 </div>
             </div>
             <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors).</p>
+            <div class="map-actions">
+                <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas (beta)</button>
+            </div>
             <div id="map" class="map"></div>
             <p id="map-status" class="map-status">Waiting for GPS fix...</p>
+            <p id="map-areas-status" class="map-areas-status">Saved areas: not loaded yet.</p>
         </section>
 
         <?php if ($camerasEnabled): ?>

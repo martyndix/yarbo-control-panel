@@ -241,6 +241,19 @@ header h1 {
     color: var(--muted);
 }
 
+.map-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.map-areas-status {
+    margin: 0.4rem 0 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
 .camera-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
