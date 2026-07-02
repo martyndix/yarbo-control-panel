@@ -90,7 +90,7 @@
             <p class="hint">Live GPS from RTK telemetry. Example satellite view with heading overlay.</p>
             <div id="map"></div>
             <p class="status">
-                GPS locked (fix_quality=1) at 51.177684, -0.622751 | altitude 84.0m
+                GPS locked (fix_quality=1) at 34.011286, -116.166868 | altitude 780.0m
                 <span class="pill">Live fix</span>
             </p>
         </section>
@@ -102,14 +102,14 @@
         crossorigin=""
     ></script>
     <script>
-        const map = L.map('map', { zoomControl: false }).setView([51.177684, -0.622751], 19);
+        const map = L.map('map', { zoomControl: false }).setView([34.011286, -116.166868], 17);
         L.tileLayer(
             'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             { maxZoom: 22, attribution: 'Tiles © Esri' }
         ).addTo(map);
 
-        const lat = 51.177684;
-        const lon = -0.622751;
+        const lat = 34.011286;
+        const lon = -116.166868;
         const heading = 332;
         const headingRad = (heading * Math.PI) / 180;
         const meters = 4;
