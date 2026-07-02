@@ -22,7 +22,7 @@ The MQTT protocol is based on community reverse-engineering documented in [home-
 
 ## Screenshots
 
-Sample telemetry data shown for illustration.
+Sample telemetry and map data shown for illustration (fictional coordinates and network details).
 
 <p align="center">
   <img src="docs/screenshots/panel-desktop.png" alt="Yarbo Control Panel — desktop view showing status, manual drive, and controls" width="720">
@@ -63,10 +63,11 @@ Open the panel in a browser and you can:
 
 - **View live status** — battery, working state, charging, heading, attached head type, error codes (polled every 5 seconds)
 - **View live GPS on a map** — Leaflet map with Street/Satellite layers, robot position, heading line, and GPS lock status
-- **View connection & health diagnostics** — network type/status (HaLow/4G/WiFi when available), battery temperature, wireless charge telemetry, RTK status, and link diagnostics
-- **Probe saved mowing areas (beta)** — attempts map extraction via MQTT (`get_map`, `read_clean_area`, `read_all_plan`, `read_recharge_point`) and overlays detected geometry
-- **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop
-- **Run work plans** — load saved plans, start at a chosen percentage, delete plans
+- **View connection & health diagnostics** — network type/status (HaLow/4G/WiFi when available), **WiFi network name, signal strength, and security** (via `get_connect_wifi_name`), battery temperature, wireless charge telemetry, RTK status, and link diagnostics
+- **Probe saved mowing areas** — loads map geometry via local MQTT (`read_gps_ref`, `get_map`, …) with optional Yarbo cloud fallback when local data is empty
+- **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop (dual payload compatibility with official SDK command shapes)
+- **Run work plans** — load saved plans (local or cloud), start at a chosen percentage, delete plans
+- **Head-specific controls** — mower blade height/speed or snow chute angle when the attached head is detected
 - **Navigate to waypoints** — send the robot to a stored waypoint by index
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
@@ -110,6 +111,14 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 ```bash
 git clone https://github.com/martyndix/yarbo-control-panel.git
 cd yarbo-control-panel
+./scripts/install.sh
+```
+
+The install script runs `composer install`, creates `config.php` if missing, creates the `data/` directory, and optionally installs the Python `yarbo-data-sdk` package for cloud map/plan reads.
+
+Or install manually:
+
+```bash
 composer install
 cp config.example.php config.php
 ```
@@ -166,9 +175,9 @@ php -r "unlink('composer-setup.php');"
 ```bash
 git clone https://github.com/martyndix/yarbo-control-panel.git ~/yarbo
 cd ~/yarbo
-composer install --no-dev --optimize-autoloader
-cp config.example.php config.php
-nano config.php
+./scripts/install.sh
+nano config.php   # or use the web Settings page after first launch
+```
 ```
 
 **3. Test manually**
@@ -301,22 +310,11 @@ Notes:
 
 ## Mowing map extraction status
 
-At the moment, saved mowing-area overlays are **not available** on this test mower.
+The panel loads saved areas via **local MQTT** (`read_gps_ref` + `get_map`) and converts local coordinates to GPS when a reference origin is available. If local MQTT returns no drawable geometry, enable **cloud fallback reads** in the web **Settings** page (optional Yarbo account + `yarbo-data-sdk`).
 
-Feasibility probe results (MQTT commands):
+On some firmware, map commands return no `data_feedback` response until a map exists in the Yarbo app workflow.
 
-- `get_map` → no matching `data_feedback` response
-- `read_clean_area` → no matching `data_feedback` response
-- `read_all_plan` → no matching `data_feedback` response
-- `read_recharge_point` → no matching `data_feedback` response
-
-This likely means one of:
-
-- the mower firmware does not expose these endpoints locally,
-- map extraction requires additional robot state/setup,
-- or no map/area data exists yet for the robot to return.
-
-### How to re-test later
+### How to re-test
 
 After creating/saving a map in the official Yarbo workflow, run:
 
@@ -326,7 +324,20 @@ php scripts/discover_map.php
 
 Discovery output is written to `debug/map-dumps/map_discovery_YYYYMMDD_HHMMSS.json` for inspection.
 
-If future runs start returning structured payloads, this project can then add map-area overlay parsing/rendering.
+If future runs start returning structured payloads, overlays appear automatically on the Location Map card. Cloud reads use the official [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK) behind the scenes — you configure it from the web UI, not from the command line.
+
+---
+
+## Optional cloud reads (map & plans)
+
+Local MQTT remains the default for **all controls** (drive, pause, plans start/delete, etc.). Cloud is only used for **reading** map/plan data when you enable it in **Settings**:
+
+1. Run `./scripts/install.sh` (installs `yarbo-data-sdk` when Python/pip are available)
+2. Open **Settings** in the panel
+3. Enable cloud fallback, enter Yarbo account email/password, choose data source (`auto` / `local` / `cloud`)
+4. Use **Test cloud connection** to verify the bridge
+
+Credentials are stored in `data/cloud-config.json` (gitignored), not in `config.php`.
 
 ---
 
@@ -361,6 +372,7 @@ The dashboard now includes a **Connection & Health** card with additional operat
 Metrics shown:
 
 - `connection_type` and `connection_status` (derived from `net_type`, `halow_status`, `net_module_status`)
+- WiFi network name, signal strength (%), security, and IP (from MQTT `get_connect_wifi_name` when the robot responds)
 - battery temperature (`battery_diagnostics.temperature_c`), with `(avg cells)` shown when derived from `temperature1`..`temperature6`
 - wireless charging voltage/current
 - RTK status and fix quality

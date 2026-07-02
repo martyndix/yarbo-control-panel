@@ -77,6 +77,18 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span id="connection-status" class="value badge">—</span>
                 </div>
                 <div class="stat">
+                    <span class="label">WiFi Network</span>
+                    <span id="wifi-network" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">WiFi Signal</span>
+                    <span id="wifi-signal" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">WiFi Security</span>
+                    <span id="wifi-security" class="value">—</span>
+                </div>
+                <div class="stat">
                     <span class="label">Battery Temp</span>
                     <span id="battery-temp" class="value">—</span>
                 </div>
@@ -119,7 +131,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
             <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors).</p>
             <div class="map-actions">
-                <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas (beta)</button>
+                <label class="data-source-field">
+                    Map data
+                    <select id="map-data-source">
+                        <option value="auto">Auto (local, then cloud)</option>
+                        <option value="local">Local MQTT only</option>
+                        <option value="cloud">Cloud only</option>
+                    </select>
+                </label>
+                <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas</button>
             </div>
             <div id="map" class="map"></div>
             <p id="map-status" class="map-status">Waiting for GPS fix...</p>
@@ -175,6 +195,14 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <input type="range" id="plan-start-percent" min="0" max="100" value="0">
                     <span id="plan-start-percent-label">0%</span>
                 </label>
+                <label class="data-source-field">
+                    Plan data
+                    <select id="plans-data-source">
+                        <option value="auto">Auto (local, then cloud)</option>
+                        <option value="local">Local MQTT only</option>
+                        <option value="cloud">Cloud only</option>
+                    </select>
+                </label>
                 <button type="button" class="btn btn-secondary" id="plans-load">Load plans</button>
             </div>
             <p id="plans-status" class="plans-status">Plan activity: —</p>
@@ -198,6 +226,33 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 </label>
                 <button type="submit" class="btn btn-secondary" id="waypoint-save">Save waypoint</button>
             </form>
+        </section>
+
+        <section class="card head-card hidden" id="head-controls-card">
+            <h2>Head controls</h2>
+            <p class="hint" id="head-controls-hint">Controls for the attached Yarbo head (mower or snow blower).</p>
+            <div id="head-mower-controls" class="head-controls hidden">
+                <label class="settings-field">
+                    <span class="label">Blade height</span>
+                    <input type="range" id="mower-blade-height" min="0" max="100" value="50">
+                    <span id="mower-blade-height-label">50</span>
+                </label>
+                <button type="button" class="btn btn-secondary" id="mower-blade-height-send">Set blade height</button>
+                <label class="settings-field">
+                    <span class="label">Blade speed</span>
+                    <input type="range" id="mower-blade-speed" min="0" max="100" value="50">
+                    <span id="mower-blade-speed-label">50</span>
+                </label>
+                <button type="button" class="btn btn-secondary" id="mower-blade-speed-send">Set blade speed</button>
+            </div>
+            <div id="head-snow-controls" class="head-controls hidden">
+                <label class="settings-field">
+                    <span class="label">Chute angle</span>
+                    <input type="range" id="snow-chute-angle" min="0" max="180" value="90">
+                    <span id="snow-chute-angle-label">90°</span>
+                </label>
+                <button type="button" class="btn btn-secondary" id="snow-chute-angle-send">Set chute angle</button>
+            </div>
         </section>
 
         <section class="card controls-card">
@@ -245,7 +300,34 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             spellcheck="false"
                         >
                     </label>
-                    <p class="hint">Updates <code>config.php</code> on this server. Use only on a trusted home network.</p>
+
+                    <h3 class="settings-subtitle">Cloud reads (optional)</h3>
+                    <p class="hint">Use your Yarbo account for map/plan data when local MQTT returns nothing. Controls always use local MQTT.</p>
+                    <label class="settings-field settings-checkbox">
+                        <input type="checkbox" id="settings-cloud-enabled" name="cloud_enabled">
+                        <span>Enable cloud fallback reads</span>
+                    </label>
+                    <label class="settings-field">
+                        <span class="label">Yarbo account email</span>
+                        <input type="email" id="settings-cloud-email" name="cloud_email" autocomplete="username">
+                    </label>
+                    <label class="settings-field">
+                        <span class="label">Yarbo account password</span>
+                        <input type="password" id="settings-cloud-password" name="cloud_password" autocomplete="current-password" placeholder="Leave blank to keep saved password">
+                    </label>
+                    <label class="settings-field">
+                        <span class="label">Default data source</span>
+                        <select id="settings-data-source" name="data_source">
+                            <option value="auto">Auto (local, then cloud)</option>
+                            <option value="local">Local MQTT only</option>
+                            <option value="cloud">Cloud only</option>
+                        </select>
+                    </label>
+                    <p id="settings-cloud-status" class="hint">Cloud bridge: checking…</p>
+                    <p id="settings-cloud-result" class="settings-cloud-result hidden" role="status"></p>
+                    <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
+
+                    <p class="hint">Updates <code>config.php</code> and <code>data/cloud-config.json</code> on this server. Use only on a trusted home network.</p>
                     <p id="settings-error" class="settings-error hidden" role="alert"></p>
                     <div class="modal-actions">
                         <button type="submit" class="btn" id="settings-save">Save</button>

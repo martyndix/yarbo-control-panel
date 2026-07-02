@@ -27,7 +27,22 @@ function yarbo_client(array $config): \Yarbo\YarboMqtt
 function json_response(array $data, int $status = 200): void
 {
     http_response_code($status);
-    header('Content-Type: application/json');
-    echo json_encode($data, JSON_THROW_ON_ERROR);
+    header('Content-Type: application/json; charset=utf-8');
+
+    try {
+        $json = json_encode(
+            $data,
+            JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR
+        );
+    } catch (\JsonException $e) {
+        http_response_code(500);
+        echo json_encode([
+            'ok' => false,
+            'error' => 'Response could not be encoded as JSON',
+        ]);
+        exit;
+    }
+
+    echo $json;
     exit;
 }

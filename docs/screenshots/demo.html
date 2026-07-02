@@ -6,7 +6,7 @@
     <title>Yarbo Control Panel</title>
     <link rel="stylesheet" href="../../public/assets/style.css">
     <style>
-        /* Screenshot demo — static sample data, no live API */
+        /* Screenshot demo — fictional sample data only, no live API */
         body.screenshot-demo { min-height: auto; }
         .map-mock {
             position: relative;
@@ -24,7 +24,7 @@
                 #101824;
         }
         .map-mock::before {
-            content: "Map data © OpenStreetMap contributors | Tiles © Esri";
+            content: "Example map mock — not a real location";
             position: absolute;
             left: 8px;
             bottom: 6px;
@@ -32,10 +32,12 @@
             font-size: 11px;
             opacity: 0.85;
         }
-        .map-path {
+        .map-zone {
             position: absolute;
-            inset: 0;
-            pointer-events: none;
+            inset: 18% 22% 24% 18%;
+            border: 2px solid rgba(125, 222, 160, 0.75);
+            border-radius: 18px;
+            background: rgba(61, 154, 95, 0.12);
         }
         .map-marker {
             position: absolute;
@@ -73,13 +75,25 @@
             border-radius: 999px;
             padding: 0.2rem 0.55rem;
         }
+        .plan-item, .waypoint-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.85rem 0;
+            border-top: 1px solid var(--border);
+        }
+        .plan-item:first-child, .waypoint-item:first-child { border-top: 0; }
     </style>
 </head>
 <body class="screenshot-demo">
     <main class="container">
-        <header>
-            <h1>Yarbo Control Panel</h1>
-            <p class="subtitle">Local MQTT control</p>
+        <header class="app-header">
+            <div>
+                <h1>Yarbo Control Panel</h1>
+                <p class="subtitle">Local MQTT control</p>
+            </div>
+            <button type="button" class="btn btn-secondary btn-settings">Settings</button>
         </header>
 
         <section class="card status-card">
@@ -110,7 +124,7 @@
                     <span class="value">0</span>
                 </div>
             </div>
-            <p class="updated">Last updated: <span>1 Jul 2026, 17:36:21</span></p>
+            <p class="updated">Last updated: <span>2 Jul 2026, 12:00:00</span></p>
         </section>
 
         <section class="card diagnostics-card">
@@ -123,6 +137,18 @@
                 <div class="stat">
                     <span class="label">Connection Status</span>
                     <span class="value badge connected">Connected</span>
+                </div>
+                <div class="stat">
+                    <span class="label">WiFi Network</span>
+                    <span class="value">Home-WiFi (192.168.0.10)</span>
+                </div>
+                <div class="stat">
+                    <span class="label">WiFi Signal</span>
+                    <span class="value">72% (Good)</span>
+                </div>
+                <div class="stat">
+                    <span class="label">WiFi Security</span>
+                    <span class="value">WPA2 · saved</span>
                 </div>
                 <div class="stat">
                     <span class="label">Battery Temp</span>
@@ -138,7 +164,7 @@
                 </div>
                 <div class="stat">
                     <span class="label">RTCM Age</span>
-                    <span class="value">-1</span>
+                    <span class="value">2</span>
                 </div>
                 <div class="stat">
                     <span class="label">Route Priority</span>
@@ -146,7 +172,7 @@
                 </div>
                 <div class="stat">
                     <span class="label">Net Module</span>
-                    <span class="value compact">LTE: Connected | Signal: Unknown | Radio n/a | SIM ****1203</span>
+                    <span class="value compact">LTE: Connected | Signal: 65% | Radio n/a | SIM ****0000</span>
                 </div>
             </div>
         </section>
@@ -155,34 +181,79 @@
             <div class="section-header">
                 <h2>Location Map</h2>
                 <div class="map-mode">
-                    <label>
-                        <input type="radio" name="map-layer-demo" checked>
-                        Street
-                    </label>
-                    <label>
-                        <input type="radio" name="map-layer-demo">
-                        Satellite
-                    </label>
+                    <label><input type="radio" name="map-layer-demo" checked> Street</label>
+                    <label><input type="radio" name="map-layer-demo"> Satellite</label>
                 </div>
             </div>
             <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors).</p>
+            <div class="map-actions">
+                <label class="data-source-field">
+                    Map data
+                    <select><option>Auto (local, then cloud)</option></select>
+                </label>
+                <button type="button" class="btn btn-secondary">Load saved mowing areas</button>
+            </div>
             <div class="map-mock">
-                <svg class="map-path" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <polyline points="15,72 28,66 37,59 46,56 57,52 67,47" fill="none" stroke="#67b3ff" stroke-width="1.5" opacity="0.8" />
-                    <polyline points="14,75 26,70 35,63 45,58 54,55" fill="none" stroke="#67b3ff" stroke-width="1" opacity="0.35" />
-                </svg>
+                <div class="map-zone" aria-hidden="true"></div>
                 <span class="map-marker" aria-hidden="true"></span>
                 <span class="map-heading" aria-hidden="true"></span>
             </div>
             <p class="map-status">
-                GPS locked (fix_quality=1) at 34.011286, -116.166868 | altitude 780.0m
+                GPS locked (fix_quality=1) at 51.500000, -0.120000 | altitude 42.0m (example)
                 <span class="map-pill">Live fix</span>
             </p>
+            <p class="map-areas-status">Saved areas loaded (2 features) via local.</p>
+        </section>
+
+        <section class="card plans-card">
+            <h2>Work Plans</h2>
+            <p class="hint">Load saved plans from the robot, then start at a chosen progress percentage.</p>
+            <div class="plans-toolbar">
+                <label class="plan-percent">Start at <input type="range" value="0"> <span>0%</span></label>
+                <label class="data-source-field">Plan data <select><option>Auto (local, then cloud)</option></select></label>
+                <button type="button" class="btn btn-secondary">Load plans</button>
+            </div>
+            <p class="plans-status">Plan activity: idle</p>
+            <div class="plans-list">
+                <article class="plan-item">
+                    <div>
+                        <strong>Front lawn</strong>
+                        <p class="hint">ID 101 · Areas: 1, 2</p>
+                    </div>
+                    <div class="plan-actions">
+                        <button type="button" class="btn">Start</button>
+                        <button type="button" class="btn btn-danger">Delete</button>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section class="card waypoints-card">
+            <h2>Waypoints</h2>
+            <p class="hint">Save friendly names mapped to robot indices for one-click navigation.</p>
+            <div class="waypoints-list">
+                <article class="waypoint-item">
+                    <div><strong>Front gate</strong><p class="hint">Index 0</p></div>
+                    <button type="button" class="btn">Go</button>
+                </article>
+            </div>
+        </section>
+
+        <section class="card head-card" id="head-controls-card">
+            <h2>Head controls</h2>
+            <p class="hint">Controls for the attached Yarbo head (mower or snow blower).</p>
+            <div class="head-controls">
+                <label class="settings-field">
+                    <span class="label">Blade height</span>
+                    <input type="range" value="50"> <span>50</span>
+                </label>
+                <button type="button" class="btn btn-secondary">Set blade height</button>
+            </div>
         </section>
 
         <section class="card drive-card">
             <h2>Manual Drive</h2>
-            <p class="hint">Hold a direction to move. Release to stop. Takes controller from the Yarbo app — use with care.</p>
+            <p class="hint">Hold a direction to move. Release to stop.</p>
             <div class="dpad">
                 <button type="button" class="btn btn-drive" aria-label="Forward">▲</button>
                 <button type="button" class="btn btn-drive" aria-label="Turn left">◀</button>

@@ -94,6 +94,32 @@ final class YarboMqtt
     }
 
     /**
+     * Publish command variants (firmware differs on payload shape).
+     *
+     * @param array<int, array{cmd: string, payload: array<string, mixed>}> $variants
+     */
+    public function sendCommandVariants(array $variants, bool $acquireController = true): string
+    {
+        if ($variants === []) {
+            throw new \InvalidArgumentException('At least one command variant is required');
+        }
+
+        if ($acquireController) {
+            $this->acquireController();
+        }
+
+        $last = $variants[count($variants) - 1];
+        foreach ($variants as $variant) {
+            $this->publish($variant['cmd'], $variant['payload']);
+            $last = $variant;
+        }
+
+        $this->briefLoop(1.0);
+
+        return $last['cmd'];
+    }
+
+    /**
      * Publish a command and wait for matching data_feedback response.
      *
      * @return array<string, mixed>|null Full decoded feedback envelope, or null on timeout.

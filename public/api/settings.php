@@ -4,10 +4,16 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+use Yarbo\YarboCloud;
+use Yarbo\YarboCloudSettings;
 use Yarbo\YarboConfig;
 
+$projectRoot = dirname(__DIR__, 2);
+$configPath = $projectRoot . '/config.php';
+$dataDir = $projectRoot . '/data';
+$cloudSettings = new YarboCloudSettings($dataDir);
+$cloud = new YarboCloud($cloudSettings, $projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$configPath = dirname(__DIR__, 2) . '/config.php';
 
 if ($method === 'GET') {
     json_response([
@@ -16,6 +22,8 @@ if ($method === 'GET') {
         'broker_port' => (int) ($config['broker_port'] ?? 1883),
         'serial' => (string) ($config['serial'] ?? ''),
         'writable' => is_writable($configPath),
+        'cloud' => $cloudSettings->publicView(),
+        'cloud_status' => $cloud->status(),
     ]);
 }
 
@@ -57,8 +65,17 @@ if (!YarboConfig::applySettings($configPath, [
     ], 500);
 }
 
+if (!$cloudSettings->save($input)) {
+    json_response([
+        'ok' => false,
+        'error' => 'Could not write cloud settings. Check permissions on the data/ directory.',
+    ], 500);
+}
+
 json_response([
     'ok' => true,
     'broker_host' => $host,
     'serial' => $serial,
+    'cloud' => $cloudSettings->publicView(),
+    'cloud_status' => $cloud->status(),
 ]);

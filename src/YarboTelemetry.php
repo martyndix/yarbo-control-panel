@@ -92,6 +92,15 @@ final class YarboTelemetry
             'planning_paused'     => (bool) ($raw['StateMSG']['planning_paused'] ?? 0),
             'returning_to_dock'   => (bool) ($raw['StateMSG']['on_going_recharging'] ?? 0),
             'plan_running'        => (bool) ($raw['StateMSG']['on_going_planning'] ?? 0),
+            'plan_status'         => [
+                'plan_id' => $stateMsg['plan_id'] ?? $stateMsg['planId'] ?? null,
+                'plan_percent' => isset($stateMsg['plan_percent']) ? (int) $stateMsg['plan_percent'] : (
+                    isset($stateMsg['percent']) ? (int) $stateMsg['percent'] : null
+                ),
+                'plan_name' => $stateMsg['plan_name'] ?? $stateMsg['planName'] ?? null,
+                'pause_reason' => $stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? null,
+                'error_message' => $stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? null,
+            ],
             'camera_state'        => $raw['camera_state'] ?? null,
             'connection_type'     => $connectionType,
             'connection_status'   => $connectionStatus,

@@ -1,5 +1,6 @@
 /vendor/
 /config.php
 /data/waypoints.json
+/data/cloud-config.json
 .DS_Store
 /debug/map-dumps/*.json

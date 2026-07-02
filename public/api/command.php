@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+use Yarbo\YarboCommands;
+
 const LED_CHANNELS = [
     'led_head',
     'led_left_w',
@@ -14,15 +16,36 @@ const LED_CHANNELS = [
     'tail_right_r',
 ];
 
-/** @var array<string, array{cmd: string, payload: array<string, mixed>}> $ACTIONS */
+/** @var array<string, array{variants: callable(): array<int, array{cmd: string, payload: array<string, mixed>}>, acquire: bool}> $ACTIONS */
 $ACTIONS = [
-    'lights_on'      => ['cmd' => 'light_ctrl', 'payload' => array_fill_keys(LED_CHANNELS, 255)],
-    'lights_off'     => ['cmd' => 'light_ctrl', 'payload' => array_fill_keys(LED_CHANNELS, 0)],
-    'buzzer'         => ['cmd' => 'cmd_buzzer', 'payload' => ['state' => 1, 'timeStamp' => time()]],
-    'return_to_dock' => ['cmd' => 'cmd_recharge', 'payload' => []],
-    'pause'          => ['cmd' => 'planning_paused', 'payload' => []],
-    'resume'         => ['cmd' => 'resume', 'payload' => []],
-    'stop'           => ['cmd' => 'dstop', 'payload' => []],
+    'lights_on' => [
+        'variants' => static fn (): array => [['cmd' => 'light_ctrl', 'payload' => array_fill_keys(LED_CHANNELS, 255)]],
+        'acquire' => true,
+    ],
+    'lights_off' => [
+        'variants' => static fn (): array => [['cmd' => 'light_ctrl', 'payload' => array_fill_keys(LED_CHANNELS, 0)]],
+        'acquire' => true,
+    ],
+    'buzzer' => [
+        'variants' => static fn (): array => [['cmd' => 'cmd_buzzer', 'payload' => ['state' => 1, 'timeStamp' => time()]]],
+        'acquire' => true,
+    ],
+    'return_to_dock' => [
+        'variants' => static fn (): array => YarboCommands::returnToDockVariants(),
+        'acquire' => true,
+    ],
+    'pause' => [
+        'variants' => static fn (): array => YarboCommands::pauseVariants(),
+        'acquire' => true,
+    ],
+    'resume' => [
+        'variants' => static fn (): array => [['cmd' => 'resume', 'payload' => []]],
+        'acquire' => true,
+    ],
+    'stop' => [
+        'variants' => static fn (): array => YarboCommands::stopVariants(),
+        'acquire' => true,
+    ],
 ];
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -53,10 +76,10 @@ try {
     $client->connect();
 
     $def = $ACTIONS[$action];
-    $client->sendCommand($def['cmd'], $def['payload'], true);
+    $cmd = $client->sendCommandVariants($def['variants'](), $def['acquire']);
     $client->disconnect();
 
-    json_response(['ok' => true, 'action' => $action]);
+    json_response(['ok' => true, 'action' => $action, 'cmd' => $cmd]);
 } catch (Throwable $e) {
     json_response(['ok' => false, 'error' => $e->getMessage()], 500);
 }

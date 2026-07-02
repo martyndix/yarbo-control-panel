@@ -18,18 +18,24 @@ final class YarboMap
      *   feature_collection: array{type: string, features: array<int, array<string, mixed>>}
      * }
      */
-    public static function normalize(array $responses): array
+    public static function normalize(array $responses, ?array $gpsRef = null): array
     {
         $warnings = [];
         $features = [];
         $source = null;
         $probes = [];
+        $ref = $gpsRef !== null ? YarboGeo::extractGpsRef($gpsRef) : null;
 
         foreach ($responses as $cmd => $envelope) {
+            if (!is_array($envelope)) {
+                $probes[$cmd] = ['ok' => false, 'has_data' => false, 'data_keys' => []];
+                continue;
+            }
+
             $data = is_array($envelope['data'] ?? null) ? $envelope['data'] : [];
             $hasData = $data !== [];
             $probes[$cmd] = [
-                'ok' => is_array($envelope),
+                'ok' => true,
                 'has_data' => $hasData,
                 'data_keys' => array_map('strval', array_keys($data)),
             ];
@@ -42,7 +48,15 @@ final class YarboMap
                 $source = (string) $cmd;
             }
 
-            $features = array_merge($features, self::extractFeaturesFromPayload($data, (string) $cmd));
+            if ($cmd === 'get_map' && $ref !== null) {
+                $features = array_merge($features, self::extractOfficialMapFeatures($data, $ref));
+            }
+
+            $features = array_merge($features, self::extractFeaturesFromPayload($data, (string) $cmd, $ref));
+        }
+
+        if ($ref === null) {
+            $warnings[] = 'No GPS reference from read_gps_ref — local map coordinates cannot be converted to lat/lon.';
         }
 
         if ($features === []) {
@@ -59,13 +73,171 @@ final class YarboMap
         return [
             'status' => $status,
             'source' => $source,
+            'gps_ref' => $ref,
             'warnings' => $warnings,
             'probes' => $probes,
-            'feature_collection' => [
+            'feature_collection' => self::sanitizeFeatureCollection([
                 'type' => 'FeatureCollection',
                 'features' => $features,
-            ],
+            ]),
         ];
+    }
+
+    /**
+     * @param array{type: string, features: array<int, array<string, mixed>>} $collection
+     * @return array{type: string, features: array<int, array<string, mixed>>}
+     */
+    public static function sanitizeFeatureCollection(array $collection): array
+    {
+        $features = [];
+        foreach ($collection['features'] as $feature) {
+            if (!is_array($feature) || !is_array($feature['geometry'] ?? null)) {
+                continue;
+            }
+            $geometry = $feature['geometry'];
+            if (!self::geometryHasFiniteCoordinates($geometry)) {
+                continue;
+            }
+            $features[] = $feature;
+        }
+
+        return [
+            'type' => 'FeatureCollection',
+            'features' => $features,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $geometry
+     */
+    private static function geometryHasFiniteCoordinates(array $geometry): bool
+    {
+        $type = (string) ($geometry['type'] ?? '');
+        $coordinates = $geometry['coordinates'] ?? null;
+        if (!is_array($coordinates)) {
+            return false;
+        }
+
+        if ($type === 'Point') {
+            return self::isFinitePosition($coordinates);
+        }
+
+        if ($type === 'Polygon') {
+            foreach ($coordinates as $ring) {
+                if (!is_array($ring)) {
+                    return false;
+                }
+                foreach ($ring as $position) {
+                    if (!self::isFinitePosition($position)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param mixed $position
+     */
+    private static function isFinitePosition(mixed $position): bool
+    {
+        if (!is_array($position) || count($position) < 2) {
+            return false;
+        }
+        $lon = $position[0];
+        $lat = $position[1];
+        if (!is_numeric($lon) || !is_numeric($lat)) {
+            return false;
+        }
+
+        return YarboGeo::isValidGps((float) $lat, (float) $lon);
+    }
+
+    /**
+     * @param array<string, mixed> $mapData
+     * @param array{latitude: float, longitude: float} $ref
+     * @return array<int, array<string, mixed>>
+     */
+    private static function extractOfficialMapFeatures(array $mapData, array $ref): array
+    {
+        $zoneTypes = [
+            'clean_area_list' => 'clean',
+            'forbidden_area_list' => 'forbidden',
+            'obstacle_area_list' => 'obstacle',
+            'path_area_list' => 'path',
+            'recharge_area_list' => 'recharge',
+            'cleanAreaList' => 'clean',
+            'forbiddenAreaList' => 'forbidden',
+        ];
+
+        $features = [];
+        foreach ($zoneTypes as $key => $zoneType) {
+            $zones = $mapData[$key] ?? null;
+            if (!is_array($zones)) {
+                continue;
+            }
+
+            foreach ($zones as $index => $zone) {
+                if (!is_array($zone)) {
+                    continue;
+                }
+
+                $points = $zone['point_list'] ?? $zone['points'] ?? $zone['polygon'] ?? null;
+                if (!is_array($points)) {
+                    continue;
+                }
+
+                $coords = self::localPointListToCoordinates($points, $ref);
+                if (count($coords) < 3) {
+                    continue;
+                }
+
+                $features[] = self::polygonFeature(
+                    $coords,
+                    'get_map',
+                    sprintf('%s[%d]', $key, (int) $index),
+                    [
+                        'zone_type' => $zoneType,
+                        'zone_id' => $zone['id'] ?? $zone['area_id'] ?? $index,
+                        'name' => $zone['name'] ?? null,
+                    ],
+                );
+            }
+        }
+
+        return $features;
+    }
+
+    /**
+     * @param array<int, mixed> $points
+     * @param array{latitude: float, longitude: float} $ref
+     * @return array<int, array{0: float, 1: float}>
+     */
+    private static function localPointListToCoordinates(array $points, array $ref): array
+    {
+        $coords = [];
+        foreach ($points as $point) {
+            if (!is_array($point)) {
+                continue;
+            }
+
+            $x = $point['x'] ?? $point['X'] ?? null;
+            $y = $point['y'] ?? $point['Y'] ?? null;
+            if (!is_numeric($x) || !is_numeric($y)) {
+                continue;
+            }
+
+            [$lat, $lon] = YarboGeo::localToGps((float) $x, (float) $y, $ref['latitude'], $ref['longitude']);
+            if (!YarboGeo::isValidGps($lat, $lon)) {
+                continue;
+            }
+            $coords[] = [$lon, $lat];
+        }
+
+        return $coords;
     }
 
     /**
@@ -83,25 +255,33 @@ final class YarboMap
     }
 
     /**
-     * Recursively scan payload for lat/lon-like point arrays and build geometry.
-     *
      * @param array<string, mixed> $payload
+     * @param array{latitude: float, longitude: float}|null $ref
      * @return array<int, array<string, mixed>>
      */
-    private static function extractFeaturesFromPayload(array $payload, string $source): array
+    private static function extractFeaturesFromPayload(array $payload, string $source, ?array $ref = null): array
     {
         $features = [];
-        self::walkNode($payload, $source, '$', $features);
+        self::walkNode($payload, $source, '$', $features, $ref);
         return $features;
     }
 
     /**
      * @param mixed $node
      * @param array<int, array<string, mixed>> $features
+     * @param array{latitude: float, longitude: float}|null $ref
      */
-    private static function walkNode(mixed $node, string $source, string $path, array &$features): void
+    private static function walkNode(mixed $node, string $source, string $path, array &$features, ?array $ref = null): void
     {
         if (is_array($node)) {
+            if (self::looksLikeLocalPointList($node, $ref)) {
+                $coords = self::localPointListToCoordinates($node, $ref);
+                if (count($coords) >= 3) {
+                    $features[] = self::polygonFeature($coords, $source, $path);
+                }
+                return;
+            }
+
             if (self::looksLikePointList($node)) {
                 $coords = self::pointListToCoordinates($node);
                 if (count($coords) === 1) {
@@ -114,9 +294,34 @@ final class YarboMap
 
             foreach ($node as $k => $v) {
                 $nextPath = $path . '.' . (is_int($k) ? '[' . $k . ']' : (string) $k);
-                self::walkNode($v, $source, $nextPath, $features);
+                self::walkNode($v, $source, $nextPath, $features, $ref);
             }
         }
+    }
+
+    /**
+     * @param array<int, mixed> $node
+     * @param array{latitude: float, longitude: float}|null $ref
+     */
+    private static function looksLikeLocalPointList(array $node, ?array $ref): bool
+    {
+        if ($ref === null || $node === [] || !array_is_list($node)) {
+            return false;
+        }
+
+        $valid = 0;
+        foreach ($node as $item) {
+            if (!is_array($item)) {
+                return false;
+            }
+            $x = $item['x'] ?? $item['X'] ?? null;
+            $y = $item['y'] ?? $item['Y'] ?? null;
+            if (is_numeric($x) && is_numeric($y)) {
+                $valid++;
+            }
+        }
+
+        return $valid === count($node);
     }
 
     /**
@@ -217,11 +422,16 @@ final class YarboMap
     }
 
     /**
-     * @param array<int, array{0: float, 1: float}> $coords
+     * @param array{0: float, 1: float} $coord
+     * @param array<string, mixed> $extraProperties
      * @return array<string, mixed>
      */
-    private static function polygonFeature(array $coords, string $source, string $path): array
-    {
+    private static function polygonFeature(
+        array $coords,
+        string $source,
+        string $path,
+        array $extraProperties = [],
+    ): array {
         $closed = $coords;
         $first = $closed[0];
         $last = $closed[count($closed) - 1];
@@ -231,11 +441,11 @@ final class YarboMap
 
         return [
             'type' => 'Feature',
-            'properties' => [
+            'properties' => array_merge([
                 'source' => $source,
                 'path' => $path,
                 'kind' => 'polygon',
-            ],
+            ], $extraProperties),
             'geometry' => [
                 'type' => 'Polygon',
                 'coordinates' => [$closed],

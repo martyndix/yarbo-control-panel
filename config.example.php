@@ -14,6 +14,10 @@ return [
     'ffmpeg_path'     => 'ffmpeg',
     'camera_fps'      => 5,
 
+    // Optional cloud reads for map/plans when local MQTT is empty (configured via web Settings).
+    // Credentials are stored in data/cloud-config.json, not here.
+    'data_source' => 'auto', // local | cloud | auto
+
     // Default Yarbo RTSP ports: 19201=front, 19202=left, 19203=right, 19204=rear
     // Override with full rtsp URL per camera if needed:
     // 'front' => ['name' => 'Front', 'rtsp' => 'rtsp://127.0.0.1:19201/live/chn0'],

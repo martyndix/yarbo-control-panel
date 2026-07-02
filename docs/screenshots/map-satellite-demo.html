@@ -87,10 +87,10 @@
                 <h2>Location Map</h2>
                 <div class="layers">Street / <strong>Satellite</strong></div>
             </div>
-            <p class="hint">Live GPS from RTK telemetry. Example satellite view with heading overlay.</p>
+            <p class="hint">Live GPS from RTK telemetry. Example satellite view with heading overlay (fictional coordinates).</p>
             <div id="map"></div>
             <p class="status">
-                GPS locked (fix_quality=1) at 34.011286, -116.166868 | altitude 780.0m
+                GPS locked (fix_quality=1) at 51.500000, -0.120000 | altitude 42.0m (example)
                 <span class="pill">Live fix</span>
             </p>
         </section>
@@ -102,14 +102,14 @@
         crossorigin=""
     ></script>
     <script>
-        const map = L.map('map', { zoomControl: false }).setView([34.011286, -116.166868], 17);
+        const lat = 51.500000;
+        const lon = -0.120000;
+        const map = L.map('map', { zoomControl: false }).setView([lat, lon], 17);
         L.tileLayer(
             'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             { maxZoom: 22, attribution: 'Tiles © Esri' }
         ).addTo(map);
 
-        const lat = 34.011286;
-        const lon = -116.166868;
         const heading = 332;
         const headingRad = (heading * Math.PI) / 180;
         const meters = 4;
@@ -129,6 +129,18 @@
             color: '#7ddea0',
             weight: 3,
             opacity: 0.95
+        }).addTo(map);
+
+        L.polygon([
+            [51.5012, -0.1212],
+            [51.5012, -0.1188],
+            [51.4988, -0.1188],
+            [51.4988, -0.1212],
+        ], {
+            color: '#7ddea0',
+            weight: 2,
+            fillColor: '#3d9a5f',
+            fillOpacity: 0.18,
         }).addTo(map);
     </script>
 </body>
