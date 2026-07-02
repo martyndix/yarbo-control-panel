@@ -1,10 +1,14 @@
 # Yarbo PHP Control Panel
 
-A lightweight, local web control panel for [Yarbo](https://www.yarbo.com/) robot mowers and snow blowers. It talks directly to the robot's on-board MQTT broker on your home network — **no Yarbo cloud account required**.
+A lightweight **web control panel** for [Yarbo](https://www.yarbo.com/) robot mowers and snow blowers. Open it in any browser on your home network to view live status, drive manually, run plans, and manage your robot.
+
+**Local-first by design:** all controls (drive, pause, lights, plan start/delete, waypoints, head controls) use **local MQTT** on your LAN — the same path as the community Home Assistant integration. **No Yarbo cloud account is required** for day-to-day control.
+
+**Optional cloud reads:** if local MQTT does not return saved map or plan data on your firmware, you can enable an optional cloud fallback in the web **Settings** page (Yarbo account + Python `yarbo-data-sdk`) to load mowing areas and work plans via the official [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK). Cloud is read-only for map/plans; commands always stay on local MQTT.
 
 This project was originally built to run on a **Raspberry Pi** (alongside Homebridge) as an always-on panel you can open from any phone, tablet, or computer on your LAN. It also runs fine on a Mac, Linux PC, NAS, or any machine with PHP — useful for development and testing.
 
-The MQTT protocol is based on community reverse-engineering documented in [home-assistant-yarbo](https://github.com/markus-lassfolk/home-assistant-yarbo) and [python-yarbo](https://github.com/markus-lassfolk/python-yarbo).
+The local MQTT protocol is based on community reverse-engineering documented in [home-assistant-yarbo](https://github.com/markus-lassfolk/home-assistant-yarbo) and [python-yarbo](https://github.com/markus-lassfolk/python-yarbo). Optional cloud reads follow patterns from the official Yarbo Data SDK.
 
 > **Disclaimer — read before use**
 >
@@ -29,7 +33,7 @@ Sample telemetry and map data shown for illustration (fictional coordinates and 
 </p>
 
 <p align="center">
-  <em>Status, manual drive D-pad, and command buttons — runs in any modern browser on your LAN.</em>
+  <em>Status, manual drive, plans, and controls — runs in any modern browser on your LAN.</em>
 </p>
 
 <p align="center">
@@ -79,18 +83,28 @@ Commands acquire the MQTT **controller role** first (`get_controller`), which ma
 ## How it works
 
 ```
-Browser  →  PHP web server  →  MQTT (port 1883)  →  Yarbo robot
-           (this project)         on your LAN
+Browser  →  PHP web server  →  Local MQTT (port 1883)  →  Yarbo robot
+           (this project)         on your LAN              (controls + live status)
+
+Optional (map/plan reads only):
+Browser  →  PHP  →  cloud_bridge.py  →  Yarbo cloud  →  robot data
+                     (yarbo-data-sdk)     (Settings)
 ```
 
-1. The browser loads a simple HTML/JS UI from the PHP built-in web server.
-2. API endpoints (`/api/status.php`, `/api/command.php`, `/api/drive.php`) connect to the Yarbo MQTT broker.
+| Path | Used for | Account needed? |
+|------|----------|-----------------|
+| **Local MQTT** | Live status, GPS, drive, controls, plans start/delete, waypoints | No — robot IP + serial only |
+| **Cloud (optional)** | Reading saved maps and work plans when local MQTT returns nothing | Yes — Yarbo app account in Settings |
+
+1. The browser loads a simple HTML/JS UI from the PHP built-in web server (or systemd on a Pi).
+2. API endpoints connect to the Yarbo MQTT broker on your LAN for telemetry and commands.
 3. Payloads are zlib-compressed JSON, matching the format used by the Yarbo app and Home Assistant integration.
-4. Telemetry is requested with `get_device_msg` and parsed from the `data_feedback` topic.
+4. Telemetry is requested with `get_device_msg`; WiFi details use `get_connect_wifi_name`.
+5. Map/plan loads try local MQTT first (`read_gps_ref`, `get_map`, `read_all_plan`). If enabled, **Settings → cloud fallback** can fetch the same data via the official SDK.
 
 GPS map fields (`latitude`, `longitude`, `altitude`, `fix_quality`, `gps_valid`) are parsed from `rtk_base_data.rover.gngga` when the robot reports a valid GNSS/RTK fix.
 
-You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (printed on the device / found in the Yarbo app).
+You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (printed on the device / found in the Yarbo app). Cloud credentials are optional and only used for map/plan reads.
 
 ---
 
@@ -102,6 +116,7 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 | **PHP zlib extension** | Usually included by default |
 | **Composer** | To install the MQTT client dependency |
 | **Same network as Yarbo** | The host must reach the robot on port **1883** |
+| **Python 3 + yarbo-data-sdk** | Optional — only for cloud map/plan reads (`./scripts/install.sh` can install this) |
 | **ffmpeg** | Only relevant if experimenting with cameras (not working for most users — see below) |
 
 ---
