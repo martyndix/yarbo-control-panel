@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yarbo Control Panel</title>
     <link rel="stylesheet" href="/assets/style.css">
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""
+    >
 </head>
 <body>
 <?php
@@ -48,6 +54,25 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 </div>
             </div>
             <p class="updated">Last updated: <span id="updated-at">never</span></p>
+        </section>
+
+        <section class="card map-card">
+            <div class="section-header">
+                <h2>Location Map</h2>
+                <div class="map-mode">
+                    <label>
+                        <input type="radio" name="map-layer" value="street" checked>
+                        Street
+                    </label>
+                    <label>
+                        <input type="radio" name="map-layer" value="satellite">
+                        Satellite
+                    </label>
+                </div>
+            </div>
+            <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors).</p>
+            <div id="map" class="map"></div>
+            <p id="map-status" class="map-status">Waiting for GPS fix...</p>
         </section>
 
         <?php if ($camerasEnabled): ?>
@@ -106,6 +131,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         <section id="toast" class="toast hidden" role="status"></section>
     </main>
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
     <script src="/assets/app.js"></script>
 </body>
 </html>

@@ -52,6 +52,7 @@ Sample telemetry data shown for illustration.
 Open the panel in a browser and you can:
 
 - **View live status** — battery, working state, charging, heading, attached head type, error codes (polled every 5 seconds)
+- **View live GPS on a map** — Leaflet map with Street/Satellite layers, robot position, heading line, and GPS lock status
 - **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
@@ -71,6 +72,8 @@ Browser  →  PHP web server  →  MQTT (port 1883)  →  Yarbo robot
 2. API endpoints (`/api/status.php`, `/api/command.php`, `/api/drive.php`) connect to the Yarbo MQTT broker.
 3. Payloads are zlib-compressed JSON, matching the format used by the Yarbo app and Home Assistant integration.
 4. Telemetry is requested with `get_device_msg` and parsed from the `data_feedback` topic.
+
+GPS map fields (`latitude`, `longitude`, `altitude`, `fix_quality`, `gps_valid`) are parsed from `rtk_base_data.rover.gngga` when the robot reports a valid GNSS/RTK fix.
 
 You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (printed on the device / found in the Yarbo app).
 
@@ -264,6 +267,22 @@ Copy `config.example.php` to `config.php`. **`config.php` is git-ignored** — n
 
 ---
 
+## GPS map support
+
+The panel now includes a **Location Map** card (Leaflet) showing live robot GPS and heading.
+
+- Base layers: **OpenStreetMap (Street)** and **Esri World Imagery (Satellite)**
+- Marker updates from `/api/status.php` every 5 seconds
+- Map shows a clear message when no valid fix is available
+
+Notes:
+
+- GPS depends on the robot reporting valid `gngga` telemetry.
+- Indoors / under cover / without RTK lock, `gps_valid` may be `false`.
+- If coordinates are missing, move the robot outdoors and wait for lock.
+
+---
+
 ## Controls
 
 | UI control | MQTT command | Notes |
@@ -333,6 +352,7 @@ curl -X POST -d "action=lights_on" http://localhost:8080/api/command.php
 
 ```
 yarbo-control-panel/
+├── CHANGELOG.md          # Release notes (updated each publish)
 ├── config.example.php    # Copy to config.php (not in git)
 ├── public/               # Web root (index.php, assets, api/)
 ├── src/                  # MQTT codec, client, telemetry
@@ -340,6 +360,13 @@ yarbo-control-panel/
 ├── docs/                 # Pi quick-reference (PDF + HTML)
 └── scripts/              # Helper scripts (camera tunnel)
 ```
+
+---
+
+## Changelog
+
+Release notes are tracked in [`CHANGELOG.md`](CHANGELOG.md).  
+For each published update, add an entry with date, version tag (or `Unreleased`), and key changes.
 
 ---
 

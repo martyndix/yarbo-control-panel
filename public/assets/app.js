@@ -18,6 +18,8 @@ const els = {
     cameraNote: document.getElementById('camera-note'),
     cameraAlert: document.getElementById('camera-alert'),
     driveStatus: document.getElementById('drive-status'),
+    map: document.getElementById('map'),
+    mapStatus: document.getElementById('map-status'),
 };
 
 const DRIVE_VECTORS = {
@@ -38,6 +40,102 @@ let cameras = [];
 let cameraMode = 'stream';
 let snapshotTimer = null;
 let streamsAvailable = false;
+let map = null;
+let mapLayers = { street: null, satellite: null };
+let currentMapLayer = 'street';
+let robotMarker = null;
+let headingLine = null;
+let mapHasCentered = false;
+
+function initMap() {
+    if (!els.map || typeof L === 'undefined') return;
+
+    map = L.map(els.map, {
+        zoomControl: true,
+        attributionControl: true,
+    }).setView([51.505, -0.09], 18);
+
+    mapLayers.street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 22,
+        attribution: '&copy; OpenStreetMap contributors',
+    });
+    mapLayers.satellite = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        {
+            maxZoom: 22,
+            attribution: 'Tiles &copy; Esri',
+        }
+    );
+
+    mapLayers.street.addTo(map);
+}
+
+function setMapLayer(layer) {
+    if (!map || !mapLayers[layer]) return;
+    if (currentMapLayer === layer) return;
+    map.removeLayer(mapLayers[currentMapLayer]);
+    mapLayers[layer].addTo(map);
+    currentMapLayer = layer;
+}
+
+function headingEndpoint(lat, lon, headingDegrees, meters = 3) {
+    const headingRad = (headingDegrees * Math.PI) / 180;
+    const dLat = (meters * Math.cos(headingRad)) / 111320;
+    const dLon = (meters * Math.sin(headingRad)) / (111320 * Math.cos((lat * Math.PI) / 180));
+    return [lat + dLat, lon + dLon];
+}
+
+function updateMapStatus(message) {
+    if (els.mapStatus) els.mapStatus.textContent = message;
+}
+
+function updateRobotOnMap(data) {
+    if (!map || !els.mapStatus) return;
+
+    const lat = Number(data.latitude);
+    const lon = Number(data.longitude);
+    const fixQuality = Number(data.fix_quality ?? 0);
+    const heading = Number(data.heading ?? 0);
+    const hasFix = Boolean(data.gps_valid) && Number.isFinite(lat) && Number.isFinite(lon);
+
+    if (!hasFix) {
+        updateMapStatus(`No GPS fix yet (fix_quality=${fixQuality}). Move outdoors and wait for RTK/GNSS lock.`);
+        return;
+    }
+
+    if (!robotMarker) {
+        robotMarker = L.circleMarker([lat, lon], {
+            radius: 8,
+            color: '#7ddea0',
+            weight: 2,
+            fillColor: '#3d9a5f',
+            fillOpacity: 0.9,
+        }).addTo(map);
+    } else {
+        robotMarker.setLatLng([lat, lon]);
+    }
+
+    const tip = headingEndpoint(lat, lon, heading);
+    if (!headingLine) {
+        headingLine = L.polyline([[lat, lon], tip], {
+            color: '#7ddea0',
+            weight: 3,
+            opacity: 0.9,
+        }).addTo(map);
+    } else {
+        headingLine.setLatLngs([[lat, lon], tip]);
+    }
+
+    if (!mapHasCentered) {
+        map.setView([lat, lon], 20);
+        mapHasCentered = true;
+    }
+
+    const altitudeLabel = data.altitude != null ? `${Number(data.altitude).toFixed(1)}m` : 'n/a';
+    updateMapStatus(
+        `GPS locked (fix_quality=${fixQuality}) at ${lat.toFixed(6)}, ${lon.toFixed(6)} | altitude ${altitudeLabel}`
+    );
+}
 
 function showToast(message, type = 'success') {
     els.toast.textContent = message;
@@ -73,6 +171,7 @@ function updateStatus(data) {
     els.headType.textContent = data.head_type_name ?? '—';
     els.errorCode.textContent = data.error_code ?? '—';
     els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
+    updateRobotOnMap(data);
 }
 
 async function fetchStatus() {
@@ -382,6 +481,12 @@ document.querySelectorAll('input[name="camera-mode"]').forEach((input) => {
     });
 });
 
+document.querySelectorAll('input[name="map-layer"]').forEach((input) => {
+    input.addEventListener('change', () => {
+        if (input.checked) setMapLayer(input.value);
+    });
+});
+
 document.getElementById('camera-prepare')?.addEventListener('click', (e) => {
     prepareCameras(e.currentTarget);
 });
@@ -396,6 +501,9 @@ document.getElementById('camera-recheck')?.addEventListener('click', async (e) =
 
 if (document.getElementById('camera-grid')) {
     loadCameras();
+}
+if (document.getElementById('map')) {
+    initMap();
 }
 setupDrivePad();
 fetchStatus();
