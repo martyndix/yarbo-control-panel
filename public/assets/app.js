@@ -380,15 +380,18 @@ async function loadSavedAreas(button = null) {
         }
 
         const warning = (data.warnings && data.warnings[0]) || data.note || null;
+        const probeHint = data.probes
+            ? ` Probes: ${Object.entries(data.probes).map(([k, v]) => `${k}=${v.has_data ? 'data' : 'empty'}`).join(', ')}.`
+            : '';
         if (data.status === 'empty') {
-            updateMapAreasStatus('No saved map areas returned yet. Try cloud fallback in Settings, or create/save a map in the Yarbo app.');
-            showToast(data.note || 'No saved map data yet', 'error');
+            updateMapAreasStatus(`No saved map areas returned yet.${probeHint} Try cloud fallback in Settings, or create/save a map in the Yarbo app.`);
+            showToast(data.note || warning || 'No saved map data yet', 'error');
         } else if (data.status === 'structured_no_geometry') {
-            updateMapAreasStatus('Map data returned but no drawable geometry detected yet (firmware format may differ).');
-            showToast('Map data found but not drawable yet', 'error');
+            updateMapAreasStatus(`Map data returned but no drawable geometry detected yet.${probeHint}`);
+            showToast(warning || 'Map data found but not drawable yet', 'error');
         } else {
-            updateMapAreasStatus(warning || 'Saved areas not available on this mower/firmware.');
-            showToast('Saved area extraction not supported yet', 'error');
+            updateMapAreasStatus((warning || 'Saved areas not available on this mower/firmware.') + probeHint);
+            showToast(warning || 'Saved area extraction not supported yet', 'error');
         }
     } catch (err) {
         updateMapAreasStatus(`Saved areas request failed: ${err.message || 'network error'}`);

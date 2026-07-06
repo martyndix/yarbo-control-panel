@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -37,30 +38,82 @@ def sdk_installed() -> bool:
             return False
 
 
-async def login_and_run(action: str, serial: str, timeout: float, config: dict[str, Any]) -> Any:
+def _import_client():
+    try:
+        from yarbo_robot_sdk import YarboClient
+    except ImportError:
+        from yarbo_data_sdk import YarboClient  # type: ignore
+    return YarboClient
+
+
+def _device_serial(device: Any) -> str:
+    for attr in ("sn", "serial", "serial_number"):
+        value = getattr(device, attr, None)
+        if value:
+            return str(value)
+    if isinstance(device, dict):
+        for key in ("sn", "serial", "serial_number"):
+            if device.get(key):
+                return str(device[key])
+    return ""
+
+
+def run_action_sync(action: str, serial: str, timeout: float, config: dict[str, Any]) -> Any:
     email = str(config.get("email", "")).strip()
     password = str(config.get("password", "")).strip()
     if not email or not password:
         raise ValueError("Cloud email and password are required in cloud-config.json")
 
-    try:
-        from yarbo_robot_sdk import YarboClient
-    except ImportError:
-        from yarbo_data_sdk import YarboClient  # type: ignore
-
+    YarboClient = _import_client()
     client = YarboClient()
-    await client.login(email, password)
 
-    if action == "read_all_plan":
-        return await client.read_all_plan(serial, timeout=timeout)
-    if action == "get_map":
-        return await client.get_map(serial, timeout=timeout)
-    if action == "read_gps_ref":
-        return await client.read_gps_ref(serial, timeout=timeout)
-    if action == "get_device_msg":
-        return await client.get_device_msg(serial, timeout=timeout)
+    try:
+        login = getattr(client, "login", None)
+        if login is None:
+            raise ValueError("YarboClient.login is not available")
+        login_result = login(email, password)
+        if asyncio.iscoroutine(login_result):
+            raise ValueError("Unexpected async YarboClient.login — update cloud_bridge.py")
 
-    raise ValueError(f"Unsupported action: {action}")
+        devices = client.get_devices()
+        device = None
+        for candidate in devices:
+            if _device_serial(candidate) == serial:
+                device = candidate
+                break
+        if device is None:
+            raise ValueError(f"Robot serial {serial} not found in Yarbo account")
+
+        mqtt_connect = getattr(client, "mqtt_connect", None)
+        if callable(mqtt_connect):
+            mqtt_connect()
+
+        bound = client.device(device)
+        core = bound.core if hasattr(bound, "core") else bound
+
+        subscribe_feedback = getattr(core, "subscribe_data_feedback", None)
+        if callable(subscribe_feedback):
+            subscribe_feedback(lambda _topic, _data: None)
+            time.sleep(0.35)
+
+        if action == "read_all_plan":
+            return core.read_all_plan(timeout=timeout)
+        if action == "get_map":
+            return core.get_map(timeout=timeout)
+        if action == "read_gps_ref":
+            return core.read_gps_ref(timeout=timeout)
+        if action == "get_device_msg":
+            return core.get_device_msg(timeout=timeout)
+
+        raise ValueError(f"Unsupported action: {action}")
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
+
+async def login_and_run(action: str, serial: str, timeout: float, config: dict[str, Any]) -> Any:
+    return await asyncio.to_thread(run_action_sync, action, serial, timeout, config)
 
 
 def main() -> int:

@@ -33,6 +33,15 @@ final class YarboMap
             }
 
             $data = is_array($envelope['data'] ?? null) ? $envelope['data'] : [];
+            if ($data === [] && $envelope !== []) {
+                $topic = (string) ($envelope['topic'] ?? '');
+                if ($topic === '' || $topic === (string) $cmd) {
+                    unset($envelope['topic'], $envelope['state'], $envelope['result']);
+                    if ($envelope !== []) {
+                        $data = $envelope;
+                    }
+                }
+            }
             $hasData = $data !== [];
             $probes[$cmd] = [
                 'ok' => true,

@@ -24,11 +24,32 @@ $cloudConfig = $cloudSettings->load();
 $dataSource = (string) ($_GET['source'] ?? $cloudConfig['data_source'] ?? YarboCloudSettings::DATA_SOURCE_AUTO);
 $serial = (string) ($config['serial'] ?? '');
 
+/**
+ * @param array<string, mixed>|null $payload
+ * @return array<string, mixed>|null
+ */
+function wrap_cloud_feedback(string $cmd, ?array $payload): ?array
+{
+    if ($payload === null) {
+        return null;
+    }
+    if (isset($payload['data']) && is_array($payload['data'])) {
+        return $payload;
+    }
+
+    return [
+        'topic' => $cmd,
+        'state' => 0,
+        'data' => $payload,
+    ];
+}
+
 function load_map_local(\Yarbo\YarboMqtt $client, array $commands): array
 {
     $responses = [];
     foreach ($commands as $cmd) {
-        $responses[$cmd] = $client->requestDataFeedback($cmd, [], 3.0, true);
+        $timeout = in_array($cmd, ['get_map', 'read_gps_ref'], true) ? 10.0 : 5.0;
+        $responses[$cmd] = $client->requestDataFeedback($cmd, [], $timeout, true);
     }
 
     return ['responses' => $responses, 'via' => 'local'];
@@ -49,10 +70,12 @@ function load_map_cloud(YarboCloud $cloud, string $serial): array
 
     $responses = [];
     if (is_array($gpsRef) && ($gpsRef['ok'] ?? true) !== false) {
-        $responses['read_gps_ref'] = is_array($gpsRef['data'] ?? null) ? $gpsRef['data'] : $gpsRef;
+        $payload = is_array($gpsRef['data'] ?? null) ? $gpsRef['data'] : $gpsRef;
+        $responses['read_gps_ref'] = wrap_cloud_feedback('read_gps_ref', is_array($payload) ? $payload : null);
     }
     if (is_array($mapData) && ($mapData['ok'] ?? true) !== false) {
-        $responses['get_map'] = is_array($mapData['data'] ?? null) ? $mapData['data'] : $mapData;
+        $payload = is_array($mapData['data'] ?? null) ? $mapData['data'] : $mapData;
+        $responses['get_map'] = wrap_cloud_feedback('get_map', is_array($payload) ? $payload : null);
     }
 
     return ['responses' => $responses, 'via' => 'cloud'];

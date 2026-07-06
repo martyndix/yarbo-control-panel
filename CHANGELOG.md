@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+### Fixed
+- **Cloud map/plan reads**: `cloud_bridge.py` now follows yarbo-data-sdk v0.2 MQTT lifecycle (login, mqtt_connect, subscribe_data_feedback before get_map)
+- **Cloud map normalization**: cloud payloads are wrapped like local MQTT feedback so mowing areas render correctly
+- **Local map timeouts**: increased `get_map` / `read_gps_ref` MQTT wait to 10s
+
 ## [1.1.2] - 2026-07-02
 
 ### Fixed
