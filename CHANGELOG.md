@@ -6,6 +6,9 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+### Fixed
+- **Settings update hang**: panel update polling now uses fetch timeouts, remembers restart progress, and reloads when the target git commit is detected (fixes "Waiting for panel to restart" stuck after a successful update)
+
 ## [1.1.4] - 2026-07-06
 
 ### Added

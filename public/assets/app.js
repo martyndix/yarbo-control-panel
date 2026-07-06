@@ -1755,25 +1755,64 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function isAbortError(err) {
+    return err?.name === 'AbortError' || String(err?.message || '').includes('aborted');
+}
+
 async function fetchUpdateProgress() {
     try {
-        const res = await fetch('/api/update.php?action=progress', { cache: 'no-store' });
+        const res = await fetchWithTimeout('/api/update.php?action=progress', { cache: 'no-store' }, 8000);
         return await parseJsonResponse(res);
     } catch {
         return null;
     }
 }
 
-async function waitForPanelRestart(maxWaitMs = 120000) {
+async function fetchUpdateCheck() {
+    try {
+        const res = await fetchWithTimeout('/api/update.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'check' }),
+            cache: 'no-store',
+        }, 20000);
+        return await parseJsonResponse(res);
+    } catch {
+        return null;
+    }
+}
+
+async function waitForPanelRestart(maxWaitMs = 120000, targetCommitShort = null) {
     const deadline = Date.now() + maxWaitMs;
     let sawDisconnect = false;
+    let lastProgressState = null;
+    let polls = 0;
+    let lastCommitCheck = 0;
 
     while (Date.now() < deadline) {
-        await sleep(2500);
+        await sleep(polls === 0 ? 1000 : 2500);
+        polls += 1;
 
         let progress = null;
         try {
             progress = await fetchUpdateProgress();
+            if (progress?.state) {
+                lastProgressState = progress.state;
+            }
+            if (progress?.message && els.settingsUpdateResult) {
+                const suffix = targetCommitShort ? ` → ${targetCommitShort}` : '';
+                setUpdateResult(`${progress.message}${suffix}. Waiting for panel to restart…`, 'success');
+            }
             if (progress?.state === 'failed') {
                 throw new Error(progress.error || progress.message || 'Update failed');
             }
@@ -1782,13 +1821,23 @@ async function waitForPanelRestart(maxWaitMs = 120000) {
                 return;
             }
         } catch (err) {
-            if (!isUpdateNetworkError(err)) {
+            if (!isUpdateNetworkError(err) && !isAbortError(err)) {
                 throw err;
+            }
+            sawDisconnect = true;
+        }
+
+        if (targetCommitShort && Date.now() - lastCommitCheck >= 10000) {
+            lastCommitCheck = Date.now();
+            const check = await fetchUpdateCheck();
+            if (check?.ok && check.current_commit_short === targetCommitShort && !check.update_available) {
+                window.location.reload();
+                return;
             }
         }
 
         try {
-            const res = await fetch('/api/status.php', { cache: 'no-store' });
+            const res = await fetchWithTimeout('/api/status.php', { cache: 'no-store' }, 8000);
             if (!res.ok) {
                 sawDisconnect = true;
                 continue;
@@ -1799,12 +1848,17 @@ async function waitForPanelRestart(maxWaitMs = 120000) {
                 continue;
             }
 
-            if (sawDisconnect || progress?.state === 'restarting') {
+            const restartPhase = progress?.state === 'restarting'
+                || lastProgressState === 'restarting'
+                || progress?.state === 'done'
+                || lastProgressState === 'done';
+
+            if (sawDisconnect || restartPhase) {
                 window.location.reload();
                 return;
             }
         } catch (err) {
-            if (isUpdateNetworkError(err)) {
+            if (isUpdateNetworkError(err) || isAbortError(err)) {
                 sawDisconnect = true;
                 continue;
             }
@@ -1837,7 +1891,7 @@ async function runPanelUpdate(button) {
             const to = data.remote_commit_short || 'latest';
             setUpdateResult(`Update started (${from} → ${to}). Waiting for panel to restart…`, 'success');
             showToast('Update started', 'success');
-            await waitForPanelRestart();
+            await waitForPanelRestart(120000, data.remote_commit_short || null);
             return;
         }
 
@@ -1858,7 +1912,7 @@ async function runPanelUpdate(button) {
         if (isUpdateNetworkError(err)) {
             setUpdateResult('Update may be in progress — waiting for panel to restart…', 'success');
             try {
-                await waitForPanelRestart();
+                await waitForPanelRestart(120000, null);
                 return;
             } catch (waitErr) {
                 setUpdateResult(waitErr.message || 'Update status unknown', 'error');
