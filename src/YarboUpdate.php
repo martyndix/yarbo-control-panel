@@ -8,6 +8,9 @@ final class YarboUpdate
 {
     private const LOCK_STALE_SECONDS = 900;
 
+    /** @var list<string> */
+    private const ACTIVE_PROGRESS_STATES = ['running', 'pulling', 'composer', 'restarting'];
+
     public function __construct(private readonly string $projectRoot)
     {
     }
@@ -83,7 +86,6 @@ final class YarboUpdate
             'message' => 'Update started',
             'started_at' => gmdate('c'),
         ]);
-        file_put_contents($this->lockPath(), (string) time() . "\n");
 
         $script = $this->projectRoot . '/scripts/update.sh';
         $logFile = $this->projectRoot . '/data/update.log';
@@ -94,6 +96,13 @@ final class YarboUpdate
         );
 
         if (!$this->spawnBackgroundCommand($cmd)) {
+            $this->writeProgress([
+                'state' => 'failed',
+                'message' => 'Could not start background update',
+                'error' => 'Could not start background update',
+                'updated_at' => gmdate('c'),
+            ]);
+
             return ['ok' => false, 'error' => 'Could not start background update'];
         }
 
@@ -137,19 +146,51 @@ final class YarboUpdate
 
     public function isUpdateRunning(): bool
     {
+        $this->clearStaleUpdateLock();
+
+        if (is_file($this->lockPath())) {
+            return true;
+        }
+
+        $progress = $this->readProgress();
+        $state = (string) ($progress['state'] ?? '');
+        if (!in_array($state, self::ACTIVE_PROGRESS_STATES, true)) {
+            return false;
+        }
+
+        $startedAt = strtotime((string) ($progress['started_at'] ?? $progress['updated_at'] ?? ''));
+        if ($startedAt > 0 && (time() - $startedAt) < 120) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function clearStaleUpdateLock(): void
+    {
         $lock = $this->lockPath();
         if (!is_file($lock)) {
-            return false;
+            return;
+        }
+
+        $progress = $this->readProgress();
+        $state = (string) ($progress['state'] ?? '');
+        if (!in_array($state, self::ACTIVE_PROGRESS_STATES, true)) {
+            @unlink($lock);
+
+            return;
         }
 
         $age = time() - (int) filemtime($lock);
         if ($age > self::LOCK_STALE_SECONDS) {
             @unlink($lock);
-
-            return false;
+            $this->writeProgress(array_merge($progress, [
+                'state' => 'failed',
+                'message' => 'Update timed out',
+                'error' => 'Update lock expired after ' . self::LOCK_STALE_SECONDS . ' seconds',
+                'updated_at' => gmdate('c'),
+            ]));
         }
-
-        return true;
     }
 
     /**

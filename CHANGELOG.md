@@ -6,6 +6,9 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+### Fixed
+- **Panel update "already running"**: PHP no longer creates the update lock before `update.sh` starts (which caused the script to exit immediately and leave a stale lock); stale locks are cleared when progress is no longer active
+
 ## [1.1.3] - 2026-07-06
 
 ### Fixed
