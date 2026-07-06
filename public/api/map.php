@@ -9,10 +9,8 @@ use Yarbo\YarboCloudSettings;
 use Yarbo\YarboMap;
 
 $commands = [
-    'read_gps_ref',
     'get_map',
-    'read_clean_area',
-    'read_recharge_point',
+    'read_gps_ref',
 ];
 
 set_time_limit(120);
@@ -46,10 +44,27 @@ function wrap_cloud_feedback(string $cmd, ?array $payload): ?array
 
 function load_map_local(\Yarbo\YarboMqtt $client, array $commands): array
 {
-    $responses = [];
+    $batch = [];
     foreach ($commands as $cmd) {
-        $timeout = in_array($cmd, ['get_map', 'read_gps_ref'], true) ? 10.0 : 5.0;
-        $responses[$cmd] = $client->requestDataFeedback($cmd, [], $timeout, true);
+        $batch[$cmd] = $cmd === 'get_map' ? 15.0 : 8.0;
+    }
+
+    $responses = $client->requestDataFeedbackBatch($batch);
+
+    if ($responses['get_map'] ?? null) {
+        return ['responses' => $responses, 'via' => 'local'];
+    }
+
+    for ($attempt = 1; $attempt <= 3; $attempt++) {
+        $retry = $client->requestDataFeedback('get_map', [], 15.0, false);
+        if ($retry !== null) {
+            $responses['get_map'] = $retry;
+            break;
+        }
+    }
+
+    if (($responses['read_gps_ref'] ?? null) === null) {
+        $responses['read_gps_ref'] = $client->requestDataFeedback('read_gps_ref', [], 8.0, false);
     }
 
     return ['responses' => $responses, 'via' => 'local'];

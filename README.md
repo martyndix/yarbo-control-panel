@@ -68,7 +68,7 @@ Open the panel in a browser and you can:
 - **View live status** — battery, working state, charging, heading, attached head type, error codes (polled every 5 seconds)
 - **View live GPS on a map** — Leaflet map with Street/Satellite layers, robot position, heading line, and GPS lock status
 - **View connection & health diagnostics** — network type/status (HaLow/4G/WiFi when available), **WiFi network name, signal strength, and security** (via `get_connect_wifi_name`), battery temperature, wireless charge telemetry, RTK status, and link diagnostics
-- **Probe saved mowing areas** — loads map geometry via local MQTT (`read_gps_ref`, `get_map`, …) with optional Yarbo cloud fallback when local data is empty
+- **Probe saved mowing areas** — decodes compressed `get_map` MQTT payloads and draws `areas` / `pathways` on the map (optional cloud fallback)
 - **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop (dual payload compatibility with official SDK command shapes)
 - **Run work plans** — load saved plans (local or cloud), start at a chosen percentage, delete plans
 - **Head-specific controls** — mower blade height/speed or snow chute angle when the attached head is detected
@@ -377,23 +377,45 @@ Notes:
 
 ---
 
-## Mowing map extraction status
+## Saved mowing areas (Location Map)
 
-The panel loads saved areas via **local MQTT** (`read_gps_ref` + `get_map`) and converts local coordinates to GPS when a reference origin is available. If local MQTT returns no drawable geometry, enable **cloud fallback reads** in the web **Settings** page (optional Yarbo account + `yarbo-data-sdk`).
+Use **Load saved mowing areas** on the Location Map card to draw zones from the robot on the Leaflet map.
 
-On some firmware, map commands return no `data_feedback` response until a map exists in the Yarbo app workflow.
+### How it works
 
-### How to re-test
+1. **Local MQTT (default)** — the panel calls `get_map` (and optionally `read_gps_ref`) over the same broker as controls.
+2. **Decode** — many firmware versions return `get_map` as a **base64 + zlib** compressed blob; the panel decodes this automatically.
+3. **Convert to GPS** — Yarbo app map format uses `areas` / `pathways` with per-zone `ref` (lat/lon) and `range` points (`x` / `y` metres). Older payloads may use `clean_area_list` instead.
+4. **Cloud fallback (optional)** — if local MQTT returns nothing, enable **Settings → cloud fallback** (`auto` or `cloud`) to read the same data via the [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK).
 
-After creating/saving a map in the official Yarbo workflow, run:
+Map load can take **20–30 seconds** — the robot may only respond to `get_map` after a short retry window.
+
+### In the UI
+
+| Map data | Behaviour |
+|----------|-----------|
+| **Auto** | Local MQTT first, then cloud if enabled and local is empty |
+| **Local MQTT only** | Robot broker only |
+| **Cloud only** | Yarbo account + Python SDK on the Pi/host |
+
+### Troubleshooting
+
+| Symptom | What to try |
+|---------|-------------|
+| **No areas / timeout** | Robot powered on, same network as panel, port 1883 open. Wait 30s and click again. |
+| **GPS ref warning** | Usually means `get_map` did not respond — not a missing `read_gps_ref`. Check MQTT connection; run discovery below. |
+| **Empty but map exists in Yarbo app** | Save the map again in the official app, then reload. Try **Cloud** in Map data if local MQTT is silent on your firmware. |
+| **Probe shows `get_map=data` but no draw** | Share a `debug/map-dumps/` file (see below) — payload format may need a small adapter. |
+
+### CLI discovery (optional)
+
+After creating/saving a map in the Yarbo app:
 
 ```bash
 php scripts/discover_map.php
 ```
 
-Discovery output is written to `debug/map-dumps/map_discovery_YYYYMMDD_HHMMSS.json` for inspection.
-
-If future runs start returning structured payloads, overlays appear automatically on the Location Map card. Cloud reads use the official [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK) behind the scenes — you configure it from the web UI, not from the command line.
+Output is written to `debug/map-dumps/map_discovery_YYYYMMDD_HHMMSS.json` for inspection.
 
 ---
 
@@ -410,27 +432,17 @@ Credentials are stored in `data/cloud-config.json` (gitignored), not in `config.
 
 ---
 
-### Community testing for saved areas (beta)
+### Saved mowing areas (beta)
 
-The UI now includes **Load saved mowing areas (beta)** in the Location Map card.
+The Location Map card includes **Load saved mowing areas**. It calls `/api/map.php`, decodes compressed `get_map` payloads when needed, and draws mowing zones and pathways when the robot returns them.
 
-What it does:
+On tested hardware, local MQTT `get_map` works when the robot is online and a map is saved in the Yarbo app. If local MQTT returns nothing on your firmware, use **Settings → cloud fallback** or set Map data to **Cloud**.
 
-- Calls `/api/map.php`
-- Probes map-related MQTT commands
-- Tries to extract lat/lon geometry and draw overlays on the map
+If areas still do not render, please share:
 
-Expected outcomes:
-
-- **Works** on firmware/robots that return drawable geometry
-- **Empty** if no saved map exists yet
-- **Structured but not drawable** when payload format differs (helps reverse-engineering)
-
-If you are testing with a stored map and it does not render, please share:
-
-- `debug/map-dumps/map_discovery_*.json` output from `php scripts/discover_map.php`
-- Your firmware version
-- Whether the robot has at least one saved map/area in the official app
+- `debug/map-dumps/map_discovery_*.json` from `php scripts/discover_map.php`
+- Firmware version and whether a map exists in the Yarbo app
+- The status line under the map button (includes probe hints like `get_map=data`)
 
 ---
 

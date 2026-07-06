@@ -43,6 +43,33 @@ final class YarboGeo
     }
 
     /**
+     * @param array<string, mixed> $mapData decoded get_map payload
+     * @return array{latitude: float, longitude: float}|null
+     */
+    public static function extractGpsRefFromMapData(array $mapData): ?array
+    {
+        foreach (['areas', 'pathways', 'clean_area_list', 'path_area_list'] as $key) {
+            $zones = $mapData[$key] ?? null;
+            if (!is_array($zones)) {
+                continue;
+            }
+
+            foreach ($zones as $zone) {
+                if (!is_array($zone)) {
+                    continue;
+                }
+
+                $ref = self::extractGpsRef($zone);
+                if ($ref !== null) {
+                    return $ref;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Convert local meters (x east, y north) to WGS84 using a GPS reference origin.
      *
      * @return array{0: float, 1: float} [latitude, longitude]

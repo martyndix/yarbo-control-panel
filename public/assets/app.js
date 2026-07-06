@@ -384,8 +384,11 @@ async function loadSavedAreas(button = null) {
             ? ` Probes: ${Object.entries(data.probes).map(([k, v]) => `${k}=${v.has_data ? 'data' : 'empty'}`).join(', ')}.`
             : '';
         if (data.status === 'empty') {
-            updateMapAreasStatus(`No saved map areas returned yet.${probeHint} Try cloud fallback in Settings, or create/save a map in the Yarbo app.`);
-            showToast(data.note || warning || 'No saved map data yet', 'error');
+            const emptyMsg = probeHint.includes('get_map=data')
+                ? 'Map data arrived but could not be drawn yet.'
+                : 'No saved map areas returned yet.';
+            updateMapAreasStatus(`${emptyMsg}${probeHint} Try cloud fallback in Settings, or create/save a map in the Yarbo app.`);
+            showToast(data.note || (probeHint.includes('get_map=data') ? 'Could not draw map areas' : 'No saved map data yet'), 'error');
         } else if (data.status === 'structured_no_geometry') {
             updateMapAreasStatus(`Map data returned but no drawable geometry detected yet.${probeHint}`);
             showToast(warning || 'Map data found but not drawable yet', 'error');

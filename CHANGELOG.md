@@ -6,10 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-07-06
+
 ### Fixed
-- **Cloud map/plan reads**: `cloud_bridge.py` now follows yarbo-data-sdk v0.2 MQTT lifecycle (login, mqtt_connect, subscribe_data_feedback before get_map)
-- **Cloud map normalization**: cloud payloads are wrapped like local MQTT feedback so mowing areas render correctly
-- **Local map timeouts**: increased `get_map` / `read_gps_ref` MQTT wait to 10s
+- **Saved mowing areas**: decode base64+zlib `get_map` payloads from MQTT; support Yarbo app map format (`areas` / `pathways` with per-zone `ref` and `range` points)
+- **Map MQTT reliability**: batch `get_map` + `read_gps_ref` on one connection with retries (fixes empty map loads when sequential commands timed out)
+- **Cloud map reads**: `cloud_bridge.py` follows yarbo-data-sdk v0.2 MQTT lifecycle; cloud payloads normalized like local feedback envelopes
 
 ## [1.1.2] - 2026-07-02
 
@@ -39,30 +41,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 - Richer plan activity fields from `StateMSG`
 
 ### Changed
-- README describes **local-first** control with **optional cloud** map/plan reads
-- Install docs streamlined: **2 commands on Pi**, configure via web **Settings**
-- `GET /api/map.php` and `GET /api/plans.php` support `?source=local|cloud|auto`
-- Settings API stores cloud credentials in `data/cloud-config.json` (gitignored)
-- Screenshot assets refreshed with fictional sample data (no personal location/network details)
-- Pi quick-reference HTML updated (`docs/yarbo-pi-commands.html`)
+- **README** restructured for hybrid local-first + optional cloud; Pi quick-start is 2 commands with web Settings (no manual `config.php` editing)
+- **Screenshots** refreshed with fictional demo data (no personal location/network details)
+- Settings modal scrollable layout for connection, cloud, and panel updates sections
 
 ### Fixed
-- Settings cloud test result and toasts appearing behind the modal (z-index + inline status)
-- Map API JSON encoding and client parsing when responses contain invalid floats or non-JSON bodies
-
-### Notes
-- Saved mowing-area overlays still depend on the robot returning map data via local MQTT or cloud fallback; some firmware returns no `data_feedback` for map commands.
+- Toast notifications appearing behind the Settings modal
+- Map API JSON parse errors on Safari when MQTT payloads contained invalid UTF-8 sequences
 
 ## [1.0.0] - 2026-07-01
 
 ### Added
-- Live GPS map (Leaflet, Street/Satellite, heading overlay)
-- Connection & health diagnostics card (HaLow/4G/WiFi, battery temp, RTK, route priority, LTE module)
-- Beta saved-area extraction (`/api/map.php`, `YarboMap`)
-- Work plans and waypoints APIs
-- In-panel Settings for broker IP and serial
-- `scripts/discover_map.php` map command probe tool
-
-### Changed
-- Telemetry parses GNSS from `rtk_base_data.rover.gngga` (NMEA GNGGA)
-- Battery temperature supports per-cell averages (`temperature1`..`temperature6`)
+- Initial release: local MQTT control panel for Yarbo robots
+- Status, drive, pause/stop/dock, work plans, waypoints, cameras (experimental), GPS map

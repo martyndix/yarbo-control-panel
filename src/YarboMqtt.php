@@ -162,6 +162,56 @@ final class YarboMqtt
         return $feedbackResponse;
     }
 
+    /**
+     * Publish multiple read commands on one connection with a single controller acquire.
+     *
+     * @param array<string, float> $commands Command name => per-command timeout seconds
+     * @return array<string, array<string, mixed>|null>
+     */
+    public function requestDataFeedbackBatch(array $commands, bool $acquireController = true): array
+    {
+        if ($commands === []) {
+            return [];
+        }
+
+        $feedbackTopic = $this->topic('device', 'data_feedback');
+        /** @var array<string, array<string, mixed>|null> $responses */
+        $responses = [];
+        foreach (array_keys($commands) as $cmd) {
+            $responses[$cmd] = null;
+        }
+
+        $this->client->subscribe($feedbackTopic, function (string $topic, string $message) use (&$responses): void {
+            $decoded = YarboCodec::decode($message);
+            $cmd = (string) ($decoded['topic'] ?? '');
+            if ($cmd !== '' && array_key_exists($cmd, $responses) && $responses[$cmd] === null) {
+                $responses[$cmd] = $decoded;
+            }
+        }, 0);
+
+        $this->waitForSubscriptions(0.4);
+
+        if ($acquireController) {
+            $this->acquireController();
+        }
+
+        foreach ($commands as $cmd => $timeoutSeconds) {
+            if ($responses[$cmd] !== null) {
+                continue;
+            }
+
+            $this->publish($cmd, []);
+
+            $loopStarted = microtime(true);
+            $deadline = $loopStarted + $timeoutSeconds;
+            while ($responses[$cmd] === null && microtime(true) < $deadline) {
+                $this->client->loopOnce($loopStarted, true);
+            }
+        }
+
+        return $responses;
+    }
+
     private function acquireController(): void
     {
         $feedbackTopic = $this->topic('device', 'data_feedback');

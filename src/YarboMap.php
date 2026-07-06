@@ -32,19 +32,14 @@ final class YarboMap
                 continue;
             }
 
-            $data = is_array($envelope['data'] ?? null) ? $envelope['data'] : [];
-            if ($data === [] && $envelope !== []) {
-                $topic = (string) ($envelope['topic'] ?? '');
-                if ($topic === '' || $topic === (string) $cmd) {
-                    unset($envelope['topic'], $envelope['state'], $envelope['result']);
-                    if ($envelope !== []) {
-                        $data = $envelope;
-                    }
-                }
+            $data = YarboCodec::decodePayloadField($envelope['data'] ?? null);
+            if ($data === []) {
+                $data = YarboCodec::decodePayloadField($envelope);
             }
+
             $hasData = $data !== [];
             $probes[$cmd] = [
-                'ok' => true,
+                'ok' => is_array($envelope),
                 'has_data' => $hasData,
                 'data_keys' => array_map('strval', array_keys($data)),
             ];
@@ -57,14 +52,20 @@ final class YarboMap
                 $source = (string) $cmd;
             }
 
-            if ($cmd === 'get_map' && $ref !== null) {
-                $features = array_merge($features, self::extractOfficialMapFeatures($data, $ref));
+            if ($cmd === 'get_map') {
+                if ($ref === null) {
+                    $ref = YarboGeo::extractGpsRefFromMapData($data);
+                }
+                $features = array_merge($features, self::extractAppMapFeatures($data));
+                if ($ref !== null) {
+                    $features = array_merge($features, self::extractOfficialMapFeatures($data, $ref));
+                }
             }
 
             $features = array_merge($features, self::extractFeaturesFromPayload($data, (string) $cmd, $ref));
         }
 
-        if ($ref === null) {
+        if ($ref === null && $features === []) {
             $warnings[] = 'No GPS reference from read_gps_ref — local map coordinates cannot be converted to lat/lon.';
         }
 
@@ -221,6 +222,99 @@ final class YarboMap
     }
 
     /**
+     * Yarbo app map format: areas/pathways with per-zone ref + range points (x/y meters).
+     *
+     * @param array<string, mixed> $mapData
+     * @return array<int, array<string, mixed>>
+     */
+    private static function extractAppMapFeatures(array $mapData): array
+    {
+        $zoneTypes = [
+            'areas' => 'clean',
+            'pathways' => 'path',
+            'nogozones' => 'forbidden',
+            'novisionzones' => 'no_vision',
+            'sidewalks' => 'sidewalk',
+        ];
+
+        $features = [];
+        foreach ($zoneTypes as $key => $zoneType) {
+            $zones = $mapData[$key] ?? null;
+            if (!is_array($zones)) {
+                continue;
+            }
+
+            foreach ($zones as $index => $zone) {
+                if (!is_array($zone)) {
+                    continue;
+                }
+
+                $zoneRef = YarboGeo::extractGpsRef($zone);
+                if ($zoneRef === null) {
+                    continue;
+                }
+
+                $range = $zone['range'] ?? null;
+                if (!is_array($range)) {
+                    continue;
+                }
+
+                $coords = self::rangePointsToCoordinates($range, $zoneRef);
+                if (count($coords) < 3) {
+                    continue;
+                }
+
+                $features[] = self::polygonFeature(
+                    $coords,
+                    'get_map',
+                    sprintf('%s[%d]', $key, (int) $index),
+                    [
+                        'zone_type' => $zoneType,
+                        'zone_id' => $zone['id'] ?? $index,
+                        'name' => $zone['name'] ?? null,
+                    ],
+                );
+            }
+        }
+
+        return $features;
+    }
+
+    /**
+     * @param array<int, mixed> $points
+     * @param array{latitude: float, longitude: float} $ref
+     * @return array<int, array{0: float, 1: float}>
+     */
+    private static function rangePointsToCoordinates(array $points, array $ref): array
+    {
+        $coords = [];
+        foreach ($points as $point) {
+            if (!is_array($point)) {
+                continue;
+            }
+
+            $x = $point['x'] ?? null;
+            $y = $point['y'] ?? null;
+            if (!is_numeric($x) || !is_numeric($y)) {
+                continue;
+            }
+
+            [$lat, $lon] = YarboGeo::localToGps(
+                (float) $x,
+                (float) $y,
+                $ref['latitude'],
+                $ref['longitude'],
+            );
+            if (!YarboGeo::isValidGps($lat, $lon)) {
+                continue;
+            }
+            $coords[] = [$lon, $lat];
+        }
+
+        return $coords;
+    }
+
+    /**
      * @param array<int, mixed> $points
      * @param array{latitude: float, longitude: float} $ref
      * @return array<int, array{0: float, 1: float}>
@@ -255,11 +349,20 @@ final class YarboMap
     private static function hasAnyData(array $responses): bool
     {
         foreach ($responses as $envelope) {
-            $data = $envelope['data'] ?? null;
-            if (is_array($data) && $data !== []) {
+            if (!is_array($envelope)) {
+                continue;
+            }
+
+            $data = YarboCodec::decodePayloadField($envelope['data'] ?? null);
+            if ($data === []) {
+                $data = YarboCodec::decodePayloadField($envelope);
+            }
+
+            if ($data !== []) {
                 return true;
             }
         }
+
         return false;
     }
 

@@ -22,6 +22,41 @@ final class YarboCodec
     }
 
     /**
+     * Decode map/plan payload fields that may be an array, zlib bytes, or base64+zlib text.
+     *
+     * @return array<string, mixed>
+     */
+    public static function decodePayloadField(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (!is_string($value) || $value === '') {
+            return [];
+        }
+
+        $attempts = [$value];
+        $decoded64 = base64_decode($value, true);
+        if ($decoded64 !== false) {
+            $attempts[] = $decoded64;
+        }
+
+        foreach ($attempts as $attempt) {
+            try {
+                $result = self::decode($attempt);
+                if ($result !== [] && !isset($result['_raw'])) {
+                    return $result;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return [];
+    }
+
+    /**
      * Decode zlib-compressed JSON (or plain JSON for heart_beat) to an array.
      */
     public static function decode(string $data): array
