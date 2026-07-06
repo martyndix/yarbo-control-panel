@@ -367,6 +367,7 @@ The panel now includes a **Location Map** card (Leaflet) showing live robot GPS 
 
 - Base layers: **OpenStreetMap (Street)** and **Esri World Imagery (Satellite)**
 - Marker updates from `/api/status.php` every 5 seconds
+- **Center on Yarbo** button (bottom-right on the map) recenters on the live GPS fix
 - Map shows a clear message when no valid fix is available
 
 Notes:
@@ -389,6 +390,38 @@ Use **Load saved mowing areas** on the Location Map card to draw zones from the 
 4. **Cloud fallback (optional)** — if local MQTT returns nothing, enable **Settings → cloud fallback** (`auto` or `cloud`) to read the same data via the [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK).
 
 Map load can take **20–30 seconds** — the robot may only respond to `get_map` after a short retry window.
+
+After a successful load, zones are **cached in the browser** so a page refresh redraws them without another MQTT fetch. Use **Load saved mowing areas** again to refresh from the robot.
+
+### Map zones and draft editing
+
+| Control | Behaviour |
+|---------|-----------|
+| **Map zones** | Lists loaded zones with type colours; toggle visibility per zone |
+| **Export GeoJSON** | Download the currently loaded zones |
+| **Edit map (draft)** | Opens Leaflet.draw tools on a local draft copy — does not change the robot map |
+| **Export draft** | Download edited draft GeoJSON |
+| **Save to robot** | Disabled until map write MQTT commands are verified |
+
+To change zones on the robot today, use the **official Yarbo app**. The panel can load and inspect maps; saving back requires reverse-engineering undocumented MQTT write commands.
+
+### Discovering map write commands
+
+While investigating map writes, use these CLI tools (robot on same network):
+
+```bash
+# Log MQTT while you save/edit a map in the Yarbo app (default 5 minutes)
+php scripts/capture_map_mqtt.php 300
+
+# List candidate write commands (dry run)
+php scripts/discover_map.php --probe-writes
+
+# Send empty [] probes only — safe, non-destructive
+php scripts/discover_map.php --probe-writes --send-probes
+```
+
+Capture output: `debug/map-dumps/mqtt_capture_*.jsonl`  
+Discovery output: `debug/map-dumps/map_discovery_*.json`
 
 ### In the UI
 
@@ -581,7 +614,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.1.0** (2026-07-02).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.1.4** (2026-07-06).
 
 ---
 

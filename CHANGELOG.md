@@ -6,8 +6,20 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-07-06
+
+### Added
+- **Map center button**: Leaflet control to recenter on the robot's live GPS fix
+- **Map persistence**: loaded mowing areas and map viewport restore after page refresh (browser `localStorage`)
+- **Map zones inspector**: per-zone visibility toggles, GeoJSON export, and per-zone **Edit** shortcut
+- **Map load indicator**: spinner and progress bar overlay while saved areas fetch from the robot
+- **Draft map editor**: drag vertices to adjust boundaries; draft syncs back to the map view when editing stops; **Save to robot** remains disabled until write commands are verified
+- **Map MQTT discovery**: `scripts/capture_map_mqtt.php` to log traffic while saving in the Yarbo app; `discover_map.php --probe-writes` for safe write-command probes
+- **`YarboGeo::gpsToLocal()`**: inverse coordinate helper for a future map encode path
+
 ### Fixed
-- **Panel update "already running"**: PHP no longer creates the update lock before `update.sh` starts (which caused the script to exit immediately and leave a stale lock); stale locks are cleared when progress is no longer active
+- **Edit map button styling**: toggle no longer strips the base `btn` class (which caused native browser button chrome)
+- **Panel update "already running"**: PHP no longer creates the update lock before `update.sh` starts; stale locks clear when progress is no longer active
 
 ## [1.1.3] - 2026-07-06
 

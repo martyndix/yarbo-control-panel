@@ -15,6 +15,18 @@ $commands = [
     'read_recharge_point',
 ];
 
+$writeCandidates = [
+    'set_map',
+    'save_map',
+    'write_clean_area',
+    'set_clean_area',
+    'del_map',
+    'update_map',
+];
+
+$probeWrites = in_array('--probe-writes', $argv, true);
+$sendProbes = in_array('--send-probes', $argv, true);
+
 $attempts = 3;
 $timeoutSeconds = 6.0;
 $dumpDir = __DIR__ . '/../debug/map-dumps';
@@ -31,13 +43,15 @@ $summary = [
     'started_at' => gmdate('c'),
     'attempts_per_command' => $attempts,
     'timeout_seconds' => $timeoutSeconds,
+    'probe_writes' => $probeWrites,
+    'send_probes' => $sendProbes,
     'results' => [],
 ];
 
 $client = new YarboMqtt(
     (string) $config['broker_host'],
-    (int) $config['broker_port'],
-    (string) $config['serial']
+    (int) ($config['broker_port'] ?? 1883),
+    (string) ($config['serial'] ?? '')
 );
 
 echo "Connecting to {$summary['host']}:{$summary['port']} SN={$summary['serial']}\n";
@@ -103,6 +117,48 @@ try {
             $summary['results'][$cmd]['classification'] = 'geometry_or_structured_data_present';
         }
     }
+
+    if ($probeWrites) {
+        echo "\n=== Write command probes ===\n";
+        if (!$sendProbes) {
+            echo "Dry run — listing candidate write commands only. Re-run with --send-probes to send empty payloads.\n";
+        } else {
+            echo "Sending empty [] payloads to candidate write commands (safe probe only).\n";
+        }
+
+        $summary['write_probes'] = [];
+        foreach ($writeCandidates as $cmd) {
+            echo "\n--- {$cmd} ---\n";
+            $probe = [
+                'command' => $cmd,
+                'sent' => false,
+                'classification' => 'documented_only',
+            ];
+
+            if ($sendProbes) {
+                $probe['sent'] = true;
+                $response = $client->requestDataFeedback($cmd, [], $timeoutSeconds, true);
+                if ($response === null) {
+                    $probe['classification'] = 'not_supported';
+                    $probe['error'] = 'timeout_or_no_match';
+                    echo "no response\n";
+                } else {
+                    $state = $response['state'] ?? null;
+                    $probe['response'] = $response;
+                    if ($state === 0 || $state === '0') {
+                        $probe['classification'] = 'acknowledged';
+                    } else {
+                        $probe['classification'] = 'error';
+                    }
+                    echo 'state=' . (string) $state . ' topic=' . ($response['topic'] ?? 'n/a') . "\n";
+                }
+            } else {
+                echo "candidate (not sent)\n";
+            }
+
+            $summary['write_probes'][$cmd] = $probe;
+        }
+    }
 } catch (Throwable $e) {
     $summary['fatal_error'] = $e->getMessage();
     fwrite(STDERR, "Discovery failed: {$e->getMessage()}\n");
@@ -124,3 +180,9 @@ foreach ($summary['results'] as $cmd => $result) {
     echo " - {$cmd}: {$result['classification']}\n";
 }
 
+if ($probeWrites && isset($summary['write_probes'])) {
+    echo "\nWrite probe classifications:\n";
+    foreach ($summary['write_probes'] as $cmd => $probe) {
+        echo " - {$cmd}: {$probe['classification']}\n";
+    }
+}

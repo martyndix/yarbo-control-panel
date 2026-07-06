@@ -64,6 +64,16 @@ const els = {
     settingsUpdateRun: document.getElementById('settings-update-run'),
     mapDataSource: document.getElementById('map-data-source'),
     plansDataSource: document.getElementById('plans-data-source'),
+    mapInspector: document.getElementById('map-inspector'),
+    mapZoneList: document.getElementById('map-zone-list'),
+    mapEditToggle: document.getElementById('map-edit-toggle'),
+    mapExport: document.getElementById('map-export'),
+    mapExportDraft: document.getElementById('map-export-draft'),
+    mapSaveRobot: document.getElementById('map-save-robot'),
+    mapLoadAreas: document.getElementById('map-load-areas'),
+    mapLoading: document.getElementById('map-loading'),
+    mapLoadingText: document.getElementById('map-loading-text'),
+    mapEditTip: document.getElementById('map-edit-tip'),
     headControlsCard: document.getElementById('head-controls-card'),
     headMowerControls: document.getElementById('head-mower-controls'),
     headSnowControls: document.getElementById('head-snow-controls'),
@@ -81,6 +91,21 @@ const DRIVE_VECTORS = {
     left: { linear: 0, angular: ANGULAR_SPEED },
     right: { linear: 0, angular: -ANGULAR_SPEED },
     stop: { linear: 0, angular: 0 },
+};
+
+const MAP_CACHE_KEY = 'yarbo_map_cache';
+const MAP_VIEW_KEY = 'yarbo_map_view';
+const MAP_CENTER_ZOOM = 20;
+
+const ZONE_COLORS = {
+    clean: { color: '#67b3ff', fill: '#67b3ff' },
+    path: { color: '#9b7dff', fill: '#9b7dff' },
+    forbidden: { color: '#ff6b6b', fill: '#ff6b6b' },
+    no_vision: { color: '#ffb347', fill: '#ffb347' },
+    sidewalk: { color: '#c9a86c', fill: '#c9a86c' },
+    obstacle: { color: '#ff8c69', fill: '#ff8c69' },
+    recharge: { color: '#7ddea0', fill: '#7ddea0' },
+    default: { color: '#67b3ff', fill: '#67b3ff' },
 };
 
 let driveInterval = null;
@@ -103,6 +128,40 @@ let currentHeadType = null;
 let defaultDataSource = 'auto';
 let areasLayer = null;
 let loadedPlans = [];
+let lastRobotFix = null;
+let mapZoneLayers = [];
+let loadedMapFeatures = [];
+let loadedMapMeta = null;
+let draftLayer = null;
+let drawControl = null;
+let mapEditMode = false;
+let mapViewSaveTimer = null;
+let mapLoadingTimer = null;
+let mapLoadingStartedAt = 0;
+
+function zoneStyle(feature) {
+    const zoneType = feature?.properties?.zone_type || 'default';
+    const palette = ZONE_COLORS[zoneType] || ZONE_COLORS.default;
+    return {
+        color: palette.color,
+        weight: 2,
+        fillColor: palette.fill,
+        fillOpacity: 0.2,
+    };
+}
+
+function countFeaturePoints(feature) {
+    const geom = feature?.geometry;
+    if (!geom) return 0;
+    if (geom.type === 'Polygon' && Array.isArray(geom.coordinates?.[0])) {
+        return geom.coordinates[0].length;
+    }
+    if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
+        return geom.coordinates.length;
+    }
+    if (geom.type === 'Point') return 1;
+    return 0;
+}
 
 function initMap() {
     if (!els.map || typeof L === 'undefined') return;
@@ -126,12 +185,7 @@ function initMap() {
 
     mapLayers.street.addTo(map);
     areasLayer = L.geoJSON([], {
-        style: {
-            color: '#67b3ff',
-            weight: 2,
-            fillColor: '#67b3ff',
-            fillOpacity: 0.2,
-        },
+        style: zoneStyle,
         pointToLayer(_feature, latlng) {
             return L.circleMarker(latlng, {
                 radius: 5,
@@ -141,7 +195,481 @@ function initMap() {
                 fillOpacity: 0.75,
             });
         },
+        onEachFeature(feature, layer) {
+            const index = mapZoneLayers.length;
+            layer._yarboZoneIndex = index;
+            mapZoneLayers.push({ feature, layer, visible: true });
+        },
     }).addTo(map);
+
+    draftLayer = L.featureGroup().addTo(map);
+
+    const centerControl = L.control({ position: 'bottomright' });
+    centerControl.onAdd = function () {
+        const button = L.DomUtil.create('button', 'map-center-robot');
+        button.type = 'button';
+        button.title = 'Center on Yarbo';
+        button.setAttribute('aria-label', 'Center on Yarbo');
+        button.innerHTML = '&#8857;';
+        L.DomEvent.disableClickPropagation(button);
+        L.DomEvent.on(button, 'click', (event) => {
+            L.DomEvent.preventDefault(event);
+            centerOnRobot();
+        });
+        return button;
+    };
+    centerControl.addTo(map);
+
+    map.on('moveend zoomend', () => {
+        clearTimeout(mapViewSaveTimer);
+        mapViewSaveTimer = setTimeout(saveMapView, 250);
+    });
+
+    restoreMapCache();
+    restoreMapView();
+}
+
+function setMapLoading(active, message = 'Loading saved map areas') {
+    if (!els.mapLoading) return;
+
+    if (active) {
+        els.mapLoading.classList.remove('hidden');
+        els.mapLoading.setAttribute('aria-busy', 'true');
+        mapLoadingStartedAt = Date.now();
+        if (els.mapLoadingText) {
+            els.mapLoadingText.textContent = `${message}…`;
+        }
+        clearInterval(mapLoadingTimer);
+        mapLoadingTimer = setInterval(() => {
+            const secs = Math.floor((Date.now() - mapLoadingStartedAt) / 1000);
+            if (els.mapLoadingText) {
+                els.mapLoadingText.textContent = `${message}… ${secs}s`;
+            }
+        }, 1000);
+        if (els.mapDataSource) els.mapDataSource.disabled = true;
+        if (els.mapEditToggle) els.mapEditToggle.disabled = true;
+        if (els.mapLoadAreas) els.mapLoadAreas.disabled = true;
+        return;
+    }
+
+    els.mapLoading.classList.add('hidden');
+    els.mapLoading.setAttribute('aria-busy', 'false');
+    clearInterval(mapLoadingTimer);
+    mapLoadingTimer = null;
+    if (els.mapDataSource) els.mapDataSource.disabled = false;
+    if (els.mapEditToggle) els.mapEditToggle.disabled = false;
+    if (els.mapLoadAreas) els.mapLoadAreas.disabled = false;
+}
+
+function setAreasLayerVisible(visible) {
+    if (!map || !areasLayer) return;
+    const onMap = map.hasLayer(areasLayer);
+    if (visible && !onMap) {
+        areasLayer.addTo(map);
+    } else if (!visible && onMap) {
+        map.removeLayer(areasLayer);
+    }
+}
+
+function enableDraftVertexEditing() {
+    draftLayer?.eachLayer((layer) => {
+        if (layer.editing) {
+            layer.editing.enable();
+            return;
+        }
+        if (typeof L.Edit?.Poly === 'function' && typeof layer.getLatLngs === 'function') {
+            layer._yarboEditHandler = new L.Edit.Poly(layer);
+            layer._yarboEditHandler.enable();
+        }
+    });
+}
+
+function disableDraftVertexEditing() {
+    draftLayer?.eachLayer((layer) => {
+        if (layer.editing) {
+            layer.editing.disable();
+        }
+        if (layer._yarboEditHandler) {
+            layer._yarboEditHandler.disable();
+            delete layer._yarboEditHandler;
+        }
+    });
+}
+
+function clearDraftHighlights() {
+    draftLayer?.eachLayer((layer) => {
+        if (layer.feature) {
+            layer.setStyle(zoneStyle(layer.feature));
+        }
+    });
+}
+
+function applyDraftToView() {
+    const geojson = draftLayerToGeoJson();
+    if (!geojson.features.length) return;
+    applyLoadedMapFeatures(geojson.features, {
+        skipFit: true,
+        meta: loadedMapMeta || {},
+    });
+    saveMapCache(
+        {
+            data_via: loadedMapMeta?.data_via ?? null,
+            gps_ref: loadedMapMeta?.gps_ref ?? null,
+        },
+        geojson.features,
+    );
+}
+
+function focusZoneForEditing(index) {
+    if (!loadedMapFeatures.length) {
+        showToast('Load map zones first', 'error');
+        return;
+    }
+
+    if (!mapEditMode) {
+        setMapEditMode(true);
+    } else if (draftLayer.getLayers().length === 0) {
+        copyFeaturesToDraft();
+    }
+
+    let target = null;
+    draftLayer.eachLayer((layer) => {
+        const feature = layer.feature || {};
+        const style = zoneStyle(feature);
+        if (layer._yarboZoneIndex === index) {
+            layer.setStyle({ ...style, weight: 4, fillOpacity: 0.35 });
+            target = layer;
+        } else {
+            layer.setStyle(style);
+        }
+    });
+
+    enableDraftVertexEditing();
+
+    if (target) {
+        const bounds = target.getBounds?.();
+        if (bounds?.isValid?.()) {
+            map.fitBounds(bounds.pad(0.2));
+        }
+    }
+}
+
+function centerOnRobot() {
+    if (!map) return;
+    if (!lastRobotFix?.gps_valid) {
+        showToast('No GPS fix yet — move outdoors and wait for RTK/GNSS lock', 'error');
+        return;
+    }
+    map.setView([lastRobotFix.lat, lastRobotFix.lon], MAP_CENTER_ZOOM);
+}
+
+function saveMapView() {
+    if (!map) return;
+    const center = map.getCenter();
+    try {
+        localStorage.setItem(MAP_VIEW_KEY, JSON.stringify({
+            center: [center.lat, center.lng],
+            zoom: map.getZoom(),
+            layer: currentMapLayer,
+        }));
+    } catch {
+        // ignore quota errors
+    }
+}
+
+function restoreMapView() {
+    if (!map) return;
+    try {
+        const raw = localStorage.getItem(MAP_VIEW_KEY);
+        if (!raw) return;
+        const view = JSON.parse(raw);
+        if (!Array.isArray(view.center) || view.center.length < 2) return;
+        const zoom = Number(view.zoom);
+        map.setView([Number(view.center[0]), Number(view.center[1])], Number.isFinite(zoom) ? zoom : 18);
+        if (view.layer === 'satellite' || view.layer === 'street') {
+            setMapLayer(view.layer);
+            const radio = document.querySelector(`input[name="map-layer"][value="${view.layer}"]`);
+            if (radio) radio.checked = true;
+        }
+    } catch {
+        localStorage.removeItem(MAP_VIEW_KEY);
+    }
+}
+
+function saveMapCache(apiData, features) {
+    if (!features.length) return;
+    try {
+        localStorage.setItem(MAP_CACHE_KEY, JSON.stringify({
+            geojson: { type: 'FeatureCollection', features },
+            source: els.mapDataSource?.value || defaultDataSource,
+            loaded_at: new Date().toISOString(),
+            meta: {
+                feature_count: features.length,
+                data_via: apiData.data_via || null,
+                gps_ref: apiData.gps_ref || null,
+            },
+        }));
+    } catch {
+        // ignore quota errors
+    }
+}
+
+function restoreMapCache() {
+    try {
+        const raw = localStorage.getItem(MAP_CACHE_KEY);
+        if (!raw) return;
+        const cache = JSON.parse(raw);
+        const features = cache?.geojson?.features;
+        if (!Array.isArray(features) || features.length === 0) {
+            localStorage.removeItem(MAP_CACHE_KEY);
+            return;
+        }
+        applyLoadedMapFeatures(features, {
+            restored: true,
+            source: cache.source,
+            loaded_at: cache.loaded_at,
+            meta: cache.meta || {},
+        });
+    } catch {
+        localStorage.removeItem(MAP_CACHE_KEY);
+    }
+}
+
+function clearMapZones() {
+    mapZoneLayers = [];
+    loadedMapFeatures = [];
+    loadedMapMeta = null;
+    areasLayer?.clearLayers();
+    if (els.mapInspector) els.mapInspector.classList.add('hidden');
+    if (els.mapZoneList) els.mapZoneList.innerHTML = '';
+}
+
+function applyLoadedMapFeatures(features, context = {}) {
+    if (!map || !areasLayer) return;
+    clearMapZones();
+    const featureCollection = { type: 'FeatureCollection', features };
+    areasLayer.addData(featureCollection);
+    loadedMapFeatures = features;
+    loadedMapMeta = context.meta || null;
+
+    if (context.restored) {
+        const via = context.meta?.data_via ? ` via ${context.meta.data_via}` : '';
+        const when = context.loaded_at ? ` from ${new Date(context.loaded_at).toLocaleString()}` : '';
+        updateMapAreasStatus(`Restored from last session (${features.length} feature${features.length === 1 ? '' : 's'})${via}${when}.`);
+    }
+
+    renderMapInspector();
+    if (!mapHasCentered && !context.skipFit) {
+        const bounds = areasLayer.getBounds?.();
+        if (bounds?.isValid?.()) {
+            map.fitBounds(bounds.pad(0.15));
+            mapHasCentered = true;
+        }
+    }
+}
+
+function renderMapInspector() {
+    if (!els.mapInspector || !els.mapZoneList) return;
+    if (mapZoneLayers.length === 0) {
+        els.mapInspector.classList.add('hidden');
+        els.mapZoneList.innerHTML = '';
+        return;
+    }
+
+    els.mapInspector.classList.remove('hidden');
+    els.mapZoneList.innerHTML = mapZoneLayers.map((entry, index) => {
+        const props = entry.feature?.properties || {};
+        const zoneType = props.zone_type || 'zone';
+        const name = props.name || props.zone_id || `Zone ${index + 1}`;
+        const points = countFeaturePoints(entry.feature);
+        const palette = ZONE_COLORS[zoneType] || ZONE_COLORS.default;
+        return `<li class="map-zone-item">
+            <input type="checkbox" id="map-zone-vis-${index}" data-zone-index="${index}" ${entry.visible ? 'checked' : ''}>
+            <span class="map-zone-swatch" style="background:${palette.color}"></span>
+            <label class="map-zone-meta" for="map-zone-vis-${index}">${name} · ${zoneType} · ${points} pts</label>
+            <button type="button" class="btn btn-secondary map-zone-edit" data-zone-edit="${index}">Edit</button>
+        </li>`;
+    }).join('');
+
+    els.mapZoneList.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            const index = Number(input.dataset.zoneIndex);
+            setMapZoneVisible(index, input.checked);
+        });
+    });
+
+    els.mapZoneList.querySelectorAll('[data-zone-edit]').forEach((button) => {
+        button.addEventListener('click', () => {
+            focusZoneForEditing(Number(button.dataset.zoneEdit));
+        });
+    });
+}
+
+function setMapZoneVisible(index, visible) {
+    const entry = mapZoneLayers[index];
+    if (!entry || !map) return;
+    entry.visible = visible;
+    if (visible) {
+        if (!areasLayer.hasLayer(entry.layer)) {
+            areasLayer.addLayer(entry.layer);
+        }
+    } else if (areasLayer.hasLayer(entry.layer)) {
+        areasLayer.removeLayer(entry.layer);
+    }
+}
+
+function downloadGeoJson(geojson, filename) {
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function exportLoadedMapGeoJson() {
+    if (!loadedMapFeatures.length) {
+        showToast('No map zones loaded to export', 'error');
+        return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    downloadGeoJson({ type: 'FeatureCollection', features: loadedMapFeatures }, `yarbo-map-${stamp}.geojson`);
+    showToast('Map GeoJSON exported', 'success');
+}
+
+function draftLayerToGeoJson() {
+    const features = [];
+    draftLayer?.eachLayer((layer) => {
+        if (typeof layer.toGeoJSON === 'function') {
+            features.push(layer.toGeoJSON());
+        }
+    });
+    return { type: 'FeatureCollection', features };
+}
+
+function exportDraftGeoJson() {
+    const geojson = draftLayerToGeoJson();
+    if (!geojson.features.length) {
+        showToast('Draft layer is empty', 'error');
+        return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    downloadGeoJson(geojson, `yarbo-map-draft-${stamp}.geojson`);
+    showToast('Draft GeoJSON exported', 'success');
+}
+
+function copyFeaturesToDraft() {
+    if (!draftLayer || !loadedMapFeatures.length) return;
+    disableDraftVertexEditing();
+    draftLayer.clearLayers();
+    let zoneIndex = 0;
+    L.geoJSON({ type: 'FeatureCollection', features: loadedMapFeatures }, {
+        style: zoneStyle,
+        onEachFeature(feature, layer) {
+            layer.feature = feature;
+            layer._yarboZoneIndex = zoneIndex;
+            zoneIndex += 1;
+        },
+    }).eachLayer((layer) => {
+        draftLayer.addLayer(layer);
+    });
+}
+
+function updateMapEditToggleStyle(editing) {
+    const btn = els.mapEditToggle;
+    if (!btn) return;
+    btn.textContent = editing ? 'Stop editing (draft)' : 'Edit map (draft)';
+    btn.classList.add('btn');
+    btn.classList.toggle('btn-secondary', !editing);
+}
+
+function setMapEditMode(enabled) {
+    if (!map || typeof L.Control?.Draw === 'undefined') {
+        if (enabled) {
+            showToast('Map editor requires Leaflet.draw to load', 'error');
+        }
+        return;
+    }
+
+    if (!enabled && mapEditMode) {
+        disableDraftVertexEditing();
+        clearDraftHighlights();
+        setAreasLayerVisible(true);
+        applyDraftToView();
+        if (drawControl) {
+            map.removeControl(drawControl);
+        }
+        if (els.mapEditTip) els.mapEditTip.classList.add('hidden');
+    }
+
+    mapEditMode = enabled;
+    updateMapEditToggleStyle(enabled);
+    if (els.mapExportDraft) els.mapExportDraft.disabled = !enabled;
+    if (els.mapEditTip) {
+        els.mapEditTip.classList.toggle('hidden', !enabled);
+    }
+
+    if (!enabled) {
+        return;
+    }
+
+    if (!loadedMapFeatures.length) {
+        showToast('Load map zones before editing', 'error');
+        mapEditMode = false;
+        updateMapEditToggleStyle(false);
+        if (els.mapExportDraft) els.mapExportDraft.disabled = true;
+        if (els.mapEditTip) els.mapEditTip.classList.add('hidden');
+        return;
+    }
+
+    if (draftLayer.getLayers().length === 0) {
+        copyFeaturesToDraft();
+    }
+
+    setAreasLayerVisible(false);
+
+    if (!drawControl) {
+        drawControl = new L.Control.Draw({
+            position: 'topright',
+            edit: {
+                featureGroup: draftLayer,
+                remove: true,
+            },
+            draw: {
+                polygon: { allowIntersection: false, showArea: false },
+                polyline: false,
+                rectangle: false,
+                circle: false,
+                marker: false,
+                circlemarker: false,
+            },
+        });
+        map.on(L.Draw.Event.CREATED, (event) => {
+            const layer = event.layer;
+            layer._yarboZoneIndex = draftLayer.getLayers().length;
+            layer.feature = layer.feature || {
+                type: 'Feature',
+                properties: { zone_type: 'clean', name: 'New zone' },
+                geometry: layer.toGeoJSON().geometry,
+            };
+            draftLayer.addLayer(layer);
+            enableDraftVertexEditing();
+        });
+        map.on(L.Draw.Event.EDITED, () => {
+            enableDraftVertexEditing();
+        });
+        map.on(L.Draw.Event.DELETED, () => {
+            enableDraftVertexEditing();
+        });
+    }
+
+    map.addControl(drawControl);
+    enableDraftVertexEditing();
+}
+
+function saveMapDraft() {
+    showToast('Map write MQTT commands not yet verified — export draft or use Yarbo app', 'error');
 }
 
 function setMapLayer(layer) {
@@ -303,6 +831,8 @@ function updateRobotOnMap(data) {
     const heading = Number(data.heading ?? 0);
     const hasFix = Boolean(data.gps_valid) && Number.isFinite(lat) && Number.isFinite(lon);
 
+    lastRobotFix = { lat, lon, gps_valid: hasFix };
+
     if (!hasFix) {
         updateMapStatus(`No GPS fix yet (fix_quality=${fixQuality}). Move outdoors and wait for RTK/GNSS lock.`);
         return;
@@ -344,7 +874,7 @@ function updateRobotOnMap(data) {
 
 async function loadSavedAreas(button = null) {
     if (!map || !areasLayer) return;
-    if (button) button.disabled = true;
+    setMapLoading(true);
     updateMapAreasStatus('Loading saved map areas...');
 
     try {
@@ -357,24 +887,29 @@ async function loadSavedAreas(button = null) {
             return;
         }
 
-        areasLayer.clearLayers();
         const featureCollection = data.geojson || { type: 'FeatureCollection', features: [] };
         const features = Array.isArray(featureCollection.features) ? featureCollection.features : [];
 
         if (features.length > 0) {
             try {
-                areasLayer.addData(featureCollection);
+                applyLoadedMapFeatures(features, {
+                    meta: {
+                        feature_count: features.length,
+                        data_via: data.data_via || null,
+                        gps_ref: data.gps_ref || null,
+                    },
+                });
             } catch (geoErr) {
                 throw new Error(`Could not render map geometry: ${geoErr.message || 'invalid GeoJSON'}`);
             }
+            saveMapCache(data, features);
             const via = data.data_via ? ` via ${data.data_via}` : '';
             updateMapAreasStatus(`Saved areas loaded (${features.length} feature${features.length === 1 ? '' : 's'})${via}.`);
             showToast(data.note || 'Saved mowing areas loaded', 'success');
-            if (!mapHasCentered) {
-                const bounds = areasLayer.getBounds?.();
-                if (bounds && bounds.isValid && bounds.isValid()) {
-                    map.fitBounds(bounds.pad(0.15));
-                }
+            if (mapEditMode) {
+                copyFeaturesToDraft();
+                setAreasLayerVisible(false);
+                enableDraftVertexEditing();
             }
             return;
         }
@@ -400,7 +935,7 @@ async function loadSavedAreas(button = null) {
         updateMapAreasStatus(`Saved areas request failed: ${err.message || 'network error'}`);
         showToast(err.message || 'Network error', 'error');
     } finally {
-        if (button) button.disabled = false;
+        setMapLoading(false);
     }
 }
 
@@ -1667,6 +2202,14 @@ document.getElementById('camera-recheck')?.addEventListener('click', async (e) =
 document.getElementById('map-load-areas')?.addEventListener('click', (e) => {
     loadSavedAreas(e.currentTarget);
 });
+
+document.getElementById('map-edit-toggle')?.addEventListener('click', () => {
+    setMapEditMode(!mapEditMode);
+});
+
+document.getElementById('map-export')?.addEventListener('click', exportLoadedMapGeoJson);
+document.getElementById('map-export-draft')?.addEventListener('click', exportDraftGeoJson);
+document.getElementById('map-save-robot')?.addEventListener('click', saveMapDraft);
 
 els.planStartPercent?.addEventListener('input', () => {
     if (els.planStartPercentLabel) {

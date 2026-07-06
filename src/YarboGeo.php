@@ -90,6 +90,23 @@ final class YarboGeo
         return [$lat, $lon];
     }
 
+    /**
+     * Convert WGS84 to local meters (x east, y north) relative to a GPS reference origin.
+     *
+     * @return array{0: float, 1: float} [x, y]
+     */
+    public static function gpsToLocal(float $lat, float $lon, float $refLat, float $refLon): array
+    {
+        $metersPerDegLat = 111_320.0;
+        $cosLat = cos(deg2rad($refLat));
+        $metersPerDegLon = abs($cosLat) < 1e-9 ? 1e-9 : 111_320.0 * $cosLat;
+
+        $y = ($lat - $refLat) * $metersPerDegLat;
+        $x = ($lon - $refLon) * $metersPerDegLon;
+
+        return [$x, $y];
+    }
+
     public static function isValidGps(float $lat, float $lon): bool
     {
         return is_finite($lat)

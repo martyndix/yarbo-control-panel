@@ -11,6 +11,11 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin=""
     >
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+        crossorigin=""
+    >
 </head>
 <body>
 <?php
@@ -141,9 +146,38 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 </label>
                 <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas</button>
             </div>
-            <div id="map" class="map"></div>
+            <p id="map-edit-tip" class="map-edit-tip hidden">Drag vertices to reshape zones.</p>
+            <div class="map-wrap">
+                <div id="map" class="map"></div>
+                <div id="map-loading" class="map-loading hidden" aria-live="polite" aria-busy="false">
+                    <div class="map-loading-spinner" aria-hidden="true"></div>
+                    <div class="map-loading-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                        <div class="map-loading-bar-fill"></div>
+                    </div>
+                    <p id="map-loading-text" class="map-loading-text">Loading saved map areas…</p>
+                </div>
+            </div>
             <p id="map-status" class="map-status">Waiting for GPS fix...</p>
             <p id="map-areas-status" class="map-areas-status">Saved areas: not loaded yet.</p>
+            <div id="map-inspector" class="map-inspector hidden">
+                <details open>
+                    <summary>Map zones</summary>
+                    <ul id="map-zone-list" class="map-zone-list"></ul>
+                </details>
+            </div>
+            <div class="map-editor-actions">
+                <button type="button" class="btn btn-secondary" id="map-edit-toggle">Edit map (draft)</button>
+                <button type="button" class="btn btn-secondary" id="map-export">Export GeoJSON</button>
+                <button type="button" class="btn btn-secondary" id="map-export-draft" disabled>Export draft</button>
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    id="map-save-robot"
+                    disabled
+                    title="Map write MQTT commands are not yet verified — use the Yarbo app or export a draft"
+                >Save to robot</button>
+            </div>
+            <p class="hint map-editor-hint">Drag polygon corners to adjust boundaries. Changes are local until Save to robot is supported.</p>
         </section>
 
         <?php if ($camerasEnabled): ?>
@@ -364,6 +398,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
     <script
         src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+    <script
+        src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"
         crossorigin=""
     ></script>
     <script src="/assets/app.js"></script>
