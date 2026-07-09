@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-07-09
+
+### Fixed
+- **Update-available UI**: green Panel updates section, View release notes button, and settings badge now stay in sync; opening Settings no longer clears update UI on a failed re-check
+- **Connection errors**: telemetry timeout (504) and MQTT errors now use the same friendly message on server and client
+
+### Changed
+- **View release notes button**: always visible in Settings; shows installed version notes when up to date, or pending update notes when an update is available
+- **Asset cache busting**: `app.js` and `style.css` load with a version query string so browsers pick up updates after `git pull`
+
 ## [1.1.8] - 2026-07-09
 
 ### Fixed

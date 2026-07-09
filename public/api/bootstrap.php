@@ -29,6 +29,11 @@ function friendly_error(Throwable $e): string
     return \Yarbo\YarboErrors::friendly($e->getMessage());
 }
 
+function friendly_message(string $message): string
+{
+    return \Yarbo\YarboErrors::friendly($message);
+}
+
 function json_response(array $data, int $status = 200): void
 {
     http_response_code($status);

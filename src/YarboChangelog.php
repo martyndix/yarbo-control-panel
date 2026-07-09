@@ -74,6 +74,44 @@ final class YarboChangelog
     }
 
     /**
+     * @return array{version: ?string, release_notes: list<array{version: string, date: ?string, sections: array<string, list<string>>}>}
+     */
+    public static function installedRelease(string $projectRoot): array
+    {
+        $path = $projectRoot . '/CHANGELOG.md';
+        if (!is_file($path)) {
+            return [
+                'version' => null,
+                'release_notes' => [],
+            ];
+        }
+
+        $markdown = file_get_contents($path);
+        if ($markdown === false) {
+            return [
+                'version' => null,
+                'release_notes' => [],
+            ];
+        }
+
+        foreach (self::parseReleases($markdown) as $release) {
+            if (strtolower($release['version']) === 'unreleased') {
+                continue;
+            }
+
+            return [
+                'version' => $release['version'],
+                'release_notes' => [$release],
+            ];
+        }
+
+        return [
+            'version' => null,
+            'release_notes' => [],
+        ];
+    }
+
+    /**
      * @return array{pending_version: ?string, release_notes: list<array{version: string, date: ?string, sections: array<string, list<string>>}>}
      */
     public static function pendingReleases(string $projectRoot, ?string $remoteRef = null): array

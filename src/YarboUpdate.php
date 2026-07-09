@@ -57,6 +57,38 @@ final class YarboUpdate
     /**
      * @return array<string, mixed>
      */
+    public function releaseNotes(): array
+    {
+        $installed = YarboChangelog::installedRelease($this->projectRoot);
+        $check = $this->status(true);
+
+        if (($check['update_available'] ?? false)) {
+            $pending = $check['release_notes'] ?? [];
+            if ($pending !== []) {
+                return [
+                    'ok' => true,
+                    'mode' => 'pending',
+                    'version' => $check['pending_version'] ?? null,
+                    'release_notes' => $pending,
+                    'update_available' => true,
+                    'current_commit_short' => $check['current_commit_short'] ?? null,
+                    'remote_commit_short' => $check['remote_commit_short'] ?? null,
+                ];
+            }
+        }
+
+        return [
+            'ok' => true,
+            'mode' => 'installed',
+            'version' => $installed['version'],
+            'release_notes' => $installed['release_notes'],
+            'update_available' => (bool) ($check['update_available'] ?? false),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     public function runUpdateAsync(): array
     {
         if (!$this->isGitInstall()) {

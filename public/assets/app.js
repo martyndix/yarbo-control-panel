@@ -1345,7 +1345,7 @@ function formatConnectionError(message) {
     if (lower.includes('network is unreachable') || message.includes('[101]')) {
         return 'The network route to the Yarbo robot is unreachable. Check your Wi‑Fi connection and the broker IP in Settings.';
     }
-    if (lower.includes('timed out') || lower.includes('timeout')) {
+    if (lower.includes('no telemetry received') || lower.includes('timed out') || lower.includes('timeout')) {
         return 'Connection to the Yarbo robot timed out. Check the broker IP and serial number in Settings, and make sure the robot is powered on and on your home network.';
     }
     if (lower.includes('establishing a connection to the mqtt broker failed')) {
@@ -1919,7 +1919,7 @@ function openSettingsModal() {
     setUpdateResult(null);
     loadSettings();
     if (lastUpdateStatus) {
-        setUpdateAvailableUi(lastUpdateStatus);
+        applyUpdateAvailability(lastUpdateStatus);
     }
     loadUpdateStatus();
     els.settingsHost?.focus();
@@ -2047,12 +2047,44 @@ async function testCloudConnection(button) {
     }
 }
 
+function isUpdateAvailable(data) {
+    return Boolean(data?.git_install && data?.ok && data?.update_available);
+}
+
 function setUpdateBadge(visible) {
     if (els.settingsUpdateBadge) {
         els.settingsUpdateBadge.classList.toggle('hidden', !visible);
     }
     if (els.settingsOpen) {
         els.settingsOpen.setAttribute('aria-label', visible ? 'Settings (update available)' : 'Settings');
+    }
+}
+
+function applyUpdateAvailability(data, { enableUpdateButton = true } = {}) {
+    const available = isUpdateAvailable(data);
+    const version = data?.pending_version || data?.changelog_version;
+    const versionLabel = version ? `v${version}` : 'a new version';
+
+    setUpdateBadge(available);
+    moveUpdateSectionToTop(available);
+    showSettingsReleaseNotes(data, false);
+
+    if (els.settingsUpdateCallout) {
+        els.settingsUpdateCallout.classList.toggle('hidden', !available);
+    }
+    if (els.settingsUpdateCalloutText) {
+        els.settingsUpdateCalloutText.textContent = available
+            ? ` — ${versionLabel} is ready to install.`
+            : '';
+    }
+    if (els.settingsUpdateSection) {
+        els.settingsUpdateSection.classList.toggle('settings-section--update-available', available);
+    }
+    if (els.settingsUpdateRun) {
+        els.settingsUpdateRun.classList.toggle('btn-update-ready', available);
+        if (enableUpdateButton) {
+            els.settingsUpdateRun.disabled = !available;
+        }
     }
 }
 
@@ -2105,17 +2137,9 @@ function setUpdateModalViewOnly(viewOnly) {
 async function viewReleaseNotes(button) {
     if (button) button.disabled = true;
     try {
-        let data = lastUpdateStatus;
-        if (!data?.update_available) {
-            const res = await fetch('/api/update.php', { cache: 'no-store' });
-            data = await parseJsonResponse(res);
-            lastUpdateStatus = data;
-        }
+        const res = await fetch('/api/update.php?action=release-notes', { cache: 'no-store' });
+        const data = await parseJsonResponse(res);
         if (!data?.ok) throw new Error(data?.error || 'Could not load release notes');
-        if (!data?.update_available) {
-            showToast('You are on the latest version.', 'success');
-            return;
-        }
         showReleaseNotesModal(data);
     } catch (err) {
         showToast(err.message || 'Could not load release notes', 'error');
@@ -2127,16 +2151,25 @@ async function viewReleaseNotes(button) {
 function showReleaseNotesModal(data) {
     if (!els.updateConfirmModal) return;
 
-    const version = data?.pending_version || data?.changelog_version;
-    const versionLabel = version ? `v${version}` : 'latest version';
+    const version = data?.version || data?.pending_version || data?.changelog_version;
+    const versionLabel = version ? `v${version}` : 'this version';
+    const isPending = data?.mode === 'pending' || Boolean(data?.update_available);
 
     if (els.updateConfirmTitle) {
-        els.updateConfirmTitle.textContent = `Release notes for ${versionLabel}`;
+        els.updateConfirmTitle.textContent = isPending
+            ? `Release notes for ${versionLabel}`
+            : `Installed release notes (${versionLabel})`;
     }
     if (els.updateConfirmSummary) {
-        const from = data?.current_commit_short || 'current';
-        const to = data?.remote_commit_short || 'latest';
-        els.updateConfirmSummary.textContent = `Update available: ${from} → ${to}`;
+        if (isPending) {
+            const from = data?.current_commit_short || 'current';
+            const to = data?.remote_commit_short || 'latest';
+            els.updateConfirmSummary.textContent = `Update available: ${from} → ${to}`;
+            els.updateConfirmSummary.classList.remove('hidden');
+        } else {
+            els.updateConfirmSummary.textContent = 'You are on the latest installed version.';
+            els.updateConfirmSummary.classList.remove('hidden');
+        }
     }
     if (els.updateConfirmNotes) {
         els.updateConfirmNotes.innerHTML = renderReleaseNotesHtml(data?.release_notes);
@@ -2145,34 +2178,6 @@ function showReleaseNotesModal(data) {
     setUpdateModalViewOnly(true);
     els.updateConfirmModal.classList.remove('hidden');
     document.body.classList.add('modal-open');
-}
-
-function setUpdateAvailableUi(data) {
-    const available = Boolean(data?.git_install && data?.ok && data?.update_available);
-    const version = data?.pending_version || data?.changelog_version;
-    const versionLabel = version ? `v${version}` : 'a new version';
-
-    moveUpdateSectionToTop(available);
-    showSettingsReleaseNotes(data, false);
-
-    if (els.settingsUpdateViewNotes) {
-        els.settingsUpdateViewNotes.classList.toggle('hidden', !available);
-    }
-
-    if (els.settingsUpdateCallout) {
-        els.settingsUpdateCallout.classList.toggle('hidden', !available);
-    }
-    if (els.settingsUpdateCalloutText) {
-        els.settingsUpdateCalloutText.textContent = available
-            ? ` — ${versionLabel} is ready to install.`
-            : '';
-    }
-    if (els.settingsUpdateSection) {
-        els.settingsUpdateSection.classList.toggle('settings-section--update-available', available);
-    }
-    if (els.settingsUpdateRun) {
-        els.settingsUpdateRun.classList.toggle('btn-update-ready', available);
-    }
 }
 
 function renderReleaseNotesHtml(releaseNotes) {
@@ -2253,15 +2258,18 @@ async function refreshUpdateBadge() {
     try {
         const res = await fetch('/api/update.php', { cache: 'no-store' });
         const data = await parseJsonResponse(res);
-        const available = Boolean(data?.git_install && data?.ok && data?.update_available);
-        lastUpdateStatus = data;
-        setUpdateBadge(available);
-        setUpdateAvailableUi(data);
-        return data;
+        if (data?.ok) {
+            lastUpdateStatus = data;
+        }
+        applyUpdateAvailability(lastUpdateStatus);
+        return lastUpdateStatus;
     } catch {
-        setUpdateBadge(false);
-        setUpdateAvailableUi(null);
-        return null;
+        if (isUpdateAvailable(lastUpdateStatus)) {
+            applyUpdateAvailability(lastUpdateStatus);
+        } else {
+            applyUpdateAvailability(null);
+        }
+        return lastUpdateStatus;
     }
 }
 
@@ -2296,10 +2304,7 @@ function setUpdateResult(message, type) {
 }
 
 function setUpdateButtonState(data) {
-    if (!els.settingsUpdateRun) return;
-    const canUpdate = Boolean(data?.git_install && data?.ok && data?.update_available);
-    els.settingsUpdateRun.disabled = !canUpdate;
-    setUpdateAvailableUi(data);
+    applyUpdateAvailability(data);
 }
 
 async function loadUpdateStatus() {
@@ -2307,22 +2312,23 @@ async function loadUpdateStatus() {
     els.settingsUpdateStatus.textContent = 'Checking for updates…';
     setUpdateResult(null);
     if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = true;
-    if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
+    applyUpdateAvailability(lastUpdateStatus, { enableUpdateButton: false });
     try {
         const res = await fetch('/api/update.php');
         const data = await parseJsonResponse(res);
         lastUpdateStatus = data;
         els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
-        setUpdateButtonState(data);
-        setUpdateBadge(Boolean(data?.git_install && data?.ok && data?.update_available));
-        if (data?.git_install && data?.ok && data?.update_available) {
+        applyUpdateAvailability(data);
+        if (isUpdateAvailable(data)) {
             els.settingsUpdateSection?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
     } catch (err) {
         els.settingsUpdateStatus.textContent = err.message || 'Could not check for updates';
-        if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
-        setUpdateBadge(false);
-        setUpdateAvailableUi(null);
+        if (isUpdateAvailable(lastUpdateStatus)) {
+            applyUpdateAvailability(lastUpdateStatus);
+        } else {
+            applyUpdateAvailability(null);
+        }
     } finally {
         if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
     }
@@ -2347,10 +2353,8 @@ async function checkPanelUpdates(button) {
         if (data.update_available) {
             showSettingsReleaseNotes(data, true);
             setUpdateResult('A newer version is available. Review the notes below, then click Update to latest.', 'success');
-            setUpdateBadge(true);
         } else {
             setUpdateResult('You are on the latest version.', 'success');
-            setUpdateBadge(false);
         }
     } catch (err) {
         setUpdateResult(err.message || 'Update check failed', 'error');
@@ -2526,7 +2530,6 @@ async function runPanelUpdate(button) {
             els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
         }
         setUpdateButtonState(data);
-        setUpdateBadge(false);
     } catch (err) {
         if (isUpdateNetworkError(err)) {
             setUpdateResult('Update may be in progress — waiting for panel to restart…', 'success');

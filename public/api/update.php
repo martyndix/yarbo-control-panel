@@ -18,6 +18,10 @@ if ($method === 'GET') {
         json_response($update->readProgress());
     }
 
+    if ($action === 'release-notes') {
+        json_response($update->releaseNotes());
+    }
+
     json_response($update->status(true));
 }
 

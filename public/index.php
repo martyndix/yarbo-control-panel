@@ -1,3 +1,34 @@
+<?php
+
+declare(strict_types=1);
+
+function panel_version(): string
+{
+    $changelog = dirname(__DIR__) . '/CHANGELOG.md';
+    if (!is_file($changelog)) {
+        return '0';
+    }
+
+    $handle = fopen($changelog, 'rb');
+    if ($handle === false) {
+        return '0';
+    }
+
+    while (($line = fgets($handle)) !== false) {
+        if (preg_match('/^## \[([^\]]+)\]/', $line, $matches) && $matches[1] !== 'Unreleased') {
+            fclose($handle);
+
+            return $matches[1];
+        }
+    }
+
+    fclose($handle);
+
+    return '0';
+}
+
+$panelVersion = panel_version();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -18,7 +49,7 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="/assets/style.css">
+    <link rel="stylesheet" href="/assets/style.css?v=<?= htmlspecialchars($panelVersion, ENT_QUOTES, 'UTF-8') ?>">
     <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -481,7 +512,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p id="settings-update-result" class="settings-cloud-result hidden" role="status"></p>
                             <div class="settings-update-actions">
                                 <button type="button" class="btn btn-secondary" id="settings-update-check">Check for updates</button>
-                                <button type="button" class="btn btn-secondary hidden" id="settings-update-view-notes">View release notes</button>
+                                <button type="button" class="btn btn-secondary" id="settings-update-view-notes">View release notes</button>
                                 <button type="button" class="btn" id="settings-update-run" disabled>Update to latest</button>
                             </div>
                         </section>
@@ -525,6 +556,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"
         crossorigin=""
     ></script>
-    <script src="/assets/app.js"></script>
+    <script src="/assets/app.js?v=<?= htmlspecialchars($panelVersion, ENT_QUOTES, 'UTF-8') ?>"></script>
 </body>
 </html>

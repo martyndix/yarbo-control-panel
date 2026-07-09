@@ -16,7 +16,10 @@ try {
     $client->disconnect();
 
     if ($raw === null) {
-        json_response(['ok' => false, 'error' => 'No telemetry received within timeout. Check broker IP and serial number.'], 504);
+        json_response([
+            'ok' => false,
+            'error' => friendly_message('No telemetry received within timeout. Check broker IP and serial number.'),
+        ], 504);
     }
 
     json_response(array_merge(
