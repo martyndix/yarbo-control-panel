@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-07-09
+
+### Fixed
+- **Update changelog in Settings**: release notes appear inline when checking for updates; Panel updates section moves to the top with a stronger green highlight when an update is available
+- **Remote changelog loading**: improved git access for release notes on the Pi (`safe.directory`, branch-aware remote ref, fallback when version compare finds no entries)
+
+### Changed
+- **View release notes button**: opens a read-only popup with changelog details when an update is available
+
 ## [1.1.7] - 2026-07-09
 
 ### Added

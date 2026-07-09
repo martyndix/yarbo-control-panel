@@ -477,9 +477,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <h3 class="settings-subtitle">Panel updates</h3>
                             <p class="hint">Pull the latest code from GitHub. <code>config.php</code> and <code>data/</code> are preserved.</p>
                             <p id="settings-update-status" class="hint">Checking for updates…</p>
+                            <div id="settings-update-notes" class="settings-update-notes hidden" aria-live="polite"></div>
                             <p id="settings-update-result" class="settings-cloud-result hidden" role="status"></p>
                             <div class="settings-update-actions">
                                 <button type="button" class="btn btn-secondary" id="settings-update-check">Check for updates</button>
+                                <button type="button" class="btn btn-secondary hidden" id="settings-update-view-notes">View release notes</button>
                                 <button type="button" class="btn" id="settings-update-run" disabled>Update to latest</button>
                             </div>
                         </section>
@@ -504,8 +506,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2 id="update-confirm-title">Install panel update?</h2>
                 <p id="update-confirm-summary" class="hint"></p>
                 <div id="update-confirm-notes" class="update-confirm-notes"></div>
-                <p class="hint update-confirm-footnote">The page will reload after the service restarts.</p>
-                <div class="modal-actions">
+                <p class="hint update-confirm-footnote" id="update-confirm-footnote">The page will reload after the service restarts.</p>
+                <div class="modal-actions" id="update-confirm-actions">
                     <button type="button" class="btn" id="update-confirm-run">Update now</button>
                     <button type="button" class="btn btn-secondary" data-update-confirm-close>Cancel</button>
                 </div>

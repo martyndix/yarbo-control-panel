@@ -44,7 +44,11 @@ final class YarboUpdate
         ], $result);
 
         if (($merged['update_available'] ?? false)) {
-            $merged = array_merge($merged, YarboChangelog::pendingReleases($this->projectRoot));
+            $notes = YarboChangelog::pendingReleases($this->projectRoot);
+            if ($notes['release_notes'] === []) {
+                $notes = YarboChangelog::latestRemoteRelease($this->projectRoot);
+            }
+            $merged = array_merge($merged, $notes);
         }
 
         return $merged;

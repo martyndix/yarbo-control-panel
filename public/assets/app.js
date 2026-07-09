@@ -60,8 +60,10 @@ const els = {
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
+    settingsUpdateNotes: document.getElementById('settings-update-notes'),
     settingsUpdateResult: document.getElementById('settings-update-result'),
     settingsUpdateCheck: document.getElementById('settings-update-check'),
+    settingsUpdateViewNotes: document.getElementById('settings-update-view-notes'),
     settingsUpdateRun: document.getElementById('settings-update-run'),
     settingsUpdateSection: document.getElementById('settings-update-section'),
     settingsUpdateCallout: document.getElementById('settings-update-callout'),
@@ -71,6 +73,8 @@ const els = {
     updateConfirmTitle: document.getElementById('update-confirm-title'),
     updateConfirmSummary: document.getElementById('update-confirm-summary'),
     updateConfirmNotes: document.getElementById('update-confirm-notes'),
+    updateConfirmFootnote: document.getElementById('update-confirm-footnote'),
+    updateConfirmActions: document.getElementById('update-confirm-actions'),
     updateConfirmRun: document.getElementById('update-confirm-run'),
     mapDataSource: document.getElementById('map-data-source'),
     plansDataSource: document.getElementById('plans-data-source'),
@@ -177,6 +181,7 @@ let draggedPanelId = null;
 let themeMediaQuery = null;
 let lastUpdateStatus = null;
 let updateConfirmResolver = null;
+let updateSectionRestoreBefore = null;
 
 function resolveTheme(mode) {
     if (mode === 'light' || mode === 'dark') return mode;
@@ -1913,6 +1918,9 @@ function openSettingsModal() {
     setCloudTestResult(null);
     setUpdateResult(null);
     loadSettings();
+    if (lastUpdateStatus) {
+        setUpdateAvailableUi(lastUpdateStatus);
+    }
     loadUpdateStatus();
     els.settingsHost?.focus();
 }
@@ -2048,10 +2056,108 @@ function setUpdateBadge(visible) {
     }
 }
 
+function ensureUpdateSectionAnchor() {
+    if (!els.settingsUpdateSection || updateSectionRestoreBefore) return;
+    updateSectionRestoreBefore = els.settingsUpdateSection.nextElementSibling;
+}
+
+function moveUpdateSectionToTop(available) {
+    const scroll = document.querySelector('.settings-modal-scroll');
+    if (!scroll || !els.settingsUpdateSection) return;
+    ensureUpdateSectionAnchor();
+    if (available) {
+        scroll.insertBefore(els.settingsUpdateSection, scroll.firstChild);
+        return;
+    }
+    if (updateSectionRestoreBefore) {
+        scroll.insertBefore(els.settingsUpdateSection, updateSectionRestoreBefore);
+    }
+}
+
+function showSettingsReleaseNotes(data, showPanel = true) {
+    if (!els.settingsUpdateNotes) return;
+    const available = Boolean(data?.git_install && data?.ok && data?.update_available);
+    if (!available) {
+        els.settingsUpdateNotes.innerHTML = '';
+        els.settingsUpdateNotes.classList.add('hidden');
+        return;
+    }
+
+    const version = data?.pending_version || data?.changelog_version;
+    const heading = version ? `What’s new in v${version}` : 'What’s new in this update';
+    els.settingsUpdateNotes.innerHTML = `<h4 class="settings-update-notes-title">${escapeHtml(heading)}</h4>${renderReleaseNotesHtml(data?.release_notes)}`;
+    els.settingsUpdateNotes.classList.toggle('hidden', !showPanel);
+    if (showPanel) {
+        els.settingsUpdateNotes.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+}
+
+function setUpdateModalViewOnly(viewOnly) {
+    els.updateConfirmModal?.classList.toggle('update-confirm-panel--view-only', viewOnly);
+    els.updateConfirmRun?.classList.toggle('hidden', viewOnly);
+    els.updateConfirmFootnote?.classList.toggle('hidden', viewOnly);
+    const closeButton = els.updateConfirmActions?.querySelector('[data-update-confirm-close]');
+    if (closeButton) {
+        closeButton.textContent = viewOnly ? 'Close' : 'Cancel';
+    }
+}
+
+async function viewReleaseNotes(button) {
+    if (button) button.disabled = true;
+    try {
+        let data = lastUpdateStatus;
+        if (!data?.update_available) {
+            const res = await fetch('/api/update.php', { cache: 'no-store' });
+            data = await parseJsonResponse(res);
+            lastUpdateStatus = data;
+        }
+        if (!data?.ok) throw new Error(data?.error || 'Could not load release notes');
+        if (!data?.update_available) {
+            showToast('You are on the latest version.', 'success');
+            return;
+        }
+        showReleaseNotesModal(data);
+    } catch (err) {
+        showToast(err.message || 'Could not load release notes', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function showReleaseNotesModal(data) {
+    if (!els.updateConfirmModal) return;
+
+    const version = data?.pending_version || data?.changelog_version;
+    const versionLabel = version ? `v${version}` : 'latest version';
+
+    if (els.updateConfirmTitle) {
+        els.updateConfirmTitle.textContent = `Release notes for ${versionLabel}`;
+    }
+    if (els.updateConfirmSummary) {
+        const from = data?.current_commit_short || 'current';
+        const to = data?.remote_commit_short || 'latest';
+        els.updateConfirmSummary.textContent = `Update available: ${from} → ${to}`;
+    }
+    if (els.updateConfirmNotes) {
+        els.updateConfirmNotes.innerHTML = renderReleaseNotesHtml(data?.release_notes);
+    }
+
+    setUpdateModalViewOnly(true);
+    els.updateConfirmModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+}
+
 function setUpdateAvailableUi(data) {
     const available = Boolean(data?.git_install && data?.ok && data?.update_available);
     const version = data?.pending_version || data?.changelog_version;
     const versionLabel = version ? `v${version}` : 'a new version';
+
+    moveUpdateSectionToTop(available);
+    showSettingsReleaseNotes(data, false);
+
+    if (els.settingsUpdateViewNotes) {
+        els.settingsUpdateViewNotes.classList.toggle('hidden', !available);
+    }
 
     if (els.settingsUpdateCallout) {
         els.settingsUpdateCallout.classList.toggle('hidden', !available);
@@ -2094,7 +2200,12 @@ function renderReleaseNotesHtml(releaseNotes) {
 function closeUpdateConfirmModal(confirmed = false) {
     if (!els.updateConfirmModal) return;
     els.updateConfirmModal.classList.add('hidden');
-    document.body.classList.remove('modal-open');
+    setUpdateModalViewOnly(false);
+    if (!els.settingsModal?.classList.contains('hidden')) {
+        document.body.classList.add('modal-open');
+    } else {
+        document.body.classList.remove('modal-open');
+    }
     if (updateConfirmResolver) {
         updateConfirmResolver(confirmed);
         updateConfirmResolver = null;
@@ -2109,6 +2220,7 @@ function showUpdateConfirmModal(data) {
         }
 
         updateConfirmResolver = resolve;
+        setUpdateModalViewOnly(false);
         const version = data?.pending_version || data?.changelog_version;
         const from = data?.current_commit_short || 'current';
         const to = data?.remote_commit_short || 'latest';
@@ -2233,7 +2345,8 @@ async function checkPanelUpdates(button) {
         }
         setUpdateButtonState(data);
         if (data.update_available) {
-            setUpdateResult('A newer version is available. Click Update to latest.', 'success');
+            showSettingsReleaseNotes(data, true);
+            setUpdateResult('A newer version is available. Review the notes below, then click Update to latest.', 'success');
             setUpdateBadge(true);
         } else {
             setUpdateResult('You are on the latest version.', 'success');
@@ -2800,6 +2913,7 @@ els.settingsOpen?.addEventListener('click', openSettingsModal);
 els.settingsForm?.addEventListener('submit', saveSettings);
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
 els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));
+els.settingsUpdateViewNotes?.addEventListener('click', (e) => viewReleaseNotes(e.currentTarget));
 els.settingsUpdateRun?.addEventListener('click', (e) => runPanelUpdate(e.currentTarget));
 document.querySelectorAll('[data-settings-close]').forEach((el) => {
     el.addEventListener('click', closeSettingsModal);

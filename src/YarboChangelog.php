@@ -76,7 +76,7 @@ final class YarboChangelog
     /**
      * @return array{pending_version: ?string, release_notes: list<array{version: string, date: ?string, sections: array<string, list<string>>}>}
      */
-    public static function pendingReleases(string $projectRoot, string $remoteRef = 'origin/main'): array
+    public static function pendingReleases(string $projectRoot, ?string $remoteRef = null): array
     {
         $localVersion = self::currentVersion($projectRoot);
         $remoteMarkdown = self::readRemoteChangelog($projectRoot, $remoteRef);
@@ -106,9 +106,50 @@ final class YarboChangelog
         ];
     }
 
-    private static function readRemoteChangelog(string $projectRoot, string $remoteRef): ?string
+    /**
+     * @return array{pending_version: ?string, release_notes: list<array{version: string, date: ?string, sections: array<string, list<string>>}>}
+     */
+    public static function latestRemoteRelease(string $projectRoot, ?string $remoteRef = null): array
     {
-        $ref = str_contains($remoteRef, ':') ? $remoteRef : $remoteRef . ':CHANGELOG.md';
+        $remoteMarkdown = self::readRemoteChangelog($projectRoot, $remoteRef);
+        if ($remoteMarkdown === null) {
+            return [
+                'pending_version' => null,
+                'release_notes' => [],
+            ];
+        }
+
+        foreach (self::parseReleases($remoteMarkdown) as $release) {
+            if (strtolower($release['version']) === 'unreleased') {
+                continue;
+            }
+
+            return [
+                'pending_version' => $release['version'],
+                'release_notes' => [$release],
+            ];
+        }
+
+        return [
+            'pending_version' => null,
+            'release_notes' => [],
+        ];
+    }
+
+    private static function remoteRef(?string $remoteRef = null): string
+    {
+        if ($remoteRef !== null && $remoteRef !== '') {
+            return str_contains($remoteRef, ':') ? $remoteRef : $remoteRef . ':CHANGELOG.md';
+        }
+
+        $branch = getenv('YARBO_PANEL_BRANCH') ?: 'main';
+
+        return 'origin/' . $branch . ':CHANGELOG.md';
+    }
+
+    private static function readRemoteChangelog(string $projectRoot, ?string $remoteRef = null): ?string
+    {
+        $ref = self::remoteRef($remoteRef);
 
         $descriptorSpec = [
             0 => ['pipe', 'r'],
@@ -125,6 +166,9 @@ final class YarboChangelog
                 'HOME' => getenv('HOME') ?: $projectRoot,
                 'PATH' => getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
                 'GIT_TERMINAL_PROMPT' => '0',
+                'GIT_CONFIG_COUNT' => '1',
+                'GIT_CONFIG_KEY_0' => 'safe.directory',
+                'GIT_CONFIG_VALUE_0' => $projectRoot,
             ]
         );
 

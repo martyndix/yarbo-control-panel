@@ -1101,10 +1101,40 @@ body.modal-open {
 }
 
 .settings-section--update-available {
-    border: 1px solid var(--accent);
+    border: 2px solid var(--accent);
     border-radius: 10px;
+    padding: 0.85rem;
+    background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.settings-section--update-available .settings-subtitle {
+    color: var(--accent);
+}
+
+.settings-update-notes {
+    margin: 0.65rem 0;
     padding: 0.75rem;
-    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+    font-size: 0.85rem;
+    max-height: 14rem;
+    overflow-y: auto;
+}
+
+.settings-update-notes.hidden {
+    display: none;
+}
+
+.settings-update-notes-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.9rem;
+    color: var(--accent);
+}
+
+.settings-update-notes .update-release-block h3 {
+    font-size: 0.85rem;
 }
 
 .btn-update-ready {
@@ -1113,6 +1143,10 @@ body.modal-open {
 
 .update-confirm-panel {
     max-width: 34rem;
+}
+
+.update-confirm-panel--view-only .update-confirm-notes {
+    max-height: 20rem;
 }
 
 .update-confirm-notes {
