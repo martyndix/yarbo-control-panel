@@ -451,10 +451,29 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span>Auto (system)</span>
                                 </label>
                             </fieldset>
-                            <button type="button" class="btn btn-secondary" id="settings-reset-layout">Reset section order</button>
+                            <fieldset class="settings-panel-visibility" id="settings-panel-visibility">
+                                <legend class="label">Visible sections</legend>
+                                <p class="hint settings-panel-visibility-hint">Uncheck a section to hide it from the dashboard.</p>
+                                <div class="settings-panel-visibility-grid">
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="status" checked><span>Status</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="diagnostics" checked><span>Diagnostics</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="map" checked><span>Location map</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="cameras" checked><span>Cameras</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="drive" checked><span>Manual drive</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="plans" checked><span>Work plans</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="waypoints" checked><span>Waypoints</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="head" checked><span>Head controls</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="controls" checked><span>Controls</span></label>
+                                </div>
+                            </fieldset>
+                            <button type="button" class="btn btn-secondary" id="settings-reset-layout">Reset dashboard layout</button>
                         </section>
 
-                        <section class="settings-section">
+                        <section class="settings-section" id="settings-update-section">
+                            <div id="settings-update-callout" class="settings-update-callout hidden" role="status">
+                                <strong>Panel update available</strong>
+                                <span id="settings-update-callout-text"></span>
+                            </div>
                             <h3 class="settings-subtitle">Panel updates</h3>
                             <p class="hint">Pull the latest code from GitHub. <code>config.php</code> and <code>data/</code> are preserved.</p>
                             <p id="settings-update-status" class="hint">Checking for updates…</p>
@@ -476,6 +495,20 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         </div>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <div id="update-confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="update-confirm-title">
+            <button type="button" class="modal-backdrop" data-update-confirm-close aria-label="Cancel update"></button>
+            <div class="modal-panel card update-confirm-panel">
+                <h2 id="update-confirm-title">Install panel update?</h2>
+                <p id="update-confirm-summary" class="hint"></p>
+                <div id="update-confirm-notes" class="update-confirm-notes"></div>
+                <p class="hint update-confirm-footnote">The page will reload after the service restarts.</p>
+                <div class="modal-actions">
+                    <button type="button" class="btn" id="update-confirm-run">Update now</button>
+                    <button type="button" class="btn btn-secondary" data-update-confirm-close>Cancel</button>
+                </div>
             </div>
         </div>
 

@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-07-09
+
+### Added
+- **Hide dashboard sections**: Settings → Appearance checkboxes to show/hide panel sections (saved in browser)
+- **Update changelog preview**: confirmation popup before installing an update, showing release notes from `CHANGELOG.md`
+
+### Changed
+- **Settings update highlight**: when an update is available, the Panel updates section is highlighted with a callout banner (matches the badge on the Settings button)
+- **Reset dashboard layout**: restores default section order and visibility
+
 ## [1.1.6] - 2026-07-09
 
 ### Changed

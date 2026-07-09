@@ -640,6 +640,10 @@ body.modal-open {
     box-shadow: 0 0 0 2px var(--accent);
 }
 
+.panel-section--user-hidden {
+    display: none !important;
+}
+
 .panel-sections {
     display: flex;
     flex-direction: column;
@@ -1064,6 +1068,94 @@ body.modal-open {
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
+}
+
+.settings-panel-visibility {
+    border: none;
+    margin: 0.75rem 0 0;
+    padding: 0;
+}
+
+.settings-panel-visibility-hint {
+    margin: 0.25rem 0 0.5rem;
+}
+
+.settings-panel-visibility-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+    gap: 0.35rem 0.75rem;
+}
+
+.settings-update-callout {
+    margin-bottom: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--control-tile-active-glow);
+    color: var(--text);
+    font-size: 0.85rem;
+}
+
+.settings-update-callout.hidden {
+    display: none;
+}
+
+.settings-section--update-available {
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 0.75rem;
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.btn-update-ready {
+    box-shadow: 0 0 0 2px var(--control-tile-active-glow);
+}
+
+.update-confirm-panel {
+    max-width: 34rem;
+}
+
+.update-confirm-notes {
+    max-height: 16rem;
+    overflow-y: auto;
+    margin: 0.75rem 0;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-size: 0.85rem;
+}
+
+.update-release-block + .update-release-block {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.update-release-block h3 {
+    margin: 0 0 0.5rem;
+    font-size: 0.95rem;
+}
+
+.update-release-section h4 {
+    margin: 0.5rem 0 0.25rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.update-release-section ul {
+    margin: 0;
+    padding-left: 1.1rem;
+}
+
+.update-release-section li + li {
+    margin-top: 0.25rem;
+}
+
+.update-confirm-footnote {
+    margin: 0 0 0.75rem;
 }
 
 .settings-checkbox {

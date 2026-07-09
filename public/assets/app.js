@@ -63,6 +63,15 @@ const els = {
     settingsUpdateResult: document.getElementById('settings-update-result'),
     settingsUpdateCheck: document.getElementById('settings-update-check'),
     settingsUpdateRun: document.getElementById('settings-update-run'),
+    settingsUpdateSection: document.getElementById('settings-update-section'),
+    settingsUpdateCallout: document.getElementById('settings-update-callout'),
+    settingsUpdateCalloutText: document.getElementById('settings-update-callout-text'),
+    settingsPanelVisibility: document.getElementById('settings-panel-visibility'),
+    updateConfirmModal: document.getElementById('update-confirm-modal'),
+    updateConfirmTitle: document.getElementById('update-confirm-title'),
+    updateConfirmSummary: document.getElementById('update-confirm-summary'),
+    updateConfirmNotes: document.getElementById('update-confirm-notes'),
+    updateConfirmRun: document.getElementById('update-confirm-run'),
     mapDataSource: document.getElementById('map-data-source'),
     plansDataSource: document.getElementById('plans-data-source'),
     mapInspector: document.getElementById('map-inspector'),
@@ -106,9 +115,21 @@ const MAP_CACHE_KEY = 'yarbo_map_cache';
 const MAP_VIEW_KEY = 'yarbo_map_view';
 const MAP_CENTER_ZOOM = 20;
 const PANEL_ORDER_KEY = 'yarbo_panel_order';
+const PANEL_HIDDEN_KEY = 'yarbo_panel_hidden';
 const THEME_KEY = 'yarbo_theme';
 const LIGHTS_ON_KEY = 'yarbo_lights_on';
 const DEFAULT_PANEL_ORDER = ['status', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls'];
+const PANEL_LABELS = {
+    status: 'Status',
+    diagnostics: 'Diagnostics',
+    map: 'Location map',
+    cameras: 'Cameras',
+    drive: 'Manual drive',
+    plans: 'Work plans',
+    waypoints: 'Waypoints',
+    head: 'Head controls',
+    controls: 'Controls',
+};
 
 const ZONE_COLORS = {
     clean: { color: '#67b3ff', fill: '#67b3ff' },
@@ -154,6 +175,8 @@ let mapLoadingStartedAt = 0;
 let lightsOn = false;
 let draggedPanelId = null;
 let themeMediaQuery = null;
+let lastUpdateStatus = null;
+let updateConfirmResolver = null;
 
 function resolveTheme(mode) {
     if (mode === 'light' || mode === 'dark') return mode;
@@ -246,12 +269,71 @@ function applyPanelOrder(order) {
 function resetPanelOrder() {
     try {
         localStorage.removeItem(PANEL_ORDER_KEY);
+        localStorage.removeItem(PANEL_HIDDEN_KEY);
     } catch {
         // ignore
     }
     const order = DEFAULT_PANEL_ORDER.filter((id) => document.querySelector(`[data-panel-id="${id}"]`));
     applyPanelOrder(order);
     savePanelOrder();
+    applyPanelVisibility([]);
+    syncPanelVisibilityCheckboxes([]);
+}
+
+function loadHiddenPanels() {
+    try {
+        const raw = localStorage.getItem(PANEL_HIDDEN_KEY);
+        if (!raw) return [];
+        const hidden = JSON.parse(raw);
+        return Array.isArray(hidden) ? hidden.filter((id) => typeof id === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveHiddenPanels(hidden) {
+    try {
+        localStorage.setItem(PANEL_HIDDEN_KEY, JSON.stringify(hidden));
+    } catch {
+        // ignore
+    }
+}
+
+function applyPanelVisibility(hidden) {
+    const hiddenSet = new Set(hidden);
+    getPanelSections().forEach((section) => {
+        const id = section.dataset.panelId;
+        if (!id) return;
+        section.classList.toggle('panel-section--user-hidden', hiddenSet.has(id));
+    });
+}
+
+function syncPanelVisibilityCheckboxes(hidden) {
+    const hiddenSet = new Set(hidden);
+    els.settingsPanelVisibility?.querySelectorAll('input[data-panel-visible]').forEach((input) => {
+        const id = input.dataset.panelVisible;
+        if (!id) return;
+        input.checked = !hiddenSet.has(id);
+    });
+}
+
+function initPanelVisibility() {
+    const hidden = loadHiddenPanels();
+    applyPanelVisibility(hidden);
+    syncPanelVisibilityCheckboxes(hidden);
+
+    els.settingsPanelVisibility?.querySelectorAll('input[data-panel-visible]').forEach((input) => {
+        input.addEventListener('change', () => {
+            const id = input.dataset.panelVisible;
+            if (!id) return;
+            const nextHidden = loadHiddenPanels().filter((panelId) => panelId !== id);
+            if (!input.checked) {
+                nextHidden.push(id);
+            }
+            saveHiddenPanels(nextHidden);
+            applyPanelVisibility(nextHidden);
+        });
+    });
 }
 
 function initPanelDragDrop() {
@@ -383,6 +465,7 @@ async function toggleLights(button) {
 function initAppearance() {
     initTheme();
     initPanelDragDrop();
+    initPanelVisibility();
     try {
         lightsOn = localStorage.getItem(LIGHTS_ON_KEY) === '1';
     } catch {
@@ -392,7 +475,7 @@ function initAppearance() {
 
     els.settingsResetLayout?.addEventListener('click', () => {
         resetPanelOrder();
-        showToast('Section order reset', 'success');
+        showToast('Dashboard layout reset', 'success');
     });
 
     els.controlLights?.addEventListener('click', (event) => {
@@ -1965,15 +2048,107 @@ function setUpdateBadge(visible) {
     }
 }
 
+function setUpdateAvailableUi(data) {
+    const available = Boolean(data?.git_install && data?.ok && data?.update_available);
+    const version = data?.pending_version || data?.changelog_version;
+    const versionLabel = version ? `v${version}` : 'a new version';
+
+    if (els.settingsUpdateCallout) {
+        els.settingsUpdateCallout.classList.toggle('hidden', !available);
+    }
+    if (els.settingsUpdateCalloutText) {
+        els.settingsUpdateCalloutText.textContent = available
+            ? ` — ${versionLabel} is ready to install.`
+            : '';
+    }
+    if (els.settingsUpdateSection) {
+        els.settingsUpdateSection.classList.toggle('settings-section--update-available', available);
+    }
+    if (els.settingsUpdateRun) {
+        els.settingsUpdateRun.classList.toggle('btn-update-ready', available);
+    }
+}
+
+function renderReleaseNotesHtml(releaseNotes) {
+    if (!Array.isArray(releaseNotes) || releaseNotes.length === 0) {
+        return '<p class="hint">Release notes are not available for this update.</p>';
+    }
+
+    return releaseNotes.map((release) => {
+        const heading = release.date
+            ? `Version ${release.version} (${release.date})`
+            : `Version ${release.version}`;
+        const sections = release.sections || {};
+        const sectionHtml = ['Added', 'Changed', 'Fixed', 'Deprecated', 'Removed', 'Security']
+            .filter((name) => Array.isArray(sections[name]) && sections[name].length > 0)
+            .map((name) => {
+                const items = sections[name].map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+                return `<div class="update-release-section"><h4>${name}</h4><ul>${items}</ul></div>`;
+            })
+            .join('');
+
+        return `<article class="update-release-block"><h3>${escapeHtml(heading)}</h3>${sectionHtml || '<p class="hint">No detailed notes for this version.</p>'}</article>`;
+    }).join('');
+}
+
+function closeUpdateConfirmModal(confirmed = false) {
+    if (!els.updateConfirmModal) return;
+    els.updateConfirmModal.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+    if (updateConfirmResolver) {
+        updateConfirmResolver(confirmed);
+        updateConfirmResolver = null;
+    }
+}
+
+function showUpdateConfirmModal(data) {
+    return new Promise((resolve) => {
+        if (!els.updateConfirmModal) {
+            resolve(window.confirm('Update the panel to the latest version from GitHub? The page will reload after the service restarts.'));
+            return;
+        }
+
+        updateConfirmResolver = resolve;
+        const version = data?.pending_version || data?.changelog_version;
+        const from = data?.current_commit_short || 'current';
+        const to = data?.remote_commit_short || 'latest';
+        const versionLabel = version ? `v${version}` : 'latest version';
+
+        if (els.updateConfirmTitle) {
+            els.updateConfirmTitle.textContent = `Install ${versionLabel}?`;
+        }
+        if (els.updateConfirmSummary) {
+            els.updateConfirmSummary.textContent = `This will update the panel from ${from} to ${to}.`;
+        }
+        if (els.updateConfirmNotes) {
+            els.updateConfirmNotes.innerHTML = renderReleaseNotesHtml(data?.release_notes);
+        }
+
+        els.updateConfirmModal.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+        els.updateConfirmRun?.focus();
+    });
+}
+
+function initUpdateConfirmModal() {
+    els.updateConfirmRun?.addEventListener('click', () => closeUpdateConfirmModal(true));
+    document.querySelectorAll('[data-update-confirm-close]').forEach((button) => {
+        button.addEventListener('click', () => closeUpdateConfirmModal(false));
+    });
+}
+
 async function refreshUpdateBadge() {
     try {
         const res = await fetch('/api/update.php', { cache: 'no-store' });
         const data = await parseJsonResponse(res);
         const available = Boolean(data?.git_install && data?.ok && data?.update_available);
+        lastUpdateStatus = data;
         setUpdateBadge(available);
+        setUpdateAvailableUi(data);
         return data;
     } catch {
         setUpdateBadge(false);
+        setUpdateAvailableUi(null);
         return null;
     }
 }
@@ -1989,7 +2164,8 @@ function formatUpdateStatus(data) {
     const current = data.current_commit_short || data.current_commit || 'unknown';
     if (data.update_available) {
         const remote = data.remote_commit_short || data.remote_commit || 'latest';
-        return `Update available: ${current} → ${remote}${version}`;
+        const pending = data.pending_version ? ` → v${data.pending_version}` : '';
+        return `Update available: ${current} → ${remote}${pending || version}`;
     }
     return `Up to date at ${current}${version}`;
 }
@@ -2011,6 +2187,7 @@ function setUpdateButtonState(data) {
     if (!els.settingsUpdateRun) return;
     const canUpdate = Boolean(data?.git_install && data?.ok && data?.update_available);
     els.settingsUpdateRun.disabled = !canUpdate;
+    setUpdateAvailableUi(data);
 }
 
 async function loadUpdateStatus() {
@@ -2022,13 +2199,18 @@ async function loadUpdateStatus() {
     try {
         const res = await fetch('/api/update.php');
         const data = await parseJsonResponse(res);
+        lastUpdateStatus = data;
         els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
         setUpdateButtonState(data);
         setUpdateBadge(Boolean(data?.git_install && data?.ok && data?.update_available));
+        if (data?.git_install && data?.ok && data?.update_available) {
+            els.settingsUpdateSection?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
     } catch (err) {
         els.settingsUpdateStatus.textContent = err.message || 'Could not check for updates';
         if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
         setUpdateBadge(false);
+        setUpdateAvailableUi(null);
     } finally {
         if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
     }
@@ -2044,6 +2226,7 @@ async function checkPanelUpdates(button) {
             body: JSON.stringify({ action: 'check' }),
         });
         const data = await parseJsonResponse(res);
+        lastUpdateStatus = data;
         if (!data.ok) throw new Error(data.error || 'Update check failed');
         if (els.settingsUpdateStatus) {
             els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
@@ -2190,7 +2373,9 @@ async function waitForPanelRestart(maxWaitMs = 120000, targetCommitShort = null)
 }
 
 async function runPanelUpdate(button) {
-    if (!window.confirm('Update the panel to the latest version from GitHub? The page will reload after the service restarts.')) {
+    const statusData = lastUpdateStatus || await refreshUpdateBadge();
+    const confirmed = await showUpdateConfirmModal(statusData || {});
+    if (!confirmed) {
         return;
     }
     if (button) button.disabled = true;
@@ -2639,7 +2824,12 @@ document.getElementById('snow-chute-angle-send')?.addEventListener('click', (e) 
     sendHeadControl('snow_chute_angle', Number(els.snowChuteAngle?.value ?? 0), e.currentTarget);
 });
 document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && els.settingsModal && !els.settingsModal.classList.contains('hidden')) {
+    if (event.key !== 'Escape') return;
+    if (els.updateConfirmModal && !els.updateConfirmModal.classList.contains('hidden')) {
+        closeUpdateConfirmModal(false);
+        return;
+    }
+    if (els.settingsModal && !els.settingsModal.classList.contains('hidden')) {
         closeSettingsModal();
     }
 });
@@ -2652,6 +2842,7 @@ if (document.getElementById('map')) {
 }
 setupDrivePad();
 initAppearance();
+initUpdateConfirmModal();
 loadSettings().catch(() => {});
 refreshUpdateBadge();
 fetchStatus();

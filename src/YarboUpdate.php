@@ -37,11 +37,17 @@ final class YarboUpdate
             ], $result);
         }
 
-        return array_merge([
+        $merged = array_merge([
             'ok' => true,
             'git_install' => true,
             'can_update' => true,
         ], $result);
+
+        if (($merged['update_available'] ?? false)) {
+            $merged = array_merge($merged, YarboChangelog::pendingReleases($this->projectRoot));
+        }
+
+        return $merged;
     }
 
     /**
