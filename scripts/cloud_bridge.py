@@ -58,6 +58,35 @@ def _device_serial(device: Any) -> str:
     return ""
 
 
+def run_login_test(config: dict[str, Any]) -> dict[str, Any]:
+    email = str(config.get("email", "")).strip()
+    password = str(config.get("password", "")).strip()
+    if not email or not password:
+        raise ValueError("Cloud email and password are required in cloud-config.json")
+
+    YarboClient = _import_client()
+    client = YarboClient()
+
+    try:
+        login = getattr(client, "login", None)
+        if login is None:
+            raise ValueError("YarboClient.login is not available")
+        login_result = login(email, password)
+        if asyncio.iscoroutine(login_result):
+            raise ValueError("Unexpected async YarboClient.login — update cloud_bridge.py")
+
+        devices = client.get_devices()
+        device_count = len(devices) if devices is not None else 0
+        return {
+            "email": email,
+            "device_count": device_count,
+        }
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
+
 def run_action_sync(action: str, serial: str, timeout: float, config: dict[str, Any]) -> Any:
     email = str(config.get("email", "")).strip()
     password = str(config.get("password", "")).strip()
@@ -120,7 +149,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Yarbo cloud bridge")
     parser.add_argument(
         "action",
-        choices=["status", "read_all_plan", "get_map", "read_gps_ref", "get_device_msg"],
+        choices=["status", "test-login", "read_all_plan", "get_map", "read_gps_ref", "get_device_msg"],
     )
     parser.add_argument("--serial", default="")
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -133,9 +162,31 @@ def main() -> int:
                 "ok": True,
                 "sdk_installed": sdk_installed(),
                 "python_version": sys.version.split()[0],
+                "python_executable": sys.executable,
             }
         )
         return 0
+
+    if args.action == "test-login":
+        if not args.config:
+            emit({"ok": False, "error": "--config is required for test-login"})
+            return 1
+        if not sdk_installed():
+            emit(
+                {
+                    "ok": False,
+                    "error": "yarbo-data-sdk is not installed. Run: ./scripts/install.sh",
+                }
+            )
+            return 1
+        try:
+            config = load_config(Path(args.config))
+            data = asyncio.run(asyncio.to_thread(run_login_test, config))
+            emit({"ok": True, "login": data, "cloud": True})
+            return 0
+        except Exception as exc:  # noqa: BLE001
+            emit({"ok": False, "error": str(exc), "cloud": True})
+            return 1
 
     if not args.config:
         emit({"ok": False, "error": "--config is required for data actions"})

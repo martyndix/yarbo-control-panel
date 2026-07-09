@@ -434,6 +434,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     spellcheck="false"
                                 >
                             </label>
+                            <p id="settings-connection-result" class="settings-cloud-result hidden" role="status"></p>
+                            <button type="button" class="btn btn-secondary" id="settings-connection-test">Test local connection</button>
                         </section>
 
                         <section class="settings-section">

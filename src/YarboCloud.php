@@ -18,7 +18,7 @@ final class YarboCloud
     public function status(): array
     {
         $config = $this->settings->load();
-        $python = $config['python_path'] ?: 'python3';
+        $python = $this->resolvePython($config['python_path']);
         $bridge = $this->projectRoot . '/scripts/cloud_bridge.py';
 
         $available = is_file($bridge);
@@ -41,11 +41,32 @@ final class YarboCloud
             'bridge_available' => $available,
             'sdk_installed' => $sdkInstalled,
             'python' => $python,
+            'python_executable' => $python,
             'python_version' => $pythonVersion,
+            'venv_python' => $this->venvPythonPath(),
+            'sdk_path_hint' => $sdkInstalled
+                ? null
+                : 'Run ./scripts/install.sh (or sudo ./scripts/install.sh --deps on a fresh Pi)',
             'configured' => $config['enabled'] && $config['email'] !== '' && $config['password'] !== '',
             'data_source' => $config['data_source'],
             'error' => $error,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function testLogin(): array
+    {
+        $config = $this->settings->load();
+        if ($config['email'] === '' || $config['password'] === '') {
+            return [
+                'ok' => false,
+                'error' => 'Cloud email and password are required',
+            ];
+        }
+
+        return $this->runBridge(['test-login'], true);
     }
 
     /**
@@ -84,7 +105,7 @@ final class YarboCloud
     private function runBridge(array $args, bool $requireCredentials): array
     {
         $config = $this->settings->load();
-        $python = $config['python_path'] ?: 'python3';
+        $python = $this->resolvePython($config['python_path']);
         $bridge = $this->projectRoot . '/scripts/cloud_bridge.py';
 
         if (!is_file($bridge)) {
@@ -103,7 +124,7 @@ final class YarboCloud
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open($cmd, $descriptorSpec, $pipes, $this->projectRoot);
+        $process = proc_open($cmd, $descriptorSpec, $pipes, $this->projectRoot, $this->processEnvironment());
         if (!is_resource($process)) {
             return ['ok' => false, 'error' => 'Could not start cloud bridge process'];
         }
@@ -125,5 +146,52 @@ final class YarboCloud
         }
 
         return $decoded;
+    }
+
+    private function resolvePython(string $configuredPath): string
+    {
+        $venv = $this->venvPythonPath();
+        if ($venv !== null) {
+            return $venv;
+        }
+
+        $configured = trim($configuredPath);
+        if ($configured !== '' && $configured !== 'python3') {
+            return $configured;
+        }
+
+        return 'python3';
+    }
+
+    private function venvPythonPath(): ?string
+    {
+        $path = $this->projectRoot . '/.venv/bin/python3';
+        if (is_executable($path)) {
+            return $path;
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function processEnvironment(): array
+    {
+        $home = getenv('HOME') ?: '';
+        if ($home === '') {
+            $home = $this->projectRoot;
+        }
+
+        $path = getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+        $venvBin = $this->projectRoot . '/.venv/bin';
+        if (is_dir($venvBin) && !str_contains($path, $venvBin)) {
+            $path = $venvBin . ':' . $path;
+        }
+
+        return [
+            'HOME' => $home,
+            'PATH' => $path,
+        ];
     }
 }

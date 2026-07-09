@@ -1,4 +1,5 @@
 /vendor/
+/.venv/
 /config.php
 /data/waypoints.json
 /data/cloud-config.json

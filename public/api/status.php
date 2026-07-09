@@ -10,15 +10,24 @@ use Yarbo\YarboWifi;
 try {
     $client = yarbo_client($config);
     $client->connect();
+} catch (Throwable $e) {
+    json_response([
+        'ok' => false,
+        'stage' => 'connect',
+        'error' => friendly_error($e),
+    ], 500);
+}
 
-    $raw = $client->requestTelemetry(3);
+try {
+    $raw = $client->requestTelemetry(6);
     $wifiResponse = $client->requestDataFeedback('get_connect_wifi_name', [], 2.5, false);
     $client->disconnect();
 
     if ($raw === null) {
         json_response([
             'ok' => false,
-            'error' => friendly_message('No telemetry received within timeout. Check broker IP and serial number.'),
+            'stage' => 'telemetry',
+            'error' => friendly_message('telemetry_timeout: No telemetry received within timeout. Check serial number.'),
         ], 504);
     }
 
@@ -28,5 +37,10 @@ try {
         ['wifi' => YarboWifi::parse($wifiResponse)],
     ));
 } catch (Throwable $e) {
-    json_response(['ok' => false, 'error' => friendly_error($e)], 500);
+    $client->disconnect();
+    json_response([
+        'ok' => false,
+        'stage' => 'telemetry',
+        'error' => friendly_error($e),
+    ], 500);
 }

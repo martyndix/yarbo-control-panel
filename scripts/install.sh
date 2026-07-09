@@ -92,21 +92,22 @@ install_project() {
   # shellcheck source=scripts/lib/python_sdk.sh
   source "${ROOT}/scripts/lib/python_sdk.sh"
 
-  local python
+  local python resolved
   python="$(yarbo_python_bin || true)"
 
   if [[ -n "$python" ]]; then
-    echo "==> Optional: Yarbo cloud bridge (map/plan fallback reads)"
+    echo "==> Yarbo cloud bridge (map/plan fallback reads)"
     if [[ "${EUID}" -eq 0 ]]; then
       ensure_python_pip "$python" || true
     fi
-    if yarbo_sdk_installed "$python"; then
-      echo "    yarbo-data-sdk already installed"
-    elif run_as_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_yarbo_data_sdk '${python}'"; then
-      echo "    yarbo-data-sdk installed for ${owner}"
+    if run_as_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_yarbo_data_sdk '${python}' '${ROOT}'"; then
+      resolved="$(run_as_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && yarbo_resolve_python '${ROOT}'" || true)"
+      echo "    yarbo-data-sdk installed (${resolved:-${python}})"
     else
-      echo "    WARNING: could not install yarbo-data-sdk automatically"
-      echo "    Try: ${python} -m pip install --user yarbo-data-sdk --break-system-packages"
+      echo "    ERROR: could not install yarbo-data-sdk"
+      echo "    Try: cd '${ROOT}' && ./scripts/install.sh"
+      echo "    Or:  sudo apt install python3-venv python3-pip && ./scripts/install.sh"
+      exit 1
     fi
   else
     echo "==> Python not found — cloud map/plan reads unavailable until Python 3 is installed"

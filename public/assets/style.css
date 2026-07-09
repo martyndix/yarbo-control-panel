@@ -245,6 +245,7 @@ header h1 {
     border-radius: 8px;
     font-size: 0.85rem;
     line-height: 1.4;
+    white-space: pre-line;
     border: 1px solid var(--border);
     background: var(--bg);
 }

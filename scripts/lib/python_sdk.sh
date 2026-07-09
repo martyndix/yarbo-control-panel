@@ -10,6 +10,25 @@ yarbo_python_bin() {
   fi
 }
 
+yarbo_venv_python() {
+  local root="${1:?}"
+  local venv_py="${root}/.venv/bin/python3"
+  if [[ -x "$venv_py" ]]; then
+    echo "$venv_py"
+  fi
+}
+
+yarbo_resolve_python() {
+  local root="${1:?}"
+  local venv_py
+  venv_py="$(yarbo_venv_python "$root" || true)"
+  if [[ -n "$venv_py" ]]; then
+    echo "$venv_py"
+    return 0
+  fi
+  yarbo_python_bin
+}
+
 yarbo_sdk_installed() {
   local python="${1:?}"
   "$python" -c "
@@ -30,15 +49,77 @@ ensure_python_pip() {
   if [[ "${EUID:-$(id -u)}" -eq 0 ]] && command -v apt-get >/dev/null 2>&1; then
     echo "    Installing python3-pip (apt)"
     export DEBIAN_FRONTEND=noninteractive
-    apt-get install -y python3-pip >/dev/null
+    apt-get install -y python3-pip python3-venv >/dev/null
   fi
 
   "$python" -m pip --version >/dev/null 2>&1
 }
 
+ensure_yarbo_venv() {
+  local root="${1:?}"
+  local base_python="${2:-}"
+  local venv_py err_file
+
+  if [[ -z "$base_python" ]]; then
+    base_python="$(yarbo_python_bin || true)"
+  fi
+  if [[ -z "$base_python" ]]; then
+    echo "    Python 3 not found — cannot create venv" >&2
+    return 1
+  fi
+
+  if ! ensure_python_pip "$base_python"; then
+    echo "    pip is not available for ${base_python}" >&2
+    echo "    Install with: sudo apt install python3-pip python3-venv" >&2
+    return 1
+  fi
+
+  venv_py="${root}/.venv/bin/python3"
+  if [[ ! -x "$venv_py" ]]; then
+    echo "    Creating project venv at ${root}/.venv"
+    if ! "$base_python" -m venv "${root}/.venv"; then
+      echo "    Failed to create venv" >&2
+      return 1
+    fi
+  fi
+
+  if yarbo_sdk_installed "$venv_py"; then
+    return 0
+  fi
+
+  echo "    Installing yarbo-data-sdk into project venv"
+  err_file="$(mktemp)"
+  if "$venv_py" -m pip install --upgrade pip >/dev/null 2>"$err_file" \
+    && "$venv_py" -m pip install yarbo-data-sdk 2>"$err_file"; then
+    rm -f "$err_file"
+    yarbo_sdk_installed "$venv_py"
+    return $?
+  fi
+
+  if grep -qi 'externally-managed-environment' "$err_file" 2>/dev/null; then
+    rm -f "$err_file"
+    if "$venv_py" -m pip install yarbo-data-sdk; then
+      yarbo_sdk_installed "$venv_py"
+      return $?
+    fi
+    return 1
+  fi
+
+  if [[ -s "$err_file" ]]; then
+    sed 's/^/    /' "$err_file" >&2
+  fi
+  rm -f "$err_file"
+  return 1
+}
+
 install_yarbo_data_sdk() {
   local python="${1:?}"
+  local root="${2:-}"
   local err_file
+
+  if [[ -n "$root" ]] && ensure_yarbo_venv "$root" "$python"; then
+    return 0
+  fi
 
   if yarbo_sdk_installed "$python"; then
     return 0

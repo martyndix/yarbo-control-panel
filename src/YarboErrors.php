@@ -9,6 +9,9 @@ final class YarboErrors
     public const MSG_TIMEOUT = 'Connection to the Yarbo robot timed out. Check the broker IP and serial number in Settings, '
         . 'and make sure the robot is powered on and on your home network.';
 
+    public const MSG_TELEMETRY_TIMEOUT = 'Connected to the Yarbo MQTT broker but the robot did not respond. '
+        . 'Check the serial number in Settings, wake the robot, and try again.';
+
     public const MSG_REFUSED = 'Cannot reach the Yarbo robot at the configured IP address (MQTT port 1883 refused the connection). '
         . 'Open Settings and check the broker IP matches your Yarbo base station, the robot is powered on, '
         . 'and this device is on the same home network.';
@@ -38,8 +41,8 @@ final class YarboErrors
             return self::MSG_UNREACHABLE;
         }
 
-        if (str_contains($lower, 'no telemetry received')) {
-            return self::MSG_TIMEOUT;
+        if (str_contains($lower, 'no telemetry received') || str_contains($lower, 'telemetry_timeout')) {
+            return self::MSG_TELEMETRY_TIMEOUT;
         }
 
         if (str_contains($lower, 'timed out') || str_contains($lower, 'timeout')) {

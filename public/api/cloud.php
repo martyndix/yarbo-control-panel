@@ -54,14 +54,40 @@ if ($action === 'test') {
     $sdkReady = (bool) ($status['sdk_installed'] ?? false);
     $configured = (bool) ($status['configured'] ?? false);
 
+    if (!$sdkReady) {
+        json_response([
+            'ok' => false,
+            'status' => $status,
+            'message' => 'Python SDK not installed. Run ./scripts/install.sh (or sudo ./scripts/install.sh --deps on a fresh Pi).',
+        ]);
+    }
+
+    if (!$configured) {
+        json_response([
+            'ok' => false,
+            'status' => $status,
+            'message' => 'Enter Yarbo email and password, then test again (password is required on first save).',
+        ]);
+    }
+
+    $login = $cloud->testLogin();
+    if (!($login['ok'] ?? false)) {
+        json_response([
+            'ok' => false,
+            'status' => $status,
+            'message' => (string) ($login['error'] ?? 'Cloud login failed'),
+            'login' => $login,
+        ]);
+    }
+
+    $deviceCount = (int) ($login['login']['device_count'] ?? 0);
     json_response([
-        'ok' => $configured && $sdkReady,
+        'ok' => true,
         'status' => $status,
-        'message' => !$sdkReady
-            ? 'Python SDK not installed. Run ./scripts/install.sh (or sudo ./scripts/install.sh --deps on a fresh Pi).'
-            : ($configured
-                ? 'Cloud credentials saved. SDK bridge is ready for map/plan fallback reads.'
-                : 'Enter Yarbo email and password, then test again (password is required on first save).'),
+        'login' => $login,
+        'message' => $deviceCount > 0
+            ? "Cloud login successful ({$deviceCount} robot" . ($deviceCount === 1 ? '' : 's') . ' in account).'
+            : 'Cloud login successful.',
     ]);
 }
 

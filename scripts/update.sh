@@ -204,21 +204,17 @@ elif command -v python >/dev/null 2>&1; then
 fi
 
 if [[ -n "$PYTHON" ]]; then
-  step "Checking optional yarbo-data-sdk"
-  write_status "composer" "Checking optional yarbo-data-sdk"
+  step "Checking yarbo-data-sdk"
+  write_status "composer" "Checking yarbo-data-sdk"
   # shellcheck source=scripts/lib/python_sdk.sh
   source "${ROOT}/scripts/lib/python_sdk.sh"
-  if ! yarbo_sdk_installed "$PYTHON"; then
-    if [[ "${EUID}" -eq 0 ]]; then
-      ensure_python_pip "$PYTHON" || true
-    fi
-    if run_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_yarbo_data_sdk '${PYTHON}'"; then
-      step "yarbo-data-sdk installed"
-    else
-      step "yarbo-data-sdk install skipped (run ./scripts/install.sh to retry)"
-    fi
+  RESOLVED="$(yarbo_resolve_python "${ROOT}" || true)"
+  if [[ -n "$RESOLVED" ]] && yarbo_sdk_installed "$RESOLVED"; then
+    step "yarbo-data-sdk already installed (${RESOLVED})"
+  elif run_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_yarbo_data_sdk '${PYTHON}' '${ROOT}'"; then
+    step "yarbo-data-sdk installed"
   else
-    step "yarbo-data-sdk already installed"
+    step "yarbo-data-sdk install failed (run ./scripts/install.sh to retry)"
   fi
 fi
 

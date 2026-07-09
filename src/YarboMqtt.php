@@ -33,6 +33,27 @@ final class YarboMqtt
         $this->client->connect($settings, true);
     }
 
+    /**
+     * @return array{ok: bool, error?: string, errno?: int}
+     */
+    public static function probeTcp(string $host, int $port, float $timeoutSeconds = 3.0): array
+    {
+        $errno = 0;
+        $errstr = '';
+        $socket = @fsockopen($host, $port, $errno, $errstr, $timeoutSeconds);
+        if ($socket === false) {
+            return [
+                'ok' => false,
+                'error' => $errstr !== '' ? $errstr : 'Connection failed',
+                'errno' => $errno,
+            ];
+        }
+
+        fclose($socket);
+
+        return ['ok' => true];
+    }
+
     public function disconnect(): void
     {
         if ($this->client->isConnected()) {

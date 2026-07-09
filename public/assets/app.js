@@ -50,6 +50,8 @@ const els = {
     settingsForm: document.getElementById('settings-form'),
     settingsHost: document.getElementById('settings-host'),
     settingsSerial: document.getElementById('settings-serial'),
+    settingsConnectionResult: document.getElementById('settings-connection-result'),
+    settingsConnectionTest: document.getElementById('settings-connection-test'),
     settingsCloudEnabled: document.getElementById('settings-cloud-enabled'),
     settingsCloudEmail: document.getElementById('settings-cloud-email'),
     settingsCloudPassword: document.getElementById('settings-cloud-password'),
@@ -1333,6 +1335,32 @@ function setCloudTestResult(message, type = null) {
     els.settingsCloudResult.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
+function setConnectionTestResult(message, type = null) {
+    if (!els.settingsConnectionResult) return;
+    if (!message) {
+        els.settingsConnectionResult.textContent = '';
+        els.settingsConnectionResult.className = 'settings-cloud-result hidden';
+        return;
+    }
+    els.settingsConnectionResult.textContent = message;
+    els.settingsConnectionResult.className = `settings-cloud-result ${type || ''}`.trim();
+    els.settingsConnectionResult.classList.remove('hidden');
+    els.settingsConnectionResult.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function formatDiagnosticsSteps(steps) {
+    if (!steps || typeof steps !== 'object') return '';
+    const order = ['tcp', 'mqtt_connect', 'telemetry', 'cloud_sdk'];
+    return order
+        .filter((key) => steps[key])
+        .map((key) => {
+            const step = steps[key];
+            const icon = step.ok ? '✓' : '✗';
+            return `${icon} ${step.label}: ${step.message}`;
+        })
+        .join('\n');
+}
+
 function formatConnectionError(message) {
     if (!message) return message;
     const lower = message.toLowerCase();
@@ -1345,7 +1373,10 @@ function formatConnectionError(message) {
     if (lower.includes('network is unreachable') || message.includes('[101]')) {
         return 'The network route to the Yarbo robot is unreachable. Check your Wi‑Fi connection and the broker IP in Settings.';
     }
-    if (lower.includes('no telemetry received') || lower.includes('timed out') || lower.includes('timeout')) {
+    if (lower.includes('telemetry_timeout') || lower.includes('no telemetry received') || lower.includes('connected to the yarbo mqtt broker but the robot did not respond')) {
+        return 'Connected to the Yarbo MQTT broker but the robot did not respond. Check the serial number in Settings, wake the robot, and try again.';
+    }
+    if (lower.includes('timed out') || lower.includes('timeout')) {
         return 'Connection to the Yarbo robot timed out. Check the broker IP and serial number in Settings, and make sure the robot is powered on and on your home network.';
     }
     if (lower.includes('establishing a connection to the mqtt broker failed')) {
@@ -1475,8 +1506,12 @@ function updateHeadControls(data) {
 function formatCloudStatus(cloudStatus) {
     if (!cloudStatus) return 'Cloud bridge: unknown';
     const parts = [];
-    if (cloudStatus.sdk_installed) parts.push('SDK installed');
-    else parts.push('SDK not installed (run ./scripts/install.sh)');
+    if (cloudStatus.sdk_installed) {
+        const py = cloudStatus.python_executable || cloudStatus.python;
+        parts.push(py ? `SDK installed (${py})` : 'SDK installed');
+    } else {
+        parts.push(cloudStatus.sdk_path_hint || 'SDK not installed (run ./scripts/install.sh)');
+    }
     if (cloudStatus.configured) parts.push('credentials saved');
     if (cloudStatus.error) parts.push(cloudStatus.error);
     return `Cloud bridge: ${parts.join(' · ')}`;
@@ -1916,6 +1951,7 @@ function openSettingsModal() {
     els.settingsModal.classList.remove('hidden');
     document.body.classList.add('modal-open');
     setCloudTestResult(null);
+    setConnectionTestResult(null);
     setUpdateResult(null);
     loadSettings();
     if (lastUpdateStatus) {
@@ -1931,6 +1967,7 @@ function closeSettingsModal() {
     document.body.classList.remove('modal-open');
     setSettingsError(null);
     setCloudTestResult(null);
+    setConnectionTestResult(null);
     setUpdateResult(null);
 }
 
@@ -2009,6 +2046,45 @@ async function saveSettings(event) {
         setSettingsError(err.message || 'Save failed');
     } finally {
         if (els.settingsSave) els.settingsSave.disabled = false;
+    }
+}
+
+async function testLocalConnection(button) {
+    if (button) button.disabled = true;
+    const brokerHost = els.settingsHost?.value.trim() ?? '';
+    const serial = els.settingsSerial?.value.trim() ?? '';
+    if (!brokerHost || !serial) {
+        setConnectionTestResult('Broker IP and serial number are required.', 'error');
+        if (button) button.disabled = false;
+        return;
+    }
+
+    setConnectionTestResult('Testing local MQTT connection…');
+    try {
+        const res = await fetch('/api/diagnostics.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                broker_host: brokerHost,
+                serial,
+            }),
+        });
+        const data = await parseJsonResponse(res);
+        const stepsText = formatDiagnosticsSteps(data.steps);
+        const summary = data.message || data.error || (data.ok ? 'Local MQTT connection successful.' : 'Connection test failed');
+        const message = stepsText ? `${summary}\n\n${stepsText}` : summary;
+        if (!data.ok) {
+            setConnectionTestResult(message, 'error');
+            return;
+        }
+        setConnectionTestResult(message, 'success');
+        showToast('Local MQTT connection successful', 'success');
+    } catch (err) {
+        const message = err.message || 'Connection test failed';
+        setConnectionTestResult(message, 'error');
+        showToast(message, 'error');
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -2914,6 +2990,7 @@ if (document.getElementById('waypoints-list')) {
 
 els.settingsOpen?.addEventListener('click', openSettingsModal);
 els.settingsForm?.addEventListener('submit', saveSettings);
+els.settingsConnectionTest?.addEventListener('click', (e) => testLocalConnection(e.currentTarget));
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
 els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));
 els.settingsUpdateViewNotes?.addEventListener('click', (e) => viewReleaseNotes(e.currentTarget));

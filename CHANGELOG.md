@@ -6,6 +6,20 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-09
+
+### Added
+- **Test local connection** in Settings: step-by-step diagnostics (TCP port 1883, MQTT connect, robot telemetry, cloud SDK)
+- **Cloud login test**: Test cloud connection now performs a real Yarbo account login when credentials are saved
+
+### Fixed
+- **Cloud SDK detection**: installs `yarbo-data-sdk` into a project `.venv` so the panel always uses the same Python interpreter under systemd
+- **Cloud bridge environment**: PHP passes `HOME` and `PATH` when spawning the Python bridge (matches update script behaviour)
+
+### Changed
+- **Connection errors**: dashboard and diagnostics distinguish MQTT connect failures from robot-not-responding (serial/wake) cases
+- **Telemetry timeout**: increased from 3s to 6s on the status endpoint
+
 ## [1.1.9] - 2026-07-09
 
 ### Fixed
