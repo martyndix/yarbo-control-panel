@@ -4,6 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yarbo Control Panel</title>
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('yarbo_theme') || 'auto';
+                var resolved = theme;
+                if (theme === 'auto') {
+                    resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                document.documentElement.setAttribute('data-theme', resolved);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="/assets/style.css">
     <link
         rel="stylesheet"
@@ -28,19 +42,32 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h1>Yarbo Control Panel</h1>
                 <p class="subtitle">Local MQTT control</p>
             </div>
-            <button
-                type="button"
-                id="settings-open"
-                class="btn btn-secondary btn-settings"
-                aria-haspopup="dialog"
-                aria-controls="settings-modal"
-            >Settings</button>
+            <div class="settings-button-wrap">
+                <button
+                    type="button"
+                    id="settings-open"
+                    class="btn btn-secondary btn-settings"
+                    aria-haspopup="dialog"
+                    aria-controls="settings-modal"
+                >Settings</button>
+                <span
+                    id="settings-update-badge"
+                    class="settings-update-badge hidden"
+                    aria-hidden="true"
+                    title="Panel update available"
+                ></span>
+            </div>
         </header>
 
         <section id="error-banner" class="banner error hidden" role="alert"></section>
 
-        <section class="card status-card">
-            <h2>Status</h2>
+        <div id="panel-sections" class="panel-sections">
+
+        <section class="card panel-section status-card" data-panel-id="status">
+            <div class="section-header section-header--simple">
+                <h2>Status</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
             <div class="status-grid">
                 <div class="stat">
                     <span class="label">Battery</span>
@@ -70,8 +97,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p class="updated">Last updated: <span id="updated-at">never</span></p>
         </section>
 
-        <section class="card diagnostics-card">
-            <h2>Connection &amp; Health</h2>
+        <section class="card panel-section diagnostics-card" data-panel-id="diagnostics">
+            <div class="section-header section-header--simple">
+                <h2>Connection &amp; Health</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
             <div class="diagnostics-grid">
                 <div class="stat">
                     <span class="label">Connection Type</span>
@@ -120,10 +150,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </section>
 
-        <section class="card map-card">
+        <section class="card panel-section map-card" data-panel-id="map">
             <div class="section-header">
                 <h2>Location Map</h2>
-                <div class="map-mode">
+                <div class="section-header-actions">
+                    <div class="map-mode">
                     <label>
                         <input type="radio" name="map-layer" value="street" checked>
                         Street
@@ -132,6 +163,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <input type="radio" name="map-layer" value="satellite">
                         Satellite
                     </label>
+                    </div>
+                    <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
             <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors).</p>
@@ -181,10 +214,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         </section>
 
         <?php if ($camerasEnabled): ?>
-        <section class="card cameras-card">
+        <section class="card panel-section cameras-card" data-panel-id="cameras">
             <div class="section-header">
                 <h2>Cameras</h2>
-                <div class="camera-mode">
+                <div class="section-header-actions">
+                    <div class="camera-mode">
                     <label>
                         <input type="radio" name="camera-mode" value="stream" checked>
                         Live
@@ -193,6 +227,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <input type="radio" name="camera-mode" value="snapshot">
                         Snapshot
                     </label>
+                    </div>
+                    <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
             <p class="hint">The Yarbo app uses cloud video. This panel needs a local RTSP tunnel — see steps below.</p>
@@ -207,8 +243,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         </section>
         <?php endif; ?>
 
-        <section class="card drive-card">
-            <h2>Manual Drive</h2>
+        <section class="card panel-section drive-card" data-panel-id="drive">
+            <div class="section-header section-header--simple">
+                <h2>Manual Drive</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
             <p class="hint">Hold a direction to move. Release to stop. Takes controller from the Yarbo app — use with care.</p>
             <div class="dpad" id="drive-pad">
                 <button type="button" class="btn btn-drive" data-drive="forward" aria-label="Forward">▲</button>
@@ -220,8 +259,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p class="drive-status" id="drive-status">Ready</p>
         </section>
 
-        <section class="card plans-card">
-            <h2>Work Plans</h2>
+        <section class="card panel-section plans-card" data-panel-id="plans">
+            <div class="section-header section-header--simple">
+                <h2>Work Plans</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
             <p class="hint">Load saved plans from the robot, then start at a chosen progress percentage. Some firmware only responds to <code>read_all_plan</code> while the robot is active.</p>
             <div class="plans-toolbar">
                 <label class="plan-percent">
@@ -244,8 +286,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div id="plans-list" class="plans-list"></div>
         </section>
 
-        <section class="card waypoints-card">
-            <h2>Waypoints</h2>
+        <section class="card panel-section waypoints-card" data-panel-id="waypoints">
+            <div class="section-header section-header--simple">
+                <h2>Waypoints</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
             <p class="hint">The robot does not expose a documented MQTT command to list stored waypoints. Save friendly names here (mapped to robot indices) for one-click navigation via <code>start_way_point</code>.</p>
             <div id="waypoints-list" class="waypoints-list"></div>
             <p id="waypoints-note" class="waypoints-note">No saved waypoints yet.</p>
@@ -262,8 +307,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </form>
         </section>
 
-        <section class="card head-card hidden" id="head-controls-card">
-            <h2>Head controls</h2>
+        <section class="card panel-section head-card hidden" id="head-controls-card" data-panel-id="head">
+            <div class="section-header section-header--simple">
+                <h2>Head controls</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
             <p class="hint" id="head-controls-hint">Controls for the attached Yarbo head (mower or snow blower).</p>
             <div id="head-mower-controls" class="head-controls hidden">
                 <label class="settings-field">
@@ -289,19 +337,37 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </section>
 
-        <section class="card controls-card">
-            <h2>Controls</h2>
+        <section class="card panel-section controls-card" data-panel-id="controls">
+            <div class="section-header section-header--simple">
+                <h2>Controls</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
             <p class="hint">Commands acquire controller role and may take control from the Yarbo app.</p>
-            <div class="button-grid">
-                <button type="button" class="btn" data-action="lights_on">Lights On</button>
-                <button type="button" class="btn" data-action="lights_off">Lights Off</button>
-                <button type="button" class="btn" data-action="buzzer">Buzzer</button>
-                <button type="button" class="btn" data-action="pause">Pause</button>
-                <button type="button" class="btn" data-action="resume">Resume</button>
-                <button type="button" class="btn" data-action="return_to_dock">Return to Dock</button>
-                <button type="button" class="btn btn-danger" data-action="stop">Stop</button>
+            <div class="control-tiles" id="control-tiles">
+                <button type="button" class="control-tile" id="control-lights" data-control="lights" aria-pressed="false" title="Turn lights on">
+                    <span class="control-tile-icon" id="control-lights-icon" aria-hidden="true">🔅</span>
+                    <span class="control-tile-label" id="control-lights-label">Off</span>
+                </button>
+                <button type="button" class="control-tile" data-action="buzzer" title="Sound buzzer">
+                    <span class="control-tile-icon" aria-hidden="true">🔊</span>
+                    <span class="control-tile-label">Buzzer</span>
+                </button>
+                <button type="button" class="control-tile" id="control-pause-resume" data-control="pause_resume" title="Pause or resume">
+                    <span class="control-tile-icon" id="control-pause-resume-icon" aria-hidden="true">⏸</span>
+                    <span class="control-tile-label" id="control-pause-resume-label">Pause</span>
+                </button>
+                <button type="button" class="control-tile" data-action="return_to_dock" title="Return to dock">
+                    <span class="control-tile-icon" aria-hidden="true">🏠</span>
+                    <span class="control-tile-label">Dock</span>
+                </button>
+                <button type="button" class="control-tile control-tile-danger" data-action="stop" title="Emergency stop">
+                    <span class="control-tile-icon" aria-hidden="true">⛔</span>
+                    <span class="control-tile-label">Stop</span>
+                </button>
             </div>
         </section>
+
+        </div>
 
         <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
             <button type="button" class="modal-backdrop" data-settings-close aria-label="Close settings"></button>
@@ -366,6 +432,27 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p id="settings-cloud-status" class="hint">Cloud bridge: checking…</p>
                             <p id="settings-cloud-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
+                        </section>
+
+                        <section class="settings-section">
+                            <h3 class="settings-subtitle">Appearance</h3>
+                            <p class="hint">Theme and dashboard layout are saved in this browser only.</p>
+                            <fieldset class="settings-theme-fieldset">
+                                <legend class="label">Colour scheme</legend>
+                                <label class="settings-inline-radio">
+                                    <input type="radio" name="panel_theme" value="light">
+                                    <span>Light</span>
+                                </label>
+                                <label class="settings-inline-radio">
+                                    <input type="radio" name="panel_theme" value="dark">
+                                    <span>Dark</span>
+                                </label>
+                                <label class="settings-inline-radio">
+                                    <input type="radio" name="panel_theme" value="auto" checked>
+                                    <span>Auto (system)</span>
+                                </label>
+                            </fieldset>
+                            <button type="button" class="btn btn-secondary" id="settings-reset-layout">Reset section order</button>
                         </section>
 
                         <section class="settings-section">

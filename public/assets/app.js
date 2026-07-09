@@ -45,6 +45,7 @@ const els = {
     waypointsList: document.getElementById('waypoints-list'),
     waypointsNote: document.getElementById('waypoints-note'),
     settingsOpen: document.getElementById('settings-open'),
+    settingsUpdateBadge: document.getElementById('settings-update-badge'),
     settingsModal: document.getElementById('settings-modal'),
     settingsForm: document.getElementById('settings-form'),
     settingsHost: document.getElementById('settings-host'),
@@ -74,6 +75,14 @@ const els = {
     mapLoading: document.getElementById('map-loading'),
     mapLoadingText: document.getElementById('map-loading-text'),
     mapEditTip: document.getElementById('map-edit-tip'),
+    panelSections: document.getElementById('panel-sections'),
+    controlLights: document.getElementById('control-lights'),
+    controlLightsIcon: document.getElementById('control-lights-icon'),
+    controlLightsLabel: document.getElementById('control-lights-label'),
+    controlPauseResume: document.getElementById('control-pause-resume'),
+    controlPauseResumeIcon: document.getElementById('control-pause-resume-icon'),
+    controlPauseResumeLabel: document.getElementById('control-pause-resume-label'),
+    settingsResetLayout: document.getElementById('settings-reset-layout'),
     headControlsCard: document.getElementById('head-controls-card'),
     headMowerControls: document.getElementById('head-mower-controls'),
     headSnowControls: document.getElementById('head-snow-controls'),
@@ -96,6 +105,10 @@ const DRIVE_VECTORS = {
 const MAP_CACHE_KEY = 'yarbo_map_cache';
 const MAP_VIEW_KEY = 'yarbo_map_view';
 const MAP_CENTER_ZOOM = 20;
+const PANEL_ORDER_KEY = 'yarbo_panel_order';
+const THEME_KEY = 'yarbo_theme';
+const LIGHTS_ON_KEY = 'yarbo_lights_on';
+const DEFAULT_PANEL_ORDER = ['status', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls'];
 
 const ZONE_COLORS = {
     clean: { color: '#67b3ff', fill: '#67b3ff' },
@@ -138,6 +151,265 @@ let mapEditMode = false;
 let mapViewSaveTimer = null;
 let mapLoadingTimer = null;
 let mapLoadingStartedAt = 0;
+let lightsOn = false;
+let draggedPanelId = null;
+let themeMediaQuery = null;
+
+function resolveTheme(mode) {
+    if (mode === 'light' || mode === 'dark') return mode;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function applyTheme(mode) {
+    document.documentElement.setAttribute('data-theme', resolveTheme(mode));
+}
+
+function loadThemePreference() {
+    try {
+        return localStorage.getItem(THEME_KEY) || 'auto';
+    } catch {
+        return 'auto';
+    }
+}
+
+function saveThemePreference(mode) {
+    try {
+        localStorage.setItem(THEME_KEY, mode);
+    } catch {
+        // ignore
+    }
+    applyTheme(mode);
+}
+
+function initTheme() {
+    const mode = loadThemePreference();
+    applyTheme(mode);
+    document.querySelectorAll('input[name="panel_theme"]').forEach((radio) => {
+        radio.checked = radio.value === mode;
+        radio.addEventListener('change', () => {
+            if (radio.checked) saveThemePreference(radio.value);
+        });
+    });
+    themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    if (themeMediaQuery.addEventListener) {
+        themeMediaQuery.addEventListener('change', () => {
+            if (loadThemePreference() === 'auto') applyTheme('auto');
+        });
+    }
+}
+
+function getPanelSections() {
+    return Array.from(document.querySelectorAll('#panel-sections .panel-section'));
+}
+
+function loadPanelOrder() {
+    try {
+        const raw = localStorage.getItem(PANEL_ORDER_KEY);
+        if (!raw) return null;
+        const order = JSON.parse(raw);
+        return Array.isArray(order) ? order : null;
+    } catch {
+        return null;
+    }
+}
+
+function savePanelOrder() {
+    const order = getPanelSections().map((section) => section.dataset.panelId).filter(Boolean);
+    try {
+        localStorage.setItem(PANEL_ORDER_KEY, JSON.stringify(order));
+    } catch {
+        // ignore
+    }
+}
+
+function applyPanelOrder(order) {
+    const container = els.panelSections;
+    if (!container || !Array.isArray(order)) return;
+
+    const sections = new Map(
+        getPanelSections().map((section) => [section.dataset.panelId, section]),
+    );
+
+    order.forEach((id) => {
+        const section = sections.get(id);
+        if (section) container.appendChild(section);
+    });
+
+    getPanelSections().forEach((section) => {
+        const id = section.dataset.panelId;
+        if (id && !order.includes(id)) {
+            container.appendChild(section);
+        }
+    });
+}
+
+function resetPanelOrder() {
+    try {
+        localStorage.removeItem(PANEL_ORDER_KEY);
+    } catch {
+        // ignore
+    }
+    const order = DEFAULT_PANEL_ORDER.filter((id) => document.querySelector(`[data-panel-id="${id}"]`));
+    applyPanelOrder(order);
+    savePanelOrder();
+}
+
+function initPanelDragDrop() {
+    const container = els.panelSections;
+    if (!container) return;
+
+    const saved = loadPanelOrder();
+    if (saved) {
+        applyPanelOrder(saved.filter((id) => document.querySelector(`[data-panel-id="${id}"]`)));
+    }
+
+    container.querySelectorAll('.section-drag-handle').forEach((handle) => {
+        handle.addEventListener('dragstart', (event) => {
+            const section = handle.closest('.panel-section');
+            if (!section) return;
+            draggedPanelId = section.dataset.panelId || null;
+            section.classList.add('panel-section--dragging');
+            event.dataTransfer?.setData('text/plain', draggedPanelId || '');
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+        });
+
+        handle.addEventListener('dragend', () => {
+            getPanelSections().forEach((section) => {
+                section.classList.remove('panel-section--dragging', 'panel-section--drop-target');
+            });
+            draggedPanelId = null;
+            savePanelOrder();
+        });
+    });
+
+    getPanelSections().forEach((section) => {
+        section.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            if (!draggedPanelId || section.dataset.panelId === draggedPanelId) return;
+            section.classList.add('panel-section--drop-target');
+        });
+
+        section.addEventListener('dragleave', () => {
+            section.classList.remove('panel-section--drop-target');
+        });
+
+        section.addEventListener('drop', (event) => {
+            event.preventDefault();
+            section.classList.remove('panel-section--drop-target');
+            const source = document.querySelector(`[data-panel-id="${draggedPanelId}"]`);
+            if (!source || source === section) return;
+
+            const rect = section.getBoundingClientRect();
+            const before = event.clientY < rect.top + rect.height / 2;
+            if (before) {
+                container.insertBefore(source, section);
+            } else {
+                container.insertBefore(source, section.nextSibling);
+            }
+            savePanelOrder();
+        });
+    });
+}
+
+function applyLightsStateFromStatus(data) {
+    if (typeof data?.lights_on === 'boolean') {
+        lightsOn = data.lights_on;
+        try {
+            localStorage.setItem(LIGHTS_ON_KEY, lightsOn ? '1' : '0');
+        } catch {
+            // ignore
+        }
+    }
+}
+
+function updateLightsTile() {
+    if (!els.controlLights) return;
+    els.controlLights.classList.toggle('is-active', lightsOn);
+    els.controlLights.setAttribute('aria-pressed', lightsOn ? 'true' : 'false');
+    els.controlLights.title = lightsOn ? 'Turn lights off' : 'Turn lights on';
+    if (els.controlLightsIcon) {
+        els.controlLightsIcon.textContent = lightsOn ? '💡' : '🔅';
+    }
+    if (els.controlLightsLabel) {
+        els.controlLightsLabel.textContent = lightsOn ? 'On' : 'Off';
+    }
+}
+
+function updateControlTiles(data) {
+    applyLightsStateFromStatus(data);
+    updateLightsTile();
+    const paused = Boolean(data?.planning_paused);
+    if (els.controlPauseResumeIcon) {
+        els.controlPauseResumeIcon.textContent = paused ? '▶' : '⏸';
+    }
+    if (els.controlPauseResumeLabel) {
+        els.controlPauseResumeLabel.textContent = paused ? 'Resume' : 'Pause';
+    }
+    if (els.controlPauseResume) {
+        els.controlPauseResume.title = paused ? 'Resume plan' : 'Pause plan';
+    }
+}
+
+async function toggleLights(button) {
+    const action = lightsOn ? 'lights_off' : 'lights_on';
+    button.disabled = true;
+    try {
+        const res = await fetch('/api/command.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=${encodeURIComponent(action)}`,
+        });
+        const data = await res.json();
+        if (data.ok) {
+            lightsOn = action === 'lights_on';
+            try {
+                localStorage.setItem(LIGHTS_ON_KEY, lightsOn ? '1' : '0');
+            } catch {
+                // ignore
+            }
+            updateLightsTile();
+            showToast(lightsOn ? 'Lights on' : 'Lights off', 'success');
+            await fetchStatus();
+        } else {
+            showToast(data.error || 'Command failed', 'error');
+        }
+    } catch (err) {
+        showToast(err.message || 'Network error', 'error');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function initAppearance() {
+    initTheme();
+    initPanelDragDrop();
+    try {
+        lightsOn = localStorage.getItem(LIGHTS_ON_KEY) === '1';
+    } catch {
+        lightsOn = false;
+    }
+    updateLightsTile();
+
+    els.settingsResetLayout?.addEventListener('click', () => {
+        resetPanelOrder();
+        showToast('Section order reset', 'success');
+    });
+
+    els.controlLights?.addEventListener('click', (event) => {
+        toggleLights(event.currentTarget);
+    });
+
+    els.controlPauseResume?.addEventListener('click', (event) => {
+        const paused = els.controlPauseResumeLabel?.textContent === 'Resume';
+        sendCommand(paused ? 'resume' : 'pause', event.currentTarget);
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            refreshUpdateBadge();
+        }
+    });
+}
 
 function zoneStyle(feature) {
     const zoneType = feature?.properties?.zone_type || 'default';
@@ -1004,6 +1276,7 @@ function updateStatus(data) {
     renderDiagnostics(data);
     updatePlanActivity(data);
     updateHeadControls(data);
+    updateControlTiles(data);
 }
 
 function renderDiagnostics(data) {
@@ -1662,6 +1935,28 @@ async function testCloudConnection(button) {
     }
 }
 
+function setUpdateBadge(visible) {
+    if (els.settingsUpdateBadge) {
+        els.settingsUpdateBadge.classList.toggle('hidden', !visible);
+    }
+    if (els.settingsOpen) {
+        els.settingsOpen.setAttribute('aria-label', visible ? 'Settings (update available)' : 'Settings');
+    }
+}
+
+async function refreshUpdateBadge() {
+    try {
+        const res = await fetch('/api/update.php', { cache: 'no-store' });
+        const data = await parseJsonResponse(res);
+        const available = Boolean(data?.git_install && data?.ok && data?.update_available);
+        setUpdateBadge(available);
+        return data;
+    } catch {
+        setUpdateBadge(false);
+        return null;
+    }
+}
+
 function formatUpdateStatus(data) {
     if (!data?.git_install) {
         return 'Not a git clone — reinstall with git clone to enable updates.';
@@ -1708,9 +2003,11 @@ async function loadUpdateStatus() {
         const data = await parseJsonResponse(res);
         els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
         setUpdateButtonState(data);
+        setUpdateBadge(Boolean(data?.git_install && data?.ok && data?.update_available));
     } catch (err) {
         els.settingsUpdateStatus.textContent = err.message || 'Could not check for updates';
         if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
+        setUpdateBadge(false);
     } finally {
         if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
     }
@@ -1733,8 +2030,10 @@ async function checkPanelUpdates(button) {
         setUpdateButtonState(data);
         if (data.update_available) {
             setUpdateResult('A newer version is available. Click Update to latest.', 'success');
+            setUpdateBadge(true);
         } else {
             setUpdateResult('You are on the latest version.', 'success');
+            setUpdateBadge(false);
         }
     } catch (err) {
         setUpdateResult(err.message || 'Update check failed', 'error');
@@ -1908,6 +2207,7 @@ async function runPanelUpdate(button) {
             els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
         }
         setUpdateButtonState(data);
+        setUpdateBadge(false);
     } catch (err) {
         if (isUpdateNetworkError(err)) {
             setUpdateResult('Update may be in progress — waiting for panel to restart…', 'success');
@@ -2226,6 +2526,10 @@ document.querySelectorAll('[data-action]').forEach((button) => {
         if (action === 'stop' && !confirm('Send graceful stop to Yarbo?')) return;
         if (action === 'return_to_dock' && !confirm('Send Yarbo back to the dock?')) return;
         sendCommand(action, button);
+        if (action === 'buzzer') {
+            button.classList.add('is-pulse');
+            setTimeout(() => button.classList.remove('is-pulse'), 350);
+        }
     });
 });
 
@@ -2326,6 +2630,8 @@ if (document.getElementById('map')) {
     initMap();
 }
 setupDrivePad();
+initAppearance();
 loadSettings().catch(() => {});
+refreshUpdateBadge();
 fetchStatus();
 setInterval(fetchStatus, POLL_INTERVAL_MS);

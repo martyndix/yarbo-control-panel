@@ -16,6 +16,17 @@ final class YarboTelemetry
         99 => 'Trimmer',
     ];
 
+    /** @var list<string> */
+    private const LED_CHANNELS = [
+        'led_head',
+        'led_left_w',
+        'led_right_w',
+        'body_left_r',
+        'body_right_r',
+        'tail_left_r',
+        'tail_right_r',
+    ];
+
     public static function parse(array $raw): array
     {
         $battery = $raw['BatteryMSG']['capacity'] ?? null;
@@ -90,6 +101,7 @@ final class YarboTelemetry
             'head_type'           => $headType !== null ? (int) $headType : null,
             'head_type_name'      => self::HEAD_TYPES[(int) $headType] ?? 'Unknown',
             'planning_paused'     => (bool) ($raw['StateMSG']['planning_paused'] ?? 0),
+            'lights_on'           => self::parseLightsOn($raw),
             'returning_to_dock'   => (bool) ($raw['StateMSG']['on_going_recharging'] ?? 0),
             'plan_running'        => (bool) ($raw['StateMSG']['on_going_planning'] ?? 0),
             'plan_status'         => [
@@ -125,6 +137,48 @@ final class YarboTelemetry
             ],
             'updated_at'          => gmdate('c'),
         ];
+    }
+
+    /**
+     * Derive whether any LED channel is lit from telemetry, or null if unknown.
+     */
+    public static function parseLightsOn(array $raw): ?bool
+    {
+        $levels = [];
+        foreach (self::LED_CHANNELS as $channel) {
+            $value = self::findNestedNumeric($raw, $channel);
+            if ($value !== null) {
+                $levels[] = $value;
+            }
+        }
+
+        if ($levels === []) {
+            return null;
+        }
+
+        return max($levels) > 0;
+    }
+
+    /**
+     * @return float|null
+     */
+    private static function findNestedNumeric(array $data, string $key): ?float
+    {
+        if (array_key_exists($key, $data) && is_numeric($data[$key])) {
+            return (float) $data[$key];
+        }
+
+        foreach ($data as $value) {
+            if (!is_array($value)) {
+                continue;
+            }
+            $found = self::findNestedNumeric($value, $key);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
     }
 
     private static function connectionTypeName(mixed $netTypeRaw, mixed $halowStatusRaw): string

@@ -6,7 +6,17 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-07-09
+
+### Added
+- **Settings update badge**: green dot on the Settings button when a panel update is available (checked automatically on page load)
+- **Lights control state**: tile icon and label reflect on/off (`💡` On / `🔅` Off), synced from robot telemetry when available
+- **Reorderable dashboard sections**: drag ⋮⋮ handles to reorder cards; order saved in browser `localStorage`
+- **Light / dark / auto themes**: Settings → Appearance (auto follows system colour scheme)
+- **Compact control tiles**: icon-style controls with lights toggle, pause/resume from telemetry, and smaller footprint
+
 ### Fixed
+- **Map zones panel in day mode**: zone list background now follows the active theme instead of staying dark
 - **Settings update hang**: panel update polling now uses fetch timeouts, remembers restart progress, and reloads when the target git commit is detected (fixes "Waiting for panel to restart" stuck after a successful update)
 
 ## [1.1.4] - 2026-07-06

@@ -1,4 +1,5 @@
-:root {
+:root,
+html[data-theme="dark"] {
     --bg: #0f1419;
     --surface: #1a2332;
     --border: #2d3a4f;
@@ -12,6 +13,28 @@
     --warning-text: #f0c674;
     --error-bg: #3d1a1a;
     --error-text: #f07474;
+    --card: #1a2332;
+    --map-loading-bg: rgba(11, 16, 24, 0.82);
+    --control-tile-active-glow: rgba(125, 222, 160, 0.35);
+}
+
+html[data-theme="light"] {
+    --bg: #eef2f7;
+    --surface: #ffffff;
+    --border: #c5d0de;
+    --text: #1a2332;
+    --muted: #5a6b82;
+    --accent: #2d8a4e;
+    --accent-hover: #36a35c;
+    --danger: #c94c4c;
+    --danger-hover: #b33f3f;
+    --warning-bg: #fff4dd;
+    --warning-text: #8a6418;
+    --error-bg: #fdeaea;
+    --error-text: #a83232;
+    --card: #ffffff;
+    --map-loading-bg: rgba(255, 255, 255, 0.88);
+    --control-tile-active-glow: rgba(45, 138, 78, 0.25);
 }
 
 * {
@@ -57,6 +80,33 @@ header h1 {
     margin-top: 0.15rem;
     padding: 0.45rem 0.75rem;
     font-size: 0.85rem;
+}
+
+.settings-button-wrap {
+    position: relative;
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+}
+
+.settings-button-wrap .btn-settings {
+    margin-top: 0;
+}
+
+.settings-update-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--accent);
+    pointer-events: none;
+}
+
+.settings-update-badge.hidden {
+    display: none;
 }
 
 .modal {
@@ -239,6 +289,11 @@ body.modal-open {
     color: var(--muted);
 }
 
+.section-header--simple h2,
+.section-header h2 {
+    margin: 0;
+}
+
 .status-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -316,6 +371,110 @@ body.modal-open {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
+}
+
+.control-tiles {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.control-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    min-height: 4.5rem;
+    padding: 0.5rem 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+}
+
+.control-tile:hover:not(:disabled) {
+    background: var(--border);
+    border-color: var(--accent);
+}
+
+.control-tile:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.control-tile.is-active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--control-tile-active-glow);
+}
+
+.control-tile[data-control="lights"]:not(.is-active) .control-tile-icon {
+    opacity: 0.55;
+}
+
+.control-tile[data-control="lights"].is-active .control-tile-icon {
+    opacity: 1;
+}
+
+.control-tile.is-pulse {
+    animation: control-pulse 0.35s ease;
+}
+
+@keyframes control-pulse {
+    50% {
+        transform: scale(0.95);
+    }
+}
+
+.control-tile-icon {
+    font-size: 1.75rem;
+    line-height: 1;
+}
+
+.control-tile-label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--muted);
+    text-align: center;
+}
+
+.control-tile-danger {
+    grid-column: span 2;
+    border-color: var(--danger);
+    opacity: 0.9;
+}
+
+.control-tile-danger:hover:not(:disabled) {
+    border-color: var(--danger-hover);
+}
+
+.control-tile-danger .control-tile-label {
+    color: var(--danger);
+}
+
+.settings-theme-fieldset {
+    margin: 0 0 0.75rem;
+    padding: 0;
+    border: 0;
+}
+
+.settings-theme-fieldset .label {
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.settings-inline-radio {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+    font-size: 0.9rem;
+    cursor: pointer;
 }
 
 .btn {
@@ -425,6 +584,72 @@ body.modal-open {
     margin: 0;
 }
 
+.section-header--simple {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.section-header--simple h2 {
+    margin: 0;
+}
+
+.section-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.section-drag-handle {
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1;
+    cursor: grab;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+}
+
+.section-drag-handle:hover {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
+.section-drag-handle:active {
+    cursor: grabbing;
+}
+
+.panel-section {
+    transition: opacity 0.15s, box-shadow 0.15s;
+}
+
+.panel-section--dragging {
+    opacity: 0.45;
+}
+
+.panel-section--drop-target {
+    box-shadow: 0 0 0 2px var(--accent);
+}
+
+.panel-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.panel-sections .card {
+    margin-bottom: 0;
+}
+
 .camera-mode {
     display: flex;
     gap: 0.75rem;
@@ -477,7 +702,7 @@ body.modal-open {
     gap: 0.75rem;
     padding: 1rem;
     border-radius: 10px;
-    background: rgba(11, 16, 24, 0.82);
+    background: var(--map-loading-bg);
     backdrop-filter: blur(2px);
 }
 
@@ -569,8 +794,8 @@ body.modal-open {
 }
 
 .map-center-robot:hover {
-    background: #1a2332;
-    color: #7ddea0;
+    background: var(--border);
+    color: var(--accent-hover);
 }
 
 .map-inspector {
@@ -578,7 +803,7 @@ body.modal-open {
     padding: 0.65rem 0.75rem;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #0b1018;
+    background: var(--surface);
 }
 
 .map-inspector summary {
@@ -1069,6 +1294,14 @@ body.modal-open {
 
     .diagnostics-grid {
         grid-template-columns: 1fr;
+    }
+
+    .control-tiles {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .control-tile-danger {
+        grid-column: span 3;
     }
 
     .plan-item {
