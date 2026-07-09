@@ -1245,9 +1245,30 @@ function setCloudTestResult(message, type = null) {
     els.settingsCloudResult.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
+function formatConnectionError(message) {
+    if (!message) return message;
+    const lower = message.toLowerCase();
+    if (lower.includes('connection refused') || message.includes('[111]')) {
+        return 'Cannot reach the Yarbo robot at the configured IP address (MQTT port 1883 refused the connection). Open Settings and check the broker IP matches your Yarbo base station, the robot is powered on, and this device is on the same home network.';
+    }
+    if (lower.includes('no route to host') || message.includes('[113]')) {
+        return 'Cannot find the Yarbo robot on the network at the configured IP address. Verify the broker IP in Settings and that you are on the same Wi‑Fi or LAN.';
+    }
+    if (lower.includes('network is unreachable') || message.includes('[101]')) {
+        return 'The network route to the Yarbo robot is unreachable. Check your Wi‑Fi connection and the broker IP in Settings.';
+    }
+    if (lower.includes('timed out') || lower.includes('timeout')) {
+        return 'Connection to the Yarbo robot timed out. Check the broker IP and serial number in Settings, and make sure the robot is powered on and on your home network.';
+    }
+    if (lower.includes('establishing a connection to the mqtt broker failed')) {
+        return 'Cannot connect to the Yarbo MQTT broker. Check the broker IP and port (1883) in Settings, and confirm the robot is powered on.';
+    }
+    return message;
+}
+
 function setError(message) {
     if (message) {
-        els.errorBanner.textContent = message;
+        els.errorBanner.textContent = formatConnectionError(message);
         els.errorBanner.classList.remove('hidden');
     } else {
         els.errorBanner.classList.add('hidden');

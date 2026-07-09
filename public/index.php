@@ -40,7 +40,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         <header class="app-header">
             <div>
                 <h1>Yarbo Control Panel</h1>
-                <p class="subtitle">Local MQTT control</p>
             </div>
             <div class="settings-button-wrap">
                 <button

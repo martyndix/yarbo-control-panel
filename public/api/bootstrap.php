@@ -24,6 +24,11 @@ function yarbo_client(array $config): \Yarbo\YarboMqtt
     );
 }
 
+function friendly_error(Throwable $e): string
+{
+    return \Yarbo\YarboErrors::friendly($e->getMessage());
+}
+
 function json_response(array $data, int $status = 200): void
 {
     http_response_code($status);

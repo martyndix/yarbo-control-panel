@@ -26,5 +26,5 @@ try {
         'localhost_tunnel' => $probe['localhost_tunnel'] ?? false,
     ]);
 } catch (Throwable $e) {
-    json_response(['ok' => false, 'error' => $e->getMessage()], 500);
+    json_response(['ok' => false, 'error' => friendly_error($e)], 500);
 }

@@ -160,6 +160,6 @@ try {
 } catch (Throwable $e) {
     json_response([
         'ok' => false,
-        'error' => $e->getMessage(),
+        'error' => friendly_error($e),
     ], 500);
 }

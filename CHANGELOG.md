@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-07-09
+
+### Changed
+- **Header**: removed "Local MQTT control" subtitle from the top of the panel
+
+### Fixed
+- **MQTT connection errors**: raw broker errors (e.g. "Connection refused") are now shown as plain-language guidance pointing users to Settings → Connection (broker IP, robot powered on, same network)
+
 ## [1.1.5] - 2026-07-09
 
 ### Added

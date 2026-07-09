@@ -24,5 +24,5 @@ try {
 } catch (Throwable $e) {
     http_response_code(502);
     header('Content-Type: application/json');
-    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+    echo json_encode(['ok' => false, 'error' => friendly_error($e)]);
 }

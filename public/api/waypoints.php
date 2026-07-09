@@ -80,7 +80,7 @@ if ($action === 'go' || !isset($input['action'])) {
             'command' => 'start_way_point',
         ]);
     } catch (Throwable $e) {
-        json_response(['ok' => false, 'error' => $e->getMessage()], 500);
+        json_response(['ok' => false, 'error' => friendly_error($e)], 500);
     }
 }
 
