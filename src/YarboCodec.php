@@ -8,10 +8,14 @@ final class YarboCodec
 {
     /**
      * Encode a payload dict to zlib-compressed JSON bytes (wire format for all MQTT publishes).
+     *
+     * Empty arrays encode as JSON objects `{}` (python-yarbo / HA), not lists `[]`.
      */
     public static function encode(array $payload): string
     {
-        $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        // PHP's json_encode([]) produces "[]"; the robot expects "{}".
+        $toEncode = $payload === [] ? new \stdClass() : $payload;
+        $json = json_encode($toEncode, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
         $compressed = gzcompress($json);
         if ($compressed === false) {

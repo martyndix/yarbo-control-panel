@@ -6,6 +6,35 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-14
+
+### Safety
+- **Manual drive**: when testing the D-pad, use **extreme care**. Clear the area first — keep people, pets, furniture, and obstacles well out of the way. Assume the robot may accelerate or turn immediately while you hold a direction, and be ready to release / hit Stop. Manual control is for open, flat ground only; you are responsible for collision avoidance.
+
+### Fixed
+- **Buzzer**: now works via the persistent MQTT agent — official `set_sound_param` + `song_cmd` (`find yarbo`) plus millisecond-timestamped `cmd_buzzer`
+- **Manual drive**: D-pad `cmd_vel` now moves the robot (firmware 3.13 ignores string `set_working_state: "manual"`; panel uses wake `state: 1`, `emergency_unlock`, and ~10 Hz `cmd_vel` bursts)
+- **Lights sticking on**: sustained lights need app-controller hold + soft wake (`set_working_state=1`); no more connect–disconnect flash-then-off when the agent is running
+- **Controller speech spam**: keepalive / lights / drive / buzzer no longer re-run `get_controller` (only explicit Controller On announces)
+- **False charging / charge-pad block**: Charging UI and drive warnings use only `StateMSG.charging_status` (`BodyMsg.recharge_state` can false-positive)
+- **Local php -S hang / Settings “Load failed”**: status polling pauses while Settings is open; fail-fast on unreachable MQTT
+- **Controls feeling dead on php -S**: drive pulses no longer wait on a long controller ack; status polling pauses while driving
+- **Agent keepalive / false success**: default agent is `scripts/mqtt_agent.py` (python-yarbo) so lights/drive stay reliable; PHP agent alone could look “ok” after the broker drop
+- **Empty MQTT payloads**: PHP encodes empty payloads as JSON `{}` (matches python-yarbo / HA)
+- **MQTT agent spawn cwd**: auto-started agent now `cd`s to the project root so `config.php` resolves
+
+### Added
+- **Persistent MQTT agent** (`scripts/mqtt_agent.py` / `mqtt_agent.php`, `./scripts/dev.sh`) — long-lived broker session for controller, lights, buzzer, and drive
+- **Controller On/Off tile** (Controls + Manual Drive) — explicit app-controller hold with soft keepalive
+- **Controller gate** — lights / buzzer / pause / dock / drive pad require Connected controller
+- **`power_fault` awareness** — status Error line and drive banner when firmware reports a power fault that may lock chassis/audio
+
+### Changed
+- **Local controls** aligned with [python-yarbo](https://github.com/markus-lassfolk/python-yarbo) / [home-assistant-yarbo](https://github.com/markus-lassfolk/home-assistant-yarbo)
+- Prefer `./scripts/dev.sh` for local development (agent + panel); hard-refresh the browser and close the official Yarbo app while testing controls
+- Status prefers the MQTT agent so polling does not open competing MQTT clients
+- Lights tile tracks agent desired state (firmware LED telemetry is often unreliable)
+
 ## [1.2.0] - 2026-07-09
 
 ### Added

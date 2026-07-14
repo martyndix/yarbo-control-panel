@@ -87,10 +87,10 @@ ensure_yarbo_venv() {
     return 0
   fi
 
-  echo "    Installing yarbo-data-sdk into project venv"
+  echo "    Installing yarbo-data-sdk + python-yarbo into project venv"
   err_file="$(mktemp)"
   if "$venv_py" -m pip install --upgrade pip >/dev/null 2>"$err_file" \
-    && "$venv_py" -m pip install yarbo-data-sdk 2>"$err_file"; then
+    && "$venv_py" -m pip install yarbo-data-sdk python-yarbo 2>"$err_file"; then
     rm -f "$err_file"
     yarbo_sdk_installed "$venv_py"
     return $?
@@ -98,7 +98,7 @@ ensure_yarbo_venv() {
 
   if grep -qi 'externally-managed-environment' "$err_file" 2>/dev/null; then
     rm -f "$err_file"
-    if "$venv_py" -m pip install yarbo-data-sdk; then
+    if "$venv_py" -m pip install yarbo-data-sdk python-yarbo; then
       yarbo_sdk_installed "$venv_py"
       return $?
     fi

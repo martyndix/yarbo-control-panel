@@ -28,6 +28,7 @@ function panel_version(): string
 }
 
 $panelVersion = panel_version();
+$assetVersion = $panelVersion . '.' . (string) (@filemtime(__DIR__ . '/assets/app.js') ?: time());
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -49,7 +50,7 @@ $panelVersion = panel_version();
             }
         })();
     </script>
-    <link rel="stylesheet" href="/assets/style.css?v=<?= htmlspecialchars($panelVersion, ENT_QUOTES, 'UTF-8') ?>">
+    <link rel="stylesheet" href="/assets/style.css?v=<?= htmlspecialchars($assetVersion, ENT_QUOTES, 'UTF-8') ?>">
     <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -278,13 +279,21 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Manual Drive</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Hold a direction to move. Release to stop. Takes controller from the Yarbo app — use with care.</p>
+            <p class="hint">Connect the controller below first, then hold a direction to move. Release to stop. Use only on flat, clear ground.</p>
+            <p class="drive-block-banner hidden" id="drive-block-banner" role="status"></p>
+            <div class="drive-controller-row">
+                <button type="button" class="control-tile" id="control-controller-drive" data-control="controller" aria-pressed="false" title="Connect app controller">
+                    <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>
+                    <span class="control-tile-label" data-controller-label>Off</span>
+                </button>
+                <p class="drive-controller-note" id="drive-controller-note">Controller required for drive.</p>
+            </div>
             <div class="dpad" id="drive-pad">
-                <button type="button" class="btn btn-drive" data-drive="forward" aria-label="Forward">▲</button>
-                <button type="button" class="btn btn-drive" data-drive="left" aria-label="Turn left">◀</button>
+                <button type="button" class="btn btn-drive" data-drive="forward" aria-label="Forward" disabled>▲</button>
+                <button type="button" class="btn btn-drive" data-drive="left" aria-label="Turn left" disabled>◀</button>
                 <button type="button" class="btn btn-drive btn-drive-stop" data-drive="stop" aria-label="Stop">■</button>
-                <button type="button" class="btn btn-drive" data-drive="right" aria-label="Turn right">▶</button>
-                <button type="button" class="btn btn-drive" data-drive="backward" aria-label="Backward">▼</button>
+                <button type="button" class="btn btn-drive" data-drive="right" aria-label="Turn right" disabled>▶</button>
+                <button type="button" class="btn btn-drive" data-drive="backward" aria-label="Backward" disabled>▼</button>
             </div>
             <p class="drive-status" id="drive-status">Ready</p>
         </section>
@@ -372,21 +381,25 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Controls</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Commands acquire controller role and may take control from the Yarbo app.</p>
+            <p class="hint">Turn Controller on first (wakes the robot so lights/drive stick). Close the official Yarbo app while using these controls.</p>
             <div class="control-tiles" id="control-tiles">
-                <button type="button" class="control-tile" id="control-lights" data-control="lights" aria-pressed="false" title="Turn lights on">
+                <button type="button" class="control-tile" id="control-controller" data-control="controller" aria-pressed="false" title="Connect app controller">
+                    <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>
+                    <span class="control-tile-label" data-controller-label>Off</span>
+                </button>
+                <button type="button" class="control-tile" id="control-lights" data-control="lights" data-needs-controller aria-pressed="false" title="Turn lights on" disabled>
                     <span class="control-tile-icon" id="control-lights-icon" aria-hidden="true">🔅</span>
                     <span class="control-tile-label" id="control-lights-label">Off</span>
                 </button>
-                <button type="button" class="control-tile" data-action="buzzer" title="Sound buzzer">
+                <button type="button" class="control-tile" data-action="buzzer" data-needs-controller title="Sound buzzer" disabled>
                     <span class="control-tile-icon" aria-hidden="true">🔊</span>
                     <span class="control-tile-label">Buzzer</span>
                 </button>
-                <button type="button" class="control-tile" id="control-pause-resume" data-control="pause_resume" title="Pause or resume">
+                <button type="button" class="control-tile" id="control-pause-resume" data-control="pause_resume" data-needs-controller title="Pause or resume" disabled>
                     <span class="control-tile-icon" id="control-pause-resume-icon" aria-hidden="true">⏸</span>
                     <span class="control-tile-label" id="control-pause-resume-label">Pause</span>
                 </button>
-                <button type="button" class="control-tile" data-action="return_to_dock" title="Return to dock">
+                <button type="button" class="control-tile" data-action="return_to_dock" data-needs-controller title="Return to dock" disabled>
                     <span class="control-tile-icon" aria-hidden="true">🏠</span>
                     <span class="control-tile-label">Dock</span>
                 </button>
@@ -558,6 +571,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"
         crossorigin=""
     ></script>
-    <script src="/assets/app.js?v=<?= htmlspecialchars($panelVersion, ENT_QUOTES, 'UTF-8') ?>"></script>
+    <script src="/assets/app.js?v=<?= htmlspecialchars($assetVersion, ENT_QUOTES, 'UTF-8') ?>"></script>
 </body>
 </html>

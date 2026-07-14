@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+use Yarbo\YarboMqttAgentClient;
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     json_response(['ok' => false, 'error' => 'POST required'], 405);
 }
@@ -57,12 +59,22 @@ if ($headType !== null && !in_array($headType, $def['head_types'], true)) {
 }
 
 try {
-    $client = yarbo_client($config);
-    $client->connect();
-    $client->sendCommand($def['cmd'], $def['payload'], true);
-    $client->disconnect();
+    $agent = YarboMqttAgentClient::requireRunning();
+    $result = $agent->publish($def['cmd'], $def['payload']);
+    if (!($result['ok'] ?? false)) {
+        json_response([
+            'ok' => false,
+            'error' => (string) ($result['error'] ?? 'Head command failed'),
+            'via' => 'agent',
+        ], 500);
+    }
 
-    json_response(['ok' => true, 'action' => $action, 'cmd' => $def['cmd']]);
+    json_response(['ok' => true, 'action' => $action, 'cmd' => $def['cmd'], 'via' => 'agent']);
 } catch (Throwable $e) {
-    json_response(['ok' => false, 'error' => friendly_error($e)], 500);
+    json_response([
+        'ok' => false,
+        'error' => 'MQTT agent is not running. Start the panel with ./scripts/dev.sh (or run .venv/bin/python scripts/mqtt_agent.py).',
+        'detail' => $e->getMessage(),
+        'via' => 'none',
+    ], 503);
 }

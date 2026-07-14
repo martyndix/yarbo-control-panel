@@ -5,6 +5,10 @@
 /data/cloud-config.json
 /data/update-status.json
 /data/update.log
+/data/mqtt-agent.log
+/data/php-server.log
 /data/.update-running
+/scripts/__pycache__/
+**/__pycache__/
 .DS_Store
 /debug/map-dumps/*.json

@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+use Yarbo\YarboMqttAgentClient;
+
 const MAX_LINEAR = 0.5;
 const MAX_ANGULAR = 0.8;
+const AGENT_REQUIRED_ERROR = 'MQTT agent is not running. Start the panel with ./scripts/dev.sh (or run .venv/bin/python scripts/mqtt_agent.py). Connect–disconnect drive is unreliable.';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     json_response(['ok' => false, 'error' => 'POST required'], 405);
@@ -34,17 +37,30 @@ $linear = max(-MAX_LINEAR, min(MAX_LINEAR, $linear));
 $angular = max(-MAX_ANGULAR, min(MAX_ANGULAR, $angular));
 
 try {
-    $client = yarbo_client($config);
-    $client->connect();
-    $client->sendDrive($linear, $angular, $enterManual);
-    $client->disconnect();
+    $agent = YarboMqttAgentClient::requireRunning();
+    $result = $agent->drive($linear, $angular, $enterManual);
+    if (!($result['ok'] ?? false)) {
+        json_response([
+            'ok' => false,
+            'error' => (string) ($result['error'] ?? 'Drive command failed'),
+            'via' => 'agent',
+        ], 500);
+    }
 
     json_response([
         'ok' => true,
         'linear' => $linear,
         'angular' => $angular,
         'enter_manual' => $enterManual,
+        'via' => 'agent',
+        'warning' => $result['warning'] ?? null,
+        'hold_controller' => (bool) ($result['hold_controller'] ?? false),
     ]);
 } catch (Throwable $e) {
-    json_response(['ok' => false, 'error' => friendly_error($e)], 500);
+    json_response([
+        'ok' => false,
+        'error' => AGENT_REQUIRED_ERROR,
+        'detail' => $e->getMessage(),
+        'via' => 'none',
+    ], 503);
 }

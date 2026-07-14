@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * Command payload helpers aligned with community MQTT usage and the official SDK.
+ * Command payload helpers aligned with python-yarbo / home-assistant-yarbo MQTT usage.
  *
- * @see https://github.com/YarboInc/YarboDataSDK
+ * @see https://github.com/markus-lassfolk/python-yarbo
+ * @see https://github.com/markus-lassfolk/home-assistant-yarbo
  */
 final class YarboCommands
 {
@@ -18,7 +19,6 @@ final class YarboCommands
     {
         return [
             ['cmd' => 'planning_paused', 'payload' => []],
-            ['cmd' => 'pause', 'payload' => []],
         ];
     }
 
@@ -29,7 +29,6 @@ final class YarboCommands
     {
         return [
             ['cmd' => 'dstop', 'payload' => []],
-            ['cmd' => 'stop', 'payload' => []],
         ];
     }
 
@@ -40,7 +39,6 @@ final class YarboCommands
     {
         return [
             ['cmd' => 'cmd_recharge', 'payload' => []],
-            ['cmd' => 'cmd_recharge', 'payload' => ['cmd' => 2]],
         ];
     }
 

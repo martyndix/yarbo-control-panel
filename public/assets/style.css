@@ -414,12 +414,41 @@ body.modal-open {
     box-shadow: 0 0 0 2px var(--control-tile-active-glow);
 }
 
-.control-tile[data-control="lights"]:not(.is-active) .control-tile-icon {
+.control-tile[data-control="lights"]:not(.is-active) .control-tile-icon,
+.control-tile[data-control="controller"]:not(.is-active) .control-tile-icon {
     opacity: 0.55;
 }
 
-.control-tile[data-control="lights"].is-active .control-tile-icon {
+.control-tile[data-control="lights"].is-active .control-tile-icon,
+.control-tile[data-control="controller"].is-active .control-tile-icon {
     opacity: 1;
+}
+
+.control-tile[data-control="controller"].is-active {
+    border-color: #2f9e6a;
+    background: color-mix(in srgb, #2f9e6a 14%, var(--surface));
+    box-shadow: 0 0 0 2px rgba(47, 158, 106, 0.35);
+}
+
+.control-tile[data-control="controller"].is-active .control-tile-label {
+    color: #2f9e6a;
+    font-weight: 600;
+}
+
+.control-tile[data-control="controller"].is-blocked {
+    border-color: #c9852c;
+    background: color-mix(in srgb, #c9852c 14%, var(--surface));
+    box-shadow: 0 0 0 2px rgba(201, 133, 44, 0.35);
+}
+
+.control-tile[data-control="controller"].is-blocked .control-tile-label {
+    color: #c9852c;
+    font-weight: 600;
+}
+
+.control-tile[data-control="controller"].is-pending {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--control-tile-active-glow);
 }
 
 .control-tile.is-pulse {
@@ -972,6 +1001,42 @@ body.modal-open {
     color: var(--text);
 }
 
+.drive-controller-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0 0 0.75rem;
+}
+
+.drive-controller-row .control-tile {
+    flex: 0 0 5.5rem;
+    min-height: 4rem;
+}
+
+.drive-controller-note {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.drive-controller-note.is-ready {
+    color: #2f9e6a;
+}
+
+.drive-block-banner {
+    margin: 0 0 0.75rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #c9852c;
+    border-radius: 8px;
+    background: color-mix(in srgb, #c9852c 14%, var(--surface));
+    color: var(--text);
+    font-size: 0.88rem;
+}
+
+.drive-block-banner.hidden {
+    display: none;
+}
+
 .dpad {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -1016,6 +1081,11 @@ body.modal-open {
 
 .btn-drive:hover:not(:disabled) {
     background: #354d68;
+}
+
+.btn-drive:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .btn-drive.active {

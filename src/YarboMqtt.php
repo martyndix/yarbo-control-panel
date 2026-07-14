@@ -23,12 +23,12 @@ final class YarboMqtt
         $this->client = new MqttClient($this->host, $this->port, $clientId);
     }
 
-    public function connect(): void
+    public function connect(int $connectTimeout = 3, int $socketTimeout = 3): void
     {
         $settings = (new ConnectionSettings())
             ->setKeepAliveInterval(30)
-            ->setConnectTimeout(5)
-            ->setSocketTimeout(5);
+            ->setConnectTimeout($connectTimeout)
+            ->setSocketTimeout($socketTimeout);
 
         $this->client->connect($settings, true);
     }
@@ -94,24 +94,27 @@ final class YarboMqtt
      */
     public function sendDrive(float $linear, float $angular, bool $enterManual = false): void
     {
-        $this->acquireController();
+        // Do not wait for get_controller feedback — each drive HTTP request reconnects,
+        // and a 3s wait makes pulses unusable on the single-threaded php -S server.
+        $this->acquireController(false);
 
         if ($enterManual) {
             $this->publish('set_working_state', ['state' => 'manual']);
+            $this->briefLoop(0.1);
         }
 
         $this->publish('cmd_vel', ['vel' => $linear, 'rev' => $angular]);
-        $this->briefLoop(0.15);
+        $this->briefLoop(0.08);
     }
 
     public function sendCommand(string $cmd, array $payload = [], bool $acquireController = true): void
     {
         if ($acquireController) {
-            $this->acquireController();
+            $this->acquireController(true, 1.5);
         }
 
         $this->publish($cmd, $payload);
-        $this->briefLoop(1.0);
+        $this->briefLoop(0.35);
     }
 
     /**
@@ -126,7 +129,7 @@ final class YarboMqtt
         }
 
         if ($acquireController) {
-            $this->acquireController();
+            $this->acquireController(true, 1.5);
         }
 
         $last = $variants[count($variants) - 1];
@@ -135,7 +138,7 @@ final class YarboMqtt
             $last = $variant;
         }
 
-        $this->briefLoop(1.0);
+        $this->briefLoop(0.35);
 
         return $last['cmd'];
     }
@@ -233,25 +236,39 @@ final class YarboMqtt
         return $responses;
     }
 
-    private function acquireController(): void
+    private function acquireController(bool $waitForAck = true, float $timeoutSeconds = 3.0): void
     {
         $feedbackTopic = $this->topic('device', 'data_feedback');
         $this->lastMessage = null;
         $this->client->subscribe($feedbackTopic, function (string $topic, string $message): void {
             $decoded = YarboCodec::decode($message);
-            if (($decoded['topic'] ?? '') === 'get_controller' && ($decoded['state'] ?? 1) === 0) {
+            if (($decoded['topic'] ?? '') === 'get_controller' && (int) ($decoded['state'] ?? 1) === 0) {
                 $this->lastMessage = $decoded;
             }
         }, 0);
 
-        $this->waitForSubscriptions(0.3);
+        $this->waitForSubscriptions(0.15);
         $this->publish('get_controller', []);
 
+        if (!$waitForAck) {
+            $this->briefLoop(0.12);
+            return;
+        }
+
         $loopStarted = microtime(true);
-        $deadline = $loopStarted + 3;
+        $deadline = $loopStarted + $timeoutSeconds;
         while ($this->lastMessage === null && microtime(true) < $deadline) {
             $this->client->loopOnce($loopStarted, true);
         }
+
+        if ($this->lastMessage === null) {
+            throw new \RuntimeException(
+                'Robot did not grant controller role. Close the Yarbo mobile app and try again.'
+            );
+        }
+
+        // Match python-yarbo _ensure_controller settle time before action commands.
+        $this->briefLoop(0.5);
     }
 
     private function briefLoop(float $seconds): void

@@ -16,15 +16,11 @@ final class YarboTelemetry
         99 => 'Trimmer',
     ];
 
-    /** @var list<string> */
-    private const LED_CHANNELS = [
+    /** White work lights only — body/tail RGB accents stay decorative and mislead the UI. */
+    private const WHITE_LED_CHANNELS = [
         'led_head',
         'led_left_w',
         'led_right_w',
-        'body_left_r',
-        'body_right_r',
-        'tail_left_r',
-        'tail_right_r',
     ];
 
     public static function parse(array $raw): array
@@ -80,13 +76,41 @@ final class YarboTelemetry
             $batteryMsg['wireless_charge_current'] ?? null,
             $raw['wireless_charge_current'] ?? null
         );
+        $bodyMsg = is_array($raw['BodyMsg'] ?? null) ? $raw['BodyMsg'] : [];
+        $abnormalMsg = is_array($raw['abnormal_msg'] ?? null) ? $raw['abnormal_msg'] : [];
+        $motorInfo = is_array($raw['motor_info'] ?? null) ? $raw['motor_info'] : [];
+        $powerFault = self::firstNumeric(
+            $bodyMsg['power_fault_state'] ?? null,
+            $abnormalMsg['power_fault'] ?? null
+        );
+        $powerFaultInt = $powerFault !== null ? (int) $powerFault : 0;
+        $motionMotor = self::firstNumeric($motorInfo['motion_motor'] ?? null);
+        $selfCheck = self::firstNumeric($stateMsg['self_check_status'] ?? null);
+        $driveBlockedReason = null;
+        if ((int) $chargingStatus > 0) {
+            $driveBlockedReason = 'Robot is charging — unplug / leave the charger before manual drive.';
+        } elseif ($powerFaultInt > 0) {
+            $driveBlockedReason = 'Robot reports power_fault=' . $powerFaultInt
+                . ' — chassis/buzzer may stay locked (check Yarbo app / reboot).';
+        }
 
         return [
             'battery'             => $battery !== null ? (int) $battery : null,
             'state'               => $workingState === 1 ? 'active' : 'idle',
             'working_state'       => $workingState !== null ? (int) $workingState : null,
+            // HA: charging_status 2 = charging/docked. Do not use BodyMsg.recharge_state —
+            // on some firmware it stays non-zero even when not on a pad/cable.
             'charging'            => (int) $chargingStatus > 0,
             'charging_status'     => (int) $chargingStatus,
+            'recharge_state'      => self::parseRechargeState($raw),
+            'on_charge_pad'       => false,
+            'drive_blocked_reason'=> $driveBlockedReason,
+            'power_fault'         => $powerFaultInt,
+            'motion_motor'        => $motionMotor !== null ? (int) $motionMotor : null,
+            'self_check_status'   => $selfCheck !== null ? (int) $selfCheck : null,
+            'speaker_state'       => isset($abnormalMsg['speaker_state'])
+                ? (int) $abnormalMsg['speaker_state']
+                : null,
             'error_code'          => $errorCode,
             'heading'             => $heading !== null ? round((float) $heading, 1) : null,
             'latitude'            => $latitude,
@@ -101,6 +125,14 @@ final class YarboTelemetry
             'head_type'           => $headType !== null ? (int) $headType : null,
             'head_type_name'      => self::HEAD_TYPES[(int) $headType] ?? 'Unknown',
             'planning_paused'     => (bool) ($raw['StateMSG']['planning_paused'] ?? 0),
+            // car_controller is often false even when commands work; prefer working_state.
+            'car_controller'      => (bool) ($raw['StateMSG']['car_controller'] ?? false),
+            'machine_controller'  => isset($raw['StateMSG']['machine_controller'])
+                ? (int) $raw['StateMSG']['machine_controller']
+                : null,
+            'control_awake'       => (int) ($raw['StateMSG']['working_state'] ?? 0) === 1,
+            // joy_usb/joy_state are hub health flags — not a plugged-in gamepad.
+            'joy_connected'       => false,
             'lights_on'           => self::parseLightsOn($raw),
             'returning_to_dock'   => (bool) ($raw['StateMSG']['on_going_recharging'] ?? 0),
             'plan_running'        => (bool) ($raw['StateMSG']['on_going_planning'] ?? 0),
@@ -140,15 +172,22 @@ final class YarboTelemetry
     }
 
     /**
-     * Derive whether any LED channel is lit from telemetry, or null if unknown.
+     * Best-effort white-light state from telemetry.
+     *
+     * Firmware often does not update LedInfoMSG after light_ctrl (HA treats lights as
+     * assumed state). Returns null when unknown so the UI must not force Off.
      */
     public static function parseLightsOn(array $raw): ?bool
     {
+        $ledInfo = is_array($raw['LedInfoMSG'] ?? null) ? $raw['LedInfoMSG'] : null;
+        if ($ledInfo === null) {
+            return null;
+        }
+
         $levels = [];
-        foreach (self::LED_CHANNELS as $channel) {
-            $value = self::findNestedNumeric($raw, $channel);
-            if ($value !== null) {
-                $levels[] = $value;
+        foreach (self::WHITE_LED_CHANNELS as $channel) {
+            if (array_key_exists($channel, $ledInfo) && is_numeric($ledInfo[$channel])) {
+                $levels[] = (float) $ledInfo[$channel];
             }
         }
 
@@ -156,7 +195,23 @@ final class YarboTelemetry
             return null;
         }
 
-        return max($levels) > 0;
+        // Many firmwares leave white channels at 0 even when lights are on — treat
+        // all-zero as unknown rather than definitive Off (UI uses assumed state).
+        if (max($levels) > 0) {
+            return true;
+        }
+
+        return null;
+    }
+
+    public static function parseRechargeState(array $raw): ?int
+    {
+        $body = is_array($raw['BodyMsg'] ?? null) ? $raw['BodyMsg'] : [];
+        if (!array_key_exists('recharge_state', $body) || !is_numeric($body['recharge_state'])) {
+            return null;
+        }
+
+        return (int) $body['recharge_state'];
     }
 
     /**

@@ -16,6 +16,7 @@ $cloud = new YarboCloud($cloudSettings, $projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
+    $includeCloudStatus = isset($_GET['cloud_status']) && $_GET['cloud_status'] !== '0';
     json_response([
         'ok' => true,
         'broker_host' => (string) ($config['broker_host'] ?? ''),
@@ -23,7 +24,8 @@ if ($method === 'GET') {
         'serial' => (string) ($config['serial'] ?? ''),
         'writable' => is_writable($configPath),
         'cloud' => $cloudSettings->publicView(),
-        'cloud_status' => $cloud->status(),
+        // Skip Python SDK probe by default — it can block the single-threaded php -S server.
+        'cloud_status' => $includeCloudStatus ? $cloud->status() : null,
     ]);
 }
 
@@ -72,10 +74,11 @@ if (!$cloudSettings->save($input)) {
     ], 500);
 }
 
+// Skip cloud->status() on save — that spawns Python and can block the single-threaded
+// php -S server. The client already has status from load; Test cloud connection refreshes it.
 json_response([
     'ok' => true,
     'broker_host' => $host,
     'serial' => $serial,
     'cloud' => $cloudSettings->publicView(),
-    'cloud_status' => $cloud->status(),
 ]);

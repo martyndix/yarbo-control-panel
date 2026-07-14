@@ -1,8 +1,8 @@
 const POLL_INTERVAL_MS = 5000;
 const SNAPSHOT_INTERVAL_MS = 2000;
-const DRIVE_REPEAT_MS = 300;
-const LINEAR_SPEED = 0.3;
-const ANGULAR_SPEED = 0.5;
+const DRIVE_REPEAT_MS = 120;
+const LINEAR_SPEED = 0.35;
+const ANGULAR_SPEED = 0.55;
 
 const els = {
     battery: document.getElementById('battery'),
@@ -91,12 +91,15 @@ const els = {
     mapLoadingText: document.getElementById('map-loading-text'),
     mapEditTip: document.getElementById('map-edit-tip'),
     panelSections: document.getElementById('panel-sections'),
+    controlController: document.getElementById('control-controller'),
     controlLights: document.getElementById('control-lights'),
     controlLightsIcon: document.getElementById('control-lights-icon'),
     controlLightsLabel: document.getElementById('control-lights-label'),
     controlPauseResume: document.getElementById('control-pause-resume'),
     controlPauseResumeIcon: document.getElementById('control-pause-resume-icon'),
     controlPauseResumeLabel: document.getElementById('control-pause-resume-label'),
+    driveControllerNote: document.getElementById('drive-controller-note'),
+    driveBlockBanner: document.getElementById('drive-block-banner'),
     settingsResetLayout: document.getElementById('settings-reset-layout'),
     headControlsCard: document.getElementById('head-controls-card'),
     headMowerControls: document.getElementById('head-mower-controls'),
@@ -124,6 +127,7 @@ const PANEL_ORDER_KEY = 'yarbo_panel_order';
 const PANEL_HIDDEN_KEY = 'yarbo_panel_hidden';
 const THEME_KEY = 'yarbo_theme';
 const LIGHTS_ON_KEY = 'yarbo_lights_on';
+const CONTROLLER_HOLD_KEY = 'yarbo_hold_controller';
 const DEFAULT_PANEL_ORDER = ['status', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls'];
 const PANEL_LABELS = {
     status: 'Status',
@@ -150,10 +154,15 @@ const ZONE_COLORS = {
 
 let driveInterval = null;
 let driveActive = false;
+let driveInFlight = false;
+/** @type {{ linear: number, angular: number, enterManual: boolean }|null} */
+let pendingDrive = null;
 let manualModeEntered = false;
 
 let toastTimer = null;
 let polling = false;
+let settingsModalOpen = false;
+let statusAbort = null;
 let cameras = [];
 let cameraMode = 'stream';
 let snapshotTimer = null;
@@ -179,6 +188,10 @@ let mapViewSaveTimer = null;
 let mapLoadingTimer = null;
 let mapLoadingStartedAt = 0;
 let lightsOn = false;
+let holdController = false;
+let controlAwake = false;
+let onChargePad = false;
+let driveBlockedReason = null;
 let draggedPanelId = null;
 let themeMediaQuery = null;
 let lastUpdateStatus = null;
@@ -401,6 +414,7 @@ function initPanelDragDrop() {
 }
 
 function applyLightsStateFromStatus(data) {
+    // Agent reports desired lights state (LedInfoMSG is unreliable). Sync both on/off.
     if (typeof data?.lights_on === 'boolean') {
         lightsOn = data.lights_on;
         try {
@@ -409,6 +423,112 @@ function applyLightsStateFromStatus(data) {
             // ignore
         }
     }
+}
+
+function applyControllerStateFromStatus(data) {
+    if (typeof data?.hold_controller === 'boolean') {
+        holdController = data.hold_controller;
+        try {
+            localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
+        } catch {
+            // ignore
+        }
+    }
+    if (typeof data?.control_awake === 'boolean') {
+        controlAwake = data.control_awake;
+    } else if (typeof data?.working_state === 'number') {
+        controlAwake = data.working_state === 1;
+    }
+    // Only StateMSG.charging_status means charging — ignore unreliable recharge_state.
+    onChargePad = Boolean(data?.charging) || Boolean(data?.on_charge_pad);
+    driveBlockedReason =
+        typeof data?.drive_blocked_reason === 'string' && data.drive_blocked_reason
+            ? data.drive_blocked_reason
+            : null;
+}
+
+function isControllerLive() {
+    // Agent hold is authoritative; working_state can lag or stay 0 during manual drive.
+    return holdController;
+}
+
+function canDrive() {
+    // Do not block on BodyMsg.recharge_state (false positives). Only require controller.
+    return isControllerLive();
+}
+
+function updateControllerTile() {
+    const live = isControllerLive();
+    const pending = false;
+    const title = live
+        ? 'Controller active — click to release'
+        : pending
+          ? 'Handshake sent; waiting for robot to leave idle'
+          : 'Connect controller (required for lights/drive)';
+    const label = live ? 'Connected' : pending ? 'Pending' : 'Off';
+    const icon = live ? '📡' : '📴';
+
+    document.querySelectorAll('[data-control="controller"]').forEach((btn) => {
+        btn.classList.toggle('is-active', live);
+        btn.classList.remove('is-blocked');
+        btn.classList.toggle('is-pending', pending);
+        btn.setAttribute('aria-pressed', holdController ? 'true' : 'false');
+        btn.title = title;
+        const iconEl = btn.querySelector('[data-controller-icon]');
+        const labelEl = btn.querySelector('[data-controller-label]');
+        if (iconEl) iconEl.textContent = icon;
+        if (labelEl) labelEl.textContent = label;
+    });
+
+    if (els.driveBlockBanner) {
+        if (driveBlockedReason) {
+            els.driveBlockBanner.textContent = driveBlockedReason;
+            els.driveBlockBanner.classList.remove('hidden');
+        } else {
+            els.driveBlockBanner.textContent = '';
+            els.driveBlockBanner.classList.add('hidden');
+        }
+    }
+
+    if (els.driveControllerNote) {
+        els.driveControllerNote.textContent = live
+            ? 'Controller connected — hold a direction to drive.'
+            : 'Connect the controller to enable the drive pad.';
+        els.driveControllerNote.classList.toggle('is-ready', canDrive());
+    }
+
+    updateControllerGatedControls();
+}
+
+function updateControllerGatedControls() {
+    const live = isControllerLive();
+    const driveOk = canDrive();
+    document.querySelectorAll('[data-needs-controller]').forEach((el) => {
+        el.disabled = !live;
+        if (!live && !el.title?.includes('Connect controller')) {
+            el.dataset.titleUnlocked = el.title || '';
+            el.title = 'Connect controller first';
+        } else if (live && el.dataset.titleUnlocked) {
+            el.title = el.dataset.titleUnlocked;
+        }
+    });
+    document.querySelectorAll('#drive-pad [data-drive]').forEach((btn) => {
+        if (btn.dataset.drive === 'stop') {
+            btn.disabled = false;
+            return;
+        }
+        btn.disabled = !driveOk;
+        btn.title = !live ? 'Connect controller first' : '';
+    });
+    // Head controls (attached module) also need a controller session.
+    [
+        'mower-blade-height-send',
+        'mower-blade-speed-send',
+        'snow-chute-angle-send',
+    ].forEach((id) => {
+        const btn = document.getElementById(id);
+        if (btn) btn.disabled = !live;
+    });
 }
 
 function updateLightsTile() {
@@ -425,7 +545,9 @@ function updateLightsTile() {
 }
 
 function updateControlTiles(data) {
+    applyControllerStateFromStatus(data);
     applyLightsStateFromStatus(data);
+    updateControllerTile();
     updateLightsTile();
     const paused = Boolean(data?.planning_paused);
     if (els.controlPauseResumeIcon) {
@@ -439,8 +561,17 @@ function updateControlTiles(data) {
     }
 }
 
-async function toggleLights(button) {
-    const action = lightsOn ? 'lights_off' : 'lights_on';
+async function toggleController(button) {
+    if (button.disabled) return;
+    const nextOn = !holdController;
+    const action = nextOn ? 'controller_on' : 'controller_off';
+    holdController = nextOn;
+    try {
+        localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
+    } catch {
+        // ignore
+    }
+    updateControllerTile();
     button.disabled = true;
     try {
         const res = await fetch('/api/command.php', {
@@ -450,19 +581,101 @@ async function toggleLights(button) {
         });
         const data = await res.json();
         if (data.ok) {
-            lightsOn = action === 'lights_on';
+            applyControllerStateFromStatus(data);
+            applyLightsStateFromStatus(data);
+            updateControllerTile();
+            updateLightsTile();
+            if (data.warning) {
+                showToast(data.warning, 'error');
+            } else if (holdController) {
+                showToast('Controller connected', 'success');
+            } else {
+                showToast('Controller hold released', 'success');
+            }
+        } else {
+            holdController = !nextOn;
+            try {
+                localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
+            } catch {
+                // ignore
+            }
+            updateControllerTile();
+            showToast(data.error || 'Controller command failed', 'error');
+        }
+    } catch (err) {
+        holdController = !nextOn;
+        try {
+            localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
+        } catch {
+            // ignore
+        }
+        updateControllerTile();
+        showToast(err.message || 'Network error', 'error');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function toggleLights(button) {
+    if (button.disabled) return;
+    if (!isControllerLive()) {
+        showToast('Connect the controller first', 'error');
+        return;
+    }
+    const nextOn = !lightsOn;
+    const action = nextOn ? 'lights_on' : 'lights_off';
+    // Optimistic UI + disable avoids double-click sending on then off.
+    lightsOn = nextOn;
+    if (nextOn) {
+        holdController = true;
+    }
+    try {
+        localStorage.setItem(LIGHTS_ON_KEY, lightsOn ? '1' : '0');
+        if (nextOn) {
+            localStorage.setItem(CONTROLLER_HOLD_KEY, '1');
+        }
+    } catch {
+        // ignore
+    }
+    updateLightsTile();
+    updateControllerTile();
+    button.disabled = true;
+    try {
+        const res = await fetch('/api/command.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=${encodeURIComponent(action)}`,
+        });
+        const data = await res.json();
+        if (data.ok) {
+            applyControllerStateFromStatus(data);
+            updateControllerTile();
+            if (lightsOn && data.charging) {
+                showToast(
+                    'Light command sent, but the robot is charging — firmware often only flashes lights briefly while charging. Unplug the cable and try again.',
+                    'error'
+                );
+            } else {
+                showToast(lightsOn ? 'Lights on' : 'Lights off', 'success');
+            }
+        } else {
+            lightsOn = !nextOn;
             try {
                 localStorage.setItem(LIGHTS_ON_KEY, lightsOn ? '1' : '0');
             } catch {
                 // ignore
             }
             updateLightsTile();
-            showToast(lightsOn ? 'Lights on' : 'Lights off', 'success');
-            await fetchStatus();
-        } else {
             showToast(data.error || 'Command failed', 'error');
         }
     } catch (err) {
+        lightsOn = !nextOn;
+        try {
+            localStorage.setItem(LIGHTS_ON_KEY, lightsOn ? '1' : '0');
+        } catch {
+            // ignore
+        }
+        updateLightsTile();
         showToast(err.message || 'Network error', 'error');
     } finally {
         button.disabled = false;
@@ -473,11 +686,16 @@ function initAppearance() {
     initTheme();
     initPanelDragDrop();
     initPanelVisibility();
+    // Always start Off until status/agent confirms — stale localStorage was showing On wrongly.
+    lightsOn = false;
+    holdController = false;
     try {
-        lightsOn = localStorage.getItem(LIGHTS_ON_KEY) === '1';
+        localStorage.setItem(LIGHTS_ON_KEY, '0');
+        localStorage.setItem(CONTROLLER_HOLD_KEY, '0');
     } catch {
-        lightsOn = false;
+        // ignore
     }
+    updateControllerTile();
     updateLightsTile();
 
     els.settingsResetLayout?.addEventListener('click', () => {
@@ -485,11 +703,21 @@ function initAppearance() {
         showToast('Dashboard layout reset', 'success');
     });
 
+    document.querySelectorAll('[data-control="controller"]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+            toggleController(event.currentTarget);
+        });
+    });
+
     els.controlLights?.addEventListener('click', (event) => {
         toggleLights(event.currentTarget);
     });
 
     els.controlPauseResume?.addEventListener('click', (event) => {
+        if (!isControllerLive()) {
+            showToast('Connect the controller first', 'error');
+            return;
+        }
         const paused = els.controlPauseResumeLabel?.textContent === 'Resume';
         sendCommand(paused ? 'resume' : 'pause', event.currentTarget);
     });
@@ -1410,7 +1638,11 @@ function updateStatus(data) {
     els.charging.textContent = data.charging ? 'Yes' : 'No';
     els.heading.textContent = data.heading != null ? `${data.heading}°` : '—';
     els.headType.textContent = data.head_type_name ?? '—';
-    els.errorCode.textContent = data.error_code ?? '—';
+    {
+        const err = data.error_code ?? '—';
+        const pf = typeof data.power_fault === 'number' ? data.power_fault : null;
+        els.errorCode.textContent = pf > 0 ? `${err} (power ${pf})` : String(err);
+    }
     els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
     updateRobotOnMap(data);
     renderDiagnostics(data);
@@ -1948,6 +2180,13 @@ function setSettingsError(message) {
 
 function openSettingsModal() {
     if (!els.settingsModal) return;
+    settingsModalOpen = true;
+    // Stop in-flight status polls so the single-threaded php -S server can handle settings.
+    if (statusAbort) {
+        statusAbort.abort();
+        statusAbort = null;
+        polling = false;
+    }
     els.settingsModal.classList.remove('hidden');
     document.body.classList.add('modal-open');
     setCloudTestResult(null);
@@ -1965,10 +2204,24 @@ function closeSettingsModal() {
     if (!els.settingsModal) return;
     els.settingsModal.classList.add('hidden');
     document.body.classList.remove('modal-open');
+    settingsModalOpen = false;
     setSettingsError(null);
     setCloudTestResult(null);
     setConnectionTestResult(null);
     setUpdateResult(null);
+}
+
+async function loadCloudStatusHint() {
+    if (!els.settingsCloudStatus) return;
+    try {
+        const res = await fetch('/api/cloud.php');
+        const data = await parseJsonResponse(res);
+        if (data.status) {
+            els.settingsCloudStatus.textContent = formatCloudStatus(data.status);
+        }
+    } catch {
+        // Keep previous hint; cloud status is optional
+    }
 }
 
 async function loadSettings() {
@@ -1989,7 +2242,12 @@ async function loadSettings() {
             if (els.plansDataSource) els.plansDataSource.value = defaultDataSource;
         }
         if (els.settingsCloudStatus) {
-            els.settingsCloudStatus.textContent = formatCloudStatus(data.cloud_status);
+            if (data.cloud_status) {
+                els.settingsCloudStatus.textContent = formatCloudStatus(data.cloud_status);
+            } else {
+                els.settingsCloudStatus.textContent = 'Cloud bridge: checking…';
+                loadCloudStatusHint();
+            }
         }
         if (!data.writable) {
             setSettingsError('config.php is not writable on the server.');
@@ -2036,12 +2294,13 @@ async function saveSettings(event) {
         defaultDataSource = data.cloud?.data_source || dataSource;
         if (els.mapDataSource) els.mapDataSource.value = defaultDataSource;
         if (els.plansDataSource) els.plansDataSource.value = defaultDataSource;
-        if (els.settingsCloudStatus) {
+        if (els.settingsCloudStatus && data.cloud_status) {
             els.settingsCloudStatus.textContent = formatCloudStatus(data.cloud_status);
         }
         showToast('Settings saved', 'success');
         closeSettingsModal();
-        await fetchStatus();
+        // Don't block on status — polling resumes after the modal closes.
+        fetchStatus().catch(() => {});
     } catch (err) {
         setSettingsError(err.message || 'Save failed');
     } finally {
@@ -2627,11 +2886,17 @@ async function runPanelUpdate(button) {
 }
 
 async function fetchStatus() {
-    if (polling) return;
+    if (polling || settingsModalOpen || driveActive) return;
     polling = true;
+    if (statusAbort) {
+        statusAbort.abort();
+    }
+    statusAbort = new AbortController();
+    const { signal } = statusAbort;
     try {
-        const res = await fetch('/api/status.php');
+        const res = await fetch('/api/status.php', { signal });
         const data = await res.json();
+        if (settingsModalOpen || driveActive) return;
         if (data.ok) {
             setError(null);
             updateStatus(data);
@@ -2640,6 +2905,7 @@ async function fetchStatus() {
             setError(data.error || 'Failed to fetch status');
         }
     } catch (err) {
+        if (err?.name === 'AbortError' || settingsModalOpen || driveActive) return;
         setError(err.message || 'Network error');
     } finally {
         polling = false;
@@ -2804,6 +3070,11 @@ async function sendDrive(linear, angular, enterManual = false) {
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
             return false;
         }
+        if (data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
+            sessionStorage.setItem('yarbo_drive_dock_warn', '1');
+            showToast(data.warning, 'error');
+            if (els.driveStatus) els.driveStatus.textContent = 'Blocked (dock/charge?)';
+        }
         if (enterManual) manualModeEntered = true;
         return true;
     } catch (err) {
@@ -2813,9 +3084,36 @@ async function sendDrive(linear, angular, enterManual = false) {
     }
 }
 
+async function flushDriveQueue() {
+    if (driveInFlight) return;
+    driveInFlight = true;
+    // Abort a long status poll so drive can use the single-threaded php -S server.
+    if (statusAbort) {
+        statusAbort.abort();
+        statusAbort = null;
+        polling = false;
+    }
+    try {
+        while (pendingDrive) {
+            const next = pendingDrive;
+            pendingDrive = null;
+            await sendDrive(next.linear, next.angular, next.enterManual);
+        }
+    } finally {
+        driveInFlight = false;
+        if (pendingDrive) {
+            flushDriveQueue();
+        }
+    }
+}
+
 function sendDrivePulse(linear, angular) {
-    const enterManual = !manualModeEntered;
-    sendDrive(linear, angular, enterManual);
+    pendingDrive = {
+        linear,
+        angular,
+        enterManual: !manualModeEntered,
+    };
+    flushDriveQueue();
 }
 
 function driveLabel(direction) {
@@ -2846,9 +3144,17 @@ async function startDrive(direction, button) {
         return;
     }
 
+    if (!isControllerLive()) {
+        showToast('Connect the controller first (in Manual Drive or Controls)', 'error');
+        if (els.driveStatus) els.driveStatus.textContent = 'Controller required';
+        return;
+    }
     if (!sessionStorage.getItem('yarbo_drive_ack')) {
         const ok = confirm(
-            'Manual drive takes control from the Yarbo app. Only drive on flat, clear ground. Continue?'
+            'WARNING: Manual drive can move the robot immediately.\n\n'
+            + 'Clear the area first — keep people, pets, furniture, and obstacles '
+            + 'well out of the way in case of collision. Use only on open, flat ground, '
+            + 'and be ready to release or press Stop.\n\nContinue?'
         );
         if (!ok) return;
         sessionStorage.setItem('yarbo_drive_ack', '1');
@@ -2862,6 +3168,12 @@ async function startDrive(direction, button) {
     sendDrivePulse(vector.linear, vector.angular);
     driveInterval = setInterval(() => {
         if (!driveActive) return;
+        if (!isControllerLive()) {
+            stopDriveLoop();
+            sendDrive(0, 0, false);
+            if (els.driveStatus) els.driveStatus.textContent = 'Controller lost';
+            return;
+        }
         sendDrivePulse(vector.linear, vector.angular);
     }, DRIVE_REPEAT_MS);
 }
@@ -2906,8 +3218,15 @@ async function sendCommand(action, button) {
         });
         const data = await res.json();
         if (data.ok) {
-            showToast(`${action.replace(/_/g, ' ')} sent`, 'success');
-            await fetchStatus();
+            if (action === 'buzzer' && data.note) {
+                showToast(data.note, 'error');
+            } else {
+                showToast(`${action.replace(/_/g, ' ')} sent`, 'success');
+            }
+            if (data.agent_warning) {
+                showToast('Start MQTT agent for reliable controls: ./scripts/dev.sh', 'error');
+            }
+            fetchStatus().catch(() => {});
         } else {
             showToast(data.error || 'Command failed', 'error');
         }
@@ -2921,6 +3240,10 @@ async function sendCommand(action, button) {
 document.querySelectorAll('[data-action]').forEach((button) => {
     button.addEventListener('click', () => {
         const action = button.dataset.action;
+        if (action !== 'stop' && !isControllerLive()) {
+            showToast('Connect the controller first', 'error');
+            return;
+        }
         if (action === 'stop' && !confirm('Send graceful stop to Yarbo?')) return;
         if (action === 'return_to_dock' && !confirm('Send Yarbo back to the dock?')) return;
         sendCommand(action, button);

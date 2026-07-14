@@ -20,6 +20,10 @@ The local MQTT protocol is based on community reverse-engineering documented in 
 > - Commands sent via this panel (including manual drive) can move or stop your machine and may conflict with the official Yarbo app.
 > - The MQTT protocol is reverse-engineered and **may change** without notice in future Yarbo firmware updates.
 >
+> **⚠️ Manual control — test with extreme care**
+>
+> The Manual Drive D-pad can move the robot immediately. Before testing, clear the area completely — keep people, pets, furniture, walls, and other obstacles well out of the way in case of collision. Use only on open, flat ground; stay ready to release the pad or press Stop. You are responsible for avoiding collisions.
+>
 > If you are not comfortable with these risks, do not use this software.
 
 ---
@@ -69,7 +73,7 @@ Open the panel in a browser and you can:
 - **View live GPS on a map** — Leaflet map with Street/Satellite layers, robot position, heading line, and GPS lock status
 - **View connection & health diagnostics** — network type/status (HaLow/4G/WiFi when available), **WiFi network name, signal strength, and security** (via `get_connect_wifi_name`), battery temperature, wireless charge telemetry, RTK status, and link diagnostics
 - **Probe saved mowing areas** — decodes compressed `get_map` MQTT payloads and draws `areas` / `pathways` on the map (optional cloud fallback)
-- **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop (dual payload compatibility with official SDK command shapes)
+- **Control the robot** — lights, buzzer, pause, resume, return to dock, graceful stop (MQTT payloads aligned with python-yarbo / Home Assistant)
 - **Run work plans** — load saved plans (local or cloud), start at a chosen percentage, delete plans
 - **Head-specific controls** — mower blade height/speed or snow chute angle when the attached head is detected
 - **Navigate to waypoints** — send the robot to a stored waypoint by index
@@ -116,7 +120,8 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 | **PHP zlib extension** | Usually included by default |
 | **Composer** | To install the MQTT client dependency |
 | **Same network as Yarbo** | The host must reach the robot on port **1883** |
-| **Python 3 + yarbo-data-sdk** | Optional — only for cloud map/plan reads (`./scripts/install.sh` can install this) |
+| **Python 3 + yarbo-data-sdk** | Optional — cloud map/plan reads (`./scripts/install.sh`) |
+| **Python 3 + python-yarbo** | Recommended for controls — MQTT agent (`scripts/mqtt_agent.py`); install puts it in `.venv` |
 | **ffmpeg** | Only relevant if experimenting with cameras (not working for most users — see below) |
 
 ---
@@ -156,8 +161,12 @@ cd ~/yarbo && sudo ./scripts/install.sh
 git clone https://github.com/martyndix/yarbo-control-panel.git
 cd yarbo-control-panel
 ./scripts/install.sh
-php -S 0.0.0.0:8080 -t public
+./scripts/dev.sh
 ```
+
+`./scripts/dev.sh` starts the **persistent MQTT agent** (controls/drive) plus the PHP panel. Prefer this over `php -S` alone — lights and drive need a long-lived controller session (same model as Home Assistant / python-yarbo).
+
+Hard-refresh the browser after start, and **close the official Yarbo app** while testing controls.
 
 Open **http://localhost:8080**, click **Settings**, and enter broker IP and serial. macOS has no systemd — keep the terminal open, or run on a Pi for always-on use.
 
@@ -527,18 +536,20 @@ The robot does not expose a documented MQTT command to list stored waypoint name
 
 ## Controls
 
+Controls and manual drive talk through a **persistent MQTT agent** (`scripts/mqtt_agent.py` via `python-yarbo`, or `scripts/mqtt_agent.php` if the package is missing). Start with `./scripts/dev.sh` locally. Connect–disconnect-per-request is not used for lights/drive (that makes lights flash then turn off).
+
 | UI control | MQTT command | Notes |
 |------------|--------------|-------|
-| Lights On / Off | `light_ctrl` | All 7 LED channels |
-| Buzzer | `cmd_buzzer` | |
+| Lights On / Off | `light_ctrl` | All 7 LED channels (ints 0–255) |
+| Buzzer | `cmd_buzzer` | `state` + millisecond `timeStamp` |
 | Pause | `planning_paused` | |
 | Resume | `resume` | |
 | Return to Dock | `cmd_recharge` | |
 | Stop | `dstop` | Graceful stop |
-| Start work plan | `start_plan` | `planId`, `percent` |
+| Start work plan | `start_plan` | `planId` / `id` + `percent` (dual shapes for firmware) |
 | Delete work plan | `del_plan` | Destructive — requires confirm in UI |
 | Go to waypoint | `start_way_point` | `index` 0–9999 |
-| Manual drive D-pad | `set_working_state` + `cmd_vel` | Hold to move; enters manual mode |
+| Manual drive D-pad | `set_working_state` (`state: 1`) + `cmd_vel` | Hold to move; **test with extreme care in a clear area** (see safety warning above) |
 
 ---
 
@@ -570,7 +581,7 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 
 - The Yarbo MQTT broker (port **1883**) has **no authentication**. Anyone on your Wi‑Fi who knows the robot IP can read telemetry and send commands.
 - Keep this control panel on your **LAN only** — do not port-forward port 8080 or 1883 to the internet.
-- Manual drive can move the robot — use only on flat, clear ground and away from people.
+- **Manual drive**: test with **extreme care**. Clear the area of people, pets, and obstacles before using the D-pad; stay ready to release / Stop. Use only on open, flat ground.
 
 ---
 
@@ -579,7 +590,8 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 | Problem | What to check |
 |---------|---------------|
 | Status shows an error | `nc -zv <yarbo-ip> 1883` from the host running the panel |
-| Commands do nothing | Yarbo app may hold controller; try again — panel calls `get_controller` first |
+| Commands do nothing | Close the Yarbo app; ensure `./scripts/dev.sh` (MQTT agent) is running; panel calls `get_controller` before actions |
+| Lights flash then off | Agent not running — panel no longer uses connect–disconnect control; start `./scripts/dev.sh` |
 | Page won't load | Is PHP running? `curl http://127.0.0.1:8080/api/status.php` |
 | Pi service won't start | `sudo journalctl -u yarbo-panel -n 50` — check PHP path in the service file |
 | Wrong subnet | Pi and Yarbo must be able to route to each other (e.g. `192.168.9.x` → `192.168.1.x`) |
