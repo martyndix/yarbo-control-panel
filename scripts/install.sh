@@ -88,6 +88,7 @@ install_project() {
 
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
   chmod +x scripts/update.sh 2>/dev/null || true
+  chmod +x scripts/dev.sh scripts/panel.sh 2>/dev/null || true
 
   # shellcheck source=scripts/lib/python_sdk.sh
   source "${ROOT}/scripts/lib/python_sdk.sh"
@@ -102,12 +103,16 @@ install_project() {
     fi
     if run_as_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_yarbo_data_sdk '${python}' '${ROOT}'"; then
       resolved="$(run_as_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && yarbo_resolve_python '${ROOT}'" || true)"
-      echo "    yarbo-data-sdk installed (${resolved:-${python}})"
+      if [[ -n "$resolved" ]] && run_as_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && yarbo_sdk_installed '${resolved}'"; then
+        echo "    yarbo-data-sdk installed (${resolved})"
+      else
+        echo "    WARNING: Python packages did not import after install — cloud fallback may be unavailable"
+      fi
     else
-      echo "    ERROR: could not install yarbo-data-sdk"
-      echo "    Try: cd '${ROOT}' && ./scripts/install.sh"
-      echo "    Or:  sudo apt install python3-venv python3-pip && ./scripts/install.sh"
-      exit 1
+      echo "    WARNING: could not install yarbo-data-sdk / python-yarbo (optional)"
+      echo "    The PHP panel still works. Cloud map/plan reads and the Python MQTT agent need pip."
+      echo "    On macOS: brew install python && python3 -m ensurepip --upgrade && ./scripts/install.sh"
+      echo "    On Debian/Pi: sudo apt install python3-venv python3-pip && ./scripts/install.sh"
     fi
   else
     echo "==> Python not found — cloud map/plan reads unavailable until Python 3 is installed"
@@ -141,7 +146,10 @@ Wants=network-online.target
 Type=simple
 User=${owner}
 WorkingDirectory=${ROOT}
-ExecStart=${php_bin} -S ${HOST}:${PORT} -t ${ROOT}/public
+Environment=YARBO_PANEL_HOST=${HOST}
+Environment=YARBO_PANEL_PORT=${PORT}
+Environment=YARBO_PHP_BIN=${php_bin}
+ExecStart=${ROOT}/scripts/panel.sh
 Restart=on-failure
 RestartSec=5
 
@@ -222,10 +230,11 @@ if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled "${SERVICE_NAME}
   echo "  sudo systemctl restart ${SERVICE_NAME}"
   echo "  sudo journalctl -u ${SERVICE_NAME} -f"
 else
-  echo "Start the panel manually:"
-  echo "  php -S ${HOST}:${PORT} -t public"
+  echo "Start the panel with:"
+  echo "  ./scripts/dev.sh"
   echo ""
   echo "Then open $(lan_url) and use Settings to enter broker IP and serial."
+  echo "Keep that terminal open. Do not use php -S alone — the MQTT agent must start first."
   if command -v systemctl >/dev/null 2>&1; then
     echo ""
     echo "For auto-start on boot, run:"

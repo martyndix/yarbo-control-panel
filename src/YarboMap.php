@@ -56,9 +56,13 @@ final class YarboMap
                 if ($ref === null) {
                     $ref = YarboGeo::extractGpsRefFromMapData($data);
                 }
-                $features = array_merge($features, self::extractAppMapFeatures($data));
-                if ($ref !== null) {
-                    $features = array_merge($features, self::extractOfficialMapFeatures($data, $ref));
+                $mapFeatures = self::extractAppMapFeatures($data);
+                if ($mapFeatures === [] && $ref !== null) {
+                    $mapFeatures = self::extractOfficialMapFeatures($data, $ref);
+                }
+                if ($mapFeatures !== []) {
+                    $features = array_merge($features, $mapFeatures);
+                    continue;
                 }
             }
 
@@ -130,6 +134,19 @@ final class YarboMap
 
         if ($type === 'Point') {
             return self::isFinitePosition($coordinates);
+        }
+
+        if ($type === 'LineString') {
+            if ($coordinates === []) {
+                return false;
+            }
+            foreach ($coordinates as $position) {
+                if (!self::isFinitePosition($position)) {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         if ($type === 'Polygon') {
@@ -229,55 +246,134 @@ final class YarboMap
      */
     private static function extractAppMapFeatures(array $mapData): array
     {
-        $zoneTypes = [
+        $polygonTypes = [
             'areas' => 'clean',
-            'pathways' => 'path',
             'nogozones' => 'forbidden',
             'novisionzones' => 'no_vision',
+            'elec_fence' => 'forbidden',
+        ];
+        $lineTypes = [
+            'pathways' => 'path',
             'sidewalks' => 'sidewalk',
+            'deadends' => 'path',
         ];
 
         $features = [];
-        foreach ($zoneTypes as $key => $zoneType) {
-            $zones = $mapData[$key] ?? null;
-            if (!is_array($zones)) {
-                continue;
+        foreach ($polygonTypes as $key => $zoneType) {
+            $features = array_merge($features, self::extractAppZones($mapData, $key, $zoneType, 'polygon'));
+        }
+        foreach ($lineTypes as $key => $zoneType) {
+            $features = array_merge($features, self::extractAppZones($mapData, $key, $zoneType, 'line'));
+        }
+
+        $charging = $mapData['chargingData'] ?? null;
+        if (is_array($charging)) {
+            $point = self::chargingPointFeature($charging, 'chargingData');
+            if ($point !== null) {
+                $features[] = $point;
             }
-
-            foreach ($zones as $index => $zone) {
-                if (!is_array($zone)) {
+        }
+        $allCharging = $mapData['allchargingData'] ?? null;
+        if (is_array($allCharging)) {
+            foreach ($allCharging as $index => $station) {
+                if (!is_array($station)) {
                     continue;
                 }
-
-                $zoneRef = YarboGeo::extractGpsRef($zone);
-                if ($zoneRef === null) {
-                    continue;
+                $point = self::chargingPointFeature($station, sprintf('allchargingData[%d]', (int) $index));
+                if ($point !== null) {
+                    $features[] = $point;
                 }
-
-                $range = $zone['range'] ?? null;
-                if (!is_array($range)) {
-                    continue;
-                }
-
-                $coords = self::rangePointsToCoordinates($range, $zoneRef);
-                if (count($coords) < 3) {
-                    continue;
-                }
-
-                $features[] = self::polygonFeature(
-                    $coords,
-                    'get_map',
-                    sprintf('%s[%d]', $key, (int) $index),
-                    [
-                        'zone_type' => $zoneType,
-                        'zone_id' => $zone['id'] ?? $index,
-                        'name' => $zone['name'] ?? null,
-                    ],
-                );
             }
         }
 
         return $features;
+    }
+
+    /**
+     * @param array<string, mixed> $mapData
+     * @param 'polygon'|'line' $geometry
+     * @return array<int, array<string, mixed>>
+     */
+    private static function extractAppZones(array $mapData, string $key, string $zoneType, string $geometry): array
+    {
+        $zones = $mapData[$key] ?? null;
+        if (!is_array($zones)) {
+            return [];
+        }
+
+        $minPoints = $geometry === 'line' ? 2 : 3;
+        $features = [];
+        foreach ($zones as $index => $zone) {
+            if (!is_array($zone)) {
+                continue;
+            }
+
+            $zoneRef = YarboGeo::extractGpsRef($zone);
+            if ($zoneRef === null) {
+                continue;
+            }
+
+            $range = $zone['range'] ?? null;
+            if (!is_array($range)) {
+                continue;
+            }
+
+            $coords = self::rangePointsToCoordinates($range, $zoneRef);
+            if (count($coords) < $minPoints) {
+                continue;
+            }
+
+            $props = [
+                'zone_type' => $zoneType,
+                'zone_id' => $zone['id'] ?? $index,
+                'name' => $zone['name'] ?? null,
+            ];
+            $path = sprintf('%s[%d]', $key, (int) $index);
+            $features[] = $geometry === 'line'
+                ? self::lineStringFeature($coords, 'get_map', $path, $props)
+                : self::polygonFeature($coords, 'get_map', $path, $props);
+        }
+
+        return $features;
+    }
+
+    /**
+     * @param array<string, mixed> $charging
+     * @return array<string, mixed>|null
+     */
+    private static function chargingPointFeature(array $charging, string $path): ?array
+    {
+        $zoneRef = YarboGeo::extractGpsRef($charging);
+        if ($zoneRef === null) {
+            return null;
+        }
+
+        $point = $charging['chargingPoint'] ?? $charging['charging_point'] ?? null;
+        if (!is_array($point)) {
+            return null;
+        }
+
+        $x = $point['x'] ?? $point['X'] ?? null;
+        $y = $point['y'] ?? $point['Y'] ?? null;
+        if (!is_numeric($x) || !is_numeric($y)) {
+            return null;
+        }
+
+        [$lat, $lon] = YarboGeo::localToGps((float) $x, (float) $y, $zoneRef['latitude'], $zoneRef['longitude']);
+        if (!YarboGeo::isValidGps($lat, $lon)) {
+            return null;
+        }
+
+        return self::pointFeature(
+            [$lon, $lat],
+            'get_map',
+            $path,
+            [
+                'zone_type' => 'charging',
+                'zone_id' => $charging['id'] ?? null,
+                'name' => $charging['name'] ?? 'Charging Station',
+            ],
+        );
     }
 
     /**
@@ -515,20 +611,46 @@ final class YarboMap
 
     /**
      * @param array{0: float, 1: float} $coord
+     * @param array<string, mixed> $extraProperties
      * @return array<string, mixed>
      */
-    private static function pointFeature(array $coord, string $source, string $path): array
+    private static function pointFeature(array $coord, string $source, string $path, array $extraProperties = []): array
     {
         return [
             'type' => 'Feature',
-            'properties' => [
+            'properties' => array_merge([
                 'source' => $source,
                 'path' => $path,
                 'kind' => 'point',
-            ],
+            ], $extraProperties),
             'geometry' => [
                 'type' => 'Point',
                 'coordinates' => $coord,
+            ],
+        ];
+    }
+
+    /**
+     * @param array<int, array{0: float, 1: float}> $coords
+     * @param array<string, mixed> $extraProperties
+     * @return array<string, mixed>
+     */
+    private static function lineStringFeature(
+        array $coords,
+        string $source,
+        string $path,
+        array $extraProperties = [],
+    ): array {
+        return [
+            'type' => 'Feature',
+            'properties' => array_merge([
+                'source' => $source,
+                'path' => $path,
+                'kind' => 'line',
+            ], $extraProperties),
+            'geometry' => [
+                'type' => 'LineString',
+                'coordinates' => $coords,
             ],
         ];
     }

@@ -39,7 +39,7 @@ final class YarboMqttAgentClient
         if (!$client->isAvailable()) {
             throw new \RuntimeException(
                 'MQTT agent is not running. Start the panel with ./scripts/dev.sh '
-                . '(or run .venv/bin/python scripts/mqtt_agent.py).'
+                . '(or ./scripts/panel.sh).'
             );
         }
 
@@ -81,37 +81,22 @@ final class YarboMqttAgentClient
         $pyAgent = $root . '/scripts/mqtt_agent.py';
         $phpAgent = $root . '/scripts/mqtt_agent.php';
 
-        $cmd = null;
+        $argv = null;
         if (is_file($pyAgent) && is_executable($venvPy)) {
             $check = @exec(escapeshellarg($venvPy) . ' -c ' . escapeshellarg('import yarbo') . ' 2>/dev/null; echo $?');
             if (trim((string) $check) === '0') {
-                // Always start from project root so config.php / relative paths resolve.
-                $cmd = sprintf(
-                    'cd %s && YARBO_MQTT_AGENT_PORT=%d %s %s >> %s 2>&1 &',
-                    escapeshellarg($root),
-                    $this->port,
-                    escapeshellarg($venvPy),
-                    escapeshellarg($pyAgent),
-                    escapeshellarg($log)
-                );
+                $argv = [escapeshellarg($venvPy), escapeshellarg($pyAgent)];
             }
         }
-        if ($cmd === null && is_file($phpAgent)) {
+        if ($argv === null && is_file($phpAgent)) {
             $php = defined('PHP_BINARY') && PHP_BINARY !== '' ? PHP_BINARY : 'php';
-            $cmd = sprintf(
-                'cd %s && YARBO_MQTT_AGENT_PORT=%d %s %s >> %s 2>&1 &',
-                escapeshellarg($root),
-                $this->port,
-                escapeshellarg($php),
-                escapeshellarg($phpAgent),
-                escapeshellarg($log)
-            );
+            $argv = [escapeshellarg($php), escapeshellarg($phpAgent)];
         }
-        if ($cmd === null) {
+        if ($argv === null) {
             return;
         }
 
-        @exec($cmd);
+        $this->spawnDetached($root, $argv, $log);
 
         $deadline = microtime(true) + 4.0;
         while (microtime(true) < $deadline) {
@@ -120,6 +105,32 @@ final class YarboMqttAgentClient
                 return;
             }
         }
+    }
+
+    /**
+     * Start the agent without blocking the single-threaded php -S request.
+     *
+     * PHP exec() waits on inherited sockets unless stdin is closed and the
+     * child is fully detached (nohup / setsid). That hang is what produced
+     * blank panels and "Failed to Fetch" on macOS php -S.
+     *
+     * @param list<string> $escapedArgv already escapeshellarg()'d binary + args
+     */
+    private function spawnDetached(string $root, array $escapedArgv, string $log): void
+    {
+        $setsid = is_executable('/usr/bin/setsid') ? '/usr/bin/setsid ' : '';
+        $nohup = is_executable('/usr/bin/nohup') || is_executable('/bin/nohup') ? 'nohup ' : '';
+        // echo $! so exec() returns as soon as the shell backgrounds the agent.
+        $cmd = sprintf(
+            'cd %s && YARBO_MQTT_AGENT_PORT=%d %s%s%s >> %s 2>&1 < /dev/null & echo $!',
+            escapeshellarg($root),
+            $this->port,
+            $nohup,
+            $setsid,
+            implode(' ', $escapedArgv),
+            escapeshellarg($log)
+        );
+        @exec($cmd);
     }
 
     /**
@@ -239,7 +250,7 @@ final class YarboMqttAgentClient
         if ($socket === false) {
             throw new \RuntimeException(
                 'MQTT agent is not running. Start the panel with ./scripts/dev.sh '
-                . '(or run .venv/bin/python scripts/mqtt_agent.py).'
+                . '(or ./scripts/panel.sh).'
             );
         }
 

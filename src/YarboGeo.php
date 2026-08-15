@@ -70,7 +70,10 @@ final class YarboGeo
     }
 
     /**
-     * Convert local meters (x east, y north) to WGS84 using a GPS reference origin.
+     * Convert local meters to WGS84 using a GPS reference origin.
+     *
+     * Matches Yarbo Data SDK convert_local_to_gps():
+     * X positive is West, Y positive is North.
      *
      * @return array{0: float, 1: float} [latitude, longitude]
      */
@@ -81,7 +84,7 @@ final class YarboGeo
         $metersPerDegLon = abs($cosLat) < 1e-9 ? 1e-9 : 111_320.0 * $cosLat;
 
         $lat = $refLat + ($y / $metersPerDegLat);
-        $lon = $refLon + ($x / $metersPerDegLon);
+        $lon = $refLon - ($x / $metersPerDegLon);
 
         if (!is_finite($lat) || !is_finite($lon)) {
             return [$refLat, $refLon];
@@ -91,7 +94,7 @@ final class YarboGeo
     }
 
     /**
-     * Convert WGS84 to local meters (x east, y north) relative to a GPS reference origin.
+     * Convert WGS84 to local meters (x west, y north) relative to a GPS reference origin.
      *
      * @return array{0: float, 1: float} [x, y]
      */
@@ -102,7 +105,7 @@ final class YarboGeo
         $metersPerDegLon = abs($cosLat) < 1e-9 ? 1e-9 : 111_320.0 * $cosLat;
 
         $y = ($lat - $refLat) * $metersPerDegLat;
-        $x = ($lon - $refLon) * $metersPerDegLon;
+        $x = ($refLon - $lon) * $metersPerDegLon;
 
         return [$x, $y];
     }

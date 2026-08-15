@@ -229,7 +229,7 @@ Legacy manual install (if you prefer):
 ```bash
 composer install
 cp config.example.php config.php
-php -S 0.0.0.0:8080 -t public
+./scripts/dev.sh
 # Then use the web Settings page — editing config.php is optional
 ```
 
@@ -297,16 +297,18 @@ Open `http://<pi-ip>:8080` → **Settings** → broker IP and serial.
 ### macOS
 
 ```bash
-brew install php composer
+brew install php composer python
 git clone https://github.com/martyndix/yarbo-control-panel.git
 cd yarbo-control-panel
 ./scripts/install.sh
-php -S 0.0.0.0:8080 -t public
+./scripts/dev.sh
 ```
 
 Open **http://localhost:8080** → **Settings** → broker IP and serial.
 
-macOS does not use systemd. For always-on hosting, use a Raspberry Pi with `sudo ./scripts/install.sh --deps`.
+Keep the `./scripts/dev.sh` terminal open. **Do not use `php -S` alone** — that starts the web UI without the MQTT agent and can leave status tiles blank (“Failed to Fetch”) on macOS.
+
+macOS does not use systemd. For always-on hosting, use a Raspberry Pi with `sudo ./scripts/install.sh --deps`. Zip downloads cannot use Settings → Panel updates (that needs a `git clone`).
 
 ---
 
@@ -338,7 +340,7 @@ Not the primary target platform, but it works if you have PHP and Composer insta
 1. Install [PHP for Windows](https://windows.php.net/download/) (8.1+) and [Composer](https://getcomposer.org/download/)
 2. Clone this repo in PowerShell or Git Bash
 3. Run `./scripts/install.sh` (or `composer install` and copy `config.example.php` to `config.php`)
-4. Start the server: `php -S 0.0.0.0:8080 -t public`
+4. Start the panel: `./scripts/dev.sh` (Git Bash) so the MQTT agent starts with the UI
 5. Open **http://localhost:8080** → **Settings** → broker IP and serial
 
 For an always-on setup, a Raspberry Pi with `sudo ./scripts/install.sh --deps` is simpler.
@@ -395,7 +397,7 @@ Use **Load saved mowing areas** on the Location Map card to draw zones from the 
 
 1. **Local MQTT (default)** — the panel calls `get_map` (and optionally `read_gps_ref`) over the same broker as controls.
 2. **Decode** — many firmware versions return `get_map` as a **base64 + zlib** compressed blob; the panel decodes this automatically.
-3. **Convert to GPS** — Yarbo app map format uses `areas` / `pathways` with per-zone `ref` (lat/lon) and `range` points (`x` / `y` metres). Older payloads may use `clean_area_list` instead.
+3. **Convert to GPS** — local metres use the official SDK frame (**X west, Y north**). App maps use `areas` / `pathways` with per-zone `ref` (lat/lon) and `range` points. Pathways are drawn as lines, not filled polygons.
 4. **Cloud fallback (optional)** — if local MQTT returns nothing, enable **Settings → cloud fallback** (`auto` or `cloud`) to read the same data via the [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK).
 
 Map load can take **20–30 seconds** — the robot may only respond to `get_map` after a short retry window.
@@ -590,10 +592,13 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 | Problem | What to check |
 |---------|---------------|
 | Status shows an error | `nc -zv <yarbo-ip> 1883` from the host running the panel |
+| Blank tiles / “Failed to Fetch” | Start with `./scripts/dev.sh`, not `php -S` alone. `killall php` then retry. Close the official Yarbo app. |
 | Commands do nothing | Close the Yarbo app; ensure `./scripts/dev.sh` (MQTT agent) is running; panel calls `get_controller` before actions |
 | Lights flash then off | Agent not running — panel no longer uses connect–disconnect control; start `./scripts/dev.sh` |
+| Map looks flipped vs the phone app | Reload saved areas after v1.3.1 (local X is west, matching the official SDK). The phone app is often not north-up; compare satellite overlay to the real yard. |
 | Page won't load | Is PHP running? `curl http://127.0.0.1:8080/api/status.php` |
 | Pi service won't start | `sudo journalctl -u yarbo-panel -n 50` — check PHP path in the service file |
+| Zip install cannot update | Settings updates need a `git clone`. Reinstall from git to get one-click updates. |
 | Wrong subnet | Pi and Yarbo must be able to route to each other (e.g. `192.168.9.x` → `192.168.1.x`) |
 
 **API smoke test:**
@@ -615,6 +620,8 @@ yarbo-control-panel/
 ├── src/                  # MQTT client, telemetry, map, cloud helpers
 ├── scripts/
 │   ├── install.sh        # One-command install (+ systemd when run with sudo)
+│   ├── panel.sh          # MQTT agent + PHP panel (systemd and ./scripts/dev.sh)
+│   ├── dev.sh            # Local/macOS wrapper around panel.sh
 │   ├── lib/python_sdk.sh # Shared yarbo-data-sdk install helpers
 │   ├── update.sh         # Pull latest from GitHub, composer install, restart service
 │   └── cloud_bridge.py   # Optional Yarbo cloud map/plan reads
@@ -626,7 +633,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.1.9** (2026-07-09).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.1** (2026-08-15).
 
 ---
 

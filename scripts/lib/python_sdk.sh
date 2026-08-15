@@ -46,13 +46,53 @@ ensure_python_pip() {
     return 0
   fi
 
+  echo "    pip missing for ${python} — trying ensurepip"
+  if "$python" -m ensurepip --upgrade >/dev/null 2>&1; then
+    "$python" -m pip --version >/dev/null 2>&1 && return 0
+  fi
+
   if [[ "${EUID:-$(id -u)}" -eq 0 ]] && command -v apt-get >/dev/null 2>&1; then
     echo "    Installing python3-pip (apt)"
     export DEBIAN_FRONTEND=noninteractive
     apt-get install -y python3-pip python3-venv >/dev/null
   fi
 
-  "$python" -m pip --version >/dev/null 2>&1
+  if "$python" -m pip --version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "    pip is not available for ${python}" >&2
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "    On macOS: brew install python && python3 -m ensurepip --upgrade" >&2
+  else
+    echo "    Install with: sudo apt install python3-pip python3-venv" >&2
+  fi
+  return 1
+}
+
+ensure_venv_has_pip() {
+  local venv_py="${1:?}"
+  local base_python="${2:?}"
+  local root="${3:?}"
+
+  if "$venv_py" -m pip --version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "    Project venv is missing pip — trying ensurepip"
+  if "$venv_py" -m ensurepip --upgrade >/dev/null 2>&1 \
+    && "$venv_py" -m pip --version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "    Recreating venv with pip (python -m venv --upgrade-deps)"
+  if "$base_python" -m venv --upgrade-deps "${root}/.venv" \
+    && "$venv_py" -m pip --version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "    Could not install pip into ${root}/.venv" >&2
+  return 1
 }
 
 ensure_yarbo_venv() {
@@ -77,10 +117,16 @@ ensure_yarbo_venv() {
   venv_py="${root}/.venv/bin/python3"
   if [[ ! -x "$venv_py" ]]; then
     echo "    Creating project venv at ${root}/.venv"
-    if ! "$base_python" -m venv "${root}/.venv"; then
-      echo "    Failed to create venv" >&2
-      return 1
+    if ! "$base_python" -m venv --upgrade-deps "${root}/.venv" 2>/dev/null; then
+      if ! "$base_python" -m venv "${root}/.venv"; then
+        echo "    Failed to create venv" >&2
+        return 1
+      fi
     fi
+  fi
+
+  if ! ensure_venv_has_pip "$venv_py" "$base_python" "$root"; then
+    return 1
   fi
 
   if yarbo_sdk_installed "$venv_py"; then

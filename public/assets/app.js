@@ -149,6 +149,7 @@ const ZONE_COLORS = {
     sidewalk: { color: '#c9a86c', fill: '#c9a86c' },
     obstacle: { color: '#ff8c69', fill: '#ff8c69' },
     recharge: { color: '#7ddea0', fill: '#7ddea0' },
+    charging: { color: '#7ddea0', fill: '#7ddea0' },
     default: { color: '#67b3ff', fill: '#67b3ff' },
 };
 
@@ -732,11 +733,12 @@ function initAppearance() {
 function zoneStyle(feature) {
     const zoneType = feature?.properties?.zone_type || 'default';
     const palette = ZONE_COLORS[zoneType] || ZONE_COLORS.default;
+    const isLine = feature?.geometry?.type === 'LineString';
     return {
         color: palette.color,
-        weight: 2,
+        weight: isLine ? 3 : 2,
         fillColor: palette.fill,
-        fillOpacity: 0.2,
+        fillOpacity: isLine ? 0 : 0.2,
     };
 }
 

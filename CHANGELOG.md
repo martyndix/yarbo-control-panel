@@ -6,6 +6,18 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-15
+
+### Fixed
+- **Blank panel / “Failed to Fetch” on macOS `php -S`**: auto-starting the MQTT agent no longer blocks the single-threaded PHP built-in server. Existing Pi systemd units that still run `php -S` keep working.
+- **Map east–west flip**: local XY conversion now matches the official Yarbo Data SDK (X positive is west, Y positive is north). Reload saved areas after updating.
+- **Duplicate / filled pathways**: `get_map` uses the app zone lists once; pathways, sidewalks, and dead-ends are LineStrings; charging points are Points.
+- **Installer false success**: Homebrew venvs without pip no longer report `yarbo-data-sdk installed`. Optional Python packages no longer abort the PHP install.
+
+### Changed
+- **Start command**: Mac/manual installs should use `./scripts/dev.sh` (runs `scripts/panel.sh`: MQTT agent, then PHP). New systemd units do the same. Existing `php -S` services are unchanged until you re-run `sudo ./scripts/install.sh`.
+- **Python venv**: create/repair with `ensurepip` / `--upgrade-deps` so `python-yarbo` can install on macOS.
+
 ## [1.3.0] - 2026-07-14
 
 ### Safety
