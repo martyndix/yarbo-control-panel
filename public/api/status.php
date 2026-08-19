@@ -13,61 +13,90 @@ use Yarbo\YarboWifi;
 $host = (string) ($config['broker_host'] ?? '');
 $port = (int) ($config['broker_port'] ?? 1883);
 
-// Prefer persistent agent so status does not open a competing MQTT session.
+function status_raw_usable(mixed $raw): bool
+{
+    return is_array($raw) && $raw !== [] && (
+        isset($raw['StateMSG'])
+        || isset($raw['BatteryMSG'])
+        || isset($raw['CombinedOdom'])
+        || isset($raw['RTKMSG'])
+    );
+}
+
+function status_from_agent(array $result): void
+{
+    $raw = $result['raw'] ?? null;
+    if (!($result['ok'] ?? false) || !status_raw_usable($raw)) {
+        return;
+    }
+
+    $wifiEnvelope = is_array($result['wifi'] ?? null)
+        ? ['data' => $result['wifi'], 'topic' => 'get_connect_wifi_name']
+        : null;
+
+    $parsed = YarboTelemetry::parse($raw);
+    if (array_key_exists('lights_on', $result)) {
+        $parsed['lights_on'] = (bool) $result['lights_on'];
+    }
+    if (array_key_exists('hold_controller', $result)) {
+        $parsed['hold_controller'] = (bool) $result['hold_controller'];
+    }
+    if (array_key_exists('controller_acquired', $result)) {
+        $parsed['controller_acquired'] = (bool) $result['controller_acquired'];
+    }
+
+    json_response(array_merge(
+        ['ok' => true, 'via' => 'agent', 'cached' => (bool) ($result['cached'] ?? false)],
+        $parsed,
+        ['wifi' => YarboWifi::parse($wifiEnvelope)],
+    ));
+}
+
+// Prefer persistent Python agent so status does not open a competing MQTT session.
 $agent = YarboMqttAgentClient::fromEnv();
-$agentUp = $agent->isAvailable();
-if (!$agentUp) {
+$ping = $agent->ping();
+if (!($ping['ok'] ?? false)) {
     try {
         $agent = YarboMqttAgentClient::requireRunning();
-        $agentUp = true;
+        $ping = $agent->ping();
     } catch (Throwable) {
-        $agentUp = false;
+        $ping = ['ok' => false];
     }
 }
 
-if ($agentUp) {
+$agentTelemetry = ($ping['ok'] ?? false)
+    && (($ping['telemetry'] ?? false) || (($ping['engine'] ?? '') === 'python-yarbo'));
+
+if ($agentTelemetry) {
     try {
         $result = $agent->telemetry(4.0, true);
-        if (($result['ok'] ?? false) && is_array($result['raw'] ?? null)) {
-            $wifiEnvelope = is_array($result['wifi'] ?? null)
-                ? ['data' => $result['wifi'], 'topic' => 'get_connect_wifi_name']
-                : null;
+        status_from_agent($result);
 
-            $parsed = YarboTelemetry::parse($result['raw']);
-            // Agent desired lights/controller state is authoritative (firmware telemetry is unreliable).
-            if (array_key_exists('lights_on', $result)) {
-                $parsed['lights_on'] = (bool) $result['lights_on'];
-            }
-            if (array_key_exists('hold_controller', $result)) {
-                $parsed['hold_controller'] = (bool) $result['hold_controller'];
-            }
-            if (array_key_exists('controller_acquired', $result)) {
-                $parsed['controller_acquired'] = (bool) $result['controller_acquired'];
-            }
-
-            json_response(array_merge(
-                ['ok' => true, 'via' => 'agent', 'cached' => (bool) ($result['cached'] ?? false)],
-                $parsed,
-                ['wifi' => YarboWifi::parse($wifiEnvelope)],
-            ));
+        $error = (string) ($result['error'] ?? 'telemetry timeout');
+        $unknown = str_contains(strtolower($error), 'unknown op');
+        $disconnected = str_contains(strtolower($error), 'mqtt not connected');
+        if ($unknown || $disconnected) {
+            // PHP fallback agent, or Python still connecting — use a direct read.
+        } else {
+            json_response([
+                'ok' => false,
+                'via' => 'agent',
+                'stage' => 'telemetry',
+                'transient' => (bool) ($result['transient'] ?? false),
+                'error' => YarboErrors::friendly($error),
+            ], 504);
         }
-
-        // Agent is running — never open a second MQTT client (that fights the command session).
-        json_response([
-            'ok' => false,
-            'via' => 'agent',
-            'stage' => 'telemetry',
-            'transient' => (bool) ($result['transient'] ?? true),
-            'error' => YarboErrors::friendly((string) ($result['error'] ?? 'telemetry timeout')),
-        ], 504);
     } catch (Throwable $e) {
-        json_response([
-            'ok' => false,
-            'via' => 'agent',
-            'stage' => 'telemetry',
-            'transient' => true,
-            'error' => friendly_error($e),
-        ], 504);
+        $message = $e->getMessage();
+        if (!str_contains(strtolower($message), 'mqtt agent is not running')) {
+            json_response([
+                'ok' => false,
+                'via' => 'agent',
+                'stage' => 'telemetry',
+                'transient' => false,
+                'error' => friendly_error($e),
+            ], 504);
+        }
     }
 }
 

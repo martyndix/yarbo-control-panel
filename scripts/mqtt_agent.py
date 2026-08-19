@@ -352,6 +352,7 @@ async def handle_request(
             "controller": bool(getattr(client, "controller_acquired", False)),
             "connected": bool(getattr(client, "is_connected", False)),
             "engine": "python-yarbo",
+            "telemetry": True,
             **state_flags(state, client),
         }
 
@@ -709,6 +710,8 @@ async def controller_keepalive_loop(
     """Soft hold while lights/drive/Controller On, and until a started job latches."""
     while True:
         await asyncio.sleep(0.5)
+        if not getattr(client, "is_connected", False):
+            continue
         if not wants_wakeup(state):
             continue
         now = time.time()
@@ -787,6 +790,25 @@ async def handle_client(
             pass
 
 
+async def connect_mqtt(client: Any) -> None:
+    delay = 1.0
+    while True:
+        try:
+            if not getattr(client, "is_connected", False):
+                await client.connect()
+                log("MQTT connected (controller not held until panel requests it)")
+            try:
+                await client.start_polling(interval_seconds=15.0, acquire_controller=False)
+                log("Telemetry polling started")
+            except Exception as e:
+                log(f"WARNING: start_polling failed: {e}")
+            return
+        except Exception as e:
+            log(f"MQTT connect failed: {e} (retry in {delay:.0f}s)")
+            await asyncio.sleep(delay)
+            delay = min(15.0, delay * 1.5)
+
+
 async def amain() -> int:
     try:
         from yarbo.local import YarboLocalClient
@@ -804,18 +826,8 @@ async def amain() -> int:
         log("broker_host and serial must be set in config.php")
         return 1
 
-    log(f"Connecting MQTT {host}:{port} SN={serial}")
-    # auto_controller=False: wait for explicit Controller/Lights ON so the robot speaks then.
-    client = YarboLocalClient(broker=host, sn=serial, port=port, auto_controller=False)
-    await client.connect()
-    log("MQTT connected (controller not held until panel requests it)")
-
-    try:
-        await client.start_polling(interval_seconds=15.0, acquire_controller=False)
-        log("Telemetry polling started")
-    except Exception as e:
-        log(f"WARNING: start_polling failed: {e}")
-
+    # Bind the local control port before MQTT connect so the panel cannot
+    # spawn a PHP fallback agent onto 8765 while we are still reaching the robot.
     lock = asyncio.Lock()
     state: dict[str, Any] = {
         "hold_controller": False,
@@ -831,7 +843,7 @@ async def amain() -> int:
         "last_keepalive": 0.0,
         "keepalive_soon": False,
     }
-    asyncio.create_task(controller_keepalive_loop(client, lock, state))
+    client = YarboLocalClient(broker=host, sn=serial, port=port, auto_controller=False)
 
     async def _on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await handle_client(reader, writer, client, lock, state)
@@ -840,11 +852,13 @@ async def amain() -> int:
         server = await asyncio.start_server(_on_client, "127.0.0.1", agent_port)
     except OSError as e:
         log(f"Could not bind 127.0.0.1:{agent_port}: {e}")
-        await client.disconnect()
         return 1
 
     sockets = ", ".join(str(s.getsockname()) for s in (server.sockets or []))
-    log(f"Agent listening on {sockets} (controller/lights keepalive)")
+    log(f"Agent listening on {sockets} (MQTT connecting {host}:{port} SN={serial})")
+
+    asyncio.create_task(connect_mqtt(client))
+    asyncio.create_task(controller_keepalive_loop(client, lock, state))
 
     async with server:
         await server.serve_forever()

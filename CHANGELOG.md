@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-08-19
+
+### Fixed
+- **Status tiles went blank after the 1.3.5 update**: killing leftover agents let a PHP fallback grab port 8765 before the Python agent finished connecting, and the panel hid those telemetry misses as "transient". The Python agent now listens immediately, status falls back when the agent cannot read telemetry, and the first failed poll shows an error instead of empty dashes.
+- **Start plan still flashed then idled**: that PHP fallback only wakes twice and has no keepalive, so the job still dropped. Restarting now waits until the Python agent is actually listening.
+
 ## [1.3.5] - 2026-08-19
 
 ### Fixed

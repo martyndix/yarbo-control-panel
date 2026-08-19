@@ -163,6 +163,7 @@ let manualModeEntered = false;
 
 let toastTimer = null;
 let polling = false;
+let hasStatusSnapshot = false;
 let commandQuietUntil = 0;
 let settingsModalOpen = false;
 let statusAbort = null;
@@ -2922,10 +2923,11 @@ async function fetchStatus() {
         const data = await res.json();
         if (settingsModalOpen || driveActive) return;
         if (data.ok) {
+            hasStatusSnapshot = true;
             setError(null);
             updateStatus(data);
             updateCameraStatus(data.camera_state);
-        } else if (data.transient) {
+        } else if (data.transient && hasStatusSnapshot) {
             return;
         } else {
             setError(data.error || 'Failed to fetch status');

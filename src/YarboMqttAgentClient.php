@@ -48,12 +48,20 @@ final class YarboMqttAgentClient
 
     public function isAvailable(): bool
     {
-        try {
-            $result = $this->request(['op' => 'ping'], 1.5, false);
+        $result = $this->ping();
 
-            return (bool) ($result['ok'] ?? false);
+        return (bool) ($result['ok'] ?? false);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function ping(float $timeoutSeconds = 1.5): array
+    {
+        try {
+            return $this->request(['op' => 'ping'], $timeoutSeconds, false);
         } catch (\Throwable) {
-            return false;
+            return ['ok' => false];
         }
     }
 

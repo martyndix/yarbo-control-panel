@@ -217,6 +217,8 @@ function handle_request(
             'controller' => $controllerOk,
             'hold_controller' => $controllerOk,
             'connected' => $mqtt->isConnected(),
+            'engine' => 'php',
+            'telemetry' => false,
         ];
     }
 

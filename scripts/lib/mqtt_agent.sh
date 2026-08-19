@@ -29,3 +29,30 @@ yarbo_stop_mqtt_agent() {
   pkill -f '[s]cripts/mqtt_agent.php' 2>/dev/null || true
   sleep 0.2
 }
+
+yarbo_agent_is_up() {
+  local port="${1:-$(yarbo_mqtt_agent_port)}"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  if command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "${port}" >/dev/null 2>&1
+    return $?
+  fi
+  return 1
+}
+
+yarbo_wait_mqtt_agent() {
+  local port="${1:-$(yarbo_mqtt_agent_port)}"
+  local seconds="${2:-8}"
+  local start
+  start="$(date +%s)"
+  while (( $(date +%s) - start < seconds )); do
+    if yarbo_agent_is_up "$port"; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}

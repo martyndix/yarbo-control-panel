@@ -46,11 +46,12 @@ echo "==> Starting MQTT agent on 127.0.0.1:${AGENT_PORT}"
 echo "    ${AGENT_CMD[*]}"
 YARBO_MQTT_AGENT_PORT="${AGENT_PORT}" "${AGENT_CMD[@]}" &
 AGENT_PID=$!
-sleep 1.2
-
-if ! kill -0 "${AGENT_PID}" 2>/dev/null; then
-  echo "ERROR: MQTT agent failed to start" >&2
-  exit 1
+if ! yarbo_wait_mqtt_agent "${AGENT_PORT}" 10; then
+  if ! kill -0 "${AGENT_PID}" 2>/dev/null; then
+    echo "ERROR: MQTT agent failed to start" >&2
+    exit 1
+  fi
+  echo "WARNING: MQTT agent process is up but port ${AGENT_PORT} is not listening yet" >&2
 fi
 
 echo "==> Starting panel on http://${HOST}:${PORT}"
