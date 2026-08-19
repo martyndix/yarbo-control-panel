@@ -547,7 +547,7 @@ Controls and manual drive talk through a **persistent MQTT agent** (`scripts/mqt
 | Pause | `planning_paused` | |
 | Resume | `resume` | |
 | Return to Dock | `wireless_charging_cmd` then `cmd_recharge` | `{cmd: 0}` then `{cmd: 2}` on the live controller session |
-| Stop | `dstop` | Graceful stop |
+| Stop | `cmd_vel` 0, `dstopp`, `dstop`, `stop`, `stop_plan` | Immediate; no confirmation |
 | Start work plan | `start_plan` | One message: `planId`, `id`, and `percent` (0–100) |
 | Delete work plan | `del_plan` | Destructive — requires confirm in UI |
 | Go to waypoint | `start_way_point` | `index` 0–9999 |
@@ -633,7 +633,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.11** (2026-08-20).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.12** (2026-08-20).
 
 ---
 

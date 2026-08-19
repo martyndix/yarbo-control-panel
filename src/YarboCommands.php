@@ -23,12 +23,19 @@ final class YarboCommands
     }
 
     /**
+     * Immediate halt: zero velocity, hard/soft chassis stop, then official plan stop.
+     * Fire-and-forget — do not wait for data_feedback.
+     *
      * @return array<int, array{cmd: string, payload: array<string, mixed>}>
      */
     public static function stopVariants(): array
     {
         return [
+            ['cmd' => 'cmd_vel', 'payload' => ['vel' => 0.0, 'rev' => 0.0]],
+            ['cmd' => 'dstopp', 'payload' => []],
             ['cmd' => 'dstop', 'payload' => []],
+            ['cmd' => 'stop', 'payload' => []],
+            ['cmd' => 'stop_plan', 'payload' => []],
         ];
     }
 

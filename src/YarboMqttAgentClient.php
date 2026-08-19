@@ -348,6 +348,18 @@ final class YarboMqttAgentClient
     }
 
     /**
+     * Immediate stop (no confirm, no data_feedback wait).
+     *
+     * @return array<string, mixed>
+     */
+    public function stop(): array
+    {
+        return $this->request([
+            'op' => 'stop',
+        ], 6.0);
+    }
+
+    /**
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */

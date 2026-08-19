@@ -44,8 +44,7 @@ $ACTIONS = [
         'variants' => static fn (): array => [['cmd' => 'resume', 'payload' => []]],
     ],
     'stop' => [
-        'kind' => 'variants',
-        'variants' => static fn (): array => YarboCommands::stopVariants(),
+        'kind' => 'stop',
     ],
 ];
 
@@ -143,6 +142,27 @@ try {
             'hold_controller' => (bool) ($result['hold_controller'] ?? false),
             'charging' => (bool) ($result['charging'] ?? false),
             'charging_status' => $result['charging_status'] ?? null,
+        ]);
+    }
+
+    if (($def['kind'] ?? '') === 'stop') {
+        $result = $agent->stop();
+        if (!($result['ok'] ?? false)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Stop failed'),
+                'via' => 'agent',
+                'ack_msg' => $result['ack_msg'] ?? null,
+            ], 500);
+        }
+
+        json_response([
+            'ok' => true,
+            'action' => $action,
+            'cmd' => $result['cmd'] ?? 'stop',
+            'via' => $result['via'] ?? 'agent',
+            'ack_msg' => $result['ack_msg'] ?? null,
+            'hold_controller' => (bool) ($result['hold_controller'] ?? true),
         ]);
     }
 

@@ -3228,7 +3228,6 @@ async function sendDrive(linear, angular, enterManual = false) {
         if (data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
             sessionStorage.setItem('yarbo_drive_dock_warn', '1');
             showToast(data.warning, 'error');
-            if (els.driveStatus) els.driveStatus.textContent = 'Blocked (dock/charge?)';
         }
         if (enterManual) manualModeEntered = true;
         return true;
@@ -3305,14 +3304,8 @@ async function startDrive(direction, button) {
         return;
     }
     if (!sessionStorage.getItem('yarbo_drive_ack')) {
-        const ok = confirm(
-            'WARNING: Manual drive can move the robot immediately.\n\n'
-            + 'Clear the area first — keep people, pets, furniture, and obstacles '
-            + 'well out of the way in case of collision. Use only on open, flat ground, '
-            + 'and be ready to release or press Stop.\n\nContinue?'
-        );
-        if (!ok) return;
         sessionStorage.setItem('yarbo_drive_ack', '1');
+        showToast('Manual drive can move the robot immediately — keep the area clear and release or press Stop to halt.', 'error');
     }
 
     stopDriveLoop();
@@ -3364,7 +3357,8 @@ function setupDrivePad() {
 }
 
 async function sendCommand(action, button) {
-    button.disabled = true;
+    const keepEnabled = action === 'stop';
+    if (!keepEnabled) button.disabled = true;
     try {
         const res = await fetch('/api/command.php', {
             method: 'POST',
@@ -3413,8 +3407,11 @@ document.querySelectorAll('[data-action]').forEach((button) => {
             showToast('Connect the controller first', 'error');
             return;
         }
-        if (action === 'stop' && !confirm('Send graceful stop to Yarbo?')) return;
         if (action === 'return_to_dock' && !confirm('Send Yarbo back to the dock?')) return;
+        if (action === 'stop') {
+            stopDriveLoop();
+            if (els.driveStatus) els.driveStatus.textContent = 'Stopped';
+        }
         sendCommand(action, button);
         if (action === 'buzzer') {
             button.classList.add('is-pulse');

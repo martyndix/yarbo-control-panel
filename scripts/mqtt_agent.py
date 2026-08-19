@@ -50,6 +50,14 @@ WORK_STARTUP_CMDS = frozenset({
     "start_way_point",
     "resume",
 })
+# Fire-and-forget halt: chassis first, then official / python-yarbo plan stop.
+STOP_COMMANDS: list[tuple[str, dict[str, Any]]] = [
+    ("cmd_vel", {"vel": 0.0, "rev": 0.0}),
+    ("dstopp", {}),
+    ("dstop", {}),
+    ("stop", {}),
+    ("stop_plan", {}),
+]
 JOB_LATCH_KEYS = (
     "on_going_planning",
     "on_going_recharging",
@@ -433,21 +441,39 @@ async def soft_keepalive(client: Any, state: dict[str, Any]) -> None:
         await client.publish_command("light_ctrl", COMMUNITY_LIGHTS_ON)
 
 
-def dock_block_reason(raw: dict[str, Any] | None) -> str | None:
-    """Only trust StateMSG.charging_status — BodyMsg.recharge_state is unreliable."""
+def charging_status_of(raw: dict[str, Any] | None) -> int:
     if not isinstance(raw, dict):
-        return None
+        return 0
     state_msg = raw.get("StateMSG") if isinstance(raw.get("StateMSG"), dict) else {}
     try:
-        charging = int(state_msg.get("charging_status") or 0)
+        return int(state_msg.get("charging_status") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def battery_capacity_of(raw: dict[str, Any] | None) -> int | None:
+    if not isinstance(raw, dict):
+        return None
+    battery = raw.get("BatteryMSG") if isinstance(raw.get("BatteryMSG"), dict) else {}
+    cap = battery.get("capacity")
+    try:
+        return int(cap) if cap is not None else None
     except (TypeError, ValueError):
         return None
-    if charging > 0:
-        return (
-            f"Robot reports charging_status={charging}. "
-            "Unplug / leave the charger before manual drive."
-        )
-    return None
+
+
+def dock_block_reason(raw: dict[str, Any] | None) -> str | None:
+    """Warn only while still taking charge. Full on the pad is driveable after undock."""
+    charging = charging_status_of(raw)
+    if charging <= 0:
+        return None
+    capacity = battery_capacity_of(raw)
+    if capacity is not None and capacity >= 95:
+        return None
+    return (
+        f"Robot reports charging_status={charging}. "
+        "Leave the charger before manual drive."
+    )
 
 
 def motion_fault_warning(raw: dict[str, Any] | None) -> str | None:
@@ -532,6 +558,8 @@ async def handle_request(
                 return {"ok": False, "error": "telemetry timeout", "transient": True}
             raw = getattr(status, "raw", None) or {}
             state["last_raw"] = raw
+            if charging_status_of(raw) <= 0:
+                state["pad_released"] = False
             mark_job_from_raw(state, raw)
             working_state = (raw.get("StateMSG") or {}).get("working_state")
             # Quiet soft-wake soon if a lights/drive session fell idle (not a latched job).
@@ -610,6 +638,7 @@ async def handle_request(
             state["work_hold"] = False
             state["work_latched"] = False
             state["manual_drive"] = False
+            state["pad_released"] = False
             state["keepalive_soon"] = False
             try:
                 client._controller_acquired = False  # noqa: SLF001
@@ -667,6 +696,31 @@ async def handle_request(
                 **state_flags(state, client),
             }
 
+        if op == "stop":
+            if not getattr(client, "controller_acquired", False):
+                await ensure_controller_role(client)
+            state["manual_drive"] = False
+            state["work_hold"] = False
+            state["work_latched"] = False
+            state["keepalive_soon"] = False
+            state["hold_controller"] = True
+            raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
+            if charging_status_of(raw) <= 0:
+                state["pad_released"] = False
+            for cmd, payload in STOP_COMMANDS:
+                try:
+                    await client.publish_command(cmd, payload)
+                except Exception as e:
+                    log(f"stop {cmd} failed: {e}")
+            log("Stop sent immediately (cmd_vel 0, dstopp, dstop, stop, stop_plan)")
+            return {
+                "ok": True,
+                "op": "stop",
+                "cmd": "stop",
+                "via": "immediate",
+                **state_flags(state, client),
+            }
+
         if op == "drive":
             linear = float(req.get("linear") or 0)
             angular = float(req.get("angular") or 0)
@@ -679,6 +733,11 @@ async def handle_request(
             # Never get_controller here — that re-triggers "app controller connected".
             warning = None
             if moving:
+                raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
+                # A prior Stop/plan used work_hold; drive needs the control keepalive.
+                state["work_hold"] = False
+                state["work_latched"] = False
+                state["control_session"] = True
                 if not state.get("manual_drive"):
                     await ensure_session(client)
                     # FW 3.13 ignores string state "manual" (working_state unchanged).
@@ -687,6 +746,14 @@ async def handle_request(
                         "set_working_state",
                         {"state": 1, "source": "app"},
                     )
+                    if charging_status_of(raw) > 0 and not state.get("pad_released"):
+                        try:
+                            await client.publish_command("wireless_charging_cmd", {"cmd": 0})
+                            state["pad_released"] = True
+                            log("Drive: disabled wireless charge so the robot can leave the pad")
+                            await asyncio.sleep(0.2)
+                        except Exception as e:
+                            log(f"wireless_charging_cmd before drive failed: {e}")
                     try:
                         await client.publish_command("emergency_unlock", {})
                     except Exception as e:
@@ -694,13 +761,9 @@ async def handle_request(
                     await asyncio.sleep(0.15)
                     state["manual_drive"] = True
                     state["last_keepalive"] = time.time()
-                    warning = dock_block_reason(
-                        state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
-                    )
+                    warning = dock_block_reason(raw)
                     if warning is None:
-                        warning = motion_fault_warning(
-                            state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
-                        )
+                        warning = motion_fault_warning(raw)
                     if warning:
                         log(f"Drive warning: {warning}")
                 # Burst: robot often needs several cmd_vel frames (~10 Hz) before motion.
@@ -903,7 +966,7 @@ async def handle_request(
 
         return {
             "ok": False,
-            "error": "Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants, start_plan, return_to_dock",
+            "error": "Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, stop, publish, publish_variants, start_plan, return_to_dock",
         }
     except YarboNotControllerError as e:
         return {
@@ -1062,6 +1125,7 @@ async def amain() -> int:
         "work_started_at": 0.0,
         "lights_on": False,
         "manual_drive": False,
+        "pad_released": False,
         "last_raw": None,
         "last_wifi": None,
         "last_battery_cells": None,

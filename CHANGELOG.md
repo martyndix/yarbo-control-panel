@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.12] - 2026-08-20
+
+### Fixed
+- **Controls Stop did nothing useful and asked for confirmation**: it now sends immediately (no dialog). The agent publishes `cmd_vel` 0, hard/soft chassis stop (`dstopp` / `dstop`), then official `stop` / `stop_plan`, without waiting for a robot ack.
+- **Manual drive did not move, especially from the dock**: hold-to-drive no longer opens a confirm dialog (that cancelled the pointer hold). A full robot on the pad now disables wireless charge before `cmd_vel`, and Stop no longer leaves a work-hold that starved drive keepalive.
+
 ## [1.3.11] - 2026-08-20
 
 ### Fixed

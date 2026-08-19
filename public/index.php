@@ -404,7 +404,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span class="control-tile-icon" aria-hidden="true">🏠</span>
                     <span class="control-tile-label">Dock</span>
                 </button>
-                <button type="button" class="control-tile control-tile-danger" data-action="stop" title="Emergency stop">
+                <button type="button" class="control-tile control-tile-danger" data-action="stop" title="Stop immediately — no confirmation">
                     <span class="control-tile-icon" aria-hidden="true">⛔</span>
                     <span class="control-tile-label">Stop</span>
                 </button>

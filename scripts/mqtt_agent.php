@@ -66,8 +66,9 @@ $state = [
     'controllerOk' => false,
     'controlHold' => false,
     'lightsOn' => false,
-    'workUntil' => 0.0,
+            'workUntil' => 0.0,
     'lastWake' => 0.0,
+    'padReleased' => false,
     'lastBatteryCells' => null,
     'batteryCellsAt' => 0.0,
 ];
@@ -368,9 +369,9 @@ function handle_request(
             ], $state);
         }
 
-        $needsController = in_array($op, ['controller', 'lights', 'buzzer', 'drive', 'publish', 'publish_variants', 'start_plan', 'return_to_dock'], true);
+        $needsController = in_array($op, ['controller', 'lights', 'buzzer', 'drive', 'stop', 'publish', 'publish_variants', 'start_plan', 'return_to_dock'], true);
         if (!$needsController) {
-            return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants, start_plan, return_to_dock'];
+            return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, stop, publish, publish_variants, start_plan, return_to_dock'];
         }
 
         if ($op === 'controller' && !((bool) ($req['on'] ?? false))) {
@@ -446,11 +447,35 @@ function handle_request(
             return ok_resp(['ok' => true, 'op' => 'buzzer', 'cmd' => 'cmd_buzzer'], $state);
         }
 
+        if ($op === 'stop') {
+            publish($mqtt, $serial, 'cmd_vel', ['vel' => 0.0, 'rev' => 0.0]);
+            publish($mqtt, $serial, 'dstopp', []);
+            publish($mqtt, $serial, 'dstop', []);
+            publish($mqtt, $serial, 'stop', []);
+            publish($mqtt, $serial, 'stop_plan', []);
+            $state['workUntil'] = 0.0;
+            $state['padReleased'] = false;
+            $state['controlHold'] = true;
+            log_line('stop sent immediately (cmd_vel 0, dstopp, dstop, stop, stop_plan)');
+
+            return ok_resp([
+                'ok' => true,
+                'op' => 'stop',
+                'cmd' => 'stop',
+                'via' => 'immediate',
+            ], $state);
+        }
+
         if ($op === 'drive') {
             $linear = (float) ($req['linear'] ?? 0);
             $angular = (float) ($req['angular'] ?? 0);
             if (abs($linear) > 1e-6 || abs($angular) > 1e-6) {
                 wake_for_work($mqtt, $loopStartedAt, $serial);
+                if (!($state['padReleased'] ?? false)) {
+                    publish($mqtt, $serial, 'wireless_charging_cmd', ['cmd' => 0]);
+                    $state['padReleased'] = true;
+                    pump($mqtt, $loopStartedAt, 0.2);
+                }
                 publish($mqtt, $serial, 'emergency_unlock', []);
                 pump($mqtt, $loopStartedAt, 0.1);
             }
@@ -550,7 +575,7 @@ function handle_request(
             return ok_resp(['ok' => true, 'op' => 'publish_variants', 'cmd' => $lastCmd], $state);
         }
 
-        return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants, start_plan, return_to_dock'];
+        return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, stop, publish, publish_variants, start_plan, return_to_dock'];
     } catch (Throwable $e) {
         log_line('Command error: ' . $e->getMessage());
         $state['controllerOk'] = false;
