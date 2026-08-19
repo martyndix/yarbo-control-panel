@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-08-19
+
+### Fixed
+- **Heading line on the map stayed fixed**: the green line in front of the robot marker is facing direction. It now follows CombinedOdom yaw (which turns with the robot) instead of RTK compass heading, which often stays at 0 until dual-antenna heading is valid.
+
 ## [1.3.2] - 2026-08-19
 
 ### Fixed

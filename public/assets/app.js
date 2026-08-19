@@ -1420,7 +1420,8 @@ function updateRobotOnMap(data) {
     const lat = Number(data.latitude);
     const lon = Number(data.longitude);
     const fixQuality = Number(data.fix_quality ?? 0);
-    const heading = Number(data.heading ?? 0);
+    const heading = Number(data.heading);
+    const hasHeading = Number.isFinite(heading);
     const hasFix = Boolean(data.gps_valid) && Number.isFinite(lat) && Number.isFinite(lon);
 
     lastRobotFix = { lat, lon, gps_valid: hasFix };
@@ -1442,15 +1443,20 @@ function updateRobotOnMap(data) {
         robotMarker.setLatLng([lat, lon]);
     }
 
-    const tip = headingEndpoint(lat, lon, heading);
-    if (!headingLine) {
-        headingLine = L.polyline([[lat, lon], tip], {
-            color: '#7ddea0',
-            weight: 3,
-            opacity: 0.9,
-        }).addTo(map);
-    } else {
-        headingLine.setLatLngs([[lat, lon], tip]);
+    if (hasHeading) {
+        const tip = headingEndpoint(lat, lon, heading);
+        if (!headingLine) {
+            headingLine = L.polyline([[lat, lon], tip], {
+                color: '#7ddea0',
+                weight: 3,
+                opacity: 0.9,
+            }).addTo(map);
+        } else {
+            headingLine.setLatLngs([[lat, lon], tip]);
+        }
+    } else if (headingLine) {
+        map.removeLayer(headingLine);
+        headingLine = null;
     }
 
     if (!mapHasCentered) {
@@ -1459,8 +1465,9 @@ function updateRobotOnMap(data) {
     }
 
     const altitudeLabel = data.altitude != null ? `${Number(data.altitude).toFixed(1)}m` : 'n/a';
+    const headingLabel = hasHeading ? ` | heading ${heading.toFixed(0)}°` : '';
     updateMapStatus(
-        `GPS locked (fix_quality=${fixQuality}) at ${lat.toFixed(6)}, ${lon.toFixed(6)} | altitude ${altitudeLabel}`
+        `GPS locked (fix_quality=${fixQuality}) at ${lat.toFixed(6)}, ${lon.toFixed(6)} | altitude ${altitudeLabel}${headingLabel}`
     );
 }
 

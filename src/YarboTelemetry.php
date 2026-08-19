@@ -31,8 +31,9 @@ final class YarboTelemetry
         $workingState = $raw['StateMSG']['working_state'] ?? null;
         $chargingStatus = $raw['StateMSG']['charging_status'] ?? 0;
         $errorCode = $raw['StateMSG']['error_code'] ?? 0;
-        $heading = $raw['RTKMSG']['heading'] ?? null;
         $rtkMsg = is_array($raw['RTKMSG'] ?? null) ? $raw['RTKMSG'] : [];
+        $odomMsg = is_array($raw['CombinedOdom'] ?? null) ? $raw['CombinedOdom'] : [];
+        $heading = self::resolveCompassHeading($rtkMsg, $odomMsg);
         $netMsg = is_array($raw['NetMSG'] ?? null) ? $raw['NetMSG'] : [];
         $headType = $raw['HeadMsg']['head_type'] ?? null;
         $roverGngga = (string) ($raw['rtk_base_data']['rover']['gngga'] ?? '');
@@ -112,15 +113,15 @@ final class YarboTelemetry
                 ? (int) $abnormalMsg['speaker_state']
                 : null,
             'error_code'          => $errorCode,
-            'heading'             => $heading !== null ? round((float) $heading, 1) : null,
+            'heading'             => $heading,
             'latitude'            => $latitude,
             'longitude'           => $longitude,
             'altitude'            => $altitude,
             'fix_quality'         => $fixQuality,
             'gps_valid'           => $fixQuality > 0 && $latitude !== null && $longitude !== null,
             'position'            => [
-                'x' => isset($raw['CombinedOdom']['x']) ? round((float) $raw['CombinedOdom']['x'], 3) : null,
-                'y' => isset($raw['CombinedOdom']['y']) ? round((float) $raw['CombinedOdom']['y'], 3) : null,
+                'x' => isset($odomMsg['x']) ? round((float) $odomMsg['x'], 3) : null,
+                'y' => isset($odomMsg['y']) ? round((float) $odomMsg['y'], 3) : null,
             ],
             'head_type'           => $headType !== null ? (int) $headType : null,
             'head_type_name'      => self::HEAD_TYPES[(int) $headType] ?? 'Unknown',
@@ -164,6 +165,7 @@ final class YarboTelemetry
             'rtk_diagnostics' => [
                 'rtk_status'  => $rtkMsg['status'] ?? ($raw['rtk_status'] ?? null),
                 'heading_dop' => isset($rtkMsg['heading_dop']) ? round((float) $rtkMsg['heading_dop'], 2) : null,
+                'heading_status' => isset($rtkMsg['heading_status']) ? (int) $rtkMsg['heading_status'] : null,
                 'fix_quality' => $fixQuality,
                 'gps_valid'   => $fixQuality > 0 && $latitude !== null && $longitude !== null,
             ],
@@ -288,6 +290,59 @@ final class YarboTelemetry
             return null;
         }
         return array_sum($nums) / count($nums);
+    }
+
+    /**
+     * Compass heading for the map line (0° = north, 90° = east).
+     *
+     * RTKMSG.heading is dual-antenna RTK and often stays at 0 until heading_status
+     * is valid. CombinedOdom.phi is the pose yaw and updates as the robot turns.
+     *
+     * @param array<string, mixed> $rtkMsg
+     * @param array<string, mixed> $odomMsg
+     */
+    private static function resolveCompassHeading(array $rtkMsg, array $odomMsg): ?float
+    {
+        if (isset($odomMsg['phi']) && is_numeric($odomMsg['phi'])) {
+            return round(self::odomPhiToCompassDegrees((float) $odomMsg['phi']), 1);
+        }
+
+        if (!isset($rtkMsg['heading']) || !is_numeric($rtkMsg['heading'])) {
+            return null;
+        }
+
+        $status = $rtkMsg['heading_status'] ?? null;
+        $rtkHeading = (float) $rtkMsg['heading'];
+        if ($status !== null && (int) $status <= 0 && abs($rtkHeading) < 0.5) {
+            return null;
+        }
+
+        return round(self::normalizeDegrees($rtkHeading), 1);
+    }
+
+    /**
+     * CombinedOdom is in the local map frame (X west, Y north).
+     * Phi is radians when |phi| ≤ 2π (python-yarbo / SLAM), otherwise degrees.
+     * Phi 0 faces +X (west); convert to compass degrees for Leaflet.
+     */
+    private static function odomPhiToCompassDegrees(float $phi): float
+    {
+        $phiRad = abs($phi) <= (2 * M_PI + 0.2) ? $phi : deg2rad($phi);
+
+        return self::normalizeDegrees(rad2deg(atan2(-cos($phiRad), sin($phiRad))));
+    }
+
+    private static function normalizeDegrees(float $degrees): float
+    {
+        $degrees = fmod($degrees, 360.0);
+        if ($degrees < 0) {
+            $degrees += 360.0;
+        }
+        if ($degrees >= 359.95) {
+            return 0.0;
+        }
+
+        return $degrees;
     }
 
     /**
