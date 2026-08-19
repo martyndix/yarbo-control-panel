@@ -10,6 +10,9 @@ HOST="${YARBO_PANEL_HOST:-0.0.0.0}"
 AGENT_PORT="${YARBO_MQTT_AGENT_PORT:-8765}"
 PHP_BIN="${YARBO_PHP_BIN:-$(command -v php)}"
 
+# shellcheck source=scripts/lib/mqtt_agent.sh
+source "${ROOT}/scripts/lib/mqtt_agent.sh"
+
 if [[ -z "$PHP_BIN" ]]; then
   echo "ERROR: php not found on PATH" >&2
   exit 1
@@ -36,6 +39,8 @@ pick_agent() {
 }
 
 AGENT_CMD=($(pick_agent))
+
+yarbo_stop_mqtt_agent "${AGENT_PORT}"
 
 echo "==> Starting MQTT agent on 127.0.0.1:${AGENT_PORT}"
 echo "    ${AGENT_CMD[*]}"

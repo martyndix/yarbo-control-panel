@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-08-19
+
+### Fixed
+- **Start plan woke the robot then dropped it back to idle**: lights flashed, the panel showed a telemetry timeout, status flipped idle then active, and the plan never ran. Firmware only stays app-awake for about half a second unless something keeps holding it. The agent now keeps `set_working_state` 1 until planning/docking actually starts, then stops poking so the job can run.
+- **Status poll fought the start command**: after a failed snapshot the panel opened a second MQTT client against the same broker. Status now stays on the persistent agent, and a brief gap after start/dock is treated as transient instead of a serial-number error.
+- **Settings update could keep the old MQTT agent**: leftover `mqtt_agent` processes are stopped before the panel service restarts, so start-plan hold and other agent fixes actually load.
+
 ## [1.3.4] - 2026-08-19
 
 ### Fixed

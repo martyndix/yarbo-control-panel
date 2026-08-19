@@ -2,7 +2,8 @@
 """Persistent Yarbo MQTT agent — one live broker connection.
 
 Does not claim get_controller on connect. Watching telemetry must not stop a job.
-Controller is claimed for explicit Controller/Lights or for work commands (quiet hold).
+Controller is claimed for explicit Controller/Lights or for work commands.
+Start plan / dock keep the robot awake until the job latches, then stop poking.
 
 Talks JSON-lines over TCP 127.0.0.1:8765 (same protocol as scripts/mqtt_agent.php).
 
@@ -40,21 +41,64 @@ COMMUNITY_LIGHTS_OFF = {k: 0 for k in COMMUNITY_LIGHTS_ON}
 # Soft keepalive: re-wake / re-light without get_controller (get_controller speaks every time).
 CONTROLLER_KEEPALIVE_S = 40.0
 CONTROLLER_KEEPALIVE_MIN_GAP_S = 15.0
+# Firmware drops back to idle ~0.5s after a single wake. Hold awake until the job latches.
+WORK_STARTUP_S = 25.0
+WORK_STARTUP_KEEPALIVE_GAP_S = 1.5
+WORK_STARTUP_CMDS = frozenset({
+    "start_plan",
+    "cmd_recharge",
+    "start_way_point",
+    "resume",
+})
+JOB_LATCH_KEYS = (
+    "on_going_planning",
+    "on_going_recharging",
+    "on_going_to_start_point",
+)
+
+
+def job_is_latched(raw: Any) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    state_msg = raw.get("StateMSG") if isinstance(raw.get("StateMSG"), dict) else {}
+    for key in JOB_LATCH_KEYS:
+        try:
+            if int(state_msg.get(key) or 0) != 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def mark_job_from_raw(state: dict[str, Any], raw: Any) -> None:
+    if not state.get("work_hold") or state.get("work_latched"):
+        return
+    if job_is_latched(raw):
+        state["work_latched"] = True
+        state["keepalive_soon"] = False
+        log("Work job latched (planning/docking); stopping startup wake")
 
 
 def wants_wakeup(state: dict[str, Any]) -> bool:
-    """Soft-wake (set_working_state=1) is only for lights / manual drive / Controller On.
+    """Soft-wake (set_working_state=1) for lights / drive / Controller On.
 
-    After start_plan / dock we hold the controller quietly so keepalive does not
-    keep re-entering app-awake over the job.
+    After start_plan / dock, also wake until the job actually starts, then stop
+    so keepalive does not keep re-entering app-awake over a running job.
     """
-    if state.get("work_hold"):
+    if state.get("lights_on") or state.get("manual_drive") or state.get("control_session"):
+        return True
+    if state.get("work_latched"):
         return False
-    return bool(
-        state.get("control_session")
-        or state.get("lights_on")
-        or state.get("manual_drive")
-    )
+    if state.get("work_hold"):
+        started = float(state.get("work_started_at") or 0)
+        return started > 0 and (time.time() - started) < WORK_STARTUP_S
+    return False
+
+
+def keepalive_min_gap(state: dict[str, Any]) -> float:
+    if state.get("work_hold") and not state.get("work_latched"):
+        return WORK_STARTUP_KEEPALIVE_GAP_S
+    return CONTROLLER_KEEPALIVE_MIN_GAP_S
 
 
 def session_mode(req: dict[str, Any]) -> str:
@@ -148,8 +192,13 @@ async def assert_lights_on(client: Any) -> None:
     await client.publish_command("light_ctrl", COMMUNITY_LIGHTS_ON)
 
 
-async def apply_command_session(client: Any, state: dict[str, Any], session: str) -> None:
-    """Claim controller, then either wake (control) or wake-once for work (plan/dock)."""
+async def apply_command_session(
+    client: Any,
+    state: dict[str, Any],
+    session: str,
+    cmds: list[str] | None = None,
+) -> None:
+    """Claim controller, then wake for control or hold awake until a job latches."""
     if session == "work":
         await ensure_controller_role(client)
         if state.get("manual_drive"):
@@ -159,16 +208,25 @@ async def apply_command_session(client: Any, state: dict[str, Any], session: str
                 log(f"cmd_vel stop before work failed: {e}")
             state["manual_drive"] = False
         # Firmware drops start_plan / cmd_recharge while idle (working_state 0).
-        # Wake once, then stop drive keepalive so we do not keep latching manual.
         await wake_for_control(client)
         state["hold_controller"] = True
         state["control_session"] = False
         state["work_hold"] = True
-        state["keepalive_soon"] = False
         state["last_keepalive"] = time.time()
-        log("Work session: controller + wake (keepalive off so the job can run)")
+        cmd_names = [str(c) for c in (cmds or []) if c]
+        if any(c in WORK_STARTUP_CMDS for c in cmd_names):
+            state["work_latched"] = False
+            state["work_started_at"] = time.time()
+            state["keepalive_soon"] = True
+            state["quiet_until"] = time.time() + 4.0
+            log("Work session: controller + wake; hold awake until the job latches")
+        else:
+            state["work_latched"] = True
+            state["keepalive_soon"] = False
+            log("Work session: controller + wake once (no startup hold)")
         return
     state["work_hold"] = False
+    state["work_latched"] = False
     await ensure_session(client)
     state["hold_controller"] = True
     state["control_session"] = True
@@ -215,6 +273,7 @@ async def read_controller_reality(client: Any, state: dict[str, Any]) -> dict[st
         snap = await client.get_status(timeout=2.5, acquire_controller=False)
         if snap and getattr(snap, "raw", None):
             state["last_raw"] = snap.raw
+            mark_job_from_raw(state, snap.raw)
             return parse_controller_reality(snap.raw)
     except Exception:
         pass
@@ -232,6 +291,9 @@ async def read_controller_reality(client: Any, state: dict[str, Any]) -> dict[st
 
 async def soft_keepalive(client: Any, state: dict[str, Any]) -> None:
     """Quiet hold: wake (+ lights) without get_controller speech."""
+    if state.get("work_hold") and not state.get("lights_on") and not state.get("control_session"):
+        await wake_for_control(client)
+        return
     await ensure_session(client)
     if state.get("lights_on"):
         await client.publish_command("light_ctrl", COMMUNITY_LIGHTS_ON)
@@ -300,15 +362,22 @@ async def handle_request(
         if op == "telemetry":
             timeout = float(req.get("timeout") or 4.0)
             want_wifi = bool(req.get("wifi", True))
-            # Quiet window after lights change — avoid clobbering LED state.
+            # Quiet window after lights / work start — do not poke the robot.
             quiet_until = float(state.get("quiet_until") or 0)
-            if time.time() < quiet_until and isinstance(state.get("last_raw"), dict):
+            if time.time() < quiet_until:
+                if isinstance(state.get("last_raw"), dict):
+                    return {
+                        "ok": True,
+                        "op": "telemetry",
+                        "raw": state["last_raw"],
+                        "wifi": state.get("last_wifi"),
+                        "cached": True,
+                        **state_flags(state, client),
+                    }
                 return {
-                    "ok": True,
-                    "op": "telemetry",
-                    "raw": state["last_raw"],
-                    "wifi": state.get("last_wifi"),
-                    "cached": True,
+                    "ok": False,
+                    "error": "telemetry quiet after command",
+                    "transient": True,
                     **state_flags(state, client),
                 }
 
@@ -323,14 +392,19 @@ async def handle_request(
                         "cached": True,
                         **state_flags(state, client),
                     }
-                return {"ok": False, "error": "telemetry timeout"}
+                return {"ok": False, "error": "telemetry timeout", "transient": True}
             raw = getattr(status, "raw", None) or {}
             state["last_raw"] = raw
+            mark_job_from_raw(state, raw)
             working_state = (raw.get("StateMSG") or {}).get("working_state")
-            # Quiet soft-wake soon if a lights/drive session fell idle (not a work hold).
+            # Quiet soft-wake soon if a lights/drive session fell idle (not a latched job).
             if wants_wakeup(state) and working_state == 0:
                 state["keepalive_soon"] = True
-            if state.get("hold_controller") and not getattr(client, "controller_acquired", False):
+            if (
+                state.get("hold_controller")
+                and not state.get("work_hold")
+                and not getattr(client, "controller_acquired", False)
+            ):
                 try:
                     await ensure_controller_role(client)
                     log("Re-claimed controller after session loss (quiet)")
@@ -358,6 +432,7 @@ async def handle_request(
                 state["hold_controller"] = True
                 state["control_session"] = True
                 state["work_hold"] = False
+                state["work_latched"] = False
                 state["manual_drive"] = False
                 state["keepalive_soon"] = False
                 state["last_keepalive"] = time.time()
@@ -376,9 +451,13 @@ async def handle_request(
                     **robot,
                 }
 
-            # Releasing a lights/drive session returns to idle. A quiet work hold
+            # Releasing a lights/drive session returns to idle. A work hold
             # must not send set_working_state 0 — that would stop a running plan.
-            had_control_session = wants_wakeup(state)
+            had_control_session = bool(
+                state.get("control_session")
+                or state.get("lights_on")
+                or state.get("manual_drive")
+            )
             if state.get("lights_on"):
                 try:
                     await client.publish_command("light_ctrl", COMMUNITY_LIGHTS_OFF)
@@ -390,6 +469,7 @@ async def handle_request(
             state["hold_controller"] = False
             state["control_session"] = False
             state["work_hold"] = False
+            state["work_latched"] = False
             state["manual_drive"] = False
             state["keepalive_soon"] = False
             try:
@@ -555,8 +635,12 @@ async def handle_request(
                 return {"ok": False, "error": "cmd required"}
             payload = req.get("payload") if isinstance(req.get("payload"), dict) else {}
             payload = fix_buzzer_payload(cmd, payload)
-            await apply_command_session(client, state, session_mode(req))
+            await apply_command_session(client, state, session_mode(req), [cmd])
             await client.publish_command(cmd, payload)
+            if cmd in WORK_STARTUP_CMDS:
+                await asyncio.sleep(0.35)
+                await wake_for_control(client)
+                state["last_keepalive"] = time.time()
             await asyncio.sleep(0.15)
             return {"ok": True, "op": "publish", "cmd": cmd, **state_flags(state, client)}
 
@@ -564,16 +648,25 @@ async def handle_request(
             variants = req.get("variants")
             if not isinstance(variants, list) or not variants:
                 return {"ok": False, "error": "variants required"}
-            await apply_command_session(client, state, session_mode(req))
-            last_cmd = ""
+            cmds: list[str] = []
+            prepared: list[tuple[str, dict[str, Any]]] = []
             for variant in variants:
                 if not isinstance(variant, dict) or "cmd" not in variant:
                     continue
                 cmd = str(variant["cmd"])
                 payload = variant.get("payload") if isinstance(variant.get("payload"), dict) else {}
                 payload = fix_buzzer_payload(cmd, payload)
+                cmds.append(cmd)
+                prepared.append((cmd, payload))
+            await apply_command_session(client, state, session_mode(req), cmds)
+            last_cmd = ""
+            for cmd, payload in prepared:
                 await client.publish_command(cmd, payload)
                 last_cmd = cmd
+            if last_cmd in WORK_STARTUP_CMDS:
+                await asyncio.sleep(0.35)
+                await wake_for_control(client)
+                state["last_keepalive"] = time.time()
             await asyncio.sleep(0.2)
             return {
                 "ok": True,
@@ -613,16 +706,19 @@ async def controller_keepalive_loop(
     lock: asyncio.Lock,
     state: dict[str, Any],
 ) -> None:
-    """Soft hold while lights/drive/Controller On — not during quiet work holds."""
+    """Soft hold while lights/drive/Controller On, and until a started job latches."""
     while True:
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.5)
         if not wants_wakeup(state):
             continue
         now = time.time()
         since = now - float(state.get("last_keepalive") or 0)
-        if since < CONTROLLER_KEEPALIVE_MIN_GAP_S:
+        min_gap = keepalive_min_gap(state)
+        if since < min_gap:
             continue
-        due = bool(state.get("keepalive_soon")) or since >= CONTROLLER_KEEPALIVE_S
+        work_startup = bool(state.get("work_hold") and not state.get("work_latched"))
+        repeat_s = WORK_STARTUP_KEEPALIVE_GAP_S if work_startup else CONTROLLER_KEEPALIVE_S
+        due = bool(state.get("keepalive_soon")) or since >= repeat_s
         if not due:
             continue
         try:
@@ -637,6 +733,7 @@ async def controller_keepalive_loop(
                 log(
                     "Controller keepalive: soft wake"
                     + (" + light_ctrl" if state.get("lights_on") else "")
+                    + (" (work startup)" if work_startup else "")
                     + " (no get_controller)"
                 )
         except Exception as e:
@@ -724,6 +821,8 @@ async def amain() -> int:
         "hold_controller": False,
         "control_session": False,
         "work_hold": False,
+        "work_latched": False,
+        "work_started_at": 0.0,
         "lights_on": False,
         "manual_drive": False,
         "last_raw": None,

@@ -3,6 +3,7 @@ const SNAPSHOT_INTERVAL_MS = 2000;
 const DRIVE_REPEAT_MS = 120;
 const LINEAR_SPEED = 0.35;
 const ANGULAR_SPEED = 0.55;
+const COMMAND_QUIET_MS = 4000;
 
 const els = {
     battery: document.getElementById('battery'),
@@ -162,6 +163,7 @@ let manualModeEntered = false;
 
 let toastTimer = null;
 let polling = false;
+let commandQuietUntil = 0;
 let settingsModalOpen = false;
 let statusAbort = null;
 let cameras = [];
@@ -1631,6 +1633,10 @@ function setError(message) {
     }
 }
 
+function noteCommandQuiet(ms = COMMAND_QUIET_MS) {
+    commandQuietUntil = Date.now() + ms;
+}
+
 function formatUpdatedAt(iso) {
     if (!iso) return 'never';
     try {
@@ -1878,8 +1884,8 @@ async function startPlan(planId, button) {
             applyControllerStateFromStatus(data);
             updateControllerTile();
         }
-        showToast(`Plan ${planId} started — panel is holding control so the phone app cannot cancel it`, 'success');
-        await fetchStatus();
+        showToast(`Plan ${planId} start sent — holding the robot awake until the job begins`, 'success');
+        noteCommandQuiet();
     } catch (err) {
         showToast(err.message || 'Start failed', 'error');
     } finally {
@@ -1936,7 +1942,7 @@ async function goToWaypointIndex(index, label, button) {
             updateControllerTile();
         }
         showToast(`Sent to ${targetLabel}`, 'success');
-        await fetchStatus();
+        noteCommandQuiet();
     } catch (err) {
         showToast(err.message || 'Waypoint command failed', 'error');
     } finally {
@@ -2904,6 +2910,7 @@ async function runPanelUpdate(button) {
 
 async function fetchStatus() {
     if (polling || settingsModalOpen || driveActive) return;
+    if (Date.now() < commandQuietUntil) return;
     polling = true;
     if (statusAbort) {
         statusAbort.abort();
@@ -2918,6 +2925,8 @@ async function fetchStatus() {
             setError(null);
             updateStatus(data);
             updateCameraStatus(data.camera_state);
+        } else if (data.transient) {
+            return;
         } else {
             setError(data.error || 'Failed to fetch status');
         }
@@ -3247,7 +3256,11 @@ async function sendCommand(action, button) {
                 applyControllerStateFromStatus(data);
                 updateControllerTile();
             }
-            fetchStatus().catch(() => {});
+            if (['return_to_dock', 'pause', 'resume', 'stop'].includes(action)) {
+                noteCommandQuiet();
+            } else {
+                fetchStatus().catch(() => {});
+            }
         } else {
             showToast(data.error || 'Command failed', 'error');
         }

@@ -14,34 +14,61 @@ $host = (string) ($config['broker_host'] ?? '');
 $port = (int) ($config['broker_port'] ?? 1883);
 
 // Prefer persistent agent so status does not open a competing MQTT session.
-try {
-    $agent = YarboMqttAgentClient::requireRunning();
-    $result = $agent->telemetry(4.0, true);
-    if (($result['ok'] ?? false) && is_array($result['raw'] ?? null)) {
-        $wifiEnvelope = is_array($result['wifi'] ?? null)
-            ? ['data' => $result['wifi'], 'topic' => 'get_connect_wifi_name']
-            : null;
-
-        $parsed = YarboTelemetry::parse($result['raw']);
-        // Agent desired lights/controller state is authoritative (firmware telemetry is unreliable).
-        if (array_key_exists('lights_on', $result)) {
-            $parsed['lights_on'] = (bool) $result['lights_on'];
-        }
-        if (array_key_exists('hold_controller', $result)) {
-            $parsed['hold_controller'] = (bool) $result['hold_controller'];
-        }
-        if (array_key_exists('controller_acquired', $result)) {
-            $parsed['controller_acquired'] = (bool) $result['controller_acquired'];
-        }
-
-        json_response(array_merge(
-            ['ok' => true, 'via' => 'agent'],
-            $parsed,
-            ['wifi' => YarboWifi::parse($wifiEnvelope)],
-        ));
+$agent = YarboMqttAgentClient::fromEnv();
+$agentUp = $agent->isAvailable();
+if (!$agentUp) {
+    try {
+        $agent = YarboMqttAgentClient::requireRunning();
+        $agentUp = true;
+    } catch (Throwable) {
+        $agentUp = false;
     }
-} catch (Throwable) {
-    // Fall through to direct MQTT read (telemetry only — does not acquire controller).
+}
+
+if ($agentUp) {
+    try {
+        $result = $agent->telemetry(4.0, true);
+        if (($result['ok'] ?? false) && is_array($result['raw'] ?? null)) {
+            $wifiEnvelope = is_array($result['wifi'] ?? null)
+                ? ['data' => $result['wifi'], 'topic' => 'get_connect_wifi_name']
+                : null;
+
+            $parsed = YarboTelemetry::parse($result['raw']);
+            // Agent desired lights/controller state is authoritative (firmware telemetry is unreliable).
+            if (array_key_exists('lights_on', $result)) {
+                $parsed['lights_on'] = (bool) $result['lights_on'];
+            }
+            if (array_key_exists('hold_controller', $result)) {
+                $parsed['hold_controller'] = (bool) $result['hold_controller'];
+            }
+            if (array_key_exists('controller_acquired', $result)) {
+                $parsed['controller_acquired'] = (bool) $result['controller_acquired'];
+            }
+
+            json_response(array_merge(
+                ['ok' => true, 'via' => 'agent', 'cached' => (bool) ($result['cached'] ?? false)],
+                $parsed,
+                ['wifi' => YarboWifi::parse($wifiEnvelope)],
+            ));
+        }
+
+        // Agent is running — never open a second MQTT client (that fights the command session).
+        json_response([
+            'ok' => false,
+            'via' => 'agent',
+            'stage' => 'telemetry',
+            'transient' => (bool) ($result['transient'] ?? true),
+            'error' => YarboErrors::friendly((string) ($result['error'] ?? 'telemetry timeout')),
+        ], 504);
+    } catch (Throwable $e) {
+        json_response([
+            'ok' => false,
+            'via' => 'agent',
+            'stage' => 'telemetry',
+            'transient' => true,
+            'error' => friendly_error($e),
+        ], 504);
+    }
 }
 
 // Fail fast on unreachable broker so the single-threaded php -S server is not blocked for 30s+.

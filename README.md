@@ -518,7 +518,7 @@ The panel can manage saved work plans and waypoint navigation using the same MQT
 ### Work plans
 
 - **Load plans** — `read_all_plan` via `GET /api/plans.php`
-- **Start plan** — `start_plan` with `planId` and `percent` (0–100)
+- **Start plan** — `start_plan` with `planId` and `percent` (0–100). The MQTT agent keeps the robot awake until planning actually starts.
 - **Delete plan** — `del_plan` with confirmation
 
 UI: **Work Plans** card → adjust start percentage → **Load plans** → **Start** or **Delete** on a plan.
@@ -623,7 +623,7 @@ yarbo-control-panel/
 │   ├── panel.sh          # MQTT agent + PHP panel (systemd and ./scripts/dev.sh)
 │   ├── dev.sh            # Local/macOS wrapper around panel.sh
 │   ├── lib/python_sdk.sh # Shared yarbo-data-sdk install helpers
-│   ├── update.sh         # Pull latest from GitHub, composer install, restart service
+│   ├── update.sh         # Pull latest from GitHub, composer install, restart panel + MQTT agent
 │   └── cloud_bridge.py   # Optional Yarbo cloud map/plan reads
 ├── deploy/               # Reference systemd unit (install.sh generates the real one)
 └── docs/                 # Screenshots and Pi quick-reference (HTML)
@@ -633,7 +633,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.4** (2026-08-19).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.5** (2026-08-19).
 
 ---
 

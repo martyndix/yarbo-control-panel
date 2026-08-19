@@ -219,6 +219,13 @@ if [[ -n "$PYTHON" ]]; then
 fi
 
 RESTARTED=false
+# shellcheck source=scripts/lib/mqtt_agent.sh
+source "${ROOT}/scripts/lib/mqtt_agent.sh"
+step "Stopping MQTT agent so the new code can load"
+write_status "restarting" "Restarting MQTT agent"
+yarbo_stop_mqtt_agent
+step "MQTT agent stopped"
+
 if $SYSTEMD_ACTIVE; then
   step "Restarting systemd service ${SERVICE_NAME}"
   write_status "restarting" "Restarting panel service"
@@ -226,13 +233,14 @@ if $SYSTEMD_ACTIVE; then
   trap - EXIT
   if sudo -n systemctl restart "${SERVICE_NAME}" 2>/dev/null; then
     RESTARTED=true
-    step "Service restarted"
+    step "Service restarted (MQTT agent started with the panel)"
     write_status "done" "Panel updated successfully"
   else
     step "Could not restart automatically — run: sudo systemctl restart ${SERVICE_NAME}"
     write_status "done" "Update complete — restart the panel manually"
   fi
 else
+  step "MQTT agent will start again on the next panel request"
   write_status "done" "Panel updated successfully"
 fi
 

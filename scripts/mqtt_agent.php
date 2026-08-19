@@ -167,6 +167,29 @@ function publish(MqttClient $client, string $serial, string $cmd, array $payload
     $client->publish(topic($serial, 'app', $cmd), YarboCodec::encode($payload), 0);
 }
 
+function work_needs_startup(string $cmd): bool
+{
+    return in_array($cmd, ['start_plan', 'cmd_recharge', 'start_way_point', 'resume'], true);
+}
+
+function wake_for_work(MqttClient $client, float $loopStartedAt, string $serial): void
+{
+    publish($client, $serial, 'set_working_state', ['state' => 1, 'source' => 'smart_home']);
+    pump($client, $loopStartedAt, 0.25);
+}
+
+function hold_awake_after_work(MqttClient $client, float $loopStartedAt, string $serial, string $cmd): void
+{
+    if (!work_needs_startup($cmd)) {
+        return;
+    }
+    // PHP agent has no keepalive loop; re-wake a couple of times so idle firmware can latch.
+    pump($client, $loopStartedAt, 0.4);
+    wake_for_work($client, $loopStartedAt, $serial);
+    pump($client, $loopStartedAt, 0.8);
+    wake_for_work($client, $loopStartedAt, $serial);
+}
+
 /**
  * @param array<string, mixed> $req
  * @return array<string, mixed>
@@ -214,8 +237,7 @@ function handle_request(
 
         $session = (string) ($req['session'] ?? 'control');
         if ($session === 'work') {
-            publish($mqtt, $serial, 'set_working_state', ['state' => 1, 'source' => 'smart_home']);
-            pump($mqtt, $loopStartedAt, 0.25);
+            wake_for_work($mqtt, $loopStartedAt, $serial);
         }
 
         if ($op === 'drive') {
@@ -240,6 +262,9 @@ function handle_request(
             $payload = is_array($req['payload'] ?? null) ? $req['payload'] : [];
             publish($mqtt, $serial, $cmd, $payload);
             pump($mqtt, $loopStartedAt, 0.4);
+            if ($session === 'work') {
+                hold_awake_after_work($mqtt, $loopStartedAt, $serial, $cmd);
+            }
 
             return ['ok' => true, 'op' => 'publish', 'cmd' => $cmd];
         }
@@ -260,6 +285,9 @@ function handle_request(
                 $lastCmd = $cmd;
             }
             pump($mqtt, $loopStartedAt, 0.4);
+            if ($session === 'work') {
+                hold_awake_after_work($mqtt, $loopStartedAt, $serial, $lastCmd);
+            }
 
             return ['ok' => true, 'op' => 'publish_variants', 'cmd' => $lastCmd];
         }
