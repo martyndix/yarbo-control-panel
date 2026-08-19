@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.8] - 2026-08-20
+
+### Fixed
+- **Start plan and return-to-dock still no-op after Controller On / drive worked**: those jobs were sent on a separate work session with incomplete payloads (`start_plan` `{planId}` only, empty `cmd_recharge`). They now run on the live controller session. Start plan sends one `{planId, id, percent}` message; dock sends official `wireless_charging_cmd {cmd: 0}` then `cmd_recharge {cmd: 2}`. The agent waits for the robot ack and the UI shows that result instead of a false “sent” toast.
+
 ## [1.3.7] - 2026-08-20
 
 ### Fixed

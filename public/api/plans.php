@@ -6,7 +6,6 @@ require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
-use Yarbo\YarboCommands;
 use Yarbo\YarboGeo;
 use Yarbo\YarboMap;
 use Yarbo\YarboMqttAgentClient;
@@ -138,12 +137,13 @@ try {
 
         $percent = isset($input['percent']) ? (int) $input['percent'] : 0;
         $percent = max(0, min(100, $percent));
-        $result = $agent->publishVariants(YarboCommands::startPlanVariants($planId, $percent), 'work');
+        $result = $agent->startPlan($planId, $percent);
         if (!($result['ok'] ?? false)) {
             json_response([
                 'ok' => false,
                 'error' => (string) ($result['error'] ?? 'Start failed'),
                 'via' => 'agent',
+                'ack_msg' => $result['ack_msg'] ?? null,
                 'hold_controller' => (bool) ($result['hold_controller'] ?? false),
             ], 500);
         }
@@ -154,7 +154,8 @@ try {
             'plan_id' => $planId,
             'percent' => $percent,
             'cmd' => $result['cmd'] ?? 'start_plan',
-            'via' => 'agent',
+            'via' => $result['via'] ?? 'agent',
+            'ack_msg' => $result['ack_msg'] ?? null,
             'hold_controller' => (bool) ($result['hold_controller'] ?? true),
         ]);
     }

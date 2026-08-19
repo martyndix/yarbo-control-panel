@@ -325,6 +325,29 @@ final class YarboMqttAgentClient
     }
 
     /**
+     * @param int|string $planId
+     * @return array<string, mixed>
+     */
+    public function startPlan(int|string $planId, int $percent = 0): array
+    {
+        return $this->request([
+            'op' => 'start_plan',
+            'plan_id' => $planId,
+            'percent' => $percent,
+        ], 12.0);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function returnToDock(): array
+    {
+        return $this->request([
+            'op' => 'return_to_dock',
+        ], 12.0);
+    }
+
+    /**
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */

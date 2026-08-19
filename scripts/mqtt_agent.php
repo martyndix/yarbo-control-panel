@@ -304,9 +304,9 @@ function handle_request(
             ], $state);
         }
 
-        $needsController = in_array($op, ['controller', 'lights', 'buzzer', 'drive', 'publish', 'publish_variants'], true);
+        $needsController = in_array($op, ['controller', 'lights', 'buzzer', 'drive', 'publish', 'publish_variants', 'start_plan', 'return_to_dock'], true);
         if (!$needsController) {
-            return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants'];
+            return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants, start_plan, return_to_dock'];
         }
 
         if ($op === 'controller' && !((bool) ($req['on'] ?? false))) {
@@ -397,6 +397,54 @@ function handle_request(
             return ok_resp(['ok' => true, 'op' => 'drive'], $state);
         }
 
+        if ($op === 'start_plan') {
+            $planId = $req['plan_id'] ?? $req['planId'] ?? null;
+            if ($planId === null || $planId === '') {
+                return ['ok' => false, 'error' => 'plan_id is required'];
+            }
+            $percent = max(0, min(100, (int) ($req['percent'] ?? 0)));
+            $id = is_numeric($planId) ? (int) $planId : (string) $planId;
+            publish($mqtt, $serial, 'cmd_vel', ['vel' => 0.0, 'rev' => 0.0]);
+            if (!$state['controlHold']) {
+                wake_for_work($mqtt, $loopStartedAt, $serial);
+            }
+            $state['workUntil'] = 0.0;
+            $state['lastWake'] = microtime(true);
+            publish($mqtt, $serial, 'start_plan', ['planId' => $id, 'id' => $id, 'percent' => $percent]);
+            pump($mqtt, $loopStartedAt, 0.5);
+            log_line("start_plan planId={$id} percent={$percent}");
+
+            return ok_resp([
+                'ok' => true,
+                'op' => 'start_plan',
+                'cmd' => 'start_plan',
+                'plan_id' => $id,
+                'percent' => $percent,
+                'via' => 'official_payload',
+            ], $state);
+        }
+
+        if ($op === 'return_to_dock') {
+            publish($mqtt, $serial, 'cmd_vel', ['vel' => 0.0, 'rev' => 0.0]);
+            if (!$state['controlHold']) {
+                wake_for_work($mqtt, $loopStartedAt, $serial);
+            }
+            $state['workUntil'] = 0.0;
+            $state['lastWake'] = microtime(true);
+            publish($mqtt, $serial, 'wireless_charging_cmd', ['cmd' => 0]);
+            pump($mqtt, $loopStartedAt, 0.2);
+            publish($mqtt, $serial, 'cmd_recharge', ['cmd' => 2]);
+            pump($mqtt, $loopStartedAt, 0.5);
+            log_line('return_to_dock wireless_charging_cmd 0 + cmd_recharge cmd=2');
+
+            return ok_resp([
+                'ok' => true,
+                'op' => 'return_to_dock',
+                'cmd' => 'cmd_recharge',
+                'via' => 'official_payload',
+            ], $state);
+        }
+
         if ($op === 'publish') {
             $cmd = (string) ($req['cmd'] ?? '');
             if ($cmd === '') {
@@ -438,7 +486,7 @@ function handle_request(
             return ok_resp(['ok' => true, 'op' => 'publish_variants', 'cmd' => $lastCmd], $state);
         }
 
-        return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants'];
+        return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants, start_plan, return_to_dock'];
     } catch (Throwable $e) {
         log_line('Command error: ' . $e->getMessage());
         $state['controllerOk'] = false;

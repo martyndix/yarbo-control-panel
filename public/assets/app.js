@@ -5,6 +5,11 @@ const LINEAR_SPEED = 0.35;
 const ANGULAR_SPEED = 0.55;
 const COMMAND_QUIET_MS = 4000;
 
+function isCommandAckError(msg) {
+    if (!msg || typeof msg !== 'string') return false;
+    return /fail|error|denied|reject|busy|invalid|unable|not allowed/i.test(msg);
+}
+
 const els = {
     battery: document.getElementById('battery'),
     state: document.getElementById('state'),
@@ -1881,11 +1886,18 @@ async function startPlan(planId, button) {
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'Start failed');
+        if (isCommandAckError(data.ack_msg)) throw new Error(data.ack_msg);
         if (typeof data.hold_controller === 'boolean') {
             applyControllerStateFromStatus(data);
             updateControllerTile();
         }
-        showToast(`Plan ${planId} start sent — holding the robot awake until the job begins`, 'success');
+        if (data.ack_msg) {
+            showToast(`Plan ${planId} started (${data.ack_msg})`, 'success');
+        } else if (data.via === 'official_payload') {
+            showToast(`Plan ${planId} start sent (no robot ack)`, 'success');
+        } else {
+            showToast(`Plan ${planId} started`, 'success');
+        }
         noteCommandQuiet();
     } catch (err) {
         showToast(err.message || 'Start failed', 'error');
@@ -3246,8 +3258,14 @@ async function sendCommand(action, button) {
         });
         const data = await res.json();
         if (data.ok) {
-            if (action === 'buzzer' && data.note) {
+            if (isCommandAckError(data.ack_msg)) {
+                showToast(data.ack_msg, 'error');
+            } else if (action === 'buzzer' && data.note) {
                 showToast(data.note, 'error');
+            } else if (data.ack_msg) {
+                showToast(data.ack_msg, 'success');
+            } else if (action === 'return_to_dock' && data.via === 'official_payload') {
+                showToast('return to dock sent (no robot ack)', 'success');
             } else {
                 showToast(`${action.replace(/_/g, ' ')} sent`, 'success');
             }

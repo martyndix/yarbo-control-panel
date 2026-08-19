@@ -33,12 +33,34 @@ final class YarboCommands
     }
 
     /**
+     * Official Data SDK: disable wireless charge, then cmd_recharge with cmd=2.
+     * One cmd_recharge publish only (empty {} is ignored on some firmware).
+     *
      * @return array<int, array{cmd: string, payload: array<string, mixed>}>
      */
     public static function returnToDockVariants(): array
     {
         return [
-            ['cmd' => 'cmd_recharge', 'payload' => []],
+            ['cmd' => 'wireless_charging_cmd', 'payload' => ['cmd' => 0]],
+            ['cmd' => 'cmd_recharge', 'payload' => ['cmd' => 2]],
+        ];
+    }
+
+    /**
+     * Single start_plan payload: python-yarbo uses planId, official SDK uses id + percent.
+     *
+     * @param int|string $planId
+     * @return array<string, mixed>
+     */
+    public static function startPlanPayload(int|string $planId, int $percent): array
+    {
+        $id = is_numeric($planId) ? (int) $planId : (string) $planId;
+        $percent = max(0, min(100, $percent));
+
+        return [
+            'planId' => $id,
+            'id' => $id,
+            'percent' => $percent,
         ];
     }
 
@@ -48,14 +70,10 @@ final class YarboCommands
      */
     public static function startPlanVariants(int|string $planId, int $percent): array
     {
-        $id = is_numeric($planId) ? (int) $planId : (string) $planId;
-
         return [
             [
                 'cmd' => 'start_plan',
-                'payload' => $percent > 0
-                    ? ['planId' => $id, 'percent' => $percent]
-                    : ['planId' => $id],
+                'payload' => self::startPlanPayload($planId, $percent),
             ],
         ];
     }

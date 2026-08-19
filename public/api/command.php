@@ -33,8 +33,7 @@ $ACTIONS = [
         'kind' => 'buzzer',
     ],
     'return_to_dock' => [
-        'kind' => 'variants',
-        'variants' => static fn (): array => YarboCommands::returnToDockVariants(),
+        'kind' => 'return_to_dock',
     ],
     'pause' => [
         'kind' => 'variants',
@@ -144,6 +143,27 @@ try {
             'hold_controller' => (bool) ($result['hold_controller'] ?? false),
             'charging' => (bool) ($result['charging'] ?? false),
             'charging_status' => $result['charging_status'] ?? null,
+        ]);
+    }
+
+    if (($def['kind'] ?? '') === 'return_to_dock') {
+        $result = $agent->returnToDock();
+        if (!($result['ok'] ?? false)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Return to dock failed'),
+                'via' => 'agent',
+                'ack_msg' => $result['ack_msg'] ?? null,
+            ], 500);
+        }
+
+        json_response([
+            'ok' => true,
+            'action' => $action,
+            'cmd' => $result['cmd'] ?? 'cmd_recharge',
+            'via' => $result['via'] ?? 'agent',
+            'ack_msg' => $result['ack_msg'] ?? null,
+            'hold_controller' => (bool) ($result['hold_controller'] ?? true),
         ]);
     }
 
