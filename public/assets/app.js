@@ -1675,7 +1675,11 @@ function updateStatus(data) {
     els.battery.textContent = data.battery != null ? `${data.battery}%` : '—';
     els.state.textContent = data.state ?? '—';
     els.state.className = `value badge${data.state === 'active' ? ' active' : ''}`;
-    els.charging.textContent = data.charging ? 'Yes' : 'No';
+    {
+        const chargeLabel = data.charging_label || (data.charging ? 'Yes' : 'No');
+        els.charging.textContent = chargeLabel;
+        els.charging.className = `value${chargeLabel === 'Full' ? ' badge active' : ''}`;
+    }
     els.heading.textContent = data.heading != null ? `${data.heading}°` : '—';
     els.headType.textContent = data.head_type_name ?? '—';
     {

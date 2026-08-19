@@ -65,8 +65,17 @@ final class YarboTelemetry
         $powerFaultInt = $powerFault !== null ? (int) $powerFault : 0;
         $motionMotor = self::firstNumeric($motorInfo['motion_motor'] ?? null);
         $selfCheck = self::firstNumeric($stateMsg['self_check_status'] ?? null);
+        $batteryInt = $battery !== null ? (int) $battery : null;
+        $chargingStatusInt = (int) $chargingStatus;
+        $batteryStatus = isset($batteryMsg['status']) && is_numeric($batteryMsg['status'])
+            ? (int) $batteryMsg['status']
+            : null;
+        $chargingLabel = self::chargingDisplay($chargingStatusInt, $batteryInt, $batteryStatus);
+        $displayBattery = ($chargingLabel === 'Full' && $batteryInt !== null && $batteryInt >= 95)
+            ? 100
+            : $batteryInt;
         $driveBlockedReason = null;
-        if ((int) $chargingStatus > 0) {
+        if ($chargingStatusInt > 0 && $chargingLabel !== 'Full') {
             $driveBlockedReason = 'Robot is charging — unplug / leave the charger before manual drive.';
         } elseif ($powerFaultInt > 0) {
             $driveBlockedReason = 'Robot reports power_fault=' . $powerFaultInt
@@ -74,13 +83,16 @@ final class YarboTelemetry
         }
 
         return [
-            'battery'             => $battery !== null ? (int) $battery : null,
+            'battery'             => $displayBattery,
+            'battery_raw'         => $batteryInt,
             'state'               => $workingState === 1 ? 'active' : 'idle',
             'working_state'       => $workingState !== null ? (int) $workingState : null,
             // HA: charging_status 2 = charging/docked. Do not use BodyMsg.recharge_state —
             // on some firmware it stays non-zero even when not on a pad/cable.
-            'charging'            => (int) $chargingStatus > 0,
-            'charging_status'     => (int) $chargingStatus,
+            'charging'            => $chargingStatusInt > 0 && $chargingLabel !== 'Full',
+            'charging_label'      => $chargingLabel,
+            'charging_status'     => $chargingStatusInt,
+            'battery_status'      => $batteryStatus,
             'recharge_state'      => self::parseRechargeState($raw),
             'on_charge_pad'       => false,
             'drive_blocked_reason'=> $driveBlockedReason,
@@ -344,8 +356,25 @@ final class YarboTelemetry
     }
 
     /**
-     * Lowest non-negative routing metric wins. Negative values mean the iface is down.
+     * Official app shows Fully charged / 100% when docked at high SOC.
+     * MQTT capacity often sits around 95% and charging_status stays non-zero on the pad.
+     *
+     * @return 'No'|'Yes'|'Full'
      */
+    private static function chargingDisplay(int $chargingStatus, ?int $capacity, ?int $batteryStatus): string
+    {
+        if ($chargingStatus <= 0) {
+            return 'No';
+        }
+        if ($batteryStatus !== null && $batteryStatus >= 3) {
+            return 'Full';
+        }
+        if ($capacity !== null && $capacity >= 95) {
+            return 'Full';
+        }
+
+        return 'Yes';
+    }
     private static function activeRouteInterface(mixed $route): ?string
     {
         if (!is_array($route)) {

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.11] - 2026-08-20
+
+### Fixed
+- **Status showed 95% and Charging: Yes while the Yarbo app said fully charged 100%**: MQTT `BatteryMSG.capacity` often sits at ~95% on the dock with `charging_status` still set. The panel now shows Full / 100% in that case, matching the official app.
+
 ## [1.3.10] - 2026-08-20
 
 ### Fixed
