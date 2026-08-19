@@ -47,6 +47,7 @@ final class YarboTelemetry
         $batteryTempParsed = self::parseBatteryTemperature($batteryMsg, $cellTemps);
         $batteryTemp = $batteryTempParsed['temperature_c'];
         $batteryTempSource = $batteryTempParsed['temperature_source'];
+        $batteryCells = $batteryTempParsed['cells'];
         $wirelessChargeVoltage = self::firstNumeric(
             $batteryMsg['wireless_charge_voltage'] ?? null,
             $raw['wireless_charge_voltage'] ?? null
@@ -149,6 +150,7 @@ final class YarboTelemetry
             'battery_diagnostics' => [
                 'temperature_c'          => $batteryTemp !== null ? round($batteryTemp, 1) : null,
                 'temperature_source'     => $batteryTempSource,
+                'cells'                  => $batteryCells,
                 'wireless_charge_voltage' => $wirelessChargeVoltage !== null ? round($wirelessChargeVoltage, 2) : null,
                 'wireless_charge_current' => $wirelessChargeCurrent !== null ? round($wirelessChargeCurrent, 2) : null,
             ],
@@ -231,14 +233,11 @@ final class YarboTelemetry
     /**
      * @param array<string, mixed> $batteryMsg
      * @param array<string, mixed>|null $cellTemps
-     * @return array{temperature_c: ?float, temperature_source: ?string}
+     * @return array{temperature_c: ?float, temperature_source: ?string, cells: list<array{index: int, label: string, temperature_c: float}>}
      */
     private static function parseBatteryTemperature(array $batteryMsg, ?array $cellTemps): array
     {
         $pool = is_array($cellTemps) ? $cellTemps : [];
-        if (isset($pool['data']) && is_array($pool['data'])) {
-            $pool = $pool['data'];
-        }
         $fromCells = self::temperatureFromMap($pool);
         if ($fromCells['temperature_c'] !== null) {
             return $fromCells;
@@ -249,63 +248,136 @@ final class YarboTelemetry
 
     /**
      * @param array<string, mixed> $map
-     * @return array{temperature_c: ?float, temperature_source: ?string}
+     * @return array{temperature_c: ?float, temperature_source: ?string, cells: list<array{index: int, label: string, temperature_c: float}>}
      */
     private static function temperatureFromMap(array $map): array
     {
-        if ($map !== [] && array_is_list($map)) {
-            $avg = self::averageNumeric(...array_values($map));
-            if ($avg !== null) {
-                return ['temperature_c' => $avg, 'temperature_source' => 'avg_cells'];
-            }
+        if (isset($map['data']) && is_array($map['data'])) {
+            $map = $map['data'];
         }
 
-        if (isset($map['cells']) && is_array($map['cells'])) {
-            $fromCells = self::temperatureFromMap($map['cells']);
-            if ($fromCells['temperature_c'] !== null) {
-                return $fromCells;
-            }
+        $cells = self::extractCellTemperatures($map);
+        if (self::cellsLookReal($cells)) {
+            $avg = self::averageNumeric(...array_column($cells, 'temperature_c'));
+
+            return [
+                'temperature_c' => $avg,
+                'temperature_source' => 'avg_cells',
+                'cells' => $cells,
+            ];
         }
+
         $direct = self::firstNumeric(
+            $map['avg'] ?? null,
+            $map['avg_temp'] ?? null,
+            $map['avg_temp_c'] ?? null,
+            $map['temp_avg'] ?? null,
             $map['temperature'] ?? null,
             $map['temp'] ?? null,
             $map['temp_c'] ?? null,
             $map['battery_temp'] ?? null,
             $map['cell_temp'] ?? null
         );
-        if ($direct !== null) {
-            return ['temperature_c' => $direct, 'temperature_source' => 'direct'];
-        }
-
-        $avg = self::averageNumeric(
-            $map['temperature1'] ?? null,
-            $map['temperature2'] ?? null,
-            $map['temperature3'] ?? null,
-            $map['temperature4'] ?? null,
-            $map['temperature5'] ?? null,
-            $map['temperature6'] ?? null,
-            $map['temp1'] ?? null,
-            $map['temp2'] ?? null,
-            $map['temp3'] ?? null,
-            $map['temp4'] ?? null,
-            $map['temp5'] ?? null,
-            $map['temp6'] ?? null
-        );
-        if ($avg !== null) {
-            return ['temperature_c' => $avg, 'temperature_source' => 'avg_cells'];
+        if ($direct !== null && abs($direct) > 0.5) {
+            return ['temperature_c' => $direct, 'temperature_source' => 'direct', 'cells' => []];
         }
 
         $nested = self::firstNumeric(
+            self::findNestedNumeric($map, 'avg_temp'),
             self::findNestedNumeric($map, 'temperature'),
             self::findNestedNumeric($map, 'temp_c'),
             self::findNestedNumeric($map, 'battery_temp'),
             self::findNestedNumeric($map, 'cell_temp')
         );
-        if ($nested !== null) {
-            return ['temperature_c' => $nested, 'temperature_source' => 'direct'];
+        if ($nested !== null && abs($nested) > 0.5) {
+            return ['temperature_c' => $nested, 'temperature_source' => 'direct', 'cells' => []];
         }
 
-        return ['temperature_c' => null, 'temperature_source' => null];
+        return ['temperature_c' => null, 'temperature_source' => null, 'cells' => []];
+    }
+
+    /**
+     * @param array<string, mixed> $map
+     * @return list<array{index: int, label: string, temperature_c: float}>
+     */
+    private static function extractCellTemperatures(array $map): array
+    {
+        $fromList = self::cellsFromList($map);
+        if ($fromList !== []) {
+            return $fromList;
+        }
+
+        foreach (['temps', 'cell_temps', 'temperature_list', 'battery_cell_temp', 'cells'] as $key) {
+            if (isset($map[$key]) && is_array($map[$key])) {
+                $fromList = self::cellsFromList($map[$key]);
+                if ($fromList !== []) {
+                    return $fromList;
+                }
+            }
+        }
+
+        $cells = [];
+        for ($i = 1; $i <= 16; $i++) {
+            $value = self::firstNumeric(
+                $map['temperature' . $i] ?? null,
+                $map['temp' . $i] ?? null,
+                $map['cell' . $i] ?? null,
+                $map['cell_temp' . $i] ?? null,
+                $map['t' . $i] ?? null
+            );
+            if ($value !== null && $value >= -40.0 && $value <= 120.0) {
+                $cells[] = [
+                    'index' => $i,
+                    'label' => 'Cell ' . $i,
+                    'temperature_c' => round($value, 1),
+                ];
+            }
+        }
+
+        return $cells;
+    }
+
+    /**
+     * @param array<int|string, mixed> $list
+     * @return list<array{index: int, label: string, temperature_c: float}>
+     */
+    private static function cellsFromList(array $list): array
+    {
+        if ($list === [] || !array_is_list($list)) {
+            return [];
+        }
+
+        $cells = [];
+        foreach (array_values($list) as $i => $value) {
+            if (!is_numeric($value)) {
+                continue;
+            }
+            $n = (float) $value;
+            if ($n < -40.0 || $n > 120.0) {
+                continue;
+            }
+            $cells[] = [
+                'index' => $i + 1,
+                'label' => 'Cell ' . ($i + 1),
+                'temperature_c' => round($n, 1),
+            ];
+        }
+
+        return $cells;
+    }
+
+    /**
+     * @param list<array{index: int, label: string, temperature_c: float}> $cells
+     */
+    private static function cellsLookReal(array $cells): bool
+    {
+        foreach ($cells as $cell) {
+            if (abs((float) $cell['temperature_c']) > 0.5) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function connectionTypeName(mixed $netTypeRaw, mixed $halowStatusRaw, mixed $routePriority = null): string

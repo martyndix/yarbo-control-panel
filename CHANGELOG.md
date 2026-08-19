@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.13] - 2026-08-20
+
+### Fixed
+- **Battery temperature kept disappearing**: idle firmware often answers `battery_cell_temp_msg` with zeros or an empty ack. The agent now keeps the last real cell reading (and does not re-query while idle), and the UI holds that value.
+
+### Added
+- Click **Battery Temp** to see each cell’s temperature.
+
 ## [1.3.12] - 2026-08-20
 
 ### Fixed

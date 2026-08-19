@@ -152,23 +152,49 @@ def _is_plausible_temp(value: Any) -> bool:
     return -40.0 <= number <= 120.0
 
 
+def extract_cell_values(data: Any) -> list[float]:
+    """Pull individual cell °C readings from known battery_cell_temp_msg shapes."""
+    if isinstance(data, list):
+        return [float(item) for item in data if _is_plausible_temp(item)]
+    if not isinstance(data, dict):
+        return []
+    inner = data.get("data")
+    if isinstance(inner, (dict, list)) and inner is not data:
+        nested = extract_cell_values(inner)
+        if nested:
+            return nested
+    for key in ("temps", "cell_temps", "temperature_list", "battery_cell_temp", "cells"):
+        value = data.get(key)
+        if isinstance(value, list):
+            nums = extract_cell_values(value)
+            if nums:
+                return nums
+    cells: list[float] = []
+    for i in range(1, 17):
+        for name in (f"temperature{i}", f"temp{i}", f"cell{i}", f"cell_temp{i}", f"t{i}"):
+            if name in data and _is_plausible_temp(data[name]):
+                cells.append(float(data[name]))
+                break
+    return cells
+
+
 def payload_has_temp(data: Any) -> bool:
-    """True when the payload contains a plausible battery temperature, not just an ack."""
+    """True when the payload contains a real cell temperature, not an idle zero/ack."""
+    values = extract_cell_values(data)
+    if values:
+        return any(abs(item) > 0.5 for item in values)
     skip = {"temp_err", "timestamp", "timeStamp", "state", "topic", "status", "msg"}
     if isinstance(data, dict):
         for key, value in data.items():
             name = str(key).lower()
             if name in skip:
                 continue
-            if "temp" in name and _is_plausible_temp(value):
+            if "temp" in name and _is_plausible_temp(value) and abs(float(value)) > 0.5:
                 return True
             if payload_has_temp(value):
                 return True
         return False
     if isinstance(data, list):
-        nums = [float(item) for item in data if _is_plausible_temp(item)]
-        if nums:
-            return True
         return any(payload_has_temp(item) for item in data)
     return False
 
@@ -186,17 +212,26 @@ def extract_battery_cells(msg: Any) -> dict[str, Any] | None:
     return None
 
 
-async def cached_battery_cells(client: Any, state: dict[str, Any], timeout: float = 1.2) -> dict[str, Any] | None:
+async def cached_battery_cells(
+    client: Any,
+    state: dict[str, Any],
+    timeout: float = 1.2,
+    working_state: Any = None,
+) -> dict[str, Any] | None:
     cached = state.get("last_battery_cells")
     cached_at = float(state.get("last_battery_cells_at") or 0)
-    if isinstance(cached, dict) and payload_has_temp(cached) and (time.time() - cached_at) < BATTERY_CELLS_CACHE_S:
+    has_cache = isinstance(cached, dict) and payload_has_temp(cached)
+    age = time.time() - cached_at
+    idle = working_state == 0
+    # Idle firmware often acks battery_cell_temp_msg with zeros / no temps.
+    if has_cache and (idle or age < BATTERY_CELLS_CACHE_S):
         return cached
     cells = await request_feedback_quiet(client, "battery_cell_temp_msg", timeout)
     if isinstance(cells, dict) and payload_has_temp(cells):
         state["last_battery_cells"] = cells
         state["last_battery_cells_at"] = time.time()
         return cells
-    return cached if isinstance(cached, dict) and payload_has_temp(cached) else None
+    return cached if has_cache else None
 
 
 def load_config() -> dict[str, Any]:
@@ -582,7 +617,9 @@ async def handle_request(
                     state["last_wifi"] = wifi
                 except Exception:
                     wifi = state.get("last_wifi")
-            cells = await cached_battery_cells(client, state, timeout=min(1.2, timeout))
+            cells = await cached_battery_cells(
+                client, state, timeout=min(1.2, timeout), working_state=working_state
+            )
             return {
                 "ok": True,
                 "op": "telemetry",

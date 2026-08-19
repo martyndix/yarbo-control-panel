@@ -33,6 +33,10 @@ const els = {
     wifiSignal: document.getElementById('wifi-signal'),
     wifiSecurity: document.getElementById('wifi-security'),
     batteryTemp: document.getElementById('battery-temp'),
+    batteryTempStat: document.getElementById('battery-temp-stat'),
+    batteryCellsModal: document.getElementById('battery-cells-modal'),
+    batteryCellsList: document.getElementById('battery-cells-list'),
+    batteryCellsSummary: document.getElementById('battery-cells-summary'),
     wirelessCharge: document.getElementById('wireless-charge'),
     rtkStatus: document.getElementById('rtk-status'),
     rtcmAge: document.getElementById('rtcm-age'),
@@ -1396,16 +1400,75 @@ function formatTemp(value) {
 }
 
 let lastBatteryTempC = null;
+/** @type {Array<{index: number, label: string, temperature_c: number}>} */
+let lastBatteryCells = [];
 
 function formatBatteryTemp(diag) {
     const incoming = diag?.temperature_c;
     if (incoming != null && !Number.isNaN(Number(incoming))) {
         lastBatteryTempC = Number(incoming);
     }
+    const cells = Array.isArray(diag?.cells) ? diag.cells.filter((cell) => cell && Number.isFinite(Number(cell.temperature_c))) : [];
+    if (cells.length) {
+        lastBatteryCells = cells;
+    }
     const temp = formatTemp(lastBatteryTempC ?? incoming);
     if (temp === '—') return temp;
+    if ((diag?.temperature_source === 'avg_cells' || lastBatteryCells.length) && lastBatteryCells.length) {
+        return `${temp} · ${lastBatteryCells.length} cells`;
+    }
     if (diag?.temperature_source === 'avg_cells') return `${temp} (avg cells)`;
     return temp;
+}
+
+function openBatteryCellsModal() {
+    if (!els.batteryCellsModal) return;
+    const cells = lastBatteryCells;
+    if (!cells.length) {
+        showToast('No cell temperatures yet — wait for the next reading', 'error');
+        return;
+    }
+    if (els.batteryCellsSummary) {
+        const avg = lastBatteryTempC != null ? formatTemp(lastBatteryTempC) : '—';
+        els.batteryCellsSummary.textContent = `Average ${avg} from the last ${cells.length} cell reading${cells.length === 1 ? '' : 's'}.`;
+    }
+    if (els.batteryCellsList) {
+        els.batteryCellsList.innerHTML = cells.map((cell) => {
+            const label = escapeHtml(cell.label || `Cell ${cell.index}`);
+            const value = escapeHtml(formatTemp(cell.temperature_c));
+            return `<div class="battery-cell-row"><span>${label}</span><strong>${value}</strong></div>`;
+        }).join('');
+    }
+    els.batteryCellsModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+}
+
+function closeBatteryCellsModal() {
+    if (!els.batteryCellsModal) return;
+    els.batteryCellsModal.classList.add('hidden');
+    if (
+        (!els.settingsModal || els.settingsModal.classList.contains('hidden'))
+        && (!els.plansManageModal || els.plansManageModal.classList.contains('hidden'))
+        && (!els.updateConfirmModal || els.updateConfirmModal.classList.contains('hidden'))
+    ) {
+        document.body.classList.remove('modal-open');
+    }
+}
+
+function setupBatteryTempClick() {
+    const open = () => {
+        if (!lastBatteryCells.length && lastBatteryTempC == null) return;
+        openBatteryCellsModal();
+    };
+    els.batteryTemp?.addEventListener('click', open);
+    document.querySelectorAll('[data-battery-cells-close]').forEach((el) => {
+        el.addEventListener('click', closeBatteryCellsModal);
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && els.batteryCellsModal && !els.batteryCellsModal.classList.contains('hidden')) {
+            closeBatteryCellsModal();
+        }
+    });
 }
 
 function formatWifiNetwork(wifi) {
@@ -1720,6 +1783,11 @@ function renderDiagnostics(data) {
     }
     if (els.batteryTemp) {
         els.batteryTemp.textContent = formatBatteryTemp(batteryDiag);
+        const hasCells = lastBatteryCells.length > 0;
+        els.batteryTemp.disabled = !hasCells;
+        els.batteryTemp.classList.toggle('is-clickable', hasCells);
+        els.batteryTemp.title = hasCells ? 'Show individual cell temperatures' : 'Cell temperatures';
+        els.batteryTempStat?.classList.toggle('is-clickable', hasCells);
     }
     if (els.wirelessCharge) {
         els.wirelessCharge.textContent = formatWirelessCharge(batteryDiag);
@@ -1933,7 +2001,9 @@ function closePlansManageModal() {
     els.plansManageModal.classList.add('hidden');
     if (!els.settingsModal || els.settingsModal.classList.contains('hidden')) {
         if (!els.updateConfirmModal || els.updateConfirmModal.classList.contains('hidden')) {
-            document.body.classList.remove('modal-open');
+            if (!els.batteryCellsModal || els.batteryCellsModal.classList.contains('hidden')) {
+                document.body.classList.remove('modal-open');
+            }
         }
     }
 }
@@ -3532,6 +3602,7 @@ if (document.getElementById('map')) {
     initMap();
 }
 setupDrivePad();
+setupBatteryTempClick();
 initAppearance();
 initUpdateConfirmModal();
 loadSettings().catch(() => {});

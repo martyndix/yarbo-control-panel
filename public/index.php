@@ -154,9 +154,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span class="label">WiFi Security</span>
                     <span id="wifi-security" class="value">—</span>
                 </div>
-                <div class="stat">
+                <div class="stat" id="battery-temp-stat">
                     <span class="label">Battery Temp</span>
-                    <span id="battery-temp" class="value">—</span>
+                    <button type="button" id="battery-temp" class="value value-button" disabled title="Cell temperatures">—</button>
                 </div>
                 <div class="stat">
                     <span class="label">Wireless Charge</span>
@@ -544,6 +544,18 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         </div>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <div id="battery-cells-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="battery-cells-title">
+            <button type="button" class="modal-backdrop" data-battery-cells-close aria-label="Close cell temperatures"></button>
+            <div class="modal-panel card battery-cells-panel">
+                <h2 id="battery-cells-title">Battery cells</h2>
+                <p class="hint" id="battery-cells-summary">Average of the last cell-temperature reading.</p>
+                <div id="battery-cells-list" class="battery-cells-list"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" data-battery-cells-close>Close</button>
+                </div>
             </div>
         </div>
 

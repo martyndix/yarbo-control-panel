@@ -328,6 +328,56 @@ body.modal-open {
     overflow-wrap: anywhere;
 }
 
+.stat .value-button {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 1.25rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: default;
+}
+
+.stat .value-button.is-clickable {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 0.2em;
+}
+
+.stat .value-button:disabled {
+    opacity: 1;
+    cursor: default;
+}
+
+.battery-cells-panel {
+    max-width: 22rem;
+}
+
+.battery-cells-list {
+    display: grid;
+    gap: 0.4rem;
+    margin: 0.75rem 0 1rem;
+}
+
+.battery-cell-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+}
+
+.battery-cell-row strong {
+    font-variant-numeric: tabular-nums;
+}
+
 .badge {
     display: inline-block;
     padding: 0.15rem 0.5rem;

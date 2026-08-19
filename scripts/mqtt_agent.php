@@ -93,35 +93,81 @@ function pump(MqttClient $client, float $loopStartedAt, float $seconds): void
 
 function battery_cells_have_temp(mixed $data): bool
 {
-    $skip = ['temp_err' => true, 'timestamp' => true, 'timeStamp' => true, 'state' => true, 'topic' => true, 'status' => true, 'msg' => true];
-    if (is_array($data)) {
-        foreach ($data as $key => $value) {
-            if (is_string($key) && isset($skip[$key])) {
-                continue;
-            }
-            if (is_string($key) && str_contains(strtolower($key), 'temp') && is_numeric($value)) {
-                $n = (float) $value;
-                if ($n >= -40.0 && $n <= 120.0) {
-                    return true;
-                }
-            }
-            if (battery_cells_have_temp($value)) {
-                return true;
-            }
-        }
-        if (array_is_list($data)) {
-            foreach ($data as $value) {
-                if (is_numeric($value)) {
-                    $n = (float) $value;
-                    if ($n >= -40.0 && $n <= 120.0) {
-                        return true;
-                    }
-                }
-            }
+    $values = battery_cell_temp_values($data);
+    foreach ($values as $n) {
+        if (abs($n) > 0.5) {
+            return true;
         }
     }
 
     return false;
+}
+
+/**
+ * @return list<float>
+ */
+function battery_cell_temp_values(mixed $data): array
+{
+    if (is_array($data) && array_is_list($data)) {
+        $out = [];
+        foreach ($data as $value) {
+            if (is_numeric($value)) {
+                $n = (float) $value;
+                if ($n >= -40.0 && $n <= 120.0) {
+                    $out[] = $n;
+                }
+            }
+        }
+        return $out;
+    }
+    if (!is_array($data)) {
+        return [];
+    }
+    if (isset($data['data']) && is_array($data['data'])) {
+        $nested = battery_cell_temp_values($data['data']);
+        if ($nested !== []) {
+            return $nested;
+        }
+    }
+    foreach (['temps', 'cell_temps', 'temperature_list', 'battery_cell_temp', 'cells'] as $key) {
+        if (isset($data[$key]) && is_array($data[$key])) {
+            $nested = battery_cell_temp_values($data[$key]);
+            if ($nested !== []) {
+                return $nested;
+            }
+        }
+    }
+    $out = [];
+    for ($i = 1; $i <= 16; $i++) {
+        foreach (['temperature' . $i, 'temp' . $i, 'cell' . $i, 'cell_temp' . $i, 't' . $i] as $key) {
+            if (isset($data[$key]) && is_numeric($data[$key])) {
+                $n = (float) $data[$key];
+                if ($n >= -40.0 && $n <= 120.0) {
+                    $out[] = $n;
+                    break;
+                }
+            }
+        }
+    }
+    if ($out !== []) {
+        return $out;
+    }
+    $skip = ['temp_err' => true, 'timestamp' => true, 'timeStamp' => true, 'state' => true, 'topic' => true, 'status' => true, 'msg' => true];
+    foreach ($data as $key => $value) {
+        if (is_string($key) && isset($skip[$key])) {
+            continue;
+        }
+        if (is_string($key) && str_contains(strtolower($key), 'temp') && is_numeric($value)) {
+            $n = (float) $value;
+            if ($n >= -40.0 && $n <= 120.0 && abs($n) > 0.5) {
+                $out[] = $n;
+            }
+        } elseif (is_array($value)) {
+            $out = array_merge($out, battery_cell_temp_values($value));
+        }
+    }
+
+    return $out;
 }
 
 /**
@@ -345,7 +391,13 @@ function handle_request(
             $now = microtime(true);
             $cells = is_array($state['lastBatteryCells'] ?? null) ? $state['lastBatteryCells'] : null;
             $cellsAge = $now - (float) ($state['batteryCellsAt'] ?? 0);
-            if ($cells === null || $cellsAge > 30.0) {
+            $workingState = 0;
+            if (is_array($lastRaw['StateMSG'] ?? null) && isset($lastRaw['StateMSG']['working_state'])) {
+                $workingState = (int) $lastRaw['StateMSG']['working_state'];
+            }
+            $hasCache = battery_cells_have_temp($cells);
+            $idle = $workingState === 0;
+            if (!$hasCache || (!$idle && $cellsAge > 30.0)) {
                 publish($mqtt, $serial, 'battery_cell_temp_msg', []);
                 $deadline = microtime(true) + 1.2;
                 while (microtime(true) < $deadline) {

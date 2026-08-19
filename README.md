@@ -498,7 +498,7 @@ Metrics shown:
 
 - `connection_type` and `connection_status` (from `net_type` / `halow_status` when present, otherwise the lowest non-negative `route_priority` iface: `hg0` HaLow, `wlan0` WiFi, `wwan0` 4G)
 - WiFi network name, signal strength (%), security, and IP (from MQTT `get_connect_wifi_name` when the robot is on WiFi)
-- battery temperature (`battery_diagnostics.temperature_c`), from DeviceMSG when present, otherwise MQTT `battery_cell_temp_msg` (`(avg cells)` when derived from `temperature1`..`temperature6`)
+- battery temperature (`battery_diagnostics.temperature_c` and `cells`); click Battery Temp in the panel to see each cell. Cached from MQTT `battery_cell_temp_msg` so idle acks do not blank the reading
 - wireless charging voltage/current
 - RTK status and fix quality
 - RTCM age and route priority
@@ -633,7 +633,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.12** (2026-08-20).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.13** (2026-08-20).
 
 ---
 
