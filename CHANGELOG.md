@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.7] - 2026-08-20
+
+### Fixed
+- **Controls showed `Unknown op. Valid: ping, drive, publish, publish_variants`**: that is the PHP fallback MQTT agent, which had stolen port 8765 and did not implement Controller / Lights / Buzzer / telemetry. The panel now replaces that process with the Python agent when python-yarbo is installed. The PHP agent also implements those ops and keeps the robot awake for ~25s after start-plan, so either engine can run a job.
+
 ## [1.3.6] - 2026-08-19
 
 ### Fixed

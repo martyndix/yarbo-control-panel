@@ -10,6 +10,7 @@ namespace Yarbo;
 final class YarboMqttAgentClient
 {
     private static bool $spawnAttempted = false;
+    private static bool $pythonReplaceAttempted = false;
 
     public function __construct(
         private readonly string $host = '127.0.0.1',
@@ -26,11 +27,12 @@ final class YarboMqttAgentClient
     }
 
     /**
-     * Return a client, starting the agent in the background if it is not up.
+     * Return a client, starting (or replacing a PHP fallback with) the preferred agent.
      */
     public static function requireRunning(): self
     {
         $client = self::fromEnv();
+        $client->ensurePreferredEngine();
         if ($client->isAvailable()) {
             return $client;
         }
@@ -66,6 +68,57 @@ final class YarboMqttAgentClient
     }
 
     /**
+     * If a PHP fallback is sitting on the port and python-yarbo is installed, replace it.
+     */
+    public function ensurePreferredEngine(): void
+    {
+        $ping = $this->ping();
+        if (($ping['ok'] ?? false) && ($ping['engine'] ?? '') === 'python-yarbo') {
+            return;
+        }
+
+        $root = dirname(__DIR__);
+        $pythonArgv = $this->pythonAgentArgv($root);
+        if ($pythonArgv === null) {
+            if (!($ping['ok'] ?? false)) {
+                $this->ensureStarted();
+            }
+
+            return;
+        }
+
+        if (self::$pythonReplaceAttempted) {
+            if (!($ping['ok'] ?? false)) {
+                $this->ensureStarted();
+            }
+
+            return;
+        }
+        self::$pythonReplaceAttempted = true;
+
+        $this->stopAgentProcesses();
+        usleep(250000);
+        $log = $root . '/data/mqtt-agent.log';
+        if (!is_dir($root . '/data')) {
+            @mkdir($root . '/data', 0775, true);
+        }
+        $this->spawnDetached($root, $pythonArgv, $log);
+
+        $deadline = microtime(true) + 5.0;
+        while (microtime(true) < $deadline) {
+            usleep(200000);
+            $again = $this->ping();
+            if (($again['engine'] ?? '') === 'python-yarbo') {
+                return;
+            }
+        }
+
+        // Python did not come up — start the PHP agent so controls still work.
+        self::$spawnAttempted = false;
+        $this->ensureStarted();
+    }
+
+    /**
      * Spawn scripts/mqtt_agent.py (or .php) once if the TCP port is closed.
      */
     public function ensureStarted(): void
@@ -75,7 +128,8 @@ final class YarboMqttAgentClient
         }
         self::$spawnAttempted = true;
 
-        if ($this->isAvailable()) {
+        $ping = $this->ping();
+        if (($ping['ok'] ?? false) && (($ping['engine'] ?? '') === 'python-yarbo' || ($ping['engine'] ?? '') === 'php')) {
             return;
         }
 
@@ -85,20 +139,13 @@ final class YarboMqttAgentClient
             @mkdir($root . '/data', 0775, true);
         }
 
-        $venvPy = $root . '/.venv/bin/python';
-        $pyAgent = $root . '/scripts/mqtt_agent.py';
-        $phpAgent = $root . '/scripts/mqtt_agent.php';
-
-        $argv = null;
-        if (is_file($pyAgent) && is_executable($venvPy)) {
-            $check = @exec(escapeshellarg($venvPy) . ' -c ' . escapeshellarg('import yarbo') . ' 2>/dev/null; echo $?');
-            if (trim((string) $check) === '0') {
-                $argv = [escapeshellarg($venvPy), escapeshellarg($pyAgent)];
+        $argv = $this->pythonAgentArgv($root);
+        if ($argv === null) {
+            $phpAgent = $root . '/scripts/mqtt_agent.php';
+            if (is_file($phpAgent)) {
+                $php = defined('PHP_BINARY') && PHP_BINARY !== '' ? PHP_BINARY : 'php';
+                $argv = [escapeshellarg($php), escapeshellarg($phpAgent)];
             }
-        }
-        if ($argv === null && is_file($phpAgent)) {
-            $php = defined('PHP_BINARY') && PHP_BINARY !== '' ? PHP_BINARY : 'php';
-            $argv = [escapeshellarg($php), escapeshellarg($phpAgent)];
         }
         if ($argv === null) {
             return;
@@ -106,13 +153,54 @@ final class YarboMqttAgentClient
 
         $this->spawnDetached($root, $argv, $log);
 
-        $deadline = microtime(true) + 4.0;
+        $deadline = microtime(true) + 5.0;
         while (microtime(true) < $deadline) {
             usleep(200000);
             if ($this->isAvailable()) {
                 return;
             }
         }
+    }
+
+    /**
+     * @return list<string>|null already escapeshellarg()'d binary + args
+     */
+    private function pythonAgentArgv(string $root): ?array
+    {
+        $pyAgent = $root . '/scripts/mqtt_agent.py';
+        if (!is_file($pyAgent)) {
+            return null;
+        }
+
+        $candidates = [
+            $root . '/.venv/bin/python3',
+            $root . '/.venv/bin/python',
+        ];
+        $pathPy = trim((string) @exec('command -v python3 2>/dev/null'));
+        if ($pathPy !== '') {
+            $candidates[] = $pathPy;
+        }
+
+        foreach ($candidates as $python) {
+            if ($python === '' || !is_executable($python)) {
+                continue;
+            }
+            $code = 1;
+            @exec(escapeshellarg($python) . ' -c ' . escapeshellarg('import yarbo') . ' 2>/dev/null', $out, $code);
+            if ($code === 0) {
+                return [escapeshellarg($python), escapeshellarg($pyAgent)];
+            }
+        }
+
+        return null;
+    }
+
+    private function stopAgentProcesses(): void
+    {
+        $port = (int) $this->port;
+        @exec('lsof -ti tcp:' . $port . ' 2>/dev/null | xargs kill -9 2>/dev/null');
+        @exec("pkill -f '[s]cripts/mqtt_agent.py' 2>/dev/null");
+        @exec("pkill -f '[s]cripts/mqtt_agent.php' 2>/dev/null");
     }
 
     /**

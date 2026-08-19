@@ -1,3 +1,4 @@
+#!/usr/bin/env php
 <?php
 
 declare(strict_types=1);
@@ -5,8 +6,8 @@ declare(strict_types=1);
 /**
  * Persistent MQTT agent for Yarbo — keeps one live MQTT connection.
  *
- * Does not claim get_controller on startup (watching must not stop a running job).
- * Controller is acquired only when the panel sends a real command.
+ * Fallback when python-yarbo is missing. Supports the same ops as mqtt_agent.py:
+ * ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants.
  *
  * Usage: php scripts/mqtt_agent.php
  */
@@ -16,6 +17,7 @@ require __DIR__ . '/../vendor/autoload.php';
 use PhpMqtt\Client\ConnectionSettings;
 use PhpMqtt\Client\MqttClient;
 use Yarbo\YarboCodec;
+use Yarbo\YarboMqtt;
 
 $configPath = __DIR__ . '/../config.php';
 if (!is_file($configPath)) {
@@ -36,10 +38,37 @@ if ($host === '' || $serial === '') {
     exit(1);
 }
 
+const LIGHTS_ON = [
+    'led_head' => 255,
+    'led_left_w' => 255,
+    'led_right_w' => 255,
+    'body_left_r' => 255,
+    'body_right_r' => 255,
+    'tail_left_r' => 255,
+    'tail_right_r' => 255,
+];
+const LIGHTS_OFF = [
+    'led_head' => 0,
+    'led_left_w' => 0,
+    'led_right_w' => 0,
+    'body_left_r' => 0,
+    'body_right_r' => 0,
+    'tail_left_r' => 0,
+    'tail_right_r' => 0,
+];
+
 /** @var MqttClient|null $mqtt */
 $mqtt = null;
 $loopStartedAt = microtime(true);
-$controllerOk = false;
+/** @var array<string, mixed>|null $lastRaw */
+$lastRaw = null;
+$state = [
+    'controllerOk' => false,
+    'controlHold' => false,
+    'lightsOn' => false,
+    'workUntil' => 0.0,
+    'lastWake' => 0.0,
+];
 
 function log_line(string $msg): void
 {
@@ -60,9 +89,30 @@ function pump(MqttClient $client, float $loopStartedAt, float $seconds): void
 }
 
 /**
+ * @param array<string, mixed>|null $lastRaw
  * @return MqttClient
  */
-function mqtt_connect(string $host, int $port, string $serial): MqttClient
+function subscribe_telemetry(MqttClient $client, string $serial, ?array &$lastRaw): void
+{
+    $handler = static function (string $topic, string $message) use (&$lastRaw): void {
+        try {
+            $decoded = YarboCodec::decode($message);
+        } catch (Throwable) {
+            return;
+        }
+        $telemetry = YarboMqtt::extractTelemetry($decoded);
+        if ($telemetry !== null) {
+            $lastRaw = $telemetry;
+        }
+    };
+    $client->subscribe(topic($serial, 'device', 'data_feedback'), $handler, 0);
+    $client->subscribe(topic($serial, 'device', 'DeviceMSG'), $handler, 0);
+}
+
+/**
+ * @param array<string, mixed>|null $lastRaw
+ */
+function mqtt_connect(string $host, int $port, string $serial, ?array &$lastRaw): MqttClient
 {
     $client = new MqttClient($host, $port, 'yarbo-agent-' . bin2hex(random_bytes(4)));
     $settings = (new ConnectionSettings())
@@ -71,8 +121,7 @@ function mqtt_connect(string $host, int $port, string $serial): MqttClient
         ->setSocketTimeout(1)
         ->setResendTimeout(5);
     $client->connect($settings, true);
-    $client->subscribe(topic($serial, 'device', 'data_feedback'), static function (): void {
-    }, 0);
+    subscribe_telemetry($client, $serial, $lastRaw);
 
     return $client;
 }
@@ -93,6 +142,7 @@ function mqtt_disconnect(?MqttClient &$client): void
 }
 
 /**
+ * @param array<string, mixed>|null $lastRaw
  * @return array{ok: bool, error?: string}
  */
 function ensure_connected(
@@ -101,6 +151,7 @@ function ensure_connected(
     string $host,
     int $port,
     string $serial,
+    ?array &$lastRaw,
 ): array {
     if ($mqtt !== null && $mqtt->isConnected()) {
         return ['ok' => true];
@@ -108,7 +159,7 @@ function ensure_connected(
 
     mqtt_disconnect($mqtt);
     try {
-        $mqtt = mqtt_connect($host, $port, $serial);
+        $mqtt = mqtt_connect($host, $port, $serial, $lastRaw);
         $loopStartedAt = microtime(true);
         log_line("MQTT connected to {$host}:{$port}");
 
@@ -156,7 +207,6 @@ function acquire_controller(MqttClient $client, float $loopStartedAt, string $se
         ];
     }
 
-    // Match python-yarbo _ensure_controller settle time before action commands.
     pump($client, $loopStartedAt, 0.5);
 
     return ['ok' => true];
@@ -175,29 +225,41 @@ function work_needs_startup(string $cmd): bool
 function wake_for_work(MqttClient $client, float $loopStartedAt, string $serial): void
 {
     publish($client, $serial, 'set_working_state', ['state' => 1, 'source' => 'smart_home']);
-    pump($client, $loopStartedAt, 0.25);
-}
-
-function hold_awake_after_work(MqttClient $client, float $loopStartedAt, string $serial, string $cmd): void
-{
-    if (!work_needs_startup($cmd)) {
-        return;
-    }
-    // PHP agent has no keepalive loop; re-wake a couple of times so idle firmware can latch.
-    pump($client, $loopStartedAt, 0.4);
-    wake_for_work($client, $loopStartedAt, $serial);
-    pump($client, $loopStartedAt, 0.8);
-    wake_for_work($client, $loopStartedAt, $serial);
+    pump($client, $loopStartedAt, 0.2);
 }
 
 /**
+ * @param array<string, mixed> $state
+ * @return array<string, mixed>
+ */
+function state_flags(array $state): array
+{
+    return [
+        'hold_controller' => ((bool) $state['controlHold']) || ((bool) $state['controllerOk']),
+        'lights_on' => (bool) $state['lightsOn'],
+        'controller_acquired' => (bool) $state['controllerOk'],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $state
+ */
+function ok_resp(array $base, array $state): array
+{
+    return array_merge($base, state_flags($state));
+}
+
+/**
+ * @param array<string, mixed> $state
+ * @param array<string, mixed>|null $lastRaw
  * @param array<string, mixed> $req
  * @return array<string, mixed>
  */
 function handle_request(
     ?MqttClient &$mqtt,
     float &$loopStartedAt,
-    bool &$controllerOk,
+    array &$state,
+    ?array &$lastRaw,
     string $host,
     int $port,
     string $serial,
@@ -205,55 +267,134 @@ function handle_request(
 ): array {
     $op = (string) ($req['op'] ?? '');
 
-    $connected = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial);
+    if ($op === 'ping') {
+        return ok_resp([
+            'ok' => true,
+            'controller' => (bool) $state['controllerOk'],
+            'connected' => $mqtt !== null && $mqtt->isConnected(),
+            'engine' => 'php',
+            'telemetry' => true,
+        ], $state);
+    }
+
+    $connected = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial, $lastRaw);
     if (!($connected['ok'] ?? false)) {
         return $connected;
     }
     assert($mqtt instanceof MqttClient);
 
-    if ($op === 'ping') {
-        return [
-            'ok' => true,
-            'controller' => $controllerOk,
-            'hold_controller' => $controllerOk,
-            'connected' => $mqtt->isConnected(),
-            'engine' => 'php',
-            'telemetry' => false,
-        ];
-    }
-
     try {
-        if (!in_array($op, ['drive', 'publish', 'publish_variants'], true)) {
-            return ['ok' => false, 'error' => 'Unknown op. Valid: ping, drive, publish, publish_variants'];
+        if ($op === 'telemetry') {
+            $timeout = (float) ($req['timeout'] ?? 4.0);
+            if (!is_array($lastRaw)) {
+                publish($mqtt, $serial, 'get_device_msg', []);
+                $deadline = microtime(true) + $timeout;
+                while (!is_array($lastRaw) && microtime(true) < $deadline) {
+                    $mqtt->loopOnce($loopStartedAt, true, 20000);
+                }
+            }
+            if (!is_array($lastRaw)) {
+                return ['ok' => false, 'error' => 'telemetry timeout', 'transient' => true];
+            }
+
+            return ok_resp([
+                'ok' => true,
+                'op' => 'telemetry',
+                'raw' => $lastRaw,
+            ], $state);
         }
 
-        // Claim controller only when commanding — never on connect/ping/status.
-        if (!$controllerOk) {
+        $needsController = in_array($op, ['controller', 'lights', 'buzzer', 'drive', 'publish', 'publish_variants'], true);
+        if (!$needsController) {
+            return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants'];
+        }
+
+        if ($op === 'controller' && !((bool) ($req['on'] ?? false))) {
+            if ($state['lightsOn']) {
+                publish($mqtt, $serial, 'light_ctrl', LIGHTS_OFF);
+                $state['lightsOn'] = false;
+            }
+            if ($state['controlHold'] || $state['controllerOk']) {
+                publish($mqtt, $serial, 'set_working_state', ['state' => 0]);
+                pump($mqtt, $loopStartedAt, 0.15);
+            }
+            $state['controllerOk'] = false;
+            $state['controlHold'] = false;
+            $state['workUntil'] = 0.0;
+            log_line('Controller HOLD off');
+
+            return ok_resp(['ok' => true, 'op' => 'controller', 'on' => false], $state);
+        }
+
+        if (!$state['controllerOk']) {
             $got = acquire_controller($mqtt, $loopStartedAt, $serial, 4.0);
             if (!($got['ok'] ?? false)) {
                 return $got;
             }
-            $controllerOk = true;
-            log_line('Controller acquired (first command)');
+            $state['controllerOk'] = true;
+            subscribe_telemetry($mqtt, $serial, $lastRaw);
+            log_line('Controller acquired');
         }
 
         $session = (string) ($req['session'] ?? 'control');
         if ($session === 'work') {
             wake_for_work($mqtt, $loopStartedAt, $serial);
+            $state['lastWake'] = microtime(true);
+        }
+
+        if ($op === 'controller') {
+            wake_for_work($mqtt, $loopStartedAt, $serial);
+            $state['controlHold'] = true;
+            $state['lastWake'] = microtime(true);
+            log_line('Controller HOLD on');
+
+            return ok_resp(['ok' => true, 'op' => 'controller', 'on' => true], $state);
+        }
+
+        if ($op === 'lights') {
+            $on = (bool) ($req['on'] ?? false);
+            wake_for_work($mqtt, $loopStartedAt, $serial);
+            if ($on) {
+                publish($mqtt, $serial, 'light_ctrl', LIGHTS_ON);
+                $state['lightsOn'] = true;
+                $state['controlHold'] = true;
+                log_line('Lights ON');
+            } else {
+                publish($mqtt, $serial, 'light_ctrl', LIGHTS_OFF);
+                $state['lightsOn'] = false;
+                log_line('Lights OFF');
+            }
+            $state['lastWake'] = microtime(true);
+            pump($mqtt, $loopStartedAt, 0.15);
+
+            return ok_resp(['ok' => true, 'op' => 'lights', 'on' => $on], $state);
+        }
+
+        if ($op === 'buzzer') {
+            wake_for_work($mqtt, $loopStartedAt, $serial);
+            publish($mqtt, $serial, 'cmd_buzzer', ['state' => 1, 'timeStamp' => (int) round(microtime(true) * 1000)]);
+            pump($mqtt, $loopStartedAt, 2.0);
+            publish($mqtt, $serial, 'cmd_buzzer', ['state' => 0, 'timeStamp' => (int) round(microtime(true) * 1000)]);
+            publish($mqtt, $serial, 'song_cmd', ['song_name' => 'find yarbo']);
+            pump($mqtt, $loopStartedAt, 0.3);
+            $state['lastWake'] = microtime(true);
+
+            return ok_resp(['ok' => true, 'op' => 'buzzer', 'cmd' => 'cmd_buzzer'], $state);
         }
 
         if ($op === 'drive') {
-            $enterManual = (bool) ($req['enter_manual'] ?? false);
             $linear = (float) ($req['linear'] ?? 0);
             $angular = (float) ($req['angular'] ?? 0);
-            if ($enterManual) {
-                publish($mqtt, $serial, 'set_working_state', ['state' => 'manual']);
-                pump($mqtt, $loopStartedAt, 0.15);
+            if (abs($linear) > 1e-6 || abs($angular) > 1e-6) {
+                wake_for_work($mqtt, $loopStartedAt, $serial);
+                publish($mqtt, $serial, 'emergency_unlock', []);
+                pump($mqtt, $loopStartedAt, 0.1);
             }
             publish($mqtt, $serial, 'cmd_vel', ['vel' => $linear, 'rev' => $angular]);
             pump($mqtt, $loopStartedAt, 0.12);
+            $state['lastWake'] = microtime(true);
 
-            return ['ok' => true, 'op' => 'drive'];
+            return ok_resp(['ok' => true, 'op' => 'drive'], $state);
         }
 
         if ($op === 'publish') {
@@ -263,12 +404,13 @@ function handle_request(
             }
             $payload = is_array($req['payload'] ?? null) ? $req['payload'] : [];
             publish($mqtt, $serial, $cmd, $payload);
-            pump($mqtt, $loopStartedAt, 0.4);
-            if ($session === 'work') {
-                hold_awake_after_work($mqtt, $loopStartedAt, $serial, $cmd);
+            pump($mqtt, $loopStartedAt, 0.35);
+            if ($session === 'work' && work_needs_startup($cmd)) {
+                $state['workUntil'] = microtime(true) + 25.0;
+                $state['lastWake'] = microtime(true);
             }
 
-            return ['ok' => true, 'op' => 'publish', 'cmd' => $cmd];
+            return ok_resp(['ok' => true, 'op' => 'publish', 'cmd' => $cmd], $state);
         }
 
         if ($op === 'publish_variants') {
@@ -286,31 +428,25 @@ function handle_request(
                 publish($mqtt, $serial, $cmd, $payload);
                 $lastCmd = $cmd;
             }
-            pump($mqtt, $loopStartedAt, 0.4);
-            if ($session === 'work') {
-                hold_awake_after_work($mqtt, $loopStartedAt, $serial, $lastCmd);
+            pump($mqtt, $loopStartedAt, 0.35);
+            if ($session === 'work' && work_needs_startup($lastCmd)) {
+                $state['workUntil'] = microtime(true) + 25.0;
+                $state['lastWake'] = microtime(true);
+                wake_for_work($mqtt, $loopStartedAt, $serial);
             }
 
-            return ['ok' => true, 'op' => 'publish_variants', 'cmd' => $lastCmd];
+            return ok_resp(['ok' => true, 'op' => 'publish_variants', 'cmd' => $lastCmd], $state);
         }
 
-        return ['ok' => false, 'error' => 'Unknown op. Valid: ping, drive, publish, publish_variants'];
+        return ['ok' => false, 'error' => 'Unknown op. Valid: ping, telemetry, controller, lights, buzzer, drive, publish, publish_variants'];
     } catch (Throwable $e) {
         log_line('Command error: ' . $e->getMessage());
-        $controllerOk = false;
+        $state['controllerOk'] = false;
         mqtt_disconnect($mqtt);
 
         return ['ok' => false, 'error' => $e->getMessage()];
     }
 }
-
-log_line("Connecting MQTT {$host}:{$port} SN={$serial}");
-$connected = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial);
-if (!($connected['ok'] ?? false)) {
-    fwrite(STDERR, ($connected['error'] ?? 'connect failed') . "\n");
-    exit(1);
-}
-log_line('MQTT connected (controller not held until panel commands)');
 
 $server = @stream_socket_server("tcp://127.0.0.1:{$agentPort}", $errno, $errstr);
 if ($server === false) {
@@ -318,7 +454,7 @@ if ($server === false) {
     exit(1);
 }
 stream_set_blocking($server, false);
-log_line("Agent listening on 127.0.0.1:{$agentPort}");
+log_line("Agent listening on 127.0.0.1:{$agentPort} (MQTT connecting {$host}:{$port} SN={$serial})");
 
 /** @var array<int, resource> $clients */
 $clients = [];
@@ -331,15 +467,32 @@ while (true) {
             $mqtt->loopOnce($loopStartedAt, true, 20000);
         } catch (Throwable $e) {
             log_line('MQTT loop error (will reconnect): ' . $e->getMessage());
-            $controllerOk = false;
+            $state['controllerOk'] = false;
             mqtt_disconnect($mqtt);
         }
     } else {
-        $result = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial);
-        if ($result['ok'] ?? false) {
-            $controllerOk = false;
-        } else {
-            usleep(500000);
+        $result = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial, $lastRaw);
+        if (!($result['ok'] ?? false)) {
+            usleep(400000);
+        }
+    }
+
+    $now = microtime(true);
+    $wantWake = $mqtt !== null && $mqtt->isConnected()
+        && ($state['lightsOn'] || $state['controlHold'] || $now < (float) $state['workUntil']);
+    if ($wantWake) {
+        $gap = ($now < (float) $state['workUntil'] && !$state['lightsOn'] && !$state['controlHold']) ? 1.5 : 15.0;
+        if ($now - (float) $state['lastWake'] >= $gap) {
+            try {
+                wake_for_work($mqtt, $loopStartedAt, $serial);
+                if ($state['lightsOn']) {
+                    publish($mqtt, $serial, 'light_ctrl', LIGHTS_ON);
+                }
+                $state['lastWake'] = $now;
+                log_line('Keepalive wake' . ($state['lightsOn'] ? ' + lights' : ''));
+            } catch (Throwable $e) {
+                log_line('Keepalive failed: ' . $e->getMessage());
+            }
         }
     }
 
@@ -382,10 +535,19 @@ while (true) {
                     if (!is_array($req)) {
                         $resp = ['ok' => false, 'error' => 'Invalid JSON'];
                     } else {
-                        $resp = handle_request($mqtt, $loopStartedAt, $controllerOk, $host, $port, $serial, $req);
+                        $resp = handle_request(
+                            $mqtt,
+                            $loopStartedAt,
+                            $state,
+                            $lastRaw,
+                            $host,
+                            $port,
+                            $serial,
+                            $req
+                        );
                     }
                 } catch (Throwable $e) {
-                    $controllerOk = false;
+                    $state['controllerOk'] = false;
                     mqtt_disconnect($mqtt);
                     $resp = ['ok' => false, 'error' => $e->getMessage()];
                 }

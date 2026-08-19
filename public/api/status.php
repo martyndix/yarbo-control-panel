@@ -55,7 +55,7 @@ function status_from_agent(array $result): void
 // Prefer persistent Python agent so status does not open a competing MQTT session.
 $agent = YarboMqttAgentClient::fromEnv();
 $ping = $agent->ping();
-if (!($ping['ok'] ?? false)) {
+if (($ping['engine'] ?? '') === 'php' || !($ping['ok'] ?? false)) {
     try {
         $agent = YarboMqttAgentClient::requireRunning();
         $ping = $agent->ping();
