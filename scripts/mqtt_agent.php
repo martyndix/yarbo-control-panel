@@ -3,7 +3,10 @@
 declare(strict_types=1);
 
 /**
- * Persistent MQTT agent for Yarbo — keeps one live connection and controller role.
+ * Persistent MQTT agent for Yarbo — keeps one live MQTT connection.
+ *
+ * Does not claim get_controller on startup (watching must not stop a running job).
+ * Controller is acquired only when the panel sends a real command.
  *
  * Usage: php scripts/mqtt_agent.php
  */
@@ -189,18 +192,25 @@ function handle_request(
         return [
             'ok' => true,
             'controller' => $controllerOk,
+            'hold_controller' => $controllerOk,
             'connected' => $mqtt->isConnected(),
         ];
     }
 
     try {
-        $got = acquire_controller($mqtt, $loopStartedAt, $serial, 4.0);
-        if (!($got['ok'] ?? false)) {
-            $controllerOk = false;
-
-            return $got;
+        if (!in_array($op, ['drive', 'publish', 'publish_variants'], true)) {
+            return ['ok' => false, 'error' => 'Unknown op. Valid: ping, drive, publish, publish_variants'];
         }
-        $controllerOk = true;
+
+        // Claim controller only when commanding — never on connect/ping/status.
+        if (!$controllerOk) {
+            $got = acquire_controller($mqtt, $loopStartedAt, $serial, 4.0);
+            if (!($got['ok'] ?? false)) {
+                return $got;
+            }
+            $controllerOk = true;
+            log_line('Controller acquired (first command)');
+        }
 
         if ($op === 'drive') {
             $enterManual = (bool) ($req['enter_manual'] ?? false);
@@ -264,14 +274,7 @@ if (!($connected['ok'] ?? false)) {
     fwrite(STDERR, ($connected['error'] ?? 'connect failed') . "\n");
     exit(1);
 }
-
-$got = acquire_controller($mqtt, $loopStartedAt, $serial, 5.0);
-if ($got['ok'] ?? false) {
-    $controllerOk = true;
-    log_line('Controller acquired');
-} else {
-    log_line('WARNING: ' . ($got['error'] ?? 'get_controller failed') . ' — will retry on first command');
-}
+log_line('MQTT connected (controller not held until panel commands)');
 
 $server = @stream_socket_server("tcp://127.0.0.1:{$agentPort}", $errno, $errstr);
 if ($server === false) {

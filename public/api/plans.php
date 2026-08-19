@@ -9,6 +9,7 @@ use Yarbo\YarboCloudSettings;
 use Yarbo\YarboCommands;
 use Yarbo\YarboGeo;
 use Yarbo\YarboMap;
+use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboPlans;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -36,7 +37,7 @@ function plans_input(): array
 
 function load_plans_local(\Yarbo\YarboMqtt $client): array
 {
-    $response = $client->requestDataFeedback('read_all_plan', [], 10.0, true);
+    $response = $client->requestDataFeedback('read_all_plan', [], 10.0, false);
 
     return [
         'plans' => YarboPlans::parseList($response),
@@ -125,65 +126,85 @@ try {
         json_response(['ok' => false, 'error' => 'Method not allowed'], 405);
     }
 
-    $client = yarbo_client($config);
-    $client->connect();
     $input = plans_input();
     $action = (string) ($input['action'] ?? '');
+    $agent = YarboMqttAgentClient::requireRunning();
 
     if ($action === 'start') {
         $planId = $input['plan_id'] ?? $input['planId'] ?? null;
         if ($planId === null || $planId === '') {
-            $client->disconnect();
             json_response(['ok' => false, 'error' => 'plan_id is required'], 400);
         }
 
         $percent = isset($input['percent']) ? (int) $input['percent'] : 0;
         $percent = max(0, min(100, $percent));
-        $cmd = $client->sendCommandVariants(YarboCommands::startPlanVariants($planId, $percent), true);
-        $client->disconnect();
+        $result = $agent->publishVariants(YarboCommands::startPlanVariants($planId, $percent), 'work');
+        if (!($result['ok'] ?? false)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Start failed'),
+                'via' => 'agent',
+                'hold_controller' => (bool) ($result['hold_controller'] ?? false),
+            ], 500);
+        }
 
         json_response([
             'ok' => true,
             'action' => 'start',
             'plan_id' => $planId,
             'percent' => $percent,
-            'cmd' => $cmd,
+            'cmd' => $result['cmd'] ?? 'start_plan',
+            'via' => 'agent',
+            'hold_controller' => (bool) ($result['hold_controller'] ?? true),
         ]);
     }
 
     if ($action === 'delete') {
         $planId = $input['plan_id'] ?? $input['planId'] ?? null;
         if ($planId === null || $planId === '') {
-            $client->disconnect();
             json_response(['ok' => false, 'error' => 'plan_id is required'], 400);
         }
         if (!($input['confirm'] ?? false)) {
-            $client->disconnect();
             json_response(['ok' => false, 'error' => 'confirm=true is required to delete a plan'], 400);
         }
 
         $payload = [
             'planId' => is_numeric($planId) ? (int) $planId : (string) $planId,
         ];
-        $client->sendCommand('del_plan', $payload, true);
-        $client->disconnect();
+        $result = $agent->publish('del_plan', $payload, 'work');
+        if (!($result['ok'] ?? false)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Delete failed'),
+                'via' => 'agent',
+            ], 500);
+        }
 
-        json_response(['ok' => true, 'action' => 'delete', 'plan_id' => $planId]);
+        json_response([
+            'ok' => true,
+            'action' => 'delete',
+            'plan_id' => $planId,
+            'via' => 'agent',
+        ]);
     }
 
     if ($action === 'delete_all') {
         if (!($input['confirm'] ?? false)) {
-            $client->disconnect();
             json_response(['ok' => false, 'error' => 'confirm=true is required to delete all plans'], 400);
         }
 
-        $client->sendCommand('del_all_plan', [], true);
-        $client->disconnect();
+        $result = $agent->publish('del_all_plan', [], 'work');
+        if (!($result['ok'] ?? false)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Delete all failed'),
+                'via' => 'agent',
+            ], 500);
+        }
 
-        json_response(['ok' => true, 'action' => 'delete_all']);
+        json_response(['ok' => true, 'action' => 'delete_all', 'via' => 'agent']);
     }
 
-    $client->disconnect();
     json_response([
         'ok' => false,
         'error' => 'Unknown action. Valid: start, delete, delete_all',

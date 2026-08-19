@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-08-19
+
+### Fixed
+- **Opening the panel stopped a running job**: the PHP MQTT agent no longer calls `get_controller` on startup, and map/plan reads no longer take the controller role. Watching live status does not interrupt work.
+- **Starting a plan from the panel was cancelled if the phone app was open**: start/delete plan and waypoint go now use the persistent agent with a quiet controller hold (no manual wake / idle), so the official app cannot immediately steal the job back.
+
+### Changed
+- Pause, resume, stop, and return-to-dock also use a quiet work session instead of waking the robot into manual mode.
+- Controls copy: watching does not need the official app closed; commanding still takes over from it.
+
 ## [1.3.1] - 2026-08-15
 
 ### Fixed

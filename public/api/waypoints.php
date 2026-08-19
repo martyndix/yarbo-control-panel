@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboWaypoints;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -38,12 +39,15 @@ function parse_waypoint_index(mixed $value): ?int
     return $index;
 }
 
-function send_robot_to_waypoint(array $config, int $index): void
+function send_robot_to_waypoint(int $index): array
 {
-    $client = yarbo_client($config);
-    $client->connect();
-    $client->sendCommand('start_way_point', ['index' => $index], true);
-    $client->disconnect();
+    $agent = YarboMqttAgentClient::requireRunning();
+    $result = $agent->publish('start_way_point', ['index' => $index], 'work');
+    if (!($result['ok'] ?? false)) {
+        throw new RuntimeException((string) ($result['error'] ?? 'Waypoint command failed'));
+    }
+
+    return $result;
 }
 
 if ($method === 'GET') {
@@ -72,12 +76,14 @@ if ($action === 'go' || !isset($input['action'])) {
     }
 
     try {
-        send_robot_to_waypoint($config, $index);
+        $result = send_robot_to_waypoint($index);
         json_response([
             'ok' => true,
             'action' => 'go',
             'index' => $index,
             'command' => 'start_way_point',
+            'via' => 'agent',
+            'hold_controller' => (bool) ($result['hold_controller'] ?? true),
         ]);
     } catch (Throwable $e) {
         json_response(['ok' => false, 'error' => friendly_error($e)], 500);

@@ -80,7 +80,7 @@ Open the panel in a browser and you can:
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
-Commands acquire the MQTT **controller role** first (`get_controller`), which may take control away from the official Yarbo mobile app while you are using the panel.
+Opening the panel only watches live telemetry. It does **not** take the MQTT controller role, so a job already running in the official app should keep going. Starting a plan, going to a waypoint, or turning **Controller On** (needed for lights/drive) does take that role — only one app can command at a time.
 
 ---
 
@@ -592,8 +592,8 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 | Problem | What to check |
 |---------|---------------|
 | Status shows an error | `nc -zv <yarbo-ip> 1883` from the host running the panel |
-| Blank tiles / “Failed to Fetch” | Start with `./scripts/dev.sh`, not `php -S` alone. `killall php` then retry. Close the official Yarbo app. |
-| Commands do nothing | Close the Yarbo app; ensure `./scripts/dev.sh` (MQTT agent) is running; panel calls `get_controller` before actions |
+| Blank tiles / “Failed to Fetch” | Start with `./scripts/dev.sh`, not `php -S` alone. `killall php` then retry. |
+| Commands do nothing / start is cancelled | The official app and this panel cannot both command at once. Close the Yarbo app (or leave its remote-control screen) and try again. Watching status does **not** require closing the app. |
 | Lights flash then off | Agent not running — panel no longer uses connect–disconnect control; start `./scripts/dev.sh` |
 | Map looks flipped vs the phone app | Reload saved areas after v1.3.1 (local X is west, matching the official SDK). The phone app is often not north-up; compare satellite overlay to the real yard. |
 | Page won't load | Is PHP running? `curl http://127.0.0.1:8080/api/status.php` |
@@ -633,7 +633,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.1** (2026-08-15).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.2** (2026-08-19).
 
 ---
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Persistent Yarbo MQTT agent — keeps one live broker connection + controller role.
+"""Persistent Yarbo MQTT agent — one live broker connection.
+
+Does not claim get_controller on connect. Watching telemetry must not stop a job.
+Controller is claimed for explicit Controller/Lights or for work commands (quiet hold).
 
 Talks JSON-lines over TCP 127.0.0.1:8765 (same protocol as scripts/mqtt_agent.php).
 
@@ -39,8 +42,22 @@ CONTROLLER_KEEPALIVE_S = 40.0
 CONTROLLER_KEEPALIVE_MIN_GAP_S = 15.0
 
 
-def wants_controller(state: dict[str, Any]) -> bool:
-    return bool(state.get("hold_controller") or state.get("lights_on"))
+def wants_wakeup(state: dict[str, Any]) -> bool:
+    """Soft-wake (set_working_state=1) is only for lights / manual drive / Controller On.
+
+    A quiet work hold (start plan, waypoint) keeps get_controller so the phone app
+    cannot steal, but must not poke the robot into idle or manual.
+    """
+    return bool(
+        state.get("control_session")
+        or state.get("lights_on")
+        or state.get("manual_drive")
+    )
+
+
+def session_mode(req: dict[str, Any]) -> str:
+    mode = str(req.get("session") or "control").strip().lower()
+    return "work" if mode == "work" else "control"
 
 
 def log(msg: str) -> None:
@@ -69,13 +86,6 @@ def fix_buzzer_payload(cmd: str, payload: dict[str, Any]) -> dict[str, Any]:
     if ts is None or (isinstance(ts, (int, float)) and ts < 10_000_000_000):
         out["timeStamp"] = int(time.time() * 1000)
     return out
-
-
-async def ensure_controller(client: Any) -> None:
-    if getattr(client, "controller_acquired", False):
-        return
-    await client.get_controller()
-    await asyncio.sleep(0.5)
 
 
 async def force_controller(client: Any) -> dict[str, Any]:
@@ -107,15 +117,26 @@ async def sleep_from_control(client: Any) -> None:
         log(f"set_working_state 0 failed: {e}")
 
 
+async def ensure_controller_role(client: Any) -> None:
+    """Claim get_controller if the SDK flag was lost — no working_state change."""
+    if getattr(client, "controller_acquired", False):
+        return
+    await client.get_controller()
+    await asyncio.sleep(0.45)
+
+
 async def ensure_session(client: Any) -> None:
     """Keep MQTT command session usable without re-announcing controller.
 
     get_controller only if the SDK flag was lost (reconnect). Otherwise wake only.
     """
-    if not getattr(client, "controller_acquired", False):
-        await client.get_controller()
-        await asyncio.sleep(0.45)
+    await ensure_controller_role(client)
     await wake_for_control(client)
+
+
+async def ensure_work_session(client: Any) -> None:
+    """Claim controller for start/pause/plan without waking to manual or idle."""
+    await ensure_controller_role(client)
 
 
 async def claim_controller(client: Any) -> dict[str, Any]:
@@ -128,6 +149,22 @@ async def claim_controller(client: Any) -> dict[str, Any]:
 async def assert_lights_on(client: Any) -> None:
     await ensure_session(client)
     await client.publish_command("light_ctrl", COMMUNITY_LIGHTS_ON)
+
+
+async def apply_command_session(client: Any, state: dict[str, Any], session: str) -> None:
+    """Claim controller, then either wake (control) or quiet-hold (work)."""
+    if session == "work":
+        await ensure_work_session(client)
+        already = bool(state.get("hold_controller"))
+        state["hold_controller"] = True
+        state["last_keepalive"] = time.time()
+        if not already:
+            log("Work session: controller held quietly (no manual wake)")
+        return
+    await ensure_session(client)
+    state["hold_controller"] = True
+    state["control_session"] = True
+    state["last_keepalive"] = time.time()
 
 
 def parse_controller_reality(raw: dict[str, Any]) -> dict[str, Any]:
@@ -282,9 +319,15 @@ async def handle_request(
             raw = getattr(status, "raw", None) or {}
             state["last_raw"] = raw
             working_state = (raw.get("StateMSG") or {}).get("working_state")
-            # Quiet soft-wake soon if held session fell idle (no get_controller speech).
-            if wants_controller(state) and working_state == 0:
+            # Quiet soft-wake soon if a lights/drive session fell idle (not a work hold).
+            if wants_wakeup(state) and working_state == 0:
                 state["keepalive_soon"] = True
+            if state.get("hold_controller") and not getattr(client, "controller_acquired", False):
+                try:
+                    await ensure_controller_role(client)
+                    log("Re-claimed controller after session loss (quiet)")
+                except Exception as e:
+                    log(f"Quiet re-claim failed: {e}")
             wifi = None
             if want_wifi:
                 try:
@@ -305,6 +348,7 @@ async def handle_request(
             if on:
                 result = await claim_controller(client)
                 state["hold_controller"] = True
+                state["control_session"] = True
                 state["manual_drive"] = False
                 state["keepalive_soon"] = False
                 state["last_keepalive"] = time.time()
@@ -323,22 +367,29 @@ async def handle_request(
                     **robot,
                 }
 
-            # Releasing controller also stops lights hold + returns to idle.
+            # Releasing a lights/drive session returns to idle. A quiet work hold
+            # must not send set_working_state 0 — that would stop a running plan.
+            had_control_session = wants_wakeup(state)
             if state.get("lights_on"):
                 try:
                     await client.publish_command("light_ctrl", COMMUNITY_LIGHTS_OFF)
                 except Exception as e:
                     log(f"Lights off during controller release failed: {e}")
                 state["lights_on"] = False
-            await sleep_from_control(client)
+            if had_control_session:
+                await sleep_from_control(client)
             state["hold_controller"] = False
+            state["control_session"] = False
             state["manual_drive"] = False
             state["keepalive_soon"] = False
             try:
                 client._controller_acquired = False  # noqa: SLF001
             except Exception:
                 pass
-            log("Controller HOLD off (idle + stop keepalive)")
+            log(
+                "Controller HOLD off"
+                + (" (idle + stop keepalive)" if had_control_session else " (quiet; work state unchanged)")
+            )
             robot = await read_controller_reality(client, state)
             return {
                 "ok": True,
@@ -365,6 +416,7 @@ async def handle_request(
                 await assert_lights_on(client)
                 state["lights_on"] = True
                 state["hold_controller"] = True
+                state["control_session"] = True
                 state["keepalive_soon"] = False
                 state["last_keepalive"] = time.time()
                 log(f"Lights ON (wake + light_ctrl) charging_status={charging_status}")
@@ -493,9 +545,7 @@ async def handle_request(
                 return {"ok": False, "error": "cmd required"}
             payload = req.get("payload") if isinstance(req.get("payload"), dict) else {}
             payload = fix_buzzer_payload(cmd, payload)
-            await ensure_session(client)
-            state["hold_controller"] = True
-            state["last_keepalive"] = time.time()
+            await apply_command_session(client, state, session_mode(req))
             await client.publish_command(cmd, payload)
             await asyncio.sleep(0.15)
             return {"ok": True, "op": "publish", "cmd": cmd, **state_flags(state, client)}
@@ -504,9 +554,7 @@ async def handle_request(
             variants = req.get("variants")
             if not isinstance(variants, list) or not variants:
                 return {"ok": False, "error": "variants required"}
-            await ensure_session(client)
-            state["hold_controller"] = True
-            state["last_keepalive"] = time.time()
+            await apply_command_session(client, state, session_mode(req))
             last_cmd = ""
             for variant in variants:
                 if not isinstance(variant, dict) or "cmd" not in variant:
@@ -555,10 +603,10 @@ async def controller_keepalive_loop(
     lock: asyncio.Lock,
     state: dict[str, Any],
 ) -> None:
-    """Soft hold while controller/lights are on — no get_controller spam."""
+    """Soft hold while lights/drive/Controller On — not during quiet work holds."""
     while True:
         await asyncio.sleep(1.0)
-        if not wants_controller(state):
+        if not wants_wakeup(state):
             continue
         now = time.time()
         since = now - float(state.get("last_keepalive") or 0)
@@ -569,7 +617,7 @@ async def controller_keepalive_loop(
             continue
         try:
             async with lock:
-                if not wants_controller(state):
+                if not wants_wakeup(state):
                     continue
                 await soft_keepalive(client, state)
                 state["last_keepalive"] = time.time()
@@ -664,6 +712,7 @@ async def amain() -> int:
     lock = asyncio.Lock()
     state: dict[str, Any] = {
         "hold_controller": False,
+        "control_session": False,
         "lights_on": False,
         "manual_drive": False,
         "last_raw": None,

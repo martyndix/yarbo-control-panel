@@ -150,24 +150,27 @@ final class YarboMqttAgentClient
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    public function publish(string $cmd, array $payload): array
+    public function publish(string $cmd, array $payload, string $session = 'control'): array
     {
         return $this->request([
             'op' => 'publish',
             'cmd' => $cmd,
             'payload' => $payload,
+            'session' => $session,
         ]);
     }
 
     /**
      * @param array<int, array{cmd: string, payload: array<string, mixed>}> $variants
+     * @param 'control'|'work' $session
      * @return array<string, mixed>
      */
-    public function publishVariants(array $variants): array
+    public function publishVariants(array $variants, string $session = 'control'): array
     {
         return $this->request([
             'op' => 'publish_variants',
             'variants' => $variants,
+            'session' => $session,
         ]);
     }
 

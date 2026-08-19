@@ -148,7 +148,7 @@ try {
     }
 
     $variants = ($def['variants'] ?? static fn (): array => [])();
-    $result = $agent->publishVariants($variants);
+    $result = $agent->publishVariants($variants, 'work');
     if (!($result['ok'] ?? false)) {
         json_response([
             'ok' => false,
@@ -162,6 +162,7 @@ try {
         'action' => $action,
         'cmd' => $result['cmd'] ?? ($variants[count($variants) - 1]['cmd'] ?? null),
         'via' => 'agent',
+        'hold_controller' => (bool) ($result['hold_controller'] ?? true),
     ]);
 } catch (Throwable $e) {
     json_response([

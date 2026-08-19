@@ -279,7 +279,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Manual Drive</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Connect the controller below first, then hold a direction to move. Release to stop. Use only on flat, clear ground.</p>
+            <p class="hint">Connect the controller below first, then hold a direction to move. Release to stop. Use only on flat, clear ground. Watching the map and status does not need the controller.</p>
             <p class="drive-block-banner hidden" id="drive-block-banner" role="status"></p>
             <div class="drive-controller-row">
                 <button type="button" class="control-tile" id="control-controller-drive" data-control="controller" aria-pressed="false" title="Connect app controller">
@@ -303,7 +303,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Work Plans</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Load saved plans from the robot, then start at a chosen progress percentage. Some firmware only responds to <code>read_all_plan</code> while the robot is active.</p>
+            <p class="hint">Load saved plans from the robot (read-only — does not stop a running job). Starting a plan takes control so the official app cannot cancel it; leave the Controller tile connected while it runs.</p>
             <div class="plans-toolbar">
                 <label class="plan-percent">
                     Start at
@@ -381,7 +381,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Controls</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Turn Controller on first (wakes the robot so lights/drive stick). Close the official Yarbo app while using these controls.</p>
+            <p class="hint">Watching live status does not take control. Lights, drive, and buzzer need Controller On (that will take over from the phone app). Starting a plan or waypoint holds control quietly so the app cannot cancel the job.</p>
             <div class="control-tiles" id="control-tiles">
                 <button type="button" class="control-tile" id="control-controller" data-control="controller" aria-pressed="false" title="Connect app controller">
                     <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>

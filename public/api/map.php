@@ -49,7 +49,7 @@ function load_map_local(\Yarbo\YarboMqtt $client, array $commands): array
         $batch[$cmd] = $cmd === 'get_map' ? 15.0 : 8.0;
     }
 
-    $responses = $client->requestDataFeedbackBatch($batch);
+    $responses = $client->requestDataFeedbackBatch($batch, false);
 
     if ($responses['get_map'] ?? null) {
         return ['responses' => $responses, 'via' => 'local'];

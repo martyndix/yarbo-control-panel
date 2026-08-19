@@ -1867,7 +1867,11 @@ async function startPlan(planId, button) {
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'Start failed');
-        showToast(`Plan ${planId} started`, 'success');
+        if (typeof data.hold_controller === 'boolean') {
+            applyControllerStateFromStatus(data);
+            updateControllerTile();
+        }
+        showToast(`Plan ${planId} started — panel is holding control so the phone app cannot cancel it`, 'success');
         await fetchStatus();
     } catch (err) {
         showToast(err.message || 'Start failed', 'error');
@@ -1920,6 +1924,10 @@ async function goToWaypointIndex(index, label, button) {
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'Waypoint command failed');
+        if (typeof data.hold_controller === 'boolean') {
+            applyControllerStateFromStatus(data);
+            updateControllerTile();
+        }
         showToast(`Sent to ${targetLabel}`, 'success');
         await fetchStatus();
     } catch (err) {
@@ -3227,6 +3235,10 @@ async function sendCommand(action, button) {
             }
             if (data.agent_warning) {
                 showToast('Start MQTT agent for reliable controls: ./scripts/dev.sh', 'error');
+            }
+            if (typeof data.hold_controller === 'boolean') {
+                applyControllerStateFromStatus(data);
+                updateControllerTile();
             }
             fetchStatus().catch(() => {});
         } else {
