@@ -496,9 +496,9 @@ The dashboard now includes a **Connection & Health** card with additional operat
 
 Metrics shown:
 
-- `connection_type` and `connection_status` (derived from `net_type`, `halow_status`, `net_module_status`)
-- WiFi network name, signal strength (%), security, and IP (from MQTT `get_connect_wifi_name` when the robot responds)
-- battery temperature (`battery_diagnostics.temperature_c`), with `(avg cells)` shown when derived from `temperature1`..`temperature6`
+- `connection_type` and `connection_status` (from `net_type` / `halow_status` when present, otherwise the lowest non-negative `route_priority` iface: `hg0` HaLow, `wlan0` WiFi, `wwan0` 4G)
+- WiFi network name, signal strength (%), security, and IP (from MQTT `get_connect_wifi_name` when the robot is on WiFi)
+- battery temperature (`battery_diagnostics.temperature_c`), from DeviceMSG when present, otherwise MQTT `battery_cell_temp_msg` (`(avg cells)` when derived from `temperature1`..`temperature6`)
 - wireless charging voltage/current
 - RTK status and fix quality
 - RTCM age and route priority
@@ -518,7 +518,7 @@ The panel can manage saved work plans and waypoint navigation using the same MQT
 ### Work plans
 
 - **Load plans** — `read_all_plan` via `GET /api/plans.php`
-- **Start plan** — one `start_plan` message with `planId`, `id`, and `percent` (0–100) on the live controller session. The agent waits for the robot ack.
+- **Start plan** — one `start_plan` message with `planId`, `id`, and `percent` (0–100) on the live controller session. The agent waits for the robot ack. Confirmations use the plan name. Delete is under **Manage…**, not on the main list.
 - **Delete plan** — `del_plan` with confirmation
 
 UI: **Work Plans** card → adjust start percentage → **Load plans** → **Start** or **Delete** on a plan.
@@ -633,7 +633,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.8** (2026-08-20).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.9** (2026-08-20).
 
 ---
 

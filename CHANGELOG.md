@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.9] - 2026-08-20
+
+### Fixed
+- **Battery temperature stayed blank on HaLow**: DeviceMSG `BatteryMSG` has capacity, not cell temps. Status now reads `battery_cell_temp_msg` (cached ~30s) without taking the controller.
+- **Connection type showed Unknown while HaLow was the live link**: `wlan0: -1` is down, not primary. The panel uses the lowest non-negative `route_priority` (`hg0` → HaLow) and labels WiFi as down.
+- **Start plan confirm used the numeric id**: the dialog and toasts now use the plan name (for example “Back to Charger 2”).
+- **Delete was a red button on every plan row**: it is behind **Manage…** in a modal, with an in-modal confirm.
+
 ## [1.3.8] - 2026-08-20
 
 ### Fixed

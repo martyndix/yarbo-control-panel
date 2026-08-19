@@ -55,6 +55,7 @@ JOB_LATCH_KEYS = (
     "on_going_recharging",
     "on_going_to_start_point",
 )
+BATTERY_CELLS_CACHE_S = 30.0
 
 
 def job_is_latched(raw: Any) -> bool:
@@ -108,6 +109,46 @@ def session_mode(req: dict[str, Any]) -> str:
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S', time.gmtime())}] {msg}", file=sys.stderr, flush=True)
+
+
+async def request_feedback_quiet(client: Any, cmd: str, timeout: float) -> dict[str, Any]:
+    """Wait for data_feedback without get_controller (watching must not take control)."""
+    transport = getattr(client, "_transport", None)
+    if transport is None or not hasattr(transport, "create_wait_queue"):
+        return {}
+    wait_queue = transport.create_wait_queue()
+    try:
+        await client.publish_command(cmd, {})
+        msg = await transport.wait_for_message(
+            timeout=timeout,
+            feedback_leaf="data_feedback",
+            command_name=cmd,
+            _queue=wait_queue,
+        )
+        if not isinstance(msg, dict):
+            return {}
+        data = msg.get("data")
+        return data if isinstance(data, dict) else msg
+    except Exception as e:
+        log(f"{cmd} quiet read failed: {e}")
+        try:
+            transport.release_queue(wait_queue)
+        except Exception:
+            pass
+        return {}
+
+
+async def cached_battery_cells(client: Any, state: dict[str, Any], timeout: float = 1.2) -> dict[str, Any] | None:
+    cached = state.get("last_battery_cells")
+    cached_at = float(state.get("last_battery_cells_at") or 0)
+    if isinstance(cached, dict) and cached and (time.time() - cached_at) < BATTERY_CELLS_CACHE_S:
+        return cached
+    cells = await request_feedback_quiet(client, "battery_cell_temp_msg", timeout)
+    if isinstance(cells, dict) and cells:
+        state["last_battery_cells"] = cells
+        state["last_battery_cells_at"] = time.time()
+        return cells
+    return cached if isinstance(cached, dict) else None
 
 
 def load_config() -> dict[str, Any]:
@@ -425,6 +466,7 @@ async def handle_request(
                         "op": "telemetry",
                         "raw": state["last_raw"],
                         "wifi": state.get("last_wifi"),
+                        "battery_cells": state.get("last_battery_cells"),
                         "cached": True,
                         **state_flags(state, client),
                     }
@@ -443,6 +485,7 @@ async def handle_request(
                         "op": "telemetry",
                         "raw": state["last_raw"],
                         "wifi": state.get("last_wifi"),
+                        "battery_cells": state.get("last_battery_cells"),
                         "cached": True,
                         **state_flags(state, client),
                     }
@@ -471,11 +514,13 @@ async def handle_request(
                     state["last_wifi"] = wifi
                 except Exception:
                     wifi = state.get("last_wifi")
+            cells = await cached_battery_cells(client, state, timeout=min(1.2, timeout))
             return {
                 "ok": True,
                 "op": "telemetry",
                 "raw": raw,
                 "wifi": wifi,
+                "battery_cells": cells,
                 **state_flags(state, client),
             }
 
@@ -979,6 +1024,8 @@ async def amain() -> int:
         "manual_drive": False,
         "last_raw": None,
         "last_wifi": None,
+        "last_battery_cells": None,
+        "last_battery_cells_at": 0.0,
         "quiet_until": 0.0,
         "last_keepalive": 0.0,
         "keepalive_soon": False,

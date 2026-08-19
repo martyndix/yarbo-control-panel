@@ -282,7 +282,7 @@ final class YarboMqttAgentClient
             'op' => 'telemetry',
             'timeout' => $timeoutSeconds,
             'wifi' => $wifi,
-        ], max(8.0, $timeoutSeconds + 4.0));
+        ], max(12.0, $timeoutSeconds + 6.0));
     }
 
     /**

@@ -68,6 +68,8 @@ $state = [
     'lightsOn' => false,
     'workUntil' => 0.0,
     'lastWake' => 0.0,
+    'lastBatteryCells' => null,
+    'batteryCellsAt' => 0.0,
 ];
 
 function log_line(string $msg): void
@@ -92,12 +94,18 @@ function pump(MqttClient $client, float $loopStartedAt, float $seconds): void
  * @param array<string, mixed>|null $lastRaw
  * @return MqttClient
  */
-function subscribe_telemetry(MqttClient $client, string $serial, ?array &$lastRaw): void
+function subscribe_telemetry(MqttClient $client, string $serial, ?array &$lastRaw, array &$state): void
 {
-    $handler = static function (string $topic, string $message) use (&$lastRaw): void {
+    $handler = static function (string $topic, string $message) use (&$lastRaw, &$state): void {
         try {
             $decoded = YarboCodec::decode($message);
         } catch (Throwable) {
+            return;
+        }
+        if (($decoded['topic'] ?? '') === 'battery_cell_temp_msg') {
+            $data = $decoded['data'] ?? null;
+            $state['lastBatteryCells'] = is_array($data) ? $data : $decoded;
+            $state['batteryCellsAt'] = microtime(true);
             return;
         }
         $telemetry = YarboMqtt::extractTelemetry($decoded);
@@ -112,7 +120,7 @@ function subscribe_telemetry(MqttClient $client, string $serial, ?array &$lastRa
 /**
  * @param array<string, mixed>|null $lastRaw
  */
-function mqtt_connect(string $host, int $port, string $serial, ?array &$lastRaw): MqttClient
+function mqtt_connect(string $host, int $port, string $serial, ?array &$lastRaw, array &$state): MqttClient
 {
     $client = new MqttClient($host, $port, 'yarbo-agent-' . bin2hex(random_bytes(4)));
     $settings = (new ConnectionSettings())
@@ -121,7 +129,7 @@ function mqtt_connect(string $host, int $port, string $serial, ?array &$lastRaw)
         ->setSocketTimeout(1)
         ->setResendTimeout(5);
     $client->connect($settings, true);
-    subscribe_telemetry($client, $serial, $lastRaw);
+    subscribe_telemetry($client, $serial, $lastRaw, $state);
 
     return $client;
 }
@@ -152,6 +160,7 @@ function ensure_connected(
     int $port,
     string $serial,
     ?array &$lastRaw,
+    array &$state,
 ): array {
     if ($mqtt !== null && $mqtt->isConnected()) {
         return ['ok' => true];
@@ -159,7 +168,7 @@ function ensure_connected(
 
     mqtt_disconnect($mqtt);
     try {
-        $mqtt = mqtt_connect($host, $port, $serial, $lastRaw);
+        $mqtt = mqtt_connect($host, $port, $serial, $lastRaw, $state);
         $loopStartedAt = microtime(true);
         log_line("MQTT connected to {$host}:{$port}");
 
@@ -277,7 +286,7 @@ function handle_request(
         ], $state);
     }
 
-    $connected = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial, $lastRaw);
+    $connected = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial, $lastRaw, $state);
     if (!($connected['ok'] ?? false)) {
         return $connected;
     }
@@ -297,10 +306,30 @@ function handle_request(
                 return ['ok' => false, 'error' => 'telemetry timeout', 'transient' => true];
             }
 
+            $now = microtime(true);
+            $cells = is_array($state['lastBatteryCells'] ?? null) ? $state['lastBatteryCells'] : null;
+            $cellsAge = $now - (float) ($state['batteryCellsAt'] ?? 0);
+            if ($cells === null || $cellsAge > 30.0) {
+                publish($mqtt, $serial, 'battery_cell_temp_msg', []);
+                $deadline = microtime(true) + 1.2;
+                while (microtime(true) < $deadline) {
+                    $mqtt->loopOnce($loopStartedAt, true, 20000);
+                    $fresh = $state['lastBatteryCells'] ?? null;
+                    if (is_array($fresh) && (float) ($state['batteryCellsAt'] ?? 0) > $now) {
+                        $cells = $fresh;
+                        break;
+                    }
+                }
+                if (is_array($state['lastBatteryCells'] ?? null)) {
+                    $cells = $state['lastBatteryCells'];
+                }
+            }
+
             return ok_resp([
                 'ok' => true,
                 'op' => 'telemetry',
                 'raw' => $lastRaw,
+                'battery_cells' => $cells,
             ], $state);
         }
 
@@ -332,7 +361,7 @@ function handle_request(
                 return $got;
             }
             $state['controllerOk'] = true;
-            subscribe_telemetry($mqtt, $serial, $lastRaw);
+            subscribe_telemetry($mqtt, $serial, $lastRaw, $state);
             log_line('Controller acquired');
         }
 
@@ -519,7 +548,7 @@ while (true) {
             mqtt_disconnect($mqtt);
         }
     } else {
-        $result = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial, $lastRaw);
+        $result = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial, $lastRaw, $state);
         if (!($result['ok'] ?? false)) {
             usleep(400000);
         }

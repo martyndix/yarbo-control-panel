@@ -23,7 +23,7 @@ final class YarboTelemetry
         'led_right_w',
     ];
 
-    public static function parse(array $raw): array
+    public static function parse(array $raw, ?array $cellTemps = null): array
     {
         $battery = $raw['BatteryMSG']['capacity'] ?? null;
         $batteryMsg = is_array($raw['BatteryMSG'] ?? null) ? $raw['BatteryMSG'] : [];
@@ -40,35 +40,13 @@ final class YarboTelemetry
         [$latitude, $longitude, $altitude, $fixQuality] = self::parseGngga($roverGngga);
         $netTypeRaw = $raw['net_type'] ?? ($netMsg['net_type'] ?? null);
         $halowStatusRaw = $raw['halow_status'] ?? ($netMsg['halow_status'] ?? null);
-        $connectionType = self::connectionTypeName($netTypeRaw, $halowStatusRaw);
-        $connectionStatus = self::connectionStatusName($netTypeRaw, $halowStatusRaw, $raw['net_module_status'] ?? null);
-        $batteryTemp = self::firstNumeric(
-            $batteryMsg['temperature'] ?? null,
-            $batteryMsg['temp'] ?? null,
-            $batteryMsg['temp_c'] ?? null,
-            $batteryMsg['battery_temp'] ?? null,
-            self::averageNumeric(
-                $batteryMsg['temperature1'] ?? null,
-                $batteryMsg['temperature2'] ?? null,
-                $batteryMsg['temperature3'] ?? null,
-                $batteryMsg['temperature4'] ?? null,
-                $batteryMsg['temperature5'] ?? null,
-                $batteryMsg['temperature6'] ?? null
-            )
-        );
-        $batteryTempSource = self::firstNumeric(
-            $batteryMsg['temperature'] ?? null,
-            $batteryMsg['temp'] ?? null,
-            $batteryMsg['temp_c'] ?? null,
-            $batteryMsg['battery_temp'] ?? null
-        ) !== null ? 'direct' : (self::averageNumeric(
-            $batteryMsg['temperature1'] ?? null,
-            $batteryMsg['temperature2'] ?? null,
-            $batteryMsg['temperature3'] ?? null,
-            $batteryMsg['temperature4'] ?? null,
-            $batteryMsg['temperature5'] ?? null,
-            $batteryMsg['temperature6'] ?? null
-        ) !== null ? 'avg_cells' : null);
+        $routePriority = $raw['route_priority'] ?? ($netMsg['route_priority'] ?? null);
+        $moduleStatus = $raw['net_module_status'] ?? ($netMsg['net_module_status'] ?? null);
+        $connectionType = self::connectionTypeName($netTypeRaw, $halowStatusRaw, $routePriority);
+        $connectionStatus = self::connectionStatusName($netTypeRaw, $halowStatusRaw, $moduleStatus, $connectionType);
+        $batteryTempParsed = self::parseBatteryTemperature($batteryMsg, $cellTemps);
+        $batteryTemp = $batteryTempParsed['temperature_c'];
+        $batteryTempSource = $batteryTempParsed['temperature_source'];
         $wirelessChargeVoltage = self::firstNumeric(
             $batteryMsg['wireless_charge_voltage'] ?? null,
             $raw['wireless_charge_voltage'] ?? null
@@ -152,8 +130,8 @@ final class YarboTelemetry
             'network'             => [
                 'net_type_raw'      => $netTypeRaw,
                 'halow_status'      => $halowStatusRaw,
-                'net_module_status' => $raw['net_module_status'] ?? ($netMsg['net_module_status'] ?? null),
-                'route_priority'    => $raw['route_priority'] ?? ($netMsg['route_priority'] ?? null),
+                'net_module_status' => $moduleStatus,
+                'route_priority'    => $routePriority,
                 'rtcm_age'          => $raw['rtcm_age'] ?? ($rtkMsg['rtcm_age'] ?? null),
             ],
             'battery_diagnostics' => [
@@ -238,23 +216,105 @@ final class YarboTelemetry
         return null;
     }
 
-    private static function connectionTypeName(mixed $netTypeRaw, mixed $halowStatusRaw): string
+    /**
+     * @param array<string, mixed> $batteryMsg
+     * @param array<string, mixed>|null $cellTemps
+     * @return array{temperature_c: ?float, temperature_source: ?string}
+     */
+    private static function parseBatteryTemperature(array $batteryMsg, ?array $cellTemps): array
+    {
+        $fromDevice = self::temperatureFromMap($batteryMsg);
+        if ($fromDevice['temperature_c'] !== null) {
+            return $fromDevice;
+        }
+
+        $pool = is_array($cellTemps) ? $cellTemps : [];
+        if (isset($pool['data']) && is_array($pool['data'])) {
+            $pool = $pool['data'];
+        }
+
+        return self::temperatureFromMap($pool);
+    }
+
+    /**
+     * @param array<string, mixed> $map
+     * @return array{temperature_c: ?float, temperature_source: ?string}
+     */
+    private static function temperatureFromMap(array $map): array
+    {
+        $direct = self::firstNumeric(
+            $map['temperature'] ?? null,
+            $map['temp'] ?? null,
+            $map['temp_c'] ?? null,
+            $map['battery_temp'] ?? null,
+            $map['cell_temp'] ?? null
+        );
+        if ($direct !== null) {
+            return ['temperature_c' => $direct, 'temperature_source' => 'direct'];
+        }
+
+        $avg = self::averageNumeric(
+            $map['temperature1'] ?? null,
+            $map['temperature2'] ?? null,
+            $map['temperature3'] ?? null,
+            $map['temperature4'] ?? null,
+            $map['temperature5'] ?? null,
+            $map['temperature6'] ?? null,
+            $map['temp1'] ?? null,
+            $map['temp2'] ?? null,
+            $map['temp3'] ?? null,
+            $map['temp4'] ?? null,
+            $map['temp5'] ?? null,
+            $map['temp6'] ?? null
+        );
+        if ($avg !== null) {
+            return ['temperature_c' => $avg, 'temperature_source' => 'avg_cells'];
+        }
+
+        $nested = self::firstNumeric(
+            self::findNestedNumeric($map, 'temperature'),
+            self::findNestedNumeric($map, 'temp_c'),
+            self::findNestedNumeric($map, 'battery_temp'),
+            self::findNestedNumeric($map, 'cell_temp')
+        );
+        if ($nested !== null) {
+            return ['temperature_c' => $nested, 'temperature_source' => 'direct'];
+        }
+
+        return ['temperature_c' => null, 'temperature_source' => null];
+    }
+
+    private static function connectionTypeName(mixed $netTypeRaw, mixed $halowStatusRaw, mixed $routePriority = null): string
     {
         if ((int) ($halowStatusRaw ?? 0) > 0) {
             return 'HaLow';
         }
 
         $value = strtolower((string) $netTypeRaw);
-        return match ($value) {
+        $named = match ($value) {
             '0', 'wifi', 'wlan' => 'WiFi',
             '1', '4g', 'lte', 'cellular' => '4G',
             '2', 'halow', 'ha_low' => 'HaLow',
+            default => null,
+        };
+        if ($named !== null) {
+            return $named;
+        }
+
+        return match (self::activeRouteInterface($routePriority)) {
+            'hg0' => 'HaLow',
+            'wlan0' => 'WiFi',
+            'wwan0' => '4G',
             default => 'Unknown',
         };
     }
 
-    private static function connectionStatusName(mixed $netTypeRaw, mixed $halowStatusRaw, mixed $moduleStatusRaw): string
-    {
+    private static function connectionStatusName(
+        mixed $netTypeRaw,
+        mixed $halowStatusRaw,
+        mixed $moduleStatusRaw,
+        ?string $connectionType = null,
+    ): string {
         $module = (int) ($moduleStatusRaw ?? 0);
         if ($module > 0) {
             return 'Connected';
@@ -262,10 +322,38 @@ final class YarboTelemetry
         if ((int) ($halowStatusRaw ?? 0) > 0) {
             return 'Connected';
         }
+        if (in_array($connectionType, ['HaLow', 'WiFi', '4G'], true)) {
+            return 'Connected';
+        }
         if ($netTypeRaw !== null && $netTypeRaw !== '') {
             return 'Degraded';
         }
         return 'Unknown';
+    }
+
+    /**
+     * Lowest non-negative routing metric wins. Negative values mean the iface is down.
+     */
+    private static function activeRouteInterface(mixed $route): ?string
+    {
+        if (!is_array($route)) {
+            return null;
+        }
+
+        $bestIface = null;
+        $bestMetric = null;
+        foreach ($route as $iface => $metric) {
+            if (!is_numeric($metric) || (float) $metric < 0) {
+                continue;
+            }
+            $value = (float) $metric;
+            if ($bestMetric === null || $value < $bestMetric) {
+                $bestMetric = $value;
+                $bestIface = (string) $iface;
+            }
+        }
+
+        return $bestIface;
     }
 
     private static function firstNumeric(mixed ...$values): ?float

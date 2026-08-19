@@ -540,6 +540,7 @@ body.modal-open {
     background: var(--danger-hover);
 }
 
+.btn-text,
 .btn-text-danger {
     border: 0;
     background: none;
@@ -549,6 +550,17 @@ body.modal-open {
     padding: 0.35rem 0.45rem;
     cursor: pointer;
     border-radius: 6px;
+}
+
+.btn-text:hover:not(:disabled) {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.btn-text:disabled,
+.btn-text-danger:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .btn-text-danger:hover:not(:disabled) {
@@ -1323,6 +1335,52 @@ body.modal-open {
     flex-shrink: 0;
 }
 
+.plans-manage-panel {
+    width: min(100%, 520px);
+}
+
+.plans-manage-panel h2 {
+    margin-bottom: 0.4rem;
+}
+
+.plans-manage-list {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0.85rem 0 1rem;
+    max-height: min(50vh, 360px);
+    overflow-y: auto;
+}
+
+.plan-manage-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(15, 20, 25, 0.35);
+}
+
+.plan-manage-item p {
+    margin: 0.2rem 0 0;
+}
+
+.plan-manage-confirm {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.plan-manage-confirm-note {
+    flex: 1 1 100%;
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--error-text);
+}
+
 .waypoint-form {
     display: flex;
     flex-wrap: wrap;
@@ -1502,6 +1560,11 @@ body.modal-open {
     }
 
     .plan-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .plan-manage-item {
         flex-direction: column;
         align-items: stretch;
     }

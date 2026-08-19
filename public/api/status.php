@@ -34,7 +34,8 @@ function status_from_agent(array $result): void
         ? ['data' => $result['wifi'], 'topic' => 'get_connect_wifi_name']
         : null;
 
-    $parsed = YarboTelemetry::parse($raw);
+    $cellTemps = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
+    $parsed = YarboTelemetry::parse($raw, $cellTemps);
     if (array_key_exists('lights_on', $result)) {
         $parsed['lights_on'] = (bool) $result['lights_on'];
     }
@@ -138,9 +139,14 @@ try {
 try {
     $raw = $client->requestTelemetry(4);
     $wifiResponse = null;
+    $cellTemps = null;
     if ($raw !== null) {
         // WiFi is nice-to-have; keep it short so a slow reply does not stall the panel.
         $wifiResponse = $client->requestDataFeedback('get_connect_wifi_name', [], 1.5, false);
+        $cellResponse = $client->requestDataFeedback('battery_cell_temp_msg', [], 1.5, false);
+        if (is_array($cellResponse)) {
+            $cellTemps = is_array($cellResponse['data'] ?? null) ? $cellResponse['data'] : $cellResponse;
+        }
     }
     $client->disconnect();
 
@@ -154,7 +160,7 @@ try {
 
     json_response(array_merge(
         ['ok' => true, 'via' => 'direct'],
-        YarboTelemetry::parse($raw),
+        YarboTelemetry::parse($raw, $cellTemps),
         ['wifi' => YarboWifi::parse($wifiResponse)],
     ));
 } catch (Throwable $e) {

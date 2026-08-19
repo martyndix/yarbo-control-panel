@@ -44,6 +44,9 @@ const els = {
     plansStatus: document.getElementById('plans-status'),
     plansNote: document.getElementById('plans-note'),
     plansList: document.getElementById('plans-list'),
+    plansManage: document.getElementById('plans-manage'),
+    plansManageModal: document.getElementById('plans-manage-modal'),
+    plansManageList: document.getElementById('plans-manage-list'),
     waypointIndex: document.getElementById('waypoint-index'),
     waypointName: document.getElementById('waypoint-name'),
     waypointSaveForm: document.getElementById('waypoint-save-form'),
@@ -186,6 +189,7 @@ let currentHeadType = null;
 let defaultDataSource = 'auto';
 let areasLayer = null;
 let loadedPlans = [];
+let pendingPlanDeleteId = null;
 let lastRobotFix = null;
 let mapZoneLayers = [];
 let loadedMapFeatures = [];
@@ -1336,18 +1340,27 @@ function formatRoutePriority(value) {
             label: ifaceNames[iface] || iface,
             priority: toNumberOrNull(priority),
         }))
-        .filter((row) => row.priority != null)
-        .sort((a, b) => a.priority - b.priority);
+        .filter((row) => row.priority != null);
 
-    if (ranked.length === 0) {
+    const up = ranked.filter((row) => row.priority >= 0).sort((a, b) => a.priority - b.priority);
+    const down = ranked.filter((row) => row.priority < 0);
+
+    if (up.length === 0 && down.length === 0) {
         return 'No route data';
     }
 
-    const primary = ranked[0];
-    const backups = ranked.slice(1).map((r) => `${r.label} (${r.priority})`).join(', ');
-    return backups
-        ? `Primary: ${primary.label} (${primary.priority}) | Backup: ${backups}`
-        : `Primary: ${primary.label} (${primary.priority})`;
+    const parts = [];
+    if (up.length) {
+        const primary = up[0];
+        const backups = up.slice(1).map((r) => `${r.label} (${r.priority})`).join(', ');
+        parts.push(backups
+            ? `Primary: ${primary.label} (${primary.priority}) | Backup: ${backups}`
+            : `Primary: ${primary.label} (${primary.priority})`);
+    }
+    if (down.length) {
+        parts.push(`Down: ${down.map((r) => r.label).join(', ')}`);
+    }
+    return parts.join(' | ');
 }
 
 function formatNetModuleStatus(value) {
@@ -1797,9 +1810,11 @@ function renderPlansList(plans, note) {
 
     loadedPlans = plans;
     els.plansNote.textContent = note || (plans.length ? `${plans.length} plan(s) loaded.` : 'No saved plans returned.');
+    updatePlansManageButton();
 
     if (!plans.length) {
         els.plansList.innerHTML = '';
+        renderPlansManageList();
         return;
     }
 
@@ -1815,7 +1830,6 @@ function renderPlansList(plans, note) {
                 </div>
                 <div class="plan-actions">
                     <button type="button" class="btn" data-plan-start="${escapeHtml(String(plan.id))}">Start</button>
-                    <button type="button" class="btn btn-danger" data-plan-delete="${escapeHtml(String(plan.id))}">Delete</button>
                 </div>
             </article>
         `;
@@ -1824,9 +1838,94 @@ function renderPlansList(plans, note) {
     els.plansList.querySelectorAll('[data-plan-start]').forEach((button) => {
         button.addEventListener('click', () => startPlan(button.dataset.planStart, button));
     });
-    els.plansList.querySelectorAll('[data-plan-delete]').forEach((button) => {
-        button.addEventListener('click', () => deletePlan(button.dataset.planDelete, button));
+    renderPlansManageList();
+}
+
+function updatePlansManageButton() {
+    if (!els.plansManage) return;
+    const hasPlans = loadedPlans.length > 0;
+    els.plansManage.disabled = !hasPlans;
+    els.plansManage.title = hasPlans ? 'Delete saved plans' : 'Load plans first';
+}
+
+function planDisplayName(plan) {
+    const name = plan?.name ? String(plan.name) : '';
+    const id = plan?.id != null ? String(plan.id) : '';
+    if (name && name !== id) return name;
+    return id ? `Plan ${id}` : 'this plan';
+}
+
+function renderPlansManageList() {
+    if (!els.plansManageList) return;
+    if (!loadedPlans.length) {
+        els.plansManageList.innerHTML = '<p class="hint">No saved plans loaded.</p>';
+        return;
+    }
+
+    els.plansManageList.innerHTML = loadedPlans.map((plan) => {
+        const id = String(plan.id);
+        const confirming = pendingPlanDeleteId === id;
+        const areas = Array.isArray(plan.area_ids) && plan.area_ids.length
+            ? `Areas: ${plan.area_ids.join(', ')}`
+            : 'No area IDs';
+        const actions = confirming
+            ? `
+                <div class="plan-manage-confirm">
+                    <p class="plan-manage-confirm-note">Delete permanently? This cannot be undone.</p>
+                    <button type="button" class="btn btn-danger" data-plan-delete-confirm="${escapeHtml(id)}">Delete</button>
+                    <button type="button" class="btn btn-secondary" data-plan-delete-cancel>Cancel</button>
+                </div>
+            `
+            : `<button type="button" class="btn-text-danger" data-plan-delete="${escapeHtml(id)}">Delete</button>`;
+        return `
+            <article class="plan-manage-item">
+                <div>
+                    <strong>${escapeHtml(planDisplayName(plan))}</strong>
+                    <p class="hint">ID ${escapeHtml(id)} · ${escapeHtml(areas)}</p>
+                </div>
+                ${actions}
+            </article>
+        `;
+    }).join('');
+
+    els.plansManageList.querySelectorAll('[data-plan-delete]').forEach((button) => {
+        button.addEventListener('click', () => {
+            pendingPlanDeleteId = button.dataset.planDelete;
+            renderPlansManageList();
+        });
     });
+    els.plansManageList.querySelectorAll('[data-plan-delete-cancel]').forEach((button) => {
+        button.addEventListener('click', () => {
+            pendingPlanDeleteId = null;
+            renderPlansManageList();
+        });
+    });
+    els.plansManageList.querySelectorAll('[data-plan-delete-confirm]').forEach((button) => {
+        button.addEventListener('click', () => deletePlan(button.dataset.planDeleteConfirm, button));
+    });
+}
+
+function openPlansManageModal() {
+    if (!els.plansManageModal) return;
+    if (!loadedPlans.length) {
+        showToast('Load plans first', 'error');
+        return;
+    }
+    pendingPlanDeleteId = null;
+    renderPlansManageList();
+    els.plansManageModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+}
+
+function closePlansManageModal() {
+    if (!els.plansManageModal) return;
+    pendingPlanDeleteId = null;
+    els.plansManageModal.classList.add('hidden');
+    if (!els.settingsModal || els.settingsModal.classList.contains('hidden')) {
+        if (!els.updateConfirmModal || els.updateConfirmModal.classList.contains('hidden')) {
+            document.body.classList.remove('modal-open');
+        }
+    }
 }
 
 function escapeHtml(value) {
@@ -1871,7 +1970,9 @@ async function loadPlans(button) {
 
 async function startPlan(planId, button) {
     if (!planId) return;
-    if (!confirm(`Start plan ${planId} at ${planStartPercent()}%?`)) return;
+    const plan = loadedPlans.find((item) => String(item.id) === String(planId));
+    const label = planDisplayName(plan || { id: planId });
+    if (!confirm(`Start ${label} at ${planStartPercent()}%?`)) return;
 
     button.disabled = true;
     try {
@@ -1892,11 +1993,11 @@ async function startPlan(planId, button) {
             updateControllerTile();
         }
         if (data.ack_msg) {
-            showToast(`Plan ${planId} started (${data.ack_msg})`, 'success');
+            showToast(`${label} started (${data.ack_msg})`, 'success');
         } else if (data.via === 'official_payload') {
-            showToast(`Plan ${planId} start sent (no robot ack)`, 'success');
+            showToast(`${label} start sent (no robot ack)`, 'success');
         } else {
-            showToast(`Plan ${planId} started`, 'success');
+            showToast(`${label} started`, 'success');
         }
         noteCommandQuiet();
     } catch (err) {
@@ -1908,7 +2009,6 @@ async function startPlan(planId, button) {
 
 async function deletePlan(planId, button) {
     if (!planId) return;
-    if (!confirm(`Delete plan ${planId}? This cannot be undone.`)) return;
 
     button.disabled = true;
     try {
@@ -1923,10 +2023,15 @@ async function deletePlan(planId, button) {
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'Delete failed');
+        pendingPlanDeleteId = null;
         showToast(`Plan ${planId} deleted`, 'success');
         await loadPlans();
+        if (!loadedPlans.length) {
+            closePlansManageModal();
+        }
     } catch (err) {
         showToast(err.message || 'Delete failed', 'error');
+        renderPlansManageList();
     } finally {
         button.disabled = false;
     }
@@ -3353,6 +3458,10 @@ els.planStartPercent?.addEventListener('input', () => {
 els.plansLoad?.addEventListener('click', (e) => {
     loadPlans(e.currentTarget);
 });
+els.plansManage?.addEventListener('click', openPlansManageModal);
+document.querySelectorAll('[data-plans-manage-close]').forEach((button) => {
+    button.addEventListener('click', closePlansManageModal);
+});
 
 els.waypointSaveForm?.addEventListener('submit', saveWaypointBookmark);
 
@@ -3398,6 +3507,10 @@ document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (els.updateConfirmModal && !els.updateConfirmModal.classList.contains('hidden')) {
         closeUpdateConfirmModal(false);
+        return;
+    }
+    if (els.plansManageModal && !els.plansManageModal.classList.contains('hidden')) {
+        closePlansManageModal();
         return;
     }
     if (els.settingsModal && !els.settingsModal.classList.contains('hidden')) {

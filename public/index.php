@@ -319,6 +319,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </select>
                 </label>
                 <button type="button" class="btn btn-secondary" id="plans-load">Load plans</button>
+                <button type="button" class="btn-text" id="plans-manage" disabled title="Load plans first">Manage…</button>
             </div>
             <p id="plans-status" class="plans-status">Plan activity: —</p>
             <p id="plans-note" class="plans-note">No plans loaded yet.</p>
@@ -543,6 +544,18 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         </div>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <div id="plans-manage-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="plans-manage-title">
+            <button type="button" class="modal-backdrop" data-plans-manage-close aria-label="Close plan management"></button>
+            <div class="modal-panel card plans-manage-panel">
+                <h2 id="plans-manage-title">Manage plans</h2>
+                <p class="hint">Deleting a plan cannot be undone. Start remains on the main Work Plans list.</p>
+                <div id="plans-manage-list" class="plans-manage-list"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" data-plans-manage-close>Close</button>
+                </div>
             </div>
         </div>
 
