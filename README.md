@@ -548,7 +548,7 @@ Controls and manual drive talk through a **persistent MQTT agent** (`scripts/mqt
 | Resume | `resume` | |
 | Return to Dock | `cmd_recharge` | |
 | Stop | `dstop` | Graceful stop |
-| Start work plan | `start_plan` | `planId` / `id` + `percent` (dual shapes for firmware) |
+| Start work plan | `start_plan` | `planId`; `percent` only when starting part-way through |
 | Delete work plan | `del_plan` | Destructive — requires confirm in UI |
 | Go to waypoint | `start_way_point` | `index` 0–9999 |
 | Manual drive D-pad | `set_working_state` (`state: 1`) + `cmd_vel` | Hold to move; **test with extreme care in a clear area** (see safety warning above) |
@@ -633,7 +633,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.3** (2026-08-19).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.4** (2026-08-19).
 
 ---
 

@@ -53,11 +53,9 @@ final class YarboCommands
         return [
             [
                 'cmd' => 'start_plan',
-                'payload' => ['planId' => $id, 'percent' => $percent],
-            ],
-            [
-                'cmd' => 'start_plan',
-                'payload' => ['id' => $id, 'percent' => $percent],
+                'payload' => $percent > 0
+                    ? ['planId' => $id, 'percent' => $percent]
+                    : ['planId' => $id],
             ],
         ];
     }

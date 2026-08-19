@@ -212,6 +212,12 @@ function handle_request(
             log_line('Controller acquired (first command)');
         }
 
+        $session = (string) ($req['session'] ?? 'control');
+        if ($session === 'work') {
+            publish($mqtt, $serial, 'set_working_state', ['state' => 1, 'source' => 'smart_home']);
+            pump($mqtt, $loopStartedAt, 0.25);
+        }
+
         if ($op === 'drive') {
             $enterManual = (bool) ($req['enter_manual'] ?? false);
             $linear = (float) ($req['linear'] ?? 0);

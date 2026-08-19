@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-08-19
+
+### Fixed
+- **Start plan and return-to-dock did nothing while manual drive still worked**: those commands need the robot awake (`set_working_state` 1). The quiet work session skipped that wake, so idle firmware dropped `start_plan` / `cmd_recharge`. They now wake once, stop the drive pad latch, and then leave keepalive off so the job can run.
+- **Start plan sent two MQTT payloads**: only `planId` is sent (plus `percent` when it is above 0). The extra `id` variant could abort a start. 0% means from the beginning and no longer sends `percent: 0`.
+
 ## [1.3.3] - 2026-08-19
 
 ### Fixed

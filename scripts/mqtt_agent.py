@@ -45,9 +45,11 @@ CONTROLLER_KEEPALIVE_MIN_GAP_S = 15.0
 def wants_wakeup(state: dict[str, Any]) -> bool:
     """Soft-wake (set_working_state=1) is only for lights / manual drive / Controller On.
 
-    A quiet work hold (start plan, waypoint) keeps get_controller so the phone app
-    cannot steal, but must not poke the robot into idle or manual.
+    After start_plan / dock we hold the controller quietly so keepalive does not
+    keep re-entering app-awake over the job.
     """
+    if state.get("work_hold"):
+        return False
     return bool(
         state.get("control_session")
         or state.get("lights_on")
@@ -134,11 +136,6 @@ async def ensure_session(client: Any) -> None:
     await wake_for_control(client)
 
 
-async def ensure_work_session(client: Any) -> None:
-    """Claim controller for start/pause/plan without waking to manual or idle."""
-    await ensure_controller_role(client)
-
-
 async def claim_controller(client: Any) -> dict[str, Any]:
     """Explicit Controller ON: announce once + wake."""
     ack = await force_controller(client)
@@ -152,15 +149,26 @@ async def assert_lights_on(client: Any) -> None:
 
 
 async def apply_command_session(client: Any, state: dict[str, Any], session: str) -> None:
-    """Claim controller, then either wake (control) or quiet-hold (work)."""
+    """Claim controller, then either wake (control) or wake-once for work (plan/dock)."""
     if session == "work":
-        await ensure_work_session(client)
-        already = bool(state.get("hold_controller"))
+        await ensure_controller_role(client)
+        if state.get("manual_drive"):
+            try:
+                await client.publish_command("cmd_vel", {"vel": 0.0, "rev": 0.0})
+            except Exception as e:
+                log(f"cmd_vel stop before work failed: {e}")
+            state["manual_drive"] = False
+        # Firmware drops start_plan / cmd_recharge while idle (working_state 0).
+        # Wake once, then stop drive keepalive so we do not keep latching manual.
+        await wake_for_control(client)
         state["hold_controller"] = True
+        state["control_session"] = False
+        state["work_hold"] = True
+        state["keepalive_soon"] = False
         state["last_keepalive"] = time.time()
-        if not already:
-            log("Work session: controller held quietly (no manual wake)")
+        log("Work session: controller + wake (keepalive off so the job can run)")
         return
+    state["work_hold"] = False
     await ensure_session(client)
     state["hold_controller"] = True
     state["control_session"] = True
@@ -349,6 +357,7 @@ async def handle_request(
                 result = await claim_controller(client)
                 state["hold_controller"] = True
                 state["control_session"] = True
+                state["work_hold"] = False
                 state["manual_drive"] = False
                 state["keepalive_soon"] = False
                 state["last_keepalive"] = time.time()
@@ -380,6 +389,7 @@ async def handle_request(
                 await sleep_from_control(client)
             state["hold_controller"] = False
             state["control_session"] = False
+            state["work_hold"] = False
             state["manual_drive"] = False
             state["keepalive_soon"] = False
             try:
@@ -713,6 +723,7 @@ async def amain() -> int:
     state: dict[str, Any] = {
         "hold_controller": False,
         "control_session": False,
+        "work_hold": False,
         "lights_on": False,
         "manual_drive": False,
         "last_raw": None,

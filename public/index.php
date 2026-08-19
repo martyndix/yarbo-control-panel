@@ -303,7 +303,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Work Plans</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Load saved plans from the robot (read-only — does not stop a running job). Starting a plan takes control so the official app cannot cancel it; leave the Controller tile connected while it runs.</p>
+            <p class="hint">Load saved plans from the robot (read-only — does not stop a running job). Start at 0% means from the beginning. Starting a plan wakes the robot and holds control so the official app cannot cancel it.</p>
             <div class="plans-toolbar">
                 <label class="plan-percent">
                     Start at
