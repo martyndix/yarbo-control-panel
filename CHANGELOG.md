@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.10] - 2026-08-20
+
+### Fixed
+- **Battery temperature flashed then went back to a dash**: a later `battery_cell_temp_msg` ack (`{topic, state}` with no temps) was overwriting the real cell reading. The agent now keeps the last payload that actually contains a temperature, and the UI holds that value across empty polls.
+
 ## [1.3.9] - 2026-08-20
 
 ### Fixed

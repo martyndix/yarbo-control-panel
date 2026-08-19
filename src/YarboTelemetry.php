@@ -223,17 +223,16 @@ final class YarboTelemetry
      */
     private static function parseBatteryTemperature(array $batteryMsg, ?array $cellTemps): array
     {
-        $fromDevice = self::temperatureFromMap($batteryMsg);
-        if ($fromDevice['temperature_c'] !== null) {
-            return $fromDevice;
-        }
-
         $pool = is_array($cellTemps) ? $cellTemps : [];
         if (isset($pool['data']) && is_array($pool['data'])) {
             $pool = $pool['data'];
         }
+        $fromCells = self::temperatureFromMap($pool);
+        if ($fromCells['temperature_c'] !== null) {
+            return $fromCells;
+        }
 
-        return self::temperatureFromMap($pool);
+        return self::temperatureFromMap($batteryMsg);
     }
 
     /**
@@ -242,6 +241,19 @@ final class YarboTelemetry
      */
     private static function temperatureFromMap(array $map): array
     {
+        if ($map !== [] && array_is_list($map)) {
+            $avg = self::averageNumeric(...array_values($map));
+            if ($avg !== null) {
+                return ['temperature_c' => $avg, 'temperature_source' => 'avg_cells'];
+            }
+        }
+
+        if (isset($map['cells']) && is_array($map['cells'])) {
+            $fromCells = self::temperatureFromMap($map['cells']);
+            if ($fromCells['temperature_c'] !== null) {
+                return $fromCells;
+            }
+        }
         $direct = self::firstNumeric(
             $map['temperature'] ?? null,
             $map['temp'] ?? null,

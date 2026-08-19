@@ -125,10 +125,8 @@ async def request_feedback_quiet(client: Any, cmd: str, timeout: float) -> dict[
             command_name=cmd,
             _queue=wait_queue,
         )
-        if not isinstance(msg, dict):
-            return {}
-        data = msg.get("data")
-        return data if isinstance(data, dict) else msg
+        extracted = extract_battery_cells(msg)
+        return extracted if isinstance(extracted, dict) else {}
     except Exception as e:
         log(f"{cmd} quiet read failed: {e}")
         try:
@@ -138,17 +136,59 @@ async def request_feedback_quiet(client: Any, cmd: str, timeout: float) -> dict[
         return {}
 
 
+def _is_plausible_temp(value: Any) -> bool:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return -40.0 <= number <= 120.0
+
+
+def payload_has_temp(data: Any) -> bool:
+    """True when the payload contains a plausible battery temperature, not just an ack."""
+    skip = {"temp_err", "timestamp", "timeStamp", "state", "topic", "status", "msg"}
+    if isinstance(data, dict):
+        for key, value in data.items():
+            name = str(key).lower()
+            if name in skip:
+                continue
+            if "temp" in name and _is_plausible_temp(value):
+                return True
+            if payload_has_temp(value):
+                return True
+        return False
+    if isinstance(data, list):
+        nums = [float(item) for item in data if _is_plausible_temp(item)]
+        if nums:
+            return True
+        return any(payload_has_temp(item) for item in data)
+    return False
+
+
+def extract_battery_cells(msg: Any) -> dict[str, Any] | None:
+    if not isinstance(msg, dict):
+        return None
+    data = msg.get("data") if "topic" in msg or "state" in msg else None
+    if isinstance(data, dict) and payload_has_temp(data):
+        return data
+    if isinstance(data, list) and payload_has_temp(data):
+        return {"cells": data}
+    if payload_has_temp(msg):
+        return {k: v for k, v in msg.items() if k not in {"topic", "state", "msg"}} or msg
+    return None
+
+
 async def cached_battery_cells(client: Any, state: dict[str, Any], timeout: float = 1.2) -> dict[str, Any] | None:
     cached = state.get("last_battery_cells")
     cached_at = float(state.get("last_battery_cells_at") or 0)
-    if isinstance(cached, dict) and cached and (time.time() - cached_at) < BATTERY_CELLS_CACHE_S:
+    if isinstance(cached, dict) and payload_has_temp(cached) and (time.time() - cached_at) < BATTERY_CELLS_CACHE_S:
         return cached
     cells = await request_feedback_quiet(client, "battery_cell_temp_msg", timeout)
-    if isinstance(cells, dict) and cells:
+    if isinstance(cells, dict) and payload_has_temp(cells):
         state["last_battery_cells"] = cells
         state["last_battery_cells_at"] = time.time()
         return cells
-    return cached if isinstance(cached, dict) else None
+    return cached if isinstance(cached, dict) and payload_has_temp(cached) else None
 
 
 def load_config() -> dict[str, Any]:

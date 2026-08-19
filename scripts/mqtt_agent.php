@@ -90,9 +90,42 @@ function pump(MqttClient $client, float $loopStartedAt, float $seconds): void
     }
 }
 
+function battery_cells_have_temp(mixed $data): bool
+{
+    $skip = ['temp_err' => true, 'timestamp' => true, 'timeStamp' => true, 'state' => true, 'topic' => true, 'status' => true, 'msg' => true];
+    if (is_array($data)) {
+        foreach ($data as $key => $value) {
+            if (is_string($key) && isset($skip[$key])) {
+                continue;
+            }
+            if (is_string($key) && str_contains(strtolower($key), 'temp') && is_numeric($value)) {
+                $n = (float) $value;
+                if ($n >= -40.0 && $n <= 120.0) {
+                    return true;
+                }
+            }
+            if (battery_cells_have_temp($value)) {
+                return true;
+            }
+        }
+        if (array_is_list($data)) {
+            foreach ($data as $value) {
+                if (is_numeric($value)) {
+                    $n = (float) $value;
+                    if ($n >= -40.0 && $n <= 120.0) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 /**
  * @param array<string, mixed>|null $lastRaw
- * @return MqttClient
+ * @param array<string, mixed> $state
  */
 function subscribe_telemetry(MqttClient $client, string $serial, ?array &$lastRaw, array &$state): void
 {
@@ -103,9 +136,11 @@ function subscribe_telemetry(MqttClient $client, string $serial, ?array &$lastRa
             return;
         }
         if (($decoded['topic'] ?? '') === 'battery_cell_temp_msg') {
-            $data = $decoded['data'] ?? null;
-            $state['lastBatteryCells'] = is_array($data) ? $data : $decoded;
-            $state['batteryCellsAt'] = microtime(true);
+            $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : $decoded;
+            if (battery_cells_have_temp($data)) {
+                $state['lastBatteryCells'] = $data;
+                $state['batteryCellsAt'] = microtime(true);
+            }
             return;
         }
         $telemetry = YarboMqtt::extractTelemetry($decoded);
@@ -320,7 +355,7 @@ function handle_request(
                         break;
                     }
                 }
-                if (is_array($state['lastBatteryCells'] ?? null)) {
+                if (battery_cells_have_temp($state['lastBatteryCells'] ?? null)) {
                     $cells = $state['lastBatteryCells'];
                 }
             }
@@ -329,7 +364,7 @@ function handle_request(
                 'ok' => true,
                 'op' => 'telemetry',
                 'raw' => $lastRaw,
-                'battery_cells' => $cells,
+                'battery_cells' => battery_cells_have_temp($cells) ? $cells : null,
             ], $state);
         }
 

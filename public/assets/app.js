@@ -1395,8 +1395,14 @@ function formatTemp(value) {
     return `${Number(value).toFixed(1)}°C`;
 }
 
+let lastBatteryTempC = null;
+
 function formatBatteryTemp(diag) {
-    const temp = formatTemp(diag?.temperature_c);
+    const incoming = diag?.temperature_c;
+    if (incoming != null && !Number.isNaN(Number(incoming))) {
+        lastBatteryTempC = Number(incoming);
+    }
+    const temp = formatTemp(lastBatteryTempC ?? incoming);
     if (temp === '—') return temp;
     if (diag?.temperature_source === 'avg_cells') return `${temp} (avg cells)`;
     return temp;
