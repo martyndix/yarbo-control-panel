@@ -148,6 +148,7 @@ final class YarboMqttAgentClient
 
     /**
      * @param array<string, mixed> $payload
+     * @param 'control'|'work' $session control wakes lights/drive; work is a quiet hold
      * @return array<string, mixed>
      */
     public function publish(string $cmd, array $payload, string $session = 'control'): array
