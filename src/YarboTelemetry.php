@@ -71,7 +71,7 @@ final class YarboTelemetry
         $batteryStatus = isset($batteryMsg['status']) && is_numeric($batteryMsg['status'])
             ? (int) $batteryMsg['status']
             : null;
-        $chargingLabel = self::chargingDisplay($chargingStatusInt, $batteryInt, $batteryStatus);
+        $chargingLabel = self::chargingDisplay($chargingStatusInt, $batteryInt);
         $displayBattery = ($chargingLabel === 'Full' && $batteryInt !== null && $batteryInt >= 95)
             ? 100
             : $batteryInt;
@@ -430,16 +430,14 @@ final class YarboTelemetry
     /**
      * Official app shows Fully charged / 100% when docked at high SOC.
      * MQTT capacity often sits around 95% and charging_status stays non-zero on the pad.
+     * BatteryMSG.status is not a full-charge flag (it was showing Full at 25%).
      *
      * @return 'No'|'Yes'|'Full'
      */
-    private static function chargingDisplay(int $chargingStatus, ?int $capacity, ?int $batteryStatus): string
+    private static function chargingDisplay(int $chargingStatus, ?int $capacity): string
     {
         if ($chargingStatus <= 0) {
             return 'No';
-        }
-        if ($batteryStatus !== null && $batteryStatus >= 3) {
-            return 'Full';
         }
         if ($capacity !== null && $capacity >= 95) {
             return 'Full';

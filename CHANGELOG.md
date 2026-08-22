@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.14] - 2026-08-22
+
+### Fixed
+- **Charging showed Full at 25%**: `BatteryMSG.status >= 3` is not a full-charge flag. Full / 100% is only used when the robot is on the pad and capacity is 95% or more.
+
 ## [1.3.13] - 2026-08-20
 
 ### Fixed
