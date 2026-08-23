@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.17] - 2026-08-23
+
+### Fixed
+- **Install USB tools looked stuck on “Refreshing USB ports…”**: the port list had already finished; Settings now marks that step done. Onboard Pi UARTs such as `/dev/ttyAMA10` are hidden so they are not mistaken for the PaperMono.
+
 ## [1.3.16] - 2026-08-23
 
 ### Added

@@ -2561,7 +2561,7 @@ async function loadPaperMonoDashboard() {
 }
 
 async function refreshPaperMonoPorts() {
-    if (!els.papermonoPort) return;
+    if (!els.papermonoPort) return { ok: false, count: 0 };
     const previous = els.papermonoPort.value;
     try {
         const res = await fetch('/api/device.php?action=ports');
@@ -2573,14 +2573,14 @@ async function refreshPaperMonoPorts() {
                 ? `${data.error || 'USB serial tools are missing.'} Click Install USB tools.`
                 : (data.error || 'Could not list USB ports');
             setPaperMonoResult(missing, 'error');
-            return;
+            return { ok: false, count: 0 };
         }
         if (els.papermonoResult?.classList.contains('error')) {
             setPaperMonoResult('');
         }
         if (ports.length === 0) {
-            els.papermonoPort.innerHTML = '<option value="">No serial ports found — plug in the PaperMono and refresh</option>';
-            return;
+            els.papermonoPort.innerHTML = '<option value="">No USB serial ports found — plug in the PaperMono and refresh</option>';
+            return { ok: true, count: 0 };
         }
         els.papermonoPort.innerHTML = ports.map((port) => {
             const device = port.device || '';
@@ -2590,9 +2590,11 @@ async function refreshPaperMonoPorts() {
         if (previous && ports.some((port) => port.device === previous)) {
             els.papermonoPort.value = previous;
         }
+        return { ok: true, count: ports.length };
     } catch (err) {
         els.papermonoPort.innerHTML = '<option value="">Could not list USB ports</option>';
         setPaperMonoResult(err.message || 'Could not list USB ports', 'error');
+        return { ok: false, count: 0 };
     }
 }
 
@@ -2615,7 +2617,15 @@ async function installPaperMonoUsbTools(button) {
         }
         setPaperMonoResult('Installed pyserial and esptool. Refreshing USB ports…', 'success');
         showToast('USB tools installed', 'success');
-        await refreshPaperMonoPorts();
+        const listed = await refreshPaperMonoPorts();
+        if (els.papermonoResult && !els.papermonoResult.classList.contains('error')) {
+            setPaperMonoResult(
+                listed?.count
+                    ? 'Installed pyserial and esptool. USB ports are ready.'
+                    : 'Installed pyserial and esptool. Plug the PaperMono in over USB, then click Refresh USB ports.',
+                'success',
+            );
+        }
     } catch (err) {
         setPaperMonoResult(err.message || 'Could not install USB tools', 'error');
     } finally {

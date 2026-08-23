@@ -19,6 +19,17 @@ def emit(payload: dict) -> None:
     sys.stdout.write("\n")
 
 
+def _is_host_uart(info) -> bool:
+    """Skip onboard / Bluetooth UARTs that are not a USB PaperMono."""
+    device = (getattr(info, "device", None) or "").lower()
+    desc = (getattr(info, "description", None) or "").lower()
+    name = device.rsplit("/", 1)[-1]
+    if name.startswith("ttyama") or name.startswith("ttys"):
+        return True
+    skip = ("bluetooth", "debug-console", "wlan-debug", "incoming-port")
+    return any(token in device or token in desc for token in skip)
+
+
 def list_ports() -> dict:
     try:
         from serial.tools import list_ports
@@ -32,6 +43,8 @@ def list_ports() -> dict:
 
     ports = []
     for info in list_ports.comports():
+        if _is_host_uart(info):
+            continue
         desc = f"{info.device} — {info.description or 'serial'}"
         ports.append(
             {
