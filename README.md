@@ -78,6 +78,7 @@ Open the panel in a browser and you can:
 - **Head-specific controls** — mower blade height/speed or snow chute angle when the attached head is detected
 - **Navigate to waypoints** — send the robot to a stored waypoint by index
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
+- **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: status plus Stop / Dock / Pause / Lights. Flash and Wi-Fi from **Settings**. See [PaperMono](#papermono-companion-beta)
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
 Opening the panel only watches live telemetry. It does **not** take the MQTT controller role, so a job already running in the official app should keep going. Starting a plan, going to a waypoint, or turning **Controller On** (needed for lights/drive) does take that role — only one app can command at a time.
@@ -89,6 +90,10 @@ Opening the panel only watches live telemetry. It does **not** take the MQTT con
 ```
 Browser  →  PHP web server  →  Local MQTT (port 1883)  →  Yarbo robot
            (this project)         on your LAN              (controls + live status)
+
+PaperMono (beta, optional):
+E-ink tablet  →  HTTP JSON  →  this panel  →  MQTT  →  robot
+(flash/Wi-Fi over USB from Settings)
 
 Optional (map/plan reads only):
 Browser  →  PHP  →  cloud_bridge.py  →  Yarbo cloud  →  robot data
@@ -122,6 +127,7 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 | **Same network as Yarbo** | The host must reach the robot on port **1883** |
 | **Python 3 + yarbo-data-sdk** | Optional — cloud map/plan reads (`./scripts/install.sh`) |
 | **Python 3 + python-yarbo** | Recommended for controls — MQTT agent (`scripts/mqtt_agent.py`); install puts it in `.venv` |
+| **PaperMono (optional)** | USB flash from Settings needs `pyserial` + `esptool`; building firmware needs PlatformIO. See [PaperMono](#papermono-companion-beta) |
 | **ffmpeg** | Only relevant if experimenting with cameras (not working for most users — see below) |
 
 ---
@@ -177,10 +183,33 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Connect robot** | Pi/host must be on the same network as Yarbo; port **1883** reachable |
 | **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
 | **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
+| **PaperMono (beta)** | Settings → PaperMono companion — USB flash + Wi-Fi. See [PaperMono](#papermono-companion-beta) |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
 | **Update panel** | Settings → **Panel updates**, or `./scripts/update.sh` (see [Updating](#updating-an-existing-install)) |
 
 The install script runs `composer install`, creates `config.php` if missing, creates the `data/` directory, and optionally installs the Python `yarbo-data-sdk` package for cloud map/plan reads.
+
+## PaperMono companion (beta)
+
+Built for **[M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono)** ([shop listing](https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display)): 3.97″ **480×800** portrait 4-level grayscale e-paper (ESP32-S3R8, SSD1677, FT6336G touch, NFC + LoRa on the board). Not [PaperMono-Lite (C153-Lite)](https://docs.m5stack.com/en/core/PaperMono-Lite). It has **no web browser**, so this panel flashes a small native firmware over USB. After that, the tablet polls the panel over Wi-Fi (HTTP JSON). The panel remains the MQTT brain.
+
+**On the e-ink screen:** battery, charging, state, head, error — plus large **Stop**, **Dock**, **Pause**, and **Lights**. No map, cameras, plans, or hold-to-drive (e-ink is too slow).
+
+1. Plug the PaperMono into the computer that runs this panel.
+2. Open **Settings → PaperMono companion**.
+3. Enter 2.4 GHz Wi-Fi, the panel URL (how the tablet reaches this host), and flash firmware.
+
+Build the binary once on that host (`pip3 install platformio && pio run -d firmware/papermono`). USB helpers need `pyserial` and `esptool`. Full walkthrough: [`docs/papermono.md`](docs/papermono.md).
+
+<p align="center">
+  <img src="docs/screenshots/papermono-home.png" alt="PaperMono e-ink home mock — battery 87%, Stop and Dock buttons" width="720">
+</p>
+<p align="center"><em>Home (mock) — battery and the four large buttons. Not a photo of a flashed device.</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/papermono-setup.png" alt="PaperMono e-ink first-boot setup mock with USB cable" width="720">
+</p>
+<p align="center"><em>First boot (mock) — until Wi-Fi is sent over USB from Settings.</em></p>
 
 ## Updating an existing install
 

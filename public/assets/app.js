@@ -114,6 +114,17 @@ const els = {
     driveControllerNote: document.getElementById('drive-controller-note'),
     driveBlockBanner: document.getElementById('drive-block-banner'),
     settingsResetLayout: document.getElementById('settings-reset-layout'),
+    papermonoPort: document.getElementById('papermono-port'),
+    papermonoSsid: document.getElementById('papermono-ssid'),
+    papermonoWifiPassword: document.getElementById('papermono-wifi-password'),
+    papermonoPanelUrl: document.getElementById('papermono-panel-url'),
+    papermonoName: document.getElementById('papermono-name'),
+    papermonoResult: document.getElementById('papermono-result'),
+    papermonoFwStatus: document.getElementById('papermono-fw-status'),
+    papermonoDevices: document.getElementById('papermono-devices'),
+    papermonoPortsRefresh: document.getElementById('papermono-ports-refresh'),
+    papermonoFlash: document.getElementById('papermono-flash'),
+    papermonoConfig: document.getElementById('papermono-config'),
     headControlsCard: document.getElementById('head-controls-card'),
     headMowerControls: document.getElementById('head-mower-controls'),
     headSnowControls: document.getElementById('head-snow-controls'),
@@ -2414,6 +2425,7 @@ function openSettingsModal() {
     setConnectionTestResult(null);
     setUpdateResult(null);
     loadSettings();
+    loadPaperMonoDashboard();
     if (lastUpdateStatus) {
         applyUpdateAvailability(lastUpdateStatus);
     }
@@ -2475,6 +2487,174 @@ async function loadSettings() {
         }
     } catch (err) {
         setSettingsError(err.message || 'Could not load settings');
+    }
+}
+
+function setPaperMonoResult(message, type) {
+    if (!els.papermonoResult) return;
+    if (!message) {
+        els.papermonoResult.textContent = '';
+        els.papermonoResult.className = 'settings-cloud-result hidden';
+        return;
+    }
+    els.papermonoResult.textContent = message;
+    els.papermonoResult.className = `settings-cloud-result ${type || ''}`.trim();
+    els.papermonoResult.classList.remove('hidden');
+    els.papermonoResult.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function paperMonoFormPayload() {
+    return {
+        port: els.papermonoPort?.value.trim() ?? '',
+        wifi_ssid: els.papermonoSsid?.value.trim() ?? '',
+        wifi_password: els.papermonoWifiPassword?.value ?? '',
+        panel_url: els.papermonoPanelUrl?.value.trim() ?? '',
+        name: els.papermonoName?.value.trim() || 'PaperMono',
+    };
+}
+
+function renderPaperMonoDevices(devices) {
+    if (!els.papermonoDevices) return;
+    if (!Array.isArray(devices) || devices.length === 0) {
+        els.papermonoDevices.innerHTML = '<p class="hint">None yet. Flash a PaperMono to pair it.</p>';
+        return;
+    }
+    els.papermonoDevices.innerHTML = devices.map((device) => {
+        const last = device.last_seen_at
+            ? `Last seen ${escapeHtml(String(device.last_seen_at).replace('T', ' ').replace('Z', ' UTC'))}`
+            : 'Never seen';
+        const fw = device.fw_reported ? ` · fw ${escapeHtml(String(device.fw_reported))}` : '';
+        return `<div class="papermono-device-row">
+            <div>
+                <strong>${escapeHtml(device.name || 'PaperMono')}</strong>
+                <p class="hint">${escapeHtml(last)}${fw}</p>
+            </div>
+            <button type="button" class="btn btn-secondary btn-compact" data-papermono-revoke="${escapeHtml(device.id)}">Revoke</button>
+        </div>`;
+    }).join('');
+    els.papermonoDevices.querySelectorAll('[data-papermono-revoke]').forEach((button) => {
+        button.addEventListener('click', () => revokePaperMono(button.dataset.papermonoRevoke, button));
+    });
+}
+
+async function loadPaperMonoDashboard() {
+    if (els.papermonoPanelUrl && !els.papermonoPanelUrl.value) {
+        els.papermonoPanelUrl.value = window.location.origin;
+    }
+    try {
+        const res = await fetch('/api/device.php?action=dashboard');
+        const data = await parseJsonResponse(res);
+        if (els.papermonoFwStatus) {
+            const built = data.firmware_built
+                ? 'built on this host'
+                : 'not built yet — run pio in firmware/papermono before flashing';
+            els.papermonoFwStatus.textContent = `Firmware ${data.firmware_version || '0.1.0-beta'} (${built}).`;
+        }
+        renderPaperMonoDevices(data.devices);
+    } catch (err) {
+        if (els.papermonoFwStatus) {
+            els.papermonoFwStatus.textContent = err.message || 'Could not load PaperMono status.';
+        }
+    }
+    refreshPaperMonoPorts();
+}
+
+async function refreshPaperMonoPorts() {
+    if (!els.papermonoPort) return;
+    const previous = els.papermonoPort.value;
+    try {
+        const res = await fetch('/api/device.php?action=ports');
+        const data = await parseJsonResponse(res);
+        const ports = Array.isArray(data.ports) ? data.ports : [];
+        if (!data.ok) {
+            els.papermonoPort.innerHTML = `<option value="">${escapeHtml(data.error || 'Could not list USB ports')}</option>`;
+            return;
+        }
+        if (ports.length === 0) {
+            els.papermonoPort.innerHTML = '<option value="">No serial ports found — plug in the PaperMono and refresh</option>';
+            return;
+        }
+        els.papermonoPort.innerHTML = ports.map((port) => {
+            const device = port.device || '';
+            const label = port.label || device;
+            return `<option value="${escapeHtml(device)}">${escapeHtml(label)}</option>`;
+        }).join('');
+        if (previous && ports.some((port) => port.device === previous)) {
+            els.papermonoPort.value = previous;
+        }
+    } catch (err) {
+        els.papermonoPort.innerHTML = `<option value="">${escapeHtml(err.message || 'Could not list USB ports')}</option>`;
+    }
+}
+
+async function runPaperMonoUsb(action, button) {
+    const payload = paperMonoFormPayload();
+    if (!payload.port) {
+        setPaperMonoResult('Select the USB serial port for the PaperMono.', 'error');
+        return;
+    }
+    if (!payload.wifi_ssid) {
+        setPaperMonoResult('Wi-Fi name (SSID) is required. PaperMono is 2.4 GHz only.', 'error');
+        return;
+    }
+    if (!payload.panel_url) {
+        setPaperMonoResult('Panel URL is required so the PaperMono can reach this server.', 'error');
+        return;
+    }
+    if (button) button.disabled = true;
+    setPaperMonoResult(
+        action === 'flash'
+            ? 'Flashing firmware over USB, then sending Wi-Fi. This takes one to two minutes…'
+            : 'Sending Wi-Fi and panel URL over USB…',
+    );
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, ...payload }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) {
+            throw new Error(data.error || 'USB step failed');
+        }
+        const tokenHint = data.device?.token
+            ? `\nPaired as ${data.device.name || 'PaperMono'}. Keep that cable in until the setup screen clears.`
+            : '';
+        setPaperMonoResult(
+            action === 'flash'
+                ? `Firmware flashed and Wi-Fi sent.${tokenHint}`
+                : `Wi-Fi sent.${tokenHint}`,
+            'success',
+        );
+        showToast(action === 'flash' ? 'PaperMono flashed' : 'PaperMono Wi-Fi sent', 'success');
+        loadPaperMonoDashboard();
+    } catch (err) {
+        setPaperMonoResult(err.message || 'USB step failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function revokePaperMono(id, button) {
+    if (!id) return;
+    if (!window.confirm('Revoke this PaperMono? It will stop receiving status until you flash or pair it again.')) {
+        return;
+    }
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'revoke', id }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Revoke failed');
+        showToast('PaperMono revoked', 'success');
+        loadPaperMonoDashboard();
+    } catch (err) {
+        setPaperMonoResult(err.message || 'Revoke failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -3555,6 +3735,9 @@ els.settingsOpen?.addEventListener('click', openSettingsModal);
 els.settingsForm?.addEventListener('submit', saveSettings);
 els.settingsConnectionTest?.addEventListener('click', (e) => testLocalConnection(e.currentTarget));
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
+els.papermonoPortsRefresh?.addEventListener('click', () => refreshPaperMonoPorts());
+els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));
+els.papermonoConfig?.addEventListener('click', (e) => runPaperMonoUsb('configure_usb', e.currentTarget));
 els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));
 els.settingsUpdateViewNotes?.addEventListener('click', (e) => viewReleaseNotes(e.currentTarget));
 els.settingsUpdateRun?.addEventListener('click', (e) => runPanelUpdate(e.currentTarget));

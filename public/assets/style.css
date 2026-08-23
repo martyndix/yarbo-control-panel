@@ -1655,3 +1655,93 @@ body.modal-open {
         height: 100%;
     }
 }
+
+.settings-beta-badge {
+    display: inline-block;
+    margin-left: 0.35rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    color: var(--warning-text);
+    background: var(--warning-bg);
+    border: 1px solid var(--border);
+}
+
+.papermono-preview-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.papermono-preview {
+    margin: 0;
+}
+
+.papermono-preview svg {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    max-height: 28rem;
+    margin: 0 auto;
+    height: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #f4f1e8;
+}
+
+.papermono-preview figcaption {
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.papermono-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.papermono-device-list {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.papermono-device-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+}
+
+.papermono-device-row .hint {
+    margin: 0.15rem 0 0;
+}
+
+.btn-compact {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.85rem;
+}
+
+.settings-field select {
+    width: 100%;
+    padding: 0.6rem 0.7rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 1rem;
+}
+
+@media (max-width: 720px) {
+    .papermono-preview-grid {
+        grid-template-columns: 1fr;
+    }
+}

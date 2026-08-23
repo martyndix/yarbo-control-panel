@@ -418,7 +418,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="modal-panel card settings-modal">
                 <div class="settings-modal-header">
                     <h2 id="settings-title">Settings</h2>
-                    <p class="hint settings-modal-lead">Connection, optional cloud reads, and panel updates.</p>
+                    <p class="hint settings-modal-lead">Connection, optional cloud reads, PaperMono companion (beta), and panel updates.</p>
                 </div>
                 <form id="settings-form" class="settings-form">
                     <div class="settings-modal-scroll">
@@ -478,6 +478,88 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p id="settings-cloud-status" class="hint">Cloud bridge: checking…</p>
                             <p id="settings-cloud-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
+                        </section>
+
+                        <section class="settings-section" id="settings-papermono-section">
+                            <h3 class="settings-subtitle">PaperMono companion <span class="settings-beta-badge">Beta</span></h3>
+                            <p class="hint">Built for <a href="https://docs.m5stack.com/en/core/PaperMono" target="_blank" rel="noopener">M5Stack PaperMono SKU C153</a> (<a href="https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display" target="_blank" rel="noopener">shop</a>): ESP32-S3R8, 3.97″ 480×800 SSD1677 e-paper, FT6336G touch, 2.4 GHz Wi-Fi. Not PaperMono-Lite. It has no browser — this panel flashes native firmware over USB, then the device talks HTTP JSON to the panel (the panel stays the MQTT brain). Status plus Stop / Dock / Pause / Lights only. No map, cameras, plans, or hold-to-drive. See <code>docs/papermono.md</code>.</p>
+                            <div class="papermono-preview-grid" aria-hidden="true">
+                                <figure class="papermono-preview">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="48" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="76" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Barn PaperMono  0.1.0-beta</text>
+                                        <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">87%</text>
+                                        <text x="24" y="240" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging  No</text>
+                                        <text x="24" y="280" font-family="ui-monospace, monospace" font-size="22" fill="#111">State     idle</text>
+                                        <text x="24" y="320" font-family="ui-monospace, monospace" font-size="22" fill="#111">Head      Mower</text>
+                                        <text x="24" y="360" font-family="ui-monospace, monospace" font-size="22" fill="#111">Error     0</text>
+                                        <rect x="24" y="520" width="208" height="88" rx="12" fill="#111"/>
+                                        <text x="128" y="574" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700" fill="#f4f1e8">STOP</text>
+                                        <rect x="248" y="520" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="352" y="574" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700" fill="#111">DOCK</text>
+                                        <rect x="24" y="620" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="128" y="674" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PAUSE</text>
+                                        <rect x="248" y="620" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="352" y="674" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LIGHTS</text>
+                                        <text x="24" y="776" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#444">192.168.1.50</text>
+                                        <text x="456" y="776" text-anchor="end" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#444">tap · e-paper</text>
+                                    </svg>
+                                    <figcaption>Home — 480×800 portrait, battery and four buttons</figcaption>
+                                </figure>
+                                <figure class="papermono-preview">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono setup screen mock, portrait">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="72" font-family="ui-sans-serif, system-ui, sans-serif" font-size="36" font-weight="700" fill="#111">PaperMono</text>
+                                        <text x="24" y="116" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" fill="#111">setup  ·  BETA</text>
+                                        <text x="24" y="190" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">1. Plug USB into the computer</text>
+                                        <text x="24" y="216" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">running this Yarbo panel.</text>
+                                        <text x="24" y="264" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">2. Open Settings, then</text>
+                                        <text x="24" y="290" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">PaperMono companion.</text>
+                                        <text x="24" y="338" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">3. Flash firmware and send</text>
+                                        <text x="24" y="364" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">2.4 GHz Wi-Fi from that page.</text>
+                                        <text x="24" y="430" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#444">Keep this cable connected</text>
+                                        <text x="24" y="454" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#444">until CFG_OK.</text>
+                                    </svg>
+                                    <figcaption>First boot — until Wi-Fi is sent over USB</figcaption>
+                                </figure>
+                            </div>
+                            <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
+                            <label class="settings-field">
+                                <span class="label">USB serial port</span>
+                                <select id="papermono-port">
+                                    <option value="">Refresh ports with the PaperMono plugged in</option>
+                                </select>
+                            </label>
+                            <div class="papermono-actions">
+                                <button type="button" class="btn btn-secondary" id="papermono-ports-refresh">Refresh USB ports</button>
+                            </div>
+                            <label class="settings-field">
+                                <span class="label">Wi-Fi name (SSID)</span>
+                                <input type="text" id="papermono-ssid" name="papermono_ssid" autocomplete="off" spellcheck="false" placeholder="Home network 2.4 GHz">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Wi-Fi password</span>
+                                <input type="password" id="papermono-wifi-password" name="papermono_wifi_password" autocomplete="new-password" placeholder="2.4 GHz only — PaperMono has no 5 GHz">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Panel URL (this server, as the PaperMono will reach it)</span>
+                                <input type="url" id="papermono-panel-url" name="papermono_panel_url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:8080">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Device name</span>
+                                <input type="text" id="papermono-name" name="papermono_name" value="PaperMono" autocomplete="off">
+                            </label>
+                            <p id="papermono-result" class="settings-cloud-result hidden" role="status"></p>
+                            <div class="papermono-actions">
+                                <button type="button" class="btn" id="papermono-flash">Flash firmware &amp; send Wi-Fi</button>
+                                <button type="button" class="btn btn-secondary" id="papermono-config">Send Wi-Fi only (already flashed)</button>
+                            </div>
+                            <p class="hint">First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && pio run -d firmware/papermono</code>. USB helpers need <code>pyserial</code> and <code>esptool</code>. The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll. Keep the tablet out of direct sun.</p>
+                            <h4 class="settings-subtitle">Paired devices</h4>
+                            <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 
                         <section class="settings-section">

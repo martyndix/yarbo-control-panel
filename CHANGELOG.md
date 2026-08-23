@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.15] - 2026-08-23
+
+### Added
+- **PaperMono companion (beta)**: flash **[M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono)** ([shop](https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display)) from **Settings**, then use its 480×800 SSD1677 e-paper for battery/state plus Stop, Dock, Pause, and Lights. Not PaperMono-Lite. The panel stays the MQTT brain. Firmware follows the maker’s e-paper rules (full refresh every 10 partials). See `docs/papermono.md`.
+
 ## [1.3.14] - 2026-08-22
 
 ### Fixed
