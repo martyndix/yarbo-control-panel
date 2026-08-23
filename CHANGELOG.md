@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.16] - 2026-08-23
+
+### Added
+- **Install USB tools** on Settings → PaperMono: installs `pyserial` and `esptool` into the panel’s `.venv` so you do not have to run `pip3` by hand. Missing-tool errors now show as a message, not inside the port dropdown.
+
 ## [1.3.15] - 2026-08-23
 
 ### Added

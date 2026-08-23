@@ -127,7 +127,7 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 | **Same network as Yarbo** | The host must reach the robot on port **1883** |
 | **Python 3 + yarbo-data-sdk** | Optional — cloud map/plan reads (`./scripts/install.sh`) |
 | **Python 3 + python-yarbo** | Recommended for controls — MQTT agent (`scripts/mqtt_agent.py`); install puts it in `.venv` |
-| **PaperMono (optional)** | USB flash from Settings needs `pyserial` + `esptool`; building firmware needs PlatformIO. See [PaperMono](#papermono-companion-beta) |
+| **PaperMono (optional)** | USB flash from Settings; **Install USB tools** adds `pyserial` + `esptool`. Building firmware needs PlatformIO. See [PaperMono](#papermono-companion-beta) |
 | **ffmpeg** | Only relevant if experimenting with cameras (not working for most users — see below) |
 
 ---
@@ -199,7 +199,7 @@ Built for **[M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperM
 2. Open **Settings → PaperMono companion**.
 3. Enter 2.4 GHz Wi-Fi, the panel URL (how the tablet reaches this host), and flash firmware.
 
-Build the binary once on that host (`pip3 install platformio && pio run -d firmware/papermono`). USB helpers need `pyserial` and `esptool`. Full walkthrough: [`docs/papermono.md`](docs/papermono.md).
+Build the binary once on that host (`pip3 install platformio && pio run -d firmware/papermono`). If USB ports fail to list, use **Install USB tools** on that Settings page (`pyserial` + `esptool`). Full walkthrough: [`docs/papermono.md`](docs/papermono.md).
 
 <p align="center">
   <img src="docs/screenshots/papermono-home.png" alt="PaperMono e-ink home mock — battery 87%, Stop and Dock buttons" width="720">

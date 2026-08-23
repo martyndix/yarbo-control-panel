@@ -25,7 +25,8 @@ def list_ports() -> dict:
     except ImportError:
         return {
             "ok": False,
-            "error": "pyserial is not installed. Run: pip3 install pyserial esptool",
+            "needs_usb_tools": True,
+            "error": "pyserial is not installed on this host.",
             "ports": [],
         }
 
@@ -47,7 +48,11 @@ def send_config(port: str, ssid: str, password: str, panel_url: str, token: str,
     try:
         import serial
     except ImportError:
-        return {"ok": False, "error": "pyserial is not installed. Run: pip3 install pyserial esptool"}
+        return {
+            "ok": False,
+            "needs_usb_tools": True,
+            "error": "pyserial is not installed on this host.",
+        }
 
     line = json.dumps(
         {
@@ -94,7 +99,11 @@ def flash_firmware(port: str) -> dict:
     try:
         import esptool
     except ImportError:
-        return {"ok": False, "error": "esptool is not installed. Run: pip3 install esptool pyserial"}
+        return {
+            "ok": False,
+            "needs_usb_tools": True,
+            "error": "esptool is not installed on this host.",
+        }
 
     argv = [
         "--chip",
@@ -120,10 +129,47 @@ def flash_firmware(port: str) -> dict:
     return {"ok": True, "firmware_path": str(FIRMWARE_BIN)}
 
 
+def install_tools() -> dict:
+    import subprocess
+
+    cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "pyserial", "esptool"]
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": f"Could not install USB tools: {exc}"}
+
+    log = ((completed.stdout or "") + "\n" + (completed.stderr or "")).strip()
+    if completed.returncode != 0:
+        return {
+            "ok": False,
+            "error": "pip could not install pyserial and esptool.",
+            "log": log[-1200:],
+        }
+
+    try:
+        import esptool  # noqa: F401
+        from serial.tools import list_ports  # noqa: F401
+    except ImportError:
+        return {
+            "ok": False,
+            "error": "pip finished but Python still cannot import pyserial/esptool.",
+            "log": log[-1200:],
+        }
+
+    return {"ok": True, "log": log[-800:]}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("ports")
+    sub.add_parser("install_tools")
     flash = sub.add_parser("flash")
     cfg = sub.add_parser("config")
     for p in (flash, cfg):
@@ -138,6 +184,11 @@ def main() -> int:
     if args.cmd == "ports":
         emit(list_ports())
         return 0
+
+    if args.cmd == "install_tools":
+        result = install_tools()
+        emit(result)
+        return 0 if result.get("ok") else 1
 
     if args.cmd == "flash":
         flashed = flash_firmware(args.port)

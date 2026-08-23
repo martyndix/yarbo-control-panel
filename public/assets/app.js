@@ -123,6 +123,7 @@ const els = {
     papermonoFwStatus: document.getElementById('papermono-fw-status'),
     papermonoDevices: document.getElementById('papermono-devices'),
     papermonoPortsRefresh: document.getElementById('papermono-ports-refresh'),
+    papermonoInstallTools: document.getElementById('papermono-install-tools'),
     papermonoFlash: document.getElementById('papermono-flash'),
     papermonoConfig: document.getElementById('papermono-config'),
     headControlsCard: document.getElementById('head-controls-card'),
@@ -2567,8 +2568,15 @@ async function refreshPaperMonoPorts() {
         const data = await parseJsonResponse(res);
         const ports = Array.isArray(data.ports) ? data.ports : [];
         if (!data.ok) {
-            els.papermonoPort.innerHTML = `<option value="">${escapeHtml(data.error || 'Could not list USB ports')}</option>`;
+            els.papermonoPort.innerHTML = '<option value="">Could not list USB ports</option>';
+            const missing = data.needs_usb_tools
+                ? `${data.error || 'USB serial tools are missing.'} Click Install USB tools.`
+                : (data.error || 'Could not list USB ports');
+            setPaperMonoResult(missing, 'error');
             return;
+        }
+        if (els.papermonoResult?.classList.contains('error')) {
+            setPaperMonoResult('');
         }
         if (ports.length === 0) {
             els.papermonoPort.innerHTML = '<option value="">No serial ports found — plug in the PaperMono and refresh</option>';
@@ -2583,7 +2591,36 @@ async function refreshPaperMonoPorts() {
             els.papermonoPort.value = previous;
         }
     } catch (err) {
-        els.papermonoPort.innerHTML = `<option value="">${escapeHtml(err.message || 'Could not list USB ports')}</option>`;
+        els.papermonoPort.innerHTML = '<option value="">Could not list USB ports</option>';
+        setPaperMonoResult(err.message || 'Could not list USB ports', 'error');
+    }
+}
+
+async function installPaperMonoUsbTools(button) {
+    if (button) button.disabled = true;
+    if (els.papermonoPortsRefresh) els.papermonoPortsRefresh.disabled = true;
+    setPaperMonoResult('Installing pyserial and esptool into this panel’s Python environment. This can take a minute…');
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'install_usb_tools' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) {
+            const extra = typeof data.log === 'string' && data.log.trim() !== ''
+                ? `\n${data.log.trim().slice(-400)}`
+                : '';
+            throw new Error((data.error || 'Could not install USB tools') + extra);
+        }
+        setPaperMonoResult('Installed pyserial and esptool. Refreshing USB ports…', 'success');
+        showToast('USB tools installed', 'success');
+        await refreshPaperMonoPorts();
+    } catch (err) {
+        setPaperMonoResult(err.message || 'Could not install USB tools', 'error');
+    } finally {
+        if (button) button.disabled = false;
+        if (els.papermonoPortsRefresh) els.papermonoPortsRefresh.disabled = false;
     }
 }
 
@@ -3736,6 +3773,7 @@ els.settingsForm?.addEventListener('submit', saveSettings);
 els.settingsConnectionTest?.addEventListener('click', (e) => testLocalConnection(e.currentTarget));
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
 els.papermonoPortsRefresh?.addEventListener('click', () => refreshPaperMonoPorts());
+els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbTools(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));
 els.papermonoConfig?.addEventListener('click', (e) => runPaperMonoUsb('configure_usb', e.currentTarget));
 els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));

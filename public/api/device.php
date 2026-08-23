@@ -11,6 +11,7 @@ use Yarbo\YarboPaperDevice;
 $devices = new YarboPaperDevice(dirname(__DIR__, 2));
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = (string) ($_GET['action'] ?? '');
+set_time_limit(180);
 
 function device_token_from_request(): string
 {
@@ -103,6 +104,10 @@ if ($action === 'flash') {
 
 if ($action === 'configure_usb') {
     json_response($devices->configureUsb($input));
+}
+
+if ($action === 'install_usb_tools') {
+    json_response($devices->installUsbTools());
 }
 
 if ($action === 'command') {

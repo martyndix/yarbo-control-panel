@@ -176,6 +176,21 @@ final class YarboPaperDevice
     }
 
     /**
+     * Install pyserial and esptool into the project .venv (create it if missing).
+     *
+     * @return array<string, mixed>
+     */
+    public function installUsbTools(): array
+    {
+        $venv = $this->ensureProjectVenv();
+        if (!($venv['ok'] ?? false)) {
+            return $venv;
+        }
+
+        return $this->runPython(['install_tools'], 120.0);
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
@@ -299,6 +314,48 @@ final class YarboPaperDevice
             'error' => 'Flash helper failed (exit ' . $code . '). '
                 . trim((string) ((is_string($stderr) && $stderr !== '') ? $stderr : $stdout)),
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function ensureProjectVenv(): array
+    {
+        $venvPython = $this->projectRoot . '/.venv/bin/python';
+        if (is_file($venvPython)) {
+            return ['ok' => true];
+        }
+
+        $cmd = implode(' ', array_map('escapeshellarg', [
+            'python3',
+            '-m',
+            'venv',
+            $this->projectRoot . '/.venv',
+        ]));
+        $spec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $proc = proc_open($cmd, $spec, $pipes, $this->projectRoot);
+        if (!is_resource($proc)) {
+            return ['ok' => false, 'error' => 'Could not create a Python virtualenv for USB tools.'];
+        }
+        fclose($pipes[0]);
+        stream_set_timeout($pipes[1], 60);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($proc);
+
+        if ($code !== 0 || !is_file($venvPython)) {
+            $detail = trim((string) ((is_string($stderr) && $stderr !== '') ? $stderr : $stdout));
+
+            return [
+                'ok' => false,
+                'error' => 'Could not create .venv. Install Python 3 venv support, then try again.'
+                    . ($detail !== '' ? ' ' . $detail : ''),
+            ];
+        }
+
+        return ['ok' => true];
     }
 
     private function pythonBin(): string

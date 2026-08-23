@@ -535,7 +535,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                             <div class="papermono-actions">
                                 <button type="button" class="btn btn-secondary" id="papermono-ports-refresh">Refresh USB ports</button>
+                                <button type="button" class="btn btn-secondary" id="papermono-install-tools">Install USB tools</button>
                             </div>
+                            <p id="papermono-result" class="settings-cloud-result hidden" role="status"></p>
                             <label class="settings-field">
                                 <span class="label">Wi-Fi name (SSID)</span>
                                 <input type="text" id="papermono-ssid" name="papermono_ssid" autocomplete="off" spellcheck="false" placeholder="Home network 2.4 GHz">
@@ -552,12 +554,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span class="label">Device name</span>
                                 <input type="text" id="papermono-name" name="papermono_name" value="PaperMono" autocomplete="off">
                             </label>
-                            <p id="papermono-result" class="settings-cloud-result hidden" role="status"></p>
                             <div class="papermono-actions">
                                 <button type="button" class="btn" id="papermono-flash">Flash firmware &amp; send Wi-Fi</button>
                                 <button type="button" class="btn btn-secondary" id="papermono-config">Send Wi-Fi only (already flashed)</button>
                             </div>
-                            <p class="hint">First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && pio run -d firmware/papermono</code>. USB helpers need <code>pyserial</code> and <code>esptool</code>. The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll. Keep the tablet out of direct sun.</p>
+                            <p class="hint">First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && pio run -d firmware/papermono</code>. If the port list fails, click <strong>Install USB tools</strong> to add <code>pyserial</code> and <code>esptool</code> to this panel’s Python environment. The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll. Keep the tablet out of direct sun.</p>
                             <h4 class="settings-subtitle">Paired devices</h4>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
