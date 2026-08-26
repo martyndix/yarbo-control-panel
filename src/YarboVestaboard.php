@@ -153,6 +153,27 @@ final class YarboVestaboard
     }
 
     /**
+     * Compact payload for the dashboard card. Does not call the Note.
+     *
+     * @param array<string, mixed>|null $parsed
+     * @return array<string, mixed>
+     */
+    public function dashboardPayload(?array $parsed, bool $online): array
+    {
+        if (!$this->load()['enabled']) {
+            return ['enabled' => false];
+        }
+        $usable = $online && is_array($parsed);
+        $layout = $this->compose($usable ? $parsed : null, $usable);
+
+        return [
+            'enabled' => true,
+            'lines' => $layout['lines'],
+            'verb' => $layout['verb'],
+        ];
+    }
+
+    /**
      * @return array{ok: bool, lines: list<string>, codes: list<list<int>>, verb: string, online: bool, error?: string}
      */
     public function preview(?string $sample = null): array

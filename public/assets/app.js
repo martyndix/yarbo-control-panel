@@ -82,6 +82,9 @@ const els = {
     settingsVestaboardResult: document.getElementById('settings-vestaboard-result'),
     settingsVestaboardTest: document.getElementById('settings-vestaboard-test'),
     settingsVestaboardSend: document.getElementById('settings-vestaboard-send'),
+    vestaboardCard: document.getElementById('vestaboard-card'),
+    vestaboardBoard: document.getElementById('vestaboard-board'),
+    vestaboardCaption: document.getElementById('vestaboard-caption'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -163,9 +166,10 @@ const PANEL_HIDDEN_KEY = 'yarbo_panel_hidden';
 const THEME_KEY = 'yarbo_theme';
 const LIGHTS_ON_KEY = 'yarbo_lights_on';
 const CONTROLLER_HOLD_KEY = 'yarbo_hold_controller';
-const DEFAULT_PANEL_ORDER = ['status', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls'];
+const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls'];
 const PANEL_LABELS = {
     status: 'Status',
+    vestaboard: 'Vestaboard Note',
     diagnostics: 'Diagnostics',
     map: 'Location map',
     cameras: 'Cameras',
@@ -401,7 +405,12 @@ function initPanelDragDrop() {
 
     const saved = loadPanelOrder();
     if (saved) {
-        applyPanelOrder(saved.filter((id) => document.querySelector(`[data-panel-id="${id}"]`)));
+        const order = saved.filter((id) => document.querySelector(`[data-panel-id="${id}"]`));
+        if (!order.includes('vestaboard') && document.querySelector('[data-panel-id="vestaboard"]')) {
+            const afterStatus = order.indexOf('status');
+            order.splice(afterStatus >= 0 ? afterStatus + 1 : 0, 0, 'vestaboard');
+        }
+        applyPanelOrder(order);
     }
 
     container.querySelectorAll('.section-drag-handle').forEach((handle) => {
@@ -1777,6 +1786,7 @@ function updateStatus(data) {
     renderDiagnostics(data);
     updatePlanActivity(data);
     updateHeadControls(data);
+    updateVestaboardDashboard(data);
     updateControlTiles(data);
 }
 
@@ -1867,6 +1877,21 @@ function updateHeadControls(data) {
     els.headControlsCard.classList.toggle('hidden', !show);
     els.headMowerControls?.classList.toggle('hidden', !isMower);
     els.headSnowControls?.classList.toggle('hidden', !isSnow);
+}
+
+function updateVestaboardDashboard(data) {
+    if (!els.vestaboardCard) return;
+    const board = data.vestaboard;
+    const enabled = Boolean(board?.enabled);
+    els.vestaboardCard.classList.toggle('hidden', !enabled);
+    if (!enabled) return;
+    renderVestaboardPreview(board.lines, els.vestaboardBoard);
+    if (els.vestaboardCaption) {
+        const verb = board.verb ? String(board.verb) : '';
+        els.vestaboardCaption.textContent = verb
+            ? `Showing ${verb} — same 3×15 layout as the Note`
+            : 'Same 3×15 layout as the Note';
+    }
 }
 
 function formatCloudStatus(cloudStatus) {
@@ -2741,8 +2766,9 @@ function setVestaboardResult(message, type = null) {
     els.settingsVestaboardResult.classList.remove('hidden');
 }
 
-function renderVestaboardPreview(lines) {
-    if (!els.settingsVestaboardPreview) return;
+function renderVestaboardPreview(lines, target) {
+    const root = target || els.settingsVestaboardPreview;
+    if (!root) return;
     const rows = Array.isArray(lines) ? lines : [];
     const cells = [];
     for (let r = 0; r < 3; r++) {
@@ -2752,7 +2778,7 @@ function renderVestaboardPreview(lines) {
             cells.push(`<span class="vestaboard-cell">${escapeHtml(ch)}</span>`);
         }
     }
-    els.settingsVestaboardPreview.innerHTML = cells.join('');
+    root.innerHTML = cells.join('');
 }
 
 function vestaboardOverride() {

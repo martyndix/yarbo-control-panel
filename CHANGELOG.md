@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.19] - 2026-08-26
+
+### Added
+- **Vestaboard Note dashboard section**: when enabled in Settings, the same 3×15 flap layout appears as a main-page card (hide or reorder it like the other sections).
+
 ## [1.3.18] - 2026-08-26
 
 ### Added

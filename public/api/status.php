@@ -8,10 +8,19 @@ use Yarbo\YarboErrors;
 use Yarbo\YarboMqtt;
 use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboTelemetry;
+use Yarbo\YarboVestaboard;
 use Yarbo\YarboWifi;
 
 $host = (string) ($config['broker_host'] ?? '');
 $port = (int) ($config['broker_port'] ?? 1883);
+
+function vestaboard_status_payload(?array $parsed, bool $online): array
+{
+    static $board = null;
+    $board ??= new YarboVestaboard(dirname(__DIR__, 2));
+
+    return $board->dashboardPayload($parsed, $online);
+}
 
 function status_raw_usable(mixed $raw): bool
 {
@@ -49,7 +58,10 @@ function status_from_agent(array $result): void
     json_response(array_merge(
         ['ok' => true, 'via' => 'agent', 'cached' => (bool) ($result['cached'] ?? false)],
         $parsed,
-        ['wifi' => YarboWifi::parse($wifiEnvelope)],
+        [
+            'wifi' => YarboWifi::parse($wifiEnvelope),
+            'vestaboard' => vestaboard_status_payload($parsed, true),
+        ],
     ));
 }
 
@@ -158,10 +170,14 @@ try {
         ], 504);
     }
 
+    $parsed = YarboTelemetry::parse($raw, $cellTemps);
     json_response(array_merge(
         ['ok' => true, 'via' => 'direct'],
-        YarboTelemetry::parse($raw, $cellTemps),
-        ['wifi' => YarboWifi::parse($wifiResponse)],
+        $parsed,
+        [
+            'wifi' => YarboWifi::parse($wifiResponse),
+            'vestaboard' => vestaboard_status_payload($parsed, true),
+        ],
     ));
 } catch (Throwable $e) {
     $client->disconnect();

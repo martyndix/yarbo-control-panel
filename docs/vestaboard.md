@@ -35,7 +35,7 @@ Battery percent is rounded to 5% so the flaps are not constantly rewriting. Full
 3. Open the panel → **Settings → Vestaboard Note**.
 4. Check **Enable Vestaboard Note**.
 5. Enter the host and API key. Use the 3×15 preview (live or samples).
-6. **Test connection**, then **Save**. **Send now** writes the current layout immediately.
+6. **Test connection**, then **Save**. **Send now** writes the current layout immediately. A **Vestaboard Note** section also appears on the main dashboard with the same 3×15 layout (you can hide or reorder it under Appearance).
 7. Restart the panel (or reboot the Pi) so `scripts/vestaboard_watch.php` is running beside the MQTT agent. After that, the Note updates with no browser open.
 
 The key is stored in `data/vestaboard-config.json` (not committed).

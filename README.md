@@ -194,7 +194,7 @@ The install script runs `composer install`, creates `config.php` if missing, cre
 
 ## Vestaboard Note (optional)
 
-Push a 3×15 status line to a Vestaboard Note on your LAN via the [Local API](https://docs.vestaboard.com/docs/local-api/introduction). Enable it in **Settings → Vestaboard Note**, paste the local API key, and use the on-page flap mockup. The panel updates the board when the message changes (at most every 15 seconds). Full walkthrough: [`docs/vestaboard.md`](docs/vestaboard.md).
+Push a 3×15 status line to a Vestaboard Note on your LAN via the [Local API](https://docs.vestaboard.com/docs/local-api/introduction). Enable it in **Settings → Vestaboard Note**, paste the local API key, and use the flap mockup. When enabled, the same board also appears as a dashboard section. The panel updates the Note when the message changes (at most every 15 seconds). Full walkthrough: [`docs/vestaboard.md`](docs/vestaboard.md).
 
 ## PaperMono companion (beta)
 

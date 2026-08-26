@@ -1731,6 +1731,16 @@ body.modal-open {
     letter-spacing: 0;
 }
 
+.vestaboard-preview--dashboard {
+    max-width: 28rem;
+    gap: 4px;
+    padding: 12px;
+}
+
+.vestaboard-preview--dashboard .vestaboard-cell {
+    font-size: 0.95rem;
+}
+
 .papermono-device-list {
     display: grid;
     gap: 0.5rem;

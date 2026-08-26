@@ -128,6 +128,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p class="updated">Last updated: <span id="updated-at">never</span></p>
         </section>
 
+        <section class="card panel-section vestaboard-card hidden" id="vestaboard-card" data-panel-id="vestaboard">
+            <div class="section-header section-header--simple">
+                <h2>Vestaboard Note</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
+            <div class="vestaboard-preview vestaboard-preview--dashboard" id="vestaboard-board" aria-label="Vestaboard Note 3 by 15 live display"></div>
+            <p class="updated" id="vestaboard-caption">Waiting for status…</p>
+        </section>
+
         <section class="card panel-section diagnostics-card" data-panel-id="diagnostics">
             <div class="section-header section-header--simple">
                 <h2>Connection &amp; Health</h2>
@@ -482,7 +491,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-vestaboard-section">
                             <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
-                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/local-api/introduction" target="_blank" rel="noopener">Vestaboard Note</a> on your LAN (3×15 Local API). Hidden until enabled. The panel pushes when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>
+                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/local-api/introduction" target="_blank" rel="noopener">Vestaboard Note</a> on your LAN (3×15 Local API). Host and key stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The panel pushes when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-vestaboard-enabled" name="vestaboard_enabled">
                                 <span>Enable Vestaboard Note</span>
@@ -622,6 +631,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <p class="hint settings-panel-visibility-hint">Uncheck a section to hide it from the dashboard.</p>
                                 <div class="settings-panel-visibility-grid">
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="status" checked><span>Status</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="vestaboard" checked><span>Vestaboard Note</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="diagnostics" checked><span>Diagnostics</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="map" checked><span>Location map</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="cameras" checked><span>Cameras</span></label>
