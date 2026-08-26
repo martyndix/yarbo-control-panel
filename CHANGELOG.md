@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.18] - 2026-08-26
+
+### Added
+- **Vestaboard Note (optional)**: enable in Settings to push a 3×15 Yarbo status board (mowing / charging / idle / error) over the Local API. Live flap mockup in Settings; a background watcher updates the Note even with no browser open. See `docs/vestaboard.md`.
+
 ## [1.3.17] - 2026-08-23
 
 ### Fixed

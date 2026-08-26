@@ -7,12 +7,14 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
 use Yarbo\YarboConfig;
+use Yarbo\YarboVestaboard;
 
 $projectRoot = dirname(__DIR__, 2);
 $configPath = $projectRoot . '/config.php';
 $dataDir = $projectRoot . '/data';
 $cloudSettings = new YarboCloudSettings($dataDir);
 $cloud = new YarboCloud($cloudSettings, $projectRoot);
+$vestaboard = new YarboVestaboard($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
@@ -24,6 +26,7 @@ if ($method === 'GET') {
         'serial' => (string) ($config['serial'] ?? ''),
         'writable' => is_writable($configPath),
         'cloud' => $cloudSettings->publicView(),
+        'vestaboard' => $vestaboard->publicView(),
         // Skip Python SDK probe by default — it can block the single-threaded php -S server.
         'cloud_status' => $includeCloudStatus ? $cloud->status() : null,
     ]);
@@ -74,6 +77,13 @@ if (!$cloudSettings->save($input)) {
     ], 500);
 }
 
+if (!$vestaboard->save($input)) {
+    json_response([
+        'ok' => false,
+        'error' => 'Could not write Vestaboard settings. Check permissions on the data/ directory.',
+    ], 500);
+}
+
 // Skip cloud->status() on save — that spawns Python and can block the single-threaded
 // php -S server. The client already has status from load; Test cloud connection refreshes it.
 json_response([
@@ -81,4 +91,5 @@ json_response([
     'broker_host' => $host,
     'serial' => $serial,
     'cloud' => $cloudSettings->publicView(),
+    'vestaboard' => $vestaboard->publicView(),
 ]);

@@ -72,6 +72,16 @@ const els = {
     settingsCloudStatus: document.getElementById('settings-cloud-status'),
     settingsCloudResult: document.getElementById('settings-cloud-result'),
     settingsCloudTest: document.getElementById('settings-cloud-test'),
+    settingsVestaboardEnabled: document.getElementById('settings-vestaboard-enabled'),
+    settingsVestaboardFields: document.getElementById('settings-vestaboard-fields'),
+    settingsVestaboardHost: document.getElementById('settings-vestaboard-host'),
+    settingsVestaboardKey: document.getElementById('settings-vestaboard-key'),
+    settingsVestaboardSample: document.getElementById('settings-vestaboard-sample'),
+    settingsVestaboardPreview: document.getElementById('settings-vestaboard-preview'),
+    settingsVestaboardPreviewCaption: document.getElementById('settings-vestaboard-preview-caption'),
+    settingsVestaboardResult: document.getElementById('settings-vestaboard-result'),
+    settingsVestaboardTest: document.getElementById('settings-vestaboard-test'),
+    settingsVestaboardSend: document.getElementById('settings-vestaboard-send'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -2427,6 +2437,7 @@ function openSettingsModal() {
     setUpdateResult(null);
     loadSettings();
     loadPaperMonoDashboard();
+    loadVestaboardPreview();
     if (lastUpdateStatus) {
         applyUpdateAvailability(lastUpdateStatus);
     }
@@ -2475,6 +2486,14 @@ async function loadSettings() {
             if (els.mapDataSource) els.mapDataSource.value = defaultDataSource;
             if (els.plansDataSource) els.plansDataSource.value = defaultDataSource;
         }
+        if (els.settingsVestaboardEnabled) {
+            els.settingsVestaboardEnabled.checked = Boolean(data.vestaboard?.enabled);
+        }
+        if (els.settingsVestaboardHost) {
+            els.settingsVestaboardHost.value = data.vestaboard?.host || 'vestaboard.local';
+        }
+        if (els.settingsVestaboardKey) els.settingsVestaboardKey.value = '';
+        applyVestaboardEnabled();
         if (els.settingsCloudStatus) {
             if (data.cloud_status) {
                 els.settingsCloudStatus.textContent = formatCloudStatus(data.cloud_status);
@@ -2705,6 +2724,109 @@ async function revokePaperMono(id, button) {
     }
 }
 
+function applyVestaboardEnabled() {
+    const on = Boolean(els.settingsVestaboardEnabled?.checked);
+    els.settingsVestaboardFields?.classList.toggle('hidden', !on);
+}
+
+function setVestaboardResult(message, type = null) {
+    if (!els.settingsVestaboardResult) return;
+    if (!message) {
+        els.settingsVestaboardResult.textContent = '';
+        els.settingsVestaboardResult.className = 'settings-cloud-result hidden';
+        return;
+    }
+    els.settingsVestaboardResult.textContent = message;
+    els.settingsVestaboardResult.className = `settings-cloud-result ${type || ''}`.trim();
+    els.settingsVestaboardResult.classList.remove('hidden');
+}
+
+function renderVestaboardPreview(lines) {
+    if (!els.settingsVestaboardPreview) return;
+    const rows = Array.isArray(lines) ? lines : [];
+    const cells = [];
+    for (let r = 0; r < 3; r++) {
+        const line = String(rows[r] || '').padEnd(15).slice(0, 15);
+        for (let c = 0; c < 15; c++) {
+            const ch = line[c] === ' ' ? '' : line[c];
+            cells.push(`<span class="vestaboard-cell">${escapeHtml(ch)}</span>`);
+        }
+    }
+    els.settingsVestaboardPreview.innerHTML = cells.join('');
+}
+
+function vestaboardOverride() {
+    const payload = {
+        host: els.settingsVestaboardHost?.value.trim() || 'vestaboard.local',
+    };
+    const key = els.settingsVestaboardKey?.value ?? '';
+    if (key !== '') payload.api_key = key;
+    return payload;
+}
+
+async function loadVestaboardPreview() {
+    if (!els.settingsVestaboardPreview) return;
+    const sample = els.settingsVestaboardSample?.value || 'live';
+    try {
+        const res = await fetch(`/api/vestaboard.php?action=preview&sample=${encodeURIComponent(sample)}`);
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not preview Vestaboard');
+        renderVestaboardPreview(data.lines);
+        if (els.settingsVestaboardPreviewCaption) {
+            const verb = data.verb ? ` ${data.verb}` : '';
+            const source = sample === 'live' ? (data.online ? 'live' : 'offline') : 'sample';
+            els.settingsVestaboardPreviewCaption.textContent = `YARBO${verb} · ${source} · 3×15 Note`;
+        }
+    } catch (err) {
+        renderVestaboardPreview(['YARBO   OFFLINE', 'BATTERY      --', 'NO TELEMETRY  ']);
+        if (els.settingsVestaboardPreviewCaption) {
+            els.settingsVestaboardPreviewCaption.textContent = err.message || 'Could not preview Vestaboard';
+        }
+    }
+}
+
+async function testVestaboardConnection(button) {
+    if (button) button.disabled = true;
+    setVestaboardResult('Testing Vestaboard Local API…');
+    try {
+        const res = await fetch('/api/vestaboard.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'test', ...vestaboardOverride() }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Vestaboard test failed');
+        setVestaboardResult(data.message || 'Reached the Vestaboard Local API.', 'success');
+    } catch (err) {
+        setVestaboardResult(err.message || 'Vestaboard test failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function sendVestaboardNow(button) {
+    if (button) button.disabled = true;
+    setVestaboardResult('Sending current Yarbo status to the Note…');
+    try {
+        const res = await fetch('/api/vestaboard.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'send', ...vestaboardOverride() }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Send failed');
+        const lines = Array.isArray(data.lines) ? data.lines.join('\n') : '';
+        setVestaboardResult(lines ? `Sent:\n${lines}` : 'Sent to Vestaboard.', 'success');
+        showToast('Vestaboard updated', 'success');
+        if (els.settingsVestaboardSample) els.settingsVestaboardSample.value = 'live';
+        await loadVestaboardPreview();
+    } catch (err) {
+        setVestaboardResult(err.message || 'Send failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 async function saveSettings(event) {
     event.preventDefault();
     setSettingsError(null);
@@ -2728,9 +2850,15 @@ async function saveSettings(event) {
             cloud_enabled: cloudEnabled,
             cloud_email: cloudEmail,
             data_source: dataSource,
+            vestaboard_enabled: Boolean(els.settingsVestaboardEnabled?.checked),
+            vestaboard_host: els.settingsVestaboardHost?.value.trim() || 'vestaboard.local',
         };
         if (cloudPassword !== '') {
             payload.cloud_password = cloudPassword;
+        }
+        const vestaboardKey = els.settingsVestaboardKey?.value ?? '';
+        if (vestaboardKey !== '') {
+            payload.vestaboard_api_key = vestaboardKey;
         }
         const res = await fetch('/api/settings.php', {
             method: 'POST',
@@ -3782,6 +3910,13 @@ els.settingsOpen?.addEventListener('click', openSettingsModal);
 els.settingsForm?.addEventListener('submit', saveSettings);
 els.settingsConnectionTest?.addEventListener('click', (e) => testLocalConnection(e.currentTarget));
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
+els.settingsVestaboardEnabled?.addEventListener('change', () => {
+    applyVestaboardEnabled();
+    if (els.settingsVestaboardEnabled.checked) loadVestaboardPreview();
+});
+els.settingsVestaboardSample?.addEventListener('change', () => loadVestaboardPreview());
+els.settingsVestaboardTest?.addEventListener('click', (e) => testVestaboardConnection(e.currentTarget));
+els.settingsVestaboardSend?.addEventListener('click', (e) => sendVestaboardNow(e.currentTarget));
 els.papermonoPortsRefresh?.addEventListener('click', () => refreshPaperMonoPorts());
 els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbTools(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));

@@ -9,6 +9,7 @@
 /data/php-server.log
 /data/.update-running
 /data/papermono-devices.json
+/data/vestaboard-config.json
 /firmware/papermono/.pio/
 /scripts/__pycache__/
 **/__pycache__/

@@ -418,7 +418,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="modal-panel card settings-modal">
                 <div class="settings-modal-header">
                     <h2 id="settings-title">Settings</h2>
-                    <p class="hint settings-modal-lead">Connection, optional cloud reads, PaperMono companion (beta), and panel updates.</p>
+                    <p class="hint settings-modal-lead">Connection, optional cloud reads, Vestaboard Note, PaperMono companion (beta), and panel updates.</p>
                 </div>
                 <form id="settings-form" class="settings-form">
                     <div class="settings-modal-scroll">
@@ -478,6 +478,42 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p id="settings-cloud-status" class="hint">Cloud bridge: checking…</p>
                             <p id="settings-cloud-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
+                        </section>
+
+                        <section class="settings-section" id="settings-vestaboard-section">
+                            <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
+                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/local-api/introduction" target="_blank" rel="noopener">Vestaboard Note</a> on your LAN (3×15 Local API). Hidden until enabled. The panel pushes when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-vestaboard-enabled" name="vestaboard_enabled">
+                                <span>Enable Vestaboard Note</span>
+                            </label>
+                            <div id="settings-vestaboard-fields" class="hidden">
+                                <label class="settings-field">
+                                    <span class="label">Board IP or hostname</span>
+                                    <input type="text" id="settings-vestaboard-host" name="vestaboard_host" autocomplete="off" spellcheck="false" placeholder="vestaboard.local">
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Local API key</span>
+                                    <input type="password" id="settings-vestaboard-key" name="vestaboard_api_key" autocomplete="off" placeholder="Leave blank to keep the saved key">
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Preview</span>
+                                    <select id="settings-vestaboard-sample">
+                                        <option value="live">Live robot status</option>
+                                        <option value="mowing">Sample: mowing</option>
+                                        <option value="charging">Sample: charging</option>
+                                        <option value="idle">Sample: idle charged</option>
+                                        <option value="error">Sample: error</option>
+                                    </select>
+                                </label>
+                                <div class="vestaboard-preview" id="settings-vestaboard-preview" aria-label="Vestaboard Note 3 by 15 preview"></div>
+                                <p id="settings-vestaboard-preview-caption" class="hint">YARBO status on a 3×15 Note</p>
+                                <p id="settings-vestaboard-result" class="settings-cloud-result hidden" role="status"></p>
+                                <div class="papermono-actions">
+                                    <button type="button" class="btn btn-secondary" id="settings-vestaboard-test">Test connection</button>
+                                    <button type="button" class="btn btn-secondary" id="settings-vestaboard-send">Send now</button>
+                                </div>
+                            </div>
                         </section>
 
                         <section class="settings-section" id="settings-papermono-section">

@@ -1705,6 +1705,32 @@ body.modal-open {
     gap: 0.5rem;
 }
 
+.vestaboard-preview {
+    display: grid;
+    grid-template-columns: repeat(15, 1fr);
+    gap: 3px;
+    padding: 10px;
+    max-width: 22rem;
+    border-radius: 8px;
+    background: #161616;
+    border: 1px solid var(--border);
+}
+
+.vestaboard-cell {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+    background: #0c0c0c;
+    color: #f3ead2;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0;
+}
+
 .papermono-device-list {
     display: grid;
     gap: 0.5rem;
