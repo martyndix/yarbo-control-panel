@@ -30,11 +30,19 @@ Battery percent is rounded to 5% so the flaps are not constantly rewriting. Full
 
 ## Setup
 
-1. Enable the Local API on the Note and keep the **local API key** Vestaboard emails you. See [Local API introduction](https://docs.vestaboard.com/docs/local-api/introduction).
-2. Put the Note and this panel on the same LAN. Use **IPv4** (`vestaboard.local` or the board’s IP). IPv6 is unreliable per Vestaboard.
+1. Request a one-time **enablement token** from Vestaboard’s [Local API request form](https://www.vestaboard.com/local-api). The Note must be paired and online. They email that token to the owner — it is **not** the API key. Official steps: [Authentication](https://docs.vestaboard.com/docs/local-api/authentication/).
+2. On the same LAN (IPv4; `vestaboard.local` or the board’s IP), exchange the email token for the real key:
+
+   ```bash
+   curl -X POST \
+     -H "X-Vestaboard-Local-Api-Enablement-Token: YOUR_EMAIL_TOKEN" \
+     http://vestaboard.local:7000/local-api/enablement
+   ```
+
+   Copy `apiKey` from the JSON response. If `vestaboard.local` fails, use the Note’s IPv4 address. IPv6 is unreliable per Vestaboard.
 3. Open the panel → **Settings → Vestaboard Note**.
 4. Check **Enable Vestaboard Note**.
-5. Enter the host and API key. Use the 3×15 preview (live or samples).
+5. Enter the host and that **apiKey**. Use the 3×15 preview (live or samples).
 6. **Test connection**, then **Save**. **Send now** writes the current layout immediately. A **Vestaboard Note** section also appears on the main dashboard with the same 3×15 layout (you can hide or reorder it under Appearance).
 7. Restart the panel (or reboot the Pi) so `scripts/vestaboard_watch.php` is running beside the MQTT agent. After that, the Note updates with no browser open.
 

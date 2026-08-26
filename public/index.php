@@ -504,6 +504,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="label">Local API key</span>
                                     <input type="password" id="settings-vestaboard-key" name="vestaboard_api_key" autocomplete="off" placeholder="Leave blank to keep the saved key">
                                 </label>
+                                <p class="hint">The Local API key is not in the Vestaboard app. Request a one-time enablement token from Vestaboard’s <a href="https://www.vestaboard.com/local-api" target="_blank" rel="noopener">Local API request form</a> (the Note must be paired and online). Vestaboard emails that token; it is <strong>not</strong> the key. On the same LAN, exchange it once:</p>
+                                <p class="hint"><code>curl -X POST -H "X-Vestaboard-Local-Api-Enablement-Token: YOUR_EMAIL_TOKEN" http://vestaboard.local:7000/local-api/enablement</code></p>
+                                <p class="hint">Paste the JSON <code>apiKey</code> here. If <code>vestaboard.local</code> fails, use the Note’s IPv4 address. Official steps: <a href="https://docs.vestaboard.com/docs/local-api/authentication/" target="_blank" rel="noopener">Local API authentication</a>.</p>
                                 <label class="settings-field">
                                     <span class="label">Preview</span>
                                     <select id="settings-vestaboard-sample">

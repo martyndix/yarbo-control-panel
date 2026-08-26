@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.21] - 2026-08-26
+
+### Changed
+- Settings → Vestaboard Note now explains how to get the Local API key, with a link to Vestaboard’s [request form](https://www.vestaboard.com/local-api).
+
 ## [1.3.20] - 2026-08-26
 
 ### Changed
