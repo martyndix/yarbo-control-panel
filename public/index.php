@@ -203,6 +203,25 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         Satellite
                     </label>
                     </div>
+                    <button
+                        type="button"
+                        class="map-fullscreen-btn"
+                        id="map-fullscreen"
+                        aria-pressed="false"
+                        title="Full screen"
+                        aria-label="Full screen map"
+                    >
+                        <span class="map-fullscreen-btn__enter" aria-hidden="true">
+                            <svg viewBox="0 0 16 16" width="16" height="16" focusable="false">
+                                <path fill="currentColor" d="M2 6V2h4v1.5H3.5V6H2zm8-4h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm12 0v4h-4v-1.5h2.5V10H14z"/>
+                            </svg>
+                        </span>
+                        <span class="map-fullscreen-btn__exit hidden" aria-hidden="true">
+                            <svg viewBox="0 0 16 16" width="16" height="16" focusable="false">
+                                <path fill="currentColor" d="M6 2v4H2V4.5h2.5V2H6zm4 0h1.5v2.5H14V6h-4V2zM2 11.5h2.5V14H6v-4H2v1.5zM10 10h4v1.5h-2.5V14H10v-4z"/>
+                            </svg>
+                        </span>
+                    </button>
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>

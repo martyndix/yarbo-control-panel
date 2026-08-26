@@ -820,6 +820,99 @@ body.modal-open {
     cursor: pointer;
 }
 
+.map-fullscreen-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.map-fullscreen-btn:hover,
+.map-fullscreen-btn[aria-pressed="true"] {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
+.map-fullscreen-btn svg {
+    display: block;
+}
+
+body.map-is-fullscreen {
+    overflow: hidden;
+}
+
+.map-card.map-card--fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 1900;
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    height: 100dvh;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: max(0.75rem, env(safe-area-inset-top)) max(0.85rem, env(safe-area-inset-right))
+        max(0.65rem, env(safe-area-inset-bottom)) max(0.85rem, env(safe-area-inset-left));
+    overflow: hidden;
+    box-shadow: none;
+}
+
+.map-card.map-card--fullscreen .section-header {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+}
+
+.map-card.map-card--fullscreen .hint,
+.map-card.map-card--fullscreen .map-actions,
+.map-card.map-card--fullscreen .map-edit-tip,
+.map-card.map-card--fullscreen .map-inspector,
+.map-card.map-card--fullscreen .map-editor-actions,
+.map-card.map-card--fullscreen .map-editor-hint,
+.map-card.map-card--fullscreen .section-drag-handle {
+    display: none;
+}
+
+.map-card.map-card--fullscreen .map-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+}
+
+.map-card.map-card--fullscreen .map {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+}
+
+.map-card.map-card--fullscreen .map-status,
+.map-card.map-card--fullscreen .map-areas-status {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.map-card.map-card--fullscreen:fullscreen,
+.map-card.map-card--fullscreen:-webkit-full-screen {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    height: 100%;
+}
+
 .map {
     width: 100%;
     height: 320px;

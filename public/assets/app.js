@@ -115,6 +115,8 @@ const els = {
     mapLoading: document.getElementById('map-loading'),
     mapLoadingText: document.getElementById('map-loading-text'),
     mapEditTip: document.getElementById('map-edit-tip'),
+    mapFullscreen: document.getElementById('map-fullscreen'),
+    mapCard: document.querySelector('.map-card'),
     panelSections: document.getElementById('panel-sections'),
     controlController: document.getElementById('control-controller'),
     controlLights: document.getElementById('control-lights'),
@@ -214,6 +216,7 @@ let currentMapLayer = 'street';
 let robotMarker = null;
 let headingLine = null;
 let mapHasCentered = false;
+let mapFullscreen = false;
 let currentHeadType = null;
 let defaultDataSource = 'auto';
 let areasLayer = null;
@@ -865,6 +868,69 @@ function initMap() {
 
     restoreMapCache();
     restoreMapView();
+}
+
+function fullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function requestElementFullscreen(el) {
+    const fn = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!fn) return Promise.resolve();
+    try {
+        return Promise.resolve(fn.call(el));
+    } catch (err) {
+        return Promise.reject(err);
+    }
+}
+
+function exitDocumentFullscreen() {
+    const fn = document.exitFullscreen || document.webkitExitFullscreen;
+    if (!fn) return Promise.resolve();
+    try {
+        return Promise.resolve(fn.call(document));
+    } catch (err) {
+        return Promise.reject(err);
+    }
+}
+
+function resizeMapSoon() {
+    const run = () => map?.invalidateSize();
+    requestAnimationFrame(() => {
+        run();
+        setTimeout(run, 200);
+    });
+}
+
+function applyMapFullscreenUi(active) {
+    if (els.mapCard) {
+        els.mapCard.classList.toggle('map-card--fullscreen', active);
+    }
+    document.body.classList.toggle('map-is-fullscreen', active);
+    if (els.mapFullscreen) {
+        els.mapFullscreen.setAttribute('aria-pressed', active ? 'true' : 'false');
+        els.mapFullscreen.setAttribute('aria-label', active ? 'Exit full screen' : 'Full screen map');
+        els.mapFullscreen.title = active ? 'Exit full screen' : 'Full screen';
+        els.mapFullscreen.querySelector('.map-fullscreen-btn__enter')?.classList.toggle('hidden', active);
+        els.mapFullscreen.querySelector('.map-fullscreen-btn__exit')?.classList.toggle('hidden', !active);
+    }
+    resizeMapSoon();
+}
+
+function setMapFullscreen(active) {
+    if (mapFullscreen === active) {
+        resizeMapSoon();
+        return;
+    }
+    mapFullscreen = active;
+    applyMapFullscreenUi(active);
+    if (active) {
+        if (els.mapCard && fullscreenElement() !== els.mapCard) {
+            requestElementFullscreen(els.mapCard).catch(() => {});
+        }
+    } else if (fullscreenElement()) {
+        exitDocumentFullscreen().catch(() => {});
+    }
 }
 
 function setMapLoading(active, message = 'Loading saved map areas') {
@@ -3921,6 +3987,25 @@ document.getElementById('map-edit-toggle')?.addEventListener('click', () => {
     setMapEditMode(!mapEditMode);
 });
 
+els.mapFullscreen?.addEventListener('click', () => {
+    setMapFullscreen(!mapFullscreen);
+});
+
+document.addEventListener('fullscreenchange', () => {
+    const native = fullscreenElement() === els.mapCard;
+    if (!native && mapFullscreen) {
+        mapFullscreen = false;
+        applyMapFullscreenUi(false);
+    }
+});
+document.addEventListener('webkitfullscreenchange', () => {
+    const native = fullscreenElement() === els.mapCard;
+    if (!native && mapFullscreen) {
+        mapFullscreen = false;
+        applyMapFullscreenUi(false);
+    }
+});
+
 document.getElementById('map-export')?.addEventListener('click', exportLoadedMapGeoJson);
 document.getElementById('map-export-draft')?.addEventListener('click', exportDraftGeoJson);
 document.getElementById('map-save-robot')?.addEventListener('click', saveMapDraft);
@@ -4002,6 +4087,10 @@ document.addEventListener('keydown', (event) => {
     }
     if (els.settingsModal && !els.settingsModal.classList.contains('hidden')) {
         closeSettingsModal();
+        return;
+    }
+    if (mapFullscreen) {
+        setMapFullscreen(false);
     }
 });
 

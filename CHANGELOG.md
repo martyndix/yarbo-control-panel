@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.23] - 2026-08-26
+
+### Added
+- Location Map can go full screen (header button or Escape to exit).
+
 ## [1.3.22] - 2026-08-26
 
 ### Added
