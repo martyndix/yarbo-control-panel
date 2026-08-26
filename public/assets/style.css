@@ -320,6 +320,52 @@ body.modal-open {
     font-weight: 600;
 }
 
+.stat .value.battery-level {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.stat .value.battery-level::before {
+    content: "";
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+.stat .value.battery-level--green::before {
+    background: #3dcc6d;
+}
+
+.stat .value.battery-level--yellow::before {
+    background: #e6c233;
+}
+
+.stat .value.battery-level--orange::before {
+    background: #e08a2c;
+}
+
+.stat .value.battery-level--red::before {
+    background: #e05252;
+}
+
+.stat .value.is-error {
+    color: #e05252;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.stat .value.is-error::before {
+    content: "";
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: #e05252;
+}
+
 .stat .value.compact {
     font-size: 0.86rem;
     font-weight: 500;
@@ -1739,6 +1785,26 @@ body.modal-open {
 
 .vestaboard-preview--dashboard .vestaboard-cell {
     font-size: 0.95rem;
+}
+
+.vestaboard-cell--red {
+    background: #c43c3c;
+    color: transparent;
+}
+
+.vestaboard-cell--orange {
+    background: #d4782a;
+    color: transparent;
+}
+
+.vestaboard-cell--yellow {
+    background: #d4b42a;
+    color: transparent;
+}
+
+.vestaboard-cell--green {
+    background: #3a9e58;
+    color: transparent;
 }
 
 .papermono-device-list {

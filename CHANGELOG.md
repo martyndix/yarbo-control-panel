@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.22] - 2026-08-26
+
+### Added
+- Battery colour next to the percentage: green (≥60% / Full), yellow (≥40%), orange (≥20%), red (low). The Vestaboard Note uses the same scale as a colour chip on the battery line.
+- Error state is marked in red on the Status **Error** tile, and with red colour chips on the Vestaboard ERROR/CODE lines.
+
 ## [1.3.21] - 2026-08-26
 
 ### Changed

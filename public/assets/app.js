@@ -1764,8 +1764,23 @@ function formatUpdatedAt(iso) {
     }
 }
 
+function batteryLevelName(percent, chargingLabel) {
+    if (chargingLabel === 'Full') return 'green';
+    if (percent == null || percent === '') return '';
+    const n = Number(percent);
+    if (!Number.isFinite(n)) return '';
+    if (n >= 60) return 'green';
+    if (n >= 40) return 'yellow';
+    if (n >= 20) return 'orange';
+    return 'red';
+}
+
 function updateStatus(data) {
     els.battery.textContent = data.battery != null ? `${data.battery}%` : '—';
+    {
+        const level = batteryLevelName(data.battery, data.charging_label);
+        els.battery.className = level ? `value battery-level battery-level--${level}` : 'value';
+    }
     els.state.textContent = data.state ?? '—';
     els.state.className = `value badge${data.state === 'active' ? ' active' : ''}`;
     {
@@ -1779,6 +1794,8 @@ function updateStatus(data) {
         const err = data.error_code ?? '—';
         const pf = typeof data.power_fault === 'number' ? data.power_fault : null;
         els.errorCode.textContent = pf > 0 ? `${err} (power ${pf})` : String(err);
+        const hasError = Number(data.error_code) > 0 || pf > 0;
+        els.errorCode.className = hasError ? 'value is-error' : 'value';
     }
     els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
     updateRobotOnMap(data);
@@ -1884,7 +1901,7 @@ function updateVestaboardDashboard(data) {
     const enabled = Boolean(board?.enabled);
     els.vestaboardCard.classList.toggle('hidden', !enabled);
     if (!enabled) return;
-    renderVestaboardPreview(board.lines, els.vestaboardBoard);
+    renderVestaboardPreview(board.lines, els.vestaboardBoard, board.codes);
 }
 
 function formatCloudStatus(cloudStatus) {
@@ -2759,14 +2776,22 @@ function setVestaboardResult(message, type = null) {
     els.settingsVestaboardResult.classList.remove('hidden');
 }
 
-function renderVestaboardPreview(lines, target) {
+function renderVestaboardPreview(lines, target, codes) {
     const root = target || els.settingsVestaboardPreview;
     if (!root) return;
     const rows = Array.isArray(lines) ? lines : [];
+    const grid = Array.isArray(codes) ? codes : [];
+    const colorClass = { 63: 'red', 64: 'orange', 65: 'yellow', 66: 'green' };
     const cells = [];
     for (let r = 0; r < 3; r++) {
         const line = String(rows[r] || '').padEnd(15).slice(0, 15);
         for (let c = 0; c < 15; c++) {
+            const code = grid[r] && grid[r][c] != null ? Number(grid[r][c]) : null;
+            const color = colorClass[code];
+            if (color) {
+                cells.push(`<span class="vestaboard-cell vestaboard-cell--${color}" title="Battery ${color}"></span>`);
+                continue;
+            }
             const ch = line[c] === ' ' ? '' : line[c];
             cells.push(`<span class="vestaboard-cell">${escapeHtml(ch)}</span>`);
         }
@@ -2790,7 +2815,7 @@ async function loadVestaboardPreview() {
         const res = await fetch(`/api/vestaboard.php?action=preview&sample=${encodeURIComponent(sample)}`);
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Could not preview Vestaboard');
-        renderVestaboardPreview(data.lines);
+        renderVestaboardPreview(data.lines, els.settingsVestaboardPreview, data.codes);
         if (els.settingsVestaboardPreviewCaption) {
             const verb = data.verb ? ` ${data.verb}` : '';
             const source = sample === 'live' ? (data.online ? 'live' : 'offline') : 'sample';

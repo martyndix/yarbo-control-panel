@@ -15,6 +15,10 @@ final class YarboVestaboard
     public const MIN_SEND_GAP_SECONDS = 15.0;
     public const DEFAULT_HOST = 'vestaboard.local';
     public const DEFAULT_PORT = 7000;
+    public const COLOR_RED = 63;
+    public const COLOR_ORANGE = 64;
+    public const COLOR_YELLOW = 65;
+    public const COLOR_GREEN = 66;
 
     private const HEAD_SHORT = [
         'None' => '',
@@ -169,6 +173,7 @@ final class YarboVestaboard
         return [
             'enabled' => true,
             'lines' => $layout['lines'],
+            'codes' => $layout['codes'],
             'verb' => $layout['verb'],
         ];
     }
@@ -320,7 +325,7 @@ final class YarboVestaboard
     public function compose(?array $parsed, bool $online): array
     {
         if (!$online || $parsed === null) {
-            return $this->pack('OFFLINE', $this->pair('BATTERY', '--'), 'NO TELEMETRY');
+            return $this->pack('OFFLINE', $this->pair('BATTERY', '--', 14), 'NO TELEMETRY', self::COLOR_RED);
         }
 
         $errorCode = (int) ($parsed['error_code'] ?? 0);
@@ -332,31 +337,38 @@ final class YarboVestaboard
         $active = ($parsed['state'] ?? 'idle') === 'active';
         $headName = (string) ($parsed['head_type_name'] ?? '');
         $batteryLine = $this->batteryLine($parsed);
+        $batteryColor = $this->batteryColorCode($parsed);
 
         if ($errorCode !== 0) {
             $code = substr((string) $errorCode, 0, 6);
 
-            return $this->pack('ERROR', $this->pair('CODE', $code), 'STOPPED');
+            return $this->pack(
+                'ERROR',
+                $this->pair('CODE', $code, 14),
+                'STOPPED',
+                self::COLOR_RED,
+                self::COLOR_RED,
+            );
         }
         if ($returning) {
-            return $this->pack('DOCKING', $batteryLine, 'HEADING HOME');
+            return $this->pack('DOCKING', $batteryLine, 'HEADING HOME', $batteryColor);
         }
         if ($paused) {
-            return $this->pack('PAUSED', $batteryLine, 'PLAN HOLD');
+            return $this->pack('PAUSED', $batteryLine, 'PLAN HOLD', $batteryColor);
         }
         if ($charging && $chargingLabel !== 'Full') {
-            return $this->pack('CHARGING', $batteryLine, 'ON DOCK');
+            return $this->pack('CHARGING', $batteryLine, 'ON DOCK', $batteryColor);
         }
         if ($planRunning || $active) {
             $verb = $this->workingVerb($headName);
 
-            return $this->pack($verb, $batteryLine, $this->headLine($headName));
+            return $this->pack($verb, $batteryLine, $this->headLine($headName), $batteryColor);
         }
         if ($chargingLabel === 'Full') {
-            return $this->pack('IDLE', $this->pair('BATTERY', 'FULL'), 'CHARGED');
+            return $this->pack('IDLE', $this->batteryLine($parsed), 'CHARGED', $batteryColor);
         }
 
-        return $this->pack('IDLE', $batteryLine, 'READY');
+        return $this->pack('IDLE', $batteryLine, 'READY', $batteryColor);
     }
 
     /**
@@ -416,17 +428,29 @@ final class YarboVestaboard
     /**
      * @return array{lines: list<string>, codes: list<list<int>>, verb: string}
      */
-    private function pack(string $verb, string $line2, string $line3): array
+    private function pack(string $verb, string $line2, string $line3, int $line2Color = 0, int $line1Color = 0): array
     {
+        $line1Width = $line1Color !== 0 ? self::COLS - 1 : self::COLS;
+        $line2Text = $this->clip($line2);
+        if ($line2Color !== 0) {
+            $line2Text = substr($line2Text, 0, self::COLS - 1) . ' ';
+        }
         $lines = [
-            $this->pair('YARBO', $verb),
-            $this->clip($line2),
+            $this->pair('YARBO', $verb, $line1Width),
+            $line2Text,
             $this->clip($line3),
         ];
+        $codes = array_map(fn (string $line) => $this->encodeLine($line), $lines);
+        if ($line1Color !== 0) {
+            $codes[0][self::COLS - 1] = $line1Color;
+        }
+        if ($line2Color !== 0) {
+            $codes[1][self::COLS - 1] = $line2Color;
+        }
 
         return [
             'lines' => $lines,
-            'codes' => array_map(fn (string $line) => $this->encodeLine($line), $lines),
+            'codes' => $codes,
             'verb' => $verb,
         ];
     }
@@ -438,17 +462,48 @@ final class YarboVestaboard
     {
         $label = (string) ($parsed['charging_label'] ?? 'No');
         if ($label === 'Full') {
-            return $this->pair('BATTERY', 'FULL');
+            return $this->pair('BATTERY', 'FULL', 14);
         }
         $raw = $parsed['battery'] ?? null;
         if (!is_numeric($raw)) {
-            return $this->pair('BATTERY', '--');
+            return $this->pair('BATTERY', '--', 14);
         }
         $rounded = (int) (round(((int) $raw) / 5) * 5);
         $rounded = max(0, min(100, $rounded));
         $text = $rounded === 100 ? '100%' : (string) $rounded . '%';
 
-        return $this->pair('BATTERY', $text);
+        return $this->pair('BATTERY', $text, 14);
+    }
+
+    /**
+     * Vestaboard color chip for battery: green ≥60%, yellow ≥40%, orange ≥20%, else red.
+     *
+     * @param array<string, mixed>|null $parsed
+     */
+    public function batteryColorCode(?array $parsed): int
+    {
+        if ($parsed === null) {
+            return self::COLOR_RED;
+        }
+        if ((string) ($parsed['charging_label'] ?? '') === 'Full') {
+            return self::COLOR_GREEN;
+        }
+        $raw = $parsed['battery'] ?? null;
+        if (!is_numeric($raw)) {
+            return self::COLOR_RED;
+        }
+        $percent = (int) $raw;
+        if ($percent >= 60) {
+            return self::COLOR_GREEN;
+        }
+        if ($percent >= 40) {
+            return self::COLOR_YELLOW;
+        }
+        if ($percent >= 20) {
+            return self::COLOR_ORANGE;
+        }
+
+        return self::COLOR_RED;
     }
 
     private function workingVerb(string $headName): string
@@ -467,15 +522,16 @@ final class YarboVestaboard
         return $this->clip($short);
     }
 
-    private function pair(string $left, string $right): string
+    private function pair(string $left, string $right, int $width = self::COLS): string
     {
         $left = $this->sanitize($left);
         $right = $this->sanitize($right);
-        $gap = self::COLS - strlen($left) - strlen($right);
+        $width = max(1, min(self::COLS, $width));
+        $gap = $width - strlen($left) - strlen($right);
         if ($gap < 1) {
-            $keep = max(0, self::COLS - strlen($left) - 1);
+            $keep = max(0, $width - strlen($left) - 1);
             $right = substr($right, 0, $keep);
-            $gap = self::COLS - strlen($left) - strlen($right);
+            $gap = $width - strlen($left) - strlen($right);
         }
 
         return $left . str_repeat(' ', max(0, $gap)) . $right;
