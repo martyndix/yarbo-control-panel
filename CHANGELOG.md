@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.20] - 2026-08-26
+
+### Changed
+- Vestaboard dashboard card is flaps only — dropped the “Showing IDLE — same 3×15 layout” caption.
+
 ## [1.3.19] - 2026-08-26
 
 ### Added

@@ -84,7 +84,6 @@ const els = {
     settingsVestaboardSend: document.getElementById('settings-vestaboard-send'),
     vestaboardCard: document.getElementById('vestaboard-card'),
     vestaboardBoard: document.getElementById('vestaboard-board'),
-    vestaboardCaption: document.getElementById('vestaboard-caption'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -1886,12 +1885,6 @@ function updateVestaboardDashboard(data) {
     els.vestaboardCard.classList.toggle('hidden', !enabled);
     if (!enabled) return;
     renderVestaboardPreview(board.lines, els.vestaboardBoard);
-    if (els.vestaboardCaption) {
-        const verb = board.verb ? String(board.verb) : '';
-        els.vestaboardCaption.textContent = verb
-            ? `Showing ${verb} — same 3×15 layout as the Note`
-            : 'Same 3×15 layout as the Note';
-    }
 }
 
 function formatCloudStatus(cloudStatus) {
