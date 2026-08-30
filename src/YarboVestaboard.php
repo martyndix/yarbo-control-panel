@@ -503,9 +503,8 @@ final class YarboVestaboard
         if (!is_numeric($raw)) {
             return $this->pair('BATTERY', '--', 14);
         }
-        $rounded = (int) (round(((int) $raw) / 5) * 5);
-        $rounded = max(0, min(100, $rounded));
-        $text = $rounded === 100 ? '100%' : (string) $rounded . '%';
+        $percent = max(0, min(100, (int) $raw));
+        $text = $percent === 100 ? '100%' : (string) $percent . '%';
 
         return $this->pair('BATTERY', $text, 14);
     }

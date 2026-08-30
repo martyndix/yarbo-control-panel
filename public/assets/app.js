@@ -1834,6 +1834,21 @@ function formatUpdatedAt(iso) {
     }
 }
 
+function formatTimeAgo(iso) {
+    if (!iso) return { text: 'never', title: '' };
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return { text: 'never', title: String(iso) };
+    const secs = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+    let text = 'just now';
+    if (secs >= 30 && secs < 90) text = '1 minute ago';
+    else if (secs >= 90 && secs < 3600) text = `${Math.round(secs / 60)} minutes ago`;
+    else if (secs >= 3600 && secs < 5400) text = '1 hour ago';
+    else if (secs >= 5400 && secs < 86400) text = `${Math.round(secs / 3600)} hours ago`;
+    else if (secs >= 86400 && secs < 172800) text = '1 day ago';
+    else if (secs >= 172800) text = `${Math.round(secs / 86400)} days ago`;
+    return { text, title: date.toLocaleString() };
+}
+
 function batteryLevelName(percent, chargingLabel) {
     if (chargingLabel === 'Full') return 'green';
     if (percent == null || percent === '') return '';
@@ -1973,7 +1988,9 @@ function updateVestaboardDashboard(data) {
     if (!enabled) return;
     renderVestaboardPreview(board.lines, els.vestaboardBoard, board.codes);
     if (els.vestaboardUpdatedAt) {
-        els.vestaboardUpdatedAt.textContent = formatUpdatedAt(board.last_sent_at);
+        const rel = formatTimeAgo(board.last_sent_at);
+        els.vestaboardUpdatedAt.textContent = rel.text;
+        els.vestaboardUpdatedAt.title = rel.title;
     }
 }
 

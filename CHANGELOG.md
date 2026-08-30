@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.27] - 2026-08-30
+
+### Changed
+- Vestaboard dashboard shows **Last written** as how long ago (clock time on hover).
+- Vestaboard battery percent matches Status (no longer rounded to 5%).
+
 ## [1.3.26] - 2026-08-30
 
 ### Added

@@ -134,7 +134,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
             <div class="vestaboard-preview vestaboard-preview--dashboard" id="vestaboard-board" aria-label="Vestaboard Note 3 by 15 live display"></div>
-            <p class="updated">Last updated: <span id="vestaboard-updated-at">never</span></p>
+            <p class="updated">Last written: <span id="vestaboard-updated-at">never</span></p>
         </section>
 
         <section class="card panel-section diagnostics-card" data-panel-id="diagnostics">
