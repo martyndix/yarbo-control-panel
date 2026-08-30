@@ -194,6 +194,7 @@ final class YarboVestaboard
         }
         $usable = $online && is_array($parsed);
         $layout = $this->compose($usable ? $parsed : null, $usable);
+        $hash = hash('sha256', json_encode($layout['codes']));
 
         return [
             'enabled' => true,
@@ -201,6 +202,8 @@ final class YarboVestaboard
             'codes' => $layout['codes'],
             'verb' => $layout['verb'],
             'last_sent_at' => $config['last_sent_at'],
+            'pending' => $hash !== (string) $config['last_hash'],
+            'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
         ];
     }
 

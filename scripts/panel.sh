@@ -23,6 +23,7 @@ cleanup() {
     kill "${AGENT_PID}" 2>/dev/null || true
   fi
   if [[ -n "${VESTABOARD_PID:-}" ]]; then
+    pkill -P "${VESTABOARD_PID}" 2>/dev/null || true
     kill "${VESTABOARD_PID}" 2>/dev/null || true
   fi
 }
@@ -58,7 +59,12 @@ if ! yarbo_wait_mqtt_agent "${AGENT_PORT}" 10; then
 fi
 
 echo "==> Starting Vestaboard Note watcher"
-"$PHP_BIN" "${ROOT}/scripts/vestaboard_watch.php" &
+(
+  while true; do
+    "$PHP_BIN" "${ROOT}/scripts/vestaboard_watch.php" && echo "vestaboard_watch: reloading" || echo "vestaboard_watch: exited, restarting" >&2
+    sleep 1
+  done
+) &
 VESTABOARD_PID=$!
 
 echo "==> Starting panel on http://${HOST}:${PORT}"

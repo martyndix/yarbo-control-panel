@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.28] - 2026-08-30
+
+### Changed
+- Vestaboard dashboard pushes when the mockup is ahead of the Note, and the watcher reloads after a panel update so it is not stuck on old PHP.
+
 ## [1.3.27] - 2026-08-30
 
 ### Changed

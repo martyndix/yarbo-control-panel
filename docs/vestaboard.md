@@ -69,5 +69,5 @@ The Cloud API does not accept a blank board. Quiet hours configured in the Vesta
 ## Limits
 
 - Vestaboard **Note** only (3×15), not Flagship 6×22.
-- The watcher is started by `scripts/panel.sh`. A panel that is not started that way will only update when you click **Send now**.
+- The watcher is started by `scripts/panel.sh` and reloads if the Vestaboard PHP files change after a panel update. A panel that is not started that way will only update when you click **Send now**, or when the dashboard is open and the mockup is ahead of the Note.
 - If the board is unreachable, the watcher backs off and retries; MQTT is not blocked.

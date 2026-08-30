@@ -88,6 +88,7 @@ const els = {
     vestaboardCard: document.getElementById('vestaboard-card'),
     vestaboardBoard: document.getElementById('vestaboard-board'),
     vestaboardUpdatedAt: document.getElementById('vestaboard-updated-at'),
+    vestaboardUpdatedDetail: document.getElementById('vestaboard-updated-detail'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -221,6 +222,8 @@ let robotMarker = null;
 let headingLine = null;
 let mapHasCentered = false;
 let mapFullscreen = false;
+let vestaboardSyncAt = 0;
+let vestaboardSyncInFlight = false;
 let currentHeadType = null;
 let defaultDataSource = 'auto';
 let areasLayer = null;
@@ -1991,6 +1994,41 @@ function updateVestaboardDashboard(data) {
         const rel = formatTimeAgo(board.last_sent_at);
         els.vestaboardUpdatedAt.textContent = rel.text;
         els.vestaboardUpdatedAt.title = rel.title;
+    }
+    if (els.vestaboardUpdatedDetail) {
+        if (board.last_error) {
+            els.vestaboardUpdatedDetail.textContent = ` · ${board.last_error}`;
+        } else if (board.pending) {
+            els.vestaboardUpdatedDetail.textContent = ' · sending…';
+        } else {
+            els.vestaboardUpdatedDetail.textContent = '';
+        }
+    }
+    if (board.pending) {
+        syncVestaboardIfPending();
+    }
+}
+
+async function syncVestaboardIfPending() {
+    if (vestaboardSyncInFlight) return;
+    const now = Date.now();
+    if (now - vestaboardSyncAt < 15000) return;
+    vestaboardSyncAt = now;
+    vestaboardSyncInFlight = true;
+    try {
+        const res = await fetch('/api/vestaboard.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'send' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) {
+            vestaboardSyncAt = 0;
+        }
+    } catch {
+        vestaboardSyncAt = 0;
+    } finally {
+        vestaboardSyncInFlight = false;
     }
 }
 
