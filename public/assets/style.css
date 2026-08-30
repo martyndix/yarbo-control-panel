@@ -820,6 +820,10 @@ body.modal-open {
     cursor: pointer;
 }
 
+.vestaboard-transport {
+    margin: 0.15rem 0 0.85rem;
+}
+
 .map-fullscreen-btn {
     flex-shrink: 0;
     display: inline-flex;

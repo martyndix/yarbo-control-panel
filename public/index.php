@@ -509,12 +509,23 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-vestaboard-section">
                             <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
-                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/local-api/introduction" target="_blank" rel="noopener">Vestaboard Note</a> on your LAN (3×15 Local API). Host and key stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The panel pushes when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>
+                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The panel pushes when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-vestaboard-enabled" name="vestaboard_enabled">
                                 <span>Enable Vestaboard Note</span>
                             </label>
                             <div id="settings-vestaboard-fields" class="hidden">
+                                <div class="map-mode vestaboard-transport" role="radiogroup" aria-label="Vestaboard API">
+                                    <label>
+                                        <input type="radio" name="vestaboard-transport" value="local" checked>
+                                        Local API
+                                    </label>
+                                    <label>
+                                        <input type="radio" name="vestaboard-transport" value="cloud">
+                                        Cloud API
+                                    </label>
+                                </div>
+                                <div id="settings-vestaboard-local-fields">
                                 <label class="settings-field">
                                     <span class="label">Board IP or hostname</span>
                                     <input type="text" id="settings-vestaboard-host" name="vestaboard_host" autocomplete="off" spellcheck="false" placeholder="vestaboard.local">
@@ -526,6 +537,14 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <p class="hint">The Local API key is not in the Vestaboard app. Request a one-time enablement token from Vestaboard’s <a href="https://www.vestaboard.com/local-api" target="_blank" rel="noopener">Local API request form</a> (the Note must be paired and online). Vestaboard emails that token; it is <strong>not</strong> the key. On the same LAN, exchange it once:</p>
                                 <p class="hint"><code>curl -X POST -H "X-Vestaboard-Local-Api-Enablement-Token: YOUR_EMAIL_TOKEN" http://vestaboard.local:7000/local-api/enablement</code></p>
                                 <p class="hint">Paste the JSON <code>apiKey</code> here. If <code>vestaboard.local</code> fails, use the Note’s IPv4 address. Official steps: <a href="https://docs.vestaboard.com/docs/local-api/authentication/" target="_blank" rel="noopener">Local API authentication</a>.</p>
+                                </div>
+                                <div id="settings-vestaboard-cloud-fields" class="hidden">
+                                <label class="settings-field">
+                                    <span class="label">Cloud API token</span>
+                                    <input type="password" id="settings-vestaboard-cloud-token" name="vestaboard_cloud_token" autocomplete="off" placeholder="Leave blank to keep the saved token">
+                                </label>
+                                <p class="hint">Create a token in the Vestaboard app (<strong>Settings → Advanced</strong>) or the <a href="https://web.vestaboard.com/" target="_blank" rel="noopener">web app</a> API tab. Enable <strong>Read</strong> and <strong>Write</strong>. The token is shown once. Official docs: <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Cloud API</a> and <a href="https://docs.vestaboard.com/docs/read-write-api/authentication/" target="_blank" rel="noopener">authentication</a>. Test uses Read; Send uses Write. Quiet hours in the Vestaboard app can drop Cloud writes.</p>
+                                </div>
                                 <label class="settings-field">
                                     <span class="label">Preview</span>
                                     <select id="settings-vestaboard-sample">

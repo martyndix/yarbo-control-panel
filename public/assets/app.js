@@ -74,8 +74,11 @@ const els = {
     settingsCloudTest: document.getElementById('settings-cloud-test'),
     settingsVestaboardEnabled: document.getElementById('settings-vestaboard-enabled'),
     settingsVestaboardFields: document.getElementById('settings-vestaboard-fields'),
+    settingsVestaboardLocalFields: document.getElementById('settings-vestaboard-local-fields'),
+    settingsVestaboardCloudFields: document.getElementById('settings-vestaboard-cloud-fields'),
     settingsVestaboardHost: document.getElementById('settings-vestaboard-host'),
     settingsVestaboardKey: document.getElementById('settings-vestaboard-key'),
+    settingsVestaboardCloudToken: document.getElementById('settings-vestaboard-cloud-token'),
     settingsVestaboardSample: document.getElementById('settings-vestaboard-sample'),
     settingsVestaboardPreview: document.getElementById('settings-vestaboard-preview'),
     settingsVestaboardPreviewCaption: document.getElementById('settings-vestaboard-preview-caption'),
@@ -2590,10 +2593,12 @@ async function loadSettings() {
         if (els.settingsVestaboardEnabled) {
             els.settingsVestaboardEnabled.checked = Boolean(data.vestaboard?.enabled);
         }
+        setVestaboardTransport(data.vestaboard?.transport === 'cloud' ? 'cloud' : 'local');
         if (els.settingsVestaboardHost) {
             els.settingsVestaboardHost.value = data.vestaboard?.host || 'vestaboard.local';
         }
         if (els.settingsVestaboardKey) els.settingsVestaboardKey.value = '';
+        if (els.settingsVestaboardCloudToken) els.settingsVestaboardCloudToken.value = '';
         applyVestaboardEnabled();
         if (els.settingsCloudStatus) {
             if (data.cloud_status) {
@@ -2828,6 +2833,26 @@ async function revokePaperMono(id, button) {
 function applyVestaboardEnabled() {
     const on = Boolean(els.settingsVestaboardEnabled?.checked);
     els.settingsVestaboardFields?.classList.toggle('hidden', !on);
+    if (on) applyVestaboardTransport();
+}
+
+function vestaboardTransport() {
+    const checked = document.querySelector('input[name="vestaboard-transport"]:checked');
+    return checked?.value === 'cloud' ? 'cloud' : 'local';
+}
+
+function setVestaboardTransport(value) {
+    const next = value === 'cloud' ? 'cloud' : 'local';
+    document.querySelectorAll('input[name="vestaboard-transport"]').forEach((radio) => {
+        radio.checked = radio.value === next;
+    });
+    applyVestaboardTransport();
+}
+
+function applyVestaboardTransport() {
+    const cloud = vestaboardTransport() === 'cloud';
+    els.settingsVestaboardLocalFields?.classList.toggle('hidden', cloud);
+    els.settingsVestaboardCloudFields?.classList.toggle('hidden', !cloud);
 }
 
 function setVestaboardResult(message, type = null) {
@@ -2867,10 +2892,13 @@ function renderVestaboardPreview(lines, target, codes) {
 
 function vestaboardOverride() {
     const payload = {
+        transport: vestaboardTransport(),
         host: els.settingsVestaboardHost?.value.trim() || 'vestaboard.local',
     };
     const key = els.settingsVestaboardKey?.value ?? '';
     if (key !== '') payload.api_key = key;
+    const token = els.settingsVestaboardCloudToken?.value ?? '';
+    if (token !== '') payload.cloud_token = token;
     return payload;
 }
 
@@ -2897,7 +2925,9 @@ async function loadVestaboardPreview() {
 
 async function testVestaboardConnection(button) {
     if (button) button.disabled = true;
-    setVestaboardResult('Testing Vestaboard Local API…');
+    setVestaboardResult(vestaboardTransport() === 'cloud'
+        ? 'Testing Vestaboard Cloud API…'
+        : 'Testing Vestaboard Local API…');
     try {
         const res = await fetch('/api/vestaboard.php', {
             method: 'POST',
@@ -2961,6 +2991,7 @@ async function saveSettings(event) {
             cloud_email: cloudEmail,
             data_source: dataSource,
             vestaboard_enabled: Boolean(els.settingsVestaboardEnabled?.checked),
+            vestaboard_transport: vestaboardTransport(),
             vestaboard_host: els.settingsVestaboardHost?.value.trim() || 'vestaboard.local',
         };
         if (cloudPassword !== '') {
@@ -2969,6 +3000,10 @@ async function saveSettings(event) {
         const vestaboardKey = els.settingsVestaboardKey?.value ?? '';
         if (vestaboardKey !== '') {
             payload.vestaboard_api_key = vestaboardKey;
+        }
+        const vestaboardCloudToken = els.settingsVestaboardCloudToken?.value ?? '';
+        if (vestaboardCloudToken !== '') {
+            payload.vestaboard_cloud_token = vestaboardCloudToken;
         }
         const res = await fetch('/api/settings.php', {
             method: 'POST',
@@ -4042,6 +4077,9 @@ els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.cu
 els.settingsVestaboardEnabled?.addEventListener('change', () => {
     applyVestaboardEnabled();
     if (els.settingsVestaboardEnabled.checked) loadVestaboardPreview();
+});
+document.querySelectorAll('input[name="vestaboard-transport"]').forEach((radio) => {
+    radio.addEventListener('change', () => applyVestaboardTransport());
 });
 els.settingsVestaboardSample?.addEventListener('change', () => loadVestaboardPreview());
 els.settingsVestaboardTest?.addEventListener('click', (e) => testVestaboardConnection(e.currentTarget));

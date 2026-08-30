@@ -79,7 +79,7 @@ Open the panel in a browser and you can:
 - **Navigate to waypoints** — send the robot to a stored waypoint by index
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: status plus Stop / Dock / Pause / Lights. Flash and Wi-Fi from **Settings**. See [PaperMono](#papermono-companion-beta)
-- **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / error) over the Local API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
+- **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
 Opening the panel only watches live telemetry. It does **not** take the MQTT controller role, so a job already running in the official app should keep going. Starting a plan, going to a waypoint, or turning **Controller On** (needed for lights/drive) does take that role — only one app can command at a time.
@@ -129,7 +129,7 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 | **Python 3 + yarbo-data-sdk** | Optional — cloud map/plan reads (`./scripts/install.sh`) |
 | **Python 3 + python-yarbo** | Recommended for controls — MQTT agent (`scripts/mqtt_agent.py`); install puts it in `.venv` |
 | **PaperMono (optional)** | USB flash from Settings; **Install USB tools** adds `pyserial` + `esptool`. Building firmware needs PlatformIO. See [PaperMono](#papermono-companion-beta) |
-| **Vestaboard Note (optional)** | Same LAN + Local API key. Enable in Settings. See [Vestaboard Note](#vestaboard-note-optional) |
+| **Vestaboard Note (optional)** | Local API (LAN + local key) or Cloud API (Vestaboard token). Enable in Settings. See [Vestaboard Note](#vestaboard-note-optional) |
 | **ffmpeg** | Only relevant if experimenting with cameras (not working for most users — see below) |
 
 ---
@@ -186,7 +186,7 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
 | **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
 | **PaperMono (beta)** | Settings → PaperMono companion — USB flash + Wi-Fi. See [PaperMono](#papermono-companion-beta) |
-| **Vestaboard Note (optional)** | Settings → enable Vestaboard Note — Local API host + key. See [Vestaboard Note](#vestaboard-note-optional) |
+| **Vestaboard Note (optional)** | Settings → enable Vestaboard Note — Local or Cloud API. See [Vestaboard Note](#vestaboard-note-optional) |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
 | **Update panel** | Settings → **Panel updates**, or `./scripts/update.sh` (see [Updating](#updating-an-existing-install)) |
 
@@ -194,7 +194,7 @@ The install script runs `composer install`, creates `config.php` if missing, cre
 
 ## Vestaboard Note (optional)
 
-Push a 3×15 status line to a Vestaboard Note on your LAN via the [Local API](https://docs.vestaboard.com/docs/local-api/introduction). Enable it in **Settings → Vestaboard Note**, paste the local API key, and use the flap mockup. When enabled, the same board also appears as a dashboard section. The panel updates the Note when the message changes (at most every 15 seconds). Full walkthrough: [`docs/vestaboard.md`](docs/vestaboard.md).
+Push a 3×15 status line to a Vestaboard Note via the [Local API](https://docs.vestaboard.com/docs/local-api/introduction) on your LAN or Vestaboard’s [Cloud API](https://docs.vestaboard.com/docs/read-write-api/introduction/). Enable it in **Settings → Vestaboard Note**, choose Local or Cloud, paste the matching credential, and use the flap mockup. When enabled, the same board also appears as a dashboard section. The panel updates the Note when the message changes (at most every 15 seconds). Full walkthrough: [`docs/vestaboard.md`](docs/vestaboard.md).
 
 ## PaperMono companion (beta)
 

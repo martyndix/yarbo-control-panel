@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * Vestaboard Note (3×15) Local API: layout, encode, optional push.
+ * Vestaboard Note (3×15): layout, encode, optional push via Local or Cloud API.
  * https://docs.vestaboard.com/docs/local-api/introduction
+ * https://docs.vestaboard.com/docs/read-write-api/introduction/
  */
 final class YarboVestaboard
 {
@@ -15,6 +16,9 @@ final class YarboVestaboard
     public const MIN_SEND_GAP_SECONDS = 15.0;
     public const DEFAULT_HOST = 'vestaboard.local';
     public const DEFAULT_PORT = 7000;
+    public const TRANSPORT_LOCAL = 'local';
+    public const TRANSPORT_CLOUD = 'cloud';
+    public const CLOUD_URL = 'https://cloud.vestaboard.com/';
     public const COLOR_RED = 63;
     public const COLOR_ORANGE = 64;
     public const COLOR_YELLOW = 65;
@@ -48,9 +52,11 @@ final class YarboVestaboard
     /**
      * @return array{
      *   enabled: bool,
+     *   transport: string,
      *   host: string,
      *   port: int,
      *   api_key: string,
+     *   cloud_token: string,
      *   last_hash: string,
      *   last_sent_at: ?string,
      *   last_error: string
@@ -60,9 +66,11 @@ final class YarboVestaboard
     {
         $defaults = [
             'enabled' => false,
+            'transport' => self::TRANSPORT_LOCAL,
             'host' => self::DEFAULT_HOST,
             'port' => self::DEFAULT_PORT,
             'api_key' => '',
+            'cloud_token' => '',
             'last_hash' => '',
             'last_sent_at' => null,
             'last_error' => '',
@@ -82,9 +90,11 @@ final class YarboVestaboard
 
         return [
             'enabled' => (bool) ($decoded['enabled'] ?? false),
+            'transport' => $this->normalizeTransport($decoded['transport'] ?? $decoded['vestaboard_transport'] ?? self::TRANSPORT_LOCAL),
             'host' => trim((string) ($decoded['host'] ?? self::DEFAULT_HOST)) ?: self::DEFAULT_HOST,
             'port' => $port,
             'api_key' => (string) ($decoded['api_key'] ?? ''),
+            'cloud_token' => (string) ($decoded['cloud_token'] ?? ''),
             'last_hash' => (string) ($decoded['last_hash'] ?? ''),
             'last_sent_at' => isset($decoded['last_sent_at']) && is_string($decoded['last_sent_at'])
                 ? $decoded['last_sent_at']
@@ -118,15 +128,27 @@ final class YarboVestaboard
         if ($keyFromInput && $apiKey === '') {
             $apiKey = $current['api_key'];
         }
+        $tokenFromInput = array_key_exists('cloud_token', $input) || array_key_exists('vestaboard_cloud_token', $input);
+        $cloudToken = $tokenFromInput
+            ? (string) ($input['cloud_token'] ?? $input['vestaboard_cloud_token'] ?? '')
+            : $current['cloud_token'];
+        if ($tokenFromInput && $cloudToken === '') {
+            $cloudToken = $current['cloud_token'];
+        }
         $enabled = array_key_exists('enabled', $input) || array_key_exists('vestaboard_enabled', $input)
             ? (bool) ($input['enabled'] ?? $input['vestaboard_enabled'])
             : $current['enabled'];
+        $transport = array_key_exists('transport', $input) || array_key_exists('vestaboard_transport', $input)
+            ? $this->normalizeTransport($input['transport'] ?? $input['vestaboard_transport'] ?? $current['transport'])
+            : $current['transport'];
 
         $next = [
             'enabled' => $enabled,
+            'transport' => $transport,
             'host' => $host,
             'port' => $port,
             'api_key' => $apiKey,
+            'cloud_token' => $cloudToken,
             'last_hash' => (string) ($input['last_hash'] ?? $current['last_hash']),
             'last_sent_at' => $input['last_sent_at'] ?? $current['last_sent_at'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
@@ -148,9 +170,11 @@ final class YarboVestaboard
 
         return [
             'enabled' => $config['enabled'],
+            'transport' => $config['transport'],
             'host' => $config['host'],
             'port' => $config['port'],
             'api_key_set' => $config['api_key'] !== '',
+            'cloud_token_set' => $config['cloud_token'] !== '',
             'last_sent_at' => $config['last_sent_at'],
             'last_error' => $config['last_error'],
         ];
@@ -204,8 +228,9 @@ final class YarboVestaboard
         if (!$config['enabled']) {
             return ['ok' => true, 'skipped' => true];
         }
-        if ($config['api_key'] === '') {
-            return ['ok' => false, 'error' => 'Vestaboard Local API key is not set.'];
+        $missing = $this->missingCredentialError($config);
+        if ($missing !== null) {
+            return ['ok' => false, 'error' => $missing];
         }
 
         $layout = $this->layoutFromTelemetry();
@@ -225,15 +250,19 @@ final class YarboVestaboard
     public function testConnection(array $override = []): array
     {
         $config = $this->mergedConfig($override);
-        if ($config['api_key'] === '') {
-            return ['ok' => false, 'error' => 'Local API key is required.'];
+        $missing = $this->missingCredentialError($config);
+        if ($missing !== null) {
+            return ['ok' => false, 'error' => $missing];
         }
         $result = $this->http('GET', $config, null);
         if (!($result['ok'] ?? false)) {
             return $result;
         }
+        $label = $config['transport'] === self::TRANSPORT_CLOUD
+            ? 'Reached the Vestaboard Cloud API.'
+            : 'Reached the Vestaboard Local API.';
 
-        return ['ok' => true, 'message' => 'Reached the Vestaboard Local API.'];
+        return ['ok' => true, 'message' => $label];
     }
 
     /**
@@ -258,8 +287,12 @@ final class YarboVestaboard
     private function sendLayout(array $layout, bool $force, array $override = []): array
     {
         $config = $this->mergedConfig($override);
-        if ($config['api_key'] === '') {
-            return ['ok' => false, 'error' => 'Local API key is required.'];
+        $missing = $this->missingCredentialError($config);
+        if ($missing !== null) {
+            return ['ok' => false, 'error' => $missing];
+        }
+        if ($config['transport'] === self::TRANSPORT_CLOUD && !$this->layoutHasGlyph($layout['codes'])) {
+            return ['ok' => false, 'error' => 'Cloud API does not accept a blank board.'];
         }
         $hash = hash('sha256', json_encode($layout['codes']));
         if (!$force && $hash === $config['last_hash']) {
@@ -616,11 +649,26 @@ final class YarboVestaboard
 
     /**
      * @param array<string, mixed> $override
-     * @return array{enabled: bool, host: string, port: int, api_key: string, last_hash: string, last_sent_at: ?string, last_error: string}
+     * @return array{
+     *   enabled: bool,
+     *   transport: string,
+     *   host: string,
+     *   port: int,
+     *   api_key: string,
+     *   cloud_token: string,
+     *   last_hash: string,
+     *   last_sent_at: ?string,
+     *   last_error: string
+     * }
      */
     private function mergedConfig(array $override): array
     {
         $config = $this->load();
+        if (isset($override['transport']) || isset($override['vestaboard_transport'])) {
+            $config['transport'] = $this->normalizeTransport(
+                $override['transport'] ?? $override['vestaboard_transport'] ?? $config['transport']
+            );
+        }
         if (isset($override['host']) && is_string($override['host']) && trim($override['host']) !== '') {
             $config['host'] = trim($override['host']);
         }
@@ -633,8 +681,60 @@ final class YarboVestaboard
         if (isset($override['api_key']) && is_string($override['api_key']) && $override['api_key'] !== '') {
             $config['api_key'] = $override['api_key'];
         }
+        if (isset($override['cloud_token']) && is_string($override['cloud_token']) && $override['cloud_token'] !== '') {
+            $config['cloud_token'] = $override['cloud_token'];
+        }
 
         return $config;
+    }
+
+    private function normalizeTransport(mixed $value): string
+    {
+        return strtolower(trim((string) $value)) === self::TRANSPORT_CLOUD
+            ? self::TRANSPORT_CLOUD
+            : self::TRANSPORT_LOCAL;
+    }
+
+    /**
+     * @param array{transport: string, api_key: string, cloud_token: string} $config
+     */
+    private function missingCredentialError(array $config): ?string
+    {
+        if ($config['transport'] === self::TRANSPORT_CLOUD) {
+            return $config['cloud_token'] === '' ? 'Vestaboard Cloud API token is not set.' : null;
+        }
+
+        return $config['api_key'] === '' ? 'Vestaboard Local API key is not set.' : null;
+    }
+
+    /**
+     * @param list<list<int>> $codes
+     */
+    private function layoutHasGlyph(array $codes): bool
+    {
+        foreach ($codes as $row) {
+            foreach ($row as $code) {
+                if ((int) $code !== 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param list<list<int>>|null $body
+     * @param array{transport: string, host: string, port: int, api_key: string, cloud_token: string} $config
+     * @return array<string, mixed>
+     */
+    private function http(string $method, array $config, ?array $body): array
+    {
+        if (($config['transport'] ?? self::TRANSPORT_LOCAL) === self::TRANSPORT_CLOUD) {
+            return $this->httpCloud($method, $config, $body);
+        }
+
+        return $this->httpLocal($method, $config, $body);
     }
 
     /**
@@ -642,7 +742,7 @@ final class YarboVestaboard
      * @param array{host: string, port: int, api_key: string} $config
      * @return array<string, mixed>
      */
-    private function http(string $method, array $config, ?array $body): array
+    private function httpLocal(string $method, array $config, ?array $body): array
     {
         $host = $config['host'];
         if (!preg_match('/^[A-Za-z0-9._-]+$/', $host)) {
@@ -654,12 +754,50 @@ final class YarboVestaboard
             return ['ok' => false, 'error' => 'Could not encode Vestaboard payload.'];
         }
 
-        $headers = [
+        return $this->request($url, $method, [
             'X-Vestaboard-Local-Api-Key: ' . $config['api_key'],
             'Content-Type: application/json',
             'Accept: application/json',
-        ];
+        ], $payload, 'Vestaboard at ' . $host, 4, 8);
+    }
 
+    /**
+     * Cloud Read/Write API: GET/POST https://cloud.vestaboard.com/ with X-Vestaboard-Token.
+     *
+     * @param list<list<int>>|null $body
+     * @param array{cloud_token: string} $config
+     * @return array<string, mixed>
+     */
+    private function httpCloud(string $method, array $config, ?array $body): array
+    {
+        $payload = null;
+        if ($body !== null) {
+            $payload = json_encode(['characters' => $body]);
+            if ($payload === false) {
+                return ['ok' => false, 'error' => 'Could not encode Vestaboard payload.'];
+            }
+        }
+
+        return $this->request(self::CLOUD_URL, $method, [
+            'X-Vestaboard-Token: ' . $config['cloud_token'],
+            'Content-Type: application/json',
+            'Accept: application/json',
+        ], $payload, 'Vestaboard Cloud API', 6, 12);
+    }
+
+    /**
+     * @param list<string> $headers
+     * @return array<string, mixed>
+     */
+    private function request(
+        string $url,
+        string $method,
+        array $headers,
+        ?string $payload,
+        string $label,
+        int $connectTimeout,
+        int $timeout
+    ): array {
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
             if ($ch === false) {
@@ -669,8 +807,9 @@ final class YarboVestaboard
                 CURLOPT_CUSTOMREQUEST => $method,
                 CURLOPT_HTTPHEADER => $headers,
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => 4,
-                CURLOPT_TIMEOUT => 8,
+                CURLOPT_CONNECTTIMEOUT => $connectTimeout,
+                CURLOPT_TIMEOUT => $timeout,
+                CURLOPT_FOLLOWLOCATION => true,
             ]);
             if ($payload !== null) {
                 curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
@@ -680,25 +819,19 @@ final class YarboVestaboard
             $err = curl_error($ch);
             curl_close($ch);
             if ($raw === false) {
-                return ['ok' => false, 'error' => 'Could not reach Vestaboard at ' . $host . ': ' . $err];
-            }
-            if ($code === 503) {
-                return ['ok' => false, 'error' => 'Vestaboard rate-limited the write (wait 15 seconds).'];
-            }
-            if ($code < 200 || $code >= 300) {
-                return ['ok' => false, 'error' => 'Vestaboard HTTP ' . $code];
+                return ['ok' => false, 'error' => 'Could not reach ' . $label . ': ' . $err];
             }
 
-            return ['ok' => true];
+            return $this->httpStatusResult($code, is_string($raw) ? $raw : '');
         }
 
-        $headerStr = implode("\r\n", $headers);
         $opts = [
             'http' => [
                 'method' => $method,
-                'header' => $headerStr,
-                'timeout' => 8,
+                'header' => implode("\r\n", $headers),
+                'timeout' => $timeout,
                 'ignore_errors' => true,
+                'follow_location' => 1,
             ],
         ];
         if ($payload !== null) {
@@ -706,9 +839,55 @@ final class YarboVestaboard
         }
         $raw = @file_get_contents($url, false, stream_context_create($opts));
         if ($raw === false) {
-            return ['ok' => false, 'error' => 'Could not reach Vestaboard at ' . $host . '.'];
+            return ['ok' => false, 'error' => 'Could not reach ' . $label . '.'];
+        }
+        $code = 0;
+        if (function_exists('http_get_last_response_headers')) {
+            foreach (http_get_last_response_headers() ?: [] as $line) {
+                if (preg_match('/^HTTP\/\S+\s+(\d+)/', (string) $line, $matches)) {
+                    $code = (int) $matches[1];
+                }
+            }
+        }
+
+        return $this->httpStatusResult($code, is_string($raw) ? $raw : '');
+    }
+
+    private function httpStatusResult(int $code, string $raw): array
+    {
+        if ($code === 503) {
+            return ['ok' => false, 'error' => 'Vestaboard rate-limited the write (wait 15 seconds).'];
+        }
+        if ($code === 401) {
+            return ['ok' => false, 'error' => 'Vestaboard rejected the API credential.'];
+        }
+        if ($code === 403) {
+            return ['ok' => false, 'error' => 'Vestaboard token is missing the needed permission (Read for Test, Write for Send).'];
+        }
+        if ($code !== 0 && ($code < 200 || $code >= 300)) {
+            $hint = $this->shortHttpError($raw);
+
+            return ['ok' => false, 'error' => 'Vestaboard HTTP ' . $code . ($hint !== '' ? ': ' . $hint : '')];
         }
 
         return ['ok' => true];
+    }
+
+    private function shortHttpError(string $raw): string
+    {
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return '';
+        }
+        $decoded = json_decode($trimmed, true);
+        if (is_array($decoded)) {
+            foreach (['error', 'message', 'status'] as $key) {
+                if (isset($decoded[$key]) && is_string($decoded[$key]) && $decoded[$key] !== '') {
+                    return substr($decoded[$key], 0, 160);
+                }
+            }
+        }
+
+        return substr(preg_replace('/\s+/', ' ', $trimmed) ?? '', 0, 160);
     }
 }

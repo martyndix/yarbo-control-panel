@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.24] - 2026-08-30
+
+### Added
+- Vestaboard Note can use **Local API** or **Cloud API** (token from the Vestaboard app). Existing Local setups stay on Local.
+
 ## [1.3.23] - 2026-08-26
 
 ### Added
