@@ -6,6 +6,9 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+### Changed
+- Vestaboard rain layout is **IDLE** on the top line, attached head plus **RAIN** and a blue chip on the bottom (no DETECTED).
+
 ## [1.3.31] - 2026-08-30
 
 ### Changed

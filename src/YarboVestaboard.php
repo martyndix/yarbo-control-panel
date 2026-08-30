@@ -390,11 +390,18 @@ final class YarboVestaboard
             );
         }
         if ($rain) {
+            $head = $this->headLine($headName);
+            $maxHead = self::COLS - 6;
+            if (strlen($head) > $maxHead) {
+                $head = substr($head, 0, $maxHead);
+            }
+
             return $this->pack(
-                'RAIN',
+                'IDLE',
                 $batteryLine,
-                $paused ? 'PLAN HOLD' : 'DETECTED',
+                $this->pair($head, 'RAIN', self::COLS - 1),
                 $batteryColor,
+                0,
                 self::COLOR_BLUE,
             );
         }
@@ -464,11 +471,11 @@ final class YarboVestaboard
                 'charging_label' => 'Full',
                 'charging' => false,
                 'returning_to_dock' => false,
-                'planning_paused' => true,
+                'planning_paused' => false,
                 'plan_running' => false,
                 'rain_detected' => true,
                 'state' => 'rain',
-                'head_type_name' => 'Lawn Mower',
+                'head_type_name' => 'Lawn Mower Pro',
                 'battery' => 100,
             ], true),
             'error' => $this->compose([
@@ -489,17 +496,27 @@ final class YarboVestaboard
     /**
      * @return array{lines: list<string>, codes: list<list<int>>, verb: string}
      */
-    private function pack(string $verb, string $line2, string $line3, int $line2Color = 0, int $line1Color = 0): array
-    {
+    private function pack(
+        string $verb,
+        string $line2,
+        string $line3,
+        int $line2Color = 0,
+        int $line1Color = 0,
+        int $line3Color = 0,
+    ): array {
         $line1Width = $line1Color !== 0 ? self::COLS - 1 : self::COLS;
         $line2Text = $this->clip($line2);
         if ($line2Color !== 0) {
             $line2Text = substr($line2Text, 0, self::COLS - 1) . ' ';
         }
+        $line3Text = $this->clip($line3);
+        if ($line3Color !== 0) {
+            $line3Text = substr($line3Text, 0, self::COLS - 1) . ' ';
+        }
         $lines = [
             $this->pair('YARBO', $verb, $line1Width),
             $line2Text,
-            $this->clip($line3),
+            $line3Text,
         ];
         $codes = array_map(fn (string $line) => $this->encodeLine($line), $lines);
         if ($line1Color !== 0) {
@@ -507,6 +524,9 @@ final class YarboVestaboard
         }
         if ($line2Color !== 0) {
             $codes[1][self::COLS - 1] = $line2Color;
+        }
+        if ($line3Color !== 0) {
+            $codes[2][self::COLS - 1] = $line3Color;
         }
 
         return [
