@@ -203,7 +203,7 @@ final class YarboVestaboard
             'verb' => $layout['verb'],
             'last_sent_at' => $config['last_sent_at'],
             'pending' => $hash !== (string) $config['last_hash'],
-            'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
+            'last_error' => $this->publicLastError($config['last_error']),
         ];
     }
 
@@ -711,6 +711,22 @@ final class YarboVestaboard
         return $config['api_key'] === '' ? 'Vestaboard Local API key is not set.' : null;
     }
 
+    private function publicLastError(string $error): ?string
+    {
+        if ($error === '' || $this->isAlreadyOnBoardError($error)) {
+            return null;
+        }
+
+        return $error;
+    }
+
+    private function isAlreadyOnBoardError(string $error): bool
+    {
+        $lower = strtolower($error);
+
+        return str_contains($error, 'HTTP 409') || str_contains($lower, 'already displayed');
+    }
+
     /**
      * @param list<list<int>> $codes
      */
@@ -859,6 +875,9 @@ final class YarboVestaboard
 
     private function httpStatusResult(int $code, string $raw): array
     {
+        if ($code === 409) {
+            return ['ok' => true];
+        }
         if ($code === 503) {
             return ['ok' => false, 'error' => 'Vestaboard rate-limited the write (wait 15 seconds).'];
         }

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.29] - 2026-08-30
+
+### Changed
+- Vestaboard no longer shows an error when the Cloud API says that message is already on the Note (HTTP 409).
+
 ## [1.3.28] - 2026-08-30
 
 ### Changed
