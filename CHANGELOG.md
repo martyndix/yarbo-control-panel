@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.25] - 2026-08-30
+
+### Fixed
+- Vestaboard digits were one code too high (`100%` showed as `200%` on the Note). The panel mockup used the text string, so it looked correct.
+
 ## [1.3.24] - 2026-08-30
 
 ### Added

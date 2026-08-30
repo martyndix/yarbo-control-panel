@@ -620,7 +620,7 @@ final class YarboVestaboard
             return 36;
         }
         if ($ord >= 49 && $ord <= 57) {
-            return $ord - 21;
+            return $ord - 22;
         }
 
         return match ($ch) {
