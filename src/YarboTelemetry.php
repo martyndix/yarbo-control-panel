@@ -143,6 +143,7 @@ final class YarboTelemetry
             'rain_detected'       => $rain['rain_detected'],
             'rain_sensor'         => $rain['rain_sensor'],
             'rain_sensor_data'    => $rain['rain_sensor_data'],
+            'rain_fields'         => $rain['rain_fields'],
             'plan_status'         => [
                 'plan_id' => $stateMsg['plan_id'] ?? $stateMsg['planId'] ?? null,
                 'plan_percent' => isset($stateMsg['plan_percent']) ? (int) $stateMsg['plan_percent'] : (
@@ -540,48 +541,50 @@ final class YarboTelemetry
     /**
      * @param array<string, mixed> $raw
      * @param array<string, mixed> $stateMsg
-     * @return array{rain_detected: bool, rain_sensor: ?int, rain_sensor_data: ?float}
+     * @return array{
+     *     rain_detected: bool,
+     *     rain_sensor: ?int,
+     *     rain_sensor_data: ?float,
+     *     rain_fields: array<string, scalar>
+     * }
      */
     private static function parseRain(array $raw, array $stateMsg): array
     {
-        $headInfo = is_array($raw['mower_head_info01'] ?? null)
-            ? $raw['mower_head_info01']
-            : (is_array($raw['MowerHeadInfo01'] ?? null) ? $raw['MowerHeadInfo01'] : []);
-        $runningStatus = is_array($raw['RunningStatusMSG'] ?? null)
-            ? $raw['RunningStatusMSG']
-            : (is_array($raw['running_status'] ?? null) ? $raw['running_status'] : []);
-
-        $binary = $headInfo['rain_sensor']
-            ?? $headInfo['rain_detected']
-            ?? $stateMsg['rain_sensor']
-            ?? $raw['rain_sensor']
-            ?? null;
-        $rawValue = self::firstNumeric(
-            $runningStatus['rain_sensor_data'] ?? null,
-            $headInfo['rain_sensor_data'] ?? null,
-            $stateMsg['rain_sensor_data'] ?? null,
-            $raw['rain_sensor_data'] ?? null,
-        );
-
+        $fields = [];
         foreach (self::findRainHints($raw) as $path => $value) {
-            $leaf = strtolower((string) substr((string) strrchr('.' . $path, '.'), 1));
-            if (
-                $rawValue === null
-                && str_contains($leaf, 'sensor_data')
-                && is_numeric($value)
-            ) {
-                $rawValue = (float) $value;
+            if (is_array($value) || $value === null) {
+                continue;
             }
-            if (
-                $binary === null
-                && ($leaf === 'rain_sensor' || $leaf === 'rain_detected' || $leaf === 'rain')
-                && self::isBinaryLike($value)
-            ) {
-                $binary = $value;
+            if (is_bool($value) || is_int($value) || is_float($value) || is_string($value)) {
+                $fields[$path] = $value;
             }
         }
 
-        $detected = self::isBinaryLike($binary) && self::isActiveJobFlag($binary);
+        $flag = null;
+        $reading = null;
+        foreach ($fields as $path => $value) {
+            $leaf = strtolower((string) substr((string) strrchr('.' . $path, '.'), 1));
+            if (is_numeric($value) && str_contains($leaf, 'data')) {
+                $reading = (float) $value;
+                continue;
+            }
+            if (self::isBinaryLike($value)) {
+                $on = self::isActiveJobFlag($value);
+                if ($flag === null || $on) {
+                    $flag = $on ? 1 : 0;
+                }
+                continue;
+            }
+            if (!is_numeric($value)) {
+                continue;
+            }
+            $n = (float) $value;
+            if ($reading === null) {
+                $reading = $n;
+            }
+        }
+
+        $detected = $flag === 1 || ($reading !== null && $reading > 0);
         $pauseReason = (string) ($stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? '');
         $errorMessage = (string) ($stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? '');
         $pausedRaw = $stateMsg['planning_paused'] ?? '';
@@ -592,8 +595,9 @@ final class YarboTelemetry
 
         return [
             'rain_detected' => $detected,
-            'rain_sensor' => self::isBinaryLike($binary) ? (self::isActiveJobFlag($binary) ? 1 : 0) : null,
-            'rain_sensor_data' => $rawValue,
+            'rain_sensor' => $flag,
+            'rain_sensor_data' => $reading,
+            'rain_fields' => $fields,
         ];
     }
 

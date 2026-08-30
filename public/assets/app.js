@@ -17,6 +17,8 @@ const els = {
     heading: document.getElementById('heading'),
     headType: document.getElementById('head-type'),
     errorCode: document.getElementById('error-code'),
+    rain: document.getElementById('rain'),
+    rainSensor: document.getElementById('rain-sensor'),
     updatedAt: document.getElementById('updated-at'),
     errorBanner: document.getElementById('error-banner'),
     toast: document.getElementById('toast'),
@@ -1891,6 +1893,7 @@ function updateStatus(data) {
         const hasError = Number(data.error_code) > 0 || pf > 0;
         els.errorCode.className = hasError ? 'value is-error' : 'value';
     }
+    updateRainStatus(data);
     els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
     updateRobotOnMap(data);
     renderDiagnostics(data);
@@ -1951,6 +1954,43 @@ function renderDiagnostics(data) {
     if (els.netModuleStatus) {
         els.netModuleStatus.textContent = formatNetModuleStatus(network.net_module_status);
         els.netModuleStatus.classList.add('compact');
+    }
+}
+
+function formatRainLabel(data) {
+    const fields = data?.rain_fields && typeof data.rain_fields === 'object' ? data.rain_fields : {};
+    const hasFields = Object.keys(fields).length > 0;
+    const reading = data?.rain_sensor_data;
+    const detected = Boolean(data?.rain_detected);
+    const num = reading != null && Number.isFinite(Number(reading)) ? String(Number(reading)) : null;
+    if (!hasFields && num == null && !detected) {
+        return { text: '—', className: 'value' };
+    }
+    if (detected) {
+        return { text: num ? `Wet ${num}` : 'Wet', className: 'value badge rain' };
+    }
+    return { text: num ? `Dry ${num}` : 'Dry', className: 'value' };
+}
+
+function updateRainStatus(data) {
+    const label = formatRainLabel(data);
+    if (els.rain) {
+        els.rain.textContent = label.text;
+        els.rain.className = label.className;
+    }
+    if (els.rainSensor) {
+        const fields = data?.rain_fields && typeof data.rain_fields === 'object' ? data.rain_fields : {};
+        const paths = Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(', ');
+        if (paths) {
+            els.rainSensor.textContent = paths;
+            els.rainSensor.classList.add('compact');
+            els.rainSensor.title = paths;
+        } else if (data?.rain_sensor_data != null) {
+            els.rainSensor.textContent = String(data.rain_sensor_data);
+        } else {
+            els.rainSensor.textContent = '—';
+            els.rainSensor.removeAttribute('title');
+        }
     }
 }
 

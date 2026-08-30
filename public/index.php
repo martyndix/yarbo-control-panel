@@ -124,6 +124,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span class="label">Error</span>
                     <span id="error-code" class="value">—</span>
                 </div>
+                <div class="stat">
+                    <span class="label">Rain</span>
+                    <span id="rain" class="value">—</span>
+                </div>
             </div>
             <p class="updated">Last updated: <span id="updated-at">never</span></p>
         </section>
@@ -182,6 +186,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div class="stat">
                     <span class="label">Route Priority</span>
                     <span id="route-priority" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Rain Sensor</span>
+                    <span id="rain-sensor" class="value">—</span>
                 </div>
                 <div class="stat">
                     <span class="label">Net Module</span>

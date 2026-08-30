@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.31] - 2026-08-30
+
+### Changed
+- Rain on Status and the Vestaboard follows the wet sensor reading (any value above 0), not only a start-plan rain error. Status shows **Rain** (Wet / Dry) and Connection & Health shows the raw MQTT rain fields.
+
 ## [1.3.30] - 2026-08-30
 
 ### Fixed
