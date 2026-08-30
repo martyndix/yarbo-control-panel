@@ -188,7 +188,8 @@ final class YarboVestaboard
      */
     public function dashboardPayload(?array $parsed, bool $online): array
     {
-        if (!$this->load()['enabled']) {
+        $config = $this->load();
+        if (!$config['enabled']) {
             return ['enabled' => false];
         }
         $usable = $online && is_array($parsed);
@@ -199,6 +200,7 @@ final class YarboVestaboard
             'lines' => $layout['lines'],
             'codes' => $layout['codes'],
             'verb' => $layout['verb'],
+            'last_sent_at' => $config['last_sent_at'],
         ];
     }
 

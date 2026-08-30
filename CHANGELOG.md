@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.26] - 2026-08-30
+
+### Added
+- Vestaboard dashboard card shows when the Note was last updated.
+
 ## [1.3.25] - 2026-08-30
 
 ### Fixed

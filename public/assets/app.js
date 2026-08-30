@@ -87,6 +87,7 @@ const els = {
     settingsVestaboardSend: document.getElementById('settings-vestaboard-send'),
     vestaboardCard: document.getElementById('vestaboard-card'),
     vestaboardBoard: document.getElementById('vestaboard-board'),
+    vestaboardUpdatedAt: document.getElementById('vestaboard-updated-at'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -1971,6 +1972,9 @@ function updateVestaboardDashboard(data) {
     els.vestaboardCard.classList.toggle('hidden', !enabled);
     if (!enabled) return;
     renderVestaboardPreview(board.lines, els.vestaboardBoard, board.codes);
+    if (els.vestaboardUpdatedAt) {
+        els.vestaboardUpdatedAt.textContent = formatUpdatedAt(board.last_sent_at);
+    }
 }
 
 function formatCloudStatus(cloudStatus) {
