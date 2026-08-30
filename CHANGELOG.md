@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.33] - 2026-08-30
+
+### Changed
+- Status **STATE** shows **Rain** instead of **rain**.
+
 ## [1.3.32] - 2026-08-30
 
 ### Changed

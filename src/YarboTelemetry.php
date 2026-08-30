@@ -475,7 +475,7 @@ final class YarboTelemetry
         bool $rainDetected,
     ): string {
         if ($rainDetected) {
-            return 'rain';
+            return 'Rain';
         }
 
         $offPad = $chargingLabel === 'No';

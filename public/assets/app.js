@@ -1871,12 +1871,12 @@ function updateStatus(data) {
         const level = batteryLevelName(data.battery, data.charging_label);
         els.battery.className = level ? `value battery-level battery-level--${level}` : 'value';
     }
-    els.state.textContent = data.state ?? '—';
     {
         const state = data.state ?? '';
+        els.state.textContent = state.toLowerCase() === 'rain' ? 'Rain' : (state || '—');
         let stateClass = 'value badge';
         if (state === 'active') stateClass += ' active';
-        else if (state === 'rain') stateClass += ' rain';
+        else if (state.toLowerCase() === 'rain') stateClass += ' rain';
         els.state.className = stateClass;
     }
     {
