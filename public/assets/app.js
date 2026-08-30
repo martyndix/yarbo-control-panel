@@ -1870,7 +1870,13 @@ function updateStatus(data) {
         els.battery.className = level ? `value battery-level battery-level--${level}` : 'value';
     }
     els.state.textContent = data.state ?? '—';
-    els.state.className = `value badge${data.state === 'active' ? ' active' : ''}`;
+    {
+        const state = data.state ?? '';
+        let stateClass = 'value badge';
+        if (state === 'active') stateClass += ' active';
+        else if (state === 'rain') stateClass += ' rain';
+        els.state.className = stateClass;
+    }
     {
         const chargeLabel = data.charging_label || (data.charging ? 'Yes' : 'No');
         els.charging.textContent = chargeLabel;
@@ -1954,6 +1960,7 @@ function updatePlanActivity(data) {
     const parts = [];
     if (data.plan_running) parts.push('plan running');
     if (data.planning_paused) parts.push('paused');
+    if (data.rain_detected) parts.push('rain detected');
     if (data.returning_to_dock) parts.push('returning to dock');
 
     const planStatus = data.plan_status || {};
@@ -2931,7 +2938,7 @@ function renderVestaboardPreview(lines, target, codes) {
     if (!root) return;
     const rows = Array.isArray(lines) ? lines : [];
     const grid = Array.isArray(codes) ? codes : [];
-    const colorClass = { 63: 'red', 64: 'orange', 65: 'yellow', 66: 'green' };
+    const colorClass = { 63: 'red', 64: 'orange', 65: 'yellow', 66: 'green', 67: 'blue' };
     const cells = [];
     for (let r = 0; r < 3; r++) {
         const line = String(rows[r] || '').padEnd(15).slice(0, 15);
@@ -2939,7 +2946,7 @@ function renderVestaboardPreview(lines, target, codes) {
             const code = grid[r] && grid[r][c] != null ? Number(grid[r][c]) : null;
             const color = colorClass[code];
             if (color) {
-                cells.push(`<span class="vestaboard-cell vestaboard-cell--${color}" title="Battery ${color}"></span>`);
+                cells.push(`<span class="vestaboard-cell vestaboard-cell--${color}" title="${color}"></span>`);
                 continue;
             }
             const ch = line[c] === ' ' ? '' : line[c];

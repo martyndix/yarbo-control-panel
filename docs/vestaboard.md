@@ -26,7 +26,13 @@ BATTERY    FULL
 CHARGED
 ```
 
-Battery percent matches the Status tile (not rounded). A colour chip sits at the end of the battery line: green at 60% or more (and Full), yellow from 40%, orange from 20%, red below that. In an error state the Note shows red chips on the ERROR and CODE lines. Full uses the same rule as the panel (on the pad and capacity ≥ 95%). Updates are sent only when that 3-line message changes, and not more than once every 15 seconds (Vestaboard’s hardware rate limit).
+```
+YARBO      RAIN
+BATTERY    FULL
+DETECTED
+```
+
+Battery percent matches the Status tile (not rounded). A colour chip sits at the end of the battery line: green at 60% or more (and Full), yellow from 40%, orange from 20%, red below that. Rain uses a blue chip on the **RAIN** line. In an error state the Note shows red chips on the ERROR and CODE lines. Sitting Full on the charger is **IDLE**, even if the robot is still app-awake after a cancelled plan. Full uses the same rule as the panel (on the pad and capacity ≥ 95%). Updates are sent only when that 3-line message changes, and not more than once every 15 seconds (Vestaboard’s hardware rate limit).
 
 ## Setup (either API)
 

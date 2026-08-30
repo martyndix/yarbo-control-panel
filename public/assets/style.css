@@ -437,6 +437,11 @@ body.modal-open {
     color: #7ddea0;
 }
 
+.badge.rain {
+    background: #1a334d;
+    color: #7db8de;
+}
+
 .badge.connected {
     background: #1e4d32;
     color: #7ddea0;
@@ -1901,6 +1906,11 @@ body.map-is-fullscreen {
 
 .vestaboard-cell--green {
     background: #3a9e58;
+    color: transparent;
+}
+
+.vestaboard-cell--blue {
+    background: #2a6fd4;
     color: transparent;
 }
 

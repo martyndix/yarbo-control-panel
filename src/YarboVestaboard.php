@@ -23,6 +23,7 @@ final class YarboVestaboard
     public const COLOR_ORANGE = 64;
     public const COLOR_YELLOW = 65;
     public const COLOR_GREEN = 66;
+    public const COLOR_BLUE = 67;
 
     private const HEAD_SHORT = [
         'None' => '',
@@ -372,7 +373,7 @@ final class YarboVestaboard
         $returning = (bool) ($parsed['returning_to_dock'] ?? false);
         $paused = (bool) ($parsed['planning_paused'] ?? false);
         $planRunning = (bool) ($parsed['plan_running'] ?? false);
-        $active = ($parsed['state'] ?? 'idle') === 'active';
+        $rain = (bool) ($parsed['rain_detected'] ?? false);
         $headName = (string) ($parsed['head_type_name'] ?? '');
         $batteryLine = $this->batteryLine($parsed);
         $batteryColor = $this->batteryColorCode($parsed);
@@ -388,6 +389,15 @@ final class YarboVestaboard
                 self::COLOR_RED,
             );
         }
+        if ($rain) {
+            return $this->pack(
+                'RAIN',
+                $batteryLine,
+                $paused ? 'PLAN HOLD' : 'DETECTED',
+                $batteryColor,
+                self::COLOR_BLUE,
+            );
+        }
         if ($returning) {
             return $this->pack('DOCKING', $batteryLine, 'HEADING HOME', $batteryColor);
         }
@@ -397,7 +407,7 @@ final class YarboVestaboard
         if ($charging && $chargingLabel !== 'Full') {
             return $this->pack('CHARGING', $batteryLine, 'ON DOCK', $batteryColor);
         }
-        if ($planRunning || $active) {
+        if ($planRunning && $chargingLabel === 'No') {
             $verb = $this->workingVerb($headName);
 
             return $this->pack($verb, $batteryLine, $this->headLine($headName), $batteryColor);
@@ -444,9 +454,22 @@ final class YarboVestaboard
                 'returning_to_dock' => false,
                 'planning_paused' => false,
                 'plan_running' => false,
+                'rain_detected' => false,
                 'state' => 'idle',
                 'head_type_name' => 'Lawn Mower',
                 'battery' => 98,
+            ], true),
+            'rain' => $this->compose([
+                'error_code' => 0,
+                'charging_label' => 'Full',
+                'charging' => false,
+                'returning_to_dock' => false,
+                'planning_paused' => true,
+                'plan_running' => false,
+                'rain_detected' => true,
+                'state' => 'rain',
+                'head_type_name' => 'Lawn Mower',
+                'battery' => 100,
             ], true),
             'error' => $this->compose([
                 'error_code' => 12,

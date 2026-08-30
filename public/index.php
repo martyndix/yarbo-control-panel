@@ -553,6 +553,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <option value="mowing">Sample: mowing</option>
                                         <option value="charging">Sample: charging</option>
                                         <option value="idle">Sample: idle charged</option>
+                                        <option value="rain">Sample: rain</option>
                                         <option value="error">Sample: error</option>
                                     </select>
                                 </label>

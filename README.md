@@ -79,7 +79,7 @@ Open the panel in a browser and you can:
 - **Navigate to waypoints** — send the robot to a stored waypoint by index
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: status plus Stop / Dock / Pause / Lights. Flash and Wi-Fi from **Settings**. See [PaperMono](#papermono-companion-beta)
-- **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
+- **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / rain / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
 Opening the panel only watches live telemetry. It does **not** take the MQTT controller role, so a job already running in the official app should keep going. Starting a plan, going to a waypoint, or turning **Controller On** (needed for lights/drive) does take that role — only one app can command at a time.

@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.30] - 2026-08-30
+
+### Fixed
+- Status and Vestaboard no longer treat leftover app-awake (`working_state` 1) as mowing while the robot is Full on the charger (for example after a rain-blocked plan is cancelled).
+
+### Added
+- Vestaboard shows **RAIN** and a blue chip when rain is detected; Status **STATE** is `rain`.
+
 ## [1.3.29] - 2026-08-30
 
 ### Changed

@@ -75,6 +75,18 @@ final class YarboTelemetry
         $displayBattery = ($chargingLabel === 'Full' && $batteryInt !== null && $batteryInt >= 95)
             ? 100
             : $batteryInt;
+        $planningPaused = self::isPausedFlag($stateMsg['planning_paused'] ?? 0);
+        $planRunning = self::isActiveJobFlag($stateMsg['on_going_planning'] ?? 0);
+        $returningToDock = self::isActiveJobFlag($stateMsg['on_going_recharging'] ?? 0);
+        $rain = self::parseRain($raw, $stateMsg);
+        $displayState = self::displayState(
+            $workingState !== null ? (int) $workingState : null,
+            $chargingLabel,
+            $planRunning,
+            $planningPaused,
+            $returningToDock,
+            $rain['rain_detected'],
+        );
         $driveBlockedReason = null;
         if ($chargingStatusInt > 0 && $chargingLabel !== 'Full') {
             $driveBlockedReason = 'Robot is charging — unplug / leave the charger before manual drive.';
@@ -86,7 +98,7 @@ final class YarboTelemetry
         return [
             'battery'             => $displayBattery,
             'battery_raw'         => $batteryInt,
-            'state'               => $workingState === 1 ? 'active' : 'idle',
+            'state'               => $displayState,
             'working_state'       => $workingState !== null ? (int) $workingState : null,
             // HA: charging_status 2 = charging/docked. Do not use BodyMsg.recharge_state —
             // on some firmware it stays non-zero even when not on a pad/cable.
@@ -116,7 +128,7 @@ final class YarboTelemetry
             ],
             'head_type'           => $headType !== null ? (int) $headType : null,
             'head_type_name'      => self::HEAD_TYPES[(int) $headType] ?? 'Unknown',
-            'planning_paused'     => (bool) ($raw['StateMSG']['planning_paused'] ?? 0),
+            'planning_paused'     => $planningPaused,
             // car_controller is often false even when commands work; prefer working_state.
             'car_controller'      => (bool) ($raw['StateMSG']['car_controller'] ?? false),
             'machine_controller'  => isset($raw['StateMSG']['machine_controller'])
@@ -126,8 +138,11 @@ final class YarboTelemetry
             // joy_usb/joy_state are hub health flags — not a plugged-in gamepad.
             'joy_connected'       => false,
             'lights_on'           => self::parseLightsOn($raw),
-            'returning_to_dock'   => (bool) ($raw['StateMSG']['on_going_recharging'] ?? 0),
-            'plan_running'        => (bool) ($raw['StateMSG']['on_going_planning'] ?? 0),
+            'returning_to_dock'   => $returningToDock,
+            'plan_running'        => $planRunning,
+            'rain_detected'       => $rain['rain_detected'],
+            'rain_sensor'         => $rain['rain_sensor'],
+            'rain_sensor_data'    => $rain['rain_sensor_data'],
             'plan_status'         => [
                 'plan_id' => $stateMsg['plan_id'] ?? $stateMsg['planId'] ?? null,
                 'plan_percent' => isset($stateMsg['plan_percent']) ? (int) $stateMsg['plan_percent'] : (
@@ -445,6 +460,163 @@ final class YarboTelemetry
 
         return 'Yes';
     }
+
+    /**
+     * working_state 1 is app-awake (lights, leftover after cancel), not mowing.
+     * Sit Full on the pad as idle unless rain is detected.
+     */
+    private static function displayState(
+        ?int $workingState,
+        string $chargingLabel,
+        bool $planRunning,
+        bool $paused,
+        bool $returning,
+        bool $rainDetected,
+    ): string {
+        if ($rainDetected) {
+            return 'rain';
+        }
+
+        $offPad = $chargingLabel === 'No';
+        if ($returning && $offPad) {
+            return 'active';
+        }
+        if ($planRunning && !$paused && $offPad) {
+            return 'active';
+        }
+        if ($workingState === 1 && $offPad && !$paused) {
+            return 'active';
+        }
+
+        return 'idle';
+    }
+
+    /**
+     * True for 1 / true, not leftover WP/REC error strings on on_going_planning.
+     */
+    private static function isActiveJobFlag(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return (int) $value > 0;
+        }
+        if (is_string($value)) {
+            $trimmed = strtolower(trim($value));
+
+            return $trimmed === '1' || $trimmed === 'true' || $trimmed === 'yes' || $trimmed === 'on';
+        }
+
+        return false;
+    }
+
+    private static function isPausedFlag(mixed $value): bool
+    {
+        if (is_string($value)) {
+            $trimmed = strtolower(trim($value));
+
+            return $trimmed !== '' && !in_array($trimmed, ['0', 'false', 'no', 'off'], true);
+        }
+
+        return self::isActiveJobFlag($value);
+    }
+
+    private static function isBinaryLike(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return true;
+        }
+        if ($value === 0 || $value === 1 || $value === 0.0 || $value === 1.0) {
+            return true;
+        }
+        if (is_string($value)) {
+            return in_array(strtolower(trim($value)), ['0', '1', 'true', 'false', 'yes', 'no', 'on', 'off'], true);
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     * @param array<string, mixed> $stateMsg
+     * @return array{rain_detected: bool, rain_sensor: ?int, rain_sensor_data: ?float}
+     */
+    private static function parseRain(array $raw, array $stateMsg): array
+    {
+        $headInfo = is_array($raw['mower_head_info01'] ?? null)
+            ? $raw['mower_head_info01']
+            : (is_array($raw['MowerHeadInfo01'] ?? null) ? $raw['MowerHeadInfo01'] : []);
+        $runningStatus = is_array($raw['RunningStatusMSG'] ?? null)
+            ? $raw['RunningStatusMSG']
+            : (is_array($raw['running_status'] ?? null) ? $raw['running_status'] : []);
+
+        $binary = $headInfo['rain_sensor']
+            ?? $headInfo['rain_detected']
+            ?? $stateMsg['rain_sensor']
+            ?? $raw['rain_sensor']
+            ?? null;
+        $rawValue = self::firstNumeric(
+            $runningStatus['rain_sensor_data'] ?? null,
+            $headInfo['rain_sensor_data'] ?? null,
+            $stateMsg['rain_sensor_data'] ?? null,
+            $raw['rain_sensor_data'] ?? null,
+        );
+
+        foreach (self::findRainHints($raw) as $path => $value) {
+            $leaf = strtolower((string) substr((string) strrchr('.' . $path, '.'), 1));
+            if (
+                $rawValue === null
+                && str_contains($leaf, 'sensor_data')
+                && is_numeric($value)
+            ) {
+                $rawValue = (float) $value;
+            }
+            if (
+                $binary === null
+                && ($leaf === 'rain_sensor' || $leaf === 'rain_detected' || $leaf === 'rain')
+                && self::isBinaryLike($value)
+            ) {
+                $binary = $value;
+            }
+        }
+
+        $detected = self::isBinaryLike($binary) && self::isActiveJobFlag($binary);
+        $pauseReason = (string) ($stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? '');
+        $errorMessage = (string) ($stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? '');
+        $pausedRaw = $stateMsg['planning_paused'] ?? '';
+        $haystack = strtolower($pauseReason . ' ' . $errorMessage . ' ' . (is_string($pausedRaw) ? $pausedRaw : ''));
+        if (str_contains($haystack, 'rain')) {
+            $detected = true;
+        }
+
+        return [
+            'rain_detected' => $detected,
+            'rain_sensor' => self::isBinaryLike($binary) ? (self::isActiveJobFlag($binary) ? 1 : 0) : null,
+            'rain_sensor_data' => $rawValue,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private static function findRainHints(array $data, string $prefix = ''): array
+    {
+        $found = [];
+        foreach ($data as $key => $value) {
+            $path = $prefix === '' ? (string) $key : $prefix . '.' . $key;
+            if (str_contains(strtolower((string) $key), 'rain')) {
+                $found[$path] = $value;
+            }
+            if (is_array($value)) {
+                $found += self::findRainHints($value, $path);
+            }
+        }
+
+        return $found;
+    }
+
     private static function activeRouteInterface(mixed $route): ?string
     {
         if (!is_array($route)) {
