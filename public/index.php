@@ -527,7 +527,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-vestaboard-section">
                             <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
-                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The panel pushes when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>
+                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The Note updates in the background while the panel (or MQTT agent) is running — the browser does not need to stay open. Writes happen when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-vestaboard-enabled" name="vestaboard_enabled">
                                 <span>Enable Vestaboard Note</span>
@@ -570,6 +570,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <option value="mowing">Sample: mowing</option>
                                         <option value="charging">Sample: charging</option>
                                         <option value="idle">Sample: idle charged</option>
+                                        <option value="paused">Sample: paused / plan hold</option>
                                         <option value="rain">Sample: rain</option>
                                         <option value="error">Sample: error</option>
                                     </select>

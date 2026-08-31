@@ -226,7 +226,56 @@ write_status "restarting" "Restarting MQTT agent"
 yarbo_stop_mqtt_agent
 step "MQTT agent stopped"
 
+ensure_panel_sh_unit() {
+  local unit_path="/etc/systemd/system/${SERVICE_NAME}.service"
+  if [[ ! -f "$unit_path" ]]; then
+    return 0
+  fi
+  if grep -q 'scripts/panel.sh' "$unit_path"; then
+    return 0
+  fi
+  local owner php_bin host port
+  owner="$(grep -E '^User=' "$unit_path" | head -n1 | cut -d= -f2-)"
+  php_bin="$(grep -E '^Environment=YARBO_PHP_BIN=' "$unit_path" | head -n1 | cut -d= -f3-)"
+  host="$(grep -E '^Environment=YARBO_PANEL_HOST=' "$unit_path" | head -n1 | cut -d= -f3-)"
+  port="$(grep -E '^Environment=YARBO_PANEL_PORT=' "$unit_path" | head -n1 | cut -d= -f3-)"
+  [[ -n "$owner" ]] || owner="$(stat -c '%U' "$ROOT" 2>/dev/null || echo pi)"
+  [[ -n "$php_bin" ]] || php_bin="$(command -v php)"
+  [[ -n "$host" ]] || host="0.0.0.0"
+  [[ -n "$port" ]] || port="8080"
+  step "Updating systemd unit to start panel.sh (MQTT agent + Vestaboard watcher)"
+  local tmp
+  tmp="$(mktemp)"
+  cat > "$tmp" <<EOF
+[Unit]
+Description=Yarbo PHP Control Panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${owner}
+WorkingDirectory=${ROOT}
+Environment=YARBO_PANEL_HOST=${host}
+Environment=YARBO_PANEL_PORT=${port}
+Environment=YARBO_PHP_BIN=${php_bin}
+ExecStart=${ROOT}/scripts/panel.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  if sudo -n cp "$tmp" "$unit_path" 2>/dev/null && sudo -n systemctl daemon-reload 2>/dev/null; then
+    step "systemd unit now starts panel.sh"
+  else
+    step "Could not rewrite systemd unit — run: sudo ./scripts/install.sh"
+  fi
+  rm -f "$tmp"
+}
+
 if $SYSTEMD_ACTIVE; then
+  ensure_panel_sh_unit
   step "Restarting systemd service ${SERVICE_NAME}"
   write_status "restarting" "Restarting panel service"
   release_update_lock

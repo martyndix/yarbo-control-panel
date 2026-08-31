@@ -2048,6 +2048,8 @@ function updateVestaboardDashboard(data) {
             els.vestaboardUpdatedDetail.textContent = ` · ${board.last_error}`;
         } else if (board.pending) {
             els.vestaboardUpdatedDetail.textContent = ' · sending…';
+        } else if (board.watcher_ok === false) {
+            els.vestaboardUpdatedDetail.textContent = ' · background updater idle — restart the panel';
         } else {
             els.vestaboardUpdatedDetail.textContent = '';
         }

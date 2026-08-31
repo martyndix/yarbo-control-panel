@@ -4,6 +4,7 @@
 /**
  * Push Yarbo status to a Vestaboard Note when enabled in Settings.
  * Started by scripts/panel.sh next to the MQTT agent.
+ * The MQTT agent also runs `--once` as a backup if this loop is not running.
  * Exits 0 when source files change so panel.sh can reload new PHP.
  */
 
@@ -22,15 +23,43 @@ require $autoload;
 
 use Yarbo\YarboVestaboard;
 
+$once = in_array('--once', $argv, true);
 $board = new YarboVestaboard($root);
-$failStreak = 0;
+
+function vestaboard_run_tick(YarboVestaboard $board): void
+{
+    static $failStreak = 0;
+    try {
+        $result = $board->tick();
+        if (($result['ok'] ?? false)) {
+            $failStreak = 0;
+        } else {
+            $failStreak++;
+            if ($failStreak === 1 || $failStreak % 15 === 0) {
+                $err = (string) ($result['error'] ?? 'unknown');
+                fwrite(STDERR, 'vestaboard_watch: ' . $err . "\n");
+            }
+        }
+    } catch (Throwable $e) {
+        $failStreak++;
+        if ($failStreak === 1 || $failStreak % 15 === 0) {
+            fwrite(STDERR, 'vestaboard_watch: ' . $e->getMessage() . "\n");
+        }
+    }
+}
+
+if ($once) {
+    vestaboard_run_tick($board);
+    exit(0);
+}
+
 $startedAt = time();
 $watchFiles = [
     __FILE__,
-        $root . '/src/YarboVestaboard.php',
-        $root . '/src/YarboTelemetry.php',
-        $root . '/src/YarboRainSettings.php',
-        $root . '/data/rain-config.json',
+    $root . '/src/YarboVestaboard.php',
+    $root . '/src/YarboTelemetry.php',
+    $root . '/src/YarboRainSettings.php',
+    $root . '/data/rain-config.json',
 ];
 
 function vestaboard_watch_sources_changed(array $paths, int $startedAt): bool
@@ -49,26 +78,9 @@ while (true) {
         exit(0);
     }
 
-    try {
-        $result = $board->tick();
-        if (($result['ok'] ?? false)) {
-            $failStreak = 0;
-        } else {
-            $failStreak++;
-            if ($failStreak === 1 || $failStreak % 15 === 0) {
-                $err = (string) ($result['error'] ?? 'unknown');
-                fwrite(STDERR, 'vestaboard_watch: ' . $err . "\n");
-            }
-        }
-    } catch (Throwable $e) {
-        $failStreak++;
-        if ($failStreak === 1 || $failStreak % 15 === 0) {
-            fwrite(STDERR, 'vestaboard_watch: ' . $e->getMessage() . "\n");
-        }
-    }
+    vestaboard_run_tick($board);
 
-    $sleep = $failStreak >= 3 ? 60 : 20;
-    for ($i = 0; $i < $sleep; $i++) {
+    for ($i = 0; $i < 8; $i++) {
         if (vestaboard_watch_sources_changed($watchFiles, $startedAt)) {
             exit(0);
         }

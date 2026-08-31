@@ -50,6 +50,30 @@ final class YarboVestaboard
         return $this->dataDir() . '/vestaboard-config.json';
     }
 
+    public function heartbeatPath(): string
+    {
+        return $this->dataDir() . '/vestaboard-watch.heartbeat';
+    }
+
+    public function touchHeartbeat(): void
+    {
+        $dir = $this->dataDir();
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        @file_put_contents($this->heartbeatPath(), gmdate('c') . "\n", LOCK_EX);
+    }
+
+    public function watcherStale(int $maxAgeSeconds = 45): bool
+    {
+        $path = $this->heartbeatPath();
+        if (!is_file($path)) {
+            return true;
+        }
+
+        return (time() - (int) filemtime($path)) > $maxAgeSeconds;
+    }
+
     /**
      * @return array{
      *   enabled: bool,
@@ -178,6 +202,7 @@ final class YarboVestaboard
             'cloud_token_set' => $config['cloud_token'] !== '',
             'last_sent_at' => $config['last_sent_at'],
             'last_error' => $config['last_error'],
+            'watcher_ok' => !$this->watcherStale(),
         ];
     }
 
@@ -205,6 +230,7 @@ final class YarboVestaboard
             'last_sent_at' => $config['last_sent_at'],
             'pending' => $hash !== (string) $config['last_hash'],
             'last_error' => $this->publicLastError($config['last_error']),
+            'watcher_ok' => !$this->watcherStale(),
         ];
     }
 
@@ -230,6 +256,7 @@ final class YarboVestaboard
      */
     public function tick(): array
     {
+        $this->touchHeartbeat();
         $config = $this->load();
         if (!$config['enabled']) {
             return ['ok' => true, 'skipped' => true];
@@ -244,6 +271,9 @@ final class YarboVestaboard
             $this->save(['last_error' => (string) ($layout['error'] ?? 'Could not compose layout')]);
 
             return $layout;
+        }
+        if (!($layout['online'] ?? false)) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'offline'];
         }
 
         return $this->sendLayout($layout, false);
@@ -409,7 +439,7 @@ final class YarboVestaboard
             return $this->pack('DOCKING', $batteryLine, 'HEADING HOME', $batteryColor);
         }
         if ($paused) {
-            return $this->pack('PAUSED', $batteryLine, 'PLAN HOLD', $batteryColor);
+            return $this->packPaused($batteryLine, $batteryColor);
         }
         if ($charging && $chargingLabel !== 'Full') {
             return $this->pack('CHARGING', $batteryLine, 'ON DOCK', $batteryColor);
@@ -465,6 +495,17 @@ final class YarboVestaboard
                 'state' => 'idle',
                 'head_type_name' => 'Lawn Mower',
                 'battery' => 98,
+            ], true),
+            'paused' => $this->compose([
+                'error_code' => 0,
+                'charging_label' => 'No',
+                'charging' => false,
+                'returning_to_dock' => false,
+                'planning_paused' => true,
+                'plan_running' => true,
+                'state' => 'idle',
+                'head_type_name' => 'Lawn Mower',
+                'battery' => 81,
             ], true),
             'rain' => $this->compose([
                 'error_code' => 0,
@@ -534,6 +575,30 @@ final class YarboVestaboard
             'codes' => $codes,
             'verb' => $verb,
         ];
+    }
+
+    /**
+     * Center PLAN HOLD with yellow flaps on both sides.
+     *
+     * @return array{lines: list<string>, codes: list<list<int>>, verb: string}
+     */
+    private function packPaused(string $batteryLine, int $batteryColor): array
+    {
+        $packed = $this->pack('PAUSED', $batteryLine, str_repeat(' ', self::COLS), $batteryColor);
+        $phrase = 'PLAN HOLD';
+        $start = intdiv(self::COLS - strlen($phrase), 2);
+        $line3 = str_repeat(' ', $start) . $phrase . str_repeat(' ', self::COLS - $start - strlen($phrase));
+        $codes = $this->encodeLine($line3);
+        $end = $start + strlen($phrase);
+        for ($i = 0; $i < self::COLS; $i++) {
+            if ($i < $start || $i >= $end) {
+                $codes[$i] = self::COLOR_YELLOW;
+            }
+        }
+        $packed['lines'][2] = $line3;
+        $packed['codes'][2] = $codes;
+
+        return $packed;
     }
 
     /**

@@ -42,6 +42,7 @@ COMMUNITY_LIGHTS_OFF = {k: 0 for k in COMMUNITY_LIGHTS_ON}
 # Soft keepalive: re-wake / re-light without get_controller (get_controller speaks every time).
 CONTROLLER_KEEPALIVE_S = 40.0
 CONTROLLER_KEEPALIVE_MIN_GAP_S = 15.0
+VESTABOARD_TICK_S = 15.0
 # Firmware drops back to idle ~0.5s after a single wake. Hold awake until the job latches.
 WORK_STARTUP_S = 25.0
 WORK_STARTUP_KEEPALIVE_GAP_S = 1.5
@@ -1042,6 +1043,25 @@ async def connect_mqtt(client: Any) -> None:
             delay = min(15.0, delay * 1.5)
 
 
+async def vestaboard_tick_loop() -> None:
+    """Backup Note push if panel.sh is not running vestaboard_watch."""
+    php = os.environ.get("YARBO_PHP_BIN") or "php"
+    script = str(ROOT / "scripts" / "vestaboard_watch.php")
+    while True:
+        await asyncio.sleep(VESTABOARD_TICK_S)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                php,
+                script,
+                "--once",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=25.0)
+        except Exception as e:
+            log(f"vestaboard tick failed: {e}")
+
+
 async def amain() -> int:
     try:
         from yarbo.local import YarboLocalClient
@@ -1095,6 +1115,7 @@ async def amain() -> int:
 
     asyncio.create_task(connect_mqtt(client))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
+    asyncio.create_task(vestaboard_tick_loop())
 
     async with server:
         await server.serve_forever()

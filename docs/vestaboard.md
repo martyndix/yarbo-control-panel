@@ -34,7 +34,13 @@ BATTERY    FULL
 MOWER PRO  RAIN
 ```
 
-Battery percent matches the Status tile (not rounded). A colour chip sits at the end of the battery line: green at 60% or more (and Full), yellow from 40%, orange from 20%, red below that. Rain uses a blue chip on the bottom-right **RAIN** tile when the rain sensor is at or above the Yarbo app **Rain Sensitivity** slider (20–1000; set in panel Settings, or 20 if left blank). The top line stays **IDLE** and the third line shows the attached head. In an error state the Note shows red chips on the ERROR and CODE lines. Sitting on the charger is **CHARGING** (or **IDLE** when Full), even if `on_going_recharging` is still set after arrival. Sitting Full on the charger is **IDLE** when the sensor is dry, even if the robot is still app-awake after a cancelled plan. Full uses the same rule as the panel (on the pad and capacity ≥ 95%). Updates are sent only when that 3-line message changes, and not more than once every 15 seconds (Vestaboard’s hardware rate limit).
+```
+YARBO      PAUSED
+BATTERY     81%
+■■■PLAN HOLD■■■
+```
+
+Paused centres **PLAN HOLD** and fills the empty flaps with yellow. Battery percent matches the Status tile (not rounded). A colour chip sits at the end of the battery line: green at 60% or more (and Full), yellow from 40%, orange from 20%, red below that. Rain uses a blue chip on the bottom-right **RAIN** tile when the rain sensor is at or above the Yarbo app **Rain Sensitivity** slider (20–1000; set in panel Settings, or 20 if left blank). The top line stays **IDLE** and the third line shows the attached head. In an error state the Note shows red chips on the ERROR and CODE lines. Sitting on the charger is **CHARGING** (or **IDLE** when Full), even if `on_going_recharging` is still set after arrival. Sitting Full on the charger is **IDLE** when the sensor is dry, even if the robot is still app-awake after a cancelled plan. Full uses the same rule as the panel (on the pad and capacity ≥ 95%). Updates are sent only when that 3-line message changes, and not more than once every 15 seconds (Vestaboard’s hardware rate limit). The MQTT agent also pushes the Note, so it still updates if the browser is closed.
 
 ## Setup (either API)
 
@@ -77,5 +83,5 @@ The Cloud API does not accept a blank board. Quiet hours configured in the Vesta
 ## Limits
 
 - Vestaboard **Note** only (3×15), not Flagship 6×22.
-- The watcher is started by `scripts/panel.sh` (and the systemd service) and reloads if the Vestaboard PHP files change after a panel update. **The browser can be closed.** A panel that is not started that way will only update when you click **Send now**, or when the dashboard is open and the mockup is ahead of the Note.
+- The watcher is started by `scripts/panel.sh` (and the systemd service) and the MQTT agent also pushes about every 15 seconds. Reloads if the Vestaboard PHP files change after a panel update. **The browser can be closed.**
 - If the board is unreachable, the watcher backs off and retries; MQTT is not blocked.

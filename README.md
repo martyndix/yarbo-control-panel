@@ -194,7 +194,7 @@ The install script runs `composer install`, creates `config.php` if missing, cre
 
 ## Vestaboard Note (optional)
 
-Push a 3×15 status line to a Vestaboard Note via the [Local API](https://docs.vestaboard.com/docs/local-api/introduction) on your LAN or Vestaboard’s [Cloud API](https://docs.vestaboard.com/docs/read-write-api/introduction/). Enable it in **Settings → Vestaboard Note**, choose Local or Cloud, paste the matching credential, and use the flap mockup. When enabled, the same board also appears as a dashboard section. The Note updates in the background while the panel process is running (`scripts/panel.sh` / systemd) — the browser does not need to stay open. The panel writes when the message changes (at most every 15 seconds). Full walkthrough: [`docs/vestaboard.md`](docs/vestaboard.md).
+Push a 3×15 status line to a Vestaboard Note via the [Local API](https://docs.vestaboard.com/docs/local-api/introduction) on your LAN or Vestaboard’s [Cloud API](https://docs.vestaboard.com/docs/read-write-api/introduction/). Enable it in **Settings → Vestaboard Note**, choose Local or Cloud, paste the matching credential, and use the flap mockup. When enabled, the same board also appears as a dashboard section. The Note updates in the background while the panel or MQTT agent is running (`scripts/panel.sh` / systemd) — the browser does not need to stay open. The panel writes when the message changes (at most every 15 seconds). Full walkthrough: [`docs/vestaboard.md`](docs/vestaboard.md).
 
 <p align="center">
   <img src="docs/screenshots/vestaboard-note.jpg" alt="Vestaboard Note mockup — YARBO IDLE, battery 96% with a green chip, READY" width="480">

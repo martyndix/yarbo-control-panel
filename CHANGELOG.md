@@ -9,6 +9,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.37] - 2026-08-31
+
+### Changed
+- Vestaboard **PAUSED** centres **PLAN HOLD** with yellow tiles on both sides of the bottom row.
+
+### Fixed
+- **Vestaboard only updated while a browser tab was open**: a telemetry miss could skip the background writer, and older `php -S` units never started it. The watcher no longer overwrites the Note with OFFLINE on a single miss, ticks about every 8s, and the MQTT agent also pushes `--once` every 15s. Settings → Panel updates rewrites a leftover `php -S` unit to `panel.sh`.
+
 ## [1.3.36] - 2026-08-31
 
 ### Fixed
