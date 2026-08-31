@@ -546,10 +546,8 @@ function handle_request(
             $percent = max(0, min(100, (int) ($req['percent'] ?? 0)));
             $id = is_numeric($planId) ? (int) $planId : (string) $planId;
             publish($mqtt, $serial, 'cmd_vel', ['vel' => 0.0, 'rev' => 0.0]);
-            if (!$state['controlHold']) {
-                wake_for_work($mqtt, $loopStartedAt, $serial);
-            }
-            $state['workUntil'] = 0.0;
+            wake_for_work($mqtt, $loopStartedAt, $serial);
+            $state['workUntil'] = microtime(true) + 25.0;
             $state['lastWake'] = microtime(true);
             publish($mqtt, $serial, 'start_plan', ['planId' => $id, 'id' => $id, 'percent' => $percent]);
             pump($mqtt, $loopStartedAt, 0.5);
@@ -567,10 +565,8 @@ function handle_request(
 
         if ($op === 'return_to_dock') {
             publish($mqtt, $serial, 'cmd_vel', ['vel' => 0.0, 'rev' => 0.0]);
-            if (!$state['controlHold']) {
-                wake_for_work($mqtt, $loopStartedAt, $serial);
-            }
-            $state['workUntil'] = 0.0;
+            wake_for_work($mqtt, $loopStartedAt, $serial);
+            $state['workUntil'] = microtime(true) + 25.0;
             $state['lastWake'] = microtime(true);
             publish($mqtt, $serial, 'wireless_charging_cmd', ['cmd' => 0]);
             pump($mqtt, $loopStartedAt, 0.2);

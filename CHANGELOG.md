@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.35] - 2026-08-31
+
+### Fixed
+- **Start plan and return-to-dock did nothing while manual drive still worked**: the agent waited up to 12s for a robot ack while holding the MQTT lock, so keepalive could not keep `working_state` 1 and idle firmware dropped those jobs. They now send the official payloads immediately and keep the robot awake until planning or docking actually starts.
+
 ## [1.3.34] - 2026-08-31
 
 ### Changed

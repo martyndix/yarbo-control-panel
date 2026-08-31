@@ -3,7 +3,8 @@
 
 Does not claim get_controller on connect. Watching telemetry must not stop a job.
 Controller is claimed for explicit Controller/Lights or for work commands.
-Start plan / dock run on the live controller session and wait for data_feedback.
+Start plan / dock wake until the job latches, then stop poking. Do not wait
+on data_feedback while holding the agent lock (that blocks keepalive).
 
 Talks JSON-lines over TCP 127.0.0.1:8765 (same protocol as scripts/mqtt_agent.php).
 
@@ -319,54 +320,6 @@ async def assert_lights_on(client: Any) -> None:
 def start_plan_payload(plan_id: Any, percent: int) -> dict[str, Any]:
     nid: Any = int(plan_id) if str(plan_id).isdigit() else plan_id
     return {"planId": nid, "id": nid, "percent": max(0, min(100, int(percent)))}
-
-
-def extract_ack_msg(result: Any) -> str | None:
-    if result is None:
-        return None
-    raw = getattr(result, "raw", None)
-    if isinstance(raw, dict):
-        msg = raw.get("msg") or raw.get("message")
-        if msg:
-            return str(msg)
-        data = raw.get("data")
-        if isinstance(data, dict):
-            inner = data.get("msg") or data.get("message")
-            if inner:
-                return str(inner)
-    data = getattr(result, "data", None)
-    if isinstance(data, dict):
-        inner = data.get("msg") or data.get("message")
-        if inner:
-            return str(inner)
-    msg = getattr(result, "msg", None) or getattr(result, "message", None)
-    if msg:
-        return str(msg)
-    return None
-
-
-def ack_rejected(result: Any) -> bool:
-    """True when data_feedback arrived with a non-zero state."""
-    if result is None:
-        return False
-    success = getattr(result, "success", None)
-    return success is False
-
-
-async def prepare_job_on_live_session(client: Any, state: dict[str, Any]) -> None:
-    """Keep the Controller On session. Do not switch to work_hold."""
-    await ensure_controller_role(client)
-    if state.get("manual_drive"):
-        try:
-            await client.publish_command("cmd_vel", {"vel": 0.0, "rev": 0.0})
-        except Exception as e:
-            log(f"cmd_vel stop before job failed: {e}")
-        state["manual_drive"] = False
-    if not state.get("control_session"):
-        await wake_for_control(client)
-    state["work_hold"] = False
-    state["work_latched"] = True
-    state["keepalive_soon"] = False
 
 
 async def apply_command_session(
@@ -920,84 +873,39 @@ async def handle_request(
                 return {"ok": False, "error": "plan_id is required"}
             percent = max(0, min(100, int(req.get("percent") or 0)))
             combined = start_plan_payload(plan_id, percent)
-            await prepare_job_on_live_session(client, state)
-            ack_msg = None
-            used = "publish"
-            try:
-                result = await client.start_plan(str(plan_id))
-                ack_msg = extract_ack_msg(result)
-                used = "sdk_start_plan"
-                log(f"start_plan SDK ack plan={plan_id} msg={ack_msg!r}")
-                if ack_rejected(result):
-                    return {
-                        "ok": False,
-                        "error": ack_msg or "Robot rejected start_plan",
-                        "op": "start_plan",
-                        "cmd": "start_plan",
-                        "plan_id": combined["planId"],
-                        "percent": percent,
-                        "via": used,
-                        "ack_msg": ack_msg,
-                        **state_flags(state, client),
-                    }
-            except YarboTimeoutError:
-                log("start_plan SDK ack timeout; sending official planId+id+percent payload")
-                await client.publish_command("start_plan", combined)
-                used = "official_payload"
-            except Exception as e:
-                log(f"start_plan SDK failed ({e}); sending official payload")
-                await client.publish_command("start_plan", combined)
-                used = "official_payload"
-            await asyncio.sleep(0.2)
+            # Do not wait on SDK data_feedback here: handle_request holds the
+            # agent lock, so keepalive cannot wake the robot and idle firmware
+            # drops start_plan. Official payload + work-hold until latch.
+            await apply_command_session(client, state, "work", ["start_plan"])
+            await client.publish_command("start_plan", combined)
+            await asyncio.sleep(0.35)
+            await wake_for_control(client)
+            state["last_keepalive"] = time.time()
+            log(f"start_plan official payload plan={combined['planId']} percent={percent}")
             return {
                 "ok": True,
                 "op": "start_plan",
                 "cmd": "start_plan",
                 "plan_id": combined["planId"],
                 "percent": percent,
-                "via": used,
-                "ack_msg": ack_msg,
+                "via": "official_payload",
                 **state_flags(state, client),
             }
 
         if op == "return_to_dock":
-            await prepare_job_on_live_session(client, state)
-            ack_msg = None
-            used = "publish"
-            try:
-                result = await client.return_to_dock()
-                ack_msg = extract_ack_msg(result)
-                used = "sdk_return_to_dock"
-                log(f"return_to_dock SDK ack msg={ack_msg!r}")
-                if ack_rejected(result):
-                    return {
-                        "ok": False,
-                        "error": ack_msg or "Robot rejected return to dock",
-                        "op": "return_to_dock",
-                        "cmd": "cmd_recharge",
-                        "via": used,
-                        "ack_msg": ack_msg,
-                        **state_flags(state, client),
-                    }
-            except YarboTimeoutError:
-                log("return_to_dock SDK ack timeout; sending official wireless_charging_cmd + cmd_recharge")
-                await client.publish_command("wireless_charging_cmd", {"cmd": 0})
-                await asyncio.sleep(0.2)
-                await client.publish_command("cmd_recharge", {"cmd": 2})
-                used = "official_payload"
-            except Exception as e:
-                log(f"return_to_dock SDK failed ({e}); sending official payload")
-                await client.publish_command("wireless_charging_cmd", {"cmd": 0})
-                await asyncio.sleep(0.2)
-                await client.publish_command("cmd_recharge", {"cmd": 2})
-                used = "official_payload"
+            await apply_command_session(client, state, "work", ["cmd_recharge"])
+            await client.publish_command("wireless_charging_cmd", {"cmd": 0})
             await asyncio.sleep(0.2)
+            await client.publish_command("cmd_recharge", {"cmd": 2})
+            await asyncio.sleep(0.35)
+            await wake_for_control(client)
+            state["last_keepalive"] = time.time()
+            log("return_to_dock official wireless_charging_cmd 0 + cmd_recharge cmd=2")
             return {
                 "ok": True,
                 "op": "return_to_dock",
                 "cmd": "cmd_recharge",
-                "via": used,
-                "ack_msg": ack_msg,
+                "via": "official_payload",
                 **state_flags(state, client),
             }
 
