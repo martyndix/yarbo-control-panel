@@ -405,7 +405,7 @@ final class YarboVestaboard
                 self::COLOR_BLUE,
             );
         }
-        if ($returning) {
+        if ($returning && $chargingLabel === 'No') {
             return $this->pack('DOCKING', $batteryLine, 'HEADING HOME', $batteryColor);
         }
         if ($paused) {
