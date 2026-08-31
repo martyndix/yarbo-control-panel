@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.38] - 2026-08-31
+
+### Fixed
+- **Vestaboard stayed on DOCKING / HEADING HOME after a long charge** (Status Charging: No, battery already 99%): leftover `on_going_recharging` is ignored once the robot is sitting still at 95%+, and wireless pad current/voltage counts as on the dock even when `charging_status` stays 0. Status then shows Full; the Note shows **IDLE** / **CHARGED**.
+
 ## [1.3.37] - 2026-08-31
 
 ### Changed

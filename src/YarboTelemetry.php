@@ -78,13 +78,23 @@ final class YarboTelemetry
         $batteryStatus = isset($batteryMsg['status']) && is_numeric($batteryMsg['status'])
             ? (int) $batteryMsg['status']
             : null;
-        $chargingLabel = self::chargingDisplay($chargingStatusInt, $batteryInt);
+        $onPad = self::isOnChargePad($chargingStatusInt, $wirelessChargeVoltage, $wirelessChargeCurrent);
+        $chargingLabel = self::chargingDisplay($onPad, $batteryInt);
         $displayBattery = ($chargingLabel === 'Full' && $batteryInt !== null && $batteryInt >= 95)
             ? 100
             : $batteryInt;
         $planningPaused = self::isPausedFlag($stateMsg['planning_paused'] ?? 0);
         $planRunning = self::isActiveJobFlag($stateMsg['on_going_planning'] ?? 0);
-        $returningToDock = self::isActiveJobFlag($stateMsg['on_going_recharging'] ?? 0);
+        $stillManeuvering = ((int) ($workingState ?? 0) === 1)
+            || ($motionMotor !== null && abs((float) $motionMotor) > 0);
+        $sittingHighSoc = $batteryInt !== null && $batteryInt >= 95
+            && ($motionMotor === null || abs((float) $motionMotor) < 0.01);
+        // Leftover on_going_recharging stays set after arrival. Only treat as
+        // docking while off the pad, still awake/moving, and not sitting at Full SOC.
+        $returningToDock = self::isActiveJobFlag($stateMsg['on_going_recharging'] ?? 0)
+            && !$onPad
+            && $stillManeuvering
+            && !$sittingHighSoc;
         $rain = self::parseRain($raw, $stateMsg, $rainSensitivity);
         $displayState = self::displayState(
             $workingState !== null ? (int) $workingState : null,
@@ -95,7 +105,7 @@ final class YarboTelemetry
             $rain['rain_detected'],
         );
         $driveBlockedReason = null;
-        if ($chargingStatusInt > 0 && $chargingLabel !== 'Full') {
+        if ($onPad && $chargingLabel !== 'Full') {
             $driveBlockedReason = 'Robot is charging — unplug / leave the charger before manual drive.';
         } elseif ($powerFaultInt > 0) {
             $driveBlockedReason = 'Robot reports power_fault=' . $powerFaultInt
@@ -107,14 +117,13 @@ final class YarboTelemetry
             'battery_raw'         => $batteryInt,
             'state'               => $displayState,
             'working_state'       => $workingState !== null ? (int) $workingState : null,
-            // HA: charging_status 2 = charging/docked. Do not use BodyMsg.recharge_state —
-            // on some firmware it stays non-zero even when not on a pad/cable.
-            'charging'            => $chargingStatusInt > 0 && $chargingLabel !== 'Full',
+            // charging_status 2 = docked, or wireless pad current/voltage.
+            'charging'            => $onPad && $chargingLabel !== 'Full',
             'charging_label'      => $chargingLabel,
             'charging_status'     => $chargingStatusInt,
             'battery_status'      => $batteryStatus,
             'recharge_state'      => self::parseRechargeState($raw),
-            'on_charge_pad'       => false,
+            'on_charge_pad'       => $onPad,
             'drive_blocked_reason'=> $driveBlockedReason,
             'power_fault'         => $powerFaultInt,
             'motion_motor'        => $motionMotor !== null ? (int) $motionMotor : null,
@@ -452,15 +461,33 @@ final class YarboTelemetry
     }
 
     /**
+     * Pad presence: charging_status, or wireless current/voltage (status can stay 0 on inductive pad).
+     */
+    private static function isOnChargePad(int $chargingStatus, ?float $wirelessVoltage, ?float $wirelessCurrent): bool
+    {
+        if ($chargingStatus > 0) {
+            return true;
+        }
+        if ($wirelessCurrent !== null && abs($wirelessCurrent) >= 0.02) {
+            return true;
+        }
+        if ($wirelessVoltage !== null && $wirelessVoltage >= 5.0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Official app shows Fully charged / 100% when docked at high SOC.
      * MQTT capacity often sits around 95% and charging_status stays non-zero on the pad.
      * BatteryMSG.status is not a full-charge flag (it was showing Full at 25%).
      *
      * @return 'No'|'Yes'|'Full'
      */
-    private static function chargingDisplay(int $chargingStatus, ?int $capacity): string
+    private static function chargingDisplay(bool $onPad, ?int $capacity): string
     {
-        if ($chargingStatus <= 0) {
+        if (!$onPad) {
             return 'No';
         }
         if ($capacity !== null && $capacity >= 95) {
