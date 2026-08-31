@@ -151,7 +151,7 @@ final class YarboPaperDevice
         }
 
         $cells = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
-        $parsed = YarboTelemetry::parse($raw, $cells);
+        $parsed = YarboTelemetry::parseForPanel($raw, $cells, $this->projectRoot);
 
         return [
             'ok' => true,

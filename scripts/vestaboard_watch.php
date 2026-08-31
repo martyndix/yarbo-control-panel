@@ -27,7 +27,10 @@ $failStreak = 0;
 $startedAt = time();
 $watchFiles = [
     __FILE__,
-    $root . '/src/YarboVestaboard.php',
+        $root . '/src/YarboVestaboard.php',
+        $root . '/src/YarboTelemetry.php',
+        $root . '/src/YarboRainSettings.php',
+        $root . '/data/rain-config.json',
 ];
 
 function vestaboard_watch_sources_changed(array $paths, int $startedAt): bool

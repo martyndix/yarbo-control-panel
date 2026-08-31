@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.34] - 2026-08-31
+
+### Changed
+- Rain on Status and the Vestaboard matches the Yarbo app slider (20–1000). Readings below 20 always clear. Set the value in **Settings → Rain sensitivity** (blank = 20).
+- Vestaboard Settings layout no longer overlaps the token hint, preview caption, or buttons.
+
 ## [1.3.33] - 2026-08-30
 
 ### Changed

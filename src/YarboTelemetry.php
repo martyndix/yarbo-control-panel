@@ -23,7 +23,14 @@ final class YarboTelemetry
         'led_right_w',
     ];
 
-    public static function parse(array $raw, ?array $cellTemps = null): array
+    public static function parseForPanel(array $raw, ?array $cellTemps, string $projectRoot): array
+    {
+        $settings = new YarboRainSettings($projectRoot . '/data');
+
+        return self::parse($raw, $cellTemps, $settings->sensitivity());
+    }
+
+    public static function parse(array $raw, ?array $cellTemps = null, ?int $rainSensitivity = null): array
     {
         $battery = $raw['BatteryMSG']['capacity'] ?? null;
         $batteryMsg = is_array($raw['BatteryMSG'] ?? null) ? $raw['BatteryMSG'] : [];
@@ -78,7 +85,7 @@ final class YarboTelemetry
         $planningPaused = self::isPausedFlag($stateMsg['planning_paused'] ?? 0);
         $planRunning = self::isActiveJobFlag($stateMsg['on_going_planning'] ?? 0);
         $returningToDock = self::isActiveJobFlag($stateMsg['on_going_recharging'] ?? 0);
-        $rain = self::parseRain($raw, $stateMsg);
+        $rain = self::parseRain($raw, $stateMsg, $rainSensitivity);
         $displayState = self::displayState(
             $workingState !== null ? (int) $workingState : null,
             $chargingLabel,
@@ -143,6 +150,7 @@ final class YarboTelemetry
             'rain_detected'       => $rain['rain_detected'],
             'rain_sensor'         => $rain['rain_sensor'],
             'rain_sensor_data'    => $rain['rain_sensor_data'],
+            'rain_threshold'      => $rain['rain_threshold'],
             'rain_fields'         => $rain['rain_fields'],
             'plan_status'         => [
                 'plan_id' => $stateMsg['plan_id'] ?? $stateMsg['planId'] ?? null,
@@ -545,10 +553,11 @@ final class YarboTelemetry
      *     rain_detected: bool,
      *     rain_sensor: ?int,
      *     rain_sensor_data: ?float,
+     *     rain_threshold: int,
      *     rain_fields: array<string, scalar>
      * }
      */
-    private static function parseRain(array $raw, array $stateMsg): array
+    private static function parseRain(array $raw, array $stateMsg, ?int $configuredSensitivity = null): array
     {
         $fields = [];
         foreach (self::findRainHints($raw) as $path => $value) {
@@ -562,8 +571,19 @@ final class YarboTelemetry
 
         $flag = null;
         $reading = null;
+        $mqttThreshold = null;
         foreach ($fields as $path => $value) {
             $leaf = strtolower((string) substr((string) strrchr('.' . $path, '.'), 1));
+            if (
+                is_numeric($value)
+                && (str_contains($leaf, 'sensitivity') || str_contains($leaf, 'threshold'))
+            ) {
+                $candidate = YarboRainSettings::normalize($value);
+                if ($candidate !== null) {
+                    $mqttThreshold = $candidate;
+                }
+                continue;
+            }
             if (is_numeric($value) && str_contains($leaf, 'data')) {
                 $reading = (float) $value;
                 continue;
@@ -584,19 +604,32 @@ final class YarboTelemetry
             }
         }
 
-        $detected = $flag === 1 || ($reading !== null && $reading > 0);
-        $pauseReason = (string) ($stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? '');
-        $errorMessage = (string) ($stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? '');
-        $pausedRaw = $stateMsg['planning_paused'] ?? '';
-        $haystack = strtolower($pauseReason . ' ' . $errorMessage . ' ' . (is_string($pausedRaw) ? $pausedRaw : ''));
-        if (str_contains($haystack, 'rain')) {
-            $detected = true;
+        $threshold = $mqttThreshold ?? $configuredSensitivity ?? YarboRainSettings::DEFAULT;
+        $threshold = max(YarboRainSettings::MIN, min(YarboRainSettings::MAX, $threshold));
+
+        $belowFloor = $reading !== null && $reading < YarboRainSettings::MIN;
+        $detected = false;
+        if (!$belowFloor) {
+            if ($reading !== null && $reading >= $threshold) {
+                $detected = true;
+            }
+            if ($flag === 1 && ($reading === null || $reading >= YarboRainSettings::MIN)) {
+                $detected = true;
+            }
+            $pauseReason = (string) ($stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? '');
+            $errorMessage = (string) ($stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? '');
+            $pausedRaw = $stateMsg['planning_paused'] ?? '';
+            $haystack = strtolower($pauseReason . ' ' . $errorMessage . ' ' . (is_string($pausedRaw) ? $pausedRaw : ''));
+            if (str_contains($haystack, 'rain') && ($reading === null || $reading >= YarboRainSettings::MIN)) {
+                $detected = true;
+            }
         }
 
         return [
             'rain_detected' => $detected,
             'rain_sensor' => $flag,
             'rain_sensor_data' => $reading,
+            'rain_threshold' => $threshold,
             'rain_fields' => $fields,
         ];
     }

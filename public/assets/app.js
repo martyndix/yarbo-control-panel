@@ -87,6 +87,7 @@ const els = {
     settingsVestaboardResult: document.getElementById('settings-vestaboard-result'),
     settingsVestaboardTest: document.getElementById('settings-vestaboard-test'),
     settingsVestaboardSend: document.getElementById('settings-vestaboard-send'),
+    settingsRainSensitivity: document.getElementById('settings-rain-sensitivity'),
     vestaboardCard: document.getElementById('vestaboard-card'),
     vestaboardBoard: document.getElementById('vestaboard-board'),
     vestaboardUpdatedAt: document.getElementById('vestaboard-updated-at'),
@@ -2705,6 +2706,10 @@ async function loadSettings() {
         }
         if (els.settingsVestaboardKey) els.settingsVestaboardKey.value = '';
         if (els.settingsVestaboardCloudToken) els.settingsVestaboardCloudToken.value = '';
+        if (els.settingsRainSensitivity) {
+            const n = data.rain?.sensitivity;
+            els.settingsRainSensitivity.value = n != null ? String(n) : '';
+        }
         applyVestaboardEnabled();
         if (els.settingsCloudStatus) {
             if (data.cloud_status) {
@@ -3100,6 +3105,8 @@ async function saveSettings(event) {
             vestaboard_transport: vestaboardTransport(),
             vestaboard_host: els.settingsVestaboardHost?.value.trim() || 'vestaboard.local',
         };
+        const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
+        payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;
         if (cloudPassword !== '') {
             payload.cloud_password = cloudPassword;
         }

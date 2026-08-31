@@ -516,6 +516,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
                         </section>
 
+                        <section class="settings-section" id="settings-rain-section">
+                            <h3 class="settings-subtitle">Rain sensitivity</h3>
+                            <p class="hint">Match the Yarbo app <strong>Detection &amp; Rain Sensitivity</strong> slider (20–1000). Status and the Vestaboard only show rain when the sensor reading is at or above this value. Readings below 20 always clear (the app never blocks mowing there). Leave blank to use 20. If the robot publishes its slider over MQTT, that value is used instead.</p>
+                            <label class="settings-field">
+                                <span class="label">App slider value</span>
+                                <input type="number" id="settings-rain-sensitivity" name="rain_sensitivity" min="20" max="1000" step="1" placeholder="20" inputmode="numeric">
+                            </label>
+                        </section>
+
                         <section class="settings-section" id="settings-vestaboard-section">
                             <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
                             <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The panel pushes when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>

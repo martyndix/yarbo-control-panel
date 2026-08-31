@@ -44,7 +44,7 @@ function status_from_agent(array $result): void
         : null;
 
     $cellTemps = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
-    $parsed = YarboTelemetry::parse($raw, $cellTemps);
+    $parsed = YarboTelemetry::parseForPanel($raw, $cellTemps, dirname(__DIR__, 2));
     if (array_key_exists('lights_on', $result)) {
         $parsed['lights_on'] = (bool) $result['lights_on'];
     }
@@ -170,7 +170,7 @@ try {
         ], 504);
     }
 
-    $parsed = YarboTelemetry::parse($raw, $cellTemps);
+    $parsed = YarboTelemetry::parseForPanel($raw, $cellTemps, dirname(__DIR__, 2));
     json_response(array_merge(
         ['ok' => true, 'via' => 'direct'],
         $parsed,

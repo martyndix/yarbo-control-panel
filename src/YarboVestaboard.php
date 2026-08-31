@@ -351,7 +351,7 @@ final class YarboVestaboard
             return ['ok' => true, 'online' => false] + $layout;
         }
         $cells = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
-        $parsed = YarboTelemetry::parse($raw, $cells);
+        $parsed = YarboTelemetry::parseForPanel($raw, $cells, $this->projectRoot);
         $layout = $this->compose($parsed, true);
 
         return ['ok' => true, 'online' => true] + $layout;
