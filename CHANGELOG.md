@@ -6,6 +6,9 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+### Changed
+- README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
+
 ## [1.3.34] - 2026-08-31
 
 ### Changed
