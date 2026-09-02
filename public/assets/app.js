@@ -2809,7 +2809,7 @@ async function loadPaperMonoDashboard() {
             const built = data.firmware_built
                 ? 'built on this host'
                 : 'not built yet — run pio in firmware/papermono before flashing';
-            els.papermonoFwStatus.textContent = `Firmware ${data.firmware_version || '0.1.1-beta'} (${built}).`;
+            els.papermonoFwStatus.textContent = `Firmware ${data.firmware_version || '0.1.2-beta'} (${built}).`;
         }
         renderPaperMonoDevices(data.devices);
     } catch (err) {

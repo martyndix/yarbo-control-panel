@@ -59,6 +59,16 @@ if ($method === 'GET' && $action === 'compact') {
     json_response($devices->compactStatus());
 }
 
+if ($method === 'GET' && $action === 'plans') {
+    $device = $devices->findByToken(device_token_from_request());
+    if ($device === null) {
+        json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
+    }
+    $devices->touch((string) $device['id'], isset($_GET['fw']) ? (string) $_GET['fw'] : null);
+    $refresh = isset($_GET['refresh']) && $_GET['refresh'] !== '0';
+    json_response($devices->compactPlans($refresh));
+}
+
 if ($method === 'GET' && $action === 'firmware') {
     $device = $devices->findByToken(device_token_from_request());
     if ($device === null) {
@@ -126,6 +136,7 @@ if ($action === 'command') {
         'lights_off' => 'lights_off',
         'buzzer' => 'buzzer',
         'controller_on' => 'controller_on',
+        'start_plan' => 'start_plan',
     ];
     if (!isset($allowed[$cmd])) {
         json_response(['ok' => false, 'error' => 'Unsupported command'], 400);
@@ -150,6 +161,12 @@ if ($action === 'command') {
         $result = $agent->stop();
     } elseif ($mapped === 'pause') {
         $result = $agent->publishVariants(YarboCommands::pauseVariants(), 'work');
+    } elseif ($mapped === 'start_plan') {
+        $planId = $input['plan_id'] ?? $input['planId'] ?? null;
+        if ($planId === null || $planId === '') {
+            json_response(['ok' => false, 'error' => 'plan_id is required'], 400);
+        }
+        $result = $agent->startPlan(is_numeric($planId) ? (int) $planId : (string) $planId, 0);
     } else {
         $result = $agent->publishVariants([['cmd' => 'resume', 'payload' => []]], 'work');
     }

@@ -601,31 +601,116 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-papermono-section">
                             <h3 class="settings-subtitle">PaperMono companion <span class="settings-beta-badge">Beta</span></h3>
-                            <p class="hint">Built for <a href="https://docs.m5stack.com/en/core/PaperMono" target="_blank" rel="noopener">M5Stack PaperMono SKU C153</a> (<a href="https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display" target="_blank" rel="noopener">shop</a>): ESP32-S3R8, 3.97″ 480×800 SSD1677 e-paper, FT6336G touch, 2.4 GHz Wi-Fi. Not PaperMono-Lite. It has no browser — this panel flashes native firmware over USB, then the device talks HTTP JSON to the panel (the panel stays the MQTT brain). Status plus Stop / Dock / Pause / Lights only. No map, cameras, plans, or hold-to-drive. See <code>docs/papermono.md</code>.</p>
+                            <p class="hint">Built for <a href="https://docs.m5stack.com/en/core/PaperMono" target="_blank" rel="noopener">M5Stack PaperMono SKU C153</a> (<a href="https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display" target="_blank" rel="noopener">shop</a>): ESP32-S3R8, 3.97″ 480×800 SSD1677 e-paper, FT6336G touch, 2.4 GHz Wi-Fi. Not PaperMono-Lite. It has no browser — this panel flashes native firmware over USB, then the device talks HTTP JSON to the panel (the panel stays the MQTT brain). Home is Stop / Dock / Pause / Lights. Hardware keys cycle Home, Status, Health, and Plans (start a work plan from that page). No map, cameras, or hold-to-drive. See <code>docs/papermono.md</code>.</p>
                             <div class="papermono-preview-grid" aria-hidden="true">
                                 <figure class="papermono-preview">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-                                        <text x="24" y="48" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
-                                        <text x="24" y="76" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.1-beta</text>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
+                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOME</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">87%</text>
                                         <text x="24" y="240" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging  No</text>
                                         <text x="24" y="280" font-family="ui-monospace, monospace" font-size="22" fill="#111">State     idle</text>
                                         <text x="24" y="320" font-family="ui-monospace, monospace" font-size="22" fill="#111">Head      Mower</text>
                                         <text x="24" y="360" font-family="ui-monospace, monospace" font-size="22" fill="#111">Error     0</text>
-                                        <rect x="24" y="520" width="208" height="88" rx="12" fill="#111"/>
-                                        <text x="128" y="574" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700" fill="#f4f1e8">STOP</text>
-                                        <rect x="248" y="520" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="352" y="574" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700" fill="#111">DOCK</text>
-                                        <rect x="24" y="620" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="128" y="674" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PAUSE</text>
-                                        <rect x="248" y="620" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="352" y="674" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LIGHTS</text>
-                                        <text x="24" y="776" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#444">192.168.1.50</text>
-                                        <text x="456" y="776" text-anchor="end" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#444">tap · e-paper</text>
+                                        <rect x="24" y="500" width="208" height="88" rx="12" fill="#111"/>
+                                        <text x="128" y="554" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700" fill="#f4f1e8">STOP</text>
+                                        <rect x="248" y="500" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="352" y="554" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700" fill="#111">DOCK</text>
+                                        <rect x="24" y="600" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="128" y="654" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PAUSE</text>
+                                        <rect x="248" y="600" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="352" y="654" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LIGHTS</text>
+                                        <rect x="16" y="760" width="100" height="18" fill="#111"/>
+                                        <text x="66" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#f4f1e8">HOME</text>
+                                        <text x="180" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">STATUS</text>
+                                        <text x="300" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">HEALTH</text>
+                                        <text x="414" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">PLANS</text>
+                                        <text x="24" y="792" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">192.168.1.50</text>
+                                        <text x="456" y="792" text-anchor="end" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">keys · pages</text>
                                     </svg>
-                                    <figcaption>Home — 480×800 portrait, battery and four buttons</figcaption>
+                                    <figcaption>Home — battery and Stop / Dock / Pause / Lights</figcaption>
+                                </figure>
+                                <figure class="papermono-preview">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono status screen mock">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
+                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">STATUS</text>
+                                        <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">100%</text>
+                                        <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">State      idle</text>
+                                        <text x="24" y="288" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging   Full</text>
+                                        <text x="24" y="328" font-family="ui-monospace, monospace" font-size="22" fill="#111">Heading    219.6 deg</text>
+                                        <text x="24" y="368" font-family="ui-monospace, monospace" font-size="22" fill="#111">Head       Lawn Mower Pro</text>
+                                        <text x="24" y="408" font-family="ui-monospace, monospace" font-size="22" fill="#111">Error      0</text>
+                                        <text x="24" y="448" font-family="ui-monospace, monospace" font-size="22" fill="#111">Rain       Dry 6</text>
+                                        <text x="66" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">HOME</text>
+                                        <rect x="130" y="760" width="100" height="18" fill="#111"/>
+                                        <text x="180" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#f4f1e8">STATUS</text>
+                                        <text x="300" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">HEALTH</text>
+                                        <text x="414" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">PLANS</text>
+                                        <text x="24" y="792" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">192.168.1.50</text>
+                                        <text x="456" y="792" text-anchor="end" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">keys · pages</text>
+                                    </svg>
+                                    <figcaption>Status — same tiles as the web Status card</figcaption>
+                                </figure>
+                                <figure class="papermono-preview">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono connection and health screen mock">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
+                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HEALTH</text>
+                                        <text x="24" y="140" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn type  HaLow</text>
+                                        <text x="24" y="176" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn stat  Connected</text>
+                                        <text x="24" y="212" font-family="ui-monospace, monospace" font-size="20" fill="#111">WiFi       BarnNet</text>
+                                        <text x="24" y="248" font-family="ui-monospace, monospace" font-size="20" fill="#111">Signal     82% (Excellent)</text>
+                                        <text x="24" y="284" font-family="ui-monospace, monospace" font-size="20" fill="#111">Security   WPA2</text>
+                                        <text x="24" y="320" font-family="ui-monospace, monospace" font-size="20" fill="#111">Batt temp  21.4°C · 16 cells</text>
+                                        <text x="24" y="356" font-family="ui-monospace, monospace" font-size="20" fill="#111">Pad        20.10V / 0.40A</text>
+                                        <text x="24" y="392" font-family="ui-monospace, monospace" font-size="20" fill="#111">RTK        4 (fix 4)</text>
+                                        <text x="24" y="428" font-family="ui-monospace, monospace" font-size="20" fill="#111">RTCM age   1</text>
+                                        <text x="24" y="464" font-family="ui-monospace, monospace" font-size="20" fill="#111">Route      HaLow</text>
+                                        <text x="24" y="500" font-family="ui-monospace, monospace" font-size="20" fill="#111">Rain sns   6</text>
+                                        <text x="24" y="536" font-family="ui-monospace, monospace" font-size="20" fill="#111">Net mod    LTE connected</text>
+                                        <text x="66" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">HOME</text>
+                                        <text x="180" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">STATUS</text>
+                                        <rect x="250" y="760" width="100" height="18" fill="#111"/>
+                                        <text x="300" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#f4f1e8">HEALTH</text>
+                                        <text x="414" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">PLANS</text>
+                                        <text x="24" y="792" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">192.168.1.50</text>
+                                        <text x="456" y="792" text-anchor="end" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">keys · pages</text>
+                                    </svg>
+                                    <figcaption>Health — Connection &amp; Health tiles</figcaption>
+                                </figure>
+                                <figure class="papermono-preview">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono work plans screen mock">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
+                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PLANS</text>
+                                        <text x="24" y="124" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">idle</text>
+                                        <rect x="24" y="150" width="432" height="44" rx="10" fill="#111"/>
+                                        <text x="40" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" fill="#f4f1e8">Front lawn</text>
+                                        <rect x="24" y="202" width="432" height="44" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="40" y="232" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" fill="#111">Back garden</text>
+                                        <rect x="24" y="254" width="432" height="44" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="40" y="284" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" fill="#111">Orchard edge</text>
+                                        <rect x="24" y="500" width="208" height="72" rx="12" fill="#111"/>
+                                        <text x="128" y="544" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#f4f1e8">START</text>
+                                        <text x="66" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">HOME</text>
+                                        <text x="180" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">STATUS</text>
+                                        <text x="300" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">HEALTH</text>
+                                        <rect x="364" y="760" width="100" height="18" fill="#111"/>
+                                        <text x="414" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#f4f1e8">PLANS</text>
+                                        <text x="24" y="792" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">192.168.1.50</text>
+                                        <text x="456" y="792" text-anchor="end" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">keys · pages</text>
+                                    </svg>
+                                    <figcaption>Plans — tap a row, then START</figcaption>
                                 </figure>
                                 <figure class="papermono-preview">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono setup screen mock, portrait">

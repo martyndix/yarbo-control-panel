@@ -78,7 +78,7 @@ Open the panel in a browser and you can:
 - **Head-specific controls** — mower blade height/speed or snow chute angle when the attached head is detected
 - **Navigate to waypoints** — send the robot to a stored waypoint by index
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
-- **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: status plus Stop / Dock / Pause / Lights. Flash and Wi-Fi from **Settings**. See [PaperMono](#papermono-companion-beta)
+- **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: Home (Stop / Dock / Pause / Lights), plus Status, Health, and Plans pages. Flash and Wi-Fi from **Settings**. See [PaperMono](#papermono-companion-beta)
 - **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / rain / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
@@ -205,7 +205,7 @@ Push a 3×15 status line to a Vestaboard Note via the [Local API](https://docs.v
 
 Built for **[M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono)** ([shop listing](https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display)): 3.97″ **480×800** portrait 4-level grayscale e-paper (ESP32-S3R8, SSD1677, FT6336G touch, NFC + LoRa on the board). Not [PaperMono-Lite (C153-Lite)](https://docs.m5stack.com/en/core/PaperMono-Lite). It has **no web browser**, so this panel flashes a small native firmware over USB. After that, the tablet polls the panel over Wi-Fi (HTTP JSON). The panel remains the MQTT brain.
 
-**On the e-ink screen:** battery, charging, state, head, error — plus large **Stop**, **Dock**, **Pause**, and **Lights**. No map, cameras, plans, or hold-to-drive (e-ink is too slow).
+**On the e-ink screen:** Home still has battery plus **Stop**, **Dock**, **Pause**, and **Lights**. The two user keys cycle **Home → Status → Health → Plans** (and back). Status and Health show the same tiles as the web cards. Plans lists work plans — tap a row, then **START**. No map, cameras, or hold-to-drive (e-ink is too slow).
 
 1. Plug the PaperMono into the computer that runs this panel.
 2. Open **Settings → PaperMono companion**.
@@ -214,12 +214,15 @@ Built for **[M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperM
 Build the binary once on that host (`pip3 install platformio && pio run -d firmware/papermono`). If USB ports fail to list, use **Install USB tools** on that Settings page (`pyserial` + `esptool`). Full walkthrough: [`docs/papermono.md`](docs/papermono.md).
 
 <p align="center">
-  <img src="docs/screenshots/papermono-home.png" alt="PaperMono e-ink home mock — battery 87%, Stop and Dock buttons" width="720">
+  <img src="docs/screenshots/papermono-home.png" alt="PaperMono e-ink home mock — battery 87%, Stop and Dock buttons" width="240">
+  <img src="docs/screenshots/papermono-status.png" alt="PaperMono e-ink status mock — 100 percent, idle, Full, Dry 6" width="240">
+  <img src="docs/screenshots/papermono-health.png" alt="PaperMono e-ink health mock — HaLow, WiFi, RTK" width="240">
+  <img src="docs/screenshots/papermono-plans.png" alt="PaperMono e-ink work plans mock — Front lawn selected, START" width="240">
 </p>
-<p align="center"><em>Home (mock) — battery and the four large buttons. Not a photo of a flashed device.</em></p>
+<p align="center"><em>Home, Status, Health, and Plans (mocks). Hardware keys change page. Not photos of a flashed device.</em></p>
 
 <p align="center">
-  <img src="docs/screenshots/papermono-setup.png" alt="PaperMono e-ink first-boot setup mock with USB cable" width="720">
+  <img src="docs/screenshots/papermono-setup.png" alt="PaperMono e-ink first-boot setup mock with USB cable" width="240">
 </p>
 <p align="center"><em>First boot (mock) — until Wi-Fi is sent over USB from Settings.</em></p>
 

@@ -9,6 +9,7 @@
 /data/php-server.log
 /data/.update-running
 /data/papermono-devices.json
+/data/papermono-plans.json
 /data/vestaboard-config.json
 /data/robot-name.json
 /data/vestaboard-watch.heartbeat

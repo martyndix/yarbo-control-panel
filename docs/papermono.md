@@ -23,19 +23,28 @@ It has **no browser**. This panel flashes native firmware over USB from **Settin
 
 This is **beta**. Treat it as a companion, not a replacement for the web UI or the official app.
 
-Home and first-boot mocks (not photos of a flashed unit):
+Home and extra-page mocks (not photos of a flashed unit):
 
 ![PaperMono home mock](screenshots/papermono-home.png)
+
+![PaperMono status mock](screenshots/papermono-status.png)
+
+![PaperMono health mock](screenshots/papermono-health.png)
+
+![PaperMono work plans mock](screenshots/papermono-plans.png)
 
 ![PaperMono setup mock](screenshots/papermono-setup.png)
 
 ## What it shows
 
-- Battery, charging, working state, attached head, error code
-- Large buttons: **Stop**, **Dock**, **Pause** / **Resume**, **Lights**
-- If M5Unified maps them, the two hardware keys also send Stop and Dock
+- **Home:** battery, charging, working state, attached head, error code, and large **Stop**, **Dock**, **Pause** / **Resume**, **Lights**
+- **Status:** the same tiles as the web Status card (including heading and rain)
+- **Health:** the same tiles as Connection & Health (Wi-Fi, pad, RTK, and so on)
+- **Plans:** named work plans. Tap a row to select, tap **START** to run it from 0% (same MQTT start as the web panel)
+- The two hardware keys cycle **Home → Status → Health → Plans**. Stop / Dock are Home buttons only.
+- Tap above the Home buttons (or the pager on other pages) also changes page if the keys are not mapped.
 
-It does **not** include map, cameras, plans, or hold-to-drive. E-paper is too slow for those. NFC, LoRa, mic, IMU, and the SD slot are unused in this firmware.
+It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, LoRa, mic, IMU, and the SD slot are unused in this firmware.
 
 ## E-paper care (manufacturer)
 
@@ -82,9 +91,9 @@ On the **same machine that runs the panel**:
 
 ## Runtime
 
-The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`).
+The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. The Plans page also calls `GET /api/device.php?action=plans` (cached on the Pi for about five minutes). Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`, `start_plan` with `plan_id`).
 
-Those commands use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Firmware later can pull `GET /api/device.php?action=firmware` for OTA; that is not wired in 0.1.0-beta yet.
+Those commands use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Firmware later can pull `GET /api/device.php?action=firmware` for OTA; that is not wired in 0.1.2-beta yet.
 
 ## Limits
 

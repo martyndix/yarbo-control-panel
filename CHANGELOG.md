@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.41] - 2026-09-02
+
+### Added
+- **PaperMono extra pages** (firmware **0.1.2-beta**): hardware keys cycle **Home → Status → Health → Plans**. Status and Health match the web cards. Plans lists saved work plans; tap a row then **START** (same MQTT start as the web panel). Stop / Dock / Pause / Lights stay on Home. Reflash the tablet after the panel update.
+
 ## [1.3.40] - 2026-09-02
 
 ### Changed
