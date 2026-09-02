@@ -7,6 +7,7 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboErrors;
 use Yarbo\YarboMqtt;
 use Yarbo\YarboMqttAgentClient;
+use Yarbo\YarboRobotName;
 use Yarbo\YarboTelemetry;
 use Yarbo\YarboVestaboard;
 use Yarbo\YarboWifi;
@@ -20,6 +21,15 @@ function vestaboard_status_payload(?array $parsed, bool $online): array
     $board ??= new YarboVestaboard(dirname(__DIR__, 2));
 
     return $board->dashboardPayload($parsed, $online);
+}
+
+function attach_robot_name(array $parsed): array
+{
+    global $config;
+    $serial = (string) ($config['serial'] ?? '');
+    $names = new YarboRobotName(dirname(__DIR__, 2));
+
+    return $names->apply($parsed, $serial);
 }
 
 function status_raw_usable(mixed $raw): bool
@@ -57,7 +67,7 @@ function status_from_agent(array $result): void
 
     json_response(array_merge(
         ['ok' => true, 'via' => 'agent', 'cached' => (bool) ($result['cached'] ?? false)],
-        $parsed,
+        attach_robot_name($parsed),
         [
             'wifi' => YarboWifi::parse($wifiEnvelope),
             'vestaboard' => vestaboard_status_payload($parsed, true),
@@ -170,7 +180,7 @@ try {
         ], 504);
     }
 
-    $parsed = YarboTelemetry::parseForPanel($raw, $cellTemps, dirname(__DIR__, 2));
+    $parsed = attach_robot_name(YarboTelemetry::parseForPanel($raw, $cellTemps, dirname(__DIR__, 2)));
     json_response(array_merge(
         ['ok' => true, 'via' => 'direct'],
         $parsed,

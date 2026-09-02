@@ -12,6 +12,7 @@ function isCommandAckError(msg) {
 
 const els = {
     battery: document.getElementById('battery'),
+    robotName: document.getElementById('robot-name'),
     state: document.getElementById('state'),
     charging: document.getElementById('charging'),
     heading: document.getElementById('heading'),
@@ -1867,6 +1868,12 @@ function batteryLevelName(percent, chargingLabel) {
 }
 
 function updateStatus(data) {
+    if (els.robotName) {
+        const name = typeof data.robot_name === 'string' ? data.robot_name.trim() : '';
+        els.robotName.textContent = name;
+        els.robotName.classList.toggle('hidden', !name);
+        document.title = name ? `${name} · Yarbo Control Panel` : 'Yarbo Control Panel';
+    }
     els.battery.textContent = data.battery != null ? `${data.battery}%` : '—';
     {
         const level = batteryLevelName(data.battery, data.charging_label);
@@ -2787,7 +2794,7 @@ async function loadPaperMonoDashboard() {
             const built = data.firmware_built
                 ? 'built on this host'
                 : 'not built yet — run pio in firmware/papermono before flashing';
-            els.papermonoFwStatus.textContent = `Firmware ${data.firmware_version || '0.1.0-beta'} (${built}).`;
+            els.papermonoFwStatus.textContent = `Firmware ${data.firmware_version || '0.1.1-beta'} (${built}).`;
         }
         renderPaperMonoDevices(data.devices);
     } catch (err) {

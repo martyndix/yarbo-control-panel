@@ -10,7 +10,7 @@ namespace Yarbo;
  */
 final class YarboPaperDevice
 {
-    public const FIRMWARE_VERSION = '0.1.0-beta';
+    public const FIRMWARE_VERSION = '0.1.1-beta';
     // PlatformIO env is papermono, so the binary lands in .pio/build/papermono/
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
 
@@ -152,6 +152,9 @@ final class YarboPaperDevice
 
         $cells = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
         $parsed = YarboTelemetry::parseForPanel($raw, $cells, $this->projectRoot);
+        $config = @include $this->projectRoot . '/config.php';
+        $serial = is_array($config) ? (string) ($config['serial'] ?? '') : '';
+        $parsed = (new YarboRobotName($this->projectRoot))->apply($parsed, $serial);
 
         return [
             'ok' => true,
@@ -159,6 +162,7 @@ final class YarboPaperDevice
             'charging_label' => $parsed['charging_label'] ?? 'No',
             'state' => $parsed['state'] ?? 'idle',
             'head_type_name' => $parsed['head_type_name'] ?? 'Unknown',
+            'robot_name' => $parsed['robot_name'] ?? null,
             'error_code' => $parsed['error_code'] ?? 0,
             'heading' => $parsed['heading'] ?? null,
             'hold_controller' => (bool) ($result['hold_controller'] ?? false),

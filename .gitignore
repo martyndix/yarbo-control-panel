@@ -10,6 +10,7 @@
 /data/.update-running
 /data/papermono-devices.json
 /data/vestaboard-config.json
+/data/robot-name.json
 /data/vestaboard-watch.heartbeat
 /data/rain-config.json
 /firmware/papermono/.pio/

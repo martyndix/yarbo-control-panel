@@ -61,6 +61,14 @@ header h1 {
     font-size: 1.5rem;
 }
 
+.robot-name {
+    margin: 0.2rem 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
 .subtitle {
     margin: 0.25rem 0 0;
     color: var(--muted);

@@ -144,6 +144,7 @@ final class YarboTelemetry
             ],
             'head_type'           => $headType !== null ? (int) $headType : null,
             'head_type_name'      => self::HEAD_TYPES[(int) $headType] ?? 'Unknown',
+            'mqtt_robot_name'     => self::extractRobotName($raw, $stateMsg),
             'planning_paused'     => $planningPaused,
             // car_controller is often false even when commands work; prefer working_state.
             'car_controller'      => (bool) ($raw['StateMSG']['car_controller'] ?? false),
@@ -495,6 +496,57 @@ final class YarboTelemetry
         }
 
         return 'Yes';
+    }
+
+    /**
+     * App nickname if firmware ever puts it on the live snapshot. Plan names are ignored.
+     */
+    public static function extractRobotName(array $raw, ?array $stateMsg = null): ?string
+    {
+        $stateMsg = is_array($stateMsg) ? $stateMsg : (is_array($raw['StateMSG'] ?? null) ? $raw['StateMSG'] : []);
+        $pools = [$raw, $stateMsg];
+        foreach (['DeviceInfo', 'device_info', 'UserMSG', 'user_msg'] as $key) {
+            if (isset($raw[$key]) && is_array($raw[$key])) {
+                $pools[] = $raw[$key];
+            }
+        }
+        $keys = [
+            'nickname', 'nick_name', 'alias', 'robot_name', 'robotName',
+            'device_name', 'deviceName', 'custom_name', 'display_name',
+            'user_name', 'userName',
+        ];
+        foreach ($pools as $i => $pool) {
+            $try = $keys;
+            // Nested DeviceInfo / UserMSG may use a generic "name". Skip top-level
+            // name so a plan or map label is not shown as the robot nickname.
+            if ($i >= 2) {
+                $try[] = 'name';
+            }
+            foreach ($try as $key) {
+                $name = self::usableRobotName($pool[$key] ?? null);
+                if ($name !== null) {
+                    return $name;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static function usableRobotName(mixed $value): ?string
+    {
+        if (!is_string($value) && !is_numeric($value)) {
+            return null;
+        }
+        $name = trim((string) $value);
+        if ($name === '' || strlen($name) > 48) {
+            return null;
+        }
+        if (preg_match('/^[0-9A-Fa-f]{8,}$/', $name) === 1) {
+            return null;
+        }
+
+        return $name;
     }
 
     /**

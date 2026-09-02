@@ -72,6 +72,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         <header class="app-header">
             <div>
                 <h1>Yarbo Control Panel</h1>
+                <p class="robot-name hidden" id="robot-name"></p>
             </div>
             <div class="settings-button-wrap">
                 <button
@@ -594,7 +595,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="48" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
-                                        <text x="24" y="76" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Barn PaperMono  0.1.0-beta</text>
+                                        <text x="24" y="76" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.1-beta</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">87%</text>
                                         <text x="24" y="240" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging  No</text>
                                         <text x="24" y="280" font-family="ui-monospace, monospace" font-size="22" fill="#111">State     idle</text>

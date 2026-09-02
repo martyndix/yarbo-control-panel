@@ -70,6 +70,35 @@ final class YarboCloud
     }
 
     /**
+     * @return array{name: ?string, sn: string}|null
+     */
+    public function fetchRobotName(string $serial): ?array
+    {
+        $config = $this->settings->load();
+        if (!$config['enabled'] || $config['email'] === '' || $config['password'] === '') {
+            return null;
+        }
+
+        $result = $this->runBridge([
+            'device-name',
+            '--serial',
+            $serial,
+        ], true);
+
+        if (!($result['ok'] ?? false)) {
+            return ['name' => null, 'sn' => $serial];
+        }
+
+        $data = is_array($result['data'] ?? null) ? $result['data'] : $result;
+        $name = trim((string) ($data['name'] ?? ''));
+
+        return [
+            'name' => $name !== '' ? $name : null,
+            'sn' => (string) ($data['sn'] ?? $serial),
+        ];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function fetch(string $action, string $serial, float $timeout = 30.0): ?array

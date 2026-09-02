@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.39] - 2026-08-31
+
+### Added
+- **App-set mower name** under the panel title (and on PaperMono): MQTT nickname if the robot publishes one, otherwise the cloud `get_devices()` name from the Yarbo app Settings → Name. Cached about 6 hours so status polling does not log into the cloud every 5 seconds. Hidden until a name is known.
+
 ## [1.3.38] - 2026-08-31
 
 ### Fixed

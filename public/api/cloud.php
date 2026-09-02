@@ -6,6 +6,7 @@ require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
+use Yarbo\YarboRobotName;
 
 $projectRoot = dirname(__DIR__, 2);
 $dataDir = $projectRoot . '/data';
@@ -81,10 +82,14 @@ if ($action === 'test') {
     }
 
     $deviceCount = (int) ($login['login']['device_count'] ?? 0);
+    $serial = (string) ($config['serial'] ?? '');
+    $devices = is_array($login['login']['devices'] ?? null) ? $login['login']['devices'] : [];
+    $robotName = (new YarboRobotName($projectRoot))->rememberCloudDevices($devices, $serial);
     json_response([
         'ok' => true,
         'status' => $status,
         'login' => $login,
+        'robot_name' => $robotName,
         'message' => $deviceCount > 0
             ? "Cloud login successful ({$deviceCount} robot" . ($deviceCount === 1 ? '' : 's') . ' in account).'
             : 'Cloud login successful.',

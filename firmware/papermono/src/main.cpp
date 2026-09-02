@@ -20,6 +20,7 @@ String wifiPass;
 String panelUrl;
 String token;
 String deviceName = "PaperMono";
+String robotName = "";
 
 uint32_t lastPoll = 0;
 String lastError;
@@ -107,7 +108,7 @@ String screenKey()
 {
     return String(battery) + "|" + charging + "|" + state + "|" + head + "|"
         + String(errorCode) + "|" + lastError + "|" + (lightsOn ? "1" : "0") + "|"
-        + String((int) WiFi.status());
+        + robotName + "|" + String((int) WiFi.status());
 }
 
 void drawButton(int x, int y, int w, int h, const char *label, bool invert)
@@ -147,7 +148,8 @@ void drawHome(bool forceFull)
     M5.Display.setTextSize(2);
     M5.Display.drawString("YARBO  ·  BETA", 16, 20);
     M5.Display.setTextSize(1);
-    M5.Display.drawString(deviceName + "  " + String(PAPERMONO_FW_VERSION), 16, 52);
+    String title = robotName.length() ? robotName : deviceName;
+    M5.Display.drawString(title + "  " + String(PAPERMONO_FW_VERSION), 16, 52);
 
     M5.Display.setTextSize(5);
     String bat = battery >= 0 ? (String(battery) + "%") : String("--");
@@ -245,6 +247,7 @@ bool httpGetStatus()
     charging = doc["charging_label"] | charging;
     state = doc["state"] | state;
     head = doc["head_type_name"] | head;
+    robotName = doc["robot_name"] | "";
     errorCode = doc["error_code"] | 0;
     lastError = "";
     return true;

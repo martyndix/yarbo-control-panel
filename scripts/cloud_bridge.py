@@ -46,6 +46,30 @@ def _import_client():
     return YarboClient
 
 
+def _device_name(device: Any) -> str:
+    for attr in ("name", "nickname", "alias", "device_name", "display_name"):
+        value = getattr(device, attr, None)
+        if value:
+            return str(value).strip()
+    if isinstance(device, dict):
+        for key in ("name", "nickname", "alias", "device_name", "display_name"):
+            if device.get(key):
+                return str(device[key]).strip()
+    return ""
+
+
+def _devices_public(devices: Any) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    if not devices:
+        return out
+    for candidate in devices:
+        sn = _device_serial(candidate)
+        name = _device_name(candidate)
+        if sn or name:
+            out.append({"sn": sn, "name": name})
+    return out
+
+
 def _device_serial(device: Any) -> str:
     for attr in ("sn", "serial", "serial_number"):
         value = getattr(device, attr, None)
@@ -80,11 +104,25 @@ def run_login_test(config: dict[str, Any]) -> dict[str, Any]:
         return {
             "email": email,
             "device_count": device_count,
+            "devices": _devices_public(devices),
         }
     finally:
         close = getattr(client, "close", None)
         if callable(close):
             close()
+
+
+def run_device_name(config: dict[str, Any], serial: str) -> dict[str, str]:
+    data = run_login_test(config)
+    devices = data.get("devices") or []
+    serial_l = serial.lower()
+    for device in devices:
+        if str(device.get("sn") or "").lower() == serial_l:
+            return {"sn": serial, "name": str(device.get("name") or "")}
+    if len(devices) == 1:
+        only = devices[0]
+        return {"sn": str(only.get("sn") or serial), "name": str(only.get("name") or "")}
+    raise ValueError(f"Robot serial {serial} not found in Yarbo account")
 
 
 def run_action_sync(action: str, serial: str, timeout: float, config: dict[str, Any]) -> Any:
@@ -149,7 +187,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Yarbo cloud bridge")
     parser.add_argument(
         "action",
-        choices=["status", "test-login", "read_all_plan", "get_map", "read_gps_ref", "get_device_msg"],
+        choices=["status", "test-login", "device-name", "read_all_plan", "get_map", "read_gps_ref", "get_device_msg"],
     )
     parser.add_argument("--serial", default="")
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -183,6 +221,30 @@ def main() -> int:
             config = load_config(Path(args.config))
             data = asyncio.run(asyncio.to_thread(run_login_test, config))
             emit({"ok": True, "login": data, "cloud": True})
+            return 0
+        except Exception as exc:  # noqa: BLE001
+            emit({"ok": False, "error": str(exc), "cloud": True})
+            return 1
+
+    if args.action == "device-name":
+        if not args.config:
+            emit({"ok": False, "error": "--config is required for device-name"})
+            return 1
+        if not args.serial:
+            emit({"ok": False, "error": "--serial is required"})
+            return 1
+        if not sdk_installed():
+            emit(
+                {
+                    "ok": False,
+                    "error": "yarbo-data-sdk is not installed. Run: ./scripts/install.sh",
+                }
+            )
+            return 1
+        try:
+            config = load_config(Path(args.config))
+            data = asyncio.run(asyncio.to_thread(run_device_name, config, args.serial))
+            emit({"ok": True, "data": data, "cloud": True})
             return 0
         except Exception as exc:  # noqa: BLE001
             emit({"ok": False, "error": str(exc), "cloud": True})
