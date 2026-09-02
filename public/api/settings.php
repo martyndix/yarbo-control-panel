@@ -8,6 +8,7 @@ use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
 use Yarbo\YarboConfig;
 use Yarbo\YarboRainSettings;
+use Yarbo\YarboRobotName;
 use Yarbo\YarboVestaboard;
 
 $projectRoot = dirname(__DIR__, 2);
@@ -17,6 +18,7 @@ $cloudSettings = new YarboCloudSettings($dataDir);
 $cloud = new YarboCloud($cloudSettings, $projectRoot);
 $vestaboard = new YarboVestaboard($projectRoot);
 $rainSettings = new YarboRainSettings($dataDir);
+$robotName = new YarboRobotName($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
@@ -26,6 +28,7 @@ if ($method === 'GET') {
         'broker_host' => (string) ($config['broker_host'] ?? ''),
         'broker_port' => (int) ($config['broker_port'] ?? 1883),
         'serial' => (string) ($config['serial'] ?? ''),
+        'robot_name' => $robotName->settingsName((string) ($config['serial'] ?? '')),
         'writable' => is_writable($configPath),
         'cloud' => $cloudSettings->publicView(),
         'vestaboard' => $vestaboard->publicView(),
@@ -94,12 +97,20 @@ if (!$rainSettings->save($input)) {
     ], 500);
 }
 
+if (!$robotName->saveFromInput($input, $serial)) {
+    json_response([
+        'ok' => false,
+        'error' => 'Could not write robot name. Check permissions on the data/ directory.',
+    ], 500);
+}
+
 // Skip cloud->status() on save — that spawns Python and can block the single-threaded
 // php -S server. The client already has status from load; Test cloud connection refreshes it.
 json_response([
     'ok' => true,
     'broker_host' => $host,
     'serial' => $serial,
+    'robot_name' => $robotName->settingsName($serial),
     'cloud' => $cloudSettings->publicView(),
     'vestaboard' => $vestaboard->publicView(),
     'rain' => $rainSettings->publicView(),

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * App-set robot nickname: MQTT if present, else cached cloud get_devices() name.
+ * Display name for the robot: Settings first, then MQTT/cloud if that is not the serial.
  */
 final class YarboRobotName
 {
@@ -27,7 +27,7 @@ final class YarboRobotName
      */
     public function apply(array $parsed, string $serial): array
     {
-        $mqtt = $this->clean((string) ($parsed['mqtt_robot_name'] ?? ''));
+        $mqtt = $this->clean((string) ($parsed['mqtt_robot_name'] ?? ''), $serial);
         $parsed['robot_name'] = $this->resolve($mqtt, $serial);
         unset($parsed['mqtt_robot_name']);
 
@@ -36,15 +36,20 @@ final class YarboRobotName
 
     public function resolve(?string $mqttName, string $serial): ?string
     {
-        $mqttName = $this->clean($mqttName ?? '');
+        $cache = $this->loadCache();
+        $settingsName = $this->clean((string) ($cache['settings_name'] ?? ''), $serial);
+        if ($settingsName !== null) {
+            return $settingsName;
+        }
+
+        $mqttName = $this->clean($mqttName ?? '', $serial);
         if ($mqttName !== null) {
-            $this->saveCache($mqttName, 'mqtt', $serial);
+            $this->saveDiscovered($mqttName, 'mqtt', $serial);
 
             return $mqttName;
         }
 
-        $cache = $this->loadCache();
-        $cachedName = $this->clean((string) ($cache['name'] ?? ''));
+        $cachedName = $this->clean((string) ($cache['name'] ?? ''), $serial);
         $age = $this->cacheAgeSeconds($cache);
         if ($cachedName !== null && $age !== null && $age < self::CACHE_TTL_S) {
             return $cachedName;
@@ -59,10 +64,52 @@ final class YarboRobotName
     }
 
     /**
+     * Name entered in Settings (not MQTT/cloud).
+     */
+    public function settingsName(string $serial): ?string
+    {
+        $cache = $this->loadCache();
+
+        return $this->clean((string) ($cache['settings_name'] ?? ''), $serial);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function saveFromInput(array $input, string $serial): bool
+    {
+        if (!array_key_exists('robot_name', $input) && !array_key_exists('settings_name', $input)) {
+            return true;
+        }
+
+        $raw = $input['robot_name'] ?? $input['settings_name'] ?? '';
+        $name = $this->clean(is_string($raw) || is_numeric($raw) ? (string) $raw : '', $serial);
+        $cache = $this->loadCache();
+        $cache['settings_name'] = $name;
+        $cache['serial'] = $serial;
+        $cache['updated_at'] = gmdate('c');
+        if ($name !== null) {
+            $cache['name'] = $name;
+            $cache['source'] = 'settings';
+            $cache['last_fail_at'] = null;
+        } elseif (($cache['source'] ?? '') === 'settings') {
+            $cache['name'] = null;
+            $cache['source'] = null;
+        }
+
+        return $this->writeCache($cache);
+    }
+
+    /**
      * @param list<array<string, mixed>> $devices
      */
     public function rememberCloudDevices(array $devices, string $serial): ?string
     {
+        $settingsName = $this->settingsName($serial);
+        if ($settingsName !== null) {
+            return $settingsName;
+        }
+
         foreach ($devices as $device) {
             if (!is_array($device)) {
                 continue;
@@ -71,11 +118,11 @@ final class YarboRobotName
             if ($serial !== '' && $sn !== '' && strcasecmp($sn, $serial) !== 0) {
                 continue;
             }
-            $name = $this->clean((string) ($device['name'] ?? ''));
+            $name = $this->clean((string) ($device['name'] ?? ''), $serial !== '' ? $serial : $sn);
             if ($name === null) {
                 continue;
             }
-            $this->saveCache($name, 'cloud', $sn !== '' ? $sn : $serial);
+            $this->saveDiscovered($name, 'cloud', $sn !== '' ? $sn : $serial);
 
             return $name;
         }
@@ -102,13 +149,13 @@ final class YarboRobotName
         if ($result === null) {
             return null;
         }
-        $name = $this->clean((string) ($result['name'] ?? ''));
+        $name = $this->clean((string) ($result['name'] ?? ''), $serial);
         if ($name === null) {
             $this->saveFail();
 
             return null;
         }
-        $this->saveCache($name, 'cloud', $serial);
+        $this->saveDiscovered($name, 'cloud', $serial);
 
         return $name;
     }
@@ -142,50 +189,71 @@ final class YarboRobotName
         return $ts === false ? null : time() - $ts;
     }
 
-    private function saveCache(string $name, string $source, string $serial): void
+    private function saveDiscovered(string $name, string $source, string $serial): void
     {
-        $dir = $this->projectRoot . '/data';
-        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+        if ($this->settingsName($serial) !== null) {
             return;
         }
-        $payload = json_encode([
-            'name' => $name,
-            'source' => $source,
-            'serial' => $serial,
-            'updated_at' => gmdate('c'),
-            'last_fail_at' => null,
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if ($payload === false) {
-            return;
-        }
-        file_put_contents($this->cachePath(), $payload . "\n", LOCK_EX);
+        $cache = $this->loadCache();
+        $cache['name'] = $name;
+        $cache['source'] = $source;
+        $cache['serial'] = $serial;
+        $cache['updated_at'] = gmdate('c');
+        $cache['last_fail_at'] = null;
+        $this->writeCache($cache);
     }
 
     private function saveFail(): void
     {
         $cache = $this->loadCache();
         $cache['last_fail_at'] = gmdate('c');
-        $dir = $this->projectRoot . '/data';
-        if (!is_dir($dir)) {
-            return;
-        }
-        $payload = json_encode($cache, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        if ($payload === false) {
-            return;
-        }
-        file_put_contents($this->cachePath(), $payload . "\n", LOCK_EX);
+        $this->writeCache($cache);
     }
 
-    private function clean(string $name): ?string
+    /**
+     * @param array<string, mixed> $cache
+     */
+    private function writeCache(array $cache): bool
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return false;
+        }
+        $payload = json_encode($cache, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($payload === false) {
+            return false;
+        }
+
+        return file_put_contents($this->cachePath(), $payload . "\n", LOCK_EX) !== false;
+    }
+
+    public function clean(string $name, string $serial = ''): ?string
     {
         $name = trim($name);
         if ($name === '' || strlen($name) > 48) {
             return null;
         }
-        if (preg_match('/^[0-9A-Fa-f]{8,}$/', $name) === 1) {
+        if ($serial !== '' && strcasecmp($name, $serial) === 0) {
+            return null;
+        }
+        if (self::looksLikeSerial($name)) {
             return null;
         }
 
         return $name;
+    }
+
+    public static function looksLikeSerial(string $name): bool
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return false;
+        }
+        if (preg_match('/^[0-9A-Fa-f]{8,}$/', $name) === 1) {
+            return true;
+        }
+
+        // Yarbo SNs are 16 alphanumerics, typically 8 digits then mixed.
+        return preg_match('/^[0-9]{8}[0-9A-Za-z]{8}$/', $name) === 1;
     }
 }

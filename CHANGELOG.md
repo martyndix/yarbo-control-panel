@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.40] - 2026-09-02
+
+### Changed
+- **Robot name is set in Settings**, next to the serial, and that is what shows under the panel title and on PaperMono. MQTT/cloud often publish the serial itself (`24460102…`), so that is no longer used as a nickname.
+
 ## [1.3.39] - 2026-08-31
 
 ### Added

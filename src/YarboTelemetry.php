@@ -542,7 +542,7 @@ final class YarboTelemetry
         if ($name === '' || strlen($name) > 48) {
             return null;
         }
-        if (preg_match('/^[0-9A-Fa-f]{8,}$/', $name) === 1) {
+        if (YarboRobotName::looksLikeSerial($name)) {
             return null;
         }
 

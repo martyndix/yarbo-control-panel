@@ -485,6 +485,19 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     spellcheck="false"
                                 >
                             </label>
+                            <label class="settings-field">
+                                <span class="label">Robot name</span>
+                                <input
+                                    type="text"
+                                    id="settings-robot-name"
+                                    name="robot_name"
+                                    maxlength="48"
+                                    placeholder="e.g. Lawnbot"
+                                    autocomplete="off"
+                                    spellcheck="true"
+                                >
+                            </label>
+                            <p class="hint">Shown under the panel title and on PaperMono. Leave blank to hide it. Do not use the serial number.</p>
                             <p id="settings-connection-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-connection-test">Test local connection</button>
                         </section>

@@ -66,6 +66,7 @@ const els = {
     settingsForm: document.getElementById('settings-form'),
     settingsHost: document.getElementById('settings-host'),
     settingsSerial: document.getElementById('settings-serial'),
+    settingsRobotName: document.getElementById('settings-robot-name'),
     settingsConnectionResult: document.getElementById('settings-connection-result'),
     settingsConnectionTest: document.getElementById('settings-connection-test'),
     settingsCloudEnabled: document.getElementById('settings-cloud-enabled'),
@@ -1867,13 +1868,26 @@ function batteryLevelName(percent, chargingLabel) {
     return 'red';
 }
 
+function looksLikeRobotSerial(name, serial) {
+    const value = typeof name === 'string' ? name.trim() : '';
+    if (!value) return false;
+    const sn = typeof serial === 'string' ? serial.trim() : '';
+    if (sn && value.toLowerCase() === sn.toLowerCase()) return true;
+    return /^[0-9]{8}[0-9A-Za-z]{8}$/.test(value) || /^[0-9A-Fa-f]{8,}$/.test(value);
+}
+
+function applyRobotNameSubtitle(name) {
+    if (!els.robotName) return;
+    const serial = els.settingsSerial?.value.trim() || '';
+    const show = typeof name === 'string' ? name.trim() : '';
+    const visible = Boolean(show && !looksLikeRobotSerial(show, serial));
+    els.robotName.textContent = visible ? show : '';
+    els.robotName.classList.toggle('hidden', !visible);
+    document.title = visible ? `${show} · Yarbo Control Panel` : 'Yarbo Control Panel';
+}
+
 function updateStatus(data) {
-    if (els.robotName) {
-        const name = typeof data.robot_name === 'string' ? data.robot_name.trim() : '';
-        els.robotName.textContent = name;
-        els.robotName.classList.toggle('hidden', !name);
-        document.title = name ? `${name} · Yarbo Control Panel` : 'Yarbo Control Panel';
-    }
+    applyRobotNameSubtitle(typeof data.robot_name === 'string' ? data.robot_name : '');
     els.battery.textContent = data.battery != null ? `${data.battery}%` : '—';
     {
         const level = batteryLevelName(data.battery, data.charging_label);
@@ -2697,6 +2711,7 @@ async function loadSettings() {
         if (!data.ok) throw new Error(data.error || 'Could not load settings');
         if (els.settingsHost) els.settingsHost.value = data.broker_host || '';
         if (els.settingsSerial) els.settingsSerial.value = data.serial || '';
+        if (els.settingsRobotName) els.settingsRobotName.value = data.robot_name || '';
         if (els.settingsCloudEnabled) els.settingsCloudEnabled.checked = Boolean(data.cloud?.cloud_enabled);
         if (els.settingsCloudEmail) els.settingsCloudEmail.value = data.cloud?.cloud_email || '';
         if (els.settingsCloudPassword) els.settingsCloudPassword.value = '';
@@ -3093,6 +3108,7 @@ async function saveSettings(event) {
 
     const brokerHost = els.settingsHost?.value.trim() ?? '';
     const serial = els.settingsSerial?.value.trim() ?? '';
+    const robotName = els.settingsRobotName?.value.trim() ?? '';
     const cloudEnabled = Boolean(els.settingsCloudEnabled?.checked);
     const cloudEmail = els.settingsCloudEmail?.value.trim() ?? '';
     const cloudPassword = els.settingsCloudPassword?.value ?? '';
@@ -3101,12 +3117,17 @@ async function saveSettings(event) {
         setSettingsError('Broker IP and serial number are required.');
         return;
     }
+    if (robotName && looksLikeRobotSerial(robotName, serial)) {
+        setSettingsError('Robot name cannot be the serial number.');
+        return;
+    }
 
     if (els.settingsSave) els.settingsSave.disabled = true;
     try {
         const payload = {
             broker_host: brokerHost,
             serial,
+            robot_name: robotName,
             cloud_enabled: cloudEnabled,
             cloud_email: cloudEmail,
             data_source: dataSource,
@@ -3140,6 +3161,7 @@ async function saveSettings(event) {
         if (els.settingsCloudStatus && data.cloud_status) {
             els.settingsCloudStatus.textContent = formatCloudStatus(data.cloud_status);
         }
+        applyRobotNameSubtitle(data.robot_name || robotName);
         showToast('Settings saved', 'success');
         closeSettingsModal();
         // Don't block on status — polling resumes after the modal closes.
