@@ -89,6 +89,12 @@ const els = {
     settingsVestaboardResult: document.getElementById('settings-vestaboard-result'),
     settingsVestaboardTest: document.getElementById('settings-vestaboard-test'),
     settingsVestaboardSend: document.getElementById('settings-vestaboard-send'),
+    settingsVestaboardQuiet: document.getElementById('settings-vestaboard-quiet'),
+    settingsVestaboardQuietFields: document.getElementById('settings-vestaboard-quiet-fields'),
+    settingsVestaboardQuietStart: document.getElementById('settings-vestaboard-quiet-start'),
+    settingsVestaboardQuietEnd: document.getElementById('settings-vestaboard-quiet-end'),
+    settingsVestaboardQuietBoard: document.getElementById('settings-vestaboard-quiet-board'),
+    settingsVestaboardQuietPalette: document.getElementById('settings-vestaboard-quiet-palette'),
     settingsRainSensitivity: document.getElementById('settings-rain-sensitivity'),
     vestaboardCard: document.getElementById('vestaboard-card'),
     vestaboardBoard: document.getElementById('vestaboard-board'),
@@ -2071,6 +2077,8 @@ function updateVestaboardDashboard(data) {
             els.vestaboardUpdatedDetail.textContent = ' · sending…';
         } else if (board.watcher_ok === false) {
             els.vestaboardUpdatedDetail.textContent = ' · background updater idle — restart the panel';
+        } else if (board.quiet_hours) {
+            els.vestaboardUpdatedDetail.textContent = ` · quiet hours until ${board.quiet_until || ''}`;
         } else {
             els.vestaboardUpdatedDetail.textContent = '';
         }
@@ -2730,6 +2738,16 @@ async function loadSettings() {
         }
         if (els.settingsVestaboardKey) els.settingsVestaboardKey.value = '';
         if (els.settingsVestaboardCloudToken) els.settingsVestaboardCloudToken.value = '';
+        if (els.settingsVestaboardQuiet) {
+            els.settingsVestaboardQuiet.checked = Boolean(data.vestaboard?.quiet_hours_enabled);
+        }
+        if (els.settingsVestaboardQuietStart) {
+            els.settingsVestaboardQuietStart.value = data.vestaboard?.quiet_start || '22:00';
+        }
+        if (els.settingsVestaboardQuietEnd) {
+            els.settingsVestaboardQuietEnd.value = data.vestaboard?.quiet_end || '07:00';
+        }
+        setQuietCodes(data.vestaboard?.quiet_codes);
         if (els.settingsRainSensitivity) {
             const n = data.rain?.sensitivity;
             els.settingsRainSensitivity.value = n != null ? String(n) : '';
@@ -2968,7 +2986,108 @@ async function revokePaperMono(id, button) {
 function applyVestaboardEnabled() {
     const on = Boolean(els.settingsVestaboardEnabled?.checked);
     els.settingsVestaboardFields?.classList.toggle('hidden', !on);
-    if (on) applyVestaboardTransport();
+    if (on) {
+        applyVestaboardTransport();
+        applyVestaboardQuietHours();
+        renderQuietBoard();
+    }
+}
+
+function applyVestaboardQuietHours() {
+    const on = Boolean(els.settingsVestaboardQuiet?.checked);
+    els.settingsVestaboardQuietFields?.classList.toggle('hidden', !on);
+    if (on) renderQuietBoard();
+}
+
+const DEFAULT_QUIET_CODES = [
+    [7, 15, 15, 4, 0, 14, 9, 7, 8, 20, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+];
+let quietCodes = DEFAULT_QUIET_CODES.map((row) => row.slice());
+let quietCell = { r: 0, c: 0 };
+
+function cloneQuietCodes(raw) {
+    const fallback = DEFAULT_QUIET_CODES.map((row) => row.slice());
+    if (!Array.isArray(raw) || raw.length < 3) return fallback;
+    return [0, 1, 2].map((r) => {
+        const row = Array.isArray(raw[r]) ? raw[r] : [];
+        return Array.from({ length: 15 }, (_, c) => {
+            const n = Number(row[c]);
+            return Number.isInteger(n) && n >= 0 && n <= 69 ? n : 0;
+        });
+    });
+}
+
+function setQuietCodes(raw) {
+    quietCodes = cloneQuietCodes(raw);
+    renderQuietBoard();
+}
+
+function quietCodesSnapshot() {
+    return quietCodes.map((row) => row.slice());
+}
+
+function vestaboardCharToCode(ch) {
+    if (!ch) return 0;
+    const up = ch.toUpperCase();
+    if (up === ' ') return 0;
+    const ord = up.charCodeAt(0);
+    if (ord >= 65 && ord <= 90) return ord - 64;
+    if (up === '0') return 36;
+    if (ord >= 49 && ord <= 57) return ord - 22;
+    const extra = {
+        '!': 37, '@': 38, '#': 39, '$': 40, '(': 41, ')': 42, '-': 44, '+': 46,
+        '&': 47, '=': 48, ';': 49, ':': 50, "'": 52, '"': 53, '%': 54, ',': 55,
+        '.': 56, '/': 59, '?': 60,
+    };
+    return extra[up] ?? extra[ch] ?? null;
+}
+
+function vestaboardCodeToChar(code) {
+    if (code >= 1 && code <= 26) return String.fromCharCode(64 + code);
+    if (code >= 27 && code <= 35) return String.fromCharCode(code + 22);
+    if (code === 36) return '0';
+    const extra = {
+        37: '!', 38: '@', 39: '#', 40: '$', 41: '(', 42: ')', 44: '-', 46: '+',
+        47: '&', 48: '=', 49: ';', 50: ':', 52: "'", 53: '"', 54: '%', 55: ',',
+        56: '.', 59: '/', 60: '?',
+    };
+    return extra[code] || '';
+}
+
+function advanceQuietCell() {
+    quietCell.c += 1;
+    if (quietCell.c >= 15) {
+        quietCell.c = 0;
+        quietCell.r = (quietCell.r + 1) % 3;
+    }
+}
+
+function setQuietCellCode(code, advance) {
+    quietCodes[quietCell.r][quietCell.c] = code;
+    if (advance) advanceQuietCell();
+    renderQuietBoard();
+}
+
+function renderQuietBoard() {
+    const root = els.settingsVestaboardQuietBoard;
+    if (!root) return;
+    const colorClass = { 63: 'red', 64: 'orange', 65: 'yellow', 66: 'green', 67: 'blue' };
+    const cells = [];
+    for (let r = 0; r < 3; r += 1) {
+        for (let c = 0; c < 15; c += 1) {
+            const code = quietCodes[r][c];
+            const color = colorClass[code];
+            const sel = r === quietCell.r && c === quietCell.c ? ' is-selected' : '';
+            if (color) {
+                cells.push(`<span class="vestaboard-cell vestaboard-cell--${color}${sel}" data-quiet-r="${r}" data-quiet-c="${c}"></span>`);
+            } else {
+                cells.push(`<span class="vestaboard-cell${sel}" data-quiet-r="${r}" data-quiet-c="${c}">${escapeHtml(vestaboardCodeToChar(code))}</span>`);
+            }
+        }
+    }
+    root.innerHTML = cells.join('');
 }
 
 function vestaboardTransport() {
@@ -3134,6 +3253,10 @@ async function saveSettings(event) {
             vestaboard_enabled: Boolean(els.settingsVestaboardEnabled?.checked),
             vestaboard_transport: vestaboardTransport(),
             vestaboard_host: els.settingsVestaboardHost?.value.trim() || 'vestaboard.local',
+            vestaboard_quiet_hours: Boolean(els.settingsVestaboardQuiet?.checked),
+            vestaboard_quiet_start: els.settingsVestaboardQuietStart?.value || '22:00',
+            vestaboard_quiet_end: els.settingsVestaboardQuietEnd?.value || '07:00',
+            vestaboard_quiet_codes: quietCodesSnapshot(),
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;
@@ -4228,6 +4351,47 @@ document.querySelectorAll('input[name="vestaboard-transport"]').forEach((radio) 
 els.settingsVestaboardSample?.addEventListener('change', () => loadVestaboardPreview());
 els.settingsVestaboardTest?.addEventListener('click', (e) => testVestaboardConnection(e.currentTarget));
 els.settingsVestaboardSend?.addEventListener('click', (e) => sendVestaboardNow(e.currentTarget));
+els.settingsVestaboardQuiet?.addEventListener('change', () => applyVestaboardQuietHours());
+els.settingsVestaboardQuietBoard?.addEventListener('click', (event) => {
+    const cell = event.target.closest('[data-quiet-r]');
+    if (!cell) return;
+    quietCell = { r: Number(cell.dataset.quietR), c: Number(cell.dataset.quietC) };
+    els.settingsVestaboardQuietBoard.focus();
+    renderQuietBoard();
+});
+els.settingsVestaboardQuietBoard?.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') return;
+    if (event.key === 'Backspace' || event.key === 'Delete') {
+        event.preventDefault();
+        setQuietCellCode(0, event.key === 'Backspace');
+        return;
+    }
+    if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        advanceQuietCell();
+        renderQuietBoard();
+        return;
+    }
+    if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        quietCell.c = quietCell.c > 0 ? quietCell.c - 1 : 14;
+        if (quietCell.c === 14) quietCell.r = quietCell.r > 0 ? quietCell.r - 1 : 2;
+        renderQuietBoard();
+        return;
+    }
+    if (event.key.length === 1) {
+        const code = vestaboardCharToCode(event.key);
+        if (code === null) return;
+        event.preventDefault();
+        setQuietCellCode(code, true);
+    }
+});
+els.settingsVestaboardQuietPalette?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-quiet-code]');
+    if (!btn) return;
+    setQuietCellCode(Number(btn.dataset.quietCode), true);
+    els.settingsVestaboardQuietBoard?.focus();
+});
 els.papermonoPortsRefresh?.addEventListener('click', () => refreshPaperMonoPorts());
 els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbTools(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));

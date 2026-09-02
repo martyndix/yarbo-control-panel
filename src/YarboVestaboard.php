@@ -99,6 +99,10 @@ final class YarboVestaboard
             'last_hash' => '',
             'last_sent_at' => null,
             'last_error' => '',
+            'quiet_hours_enabled' => false,
+            'quiet_start' => '22:00',
+            'quiet_end' => '07:00',
+            'quiet_codes' => self::defaultQuietCodesStatic(),
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -125,6 +129,10 @@ final class YarboVestaboard
                 ? $decoded['last_sent_at']
                 : null,
             'last_error' => (string) ($decoded['last_error'] ?? ''),
+            'quiet_hours_enabled' => (bool) ($decoded['quiet_hours_enabled'] ?? false),
+            'quiet_start' => self::normalizeClock((string) ($decoded['quiet_start'] ?? '22:00'), '22:00'),
+            'quiet_end' => self::normalizeClock((string) ($decoded['quiet_end'] ?? '07:00'), '07:00'),
+            'quiet_codes' => self::normalizeQuietCodes($decoded['quiet_codes'] ?? null),
         ];
     }
 
@@ -167,6 +175,19 @@ final class YarboVestaboard
             ? $this->normalizeTransport($input['transport'] ?? $input['vestaboard_transport'] ?? $current['transport'])
             : $current['transport'];
 
+        $quietEnabled = array_key_exists('quiet_hours_enabled', $input) || array_key_exists('vestaboard_quiet_hours', $input)
+            ? (bool) ($input['quiet_hours_enabled'] ?? $input['vestaboard_quiet_hours'])
+            : $current['quiet_hours_enabled'];
+        $quietStart = array_key_exists('quiet_start', $input) || array_key_exists('vestaboard_quiet_start', $input)
+            ? self::normalizeClock((string) ($input['quiet_start'] ?? $input['vestaboard_quiet_start'] ?? ''), $current['quiet_start'])
+            : $current['quiet_start'];
+        $quietEnd = array_key_exists('quiet_end', $input) || array_key_exists('vestaboard_quiet_end', $input)
+            ? self::normalizeClock((string) ($input['quiet_end'] ?? $input['vestaboard_quiet_end'] ?? ''), $current['quiet_end'])
+            : $current['quiet_end'];
+        $quietCodes = array_key_exists('quiet_codes', $input) || array_key_exists('vestaboard_quiet_codes', $input)
+            ? self::normalizeQuietCodes($input['quiet_codes'] ?? $input['vestaboard_quiet_codes'] ?? null)
+            : $current['quiet_codes'];
+
         $next = [
             'enabled' => $enabled,
             'transport' => $transport,
@@ -177,6 +198,10 @@ final class YarboVestaboard
             'last_hash' => (string) ($input['last_hash'] ?? $current['last_hash']),
             'last_sent_at' => $input['last_sent_at'] ?? $current['last_sent_at'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
+            'quiet_hours_enabled' => $quietEnabled,
+            'quiet_start' => $quietStart,
+            'quiet_end' => $quietEnd,
+            'quiet_codes' => $quietCodes,
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -203,6 +228,11 @@ final class YarboVestaboard
             'last_sent_at' => $config['last_sent_at'],
             'last_error' => $config['last_error'],
             'watcher_ok' => !$this->watcherStale(),
+            'quiet_hours_enabled' => $config['quiet_hours_enabled'],
+            'quiet_start' => $config['quiet_start'],
+            'quiet_end' => $config['quiet_end'],
+            'quiet_codes' => $config['quiet_codes'],
+            'quiet_hours_active' => $this->isQuietHours(),
         ];
     }
 
@@ -217,6 +247,23 @@ final class YarboVestaboard
         $config = $this->load();
         if (!$config['enabled']) {
             return ['enabled' => false];
+        }
+        if ($this->isQuietHours()) {
+            $layout = $this->quietLayout();
+            $hash = hash('sha256', json_encode($layout['codes']));
+
+            return [
+                'enabled' => true,
+                'lines' => $layout['lines'],
+                'codes' => $layout['codes'],
+                'verb' => $layout['verb'],
+                'quiet_hours' => true,
+                'quiet_until' => $config['quiet_end'],
+                'last_sent_at' => $config['last_sent_at'],
+                'pending' => $hash !== (string) $config['last_hash'],
+                'last_error' => $this->publicLastError($config['last_error']),
+                'watcher_ok' => !$this->watcherStale(),
+            ];
         }
         $usable = $online && is_array($parsed);
         $layout = $this->compose($usable ? $parsed : null, $usable);
@@ -240,6 +287,11 @@ final class YarboVestaboard
     public function preview(?string $sample = null): array
     {
         if ($sample !== null && $sample !== '' && $sample !== 'live') {
+            if ($sample === 'quiet') {
+                $layout = $this->quietLayout();
+
+                return ['ok' => true, 'online' => false] + $layout;
+            }
             $layout = $this->sampleLayout($sample);
             if ($layout === null) {
                 return ['ok' => false, 'error' => 'Unknown sample', 'lines' => [], 'codes' => [], 'verb' => '', 'online' => false];
@@ -264,6 +316,10 @@ final class YarboVestaboard
         $missing = $this->missingCredentialError($config);
         if ($missing !== null) {
             return ['ok' => false, 'error' => $missing];
+        }
+
+        if ($this->isQuietHours()) {
+            return $this->sendLayout($this->quietLayout(), false);
         }
 
         $layout = $this->layoutFromTelemetry();
@@ -307,6 +363,9 @@ final class YarboVestaboard
      */
     public function sendNow(array $override = []): array
     {
+        if ($this->isQuietHours()) {
+            return $this->sendLayout($this->quietLayout(), true, $override);
+        }
         $layout = $this->layoutFromTelemetry();
         if (!($layout['ok'] ?? false)) {
             return $layout;
@@ -756,6 +815,145 @@ final class YarboVestaboard
             '/' => 59,
             '?' => 60,
             default => 0,
+        };
+    }
+
+    public function isQuietHours(?string $nowHm = null): bool
+    {
+        $config = $this->load();
+        if (!($config['quiet_hours_enabled'] ?? false)) {
+            return false;
+        }
+        $start = (string) ($config['quiet_start'] ?? '');
+        $end = (string) ($config['quiet_end'] ?? '');
+        if ($start === '' || $end === '' || $start === $end) {
+            return false;
+        }
+        $now = $nowHm ?? date('H:i');
+        if ($start < $end) {
+            return $now >= $start && $now < $end;
+        }
+
+        return $now >= $start || $now < $end;
+    }
+
+    /**
+     * @return array{lines: list<string>, codes: list<list<int>>, verb: string}
+     */
+    public function quietLayout(): array
+    {
+        $codes = self::normalizeQuietCodes($this->load()['quiet_codes'] ?? null);
+
+        return [
+            'lines' => self::linesFromCodes($codes),
+            'codes' => $codes,
+            'verb' => 'QUIET',
+        ];
+    }
+
+    /**
+     * @return list<list<int>>
+     */
+    public static function defaultQuietCodesStatic(): array
+    {
+        return [
+            [7, 15, 15, 4, 0, 14, 9, 7, 8, 20, 0, 0, 0, 0, 0],
+            array_fill(0, self::COLS, 0),
+            array_fill(0, self::COLS, 0),
+        ];
+    }
+
+    public static function normalizeClock(string $value, string $fallback): string
+    {
+        $value = trim($value);
+        if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $value, $m) === 1) {
+            return sprintf('%02d:%02d', (int) $m[1], (int) $m[2]);
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<list<int>>
+     */
+    public static function normalizeQuietCodes(mixed $raw): array
+    {
+        $fallback = self::defaultQuietCodesStatic();
+        if (!is_array($raw) || count($raw) < self::ROWS) {
+            return $fallback;
+        }
+        $out = [];
+        for ($r = 0; $r < self::ROWS; $r++) {
+            $row = $raw[$r] ?? [];
+            if (!is_array($row)) {
+                $row = [];
+            }
+            $codes = [];
+            for ($c = 0; $c < self::COLS; $c++) {
+                $n = isset($row[$c]) && is_numeric($row[$c]) ? (int) $row[$c] : 0;
+                if ($n < 0 || $n > 69) {
+                    $n = 0;
+                }
+                $codes[] = $n;
+            }
+            $out[] = $codes;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<list<int>> $codes
+     * @return list<string>
+     */
+    public static function linesFromCodes(array $codes): array
+    {
+        $lines = [];
+        for ($r = 0; $r < self::ROWS; $r++) {
+            $line = '';
+            for ($c = 0; $c < self::COLS; $c++) {
+                $line .= self::glyphFromCode((int) ($codes[$r][$c] ?? 0));
+            }
+            $lines[] = $line;
+        }
+
+        return $lines;
+    }
+
+    public static function glyphFromCode(int $code): string
+    {
+        if ($code >= 1 && $code <= 26) {
+            return chr(64 + $code);
+        }
+        if ($code >= 27 && $code <= 35) {
+            return chr($code + 22);
+        }
+        if ($code === 36) {
+            return '0';
+        }
+
+        return match ($code) {
+            37 => '!',
+            38 => '@',
+            39 => '#',
+            40 => '$',
+            41 => '(',
+            42 => ')',
+            44 => '-',
+            46 => '+',
+            47 => '&',
+            48 => '=',
+            49 => ';',
+            50 => ':',
+            52 => "'",
+            53 => '"',
+            54 => '%',
+            55 => ',',
+            56 => '.',
+            59 => '/',
+            60 => '?',
+            default => ' ',
         };
     }
 

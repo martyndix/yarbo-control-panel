@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.42] - 2026-09-03
+
+### Added
+- **Vestaboard Quiet hours** in Settings: start/end on this host’s clock, plus a 3×15 editor for letters and colour chips. At the start of the window the Note shows that message once (no overnight flapping); live Yarbo status resumes at the end.
+
 ## [1.3.41] - 2026-09-02
 
 ### Added

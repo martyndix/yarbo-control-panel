@@ -541,7 +541,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-vestaboard-section">
                             <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
-                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The Note updates in the background while the panel (or MQTT agent) is running — the browser does not need to stay open. Writes happen when the message changes (at most every 15 seconds). See <code>docs/vestaboard.md</code>.</p>
+                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The Note updates in the background while the panel (or MQTT agent) is running — the browser does not need to stay open. Writes happen when the message changes (at most every 15 seconds). Optional Quiet hours pause those writes overnight. See <code>docs/vestaboard.md</code>.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-vestaboard-enabled" name="vestaboard_enabled">
                                 <span>Enable Vestaboard Note</span>
@@ -587,10 +587,38 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <option value="paused">Sample: paused / plan hold</option>
                                         <option value="rain">Sample: rain</option>
                                         <option value="error">Sample: error</option>
+                                        <option value="quiet">Quiet hours message</option>
                                     </select>
                                 </label>
                                 <div class="vestaboard-preview" id="settings-vestaboard-preview" aria-label="Vestaboard Note 3 by 15 preview"></div>
                                 <p id="settings-vestaboard-preview-caption" class="hint">YARBO status on a 3×15 Note</p>
+                                <label class="settings-field settings-checkbox">
+                                    <input type="checkbox" id="settings-vestaboard-quiet" name="vestaboard_quiet_hours">
+                                    <span>Quiet hours</span>
+                                </label>
+                                <p class="hint">Stops Yarbo status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end. Times use this computer’s clock (the Pi). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.</p>
+                                <div id="settings-vestaboard-quiet-fields" class="hidden">
+                                    <div class="vestaboard-quiet-times">
+                                        <label class="settings-field">
+                                            <span class="label">Start</span>
+                                            <input type="time" id="settings-vestaboard-quiet-start" name="vestaboard_quiet_start" value="22:00">
+                                        </label>
+                                        <label class="settings-field">
+                                            <span class="label">End</span>
+                                            <input type="time" id="settings-vestaboard-quiet-end" name="vestaboard_quiet_end" value="07:00">
+                                        </label>
+                                    </div>
+                                    <p class="hint">Tap a flap, then type a letter or pick a colour. Overnight wrap is allowed (for example 22:00–07:00).</p>
+                                    <div class="vestaboard-preview vestaboard-preview--edit" id="settings-vestaboard-quiet-board" tabindex="0" role="grid" aria-label="Quiet hours 3 by 15 message"></div>
+                                    <div class="vestaboard-palette" id="settings-vestaboard-quiet-palette" role="toolbar" aria-label="Quiet hours colours">
+                                        <button type="button" class="vestaboard-palette-btn" data-quiet-code="0">Blank</button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--red" data-quiet-code="63" title="Red"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--orange" data-quiet-code="64" title="Orange"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--yellow" data-quiet-code="65" title="Yellow"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--green" data-quiet-code="66" title="Green"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--blue" data-quiet-code="67" title="Blue"></button>
+                                    </div>
+                                </div>
                                 <p id="settings-vestaboard-result" class="settings-cloud-result hidden" role="status"></p>
                                 <div class="papermono-actions">
                                     <button type="button" class="btn btn-secondary" id="settings-vestaboard-test">Test connection</button>

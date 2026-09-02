@@ -1941,6 +1941,51 @@ body.map-is-fullscreen {
     color: transparent;
 }
 
+.vestaboard-quiet-times {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.vestaboard-preview--edit {
+    cursor: pointer;
+    outline: none;
+}
+
+.vestaboard-preview--edit:focus {
+    border-color: var(--accent);
+}
+
+.vestaboard-cell.is-selected {
+    box-shadow: inset 0 0 0 2px #f3ead2;
+}
+
+.vestaboard-palette {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.5rem 0 0.75rem;
+}
+
+.vestaboard-palette-btn {
+    min-width: 2rem;
+    height: 2rem;
+    padding: 0 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #0c0c0c;
+    color: #f3ead2;
+    cursor: pointer;
+    font-size: 0.75rem;
+}
+
+.vestaboard-palette-btn--red { background: #c43c3c; }
+.vestaboard-palette-btn--orange { background: #d4782a; }
+.vestaboard-palette-btn--yellow { background: #d4b42a; }
+.vestaboard-palette-btn--green { background: #3a9e58; }
+.vestaboard-palette-btn--blue { background: #2a6fd4; }
+
 .papermono-device-list {
     display: grid;
     gap: 0.5rem;

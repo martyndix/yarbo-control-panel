@@ -42,6 +42,14 @@ BATTERY     81%
 
 Paused centres **PLAN HOLD** and fills the empty flaps with yellow. Battery percent matches the Status tile (not rounded). A colour chip sits at the end of the battery line: green at 60% or more (and Full), yellow from 40%, orange from 20%, red below that. Rain uses a blue chip on the bottom-right **RAIN** tile when the rain sensor is at or above the Yarbo app **Rain Sensitivity** slider (20–1000; set in panel Settings, or 20 if left blank). The top line stays **IDLE** and the third line shows the attached head. In an error state the Note shows red chips on the ERROR and CODE lines. Sitting on the charger is **CHARGING** (or **IDLE** when Full), even if `on_going_recharging` is still set after arrival. A leftover docking flag is also ignored once the robot is sitting still at 95% or more. Sitting Full on the charger is **IDLE** when the sensor is dry, even if the robot is still app-awake after a cancelled plan. Full uses the same rule as the panel (on the pad and capacity ≥ 95%). Updates are sent only when that 3-line message changes, and not more than once every 15 seconds (Vestaboard’s hardware rate limit). The MQTT agent also pushes the Note, so it still updates if the browser is closed.
 
+## Quiet hours
+
+In **Settings → Vestaboard Note**, enable **Quiet hours** and set start/end times on **this host’s clock** (the Pi). Overnight windows wrap midnight (for example 22:00–07:00).
+
+At the start of the window the panel writes your custom 3×15 message once (tap each flap for a letter or colour chip). After that it does not push Yarbo status, so the flaps stay still. When the window ends, live status resumes on the next tick.
+
+This is separate from Quiet Hours in the Vestaboard **app**. The app setting can still drop **Cloud** writes; panel Quiet Hours also covers Local API and actually stops the watcher.
+
 ## Setup (either API)
 
 1. Open the panel → **Settings → Vestaboard Note**.
@@ -78,7 +86,7 @@ Uses Vestaboard’s cloud (`https://cloud.vestaboard.com/`) with header `X-Vesta
 3. Copy the token immediately — Vestaboard will not show it again.
 4. In Settings, choose **Cloud API** and paste that token.
 
-The Cloud API does not accept a blank board. Quiet hours configured in the Vestaboard app can drop Cloud writes (the panel does not force through quiet hours).
+The Cloud API does not accept a blank board. Quiet hours in the Vestaboard **app** can still drop Cloud writes. Use **Settings → Quiet hours** on this panel to stop Yarbo status updates overnight (Local and Cloud).
 
 ## Limits
 
