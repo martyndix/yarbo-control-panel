@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.43] - 2026-09-03
+
+### Fixed
+- **Vestaboard Quiet hours** now posts live Yarbo status as soon as the window ends, even if the robot sat still all night (same layout as before quiet). Previously the Note stayed on the night message until telemetry changed.
+
 ## [1.3.42] - 2026-09-03
 
 ### Added

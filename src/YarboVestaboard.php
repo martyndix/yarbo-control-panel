@@ -103,6 +103,7 @@ final class YarboVestaboard
             'quiet_start' => '22:00',
             'quiet_end' => '07:00',
             'quiet_codes' => self::defaultQuietCodesStatic(),
+            'quiet_active' => false,
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -133,6 +134,7 @@ final class YarboVestaboard
             'quiet_start' => self::normalizeClock((string) ($decoded['quiet_start'] ?? '22:00'), '22:00'),
             'quiet_end' => self::normalizeClock((string) ($decoded['quiet_end'] ?? '07:00'), '07:00'),
             'quiet_codes' => self::normalizeQuietCodes($decoded['quiet_codes'] ?? null),
+            'quiet_active' => (bool) ($decoded['quiet_active'] ?? false),
         ];
     }
 
@@ -202,6 +204,9 @@ final class YarboVestaboard
             'quiet_start' => $quietStart,
             'quiet_end' => $quietEnd,
             'quiet_codes' => $quietCodes,
+            'quiet_active' => array_key_exists('quiet_active', $input)
+                ? (bool) $input['quiet_active']
+                : (bool) ($current['quiet_active'] ?? false),
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -318,8 +323,14 @@ final class YarboVestaboard
             return ['ok' => false, 'error' => $missing];
         }
 
+        $wasQuiet = !empty($config['quiet_active']);
+        $quietHash = $this->quietLayoutHash();
+
         if ($this->isQuietHours()) {
-            return $this->sendLayout($this->quietLayout(), false);
+            $result = $this->sendLayout($this->quietLayout(), false);
+            $this->save(['quiet_active' => true]);
+
+            return $result;
         }
 
         $layout = $this->layoutFromTelemetry();
@@ -329,10 +340,21 @@ final class YarboVestaboard
             return $layout;
         }
         if (!($layout['online'] ?? false)) {
-            return ['ok' => true, 'skipped' => true, 'reason' => 'offline'];
+            // Keep quiet_active so the next tick still forces live once telemetry is back.
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'reason' => $wasQuiet ? 'offline_after_quiet' : 'offline',
+            ];
         }
 
-        return $this->sendLayout($layout, false);
+        $force = $wasQuiet || ((string) $config['last_hash'] === $quietHash);
+        $result = $this->sendLayout($layout, $force);
+        if ($force && !empty($result['ok'])) {
+            $this->save(['quiet_active' => false]);
+        }
+
+        return $result;
     }
 
     /**
@@ -835,6 +857,11 @@ final class YarboVestaboard
         }
 
         return $now >= $start || $now < $end;
+    }
+
+    private function quietLayoutHash(): string
+    {
+        return hash('sha256', json_encode($this->quietLayout()['codes']));
     }
 
     /**
