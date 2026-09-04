@@ -68,6 +68,23 @@ JOB_LATCH_KEYS = (
 BATTERY_CELLS_CACHE_S = 30.0
 
 
+def telemetry_raw_usable(raw: Any) -> bool:
+    """Keep last_raw only when a snapshot actually has robot fields."""
+    if not isinstance(raw, dict) or not raw:
+        return False
+    return any(
+        raw.get(key) is not None
+        for key in ("StateMSG", "BatteryMSG", "CombinedOdom", "RTKMSG")
+    )
+
+
+def store_last_raw(state: dict[str, Any], raw: Any) -> bool:
+    if not telemetry_raw_usable(raw):
+        return False
+    state["last_raw"] = raw
+    return True
+
+
 def job_is_latched(raw: Any) -> bool:
     if not isinstance(raw, dict):
         return False
@@ -402,10 +419,9 @@ def state_flags(state: dict[str, Any], client: Any | None = None) -> dict[str, A
 async def read_controller_reality(client: Any, state: dict[str, Any]) -> dict[str, Any]:
     try:
         snap = await client.get_status(timeout=2.5, acquire_controller=False)
-        if snap and getattr(snap, "raw", None):
-            state["last_raw"] = snap.raw
-            mark_job_from_raw(state, snap.raw)
-            return parse_controller_reality(snap.raw)
+        if snap and store_last_raw(state, getattr(snap, "raw", None)):
+            mark_job_from_raw(state, state["last_raw"])
+            return parse_controller_reality(state["last_raw"])
     except Exception:
         pass
     if isinstance(state.get("last_raw"), dict):
@@ -533,8 +549,9 @@ async def handle_request(
                 }
 
             status = await client.get_status(timeout=timeout, acquire_controller=False)
-            if status is None:
-                if isinstance(state.get("last_raw"), dict):
+            raw = getattr(status, "raw", None) if status is not None else None
+            if not store_last_raw(state, raw):
+                if telemetry_raw_usable(state.get("last_raw")):
                     return {
                         "ok": True,
                         "op": "telemetry",
@@ -545,8 +562,7 @@ async def handle_request(
                         **state_flags(state, client),
                     }
                 return {"ok": False, "error": "telemetry timeout", "transient": True}
-            raw = getattr(status, "raw", None) or {}
-            state["last_raw"] = raw
+            raw = state["last_raw"]
             if charging_status_of(raw) <= 0:
                 state["pad_released"] = False
             mark_job_from_raw(state, raw)
@@ -655,9 +671,8 @@ async def handle_request(
             charging_status = None
             try:
                 snap = await client.get_status(timeout=2.5, acquire_controller=False)
-                if snap and getattr(snap, "raw", None):
-                    state["last_raw"] = snap.raw
-                    charging_status = (snap.raw.get("StateMSG") or {}).get("charging_status")
+                if snap and store_last_raw(state, getattr(snap, "raw", None)):
+                    charging_status = (state["last_raw"].get("StateMSG") or {}).get("charging_status")
             except Exception:
                 pass
 

@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.44] - 2026-09-04
+
+### Fixed
+- **Vestaboard Quiet hours** now restore live Yarbo status when the window ends even if no browser tab is open. Overnight the robot is often asleep, so the watcher used to skip the morning write and wait for the dashboard. It now keeps last night’s live layout and posts that (or fresh telemetry) as soon as quiet hours end.
+
 ## [1.3.43] - 2026-09-03
 
 ### Fixed

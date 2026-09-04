@@ -104,6 +104,7 @@ final class YarboVestaboard
             'quiet_end' => '07:00',
             'quiet_codes' => self::defaultQuietCodesStatic(),
             'quiet_active' => false,
+            'last_live_codes' => null,
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -135,6 +136,7 @@ final class YarboVestaboard
             'quiet_end' => self::normalizeClock((string) ($decoded['quiet_end'] ?? '07:00'), '07:00'),
             'quiet_codes' => self::normalizeQuietCodes($decoded['quiet_codes'] ?? null),
             'quiet_active' => (bool) ($decoded['quiet_active'] ?? false),
+            'last_live_codes' => self::normalizeLiveCodes($decoded['last_live_codes'] ?? null),
         ];
     }
 
@@ -207,6 +209,9 @@ final class YarboVestaboard
             'quiet_active' => array_key_exists('quiet_active', $input)
                 ? (bool) $input['quiet_active']
                 : (bool) ($current['quiet_active'] ?? false),
+            'last_live_codes' => array_key_exists('last_live_codes', $input)
+                ? (self::normalizeLiveCodes($input['last_live_codes']) ?? ($current['last_live_codes'] ?? null))
+                : ($current['last_live_codes'] ?? null),
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -325,8 +330,12 @@ final class YarboVestaboard
 
         $wasQuiet = !empty($config['quiet_active']);
         $quietHash = $this->quietLayoutHash();
+        $forceResume = $wasQuiet || ((string) $config['last_hash'] === $quietHash);
 
         if ($this->isQuietHours()) {
+            if (!$wasQuiet || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
+                $this->snapshotLiveLayout();
+            }
             $result = $this->sendLayout($this->quietLayout(), false);
             $this->save(['quiet_active' => true]);
 
@@ -340,17 +349,27 @@ final class YarboVestaboard
             return $layout;
         }
         if (!($layout['online'] ?? false)) {
-            // Keep quiet_active so the next tick still forces live once telemetry is back.
+            if ($forceResume) {
+                $cached = $this->lastLiveLayout($this->load());
+                if ($cached !== null) {
+                    $result = $this->sendLayout($cached, true);
+                    if (!empty($result['ok'])) {
+                        $this->save(['quiet_active' => false]);
+                    }
+
+                    return $result;
+                }
+            }
+
             return [
                 'ok' => true,
                 'skipped' => true,
-                'reason' => $wasQuiet ? 'offline_after_quiet' : 'offline',
+                'reason' => $forceResume ? 'offline_after_quiet' : 'offline',
             ];
         }
 
-        $force = $wasQuiet || ((string) $config['last_hash'] === $quietHash);
-        $result = $this->sendLayout($layout, $force);
-        if ($force && !empty($result['ok'])) {
+        $result = $this->sendLayout($layout, $forceResume);
+        if ($forceResume && !empty($result['ok'])) {
             $this->save(['quiet_active' => false]);
         }
 
@@ -412,12 +431,21 @@ final class YarboVestaboard
             return ['ok' => false, 'error' => 'Cloud API does not accept a blank board.'];
         }
         $hash = hash('sha256', json_encode($layout['codes']));
+        $isQuiet = ($layout['verb'] ?? '') === 'QUIET';
         if (!$force && $hash === $config['last_hash']) {
+            if (!$isQuiet) {
+                $this->save(['last_live_codes' => $layout['codes']]);
+            }
+
             return ['ok' => true, 'skipped' => true, 'lines' => $layout['lines']];
         }
         if (!$force && $config['last_sent_at'] !== null) {
             $then = strtotime($config['last_sent_at']);
             if ($then !== false && (microtime(true) - $then) < self::MIN_SEND_GAP_SECONDS) {
+                if (!$isQuiet) {
+                    $this->save(['last_live_codes' => $layout['codes']]);
+                }
+
                 return ['ok' => true, 'skipped' => true, 'lines' => $layout['lines']];
             }
         }
@@ -428,11 +456,15 @@ final class YarboVestaboard
 
             return $posted;
         }
-        $this->save([
+        $saved = [
             'last_hash' => $hash,
             'last_sent_at' => gmdate('c'),
             'last_error' => '',
-        ]);
+        ];
+        if (!$isQuiet) {
+            $saved['last_live_codes'] = $layout['codes'];
+        }
+        $this->save($saved);
 
         return [
             'ok' => true,
@@ -862,6 +894,62 @@ final class YarboVestaboard
     private function quietLayoutHash(): string
     {
         return hash('sha256', json_encode($this->quietLayout()['codes']));
+    }
+
+    private function snapshotLiveLayout(): void
+    {
+        $layout = $this->layoutFromTelemetry();
+        if (!($layout['ok'] ?? false) || !($layout['online'] ?? false)) {
+            return;
+        }
+        $this->save(['last_live_codes' => $layout['codes']]);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array{lines: list<string>, codes: list<list<int>>, verb: string}|null
+     */
+    private function lastLiveLayout(array $config): ?array
+    {
+        $codes = self::normalizeLiveCodes($config['last_live_codes'] ?? null);
+        if ($codes === null) {
+            return null;
+        }
+
+        return [
+            'lines' => self::linesFromCodes($codes),
+            'codes' => $codes,
+            'verb' => 'LIVE',
+        ];
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<list<int>>|null
+     */
+    public static function normalizeLiveCodes(mixed $raw): ?array
+    {
+        if (!is_array($raw) || count($raw) < self::ROWS) {
+            return null;
+        }
+        $out = [];
+        for ($r = 0; $r < self::ROWS; $r++) {
+            $row = $raw[$r] ?? [];
+            if (!is_array($row)) {
+                $row = [];
+            }
+            $codes = [];
+            for ($c = 0; $c < self::COLS; $c++) {
+                $n = isset($row[$c]) && is_numeric($row[$c]) ? (int) $row[$c] : 0;
+                if ($n < 0 || $n > 69) {
+                    $n = 0;
+                }
+                $codes[] = $n;
+            }
+            $out[] = $codes;
+        }
+
+        return $out;
     }
 
     /**
