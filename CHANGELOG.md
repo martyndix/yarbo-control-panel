@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.45] - 2026-09-04
+
+### Changed
+- Vestaboard **MOWING** now has a green tile after the word so the working state is easier to read at a glance.
+
 ## [1.3.44] - 2026-09-04
 
 ### Fixed

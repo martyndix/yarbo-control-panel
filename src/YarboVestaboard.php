@@ -559,8 +559,9 @@ final class YarboVestaboard
         }
         if ($planRunning && $chargingLabel === 'No') {
             $verb = $this->workingVerb($headName);
+            $accent = $verb === 'MOWING' ? self::COLOR_GREEN : 0;
 
-            return $this->pack($verb, $batteryLine, $this->headLine($headName), $batteryColor);
+            return $this->pack($verb, $batteryLine, $this->headLine($headName), $batteryColor, $accent);
         }
         if ($chargingLabel === 'Full') {
             return $this->pack('IDLE', $this->batteryLine($parsed), 'CHARGED', $batteryColor);
