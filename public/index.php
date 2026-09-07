@@ -596,7 +596,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <input type="checkbox" id="settings-vestaboard-quiet" name="vestaboard_quiet_hours">
                                     <span>Quiet hours</span>
                                 </label>
-                                <p class="hint">Stops Yarbo status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end. Times use this computer’s clock (the Pi). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.</p>
+                                <p class="hint" id="settings-vestaboard-quiet-hint">Stops Yarbo status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open. Times use your local timezone (not UTC). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.</p>
                                 <div id="settings-vestaboard-quiet-fields" class="hidden">
                                     <div class="vestaboard-quiet-times">
                                         <label class="settings-field">

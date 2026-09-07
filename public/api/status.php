@@ -15,13 +15,20 @@ use Yarbo\YarboWifi;
 $host = (string) ($config['broker_host'] ?? '');
 $port = (int) ($config['broker_port'] ?? 1883);
 
-function vestaboard_status_payload(?array $parsed, bool $online): array
+function vestaboard_board(): YarboVestaboard
 {
     static $board = null;
     $board ??= new YarboVestaboard(dirname(__DIR__, 2));
 
-    return $board->dashboardPayload($parsed, $online);
+    return $board;
 }
+
+function vestaboard_status_payload(?array $parsed, bool $online): array
+{
+    return vestaboard_board()->dashboardPayload($parsed, $online);
+}
+
+vestaboard_board()->rememberClientTimezoneFromRequest();
 
 function attach_robot_name(array $parsed): array
 {

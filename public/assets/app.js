@@ -2748,6 +2748,7 @@ async function loadSettings() {
             els.settingsVestaboardQuietEnd.value = data.vestaboard?.quiet_end || '07:00';
         }
         setQuietCodes(data.vestaboard?.quiet_codes);
+        updateQuietHoursClockHint(data.vestaboard);
         if (els.settingsRainSensitivity) {
             const n = data.rain?.sensitivity;
             els.settingsRainSensitivity.value = n != null ? String(n) : '';
@@ -3090,6 +3091,30 @@ function renderQuietBoard() {
     root.innerHTML = cells.join('');
 }
 
+function clientTimezone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch {
+        return '';
+    }
+}
+
+function clientTimezoneHeaders() {
+    const tz = clientTimezone();
+    return tz ? { 'X-Client-Timezone': tz } : {};
+}
+
+function updateQuietHoursClockHint(board) {
+    const hint = document.getElementById('settings-vestaboard-quiet-hint');
+    if (!hint) return;
+    const tz = board?.quiet_timezone || clientTimezone();
+    const now = board?.quiet_clock_now;
+    const clock = tz && now ? ` Times use ${tz} (now ${now}), not UTC.` : ' Times use your local timezone (not UTC).';
+    hint.textContent = 'Stops Yarbo status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open.'
+        + clock
+        + ' Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.';
+}
+
 function vestaboardTransport() {
     const checked = document.querySelector('input[name="vestaboard-transport"]:checked');
     return checked?.value === 'cloud' ? 'cloud' : 'local';
@@ -3257,6 +3282,7 @@ async function saveSettings(event) {
             vestaboard_quiet_start: els.settingsVestaboardQuietStart?.value || '22:00',
             vestaboard_quiet_end: els.settingsVestaboardQuietEnd?.value || '07:00',
             vestaboard_quiet_codes: quietCodesSnapshot(),
+            vestaboard_quiet_timezone: clientTimezone(),
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;
@@ -3883,7 +3909,7 @@ async function fetchStatus() {
     statusAbort = new AbortController();
     const { signal } = statusAbort;
     try {
-        const res = await fetch('/api/status.php', { signal });
+        const res = await fetch('/api/status.php', { signal, headers: clientTimezoneHeaders() });
         const data = await res.json();
         if (settingsModalOpen || driveActive) return;
         if (data.ok) {

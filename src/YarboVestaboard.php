@@ -105,6 +105,7 @@ final class YarboVestaboard
             'quiet_codes' => self::defaultQuietCodesStatic(),
             'quiet_active' => false,
             'last_live_codes' => null,
+            'quiet_timezone' => '',
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -137,6 +138,7 @@ final class YarboVestaboard
             'quiet_codes' => self::normalizeQuietCodes($decoded['quiet_codes'] ?? null),
             'quiet_active' => (bool) ($decoded['quiet_active'] ?? false),
             'last_live_codes' => self::normalizeLiveCodes($decoded['last_live_codes'] ?? null),
+            'quiet_timezone' => self::normalizeTimezone((string) ($decoded['quiet_timezone'] ?? '')),
         ];
     }
 
@@ -212,6 +214,10 @@ final class YarboVestaboard
             'last_live_codes' => array_key_exists('last_live_codes', $input)
                 ? (self::normalizeLiveCodes($input['last_live_codes']) ?? ($current['last_live_codes'] ?? null))
                 : ($current['last_live_codes'] ?? null),
+            'quiet_timezone' => array_key_exists('quiet_timezone', $input) || array_key_exists('vestaboard_quiet_timezone', $input)
+                ? (self::normalizeTimezone((string) ($input['quiet_timezone'] ?? $input['vestaboard_quiet_timezone'] ?? ''))
+                    ?: (string) ($current['quiet_timezone'] ?? ''))
+                : (string) ($current['quiet_timezone'] ?? ''),
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -243,6 +249,8 @@ final class YarboVestaboard
             'quiet_end' => $config['quiet_end'],
             'quiet_codes' => $config['quiet_codes'],
             'quiet_hours_active' => $this->isQuietHours(),
+            'quiet_timezone' => $this->resolveQuietTimezone($config),
+            'quiet_clock_now' => $this->quietNowHm($config),
         ];
     }
 
@@ -269,6 +277,8 @@ final class YarboVestaboard
                 'verb' => $layout['verb'],
                 'quiet_hours' => true,
                 'quiet_until' => $config['quiet_end'],
+                'quiet_timezone' => $this->resolveQuietTimezone($config),
+                'quiet_clock_now' => $this->quietNowHm($config),
                 'last_sent_at' => $config['last_sent_at'],
                 'pending' => $hash !== (string) $config['last_hash'],
                 'last_error' => $this->publicLastError($config['last_error']),
@@ -322,6 +332,13 @@ final class YarboVestaboard
         $config = $this->load();
         if (!$config['enabled']) {
             return ['ok' => true, 'skipped' => true];
+        }
+        if (self::normalizeTimezone((string) ($config['quiet_timezone'] ?? '')) === '') {
+            $os = self::osTimezone();
+            if ($os !== '') {
+                $this->save(['quiet_timezone' => $os]);
+                $config = $this->load();
+            }
         }
         $missing = $this->missingCredentialError($config);
         if ($missing !== null) {
@@ -873,6 +890,99 @@ final class YarboVestaboard
         };
     }
 
+    public function rememberTimezone(string $zone): bool
+    {
+        $zone = self::normalizeTimezone($zone);
+        if ($zone === '') {
+            return false;
+        }
+        $current = (string) ($this->load()['quiet_timezone'] ?? '');
+        if ($current === $zone) {
+            return true;
+        }
+
+        return $this->save(['quiet_timezone' => $zone]);
+    }
+
+    public function rememberClientTimezoneFromRequest(): void
+    {
+        $this->rememberTimezone((string) ($_SERVER['HTTP_X_CLIENT_TIMEZONE'] ?? ''));
+    }
+
+    /**
+     * @param array<string, mixed>|null $config
+     */
+    public function resolveQuietTimezone(?array $config = null): string
+    {
+        $config ??= $this->load();
+        $stored = self::normalizeTimezone((string) ($config['quiet_timezone'] ?? ''));
+        if ($stored !== '') {
+            return $stored;
+        }
+        $os = self::osTimezone();
+        if ($os !== '') {
+            return $os;
+        }
+        $php = self::normalizeTimezone((string) date_default_timezone_get());
+
+        return $php !== '' ? $php : 'UTC';
+    }
+
+    public static function osTimezone(): string
+    {
+        $candidates = [];
+        if (is_file('/etc/timezone')) {
+            $candidates[] = trim((string) file_get_contents('/etc/timezone'));
+        }
+        $localtime = @readlink('/etc/localtime');
+        if (is_string($localtime)) {
+            $needle = '/zoneinfo/';
+            $pos = strpos($localtime, $needle);
+            if ($pos !== false) {
+                $candidates[] = substr($localtime, $pos + strlen($needle));
+            }
+        }
+        foreach ($candidates as $raw) {
+            $zone = self::normalizeTimezone($raw);
+            if ($zone === '' || strcasecmp($zone, 'UTC') === 0 || strcasecmp($zone, 'Etc/UTC') === 0) {
+                continue;
+            }
+
+            return $zone;
+        }
+
+        return '';
+    }
+
+    public static function normalizeTimezone(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '' || strlen($value) > 64 || preg_match('/^[A-Za-z0-9_+\-\/]+$/', $value) !== 1) {
+            return '';
+        }
+        try {
+            new \DateTimeZone($value);
+        } catch (\Exception) {
+            return '';
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param array<string, mixed>|null $config
+     */
+    public function quietNowHm(?array $config = null): string
+    {
+        try {
+            $tz = new \DateTimeZone($this->resolveQuietTimezone($config));
+
+            return (new \DateTimeImmutable('now', $tz))->format('H:i');
+        } catch (\Exception) {
+            return date('H:i');
+        }
+    }
+
     public function isQuietHours(?string $nowHm = null): bool
     {
         $config = $this->load();
@@ -884,7 +994,7 @@ final class YarboVestaboard
         if ($start === '' || $end === '' || $start === $end) {
             return false;
         }
-        $now = $nowHm ?? date('H:i');
+        $now = $nowHm ?? $this->quietNowHm($config);
         if ($start < $end) {
             return $now >= $start && $now < $end;
         }

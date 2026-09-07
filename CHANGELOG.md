@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.46] - 2026-09-07
+
+### Fixed
+- **Vestaboard Quiet hours** now end at 07:00 in your local timezone, not UTC. The background watcher uses that clock with no browser open, so the Note returns to live Yarbo status at the end of the window (the 07:50 screenshot was still in quiet hours because PHP was on UTC).
+
 ## [1.3.45] - 2026-09-04
 
 ### Changed
