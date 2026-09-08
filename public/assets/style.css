@@ -1523,10 +1523,79 @@ body.map-is-fullscreen {
     width: 140px;
 }
 
-.plans-status,
 .plans-note {
     margin: 0 0 0.5rem;
     font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.plan-activity {
+    margin: 0 0 0.85rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(15, 20, 25, 0.35);
+}
+
+html[data-theme="light"] .plan-activity {
+    background: rgba(255, 255, 255, 0.72);
+}
+
+.plan-activity-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+}
+
+.plan-activity-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plan-activity-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-top: 0.55rem;
+}
+
+.plan-activity-pct {
+    flex-shrink: 0;
+    min-width: 3.75rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+    color: var(--accent);
+}
+
+.plan-activity-bar {
+    flex: 1 1 auto;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--border);
+    overflow: hidden;
+}
+
+.plan-activity-bar-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.35s ease;
+}
+
+.plan-activity.is-paused .plan-activity-bar-fill {
+    background: #e0b34c;
+}
+
+.plan-activity-detail {
+    margin: 0.45rem 0 0;
+    font-size: 0.8rem;
     color: var(--muted);
 }
 

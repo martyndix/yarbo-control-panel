@@ -28,7 +28,9 @@ function panel_version(): string
 }
 
 $panelVersion = panel_version();
-$assetVersion = $panelVersion . '.' . (string) (@filemtime(__DIR__ . '/assets/app.js') ?: time());
+$jsMtime = (int) (@filemtime(__DIR__ . '/assets/app.js') ?: 0);
+$cssMtime = (int) (@filemtime(__DIR__ . '/assets/style.css') ?: 0);
+$assetVersion = $panelVersion . '.' . (string) (max($jsMtime, $cssMtime) ?: time());
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -358,7 +360,27 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn btn-secondary" id="plans-load">Load plans</button>
                 <button type="button" class="btn-text" id="plans-manage" disabled title="Load plans first">Manage…</button>
             </div>
-            <p id="plans-status" class="plans-status">Plan activity: —</p>
+            <div id="plans-status" class="plan-activity is-idle">
+                <div class="plan-activity-row">
+                    <span id="plans-activity-badge" class="badge">Idle</span>
+                    <span id="plans-activity-title" class="plan-activity-title">No plan running</span>
+                </div>
+                <div id="plans-activity-progress" class="plan-activity-progress hidden">
+                    <div
+                        id="plans-activity-bar-wrap"
+                        class="plan-activity-bar"
+                        role="progressbar"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="0"
+                        aria-label="Work plan progress"
+                    >
+                        <div id="plans-activity-bar" class="plan-activity-bar-fill"></div>
+                    </div>
+                    <span id="plans-activity-pct" class="plan-activity-pct"></span>
+                </div>
+                <p id="plans-activity-detail" class="plan-activity-detail hidden"></p>
+            </div>
             <p id="plans-note" class="plans-note">No plans loaded yet.</p>
             <div id="plans-list" class="plans-list"></div>
         </section>

@@ -213,7 +213,19 @@
                 <label class="data-source-field">Plan data <select><option>Auto (local, then cloud)</option></select></label>
                 <button type="button" class="btn btn-secondary">Load plans</button>
             </div>
-            <p class="plans-status">Plan activity: idle</p>
+            <div class="plan-activity is-running">
+                <div class="plan-activity-row">
+                    <span class="badge active">Running</span>
+                    <span class="plan-activity-title">Patio Lawn</span>
+                </div>
+                <div class="plan-activity-progress">
+                    <div class="plan-activity-bar" role="progressbar" aria-valuenow="90" aria-valuemin="0" aria-valuemax="100">
+                        <div class="plan-activity-bar-fill" style="width: 89.8%"></div>
+                    </div>
+                    <span class="plan-activity-pct">89.8%</span>
+                </div>
+                <p class="plan-activity-detail">24.0 m² left</p>
+            </div>
             <div class="plans-list">
                 <article class="plan-item">
                     <div>

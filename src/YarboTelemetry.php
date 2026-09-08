@@ -578,6 +578,7 @@ final class YarboTelemetry
      *   plan_id: mixed,
      *   plan_percent: int|float|null,
      *   plan_percent_source: ?string,
+     *   remaining_m2: ?float,
      *   plan_name: mixed,
      *   pause_reason: mixed,
      *   error_message: mixed
@@ -598,6 +599,7 @@ final class YarboTelemetry
                 ?? ($feedback['planId'] ?? null),
             'plan_percent' => $found['percent'],
             'plan_percent_source' => $found['source'],
+            'remaining_m2' => $found['remaining_m2'] ?? null,
             'plan_name' => $stateMsg['plan_name']
                 ?? $stateMsg['planName']
                 ?? ($feedback['plan_name'] ?? null)
@@ -612,12 +614,12 @@ final class YarboTelemetry
      * finishCleanArea is planned-path coverage and runs a few points higher.
      *
      * @param array<string, mixed>|null $feedback
-     * @return array{percent: int|float|null, source: ?string}
+     * @return array{percent: int|float|null, source: ?string, remaining_m2: ?float}
      */
     private static function planPercentFromPlanFeedback(?array $feedback): array
     {
         if ($feedback === null || $feedback === []) {
-            return ['percent' => null, 'source' => null];
+            return ['percent' => null, 'source' => null, 'remaining_m2' => null];
         }
 
         $actual = self::firstNumeric(
@@ -643,10 +645,14 @@ final class YarboTelemetry
                 ? 'plan_feedback.actualCleanArea/totalCleanArea'
                 : 'plan_feedback.finishCleanArea/totalCleanArea';
 
-            return ['percent' => $pct, 'source' => $src];
+            return [
+                'percent' => $pct,
+                'source' => $src,
+                'remaining_m2' => round(max(0.0, $total - $completed), 1),
+            ];
         }
 
-        return ['percent' => null, 'source' => null];
+        return ['percent' => null, 'source' => null, 'remaining_m2' => null];
     }
 
     /**

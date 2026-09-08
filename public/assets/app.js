@@ -49,6 +49,13 @@ const els = {
     planStartPercentLabel: document.getElementById('plan-start-percent-label'),
     plansLoad: document.getElementById('plans-load'),
     plansStatus: document.getElementById('plans-status'),
+    plansActivityBadge: document.getElementById('plans-activity-badge'),
+    plansActivityTitle: document.getElementById('plans-activity-title'),
+    plansActivityProgress: document.getElementById('plans-activity-progress'),
+    plansActivityPct: document.getElementById('plans-activity-pct'),
+    plansActivityBarWrap: document.getElementById('plans-activity-bar-wrap'),
+    plansActivityBar: document.getElementById('plans-activity-bar'),
+    plansActivityDetail: document.getElementById('plans-activity-detail'),
     plansNote: document.getElementById('plans-note'),
     plansList: document.getElementById('plans-list'),
     plansManage: document.getElementById('plans-manage'),
@@ -239,6 +246,7 @@ let currentHeadType = null;
 let defaultDataSource = 'auto';
 let areasLayer = null;
 let loadedPlans = [];
+let lastStatusData = null;
 let pendingPlanDeleteId = null;
 let lastRobotFix = null;
 let mapZoneLayers = [];
@@ -2022,29 +2030,101 @@ function updateRainStatus(data) {
     }
 }
 
-function updatePlanActivity(data) {
-    if (!els.plansStatus) return;
+function planActivityName(planStatus) {
+    const named = String(planStatus.plan_name || '').trim();
+    const id = planStatus.plan_id;
+    const loaded = id != null
+        ? loadedPlans.find((item) => String(item.id) === String(id))
+        : null;
+    if (named && named !== String(id ?? '')) {
+        return named;
+    }
+    if (loaded) {
+        return planDisplayName(loaded);
+    }
+    if (id != null && String(id) !== '') {
+        return `Work plan ${id}`;
+    }
+    return '';
+}
 
-    const parts = [];
-    if (data.plan_running) parts.push('plan running');
-    if (data.planning_paused) parts.push('paused');
-    if (data.rain_detected) parts.push('rain detected');
-    if (data.returning_to_dock) parts.push('returning to dock');
+function formatPlanPercent(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+        return '';
+    }
+    return `${n.toFixed(1)}%`;
+}
+
+function updatePlanActivity(data) {
+    lastStatusData = data;
+    if (!els.plansStatus || !els.plansActivityBadge || !els.plansActivityTitle) return;
 
     const planStatus = data.plan_status || {};
-    if (planStatus.plan_name) parts.push(`"${planStatus.plan_name}"`);
-    if (planStatus.plan_id != null) parts.push(`id ${planStatus.plan_id}`);
-    if (planStatus.plan_percent != null) {
-        const src = planStatus.plan_percent_source ? ` (${planStatus.plan_percent_source})` : '';
-        const n = Number(planStatus.plan_percent);
-        parts.push(`${Number.isFinite(n) ? n.toFixed(1) : planStatus.plan_percent}%${src}`);
-    }
-    if (planStatus.pause_reason) parts.push(`pause: ${planStatus.pause_reason}`);
-    if (planStatus.error_message) parts.push(`error: ${planStatus.error_message}`);
+    const name = planActivityName(planStatus);
+    const pctLabel = formatPlanPercent(planStatus.plan_percent);
+    const remaining = Number(planStatus.remaining_m2);
+    const hasRemaining = Number.isFinite(remaining);
+    const details = [];
 
-    els.plansStatus.textContent = parts.length
-        ? `Plan activity: ${parts.join(', ')}`
-        : 'Plan activity: idle';
+    let badge = 'Idle';
+    let badgeClass = 'badge';
+    let title = 'No plan running';
+    let mode = 'idle';
+
+    if (data.planning_paused) {
+        badge = 'Paused';
+        badgeClass = 'badge degraded';
+        title = name || 'Work plan paused';
+        mode = 'paused';
+        if (planStatus.pause_reason) {
+            details.push(String(planStatus.pause_reason));
+        }
+    } else if (data.plan_running) {
+        badge = 'Running';
+        badgeClass = 'badge active';
+        title = name || 'Work plan in progress';
+        mode = 'running';
+    } else if (data.returning_to_dock) {
+        badge = 'Docking';
+        badgeClass = 'badge';
+        title = 'Returning to dock';
+        mode = 'docking';
+    }
+
+    if (data.rain_detected) {
+        details.push('Rain detected');
+    }
+    if (planStatus.error_message) {
+        details.push(String(planStatus.error_message));
+    }
+    if (hasRemaining && (mode === 'running' || mode === 'paused')) {
+        details.unshift(`${remaining.toFixed(1)} m² left`);
+    }
+
+    els.plansStatus.className = `plan-activity is-${mode}`;
+    els.plansActivityBadge.className = badgeClass;
+    els.plansActivityBadge.textContent = badge;
+    els.plansActivityTitle.textContent = title;
+
+    if (els.plansActivityPct) {
+        els.plansActivityPct.textContent = pctLabel;
+    }
+    if (els.plansActivityProgress && els.plansActivityBarWrap && els.plansActivityBar) {
+        const n = Number(planStatus.plan_percent);
+        const showBar = Number.isFinite(n) && (mode === 'running' || mode === 'paused');
+        els.plansActivityProgress.classList.toggle('hidden', !showBar);
+        if (showBar) {
+            const width = Math.max(0, Math.min(100, n));
+            els.plansActivityBar.style.width = `${width}%`;
+            els.plansActivityBarWrap.setAttribute('aria-valuenow', String(Math.round(width)));
+            els.plansActivityBarWrap.setAttribute('aria-valuetext', pctLabel);
+        }
+    }
+    if (els.plansActivityDetail) {
+        els.plansActivityDetail.textContent = details.join(' · ');
+        els.plansActivityDetail.classList.toggle('hidden', details.length === 0);
+    }
 }
 
 function updateHeadControls(data) {
@@ -2157,6 +2237,9 @@ function renderPlansList(plans, note) {
     loadedPlans = plans;
     els.plansNote.textContent = note || (plans.length ? `${plans.length} plan(s) loaded.` : 'No saved plans returned.');
     updatePlansManageButton();
+    if (lastStatusData) {
+        updatePlanActivity(lastStatusData);
+    }
 
     if (!plans.length) {
         els.plansList.innerHTML = '';

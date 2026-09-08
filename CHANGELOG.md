@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.51] - 2026-09-08
+
+### Changed
+- Work Plans live status is a compact card (Running / Paused / Idle, progress bar, remaining area) instead of a debug line with MQTT field names.
+
 ## [1.3.50] - 2026-09-08
 
 ### Fixed
