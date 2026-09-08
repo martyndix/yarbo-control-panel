@@ -14,6 +14,7 @@ final class YarboVestaboard
     public const ROWS = 3;
     public const COLS = 15;
     public const MIN_SEND_GAP_SECONDS = 15.0;
+    public const MIN_PROGRESS_SEND_GAP_SECONDS = 120.0;
     public const DEFAULT_HOST = 'vestaboard.local';
     public const DEFAULT_PORT = 7000;
     public const TRANSPORT_LOCAL = 'local';
@@ -106,6 +107,7 @@ final class YarboVestaboard
             'quiet_active' => false,
             'last_live_codes' => null,
             'quiet_timezone' => '',
+            'last_progress_stable_hash' => '',
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -139,6 +141,7 @@ final class YarboVestaboard
             'quiet_active' => (bool) ($decoded['quiet_active'] ?? false),
             'last_live_codes' => self::normalizeLiveCodes($decoded['last_live_codes'] ?? null),
             'quiet_timezone' => self::normalizeTimezone((string) ($decoded['quiet_timezone'] ?? '')),
+            'last_progress_stable_hash' => (string) ($decoded['last_progress_stable_hash'] ?? ''),
         ];
     }
 
@@ -218,6 +221,7 @@ final class YarboVestaboard
                 ? (self::normalizeTimezone((string) ($input['quiet_timezone'] ?? $input['vestaboard_quiet_timezone'] ?? ''))
                     ?: (string) ($current['quiet_timezone'] ?? ''))
                 : (string) ($current['quiet_timezone'] ?? ''),
+            'last_progress_stable_hash' => (string) ($input['last_progress_stable_hash'] ?? $current['last_progress_stable_hash'] ?? ''),
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -456,6 +460,9 @@ final class YarboVestaboard
 
             return ['ok' => true, 'skipped' => true, 'lines' => $layout['lines']];
         }
+        if (!$force && $this->isProgressOnlyRateLimited($layout, $hash, $config)) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'progress_rate_limit', 'lines' => $layout['lines']];
+        }
         if (!$force && $config['last_sent_at'] !== null) {
             $then = strtotime($config['last_sent_at']);
             if ($then !== false && (microtime(true) - $then) < self::MIN_SEND_GAP_SECONDS) {
@@ -477,6 +484,7 @@ final class YarboVestaboard
             'last_hash' => $hash,
             'last_sent_at' => gmdate('c'),
             'last_error' => '',
+            'last_progress_stable_hash' => $this->progressStableHash($layout),
         ];
         if (!$isQuiet) {
             $saved['last_live_codes'] = $layout['codes'];
@@ -577,8 +585,9 @@ final class YarboVestaboard
         if ($planRunning && $chargingLabel === 'No') {
             $verb = $this->workingVerb($headName);
             $accent = $verb === 'MOWING' ? self::COLOR_GREEN : 0;
+            $line3 = $this->planCompleteLine($parsed) ?? $this->headLine($headName);
 
-            return $this->pack($verb, $batteryLine, $this->headLine($headName), $batteryColor, $accent);
+            return $this->pack($verb, $batteryLine, $line3, $batteryColor, $accent);
         }
         if ($chargingLabel === 'Full') {
             return $this->pack('IDLE', $this->batteryLine($parsed), 'CHARGED', $batteryColor);
@@ -603,6 +612,7 @@ final class YarboVestaboard
                 'state' => 'active',
                 'head_type_name' => 'Lawn Mower',
                 'battery' => 85,
+                'plan_status' => ['plan_percent' => 58],
             ], true),
             'charging' => $this->compose([
                 'error_code' => 0,
@@ -780,6 +790,61 @@ final class YarboVestaboard
         }
 
         return self::COLOR_RED;
+    }
+
+    /**
+     * @param array<string, mixed> $parsed
+     */
+    private function planCompleteLine(array $parsed): ?string
+    {
+        $status = is_array($parsed['plan_status'] ?? null) ? $parsed['plan_status'] : [];
+        $raw = $status['plan_percent'] ?? $parsed['plan_percent'] ?? null;
+        if (!is_numeric($raw)) {
+            return null;
+        }
+        $n = max(0, min(100, (int) round((float) $raw)));
+
+        return $this->pair('WORK DONE', $n . '%');
+    }
+
+    /**
+     * Hash of the board ignoring WORK DONE percent digits so progress-only changes can be rate-limited.
+     *
+     * @param array{lines?: list<string>, codes: list<list<int>>} $layout
+     */
+    private function progressStableHash(array $layout): string
+    {
+        $codes = $layout['codes'];
+        $line3 = (string) ($layout['lines'][2] ?? '');
+        if (str_starts_with($line3, 'WORK DONE')) {
+            $codes[2] = array_fill(0, self::COLS, 0);
+        }
+
+        return hash('sha256', json_encode($codes));
+    }
+
+    /**
+     * @param array{lines?: list<string>, codes: list<list<int>>} $layout
+     * @param array<string, mixed> $config
+     */
+    private function isProgressOnlyRateLimited(array $layout, string $hash, array $config): bool
+    {
+        if ($hash === (string) ($config['last_hash'] ?? '')) {
+            return false;
+        }
+        $stable = $this->progressStableHash($layout);
+        $prevStable = (string) ($config['last_progress_stable_hash'] ?? '');
+        if ($prevStable === '' || $stable !== $prevStable) {
+            return false;
+        }
+        $then = isset($config['last_sent_at']) && is_string($config['last_sent_at'])
+            ? strtotime($config['last_sent_at'])
+            : false;
+        if ($then === false) {
+            return false;
+        }
+
+        return (microtime(true) - $then) < self::MIN_PROGRESS_SEND_GAP_SECONDS;
     }
 
     private function workingVerb(string $headName): string

@@ -164,9 +164,7 @@ final class YarboTelemetry
             'rain_fields'         => $rain['rain_fields'],
             'plan_status'         => [
                 'plan_id' => $stateMsg['plan_id'] ?? $stateMsg['planId'] ?? null,
-                'plan_percent' => isset($stateMsg['plan_percent']) ? (int) $stateMsg['plan_percent'] : (
-                    isset($stateMsg['percent']) ? (int) $stateMsg['percent'] : null
-                ),
+                'plan_percent' => self::wholePlanPercent($stateMsg),
                 'plan_name' => $stateMsg['plan_name'] ?? $stateMsg['planName'] ?? null,
                 'pause_reason' => $stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? null,
                 'error_message' => $stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? null,
@@ -582,6 +580,21 @@ final class YarboTelemetry
     /**
      * True for 1 / true, not leftover WP/REC error strings on on_going_planning.
      */
+    /**
+     * Whole-number plan progress 0–100, or null if the robot did not publish it.
+     *
+     * @param array<string, mixed> $stateMsg
+     */
+    private static function wholePlanPercent(array $stateMsg): ?int
+    {
+        $raw = $stateMsg['plan_percent'] ?? $stateMsg['percent'] ?? $stateMsg['progress'] ?? null;
+        if (!is_numeric($raw)) {
+            return null;
+        }
+
+        return max(0, min(100, (int) round((float) $raw)));
+    }
+
     private static function isActiveJobFlag(mixed $value): bool
     {
         if (is_bool($value)) {

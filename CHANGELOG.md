@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.47] - 2026-09-08
+
+### Changed
+- Vestaboard **MOWING** (and blowing) shows **WORK DONE** plus whole-number plan percent complete on the bottom row when the robot publishes it, instead of the attached module. Progress-only Note writes are limited to once every 2 minutes so the flaps do not chatter.
+
 ## [1.3.46] - 2026-09-07
 
 ### Fixed
