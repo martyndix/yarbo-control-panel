@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.48] - 2026-09-08
+
+### Fixed
+- Vestaboard **WORK DONE n%** now looks for plan progress anywhere in DeviceMSG (not only `StateMSG.percent`). v1.3.47 kept **MOWER PRO** when this firmware omitted that one field. Work Plans **Plan activity** shows the percent and which field it came from.
+
 ## [1.3.47] - 2026-09-08
 
 ### Changed

@@ -162,13 +162,7 @@ final class YarboTelemetry
             'rain_sensor_data'    => $rain['rain_sensor_data'],
             'rain_threshold'      => $rain['rain_threshold'],
             'rain_fields'         => $rain['rain_fields'],
-            'plan_status'         => [
-                'plan_id' => $stateMsg['plan_id'] ?? $stateMsg['planId'] ?? null,
-                'plan_percent' => self::wholePlanPercent($stateMsg),
-                'plan_name' => $stateMsg['plan_name'] ?? $stateMsg['planName'] ?? null,
-                'pause_reason' => $stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? null,
-                'error_message' => $stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? null,
-            ],
+            'plan_status'         => self::planStatusFromRaw($raw, $stateMsg),
             'camera_state'        => $raw['camera_state'] ?? null,
             'connection_type'     => $connectionType,
             'connection_status'   => $connectionStatus,
@@ -578,23 +572,128 @@ final class YarboTelemetry
     }
 
     /**
-     * True for 1 / true, not leftover WP/REC error strings on on_going_planning.
-     */
-    /**
-     * Whole-number plan progress 0–100, or null if the robot did not publish it.
-     *
+     * @param array<string, mixed> $raw
      * @param array<string, mixed> $stateMsg
+     * @return array{
+     *   plan_id: mixed,
+     *   plan_percent: ?int,
+     *   plan_percent_source: ?string,
+     *   plan_name: mixed,
+     *   pause_reason: mixed,
+     *   error_message: mixed
+     * }
      */
-    private static function wholePlanPercent(array $stateMsg): ?int
+    private static function planStatusFromRaw(array $raw, array $stateMsg): array
     {
-        $raw = $stateMsg['plan_percent'] ?? $stateMsg['percent'] ?? $stateMsg['progress'] ?? null;
-        if (!is_numeric($raw)) {
+        $found = self::findPlanPercent($raw);
+
+        return [
+            'plan_id' => $stateMsg['plan_id'] ?? $stateMsg['planId'] ?? null,
+            'plan_percent' => $found['percent'],
+            'plan_percent_source' => $found['source'],
+            'plan_name' => $stateMsg['plan_name'] ?? $stateMsg['planName'] ?? null,
+            'pause_reason' => $stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? null,
+            'error_message' => $stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? null,
+        ];
+    }
+
+    /**
+     * Whole-number plan progress 0–100 from anywhere in DeviceMSG, or null.
+     *
+     * @param array<string, mixed> $raw
+     * @return array{percent: ?int, source: ?string}
+     */
+    private static function findPlanPercent(array $raw): array
+    {
+        $best = ['percent' => null, 'source' => null, 'score' => -1];
+        foreach (self::walkNumericLeaves($raw) as $path => $value) {
+            $score = self::planPercentKeyScore($path);
+            if ($score < 0) {
+                continue;
+            }
+            $percent = self::normalizePlanPercentValue($value);
+            if ($percent === null) {
+                continue;
+            }
+            if ($score > $best['score']) {
+                $best = ['percent' => $percent, 'source' => $path, 'score' => $score];
+            }
+        }
+
+        return ['percent' => $best['percent'], 'source' => $best['source']];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, float|int>
+     */
+    private static function walkNumericLeaves(array $data, string $prefix = ''): array
+    {
+        $found = [];
+        foreach ($data as $key => $value) {
+            $path = $prefix === '' ? (string) $key : $prefix . '.' . $key;
+            if (is_array($value)) {
+                $found += self::walkNumericLeaves($value, $path);
+                continue;
+            }
+            if (is_numeric($value)) {
+                $found[$path] = 0 + $value;
+            }
+        }
+
+        return $found;
+    }
+
+    private static function planPercentKeyScore(string $path): int
+    {
+        $path = strtolower($path);
+        foreach ([
+            'battery', 'wifi', 'wlan', 'signal', 'rain', 'heading', 'voltage', 'current',
+            'temp', 'dop', 'cell', 'wireless', 'capacity', 'charge', 'motor', 'fault',
+        ] as $skip) {
+            if (str_contains($path, $skip)) {
+                return -1;
+            }
+        }
+        $leaf = strtolower((string) (strrchr('.' . $path, '.') ?: $path));
+        $leaf = ltrim($leaf, '.');
+        if (
+            !str_contains($leaf, 'percent')
+            && !str_contains($leaf, 'progress')
+            && !str_contains($leaf, 'complete')
+            && !str_contains($leaf, 'finish')
+        ) {
+            return -1;
+        }
+        $score = 1;
+        if (str_contains($path, 'plan')) {
+            $score += 8;
+        }
+        if (str_contains($leaf, 'progress') || str_contains($leaf, 'complete') || str_contains($leaf, 'finish')) {
+            $score += 4;
+        }
+        if ($leaf === 'percent' || $leaf === 'progress') {
+            $score += 2;
+        }
+
+        return $score;
+    }
+
+    private static function normalizePlanPercentValue(float|int $value): ?int
+    {
+        if ($value > 0 && $value <= 1) {
+            $value *= 100;
+        }
+        if ($value < 0 || $value > 100) {
             return null;
         }
 
-        return max(0, min(100, (int) round((float) $raw)));
+        return (int) round($value);
     }
 
+    /**
+     * True for 1 / true, not leftover WP/REC error strings on on_going_planning.
+     */
     private static function isActiveJobFlag(mixed $value): bool
     {
         if (is_bool($value)) {
