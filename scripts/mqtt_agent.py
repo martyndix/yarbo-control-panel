@@ -126,6 +126,8 @@ def unwrap_plan_feedback(payload: Any) -> dict[str, Any] | None:
 
 def _looks_like_plan_feedback(payload: dict[str, Any]) -> bool:
     keys = {
+        "actualCleanArea",
+        "actual_clean_area",
         "finish_clean_area",
         "total_clean_area",
         "finishCleanArea",

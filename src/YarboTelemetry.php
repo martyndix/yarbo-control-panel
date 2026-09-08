@@ -576,7 +576,7 @@ final class YarboTelemetry
      * @param array<string, mixed> $stateMsg
      * @return array{
      *   plan_id: mixed,
-     *   plan_percent: ?int,
+     *   plan_percent: int|float|null,
      *   plan_percent_source: ?string,
      *   plan_name: mixed,
      *   pause_reason: mixed,
@@ -608,8 +608,11 @@ final class YarboTelemetry
     }
 
     /**
+     * Same ratio as the Yarbo app Progress Ratio: actual cleaned area ÷ plan total.
+     * finishCleanArea is planned-path coverage and runs a few points higher.
+     *
      * @param array<string, mixed>|null $feedback
-     * @return array{percent: ?int, source: ?string}
+     * @return array{percent: int|float|null, source: ?string}
      */
     private static function planPercentFromPlanFeedback(?array $feedback): array
     {
@@ -617,44 +620,30 @@ final class YarboTelemetry
             return ['percent' => null, 'source' => null];
         }
 
+        $actual = self::firstNumeric(
+            $feedback['actualCleanArea'] ?? null,
+            $feedback['actual_clean_area'] ?? null,
+        );
         $finished = self::firstNumeric(
-            $feedback['finish_clean_area'] ?? null,
             $feedback['finishCleanArea'] ?? null,
+            $feedback['finish_clean_area'] ?? null,
             $feedback['areaCovered'] ?? null,
             $feedback['area_covered'] ?? null,
         );
+        $completed = $actual ?? $finished;
         $total = self::firstNumeric(
-            $feedback['total_clean_area'] ?? null,
             $feedback['totalCleanArea'] ?? null,
+            $feedback['total_clean_area'] ?? null,
             $feedback['total_area'] ?? null,
             $feedback['totalArea'] ?? null,
         );
-        if ($finished !== null && $total !== null && $total > 0) {
-            $pct = (int) round(max(0.0, min(100.0, ($finished / $total) * 100.0)));
+        if ($completed !== null && $total !== null && $total > 0) {
+            $pct = round(max(0.0, min(100.0, ($completed / $total) * 100.0)), 1);
+            $src = $actual !== null
+                ? 'plan_feedback.actualCleanArea/totalCleanArea'
+                : 'plan_feedback.finishCleanArea/totalCleanArea';
 
-            return ['percent' => $pct, 'source' => 'plan_feedback.finish_clean_area/total_clean_area'];
-        }
-
-        $doneIds = self::countPlanIds($feedback['finish_ids'] ?? $feedback['finishIds'] ?? null);
-        $allIds = self::countPlanIds($feedback['area_ids'] ?? $feedback['areaIds'] ?? null);
-        if ($doneIds !== null && $allIds !== null && $allIds > 0) {
-            $pct = (int) round(max(0.0, min(100.0, ($doneIds / $allIds) * 100.0)));
-
-            return ['percent' => $pct, 'source' => 'plan_feedback.finish_ids/area_ids'];
-        }
-
-        $elapsed = self::firstNumeric($feedback['duration'] ?? null);
-        $totalTime = self::firstNumeric($feedback['total_time'] ?? $feedback['totalTime'] ?? null);
-        $left = self::firstNumeric($feedback['left_time'] ?? $feedback['leftTime'] ?? null);
-        if ($elapsed !== null && $totalTime !== null && $totalTime > 0) {
-            $pct = (int) round(max(0.0, min(100.0, ($elapsed / $totalTime) * 100.0)));
-
-            return ['percent' => $pct, 'source' => 'plan_feedback.duration/total_time'];
-        }
-        if ($left !== null && $totalTime !== null && $totalTime > 0) {
-            $pct = (int) round(max(0.0, min(100.0, (($totalTime - $left) / $totalTime) * 100.0)));
-
-            return ['percent' => $pct, 'source' => 'plan_feedback.left_time/total_time'];
+            return ['percent' => $pct, 'source' => $src];
         }
 
         return ['percent' => null, 'source' => null];
@@ -696,6 +685,7 @@ final class YarboTelemetry
     private static function looksLikePlanFeedback(array $payload): bool
     {
         foreach ([
+            'actualCleanArea', 'actual_clean_area',
             'finish_clean_area', 'total_clean_area', 'finishCleanArea', 'totalCleanArea',
             'areaCovered', 'area_covered', 'area_ids', 'areaIds', 'finish_ids', 'finishIds',
             'left_time', 'leftTime', 'total_time', 'totalTime', 'plan_id', 'planId', 'duration',
@@ -706,27 +696,6 @@ final class YarboTelemetry
         }
 
         return false;
-    }
-
-    private static function countPlanIds(mixed $value): ?int
-    {
-        if (is_array($value)) {
-            return count($value);
-        }
-        if (is_int($value) || is_float($value)) {
-            return (int) $value;
-        }
-        if (is_string($value) && $value !== '') {
-            if (is_numeric($value)) {
-                return (int) $value;
-            }
-            $parts = preg_split('/\s*,\s*/', $value) ?: [];
-            $parts = array_values(array_filter($parts, static fn (string $part): bool => $part !== ''));
-
-            return $parts === [] ? null : count($parts);
-        }
-
-        return null;
     }
 
     /**

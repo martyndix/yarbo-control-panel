@@ -191,6 +191,7 @@ function unwrap_plan_feedback(mixed $payload): ?array
         $data = is_array($decoded) ? $decoded : null;
     }
     $keys = [
+        'actualCleanArea', 'actual_clean_area',
         'finish_clean_area', 'total_clean_area', 'finishCleanArea', 'totalCleanArea',
         'areaCovered', 'area_covered', 'area_ids', 'areaIds', 'finish_ids', 'finishIds',
         'left_time', 'leftTime', 'total_time', 'totalTime', 'plan_id', 'planId', 'duration',

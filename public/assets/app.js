@@ -2036,7 +2036,8 @@ function updatePlanActivity(data) {
     if (planStatus.plan_id != null) parts.push(`id ${planStatus.plan_id}`);
     if (planStatus.plan_percent != null) {
         const src = planStatus.plan_percent_source ? ` (${planStatus.plan_percent_source})` : '';
-        parts.push(`${planStatus.plan_percent}%${src}`);
+        const n = Number(planStatus.plan_percent);
+        parts.push(`${Number.isFinite(n) ? n.toFixed(1) : planStatus.plan_percent}%${src}`);
     }
     if (planStatus.pause_reason) parts.push(`pause: ${planStatus.pause_reason}`);
     if (planStatus.error_message) parts.push(`error: ${planStatus.error_message}`);

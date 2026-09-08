@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.50] - 2026-09-08
+
+### Fixed
+- Vestaboard **WORK DONE** now uses the same Progress Ratio as the Yarbo app: **actual cleaned area ÷ plan total** (`actualCleanArea / totalCleanArea`). v1.3.49 used planned-path `finishCleanArea`, which read a few points high (85% on the Note vs 81.6% in the app). The Note still rounds to a whole number (82%); Work Plans **Plan activity** shows one decimal.
+
 ## [1.3.49] - 2026-09-08
 
 ### Fixed
