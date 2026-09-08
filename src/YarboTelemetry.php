@@ -585,20 +585,153 @@ final class YarboTelemetry
      */
     private static function planStatusFromRaw(array $raw, array $stateMsg): array
     {
-        $found = self::findPlanPercent($raw);
+        $feedback = self::unwrapPlanFeedback($raw['plan_feedback'] ?? null);
+        $found = self::planPercentFromPlanFeedback($feedback);
+        if ($found['percent'] === null) {
+            $found = self::findPlanPercent($raw);
+        }
 
         return [
-            'plan_id' => $stateMsg['plan_id'] ?? $stateMsg['planId'] ?? null,
+            'plan_id' => $stateMsg['plan_id']
+                ?? $stateMsg['planId']
+                ?? ($feedback['plan_id'] ?? null)
+                ?? ($feedback['planId'] ?? null),
             'plan_percent' => $found['percent'],
             'plan_percent_source' => $found['source'],
-            'plan_name' => $stateMsg['plan_name'] ?? $stateMsg['planName'] ?? null,
+            'plan_name' => $stateMsg['plan_name']
+                ?? $stateMsg['planName']
+                ?? ($feedback['plan_name'] ?? null)
+                ?? ($feedback['planName'] ?? null),
             'pause_reason' => $stateMsg['pause_reason'] ?? $stateMsg['pauseReason'] ?? null,
             'error_message' => $stateMsg['error_message'] ?? $stateMsg['errorMessage'] ?? null,
         ];
     }
 
     /**
-     * Whole-number plan progress 0–100 from anywhere in DeviceMSG, or null.
+     * @param array<string, mixed>|null $feedback
+     * @return array{percent: ?int, source: ?string}
+     */
+    private static function planPercentFromPlanFeedback(?array $feedback): array
+    {
+        if ($feedback === null || $feedback === []) {
+            return ['percent' => null, 'source' => null];
+        }
+
+        $finished = self::firstNumeric(
+            $feedback['finish_clean_area'] ?? null,
+            $feedback['finishCleanArea'] ?? null,
+            $feedback['areaCovered'] ?? null,
+            $feedback['area_covered'] ?? null,
+        );
+        $total = self::firstNumeric(
+            $feedback['total_clean_area'] ?? null,
+            $feedback['totalCleanArea'] ?? null,
+            $feedback['total_area'] ?? null,
+            $feedback['totalArea'] ?? null,
+        );
+        if ($finished !== null && $total !== null && $total > 0) {
+            $pct = (int) round(max(0.0, min(100.0, ($finished / $total) * 100.0)));
+
+            return ['percent' => $pct, 'source' => 'plan_feedback.finish_clean_area/total_clean_area'];
+        }
+
+        $doneIds = self::countPlanIds($feedback['finish_ids'] ?? $feedback['finishIds'] ?? null);
+        $allIds = self::countPlanIds($feedback['area_ids'] ?? $feedback['areaIds'] ?? null);
+        if ($doneIds !== null && $allIds !== null && $allIds > 0) {
+            $pct = (int) round(max(0.0, min(100.0, ($doneIds / $allIds) * 100.0)));
+
+            return ['percent' => $pct, 'source' => 'plan_feedback.finish_ids/area_ids'];
+        }
+
+        $elapsed = self::firstNumeric($feedback['duration'] ?? null);
+        $totalTime = self::firstNumeric($feedback['total_time'] ?? $feedback['totalTime'] ?? null);
+        $left = self::firstNumeric($feedback['left_time'] ?? $feedback['leftTime'] ?? null);
+        if ($elapsed !== null && $totalTime !== null && $totalTime > 0) {
+            $pct = (int) round(max(0.0, min(100.0, ($elapsed / $totalTime) * 100.0)));
+
+            return ['percent' => $pct, 'source' => 'plan_feedback.duration/total_time'];
+        }
+        if ($left !== null && $totalTime !== null && $totalTime > 0) {
+            $pct = (int) round(max(0.0, min(100.0, (($totalTime - $left) / $totalTime) * 100.0)));
+
+            return ['percent' => $pct, 'source' => 'plan_feedback.left_time/total_time'];
+        }
+
+        return ['percent' => null, 'source' => null];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function unwrapPlanFeedback(mixed $payload): ?array
+    {
+        if (is_string($payload)) {
+            $decoded = json_decode($payload, true);
+            $payload = is_array($decoded) ? $decoded : null;
+        }
+        if (!is_array($payload) || $payload === []) {
+            return null;
+        }
+        $data = $payload['data'] ?? null;
+        if (is_string($data)) {
+            $decoded = json_decode($data, true);
+            $data = is_array($decoded) ? $decoded : null;
+        }
+        if (is_array($data) && self::looksLikePlanFeedback($data)) {
+            return $data;
+        }
+        if (self::looksLikePlanFeedback($payload)) {
+            return $payload;
+        }
+        if (is_array($data) && $data !== []) {
+            return $data;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private static function looksLikePlanFeedback(array $payload): bool
+    {
+        foreach ([
+            'finish_clean_area', 'total_clean_area', 'finishCleanArea', 'totalCleanArea',
+            'areaCovered', 'area_covered', 'area_ids', 'areaIds', 'finish_ids', 'finishIds',
+            'left_time', 'leftTime', 'total_time', 'totalTime', 'plan_id', 'planId', 'duration',
+        ] as $key) {
+            if (array_key_exists($key, $payload)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function countPlanIds(mixed $value): ?int
+    {
+        if (is_array($value)) {
+            return count($value);
+        }
+        if (is_int($value) || is_float($value)) {
+            return (int) $value;
+        }
+        if (is_string($value) && $value !== '') {
+            if (is_numeric($value)) {
+                return (int) $value;
+            }
+            $parts = preg_split('/\s*,\s*/', $value) ?: [];
+            $parts = array_values(array_filter($parts, static fn (string $part): bool => $part !== ''));
+
+            return $parts === [] ? null : count($parts);
+        }
+
+        return null;
+    }
+
+    /**
+     * Whole-number plan progress 0–100 from DeviceMSG, or null.
+     * Area/time fields are not percents — those live on plan_feedback.
      *
      * @param array<string, mixed> $raw
      * @return array{percent: ?int, source: ?string}
@@ -607,6 +740,9 @@ final class YarboTelemetry
     {
         $best = ['percent' => null, 'source' => null, 'score' => -1];
         foreach (self::walkNumericLeaves($raw) as $path => $value) {
+            if (str_starts_with(strtolower($path), 'plan_feedback')) {
+                continue;
+            }
             $score = self::planPercentKeyScore($path);
             if ($score < 0) {
                 continue;
@@ -650,6 +786,7 @@ final class YarboTelemetry
         foreach ([
             'battery', 'wifi', 'wlan', 'signal', 'rain', 'heading', 'voltage', 'current',
             'temp', 'dop', 'cell', 'wireless', 'capacity', 'charge', 'motor', 'fault',
+            'area', 'duration', 'time',
         ] as $skip) {
             if (str_contains($path, $skip)) {
                 return -1;

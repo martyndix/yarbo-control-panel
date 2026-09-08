@@ -9,6 +9,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 
+## [1.3.49] - 2026-09-08
+
+### Fixed
+- Vestaboard **WORK DONE n%** now uses live **plan_feedback** (finished area ÷ total area), not DeviceMSG. v1.3.47–1.3.48 kept **MOWER PRO** while mowing because this firmware never puts work-plan percent on the status snapshot. Work Plans **Plan activity** shows the same percent.
+
 ## [1.3.48] - 2026-09-08
 
 ### Fixed

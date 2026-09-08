@@ -66,6 +66,7 @@ JOB_LATCH_KEYS = (
     "on_going_to_start_point",
 )
 BATTERY_CELLS_CACHE_S = 30.0
+PLAN_FEEDBACK_POLL_S = 15.0
 
 
 def telemetry_raw_usable(raw: Any) -> bool:
@@ -83,6 +84,82 @@ def store_last_raw(state: dict[str, Any], raw: Any) -> bool:
         return False
     state["last_raw"] = raw
     return True
+
+
+def plan_is_active(raw: Any) -> bool:
+    """True while StateMSG says a work plan is in progress."""
+    if not isinstance(raw, dict):
+        return False
+    state_msg = raw.get("StateMSG") if isinstance(raw.get("StateMSG"), dict) else {}
+    try:
+        return int(state_msg.get("on_going_planning") or 0) != 0
+    except (TypeError, ValueError):
+        return False
+
+
+def unwrap_plan_feedback(payload: Any) -> dict[str, Any] | None:
+    """Normalize plan_feedback MQTT payload to a dict of plan fields."""
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return None
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict) or not payload:
+        return None
+    data = payload.get("data")
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            data = None
+    if isinstance(data, dict) and _looks_like_plan_feedback(data):
+        return data
+    if _looks_like_plan_feedback(payload):
+        return payload
+    if isinstance(data, dict) and data:
+        return data
+    return payload
+
+
+def _looks_like_plan_feedback(payload: dict[str, Any]) -> bool:
+    keys = {
+        "finish_clean_area",
+        "total_clean_area",
+        "finishCleanArea",
+        "totalCleanArea",
+        "areaCovered",
+        "area_covered",
+        "area_ids",
+        "areaIds",
+        "finish_ids",
+        "finishIds",
+        "left_time",
+        "leftTime",
+        "total_time",
+        "totalTime",
+        "plan_id",
+        "planId",
+        "duration",
+    }
+    return any(key in payload for key in keys)
+
+
+def attach_plan_feedback(raw: Any, state: dict[str, Any]) -> Any:
+    """Copy DeviceMSG and attach cached plan_feedback for PHP percent math."""
+    if not isinstance(raw, dict):
+        return raw
+    fb = state.get("last_plan_feedback")
+    at = float(state.get("last_plan_feedback_at") or 0)
+    if not isinstance(fb, dict) or not fb:
+        return raw
+    if not plan_is_active(raw) and (time.time() - at) > 180.0:
+        return raw
+    out = dict(raw)
+    out["plan_feedback"] = fb
+    return out
 
 
 def job_is_latched(raw: Any) -> bool:
@@ -136,6 +213,49 @@ def session_mode(req: dict[str, Any]) -> str:
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S', time.gmtime())}] {msg}", file=sys.stderr, flush=True)
+
+
+async def maybe_request_plan_feedback(client: Any, state: dict[str, Any]) -> None:
+    """Ask for plan_feedback while a plan is running. No get_controller, no wait."""
+    if not plan_is_active(state.get("last_raw")):
+        return
+    now = time.time()
+    last = float(state.get("last_plan_feedback_req_at") or 0)
+    if now - last < PLAN_FEEDBACK_POLL_S:
+        return
+    state["last_plan_feedback_req_at"] = now
+    try:
+        await client.publish_command("get_plan_feedback", {})
+    except Exception as e:
+        log(f"get_plan_feedback failed: {e}")
+
+
+async def plan_feedback_loop(client: Any, state: dict[str, Any]) -> None:
+    """Cache snowbot/.../device/plan_feedback (area done vs total, not DeviceMSG)."""
+    while True:
+        if not getattr(client, "is_connected", False):
+            await asyncio.sleep(1.0)
+            continue
+        transport = getattr(client, "_transport", None)
+        if transport is None or not hasattr(transport, "telemetry_stream"):
+            await asyncio.sleep(2.0)
+            continue
+        try:
+            async for envelope in transport.telemetry_stream():
+                if getattr(envelope, "kind", "") != "plan_feedback":
+                    continue
+                payload = unwrap_plan_feedback(getattr(envelope, "payload", None))
+                if not payload:
+                    continue
+                state["last_plan_feedback"] = payload
+                state["last_plan_feedback_at"] = time.time()
+                summary = ",".join(sorted(payload.keys())[:8])
+                if summary != state.get("last_plan_feedback_log"):
+                    state["last_plan_feedback_log"] = summary
+                    log(f"plan_feedback cached keys={summary}")
+        except Exception as e:
+            log(f"plan_feedback listener: {e}")
+            await asyncio.sleep(2.0)
 
 
 async def request_feedback_quiet(client: Any, cmd: str, timeout: float) -> dict[str, Any]:
@@ -535,7 +655,7 @@ async def handle_request(
                     return {
                         "ok": True,
                         "op": "telemetry",
-                        "raw": state["last_raw"],
+                        "raw": attach_plan_feedback(state["last_raw"], state),
                         "wifi": state.get("last_wifi"),
                         "battery_cells": state.get("last_battery_cells"),
                         "cached": True,
@@ -552,10 +672,11 @@ async def handle_request(
             raw = getattr(status, "raw", None) if status is not None else None
             if not store_last_raw(state, raw):
                 if telemetry_raw_usable(state.get("last_raw")):
+                    await maybe_request_plan_feedback(client, state)
                     return {
                         "ok": True,
                         "op": "telemetry",
-                        "raw": state["last_raw"],
+                        "raw": attach_plan_feedback(state["last_raw"], state),
                         "wifi": state.get("last_wifi"),
                         "battery_cells": state.get("last_battery_cells"),
                         "cached": True,
@@ -563,6 +684,7 @@ async def handle_request(
                     }
                 return {"ok": False, "error": "telemetry timeout", "transient": True}
             raw = state["last_raw"]
+            await maybe_request_plan_feedback(client, state)
             if charging_status_of(raw) <= 0:
                 state["pad_released"] = False
             mark_job_from_raw(state, raw)
@@ -593,7 +715,7 @@ async def handle_request(
             return {
                 "ok": True,
                 "op": "telemetry",
-                "raw": raw,
+                "raw": attach_plan_feedback(raw, state),
                 "wifi": wifi,
                 "battery_cells": cells,
                 **state_flags(state, client),
@@ -1107,6 +1229,10 @@ async def amain() -> int:
         "manual_drive": False,
         "pad_released": False,
         "last_raw": None,
+        "last_plan_feedback": None,
+        "last_plan_feedback_at": 0.0,
+        "last_plan_feedback_req_at": 0.0,
+        "last_plan_feedback_log": "",
         "last_wifi": None,
         "last_battery_cells": None,
         "last_battery_cells_at": 0.0,
@@ -1129,6 +1255,7 @@ async def amain() -> int:
     log(f"Agent listening on {sockets} (MQTT connecting {host}:{port} SN={serial})")
 
     asyncio.create_task(connect_mqtt(client))
+    asyncio.create_task(plan_feedback_loop(client, state))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
     asyncio.create_task(vestaboard_tick_loop())
 

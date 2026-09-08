@@ -71,6 +71,9 @@ $state = [
     'padReleased' => false,
     'lastBatteryCells' => null,
     'batteryCellsAt' => 0.0,
+    'lastPlanFeedback' => null,
+    'planFeedbackAt' => 0.0,
+    'planFeedbackReqAt' => 0.0,
 ];
 
 function log_line(string $msg): void
@@ -171,6 +174,99 @@ function battery_cell_temp_values(mixed $data): array
 }
 
 /**
+ * @return array<string, mixed>|null
+ */
+function unwrap_plan_feedback(mixed $payload): ?array
+{
+    if (is_string($payload)) {
+        $decoded = json_decode($payload, true);
+        $payload = is_array($decoded) ? $decoded : null;
+    }
+    if (!is_array($payload) || $payload === []) {
+        return null;
+    }
+    $data = $payload['data'] ?? null;
+    if (is_string($data)) {
+        $decoded = json_decode($data, true);
+        $data = is_array($decoded) ? $decoded : null;
+    }
+    $keys = [
+        'finish_clean_area', 'total_clean_area', 'finishCleanArea', 'totalCleanArea',
+        'areaCovered', 'area_covered', 'area_ids', 'areaIds', 'finish_ids', 'finishIds',
+        'left_time', 'leftTime', 'total_time', 'totalTime', 'plan_id', 'planId', 'duration',
+    ];
+    $looksLike = static function (array $row) use ($keys): bool {
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $row)) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+    if (is_array($data) && $looksLike($data)) {
+        return $data;
+    }
+    if ($looksLike($payload)) {
+        return $payload;
+    }
+    if (is_array($data) && $data !== []) {
+        return $data;
+    }
+
+    return $payload;
+}
+
+/**
+ * @param array<string, mixed>|null $lastRaw
+ * @param array<string, mixed> $state
+ * @return array<string, mixed>|null
+ */
+function attach_plan_feedback(?array $lastRaw, array $state): ?array
+{
+    if (!is_array($lastRaw)) {
+        return $lastRaw;
+    }
+    $fb = $state['lastPlanFeedback'] ?? null;
+    if (!is_array($fb) || $fb === []) {
+        return $lastRaw;
+    }
+    $planning = 0;
+    if (is_array($lastRaw['StateMSG'] ?? null)) {
+        $planning = (int) ($lastRaw['StateMSG']['on_going_planning'] ?? 0);
+    }
+    $age = microtime(true) - (float) ($state['planFeedbackAt'] ?? 0);
+    if ($planning === 0 && $age > 180.0) {
+        return $lastRaw;
+    }
+    $out = $lastRaw;
+    $out['plan_feedback'] = $fb;
+
+    return $out;
+}
+
+/**
+ * @param array<string, mixed> $state
+ * @param array<string, mixed>|null $lastRaw
+ */
+function maybe_request_plan_feedback(MqttClient $client, string $serial, array &$state, ?array $lastRaw): void
+{
+    $planning = 0;
+    if (is_array($lastRaw['StateMSG'] ?? null)) {
+        $planning = (int) ($lastRaw['StateMSG']['on_going_planning'] ?? 0);
+    }
+    if ($planning === 0) {
+        return;
+    }
+    $now = microtime(true);
+    if ($now - (float) ($state['planFeedbackReqAt'] ?? 0) < 15.0) {
+        return;
+    }
+    $state['planFeedbackReqAt'] = $now;
+    publish($client, $serial, 'get_plan_feedback', []);
+}
+
+/**
  * @param array<string, mixed>|null $lastRaw
  * @param array<string, mixed> $state
  */
@@ -180,6 +276,14 @@ function subscribe_telemetry(MqttClient $client, string $serial, ?array &$lastRa
         try {
             $decoded = YarboCodec::decode($message);
         } catch (Throwable) {
+            return;
+        }
+        if (str_ends_with($topic, '/plan_feedback')) {
+            $feedback = unwrap_plan_feedback($decoded);
+            if (is_array($feedback) && $feedback !== []) {
+                $state['lastPlanFeedback'] = $feedback;
+                $state['planFeedbackAt'] = microtime(true);
+            }
             return;
         }
         if (($decoded['topic'] ?? '') === 'battery_cell_temp_msg') {
@@ -197,6 +301,7 @@ function subscribe_telemetry(MqttClient $client, string $serial, ?array &$lastRa
     };
     $client->subscribe(topic($serial, 'device', 'data_feedback'), $handler, 0);
     $client->subscribe(topic($serial, 'device', 'DeviceMSG'), $handler, 0);
+    $client->subscribe(topic($serial, 'device', 'plan_feedback'), $handler, 0);
 }
 
 /**
@@ -387,6 +492,7 @@ function handle_request(
             if (!is_array($lastRaw)) {
                 return ['ok' => false, 'error' => 'telemetry timeout', 'transient' => true];
             }
+            maybe_request_plan_feedback($mqtt, $serial, $state, $lastRaw);
 
             $now = microtime(true);
             $cells = is_array($state['lastBatteryCells'] ?? null) ? $state['lastBatteryCells'] : null;
@@ -416,7 +522,7 @@ function handle_request(
             return ok_resp([
                 'ok' => true,
                 'op' => 'telemetry',
-                'raw' => $lastRaw,
+                'raw' => attach_plan_feedback($lastRaw, $state),
                 'battery_cells' => battery_cells_have_temp($cells) ? $cells : null,
             ], $state);
         }
