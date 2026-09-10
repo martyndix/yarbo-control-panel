@@ -640,6 +640,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--yellow" data-quiet-code="65" title="Yellow"></button>
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--green" data-quiet-code="66" title="Green"></button>
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--blue" data-quiet-code="67" title="Blue"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--violet" data-quiet-code="68" title="Violet"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--white" data-quiet-code="69" title="White"></button>
                                     </div>
                                 </div>
                                 <p id="settings-vestaboard-result" class="settings-cloud-result hidden" role="status"></p>

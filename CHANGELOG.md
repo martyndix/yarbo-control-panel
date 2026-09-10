@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.53] - 2026-09-10
+
+### Fixed
+- Vestaboard dashboard preview now shows **white** and **violet** flaps (the smiley eyes were blank/black). Quiet hours colour chips include those two as well.
+
 ## [1.3.52] - 2026-09-10
 
 ### Added

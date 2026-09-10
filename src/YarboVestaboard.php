@@ -26,6 +26,8 @@ final class YarboVestaboard
     public const COLOR_YELLOW = 65;
     public const COLOR_GREEN = 66;
     public const COLOR_BLUE = 67;
+    public const COLOR_VIOLET = 68;
+    public const COLOR_WHITE = 69;
 
     private const HEAD_SHORT = [
         'None' => '',

@@ -3108,6 +3108,15 @@ const DEFAULT_QUIET_CODES = [
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 ];
+const VESTABOARD_COLOR_CLASS = {
+    63: 'red',
+    64: 'orange',
+    65: 'yellow',
+    66: 'green',
+    67: 'blue',
+    68: 'violet',
+    69: 'white',
+};
 let quietCodes = DEFAULT_QUIET_CODES.map((row) => row.slice());
 let quietCell = { r: 0, c: 0 };
 
@@ -3177,7 +3186,7 @@ function setQuietCellCode(code, advance) {
 function renderQuietBoard() {
     const root = els.settingsVestaboardQuietBoard;
     if (!root) return;
-    const colorClass = { 63: 'red', 64: 'orange', 65: 'yellow', 66: 'green', 67: 'blue' };
+    const colorClass = VESTABOARD_COLOR_CLASS;
     const cells = [];
     for (let r = 0; r < 3; r += 1) {
         for (let c = 0; c < 15; c += 1) {
@@ -3254,7 +3263,7 @@ function renderVestaboardPreview(lines, target, codes) {
     if (!root) return;
     const rows = Array.isArray(lines) ? lines : [];
     const grid = Array.isArray(codes) ? codes : [];
-    const colorClass = { 63: 'red', 64: 'orange', 65: 'yellow', 66: 'green', 67: 'blue' };
+    const colorClass = VESTABOARD_COLOR_CLASS;
     const cells = [];
     for (let r = 0; r < 3; r++) {
         const line = String(rows[r] || '').padEnd(15).slice(0, 15);

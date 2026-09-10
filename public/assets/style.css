@@ -2014,6 +2014,16 @@ html[data-theme="light"] .plan-activity {
     color: transparent;
 }
 
+.vestaboard-cell--violet {
+    background: #7b4db3;
+    color: transparent;
+}
+
+.vestaboard-cell--white {
+    background: #f3ead2;
+    color: transparent;
+}
+
 .vestaboard-quiet-times {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2058,6 +2068,8 @@ html[data-theme="light"] .plan-activity {
 .vestaboard-palette-btn--yellow { background: #d4b42a; }
 .vestaboard-palette-btn--green { background: #3a9e58; }
 .vestaboard-palette-btn--blue { background: #2a6fd4; }
+.vestaboard-palette-btn--violet { background: #7b4db3; }
+.vestaboard-palette-btn--white { background: #f3ead2; }
 
 .papermono-device-list {
     display: grid;
