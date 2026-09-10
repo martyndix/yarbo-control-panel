@@ -1981,6 +1981,10 @@ html[data-theme="light"] .plan-activity {
     padding: 12px;
 }
 
+.vestaboard-resume {
+    margin-top: 0.65rem;
+}
+
 .vestaboard-preview--dashboard .vestaboard-cell {
     font-size: 0.95rem;
 }

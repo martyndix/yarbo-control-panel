@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [1.3.52] - 2026-09-10
+
+### Added
+- Vestaboard pauses Yarbo status when you write from the Vestaboard app: **one hour** during the day, or **until Quiet hours end** if that window is on (including a custom message already on the board). The dashboard preview shows the physical Note and **Resume Yarbo status** takes the panel back immediately.
+
 ### Changed
 - README and Vestaboard docs use a clearer Note mockup (idle, 96%, READY).
 

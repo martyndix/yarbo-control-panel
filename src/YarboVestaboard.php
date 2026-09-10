@@ -15,6 +15,7 @@ final class YarboVestaboard
     public const COLS = 15;
     public const MIN_SEND_GAP_SECONDS = 15.0;
     public const MIN_PROGRESS_SEND_GAP_SECONDS = 120.0;
+    public const EXTERNAL_HOLD_SECONDS = 3600;
     public const DEFAULT_HOST = 'vestaboard.local';
     public const DEFAULT_PORT = 7000;
     public const TRANSPORT_LOCAL = 'local';
@@ -108,6 +109,11 @@ final class YarboVestaboard
             'last_live_codes' => null,
             'quiet_timezone' => '',
             'last_progress_stable_hash' => '',
+            'board_codes' => null,
+            'board_hash' => '',
+            'board_fetched_at' => null,
+            'external_hold' => false,
+            'external_hold_until' => null,
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -142,6 +148,16 @@ final class YarboVestaboard
             'last_live_codes' => self::normalizeLiveCodes($decoded['last_live_codes'] ?? null),
             'quiet_timezone' => self::normalizeTimezone((string) ($decoded['quiet_timezone'] ?? '')),
             'last_progress_stable_hash' => (string) ($decoded['last_progress_stable_hash'] ?? ''),
+            'board_codes' => self::normalizeLiveCodes($decoded['board_codes'] ?? null),
+            'board_hash' => (string) ($decoded['board_hash'] ?? ''),
+            'board_fetched_at' => isset($decoded['board_fetched_at']) && is_string($decoded['board_fetched_at'])
+                ? $decoded['board_fetched_at']
+                : null,
+            'external_hold' => (bool) ($decoded['external_hold'] ?? false),
+            'external_hold_until' => isset($decoded['external_hold_until']) && is_string($decoded['external_hold_until'])
+                && $decoded['external_hold_until'] !== ''
+                ? $decoded['external_hold_until']
+                : null,
         ];
     }
 
@@ -222,6 +238,23 @@ final class YarboVestaboard
                     ?: (string) ($current['quiet_timezone'] ?? ''))
                 : (string) ($current['quiet_timezone'] ?? ''),
             'last_progress_stable_hash' => (string) ($input['last_progress_stable_hash'] ?? $current['last_progress_stable_hash'] ?? ''),
+            'board_codes' => array_key_exists('board_codes', $input)
+                ? self::normalizeLiveCodes($input['board_codes'])
+                : ($current['board_codes'] ?? null),
+            'board_hash' => (string) ($input['board_hash'] ?? $current['board_hash'] ?? ''),
+            'board_fetched_at' => array_key_exists('board_fetched_at', $input)
+                ? (is_string($input['board_fetched_at']) && $input['board_fetched_at'] !== ''
+                    ? $input['board_fetched_at']
+                    : null)
+                : ($current['board_fetched_at'] ?? null),
+            'external_hold' => array_key_exists('external_hold', $input)
+                ? (bool) $input['external_hold']
+                : (bool) ($current['external_hold'] ?? false),
+            'external_hold_until' => array_key_exists('external_hold_until', $input)
+                ? (is_string($input['external_hold_until']) && $input['external_hold_until'] !== ''
+                    ? $input['external_hold_until']
+                    : null)
+                : ($current['external_hold_until'] ?? null),
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -270,11 +303,32 @@ final class YarboVestaboard
         if (!$config['enabled']) {
             return ['enabled' => false];
         }
+        $held = $this->isExternalHoldActive($config);
+        $holdMeta = $this->externalHoldPublicView($config);
+        if ($held) {
+            $cached = self::normalizeLiveCodes($config['board_codes'] ?? null);
+            if ($cached !== null) {
+                return $holdMeta + [
+                    'enabled' => true,
+                    'lines' => self::linesFromCodes($cached),
+                    'codes' => $cached,
+                    'verb' => 'APP',
+                    'quiet_hours' => $this->isQuietHours(),
+                    'quiet_until' => $config['quiet_end'],
+                    'quiet_timezone' => $this->resolveQuietTimezone($config),
+                    'quiet_clock_now' => $this->quietNowHm($config),
+                    'last_sent_at' => $config['last_sent_at'],
+                    'pending' => false,
+                    'last_error' => $this->publicLastError($config['last_error']),
+                    'watcher_ok' => !$this->watcherStale(),
+                ];
+            }
+        }
         if ($this->isQuietHours()) {
             $layout = $this->quietLayout();
             $hash = hash('sha256', json_encode($layout['codes']));
 
-            return [
+            return $holdMeta + [
                 'enabled' => true,
                 'lines' => $layout['lines'],
                 'codes' => $layout['codes'],
@@ -284,7 +338,7 @@ final class YarboVestaboard
                 'quiet_timezone' => $this->resolveQuietTimezone($config),
                 'quiet_clock_now' => $this->quietNowHm($config),
                 'last_sent_at' => $config['last_sent_at'],
-                'pending' => $hash !== (string) $config['last_hash'],
+                'pending' => !$held && $hash !== (string) $config['last_hash'],
                 'last_error' => $this->publicLastError($config['last_error']),
                 'watcher_ok' => !$this->watcherStale(),
             ];
@@ -293,13 +347,13 @@ final class YarboVestaboard
         $layout = $this->compose($usable ? $parsed : null, $usable);
         $hash = hash('sha256', json_encode($layout['codes']));
 
-        return [
+        return $holdMeta + [
             'enabled' => true,
             'lines' => $layout['lines'],
             'codes' => $layout['codes'],
             'verb' => $layout['verb'],
             'last_sent_at' => $config['last_sent_at'],
-            'pending' => $hash !== (string) $config['last_hash'],
+            'pending' => !$held && $hash !== (string) $config['last_hash'],
             'last_error' => $this->publicLastError($config['last_error']),
             'watcher_ok' => !$this->watcherStale(),
         ];
@@ -349,15 +403,33 @@ final class YarboVestaboard
             return ['ok' => false, 'error' => $missing];
         }
 
+        $this->refreshBoardFromDevice($config);
+        $config = $this->load();
+        if ($this->isQuietHours() && $this->isExternalHoldActive($config)) {
+            $this->extendHoldThroughQuietHours($config);
+            $wasQuiet = !empty($config['quiet_active']);
+            if (!$wasQuiet || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
+                $this->snapshotLiveLayout();
+            }
+            $this->save(['quiet_active' => true]);
+
+            return ['ok' => true, 'skipped' => true, 'reason' => 'external_hold'];
+        }
+        if ($this->isExternalHoldActive($config)) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'external_hold'];
+        }
+
         $wasQuiet = !empty($config['quiet_active']);
         $quietHash = $this->quietLayoutHash();
-        $forceResume = $wasQuiet || ((string) $config['last_hash'] === $quietHash);
+        $forceResume = $wasQuiet
+            || ((string) $config['last_hash'] === $quietHash)
+            || $this->isExternalHoldExpired($config);
 
         if ($this->isQuietHours()) {
             if (!$wasQuiet || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
                 $this->snapshotLiveLayout();
             }
-            $result = $this->sendLayout($this->quietLayout(), false);
+            $result = $this->sendLayout($this->quietLayout(), $forceResume);
             $this->save(['quiet_active' => true]);
 
             return $result;
@@ -437,6 +509,17 @@ final class YarboVestaboard
     }
 
     /**
+     * End an app-message hold and write the layout the panel owns right now.
+     *
+     * @param array<string, mixed> $override
+     * @return array<string, mixed>
+     */
+    public function resumeYarboStatus(array $override = []): array
+    {
+        return $this->sendNow($override);
+    }
+
+    /**
      * @param array{lines: list<string>, codes: list<list<int>>} $layout
      * @param array<string, mixed> $override
      * @return array<string, mixed>
@@ -485,6 +568,11 @@ final class YarboVestaboard
             'last_sent_at' => gmdate('c'),
             'last_error' => '',
             'last_progress_stable_hash' => $this->progressStableHash($layout),
+            'board_codes' => $layout['codes'],
+            'board_hash' => $hash,
+            'board_fetched_at' => gmdate('c'),
+            'external_hold' => false,
+            'external_hold_until' => null,
         ];
         if (!$isQuiet) {
             $saved['last_live_codes'] = $layout['codes'];
@@ -1067,6 +1155,248 @@ final class YarboVestaboard
         return $now >= $start || $now < $end;
     }
 
+    /**
+     * @param array<string, mixed>|null $config
+     */
+    public function quietHoursEndAt(?array $config = null): ?\DateTimeImmutable
+    {
+        $config ??= $this->load();
+        if (!($config['quiet_hours_enabled'] ?? false)) {
+            return null;
+        }
+        $start = (string) ($config['quiet_start'] ?? '');
+        $end = (string) ($config['quiet_end'] ?? '');
+        if ($start === '' || $end === '' || $start === $end) {
+            return null;
+        }
+        try {
+            $tz = new \DateTimeZone($this->resolveQuietTimezone($config));
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('UTC');
+        }
+        $now = new \DateTimeImmutable('now', $tz);
+        $endParts = array_map('intval', explode(':', $end));
+        $endToday = $now->setTime($endParts[0] ?? 0, $endParts[1] ?? 0, 0);
+        if ($start < $end) {
+            return $now < $endToday ? $endToday : $endToday->modify('+1 day');
+        }
+        if ($now < $endToday) {
+            return $endToday;
+        }
+
+        return $endToday->modify('+1 day');
+    }
+
+    /**
+     * @param mixed $body
+     * @return list<list<int>>|null
+     */
+    public static function parseMessageCodes(mixed $body): ?array
+    {
+        if (is_string($body)) {
+            $decoded = json_decode($body, true);
+            $body = is_array($decoded) ? $decoded : null;
+        }
+        if (!is_array($body)) {
+            return null;
+        }
+        if (isset($body['currentMessage']) && is_array($body['currentMessage'])) {
+            $layout = $body['currentMessage']['layout'] ?? null;
+            if (is_string($layout)) {
+                $decoded = json_decode($layout, true);
+                $body = is_array($decoded) ? $decoded : $body;
+            } elseif (is_array($layout)) {
+                $body = $layout;
+            }
+        }
+        if (isset($body['characters']) && is_array($body['characters'])) {
+            $body = $body['characters'];
+        }
+        if ($body === [] || !array_is_list($body) || !is_array($body[0] ?? null)) {
+            return null;
+        }
+
+        return self::normalizeLiveCodes($body);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    public function isExternalHoldActive(?array $config = null): bool
+    {
+        $config ??= $this->load();
+        if (empty($config['external_hold'])) {
+            return false;
+        }
+        $until = $this->holdUntilTimestamp($config);
+
+        return $until !== null && time() < $until;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    public function isExternalHoldExpired(?array $config = null): bool
+    {
+        $config ??= $this->load();
+        if (empty($config['external_hold'])) {
+            return false;
+        }
+        $until = $this->holdUntilTimestamp($config);
+
+        return $until === null || time() >= $until;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array<string, mixed>
+     */
+    private function externalHoldPublicView(array $config): array
+    {
+        $active = $this->isExternalHoldActive($config);
+        $until = is_string($config['external_hold_until'] ?? null) ? $config['external_hold_until'] : null;
+        $untilHm = $until !== null ? $this->formatHoldUntilHm($until, $config) : '';
+        $untilQuiet = $active && $this->isQuietHours();
+
+        return [
+            'external_hold' => $active,
+            'external_hold_until' => $active ? $until : null,
+            'external_hold_until_hm' => $active ? $untilHm : '',
+            'external_hold_quiet' => $untilQuiet,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function formatHoldUntilHm(string $iso, array $config): string
+    {
+        try {
+            $dt = new \DateTimeImmutable($iso);
+            $tz = new \DateTimeZone($this->resolveQuietTimezone($config));
+
+            return $dt->setTimezone($tz)->format('H:i');
+        } catch (\Exception) {
+            return '';
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function holdUntilTimestamp(array $config): ?int
+    {
+        $until = $config['external_hold_until'] ?? null;
+        if (!is_string($until) || $until === '') {
+            return null;
+        }
+        $ts = strtotime($until);
+
+        return $ts === false ? null : $ts;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function refreshBoardFromDevice(array $config): void
+    {
+        $fetchedAt = $config['board_fetched_at'] ?? null;
+        if (is_string($fetchedAt) && $fetchedAt !== '') {
+            $then = strtotime($fetchedAt);
+            if ($then !== false && (time() - $then) < (int) self::MIN_SEND_GAP_SECONDS) {
+                if ($this->isExternalHoldActive($config) && $this->isQuietHours()) {
+                    $this->extendHoldThroughQuietHours($config);
+                }
+
+                return;
+            }
+        }
+        $result = $this->http('GET', $config, null);
+        if (!($result['ok'] ?? false)) {
+            return;
+        }
+        $codes = self::parseMessageCodes($result['body'] ?? $result['raw'] ?? null);
+        if ($codes === null) {
+            return;
+        }
+        $hash = hash('sha256', json_encode($codes));
+        $previousHash = (string) ($config['board_hash'] ?? '');
+        $lastHash = (string) ($config['last_hash'] ?? '');
+        $saved = [
+            'board_codes' => $codes,
+            'board_hash' => $hash,
+            'board_fetched_at' => gmdate('c'),
+        ];
+        if ($lastHash !== '' && $hash === $lastHash) {
+            if (!empty($config['external_hold'])) {
+                $saved['external_hold'] = false;
+                $saved['external_hold_until'] = null;
+            }
+            $this->save($saved);
+
+            return;
+        }
+        if ($lastHash === '' || $hash === $lastHash) {
+            $this->save($saved);
+
+            return;
+        }
+        if ($this->isExternalHoldExpired($config)) {
+            $this->save($saved);
+
+            return;
+        }
+        $newMessage = $hash !== $previousHash;
+        $until = $this->holdUntilForExternalWrite($config, $newMessage || empty($config['external_hold']));
+        if ($until !== null) {
+            $saved['external_hold'] = true;
+            $saved['external_hold_until'] = $until->setTimezone(new \DateTimeZone('UTC'))->format('c');
+        }
+        $this->save($saved);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function holdUntilForExternalWrite(array $config, bool $resetTimer): ?\DateTimeImmutable
+    {
+        if ($this->isQuietHours()) {
+            return $this->quietHoursEndAt($config);
+        }
+        if (!$resetTimer) {
+            $existing = $config['external_hold_until'] ?? null;
+            if (is_string($existing) && $existing !== '') {
+                try {
+                    return new \DateTimeImmutable($existing);
+                } catch (\Exception) {
+                }
+            }
+        }
+
+        return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+            ->modify('+' . self::EXTERNAL_HOLD_SECONDS . ' seconds');
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function extendHoldThroughQuietHours(array $config): void
+    {
+        $end = $this->quietHoursEndAt($config);
+        if ($end === null) {
+            return;
+        }
+        $untilTs = $this->holdUntilTimestamp($config);
+        $endTs = $end->getTimestamp();
+        if ($untilTs !== null && $untilTs >= $endTs) {
+            return;
+        }
+        $this->save([
+            'external_hold' => true,
+            'external_hold_until' => $end->setTimezone(new \DateTimeZone('UTC'))->format('c'),
+        ]);
+    }
+
     private function quietLayoutHash(): string
     {
         return hash('sha256', json_encode($this->quietLayout()['codes']));
@@ -1489,8 +1819,13 @@ final class YarboVestaboard
 
             return ['ok' => false, 'error' => 'Vestaboard HTTP ' . $code . ($hint !== '' ? ': ' . $hint : '')];
         }
+        $decoded = json_decode($raw, true);
 
-        return ['ok' => true];
+        return [
+            'ok' => true,
+            'body' => is_array($decoded) ? $decoded : $raw,
+            'raw' => $raw,
+        ];
     }
 
     private function shortHttpError(string $raw): string

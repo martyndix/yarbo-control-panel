@@ -51,4 +51,8 @@ if ($method === 'POST' && $action === 'send') {
     json_response($board->sendNow($input) + ['config' => $board->publicView()]);
 }
 
+if ($method === 'POST' && $action === 'resume') {
+    json_response($board->resumeYarboStatus($input) + ['config' => $board->publicView()]);
+}
+
 json_response(['ok' => false, 'error' => 'Unknown action'], 400);

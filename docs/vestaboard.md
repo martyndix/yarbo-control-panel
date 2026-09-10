@@ -50,6 +50,17 @@ At the start of the window the panel writes your custom 3×15 message once (tap 
 
 This is separate from Quiet Hours in the Vestaboard **app**. The app setting can still drop **Cloud** writes; panel Quiet Hours also covers Local API and actually stops the watcher.
 
+## Messages from the Vestaboard app
+
+The watcher **GETs** the Note (same Local key or Cloud Read token) about every 15 seconds and shows that grid on the dashboard card.
+
+If the flaps no longer match the last layout this panel wrote, Yarbo status pauses:
+
+- During the day, for **one hour** (a later different app message resets that hour).
+- During **Quiet hours**, until that window **ends** (not one hour). The same applies if a custom message is already on the board when quiet hours start — the overnight quiet template is not written over it.
+
+The dashboard shows **Resume Yarbo status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
+
 ## Setup (either API)
 
 1. Open the panel → **Settings → Vestaboard Note**.
@@ -90,6 +101,6 @@ The Cloud API does not accept a blank board. Quiet hours in the Vestaboard **app
 
 ## Limits
 
-- Vestaboard **Note** only (3×15), not Flagship 6×22.
+- Vestaboard **Note** only (3×15), not Flagship 6×22. A Flagship GET is cropped to 3×15 for the preview.
 - The watcher is started by `scripts/panel.sh` (and the systemd service) and the MQTT agent also pushes about every 15 seconds. Reloads if the Vestaboard PHP files change after a panel update. **The browser can be closed.**
-- If the board is unreachable, the watcher backs off and retries; MQTT is not blocked.
+- If the board is unreachable, the watcher backs off and retries; MQTT is not blocked. The dashboard preview can lag up to ~15 seconds after you change the board in the Vestaboard app.

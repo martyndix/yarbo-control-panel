@@ -107,6 +107,7 @@ const els = {
     vestaboardBoard: document.getElementById('vestaboard-board'),
     vestaboardUpdatedAt: document.getElementById('vestaboard-updated-at'),
     vestaboardUpdatedDetail: document.getElementById('vestaboard-updated-detail'),
+    vestaboardResume: document.getElementById('vestaboard-resume'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -2154,9 +2155,24 @@ function updateVestaboardDashboard(data) {
         els.vestaboardUpdatedAt.textContent = rel.text;
         els.vestaboardUpdatedAt.title = rel.title;
     }
+    if (els.vestaboardResume) {
+        els.vestaboardResume.classList.toggle('hidden', !board.external_hold);
+    }
     if (els.vestaboardUpdatedDetail) {
         if (board.last_error) {
             els.vestaboardUpdatedDetail.textContent = ` · ${board.last_error}`;
+        } else if (board.external_hold) {
+            if (board.external_hold_quiet) {
+                const until = board.external_hold_until_hm || board.quiet_until || '';
+                els.vestaboardUpdatedDetail.textContent = until
+                    ? ` · Vestaboard app until quiet hours end (${until})`
+                    : ' · Vestaboard app until quiet hours end';
+            } else {
+                const until = board.external_hold_until_hm || '';
+                els.vestaboardUpdatedDetail.textContent = until
+                    ? ` · Vestaboard app until ${until}`
+                    : ' · Vestaboard app (paused)';
+            }
         } else if (board.pending) {
             els.vestaboardUpdatedDetail.textContent = ' · sending…';
         } else if (board.watcher_ok === false) {
@@ -2167,7 +2183,7 @@ function updateVestaboardDashboard(data) {
             els.vestaboardUpdatedDetail.textContent = '';
         }
     }
-    if (board.pending) {
+    if (board.pending && !board.external_hold) {
         syncVestaboardIfPending();
     }
 }
@@ -3333,6 +3349,25 @@ async function sendVestaboardNow(button) {
     }
 }
 
+async function resumeVestaboardStatus(button) {
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/vestaboard.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'resume' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not resume Yarbo status');
+        showToast('Yarbo status resumed on Vestaboard', 'success');
+        els.vestaboardResume?.classList.add('hidden');
+    } catch (err) {
+        showToast(err.message || 'Could not resume Yarbo status', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 async function saveSettings(event) {
     event.preventDefault();
     setSettingsError(null);
@@ -4464,6 +4499,7 @@ document.querySelectorAll('input[name="vestaboard-transport"]').forEach((radio) 
 els.settingsVestaboardSample?.addEventListener('change', () => loadVestaboardPreview());
 els.settingsVestaboardTest?.addEventListener('click', (e) => testVestaboardConnection(e.currentTarget));
 els.settingsVestaboardSend?.addEventListener('click', (e) => sendVestaboardNow(e.currentTarget));
+els.vestaboardResume?.addEventListener('click', (e) => resumeVestaboardStatus(e.currentTarget));
 els.settingsVestaboardQuiet?.addEventListener('change', () => applyVestaboardQuietHours());
 els.settingsVestaboardQuietBoard?.addEventListener('click', (event) => {
     const cell = event.target.closest('[data-quiet-r]');

@@ -142,6 +142,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
             <div class="vestaboard-preview vestaboard-preview--dashboard" id="vestaboard-board" aria-label="Vestaboard Note 3 by 15 live display"></div>
             <p class="updated">Last written: <span id="vestaboard-updated-at">never</span><span id="vestaboard-updated-detail"></span></p>
+            <button type="button" class="btn btn-secondary vestaboard-resume hidden" id="vestaboard-resume">Resume Yarbo status</button>
         </section>
 
         <section class="card panel-section diagnostics-card" data-panel-id="diagnostics">
@@ -563,7 +564,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-vestaboard-section">
                             <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
-                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The Note updates in the background while the panel (or MQTT agent) is running — the browser does not need to stay open. Writes happen when the message changes (at most every 15 seconds). Optional Quiet hours pause those writes overnight. See <code>docs/vestaboard.md</code>.</p>
+                            <p class="hint">Show Yarbo status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The Note updates in the background while the panel (or MQTT agent) is running — the browser does not need to stay open. Writes happen when the message changes (at most every 15 seconds). A message from the Vestaboard app pauses Yarbo status for one hour (or until Quiet hours end overnight). Optional Quiet hours pause those writes overnight. See <code>docs/vestaboard.md</code>.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-vestaboard-enabled" name="vestaboard_enabled">
                                 <span>Enable Vestaboard Note</span>
@@ -618,7 +619,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <input type="checkbox" id="settings-vestaboard-quiet" name="vestaboard_quiet_hours">
                                     <span>Quiet hours</span>
                                 </label>
-                                <p class="hint" id="settings-vestaboard-quiet-hint">Stops Yarbo status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open. Times use your local timezone (not UTC). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.</p>
+                                <p class="hint" id="settings-vestaboard-quiet-hint">Stops Yarbo status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open. Times use your local timezone (not UTC). A custom message from the Vestaboard app during this window stays until quiet hours end (Resume Yarbo status on the dashboard takes the panel back). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.</p>
                                 <div id="settings-vestaboard-quiet-fields" class="hidden">
                                     <div class="vestaboard-quiet-times">
                                         <label class="settings-field">
