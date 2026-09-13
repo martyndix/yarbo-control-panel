@@ -237,7 +237,7 @@ final class YarboLymow
             return '';
         }
         $generic = strtolower($api);
-        if ($generic === 'lymow' || str_starts_with($generic, 'lymow ')) {
+        if ($generic === 'lymow') {
             return '';
         }
 
@@ -482,6 +482,10 @@ final class YarboLymow
         }
         if (!empty($result['ip_address'])) {
             $this->save(['lymow_host' => (string) $result['ip_address']]);
+        }
+        $found = $this->apiDeviceName($result + $this->readCloudState());
+        if ($found !== '' && $this->load()['display_name'] === '') {
+            $this->save(['lymow_display_name' => $found]);
         }
         $this->startListener();
         $dash = $this->dashboardPayload();

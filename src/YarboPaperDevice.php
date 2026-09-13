@@ -12,8 +12,8 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.3-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.1-color';
+    public const FIRMWARE_VERSION = '0.1.4-beta';
+    public const FIRMWARE_VERSION_COLOR = '0.2.2-color';
     private const PLANS_CACHE_TTL_S = 300;
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
     public const FIRMWARE_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware.bin';
@@ -264,6 +264,8 @@ final class YarboPaperDevice
             'lymow_ok' => !empty($ly['ok']) || !empty($ly['online']),
             'lymow_battery' => isset($ly['battery']) ? (int) $ly['battery'] : -1,
             'lymow_state' => $this->lymowCompanionState($ly),
+            'lymow_charging' => (string) ($ly['charging_label'] ?? '—'),
+            'lymow_name' => (string) ($ly['page_name'] ?? ''),
         ];
     }
 

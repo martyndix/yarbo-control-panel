@@ -567,6 +567,22 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <form id="settings-form" class="settings-form">
                     <div class="settings-modal-scroll">
                         <section class="settings-section">
+                            <h3 class="settings-subtitle">Panel</h3>
+                            <label class="settings-field">
+                                <span class="label">Panel name</span>
+                                <input
+                                    type="text"
+                                    id="settings-house-name"
+                                    name="house_name"
+                                    maxlength="48"
+                                    placeholder="e.g. 28LPC"
+                                    autocomplete="off"
+                                    spellcheck="true"
+                                >
+                            </label>
+                            <p class="hint">Shown as the title. <strong>28LPC</strong> becomes <strong>28LPC Control Panel</strong>. Leave blank for <strong>Control Panel</strong>.</p>
+                        </section>
+                        <section class="settings-section">
                             <h3 class="settings-subtitle">Connection</h3>
                             <label class="settings-field">
                                 <span class="label">Broker IP (Yarbo host)</span>
@@ -604,7 +620,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     spellcheck="true"
                                 >
                             </label>
-                            <p class="hint">Shown on the Yarbo page under the title, and on PaperMono. Leave blank to hide it. Do not use the serial number.</p>
+                            <p class="hint">Shown on the Yarbo page under the title, and on PaperMono / Paper Colour Yarbo pages. Leave blank to hide it. Do not use the serial number.</p>
                             <p id="settings-connection-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-connection-test">Test local connection</button>
                         </section>
@@ -698,7 +714,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span class="label">Lymow name</span>
                                 <input type="text" id="settings-lymow-name" name="lymow_display_name" maxlength="48" placeholder="e.g. Front lawn" autocomplete="off" spellcheck="true">
                             </label>
-                            <p class="hint">Shown on the Lymow page. Leave blank to use the name from the Lymow app when it is available.</p>
+                            <p class="hint">Shown under the title on the Lymow page, and on PaperMono / Paper Colour Lymow pages. Leave blank to use the name from the Lymow app when it is available.</p>
                             <label class="settings-field">
                                 <span class="label">Lymow IP (camera)</span>
                                 <input type="text" id="settings-lymow-host" name="lymow_host" autocomplete="off" spellcheck="false" inputmode="decimal" placeholder="192.168.40.154">
@@ -880,7 +896,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.1-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C sleeps. Build first: <code>pio run -e papercolor -d firmware/papercolor</code>.</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.2-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C sleeps. Build first: <code>pio run -e papercolor -d firmware/papercolor</code>.</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>

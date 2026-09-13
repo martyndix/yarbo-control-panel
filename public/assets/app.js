@@ -75,6 +75,7 @@ const els = {
     settingsHost: document.getElementById('settings-host'),
     settingsSerial: document.getElementById('settings-serial'),
     settingsRobotName: document.getElementById('settings-robot-name'),
+    settingsHouseName: document.getElementById('settings-house-name'),
     settingsConnectionResult: document.getElementById('settings-connection-result'),
     settingsConnectionTest: document.getElementById('settings-connection-test'),
     settingsCloudEnabled: document.getElementById('settings-cloud-enabled'),
@@ -1937,6 +1938,13 @@ function looksLikeRobotSerial(name, serial) {
     return /^[0-9]{8}[0-9A-Za-z]{8}$/.test(value) || /^[0-9A-Fa-f]{8,}$/.test(value);
 }
 
+function applyPanelTitle(hub) {
+    const title = String(hub?.panel_title || '').trim() || 'Control Panel';
+    const h1 = document.getElementById('panel-title');
+    if (h1) h1.textContent = title;
+    document.title = title;
+}
+
 function applyDeviceNameSubtitle() {
     if (!els.robotName) return;
     const serial = els.settingsSerial?.value.trim() || '';
@@ -1944,6 +1952,8 @@ function applyDeviceNameSubtitle() {
     if (activeModuleId === 'yarbo') {
         show = yarboDeviceName;
         if (looksLikeRobotSerial(show, serial)) show = '';
+    } else if (activeModuleId === 'lymow') {
+        show = lymowPageName;
     }
     const visible = Boolean(show);
     els.robotName.textContent = visible ? show : '';
@@ -1978,6 +1988,7 @@ function applyHubFromStatus(data) {
     if (data.vestaboard) {
         applyVestaboardLiveSwitch(data);
     }
+    applyPanelTitle(hub);
     let active = localStorage.getItem(ACTIVE_MODULE_KEY) || hub.active_module || 'yarbo';
     if (!ids.includes(active)) active = 'yarbo';
     setActiveModule(active, false);
@@ -2040,8 +2051,9 @@ function updateLymowDashboard(ly) {
     if (els.lymowProgress) els.lymowProgress.textContent = ly.mow_progress_label || '—';
     if (els.lymowCharging) els.lymowCharging.textContent = ly.charging_label || '—';
     if (els.lymowCam) els.lymowCam.textContent = camOk ? 'Up' : 'Down';
-    lymowPageName = String(ly.page_name || ly.display_name || '').trim();
+    lymowPageName = String(ly.page_name || ly.display_name || ly.device_name || '').trim();
     applyLymowDeviceName();
+    applyDeviceNameSubtitle();
 }
 
 function lymowCamMode() {
@@ -3169,6 +3181,8 @@ async function loadSettings() {
         if (!data.ok) throw new Error(data.error || 'Could not load settings');
         if (els.settingsHost) els.settingsHost.value = data.broker_host || '';
         if (els.settingsSerial) els.settingsSerial.value = data.serial || '';
+        if (els.settingsHouseName) els.settingsHouseName.value = data.hub?.house_name || '';
+        applyPanelTitle(data.hub);
         if (els.settingsRobotName) els.settingsRobotName.value = data.robot_name || '';
         if (els.settingsCloudEnabled) els.settingsCloudEnabled.checked = Boolean(data.cloud?.cloud_enabled);
         if (els.settingsCloudEmail) els.settingsCloudEmail.value = data.cloud?.cloud_email || '';
@@ -3237,9 +3251,10 @@ async function loadSettings() {
         }
         if (els.settingsLymowHost) els.settingsLymowHost.value = data.lymow?.host || '192.168.40.154';
         if (els.settingsLymowName) {
-            els.settingsLymowName.value = data.lymow?.display_name || '';
-            const apiName = data.lymow?.device_name || data.lymow?.page_name || '';
-            els.settingsLymowName.placeholder = apiName || 'e.g. Front lawn';
+            const saved = data.lymow?.display_name || '';
+            const discovered = data.lymow?.page_name || data.lymow?.device_name || '';
+            els.settingsLymowName.value = saved || discovered;
+            els.settingsLymowName.placeholder = discovered || 'e.g. Front lawn';
         }
         if (els.settingsLymowEmail) els.settingsLymowEmail.value = data.lymow?.email || '';
         if (els.settingsLymowPassword) els.settingsLymowPassword.value = '';
@@ -3855,6 +3870,7 @@ async function saveSettings(event) {
             broker_host: brokerHost,
             serial,
             robot_name: robotName,
+            house_name: els.settingsHouseName?.value.trim() || '',
             cloud_enabled: cloudEnabled,
             cloud_email: cloudEmail,
             data_source: dataSource,
@@ -3916,8 +3932,12 @@ async function saveSettings(event) {
             els.settingsCloudStatus.textContent = formatCloudStatus(data.cloud_status);
         }
         applyRobotNameSubtitle(data.robot_name || robotName);
-        lymowPageName = els.settingsLymowName?.value.trim() || lymowPageName;
+        lymowPageName = els.settingsLymowName?.value.trim()
+            || data.lymow?.page_name
+            || lymowPageName;
         applyLymowDeviceName();
+        applyDeviceNameSubtitle();
+        applyPanelTitle(data.hub);
         showToast('Settings saved', 'success');
         closeSettingsModal();
         // Don't block on status — polling resumes after the modal closes.
@@ -5085,6 +5105,12 @@ els.settingsLymowLogin?.addEventListener('click', async (e) => {
             els.settingsLymowResult.className = 'settings-cloud-result success';
         }
         if (els.settingsLymowHost && data.host) els.settingsLymowHost.value = data.host;
+        if (els.settingsLymowName) {
+            const found = data.page_name || data.display_name || data.device_name || '';
+            if (found && !els.settingsLymowName.value.trim()) {
+                els.settingsLymowName.value = found;
+            }
+        }
         if (els.settingsLymowPassword) els.settingsLymowPassword.value = '';
         showToast(msg, 'success');
         updateLymowDashboard(data);

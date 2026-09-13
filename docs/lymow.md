@@ -15,7 +15,7 @@ Settings → **Lymow**:
 
 Leave the password blank on later saves to keep the stored one.
 
-**Lymow name** (optional) is shown on the Lymow page. Leave it blank to use the nickname from the Lymow app when that is published.
+**Lymow name** is shown under the title on the Lymow page (same place as the Yarbo name). Leave the Settings field blank to use the nickname from the Lymow app when that is published. PaperMono and Paper Colour Lymow pages show the same name after a reflash (**0.1.4-beta** / **0.2.2-color**).
 
 ## Camera
 

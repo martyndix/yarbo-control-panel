@@ -48,6 +48,10 @@ String planActivity = "idle";
 bool lightsOn = false;
 String vestaboardLive = "yarbo";
 bool vestaboardOn = false;
+String lymowName = "";
+int lymowBattery = -1;
+String lymowState = "—";
+String lymowCharging = "—";
 int partialRefreshCount = 0;
 String lastDrawnKey;
 int currentPage = PAPERMONO_PAGE_HOME;
@@ -136,6 +140,7 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_HEALTH) return "HEALTH";
     if (page == PAPERMONO_PAGE_PLANS) return "PLANS";
     if (page == PAPERMONO_PAGE_NOTE) return "NOTE";
+    if (page == PAPERMONO_PAGE_LYMOW) return "LYMOW";
     return "HOME";
 }
 
@@ -146,7 +151,8 @@ String screenKey()
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + vestaboardLive + "|"
-        + (vestaboardOn ? "1" : "0") + "|" + String((int) WiFi.status());
+        + (vestaboardOn ? "1" : "0") + "|" + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
+        + String((int) WiFi.status());
 }
 
 void drawButton(int x, int y, int w, int h, const char *label, bool invert)
@@ -171,6 +177,17 @@ void layoutButtons(int &bw, int &bh, int &gap, int &y0)
     y0 = H - (bh * 2) - gap - 36;
 }
 
+String headerDeviceName()
+{
+    if (currentPage == PAPERMONO_PAGE_LYMOW) {
+        return lymowName.length() ? lymowName : String("Lymow");
+    }
+    if (currentPage == PAPERMONO_PAGE_NOTE) {
+        return deviceName;
+    }
+    return robotName.length() ? robotName : deviceName;
+}
+
 void drawHeader()
 {
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -178,8 +195,7 @@ void drawHeader()
     M5.Display.setTextSize(2);
     M5.Display.drawString("YARBO  ·  BETA", 16, 16);
     M5.Display.setTextSize(1);
-    String title = robotName.length() ? robotName : deviceName;
-    M5.Display.drawString(title + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
+    M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     M5.Display.setTextSize(2);
     M5.Display.drawString(pageName(currentPage), 16, 72);
 }
@@ -188,7 +204,7 @@ void drawPager()
 {
     int H = M5.Display.height();
     int W = M5.Display.width();
-    const char *labels[PAPERMONO_PAGE_COUNT] = {"HOME", "STATUS", "HEALTH", "PLANS", "NOTE"};
+    const char *labels[PAPERMONO_PAGE_COUNT] = {"HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "LYMOW"};
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(1);
     int slot = W / PAPERMONO_PAGE_COUNT;
@@ -402,6 +418,26 @@ void drawNotePage(bool forceFull)
     M5.Display.display();
 }
 
+void drawLymowPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(5);
+    String bat = lymowBattery >= 0 ? (String(lymowBattery) + "%") : String("--");
+    M5.Display.drawString(bat, 16, 108);
+    drawKv("State", lymowState, 220);
+    drawKv("Charging", lymowCharging, 260);
+    if (lastError.length()) {
+        M5.Display.setTextSize(1);
+        M5.Display.drawString(lastError.substring(0, 40), 16, 320);
+    }
+    drawPager();
+    M5.Display.display();
+}
+
 void drawScreen(bool forceFull)
 {
     String key = screenKey();
@@ -416,6 +452,8 @@ void drawScreen(bool forceFull)
         drawPlansPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_NOTE) {
         drawNotePage(forceFull);
+    } else if (currentPage == PAPERMONO_PAGE_LYMOW) {
+        drawLymowPage(forceFull);
     } else {
         drawHome(forceFull);
     }
@@ -515,6 +553,10 @@ bool httpGetStatus()
     planActivity = doc["plan_activity"] | planActivity;
     vestaboardLive = doc["vestaboard_live"] | vestaboardLive;
     vestaboardOn = doc["vestaboard_enabled"] | vestaboardOn;
+    lymowName = doc["lymow_name"] | lymowName;
+    lymowBattery = doc["lymow_battery"] | lymowBattery;
+    lymowState = doc["lymow_state"] | lymowState;
+    lymowCharging = doc["lymow_charging"] | lymowCharging;
     lastError = "";
     return true;
 }

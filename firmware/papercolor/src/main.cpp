@@ -46,6 +46,10 @@ String rainSensor = "—";
 String netModule = "—";
 String planActivity = "idle";
 bool lightsOn = false;
+String lymowName = "";
+int lymowBattery = -1;
+String lymowState = "—";
+String lymowCharging = "—";
 int partialRefreshCount = 0;
 String lastDrawnKey;
 int currentPage = PAPERMONO_PAGE_HOME;
@@ -144,7 +148,8 @@ String screenKey()
         + errorLabel + "|" + heading + "|" + rainLabel + "|" + connectionType + "|" + connectionStatus + "|"
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
-        + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + String((int) WiFi.status());
+        + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + lymowName + "|"
+        + String(lymowBattery) + "|" + lymowState + "|" + String((int) WiFi.status());
 }
 
 void drawButton(int x, int y, int w, int h, const char *label, bool invert)
@@ -169,6 +174,17 @@ void layoutButtons(int &bw, int &bh, int &gap, int &y0)
     y0 = H - (bh * 2) - gap - 36;
 }
 
+String headerDeviceName()
+{
+    if (currentPage == PAPERMONO_PAGE_LYMOW) {
+        return lymowName.length() ? lymowName : String("Lymow");
+    }
+    if (currentPage == PAPERMONO_PAGE_POWERWALL) {
+        return deviceName;
+    }
+    return robotName.length() ? robotName : deviceName;
+}
+
 void drawHeader()
 {
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -176,8 +192,7 @@ void drawHeader()
     M5.Display.setTextSize(2);
     M5.Display.drawString("YARBO  ·  COLOR", 16, 16);
     M5.Display.setTextSize(1);
-    String title = robotName.length() ? robotName : deviceName;
-    M5.Display.drawString(title + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
+    M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     M5.Display.setTextSize(2);
     M5.Display.drawString(pageName(currentPage), 16, 72);
 }
@@ -372,6 +387,26 @@ void drawPlansPage(bool forceFull)
     M5.Display.display();
 }
 
+void drawLymowPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(5);
+    String bat = lymowBattery >= 0 ? (String(lymowBattery) + "%") : String("--");
+    M5.Display.drawString(bat, 16, 108);
+    drawKv("State", lymowState, 220);
+    drawKv("Charging", lymowCharging, 260);
+    if (lastError.length()) {
+        M5.Display.setTextSize(1);
+        M5.Display.drawString(lastError.substring(0, 40), 16, 320);
+    }
+    drawPager();
+    M5.Display.display();
+}
+
 void drawScreen(bool forceFull)
 {
     String key = screenKey();
@@ -384,8 +419,10 @@ void drawScreen(bool forceFull)
         drawHealthPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_PLANS) {
         drawPlansPage(forceFull);
-    } else if (currentPage == PAPERMONO_PAGE_POWERWALL || currentPage == PAPERMONO_PAGE_LYMOW) {
+    } else if (currentPage == PAPERMONO_PAGE_POWERWALL) {
         drawStatusPage(forceFull);
+    } else if (currentPage == PAPERMONO_PAGE_LYMOW) {
+        drawLymowPage(forceFull);
     } else {
         drawHome(forceFull);
     }
@@ -483,6 +520,10 @@ bool httpGetStatus()
     rainSensor = doc["rain_sensor"] | rainSensor;
     netModule = doc["net_module"] | netModule;
     planActivity = doc["plan_activity"] | planActivity;
+    lymowName = doc["lymow_name"] | lymowName;
+    lymowBattery = doc["lymow_battery"] | lymowBattery;
+    lymowState = doc["lymow_state"] | lymowState;
+    lymowCharging = doc["lymow_charging"] | lymowCharging;
     lastError = "";
     return true;
 }

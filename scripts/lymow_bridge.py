@@ -864,6 +864,17 @@ def mqtt_listen_session(
             pass
 
 
+def _lymow_nickname(device: dict[str, Any], info: dict[str, Any]) -> str:
+    for src in (device, info):
+        if not isinstance(src, dict):
+            continue
+        for key in ("deviceName", "nickname", "nickName", "alias", "customName", "name"):
+            val = str(src.get(key) or "").strip()
+            if val:
+                return val
+    return ""
+
+
 def merge_state(
     bundle: dict[str, Any],
     mqtt_state: dict[str, Any] | None,
@@ -892,7 +903,7 @@ def merge_state(
         "online": str(info.get("deviceState") or device.get("deviceState") or "").lower() == "online"
         or bool(mqtt_state.get("mqtt_online")),
         "device_thing_name": bundle.get("thing"),
-        "device_name": str(device.get("deviceName") or "").strip(),
+        "device_name": _lymow_nickname(device, info),
         "sn": str(info.get("sn") or device.get("sn") or ""),
         "ip_address": ip,
         "software_version": str(info.get("softwareVersion") or mqtt_state.get("softwareVersion") or ""),

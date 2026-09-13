@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.12] - 2026-09-13
+
+### Added
+- Settings **Panel name** for the title (for example **28LPC Control Panel**). Leave blank for **Control Panel**.
+- PaperMono **LYMOW** page, and Paper Colour Lymow page shows battery/state with the Lymow name. Reflash PaperMono **0.1.4-beta** and Paper Colour **0.2.2-color**.
+
+### Changed
+- The Lymow name sits under the title on the Lymow page, same place as the Yarbo name. The Lymow-app nickname is used when Settings is blank.
+
 ## [2.0.11] - 2026-09-13
 
 ### Added
