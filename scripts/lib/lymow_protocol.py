@@ -12,6 +12,40 @@ import json
 import struct
 from typing import Any
 
+PB_VERSION = 49
+USER_CTRL_QUERY_WIFI_4G = 52
+
+
+def _encode_varint(value: int) -> bytes:
+    value &= 0xFFFFFFFFFFFFFFFF
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            break
+    return bytes(out)
+
+
+def _field_i32(field_no: int, value: int) -> bytes:
+    return _encode_varint((field_no << 3) | 0) + _encode_varint(value & 0xFFFFFFFFFFFFFFFF)
+
+
+def wrap_envelope(pb_bytes: bytes) -> str:
+    return json.dumps({"message": base64.b64encode(pb_bytes).decode()})
+
+
+def encode_userctrl(command: int) -> bytes:
+    return _field_i32(2, PB_VERSION) + _field_i32(5, command)
+
+
+def encode_status_query() -> bytes:
+    """Read-only Wi-Fi/4G query the app sends at startup; reply includes robot info."""
+    return encode_userctrl(USER_CTRL_QUERY_WIFI_4G)
+
 
 def unwrap_envelope(payload: str | bytes) -> bytes:
     if isinstance(payload, bytes):

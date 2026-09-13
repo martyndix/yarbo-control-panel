@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.5] - 2026-09-13
+
+### Fixed
+- Lymow battery/state after sign-in: subscribe once MQTT is actually connected, send the app’s read-only status query, wait long enough for a heartbeat, and keep a background MQTT listener. Missing `paho-mqtt` is shown on the card instead of a silent dash.
+
 ## [2.0.4] - 2026-09-13
 
 ### Added

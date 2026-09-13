@@ -10,7 +10,7 @@ $projectRoot = dirname(__DIR__, 2);
 $lymow = new YarboLymow($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = (string) ($_GET['action'] ?? '');
-set_time_limit(60);
+set_time_limit(90);
 
 if ($method === 'GET' && in_array($action, ['snapshot', 'live', 'stream'], true)) {
     try {

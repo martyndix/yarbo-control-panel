@@ -25,6 +25,8 @@
 /data/lymow-live.jpg
 /data/lymow-live.pid
 /data/lymow-live.log
+/data/lymow-listen.pid
+/data/lymow-listen.log
 /data/tesla-fleet-private.pem
 /public/.well-known/appspecific/com.tesla.3p.public-key.pem
 /firmware/papermono/.pio/

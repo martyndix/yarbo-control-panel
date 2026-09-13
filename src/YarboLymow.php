@@ -189,7 +189,7 @@ final class YarboLymow
             'mow_progress' => isset($cloud['mow_progress']) ? (float) $cloud['mow_progress'] : null,
             'device_name' => $cloud['device_name'] ?? null,
             'cloud_updated' => $cloud['fetched_at'] ?? null,
-            'cloud_error' => $cloud['error'] ?? null,
+            'cloud_error' => $this->cloudHint($cloud, $battery),
         ];
     }
 
@@ -231,9 +231,9 @@ final class YarboLymow
         $camOk = !empty($data['camera_ok']);
         $cloudOk = $battery !== null || !empty($data['online']);
         $showLive = $camOk || $cloudOk;
-        $work = (string) ($data['work_label'] ?? 'IDLE');
+        $work = (string) ($data['work_label'] ?? '—');
         if ($work === '—' || $work === '') {
-            $work = $showLive ? 'IDLE' : 'OFFLINE';
+            $work = $battery !== null ? 'IDLE' : '--';
         }
         $progress = isset($data['mow_progress']) ? (int) round((float) $data['mow_progress']) : null;
         $workRight = ($work === 'MOWING' && $progress !== null) ? $progress . '%' : '';
@@ -417,21 +417,24 @@ final class YarboLymow
     public function loginCloud(): array
     {
         $this->syncCloudFile($this->load());
-        $result = $this->runBridge(['login'], 50.0);
+        $result = $this->runBridge(['login'], 70.0);
         if (!($result['ok'] ?? false)) {
             return $result;
         }
         if (!empty($result['ip_address'])) {
             $this->save(['lymow_host' => (string) $result['ip_address']]);
         }
+        $this->startListener();
         $dash = $this->dashboardPayload();
         $batt = $dash['battery_label'] ?? '—';
         $work = $dash['work_label'] ?? '—';
         $message = 'Signed in to Lymow.';
         if (($dash['battery'] ?? null) !== null) {
             $message = 'Signed in. Battery ' . $batt . ', ' . $work . '.';
-        } elseif (!isset($result['battery'])) {
-            $message = 'Signed in. Live battery needs MQTT (pip install paho-mqtt), then Test Lymow again.';
+        } elseif (!empty($dash['cloud_error'])) {
+            $message = 'Signed in, but live battery failed: ' . (string) $dash['cloud_error'];
+        } else {
+            $message = 'Signed in. Waiting for Lymow MQTT battery (can take up to a minute).';
         }
 
         return ['ok' => true, 'message' => $message] + $dash;
@@ -443,7 +446,8 @@ final class YarboLymow
             return ['ok' => false, 'error' => 'Enter the Lymow app email and password in Settings first.'];
         }
         $this->syncCloudFile($this->load());
-        $result = $this->runBridge(['state', '--wait', '8'], 25.0);
+        $this->startListener();
+        $result = $this->runBridge(['state', '--wait', '25'], 40.0);
         if (!($result['ok'] ?? false)) {
             return $result;
         }
@@ -459,11 +463,86 @@ final class YarboLymow
         if (!$this->cloudSignedIn()) {
             return;
         }
-        $path = $this->cloudStatePath();
-        if (is_file($path) && (time() - (int) filemtime($path)) < 25) {
-            return;
+        $this->startListener();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function startListener(): array
+    {
+        if ($this->listenRunning()) {
+            return ['ok' => true, 'running' => true];
         }
-        $this->refreshCloud();
+        $script = $this->projectRoot . '/scripts/lymow_bridge.py';
+        if (!is_file($script)) {
+            return ['ok' => false, 'error' => 'scripts/lymow_bridge.py is missing.'];
+        }
+        $log = $this->projectRoot . '/data/lymow-listen.log';
+        $cmd = implode(' ', [
+            'nohup',
+            escapeshellarg($this->pythonBin()),
+            escapeshellarg($script),
+            'listen',
+            '--config', escapeshellarg($this->cloudConfigPath()),
+            '--state', escapeshellarg($this->cloudStatePath()),
+            '>>', escapeshellarg($log),
+            '2>&1',
+            '&',
+            'echo $!',
+        ]);
+        $pidLine = [];
+        exec($cmd, $pidLine);
+        $pid = (int) ($pidLine[0] ?? 0);
+        if ($pid < 1) {
+            return ['ok' => false, 'error' => 'Could not start the Lymow MQTT listener.'];
+        }
+        file_put_contents($this->listenPidPath(), (string) $pid . "\n");
+
+        return ['ok' => true, 'running' => true, 'pid' => $pid];
+    }
+
+    private function listenPidPath(): string
+    {
+        return $this->projectRoot . '/data/lymow-listen.pid';
+    }
+
+    private function listenPid(): int
+    {
+        if (!is_file($this->listenPidPath())) {
+            return 0;
+        }
+
+        return (int) trim((string) file_get_contents($this->listenPidPath()));
+    }
+
+    private function listenRunning(): bool
+    {
+        $pid = $this->listenPid();
+        if ($pid < 1) {
+            return false;
+        }
+        if (function_exists('posix_kill') && @posix_kill($pid, 0)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $cloud
+     */
+    private function cloudHint(array $cloud, ?int $battery): ?string
+    {
+        $err = $cloud['error'] ?? $cloud['mqtt_error'] ?? null;
+        if (is_string($err) && $err !== '') {
+            return $err;
+        }
+        if ($this->cloudSignedIn() && $battery === null) {
+            return 'Waiting for Lymow MQTT battery (can take up to a minute).';
+        }
+
+        return null;
     }
 
     public function startLive(): array

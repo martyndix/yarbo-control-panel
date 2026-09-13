@@ -27,7 +27,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 
-from lymow_protocol import decode_pboutput, unwrap_envelope  # noqa: E402
+from lymow_protocol import decode_pboutput, encode_status_query, unwrap_envelope, wrap_envelope  # noqa: E402
 
 CLIENT_ID = "3h1sqv3hishjiofbv8giskjgb0"
 REGIONS = ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]
@@ -410,26 +410,65 @@ def build_presigned_ws_path(host: str, region: str, access_key: str, secret_key:
     return f"/mqtt?{final_qs}"
 
 
-def mqtt_wait_state(config: dict[str, Any], thing: str, wait_s: float) -> dict[str, Any] | None:
+def ensure_paho() -> tuple[Any | None, str | None]:
     try:
         import paho.mqtt.client as mqtt
-    except ImportError:
-        try:
-            import subprocess
 
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "paho-mqtt"],
-                check=False,
-                capture_output=True,
-                timeout=90,
-            )
+        return mqtt, None
+    except ImportError:
+        pass
+    import subprocess
+
+    attempts = [
+        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "paho-mqtt"],
+        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--user", "paho-mqtt"],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--break-system-packages",
+            "paho-mqtt",
+        ],
+    ]
+    last = "paho-mqtt is not installed"
+    for cmd in attempts:
+        try:
+            result = subprocess.run(cmd, check=False, capture_output=True, timeout=90)
+            blob = result.stderr or result.stdout or b""
+            last = blob.decode("utf-8", errors="replace")[-240:] or last
+            import importlib
+
+            importlib.invalidate_caches()
             import paho.mqtt.client as mqtt  # type: ignore
-        except Exception:
-            return None
+
+            return mqtt, None
+        except Exception as exc:  # noqa: BLE001
+            last = str(exc)
+    return None, (
+        "Could not import paho-mqtt (needed for live battery). On the Pi: "
+        "python3 -m pip install --break-system-packages paho-mqtt"
+        + (f" ({last.strip()})" if last.strip() else "")
+    )
+
+
+def mqtt_wait_state(
+    config: dict[str, Any],
+    thing: str,
+    wait_s: float,
+    stop_on_battery: bool = True,
+) -> dict[str, Any]:
+    mqtt, import_error = ensure_paho()
+    if mqtt is None:
+        return {"mqtt_error": import_error or "paho-mqtt is not installed"}
     region = str(config["region"])
     host = str(REGION_CONFIG[region]["iot_host"])
     id_token = str(config.get("id_token") or "")
-    ident = aws_credentials(id_token, region)
+    try:
+        ident = aws_credentials(id_token, region)
+    except Exception as exc:  # noqa: BLE001
+        return {"mqtt_error": f"AWS credentials failed: {exc}"}
     creds = ident["credentials"]
     path = build_presigned_ws_path(
         host,
@@ -439,51 +478,94 @@ def mqtt_wait_state(config: dict[str, Any], thing: str, wait_s: float) -> dict[s
         str(creds.get("SessionToken") or ""),
     )
     got: dict[str, Any] = {}
+    query = wrap_envelope(encode_status_query()).encode()
+
+    def on_connect(client: Any, _userdata: Any, *_args: Any) -> None:
+        rc = 0
+        if len(_args) >= 2:
+            code = _args[1]
+            rc = int(getattr(code, "value", code) or 0)
+        if rc not in (0,):
+            got["mqtt_error"] = f"MQTT connect failed ({rc})"
+            return
+        client.subscribe(f"/device/{thing}/pboutput", qos=1)
+        client.subscribe(f"/device/{thing}/notify-app", qos=1)
+        client.publish(f"/device/{thing}/pbinput", query, qos=1)
 
     def on_message(_client: Any, _userdata: Any, message: Any) -> None:
         try:
             if str(message.topic).endswith("/notify-app"):
-                data = json.loads(message.payload.decode("utf-8", errors="replace"))
+                raw = message.payload
+                text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+                data = json.loads(text)
                 got["mqtt_online"] = str(data.get("robotState", "")).lower() == "online"
                 return
             pb = unwrap_envelope(message.payload)
             got.update(decode_pboutput(pb))
-        except Exception:
-            return
+            got.pop("mqtt_error", None)
+        except Exception as exc:  # noqa: BLE001
+            got["mqtt_error"] = f"MQTT decode failed: {exc}"
 
-    client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        client_id=f"yarbo-lymow-{uuid.uuid4().hex[:8]}",
-        transport="websockets",
-    )
+    kwargs: dict[str, Any] = {
+        "client_id": f"yarbo-lymow-{uuid.uuid4().hex[:8]}",
+        "transport": "websockets",
+        "protocol": mqtt.MQTTv311,
+    }
+    if hasattr(mqtt, "CallbackAPIVersion"):
+        kwargs["callback_api_version"] = mqtt.CallbackAPIVersion.VERSION2
+    client = mqtt.Client(**kwargs)
     client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-    client.ws_set_options(path=path)
+    try:
+        client.ws_set_options(path=path, headers={"Host": host})
+    except TypeError:
+        client.ws_set_options(path=path)
+    client.on_connect = on_connect
     client.on_message = on_message
     try:
         client.connect(host, 443, 60)
-        client.subscribe(f"/device/{thing}/pboutput", qos=1)
-        client.subscribe(f"/device/{thing}/notify-app", qos=1)
-        deadline = time.time() + wait_s
+        deadline = time.time() + max(3.0, wait_s)
         while time.time() < deadline:
             client.loop(timeout=1.0)
-            if "battery" in got or "workStatus" in got:
+            if stop_on_battery and ("battery" in got or "workStatus" in got):
                 break
+    except Exception as exc:  # noqa: BLE001
+        got["mqtt_error"] = str(exc)
     finally:
         try:
             client.disconnect()
         except Exception:
             pass
-    return got or None
+    if "battery" not in got and "workStatus" not in got and "mqtt_error" not in got:
+        got["mqtt_error"] = (
+            "MQTT connected but no battery yet (Lymow heartbeats about every 60s). "
+            "Leave the panel running, or tap Sign in / Test Lymow again."
+        )
+    return got
 
 
-def merge_state(bundle: dict[str, Any], mqtt_state: dict[str, Any] | None) -> dict[str, Any]:
+def merge_state(
+    bundle: dict[str, Any],
+    mqtt_state: dict[str, Any] | None,
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     info = bundle["info"] if isinstance(bundle.get("info"), dict) else {}
     device = bundle["device"] if isinstance(bundle.get("device"), dict) else {}
     mqtt_state = mqtt_state or {}
+    previous = previous if isinstance(previous, dict) else {}
     last_mow = bundle.get("last_mow") if isinstance(bundle.get("last_mow"), dict) else None
-    ip = str(mqtt_state.get("ipAddress") or info.get("ipAddress") or "")
+    ip = str(mqtt_state.get("ipAddress") or info.get("ipAddress") or previous.get("ip_address") or "")
     battery = mqtt_state.get("battery")
+    if battery is None:
+        battery = previous.get("battery")
     work = mqtt_state.get("workStatus")
+    if work is None:
+        work = previous.get("work_status")
+    charging = mqtt_state.get("isCharging")
+    if charging is None:
+        charging = previous.get("is_charging")
+    recharging = mqtt_state.get("isRecharging")
+    if recharging is None:
+        recharging = previous.get("is_recharging")
     return {
         "ok": True,
         "online": str(info.get("deviceState") or device.get("deviceState") or "").lower() == "online"
@@ -496,19 +578,30 @@ def merge_state(bundle: dict[str, Any], mqtt_state: dict[str, Any] | None) -> di
         "mcu_version": str(info.get("mcuVersion") or mqtt_state.get("mcuVersion") or ""),
         "battery": battery,
         "work_status": work,
-        "is_charging": mqtt_state.get("isCharging"),
-        "is_recharging": mqtt_state.get("isRecharging"),
+        "is_charging": charging,
+        "is_recharging": recharging,
         "error_code": mqtt_state.get("errorCode"),
-        "error_codes": mqtt_state.get("errorCodes") or [],
+        "error_codes": mqtt_state.get("errorCodes") or previous.get("error_codes") or [],
         "rtk_status": mqtt_state.get("rtkStatus"),
         "rtk_satellites": mqtt_state.get("rtkSatellites"),
-        "mow_progress": mqtt_state.get("mowProgress"),
+        "mow_progress": mqtt_state.get("mowProgress", previous.get("mow_progress")),
         "wifi_signal": mqtt_state.get("wifiSignalQuality"),
         "lte_signal": mqtt_state.get("lteSignalQuality"),
         "last_mow": last_mow,
         "clean_summary": bundle.get("clean_summary") or {},
+        "mqtt_error": mqtt_state.get("mqtt_error") if battery is None else None,
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
+
+
+def read_previous_state(state_path: Path) -> dict[str, Any]:
+    if not state_path.is_file():
+        return {}
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def cmd_login(config_path: Path, state_path: Path) -> int:
@@ -519,8 +612,8 @@ def cmd_login(config_path: Path, state_path: Path) -> int:
         config["device_thing_name"] = bundle["thing"]
         config["last_error"] = ""
         save_config(config_path, config)
-        mqtt_state = mqtt_wait_state(config, str(bundle["thing"]), 8.0)
-        state = merge_state(bundle, mqtt_state)
+        mqtt_state = mqtt_wait_state(config, str(bundle["thing"]), 35.0)
+        state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         emit({"ok": True, "message": "Signed in to Lymow.", "region": config.get("region"), **state})
@@ -536,10 +629,10 @@ def cmd_state(config_path: Path, state_path: Path, wait_s: float) -> int:
         config = ensure_tokens(config)
         bundle = fetch_device_bundle(config)
         config["device_thing_name"] = bundle["thing"]
-        mqtt_state = mqtt_wait_state(config, str(bundle["thing"]), wait_s) if wait_s > 0 else None
+        mqtt_state = mqtt_wait_state(config, str(bundle["thing"]), wait_s) if wait_s > 0 else {}
         config["last_error"] = ""
         save_config(config_path, config)
-        state = merge_state(bundle, mqtt_state)
+        state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         emit(state)
@@ -561,8 +654,8 @@ def cmd_listen(config_path: Path, state_path: Path) -> int:
             thing = str(bundle["thing"])
             config["device_thing_name"] = thing
             save_config(config_path, config)
-            mqtt_state = mqtt_wait_state(config, thing, 70)
-            state = merge_state(bundle, mqtt_state)
+            mqtt_state = mqtt_wait_state(config, thing, 70, stop_on_battery=False)
+            state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
             state_path.parent.mkdir(parents=True, exist_ok=True)
             state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
