@@ -427,23 +427,37 @@ def ensure_paho() -> tuple[Any | None, str | None]:
     import subprocess
 
     packages = ["paho-mqtt", "websocket-client"]
-    attempts = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *packages],
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--user", *packages],
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "--break-system-packages",
-            *packages,
-        ],
-    ]
+    in_venv = sys.prefix != sys.base_prefix
+    if in_venv:
+        attempts = [
+            [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *packages],
+        ]
+    else:
+        attempts = [
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--break-system-packages",
+                *packages,
+            ],
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--user",
+                "--break-system-packages",
+                *packages,
+            ],
+        ]
     last = "paho-mqtt / websocket-client missing"
     for cmd in attempts:
         try:
-            result = subprocess.run(cmd, check=False, capture_output=True, timeout=90)
+            result = subprocess.run(cmd, check=False, capture_output=True, timeout=120)
             blob = result.stderr or result.stdout or b""
             last = blob.decode("utf-8", errors="replace")[-240:] or last
             import importlib
@@ -766,7 +780,20 @@ def read_previous_state(state_path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def cmd_deps() -> int:
+    mqtt, err = ensure_paho()
+    if mqtt is None:
+        emit({"ok": False, "error": err or "Could not install paho-mqtt / websocket-client."})
+        return 1
+    emit({"ok": True, "message": "Lymow MQTT libraries ready."})
+    return 0
+
+
 def cmd_login(config_path: Path, state_path: Path) -> int:
+    mqtt, err = ensure_paho()
+    if mqtt is None:
+        emit({"ok": False, "error": err or "Could not install paho-mqtt / websocket-client."})
+        return 1
     config = load_config(config_path)
     try:
         config = ensure_tokens(config)
@@ -805,6 +832,10 @@ def cmd_state(config_path: Path, state_path: Path, wait_s: float) -> int:
 
 
 def cmd_listen(config_path: Path, state_path: Path) -> int:
+    mqtt, err = ensure_paho()
+    if mqtt is None:
+        emit({"ok": False, "error": err or "Could not install paho-mqtt / websocket-client."})
+        return 1
     while True:
         config = load_config(config_path)
         if not config.get("email") and not config.get("refresh_token"):
@@ -840,13 +871,15 @@ def cmd_listen(config_path: Path, state_path: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Lymow unofficial cloud bridge")
-    parser.add_argument("command", choices=["login", "state", "listen"])
+    parser.add_argument("command", choices=["deps", "login", "state", "listen"])
     parser.add_argument("--config", required=True)
     parser.add_argument("--state", default="")
     parser.add_argument("--wait", type=float, default=8.0)
     args = parser.parse_args()
     config_path = Path(args.config)
     state_path = Path(args.state) if args.state else config_path.parent / "lymow-state.json"
+    if args.command == "deps":
+        return cmd_deps()
     if args.command == "login":
         return cmd_login(config_path, state_path)
     if args.command == "state":

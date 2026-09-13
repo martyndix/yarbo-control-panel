@@ -204,6 +204,20 @@ elif command -v python >/dev/null 2>&1; then
 fi
 
 if [[ -n "$PYTHON" ]]; then
+  step "Lymow MQTT libraries (paho-mqtt + websocket-client)"
+  write_status "composer" "Installing Lymow MQTT libraries"
+  LYMOW_PY="$PYTHON"
+  if [[ -x "${ROOT}/.venv/bin/python" ]]; then
+    LYMOW_PY="${ROOT}/.venv/bin/python"
+  fi
+  if "$LYMOW_PY" -c "import paho.mqtt.client, websocket" >/dev/null 2>&1; then
+    step "Lymow MQTT libraries already installed"
+  elif "$LYMOW_PY" -m pip install --disable-pip-version-check --break-system-packages paho-mqtt websocket-client >/dev/null 2>&1 \
+    || "$LYMOW_PY" -m pip install --disable-pip-version-check --user --break-system-packages paho-mqtt websocket-client >/dev/null 2>&1; then
+    step "Lymow MQTT libraries installed"
+  else
+    step "Lymow MQTT pip install failed (Sign in / Test Lymow will retry)"
+  fi
   step "Checking yarbo-data-sdk"
   write_status "composer" "Checking yarbo-data-sdk"
   # shellcheck source=scripts/lib/python_sdk.sh

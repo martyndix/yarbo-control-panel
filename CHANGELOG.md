@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.7] - 2026-09-13
+
+### Added
+- Lymow MQTT libraries install themselves on the Pi when missing (`python3 -m pip install --break-system-packages paho-mqtt websocket-client`), on **Panel updates** and again when you **Sign in / Test Lymow**.
+
 ## [2.0.6] - 2026-09-13
 
 ### Fixed

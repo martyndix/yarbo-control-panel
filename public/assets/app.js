@@ -4968,7 +4968,7 @@ els.settingsLymowLogin?.addEventListener('click', async (e) => {
     const button = e.currentTarget;
     button.disabled = true;
     if (els.settingsLymowResult) {
-        els.settingsLymowResult.textContent = 'Signing in to Lymow…';
+        els.settingsLymowResult.textContent = 'Installing MQTT libraries if needed, then signing in to Lymow…';
         els.settingsLymowResult.className = 'settings-cloud-result';
         els.settingsLymowResult.classList.remove('hidden');
     }

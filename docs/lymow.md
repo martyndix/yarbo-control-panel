@@ -11,7 +11,7 @@ Settings → **Lymow**:
 1. Tick **Lymow** under Settings → Modules. The **Lymow** login section appears just below.
 2. Enter the same **email and password** as the Lymow phone app.
 3. Region **Auto** tries Europe first, then NA / AU / Asia.
-4. **Sign in / Test Lymow**. Battery and work state come from Lymow cloud MQTT after that (not from the camera). The first reading can take up to a minute. Needs `paho-mqtt` and `websocket-client` on the panel host (`python3 -m pip install --break-system-packages paho-mqtt websocket-client` on a Pi).
+4. **Sign in / Test Lymow**. The panel installs `paho-mqtt` and `websocket-client` on this host if they are missing (`python3 -m pip install --break-system-packages …`). Battery and work state then come from Lymow cloud MQTT (not the camera). The first reading can take up to a minute.
 
 Leave the password blank on later saves to keep the stored one.
 

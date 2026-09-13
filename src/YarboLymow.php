@@ -417,6 +417,13 @@ final class YarboLymow
     public function loginCloud(): array
     {
         $this->syncCloudFile($this->load());
+        $deps = $this->runBridge(['deps'], 130.0);
+        if (!($deps['ok'] ?? false)) {
+            return [
+                'ok' => false,
+                'error' => (string) ($deps['error'] ?? 'Could not install paho-mqtt / websocket-client on this host.'),
+            ];
+        }
         $result = $this->runBridge(['login'], 70.0);
         if (!($result['ok'] ?? false)) {
             return $result;

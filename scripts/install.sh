@@ -97,6 +97,19 @@ install_project() {
   python="$(yarbo_python_bin || true)"
 
   if [[ -n "$python" ]]; then
+    echo "==> Lymow MQTT libraries (paho-mqtt + websocket-client)"
+    local lymow_py="$python"
+    if [[ -x "${ROOT}/.venv/bin/python" ]]; then
+      lymow_py="${ROOT}/.venv/bin/python"
+    fi
+    if "$lymow_py" -c "import paho.mqtt.client, websocket" >/dev/null 2>&1; then
+      echo "    already installed"
+    elif run_as_owner "'${lymow_py}' -m pip install --disable-pip-version-check --break-system-packages paho-mqtt websocket-client" \
+      || run_as_owner "'${lymow_py}' -m pip install --disable-pip-version-check --user --break-system-packages paho-mqtt websocket-client"; then
+      echo "    installed"
+    else
+      echo "    WARNING: pip install failed — Settings → Lymow → Sign in will retry"
+    fi
     echo "==> Yarbo cloud bridge (map/plan fallback reads)"
     if [[ "${EUID}" -eq 0 ]]; then
       ensure_python_pip "$python" || true
