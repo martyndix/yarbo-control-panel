@@ -1369,7 +1369,8 @@ final class YarboVestaboard
         ];
         $ours = $hash === $lastHash
             || in_array($hash, $this->normalizeRecentHashes($config['recent_hashes'] ?? null, $lastHash), true)
-            || $this->codesLookLikeOwnPowerwall($codes);
+            || $this->codesLookLikeOwnPowerwall($codes)
+            || $this->codesLookLikeOwnLymow($codes);
         if ($ours) {
             if (!empty($config['external_hold'])) {
                 $saved['external_hold'] = false;
@@ -1465,6 +1466,21 @@ final class YarboVestaboard
         return (str_starts_with($row0, 'HOME') || str_starts_with($row0, 'POWERWALL') || str_starts_with($row0, 'OFFLINE'))
             && str_starts_with($row1, 'SOLAR')
             && str_starts_with($row2, 'DRAW');
+    }
+
+    /**
+     * LYMOW/OFFLINE + CAM is this panel's Lymow page, not an app scribble.
+     *
+     * @param list<list<int>> $codes
+     */
+    private function codesLookLikeOwnLymow(array $codes): bool
+    {
+        $lines = self::linesFromCodes($codes);
+        $row0 = strtoupper(trim($lines[0] ?? ''));
+        $row2 = strtoupper(trim($lines[2] ?? ''));
+
+        return (str_starts_with($row0, 'LYMOW') || str_starts_with($row0, 'OFFLINE'))
+            && str_starts_with($row2, 'CAM');
     }
 
     /**

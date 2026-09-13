@@ -51,6 +51,9 @@ final class YarboLymow
             'last_ok' => false,
             'last_error' => '',
             'last_check' => null,
+            'email' => '',
+            'password' => '',
+            'region' => 'auto',
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -61,6 +64,10 @@ final class YarboLymow
             return $defaults;
         }
         $host = self::normalizeHost((string) ($decoded['host'] ?? $decoded['rtsp_url'] ?? self::DEFAULT_HOST));
+        $region = strtolower(trim((string) ($decoded['region'] ?? 'auto')));
+        if ($region === '') {
+            $region = 'auto';
+        }
 
         return [
             'host' => $host,
@@ -70,6 +77,9 @@ final class YarboLymow
             'last_check' => isset($decoded['last_check']) && is_string($decoded['last_check'])
                 ? $decoded['last_check']
                 : null,
+            'email' => trim((string) ($decoded['email'] ?? '')),
+            'password' => (string) ($decoded['password'] ?? ''),
+            'region' => $region,
         ];
     }
 
@@ -87,19 +97,40 @@ final class YarboLymow
         $host = $hostInput !== null
             ? self::normalizeHost((string) $hostInput)
             : $current['host'];
+        $email = array_key_exists('lymow_email', $input) || array_key_exists('email', $input)
+            ? trim((string) ($input['lymow_email'] ?? $input['email'] ?? ''))
+            : $current['email'];
+        $password = $current['password'];
+        if (array_key_exists('lymow_password', $input) || array_key_exists('password', $input)) {
+            $nextPassword = (string) ($input['lymow_password'] ?? $input['password'] ?? '');
+            if ($nextPassword !== '') {
+                $password = $nextPassword;
+            }
+        }
+        $region = $current['region'];
+        if (array_key_exists('lymow_region', $input) || array_key_exists('region', $input)) {
+            $region = strtolower(trim((string) ($input['lymow_region'] ?? $input['region'] ?? 'auto'))) ?: 'auto';
+        }
         $next = [
             'host' => $host,
             'rtsp_url' => self::rtspForHost($host),
             'last_ok' => array_key_exists('last_ok', $input) ? (bool) $input['last_ok'] : $current['last_ok'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
             'last_check' => $input['last_check'] ?? $current['last_check'],
+            'email' => $email,
+            'password' => $password,
+            'region' => $region,
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
             return false;
         }
+        $ok = file_put_contents($this->configPath(), $json . "\n", LOCK_EX) !== false;
+        if ($ok && ($email !== '' || $password !== '')) {
+            $this->syncCloudFile($next);
+        }
 
-        return file_put_contents($this->configPath(), $json . "\n", LOCK_EX) !== false;
+        return $ok;
     }
 
     /**
@@ -115,6 +146,10 @@ final class YarboLymow
             'last_ok' => $config['last_ok'],
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
             'last_check' => $config['last_check'],
+            'email' => $config['email'],
+            'region' => $config['region'],
+            'password_set' => $config['password'] !== '',
+            'signed_in' => $this->cloudSignedIn(),
         ];
     }
 
@@ -124,15 +159,37 @@ final class YarboLymow
     public function dashboardPayload(): array
     {
         $config = $this->load();
+        $cloud = $this->readCloudState();
+        $battery = isset($cloud['battery']) ? (int) $cloud['battery'] : null;
+        $work = isset($cloud['work_status']) ? (int) $cloud['work_status'] : null;
+        $ip = trim((string) ($cloud['ip_address'] ?? ''));
+        if ($ip !== '' && ($config['host'] === self::DEFAULT_HOST || $config['host'] === '')) {
+            $config['host'] = self::normalizeHost($ip);
+        }
+        $cloudOk = !empty($cloud['ok']) || $battery !== null || !empty($cloud['online']);
+        $camOk = (bool) $config['last_ok'];
 
         return [
-            'ok' => $config['last_ok'],
-            'online' => $config['last_ok'],
+            'ok' => $camOk || $cloudOk,
+            'online' => $camOk || !empty($cloud['online']) || $battery !== null,
             'host' => $config['host'],
             'rtsp_url' => $config['rtsp_url'],
             'snapshot' => '/api/lymow.php?action=snapshot',
+            'live' => '/api/lymow.php?action=live',
             'last_check' => $config['last_check'],
-            'error' => $config['last_error'] !== '' ? $config['last_error'] : null,
+            'error' => $config['last_error'] !== '' ? $config['last_error'] : ($cloud['error'] ?? null),
+            'camera_ok' => $camOk,
+            'signed_in' => $this->cloudSignedIn(),
+            'battery' => $battery,
+            'battery_label' => $battery !== null ? $battery . '%' : '—',
+            'work_status' => $work,
+            'work_label' => self::workLabel($work, !empty($cloud['is_charging'])),
+            'charging' => !empty($cloud['is_charging']) || !empty($cloud['is_recharging']),
+            'charging_label' => !empty($cloud['is_charging']) ? 'Yes' : (!empty($cloud['is_recharging']) ? 'Returning' : 'No'),
+            'mow_progress' => isset($cloud['mow_progress']) ? (float) $cloud['mow_progress'] : null,
+            'device_name' => $cloud['device_name'] ?? null,
+            'cloud_updated' => $cloud['fetched_at'] ?? null,
+            'cloud_error' => $cloud['error'] ?? null,
         ];
     }
 
@@ -155,6 +212,7 @@ final class YarboLymow
         if (!$hub->enabled(YarboHub::MODULE_LYMOW)) {
             return;
         }
+        $this->refreshCloudIfStale();
         $check = $this->load()['last_check'];
         $then = is_string($check) ? strtotime($check) : false;
         if ($then !== false && (time() - $then) < 20) {
@@ -169,31 +227,31 @@ final class YarboLymow
     public function vestaboardLayout(): array
     {
         $data = $this->dashboardPayload();
-        $online = !empty($data['online']);
-        $verb = $online ? 'CAMERA' : 'OFFLINE';
-        $line3 = $online ? 'RTSP         OK' : 'RTSP       DOWN';
-        $lines = [
-            str_pad('LYMOW', 6) . str_pad($verb, 9, ' ', STR_PAD_LEFT),
-            'MOWER CAMERA  ',
-            $line3,
-        ];
-        $codes = [];
-        foreach ($lines as $line) {
-            $row = [];
-            $padded = str_pad(strtoupper($line), 15);
-            for ($c = 0; $c < 15; $c++) {
-                $row[] = $this->charToCode($padded[$c] ?? ' ');
-            }
-            $codes[] = $row;
+        $battery = isset($data['battery']) ? (int) $data['battery'] : null;
+        $camOk = !empty($data['camera_ok']);
+        $cloudOk = $battery !== null || !empty($data['online']);
+        $showLive = $camOk || $cloudOk;
+        $work = (string) ($data['work_label'] ?? 'IDLE');
+        if ($work === '—' || $work === '') {
+            $work = $showLive ? 'IDLE' : 'OFFLINE';
         }
-        $codes[0][14] = $online ? YarboVestaboard::COLOR_GREEN : YarboVestaboard::COLOR_RED;
+        $progress = isset($data['mow_progress']) ? (int) round((float) $data['mow_progress']) : null;
+        $workRight = ($work === 'MOWING' && $progress !== null) ? $progress . '%' : '';
+        $lines = [
+            $showLive
+                ? $this->pair('LYMOW', $battery !== null ? $battery . '%' : '--', 14)
+                : $this->pair('OFFLINE', '', 14),
+            $this->pair($work, $workRight),
+            $this->pair('CAM', $camOk ? 'UP' : 'DOWN'),
+        ];
+        $codes = $this->encodeLines($lines, $battery, $showLive);
 
         return [
             'ok' => true,
-            'online' => $online,
+            'online' => $showLive,
             'lines' => YarboVestaboard::linesFromCodes($codes),
             'codes' => $codes,
-            'verb' => $verb,
+            'verb' => $showLive ? 'LYMOW' : 'OFFLINE',
         ];
     }
 
@@ -346,6 +404,356 @@ final class YarboLymow
         return ['out' => $out, 'err' => trim($err)];
     }
 
+    public function cloudConfigPath(): string
+    {
+        return $this->projectRoot . '/data/lymow-cloud.json';
+    }
+
+    public function cloudStatePath(): string
+    {
+        return $this->projectRoot . '/data/lymow-state.json';
+    }
+
+    public function loginCloud(): array
+    {
+        $this->syncCloudFile($this->load());
+        $result = $this->runBridge(['login'], 50.0);
+        if (!($result['ok'] ?? false)) {
+            return $result;
+        }
+        if (!empty($result['ip_address'])) {
+            $this->save(['lymow_host' => (string) $result['ip_address']]);
+        }
+        $dash = $this->dashboardPayload();
+        $batt = $dash['battery_label'] ?? '—';
+        $work = $dash['work_label'] ?? '—';
+        $message = 'Signed in to Lymow.';
+        if (($dash['battery'] ?? null) !== null) {
+            $message = 'Signed in. Battery ' . $batt . ', ' . $work . '.';
+        } elseif (!isset($result['battery'])) {
+            $message = 'Signed in. Live battery needs MQTT (pip install paho-mqtt), then Test Lymow again.';
+        }
+
+        return ['ok' => true, 'message' => $message] + $dash;
+    }
+
+    public function refreshCloud(): array
+    {
+        if (!$this->cloudSignedIn() && $this->load()['email'] === '') {
+            return ['ok' => false, 'error' => 'Enter the Lymow app email and password in Settings first.'];
+        }
+        $this->syncCloudFile($this->load());
+        $result = $this->runBridge(['state', '--wait', '8'], 25.0);
+        if (!($result['ok'] ?? false)) {
+            return $result;
+        }
+        if (!empty($result['ip_address']) && $this->load()['host'] === self::DEFAULT_HOST) {
+            $this->save(['lymow_host' => (string) $result['ip_address']]);
+        }
+
+        return ['ok' => true, 'message' => 'Updated Lymow status.'] + $this->dashboardPayload();
+    }
+
+    public function refreshCloudIfStale(): void
+    {
+        if (!$this->cloudSignedIn()) {
+            return;
+        }
+        $path = $this->cloudStatePath();
+        if (is_file($path) && (time() - (int) filemtime($path)) < 25) {
+            return;
+        }
+        $this->refreshCloud();
+    }
+
+    public function startLive(): array
+    {
+        if ($this->liveRunning()) {
+            return ['ok' => true, 'running' => true];
+        }
+        try {
+            $ffmpeg = $this->ffmpegBinary();
+        } catch (\RuntimeException $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+        $url = $this->load()['rtsp_url'];
+        $jpg = $this->liveJpgPath();
+        $log = $this->projectRoot . '/data/lymow-live.log';
+        $cmd = implode(' ', [
+            'nohup',
+            escapeshellarg($ffmpeg),
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-nostdin',
+            '-rtsp_transport', 'tcp',
+            '-i', escapeshellarg($url),
+            '-an',
+            '-vf', 'fps=5',
+            '-q:v', '5',
+            '-update', '1',
+            '-y',
+            escapeshellarg($jpg),
+            '>>', escapeshellarg($log),
+            '2>&1',
+            '&',
+            'echo $!',
+        ]);
+        $pidLine = [];
+        exec($cmd, $pidLine);
+        $pid = (int) ($pidLine[0] ?? 0);
+        if ($pid < 1) {
+            return ['ok' => false, 'error' => 'Could not start ffmpeg for the Lymow stream.'];
+        }
+        file_put_contents($this->livePidPath(), (string) $pid . "\n");
+
+        return ['ok' => true, 'running' => true, 'pid' => $pid];
+    }
+
+    public function stopLive(): void
+    {
+        $pid = $this->livePid();
+        if ($pid > 0) {
+            if (function_exists('posix_kill')) {
+                @posix_kill($pid, 15);
+                usleep(150000);
+                @posix_kill($pid, 9);
+            } else {
+                exec('kill -TERM ' . (int) $pid . ' 2>/dev/null');
+            }
+        }
+        @unlink($this->livePidPath());
+    }
+
+    public function liveJpeg(): string
+    {
+        $this->startLive();
+        $jpg = $this->liveJpgPath();
+        $deadline = microtime(true) + 3.0;
+        while (microtime(true) < $deadline) {
+            if (is_file($jpg) && filesize($jpg) > 128) {
+                $data = (string) file_get_contents($jpg);
+                if (str_starts_with($data, "\xff\xd8")) {
+                    return $data;
+                }
+            }
+            usleep(80000);
+        }
+
+        return $this->snapshotJpeg();
+    }
+
+    public static function workLabel(?int $status, bool $charging = false): string
+    {
+        if ($charging && !in_array($status, [2, 8, 9], true)) {
+            return 'CHARGE';
+        }
+
+        return match ($status) {
+            0 => 'IDLE',
+            1 => 'WAIT',
+            2, 8, 9 => 'MOWING',
+            3 => 'PAUSE',
+            4, 10 => 'DOCKING',
+            5 => 'CHARGE',
+            6 => 'REMOTE',
+            7 => 'ERROR',
+            11 => 'UPDATE',
+            12 => 'FULL',
+            13 => 'STOP',
+            14 => 'ESCAPE',
+            default => $status === null ? '—' : 'UNKNOWN',
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function syncCloudFile(array $config): void
+    {
+        $cloud = [];
+        if (is_file($this->cloudConfigPath())) {
+            $raw = file_get_contents($this->cloudConfigPath());
+            $decoded = is_string($raw) ? json_decode($raw, true) : null;
+            if (is_array($decoded)) {
+                $cloud = $decoded;
+            }
+        }
+        $cloud['email'] = $config['email'];
+        if (($config['password'] ?? '') !== '') {
+            $cloud['password'] = $config['password'];
+        }
+        $cloud['region'] = $config['region'] ?: 'auto';
+        file_put_contents(
+            $this->cloudConfigPath(),
+            json_encode($cloud, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+            LOCK_EX
+        );
+    }
+
+    private function cloudSignedIn(): bool
+    {
+        if (!is_file($this->cloudConfigPath())) {
+            return false;
+        }
+        $raw = file_get_contents($this->cloudConfigPath());
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        if (!is_array($decoded)) {
+            return false;
+        }
+
+        return trim((string) ($decoded['refresh_token'] ?? '')) !== ''
+            || trim((string) ($decoded['access_token'] ?? '')) !== '';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function readCloudState(): array
+    {
+        if (!is_file($this->cloudStatePath())) {
+            return [];
+        }
+        $raw = file_get_contents($this->cloudStatePath());
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * @param list<string> $args
+     * @return array<string, mixed>
+     */
+    private function runBridge(array $args, float $timeout = 20.0): array
+    {
+        $script = $this->projectRoot . '/scripts/lymow_bridge.py';
+        if (!is_file($script)) {
+            return ['ok' => false, 'error' => 'scripts/lymow_bridge.py is missing.'];
+        }
+        $python = $this->pythonBin();
+        $cmd = array_merge(
+            [$python, $script],
+            $args,
+            ['--config', $this->cloudConfigPath(), '--state', $this->cloudStatePath()]
+        );
+        $escaped = implode(' ', array_map('escapeshellarg', $cmd));
+        $proc = proc_open($escaped, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->projectRoot);
+        if (!is_resource($proc)) {
+            return ['ok' => false, 'error' => 'Could not start the Lymow cloud helper.'];
+        }
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $stdout = '';
+        $stderr = '';
+        $deadline = microtime(true) + $timeout;
+        while (microtime(true) < $deadline) {
+            $stdout .= (string) fread($pipes[1], 8192);
+            $stderr .= (string) fread($pipes[2], 8192);
+            $status = proc_get_status($proc);
+            if (!($status['running'] ?? true)) {
+                break;
+            }
+            usleep(40000);
+        }
+        $status = proc_get_status($proc);
+        if ($status['running'] ?? false) {
+            proc_terminate($proc, 9);
+            $stderr = trim($stderr . ' Lymow cloud helper timed out.');
+        }
+        $stdout .= (string) stream_get_contents($pipes[1]);
+        $stderr .= (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($proc);
+        $decoded = json_decode($stdout, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        return [
+            'ok' => false,
+            'error' => trim($stderr) !== '' ? trim($stderr) : 'Lymow cloud helper returned no JSON.',
+        ];
+    }
+
+    private function pythonBin(): string
+    {
+        $venv = $this->projectRoot . '/.venv/bin/python';
+        if (is_file($venv)) {
+            return $venv;
+        }
+
+        return 'python3';
+    }
+
+    private function liveJpgPath(): string
+    {
+        return $this->projectRoot . '/data/lymow-live.jpg';
+    }
+
+    private function livePidPath(): string
+    {
+        return $this->projectRoot . '/data/lymow-live.pid';
+    }
+
+    private function livePid(): int
+    {
+        if (!is_file($this->livePidPath())) {
+            return 0;
+        }
+
+        return (int) trim((string) file_get_contents($this->livePidPath()));
+    }
+
+    private function liveRunning(): bool
+    {
+        $pid = $this->livePid();
+        if ($pid < 1) {
+            return false;
+        }
+        if (function_exists('posix_kill') && @posix_kill($pid, 0)) {
+            return true;
+        }
+
+        return is_file($this->liveJpgPath()) && (time() - (int) filemtime($this->liveJpgPath())) < 3;
+    }
+
+    private function pair(string $left, string $right, int $width = 15): string
+    {
+        $left = strtoupper(substr($left, 0, $width));
+        $right = strtoupper(substr($right, 0, $width));
+        $pad = $width - strlen($left) - strlen($right);
+        if ($pad < 1) {
+            return substr($left . $right, 0, $width);
+        }
+
+        return $left . str_repeat(' ', $pad) . $right;
+    }
+
+    /**
+     * @param list<string> $lines
+     * @return list<list<int>>
+     */
+    private function encodeLines(array $lines, ?int $battery, bool $online): array
+    {
+        $codes = [];
+        for ($r = 0; $r < 3; $r++) {
+            $line = str_pad(strtoupper($lines[$r] ?? ''), 15);
+            $row = [];
+            for ($c = 0; $c < 15; $c++) {
+                $row[] = $this->charToCode($line[$c] ?? ' ');
+            }
+            $codes[] = $row;
+        }
+        $chip = !$online ? YarboVestaboard::COLOR_RED : YarboVestaboard::COLOR_GREEN;
+        if ($online && $battery !== null) {
+            $chip = $battery >= 60 ? YarboVestaboard::COLOR_GREEN
+                : ($battery >= 30 ? YarboVestaboard::COLOR_YELLOW : YarboVestaboard::COLOR_ORANGE);
+        }
+        $codes[0][14] = $chip;
+
+        return $codes;
+    }
+
     private function charToCode(string $ch): int
     {
         if ($ch === ' ') {
@@ -357,6 +765,18 @@ final class YarboLymow
         }
         if ($ord >= 49 && $ord <= 57) {
             return $ord - 22;
+        }
+        if ($ch === '0') {
+            return 36;
+        }
+        if ($ch === '%') {
+            return 54;
+        }
+        if ($ch === '.') {
+            return 56;
+        }
+        if ($ch === '-') {
+            return 44;
         }
 
         return 0;

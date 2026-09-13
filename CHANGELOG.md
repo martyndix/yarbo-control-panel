@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.4] - 2026-09-13
+
+### Added
+- Lymow **app login** in Settings (email, password, region) for battery and work status. Unofficial; protocol notes from ha-lymow. No start/dock/pause from the panel.
+- Lymow card: battery, state, charging, camera, plus **Stills** / **Stream**.
+
+### Fixed
+- Vestaboard Lymow page no longer clips **CAMERA** with the colour chip. Layout is **LYMOW 87%**, work state, **CAM UP/DOWN**.
+
 ## [2.0.3] - 2026-09-13
 
 ### Fixed

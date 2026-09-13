@@ -500,10 +500,38 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         <section class="card panel-section module-pane-hidden" data-panel-id="lymow" data-module="lymow" id="lymow-card">
             <div class="section-header section-header--simple">
-                <h2>Lymow camera</h2>
+                <h2>Lymow</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
+            <div class="status-grid">
+                <div class="stat">
+                    <span class="label">Battery</span>
+                    <span id="lymow-battery" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">State</span>
+                    <span id="lymow-state" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Charging</span>
+                    <span id="lymow-charging" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Camera</span>
+                    <span id="lymow-cam" class="value">—</span>
+                </div>
+            </div>
             <p class="hint" id="lymow-status">Camera: —</p>
+            <div class="camera-mode lymow-mode" role="radiogroup" aria-label="Lymow camera mode">
+                <label>
+                    <input type="radio" name="lymow-cam-mode" value="stills" checked>
+                    Stills
+                </label>
+                <label>
+                    <input type="radio" name="lymow-cam-mode" value="stream">
+                    Stream
+                </label>
+            </div>
             <div class="lymow-video-wrap">
                 <img id="lymow-stream" class="lymow-stream" alt="Lymow camera" width="640" height="480">
                 <p id="lymow-stream-error" class="lymow-stream-error hidden" role="status"></p>
@@ -610,8 +638,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-lymow" name="module_lymow">
-                                <span>Lymow camera (LAN RTSP)</span>
+                                <span>Lymow (account, battery, camera)</span>
                             </label>
+                            <p class="hint">Tick a module, then fill its login section that appears below. Lymow uses the same email and password as the Lymow phone app.</p>
                             <label class="settings-field">
                                 <span class="label">Vestaboard live module</span>
                                 <select id="settings-vestaboard-live" name="vestaboard_live">
@@ -622,7 +651,38 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                         </section>
 
-                        <section class="settings-section" id="settings-powerwall-section">
+                        <section class="settings-section hidden" id="settings-lymow-section">
+                            <h3 class="settings-subtitle">Lymow</h3>
+                            <p class="hint">Unofficial Lymow app login (same account as the phone app) for battery and work status. Camera is the LAN IP — stream path is always <code>rtsp://IP:10022/h264ESVideoTest</code>. Needs <code>ffmpeg</code> on this host. This panel does not send start, dock, or pause. Protocol notes from <a href="https://github.com/8408323/ha-lymow" target="_blank" rel="noopener">ha-lymow</a> (MIT). See <code>docs/lymow.md</code>.</p>
+                            <label class="settings-field">
+                                <span class="label">Lymow email</span>
+                                <input type="email" id="settings-lymow-email" name="lymow_email" autocomplete="username" spellcheck="false" placeholder="app login email">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Lymow password</span>
+                                <input type="password" id="settings-lymow-password" name="lymow_password" autocomplete="new-password" placeholder="Leave blank to keep the saved password">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Region</span>
+                                <select id="settings-lymow-region" name="lymow_region">
+                                    <option value="auto">Auto (try EU, then others)</option>
+                                    <option value="eu-west-1">Europe (eu-west-1)</option>
+                                    <option value="us-east-2">North America (us-east-2)</option>
+                                    <option value="ap-southeast-2">Australia (ap-southeast-2)</option>
+                                    <option value="ap-east-1">Asia (ap-east-1)</option>
+                                </select>
+                            </label>
+                            <p id="settings-lymow-result" class="settings-cloud-result hidden" role="status"></p>
+                            <div class="settings-update-actions">
+                                <button type="button" class="btn btn-secondary" id="settings-lymow-login">Sign in / Test Lymow</button>
+                            </div>
+                            <label class="settings-field">
+                                <span class="label">Lymow IP (camera)</span>
+                                <input type="text" id="settings-lymow-host" name="lymow_host" autocomplete="off" spellcheck="false" inputmode="decimal" placeholder="192.168.40.154">
+                            </label>
+                        </section>
+
+                        <section class="settings-section hidden" id="settings-powerwall-section">
                             <h3 class="settings-subtitle">Tesla Powerwall</h3>
                             <p class="hint">You do <strong>not</strong> need the Gateway LAN password. Cloud (Tesla Fleet API) is the default. Local Gateway is optional if you later find the sticker password. Full walkthrough: <code>docs/powerwall.md</code>.</p>
                             <div class="map-mode vestaboard-transport" role="radiogroup" aria-label="Powerwall connection">
@@ -690,15 +750,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <input type="password" id="settings-powerwall-password" name="powerwall_gateway_password" autocomplete="off" placeholder="Leave blank to keep the saved password">
                                 </label>
                             </div>
-                        </section>
-
-                        <section class="settings-section" id="settings-lymow-section">
-                            <h3 class="settings-subtitle">Lymow camera</h3>
-                            <p class="hint">LAN IP of the Lymow. The panel always uses <code>rtsp://IP:10022/h264ESVideoTest</code> (same path as Homebridge CameraUI). Needs <code>ffmpeg</code> on this host (<code>sudo apt install -y ffmpeg</code> on a Pi). The dashboard shows stills about every 2–3 seconds, not a live RTSP player.</p>
-                            <label class="settings-field">
-                                <span class="label">Lymow IP</span>
-                                <input type="text" id="settings-lymow-host" name="lymow_host" autocomplete="off" spellcheck="false" inputmode="decimal" placeholder="192.168.40.154">
-                            </label>
                         </section>
 
                         <section class="settings-section" id="settings-vestaboard-section">
@@ -1049,7 +1100,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="head" checked><span>Head controls</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="controls" checked><span>Controls</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="powerwall" checked><span>Powerwall</span></label>
-                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="lymow" checked><span>Lymow camera</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="lymow" checked><span>Lymow</span></label>
                                 </div>
                             </fieldset>
                             <button type="button" class="btn btn-secondary" id="settings-reset-layout">Reset dashboard layout</button>

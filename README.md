@@ -80,7 +80,7 @@ Open the panel in a browser and you can:
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: Home (Stop / Dock / Pause / Lights), plus Status, Health, and Plans pages. Flash and Wi-Fi from **Settings**. See [PaperMono](#papermono-companion-beta)
 - **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / rain / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
-- **Modules (v2.0)** — header switcher for Yarbo, Tesla Powerwall, and Lymow. Powerwall: [docs/powerwall.md](docs/powerwall.md) (Tesla cloud by default). Lymow: camera IP in Settings (stills via ffmpeg). Vestaboard live module is chosen in Settings.
+- **Modules (v2.0)** — header switcher for Yarbo, Tesla Powerwall, and Lymow. Powerwall: [docs/powerwall.md](docs/powerwall.md). Lymow: app login for battery/status plus camera IP ([docs/lymow.md](docs/lymow.md)). Vestaboard live module is chosen in Settings.
 - **Paper Colour companion (beta)** — no-touch M5Stack PaperColor. Same Settings flash path as PaperMono: pick **Paper Colour**, then flash. See [docs/papercolor.md](docs/papercolor.md).
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
@@ -187,6 +187,7 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Connect robot** | Pi/host must be on the same network as Yarbo; port **1883** reachable |
 | **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
 | **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
+| **Lymow (unofficial)** | Settings → Modules → Lymow, then app email/password + camera IP. See [docs/lymow.md](docs/lymow.md) |
 | **PaperMono / Paper Colour (beta)** | Settings → E-paper companions — pick hardware, USB flash + Wi-Fi. See [PaperMono](#papermono-companion-beta) and [docs/papercolor.md](docs/papercolor.md) |
 | **Vestaboard Note (optional)** | Settings → enable Vestaboard Note — Local or Cloud API. See [Vestaboard Note](#vestaboard-note-optional) |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |

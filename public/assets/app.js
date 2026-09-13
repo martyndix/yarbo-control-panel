@@ -126,6 +126,11 @@ const els = {
     settingsPowerwallOauth: document.getElementById('settings-powerwall-oauth'),
     settingsPowerwallTest: document.getElementById('settings-powerwall-test'),
     settingsLymowHost: document.getElementById('settings-lymow-host'),
+    settingsLymowEmail: document.getElementById('settings-lymow-email'),
+    settingsLymowPassword: document.getElementById('settings-lymow-password'),
+    settingsLymowRegion: document.getElementById('settings-lymow-region'),
+    settingsLymowLogin: document.getElementById('settings-lymow-login'),
+    settingsLymowResult: document.getElementById('settings-lymow-result'),
     powerwallLoad: document.getElementById('powerwall-load'),
     powerwallSolar: document.getElementById('powerwall-solar'),
     powerwallBattery: document.getElementById('powerwall-battery'),
@@ -134,6 +139,10 @@ const els = {
     powerwallUpdated: document.getElementById('powerwall-updated'),
     powerwallError: document.getElementById('powerwall-error'),
     lymowStatus: document.getElementById('lymow-status'),
+    lymowBattery: document.getElementById('lymow-battery'),
+    lymowState: document.getElementById('lymow-state'),
+    lymowCharging: document.getElementById('lymow-charging'),
+    lymowCam: document.getElementById('lymow-cam'),
     lymowStream: document.getElementById('lymow-stream'),
     lymowStreamError: document.getElementById('lymow-stream-error'),
     settingsError: document.getElementById('settings-error'),
@@ -233,7 +242,7 @@ const PANEL_LABELS = {
     head: 'Head controls',
     controls: 'Controls',
     powerwall: 'Powerwall',
-    lymow: 'Lymow camera',
+    lymow: 'Lymow',
 };
 
 const ZONE_COLORS = {
@@ -1964,9 +1973,11 @@ function setActiveModule(id, persist = true) {
         btn.classList.toggle('is-active', btn.getAttribute('data-module-id') === moduleId);
     });
     if (moduleId === 'lymow') {
-        startLymowSnapshots();
+        startLymowCamera();
+        startLymowCloudPoll();
     } else {
-        stopLymowSnapshots();
+        stopLymowCamera();
+        stopLymowCloudPoll();
     }
 }
 
@@ -1989,21 +2000,36 @@ function updateLymowDashboard(ly) {
     if (!els.lymowStatus) return;
     if (!ly) {
         els.lymowStatus.textContent = 'Camera: —';
+        if (els.lymowBattery) els.lymowBattery.textContent = '—';
+        if (els.lymowState) els.lymowState.textContent = '—';
+        if (els.lymowCharging) els.lymowCharging.textContent = '—';
+        if (els.lymowCam) els.lymowCam.textContent = '—';
         return;
     }
     const host = ly.host || '';
-    const ok = Boolean(ly.online || ly.ok);
-    els.lymowStatus.textContent = host
-        ? `${ok ? 'Camera up' : 'Camera down'} · ${host}`
-        : (ok ? 'Camera up' : 'Camera down');
-    if (document.querySelector('#lymow-card:not(.module-pane-hidden)')) {
-        startLymowSnapshots();
-    }
+    const camOk = Boolean(ly.camera_ok);
+    if (els.lymowBattery) els.lymowBattery.textContent = ly.battery_label || '—';
+    if (els.lymowState) els.lymowState.textContent = ly.work_label || '—';
+    if (els.lymowCharging) els.lymowCharging.textContent = ly.charging_label || '—';
+    if (els.lymowCam) els.lymowCam.textContent = camOk ? 'Up' : 'Down';
+    const bits = [];
+    if (ly.signed_in) bits.push('signed in');
+    else if (ly.battery == null) bits.push('sign in under Settings → Lymow for battery');
+    if (host) bits.push(host);
+    if (ly.cloud_error) bits.push(ly.cloud_error);
+    els.lymowStatus.textContent = `${camOk ? 'Camera up' : 'Camera down'}${bits.length ? ' · ' + bits.join(' · ') : ''}`;
+}
+
+function lymowCamMode() {
+    const checked = document.querySelector('input[name="lymow-cam-mode"]:checked');
+    return checked?.value === 'stream' ? 'stream' : 'stills';
 }
 
 let lymowSnapTimer = null;
 let lymowSnapBusy = false;
 let lymowSnapObjectUrl = '';
+let lymowCloudTimer = null;
+let lymowCameraModeStarted = '';
 
 function stopLymowSnapshots() {
     if (lymowSnapTimer) {
@@ -2012,15 +2038,34 @@ function stopLymowSnapshots() {
     }
 }
 
+function stopLymowCloudPoll() {
+    if (lymowCloudTimer) {
+        clearInterval(lymowCloudTimer);
+        lymowCloudTimer = null;
+    }
+}
+
+function stopLymowCamera() {
+    lymowCameraModeStarted = '';
+    stopLymowSnapshots();
+    fetch('/api/lymow.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'stop_live' }),
+    }).catch(() => {});
+}
+
 async function grabLymowSnapshot() {
     if (!els.lymowStream || lymowSnapBusy || document.hidden) return;
     if (els.lymowStream.closest('.module-pane-hidden')) return;
     lymowSnapBusy = true;
+    const stream = lymowCamMode() === 'stream';
+    const action = stream ? 'live' : 'snapshot';
     try {
-        const res = await fetch(`/api/lymow.php?action=snapshot&t=${Date.now()}`, { cache: 'no-store' });
+        const res = await fetch(`/api/lymow.php?action=${action}&t=${Date.now()}`, { cache: 'no-store' });
         const type = (res.headers.get('content-type') || '').toLowerCase();
         if (!res.ok || !type.includes('jpeg')) {
-            let message = `Camera snapshot failed (${res.status})`;
+            let message = `Camera ${stream ? 'stream' : 'snapshot'} failed (${res.status})`;
             if (type.includes('json')) {
                 try {
                     const data = await res.json();
@@ -2038,37 +2083,74 @@ async function grabLymowSnapshot() {
             els.lymowStreamError.textContent = '';
             els.lymowStreamError.classList.add('hidden');
         }
-        if (els.lymowStatus && !els.lymowStatus.textContent.startsWith('Camera up')) {
-            const host = (els.lymowStatus.textContent.split('·')[1] || '').trim();
-            els.lymowStatus.textContent = host ? `Camera up · ${host}` : 'Camera up';
-        }
+        if (els.lymowCam) els.lymowCam.textContent = 'Up';
     } catch (err) {
         if (els.lymowStreamError) {
             els.lymowStreamError.textContent = err.message || 'Could not load Lymow camera.';
             els.lymowStreamError.classList.remove('hidden');
         }
-        if (els.lymowStatus) {
-            const host = (els.lymowStatus.textContent.split('·')[1] || '').trim();
-            els.lymowStatus.textContent = host ? `Camera down · ${host}` : 'Camera down';
-        }
+        if (els.lymowCam) els.lymowCam.textContent = 'Down';
     } finally {
         lymowSnapBusy = false;
     }
 }
 
-function startLymowSnapshots() {
+async function startLymowCamera() {
     if (!els.lymowStream || document.hidden) return;
     if (els.lymowStream.closest('.module-pane-hidden')) return;
-    if (lymowSnapTimer) return;
+    const stream = lymowCamMode() === 'stream';
+    const key = stream ? 'stream' : 'stills';
+    if (lymowSnapTimer && lymowCameraModeStarted === key) return;
+    lymowCameraModeStarted = key;
+    if (stream) {
+        try {
+            await fetch('/api/lymow.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'start_live' }),
+            });
+        } catch { /* grab will surface the error */ }
+    } else {
+        fetch('/api/lymow.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'stop_live' }),
+        }).catch(() => {});
+    }
+    const interval = stream ? 280 : 2500;
+    if (lymowSnapTimer) {
+        clearInterval(lymowSnapTimer);
+        lymowSnapTimer = null;
+    }
     grabLymowSnapshot();
-    lymowSnapTimer = setInterval(grabLymowSnapshot, 2500);
+    lymowSnapTimer = setInterval(grabLymowSnapshot, interval);
+}
+
+function startLymowCloudPoll() {
+    if (lymowCloudTimer || document.hidden) return;
+    if (!document.querySelector('#lymow-card:not(.module-pane-hidden)')) return;
+    const tick = async () => {
+        try {
+            const res = await fetch('/api/lymow.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'refresh_cloud' }),
+            });
+            const data = await parseJsonResponse(res);
+            updateLymowDashboard(data);
+        } catch { /* keep last reading */ }
+    };
+    tick();
+    lymowCloudTimer = setInterval(tick, 20000);
 }
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-        stopLymowSnapshots();
+        stopLymowCamera();
+        stopLymowCloudPoll();
     } else if (document.querySelector('#lymow-card:not(.module-pane-hidden)')) {
-        startLymowSnapshots();
+        startLymowCamera();
+        startLymowCloudPoll();
     }
 });
 
@@ -2081,6 +2163,17 @@ function applyPowerwallTransport() {
     const local = powerwallTransport() === 'local';
     document.getElementById('settings-powerwall-local-fields')?.classList.toggle('hidden', !local);
     document.getElementById('settings-powerwall-cloud-fields')?.classList.toggle('hidden', local);
+}
+
+function applyCompanionSettingsVisibility() {
+    document.getElementById('settings-powerwall-section')?.classList.toggle(
+        'hidden',
+        !els.settingsModulePowerwall?.checked,
+    );
+    document.getElementById('settings-lymow-section')?.classList.toggle(
+        'hidden',
+        !els.settingsModuleLymow?.checked,
+    );
 }
 
 function updateStatus(data) {
@@ -3048,6 +3141,7 @@ async function loadSettings() {
         if (els.settingsVestaboardLive) {
             els.settingsVestaboardLive.value = data.hub?.vestaboard_live || 'yarbo';
         }
+        applyCompanionSettingsVisibility();
         const pw = data.powerwall || {};
         document.querySelectorAll('input[name="powerwall-transport"]').forEach((radio) => {
             radio.checked = radio.value === (pw.transport || 'cloud');
@@ -3071,6 +3165,9 @@ async function loadSettings() {
             }
         }
         if (els.settingsLymowHost) els.settingsLymowHost.value = data.lymow?.host || '192.168.40.154';
+        if (els.settingsLymowEmail) els.settingsLymowEmail.value = data.lymow?.email || '';
+        if (els.settingsLymowPassword) els.settingsLymowPassword.value = '';
+        if (els.settingsLymowRegion) els.settingsLymowRegion.value = data.lymow?.region || 'auto';
         applyVestaboardEnabled();
         if (els.settingsCloudStatus) {
             if (data.cloud_status) {
@@ -3704,6 +3801,8 @@ async function saveSettings(event) {
             powerwall_gateway_host: els.settingsPowerwallHost?.value.trim() || '',
             powerwall_gateway_email: els.settingsPowerwallEmail?.value.trim() || '',
             lymow_host: els.settingsLymowHost?.value.trim() || '',
+            lymow_email: els.settingsLymowEmail?.value.trim() || '',
+            lymow_region: els.settingsLymowRegion?.value || 'auto',
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;
@@ -3724,6 +3823,8 @@ async function saveSettings(event) {
         if (pwRefresh !== '') payload.powerwall_refresh_token = pwRefresh;
         const pwPass = els.settingsPowerwallPassword?.value ?? '';
         if (pwPass !== '') payload.powerwall_gateway_password = pwPass;
+        const lymowPass = els.settingsLymowPassword?.value ?? '';
+        if (lymowPass !== '') payload.lymow_password = lymowPass;
         const res = await fetch('/api/settings.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4860,6 +4961,63 @@ els.settingsPowerwallOauth?.addEventListener('click', (event) => {
         event.preventDefault();
         showToast('Save a Client ID and HTTPS public panel URL first.', 'error');
     }
+});
+els.settingsModulePowerwall?.addEventListener('change', applyCompanionSettingsVisibility);
+els.settingsModuleLymow?.addEventListener('change', applyCompanionSettingsVisibility);
+els.settingsLymowLogin?.addEventListener('click', async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    if (els.settingsLymowResult) {
+        els.settingsLymowResult.textContent = 'Signing in to Lymow…';
+        els.settingsLymowResult.className = 'settings-cloud-result';
+        els.settingsLymowResult.classList.remove('hidden');
+    }
+    try {
+        const payload = {
+            action: 'save',
+            lymow_host: els.settingsLymowHost?.value.trim() || '',
+            lymow_email: els.settingsLymowEmail?.value.trim() || '',
+            lymow_region: els.settingsLymowRegion?.value || 'auto',
+        };
+        const password = els.settingsLymowPassword?.value ?? '';
+        if (password !== '') payload.lymow_password = password;
+        await fetch('/api/lymow.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const res = await fetch('/api/lymow.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'login' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Lymow login failed');
+        const msg = data.message || 'Signed in to Lymow.';
+        if (els.settingsLymowResult) {
+            els.settingsLymowResult.textContent = msg;
+            els.settingsLymowResult.className = 'settings-cloud-result success';
+        }
+        if (els.settingsLymowHost && data.host) els.settingsLymowHost.value = data.host;
+        if (els.settingsLymowPassword) els.settingsLymowPassword.value = '';
+        showToast(msg, 'success');
+        updateLymowDashboard(data);
+    } catch (err) {
+        const message = err.message || 'Lymow login failed';
+        if (els.settingsLymowResult) {
+            els.settingsLymowResult.textContent = message;
+            els.settingsLymowResult.className = 'settings-cloud-result error';
+        }
+        showToast(message, 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+document.querySelectorAll('input[name="lymow-cam-mode"]').forEach((input) => {
+    input.addEventListener('change', () => {
+        lymowCameraModeStarted = '';
+        startLymowCamera();
+    });
 });
 els.settingsVestaboardQuiet?.addEventListener('change', () => applyVestaboardQuietHours());
 els.settingsVestaboardQuietBoard?.addEventListener('click', (event) => {

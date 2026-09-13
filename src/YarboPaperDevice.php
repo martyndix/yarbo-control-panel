@@ -259,6 +259,8 @@ final class YarboPaperDevice
             'powerwall_load' => (string) ($pw['load_label'] ?? '—'),
             'powerwall_ok' => !empty($pw['ok']) || !empty($pw['online']),
             'lymow_ok' => !empty($ly['ok']) || !empty($ly['online']),
+            'lymow_battery' => isset($ly['battery']) ? (int) $ly['battery'] : -1,
+            'lymow_state' => (string) ($ly['work_label'] ?? '—'),
         ];
     }
 

@@ -883,6 +883,10 @@ body.modal-open {
     color: var(--muted);
 }
 
+.lymow-mode {
+    margin: 0.5rem 0 0.35rem;
+}
+
 .map-mode {
     display: flex;
     gap: 0.75rem;

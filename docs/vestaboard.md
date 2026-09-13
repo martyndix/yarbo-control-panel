@@ -69,7 +69,7 @@ If the flaps no longer match the last layout this panel wrote, live status pause
 
 The dashboard shows **Resume previous status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
-Settings → **Modules** chooses which enabled module is **live** on the Note (Yarbo, Powerwall, or Lymow). App-hold and Quiet hours still apply.
+Settings → **Modules** chooses which enabled module is **live** on the Note (Yarbo, Powerwall, or Lymow). App-hold and Quiet hours still apply. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), work state, and **CAM UP/DOWN**.
 
 ## Setup (either API)
 
