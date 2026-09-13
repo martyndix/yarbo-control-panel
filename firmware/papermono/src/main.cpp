@@ -48,6 +48,8 @@ String planActivity = "idle";
 bool lightsOn = false;
 String vestaboardLive = "yarbo";
 bool vestaboardOn = false;
+bool powerwallOn = false;
+bool lymowOn = false;
 String lymowName = "";
 int lymowBattery = -1;
 String lymowState = "—";
@@ -151,8 +153,78 @@ String screenKey()
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + vestaboardLive + "|"
-        + (vestaboardOn ? "1" : "0") + "|" + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
+        + (vestaboardOn ? "1" : "0") + "|" + (powerwallOn ? "1" : "0") + "|" + (lymowOn ? "1" : "0") + "|"
+        + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
         + String((int) WiFi.status());
+}
+
+bool pageEnabled(int page)
+{
+    if (page == PAPERMONO_PAGE_NOTE) return vestaboardOn;
+    if (page == PAPERMONO_PAGE_LYMOW) return lymowOn;
+    return true;
+}
+
+int visiblePageCount()
+{
+    int n = 0;
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        if (pageEnabled(i)) n++;
+    }
+    return n > 0 ? n : 1;
+}
+
+int firstEnabledPage()
+{
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        if (pageEnabled(i)) return i;
+    }
+    return PAPERMONO_PAGE_HOME;
+}
+
+int stepEnabledPage(int from, int dir)
+{
+    int p = from;
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        p += dir;
+        if (p < 0) p = PAPERMONO_PAGE_COUNT - 1;
+        p = p % PAPERMONO_PAGE_COUNT;
+        if (pageEnabled(p)) return p;
+    }
+    return firstEnabledPage();
+}
+
+int noteChoiceCount()
+{
+    int n = 1;
+    if (powerwallOn) n++;
+    if (lymowOn) n++;
+    if (powerwallOn || lymowOn) n++;
+    return n;
+}
+
+const char *noteChoiceId(int i)
+{
+    const char *ids[4];
+    int n = 0;
+    ids[n++] = "yarbo";
+    if (powerwallOn) ids[n++] = "powerwall";
+    if (lymowOn) ids[n++] = "lymow";
+    if (powerwallOn || lymowOn) ids[n++] = "batteries";
+    if (i < 0 || i >= n) return "yarbo";
+    return ids[i];
+}
+
+const char *noteChoiceLabel(int i)
+{
+    const char *labels[4];
+    int n = 0;
+    labels[n++] = "YARBO";
+    if (powerwallOn) labels[n++] = "WALL";
+    if (lymowOn) labels[n++] = "LYMOW";
+    if (powerwallOn || lymowOn) labels[n++] = "ALL";
+    if (i < 0 || i >= n) return "YARBO";
+    return labels[i];
 }
 
 void drawButton(int x, int y, int w, int h, const char *label, bool invert)
@@ -207,16 +279,20 @@ void drawPager()
     const char *labels[PAPERMONO_PAGE_COUNT] = {"HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "LYMOW"};
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(1);
-    int slot = W / PAPERMONO_PAGE_COUNT;
+    int n = visiblePageCount();
+    int slot = W / n;
+    int drawn = 0;
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
-        int x = slot * i + slot / 2;
+        if (!pageEnabled(i)) continue;
+        int x = slot * drawn + slot / 2;
         if (i == currentPage) {
             M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-            M5.Display.fillRect(slot * i + 8, H - 36, slot - 16, 18, TFT_BLACK);
+            M5.Display.fillRect(slot * drawn + 8, H - 36, slot - 16, 18, TFT_BLACK);
         } else {
             M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
         }
         M5.Display.drawString(labels[i], x, H - 33);
+        drawn++;
     }
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(BL_DATUM);
@@ -403,17 +479,21 @@ void drawNotePage(bool forceFull)
     if (!vestaboardOn) {
         M5.Display.drawString("Enable the Note in panel Settings.", 16, 156);
     } else {
-        M5.Display.drawString("Tap a view. ALL is three batteries.", 16, 156);
+        M5.Display.drawString("Tap a view.", 16, 156);
     }
     if (lastError.length()) {
         M5.Display.drawString(lastError.substring(0, 40), 16, 188);
     }
     int bw, bh, gap, y0;
     layoutButtons(bw, bh, gap, y0);
-    drawButton(16, y0, bw, bh, "YARBO", vestaboardLive == "yarbo");
-    drawButton(16 + bw + gap, y0, bw, bh, "WALL", vestaboardLive == "powerwall");
-    drawButton(16, y0 + bh + gap, bw, bh, "LYMOW", vestaboardLive == "lymow");
-    drawButton(16 + bw + gap, y0 + bh + gap, bw, bh, "ALL", vestaboardLive == "batteries");
+    int n = noteChoiceCount();
+    for (int i = 0; i < n; i++) {
+        bool left = (i % 2) == 0;
+        int row = i / 2;
+        int x = left ? 16 : 16 + bw + gap;
+        int y = y0 + row * (bh + gap);
+        drawButton(x, y, bw, bh, noteChoiceLabel(i), vestaboardLive == noteChoiceId(i));
+    }
     drawPager();
     M5.Display.display();
 }
@@ -451,9 +531,19 @@ void drawScreen(bool forceFull)
     } else if (currentPage == PAPERMONO_PAGE_PLANS) {
         drawPlansPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_NOTE) {
-        drawNotePage(forceFull);
+        if (!pageEnabled(PAPERMONO_PAGE_NOTE)) {
+            currentPage = firstEnabledPage();
+            drawHome(forceFull);
+        } else {
+            drawNotePage(forceFull);
+        }
     } else if (currentPage == PAPERMONO_PAGE_LYMOW) {
-        drawLymowPage(forceFull);
+        if (!pageEnabled(PAPERMONO_PAGE_LYMOW)) {
+            currentPage = firstEnabledPage();
+            drawHome(forceFull);
+        } else {
+            drawLymowPage(forceFull);
+        }
     } else {
         drawHome(forceFull);
     }
@@ -552,7 +642,9 @@ bool httpGetStatus()
     netModule = doc["net_module"] | netModule;
     planActivity = doc["plan_activity"] | planActivity;
     vestaboardLive = doc["vestaboard_live"] | vestaboardLive;
-    vestaboardOn = doc["vestaboard_enabled"] | vestaboardOn;
+    vestaboardOn = doc["vestaboard_enabled"] | false;
+    powerwallOn = doc["powerwall_enabled"] | false;
+    lymowOn = doc["lymow_enabled"] | false;
     lymowName = doc["lymow_name"] | lymowName;
     lymowBattery = doc["lymow_battery"] | lymowBattery;
     lymowState = doc["lymow_state"] | lymowState;
@@ -673,10 +765,9 @@ void setVestaboardLive(const char *live)
 
 void showPage(int page, bool loadPlansIfNeeded)
 {
-    if (page < 0) {
-        page = PAPERMONO_PAGE_COUNT - 1;
+    if (!pageEnabled(page)) {
+        page = stepEnabledPage(page, 1);
     }
-    page = page % PAPERMONO_PAGE_COUNT;
     currentPage = page;
     if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
         httpGetPlans(false);
@@ -686,31 +777,29 @@ void showPage(int page, bool loadPlansIfNeeded)
 
 void nextPage()
 {
-    showPage(currentPage + 1, true);
+    showPage(stepEnabledPage(currentPage, 1), true);
 }
 
 void prevPage()
 {
-    showPage(currentPage - 1, true);
+    showPage(stepEnabledPage(currentPage, -1), true);
 }
 
 void handleNoteTouch(int x, int y)
 {
-    int which = homeButtonAt(x, y);
-    if (which == 1) {
-        setVestaboardLive("yarbo");
-        return;
-    }
-    if (which == 2) {
-        setVestaboardLive("powerwall");
-        return;
-    }
-    if (which == 3) {
-        setVestaboardLive("lymow");
-        return;
-    }
-    if (which == 4) {
-        setVestaboardLive("batteries");
+    int bw, bh, gap, y0;
+    layoutButtons(bw, bh, gap, y0);
+    if (y >= y0) {
+        bool left = x < 16 + bw + gap / 2;
+        bool top = y < y0 + bh + gap / 2;
+        int which = 0;
+        if (top && left) which = 0;
+        else if (top && !left) which = 1;
+        else if (!top && left) which = 2;
+        else which = 3;
+        if (which < noteChoiceCount()) {
+            setVestaboardLive(noteChoiceId(which));
+        }
         return;
     }
     if (tapOnPager(y) || y < 110) {
@@ -834,10 +923,15 @@ void loop()
     if (millis() - lastPoll > PAPERMONO_POLL_MS) {
         lastPoll = millis();
         httpGetStatus();
-        if (currentPage == PAPERMONO_PAGE_PLANS) {
+        if (!pageEnabled(currentPage)) {
+            currentPage = stepEnabledPage(currentPage, 1);
+            drawScreen(true);
+        } else if (currentPage == PAPERMONO_PAGE_PLANS) {
             httpGetPlans(false);
+            drawScreen(false);
+        } else {
+            drawScreen(false);
         }
-        drawScreen(false);
     }
     delay(30);
 }

@@ -237,7 +237,17 @@ final class YarboHub
         if ($id === 'all') {
             $id = self::LIVE_BATTERIES;
         }
-        if (in_array($id, self::VESTABOARD_LIVE_CHOICES, true)) {
+        if ($id === self::LIVE_BATTERIES) {
+            if (!empty($modules[self::MODULE_POWERWALL]) || !empty($modules[self::MODULE_LYMOW])) {
+                return self::LIVE_BATTERIES;
+            }
+
+            return self::MODULE_YARBO;
+        }
+        if ($id === self::MODULE_POWERWALL && !empty($modules[self::MODULE_POWERWALL])) {
+            return $id;
+        }
+        if ($id === self::MODULE_LYMOW && !empty($modules[self::MODULE_LYMOW])) {
             return $id;
         }
 

@@ -1930,6 +1930,12 @@ function batteryLevelName(percent, chargingLabel) {
     return 'red';
 }
 
+function applyBatteryLevel(el, percent, chargingLabel) {
+    if (!el) return;
+    const level = batteryLevelName(percent, chargingLabel);
+    el.className = level ? `value battery-level battery-level--${level}` : 'value';
+}
+
 function looksLikeRobotSerial(name, serial) {
     const value = typeof name === 'string' ? name.trim() : '';
     if (!value) return false;
@@ -2022,11 +2028,16 @@ function updatePowerwallDashboard(pw) {
     if (!els.powerwallLoad) return;
     if (!pw) {
         els.powerwallLoad.textContent = '—';
+        if (els.powerwallBattery) {
+            els.powerwallBattery.textContent = '—';
+            applyBatteryLevel(els.powerwallBattery, null);
+        }
         return;
     }
     els.powerwallLoad.textContent = pw.load_label || '—';
     els.powerwallSolar.textContent = pw.solar_label || '—';
     els.powerwallBattery.textContent = pw.battery_label || '—';
+    applyBatteryLevel(els.powerwallBattery, pw.battery_percent);
     els.powerwallGrid.textContent = pw.grid_label || '—';
     if (els.powerwallSource) els.powerwallSource.textContent = pw.source || '—';
     if (els.powerwallUpdated) els.powerwallUpdated.textContent = pw.fetched_at ? formatUpdatedAt(pw.fetched_at) : 'never';
@@ -2036,7 +2047,10 @@ function updatePowerwallDashboard(pw) {
 function updateLymowDashboard(ly) {
     if (!els.lymowBattery && !els.lymowState && !els.lymowCharging && !els.lymowCam) return;
     if (!ly) {
-        if (els.lymowBattery) els.lymowBattery.textContent = '—';
+        if (els.lymowBattery) {
+            els.lymowBattery.textContent = '—';
+            applyBatteryLevel(els.lymowBattery, null);
+        }
         if (els.lymowState) els.lymowState.textContent = '—';
         if (els.lymowProgress) els.lymowProgress.textContent = '—';
         if (els.lymowCharging) els.lymowCharging.textContent = '—';
@@ -2046,7 +2060,10 @@ function updateLymowDashboard(ly) {
         return;
     }
     const camOk = Boolean(ly.camera_ok);
-    if (els.lymowBattery) els.lymowBattery.textContent = ly.battery_label || '—';
+    if (els.lymowBattery) {
+        els.lymowBattery.textContent = ly.battery_label || '—';
+        applyBatteryLevel(els.lymowBattery, ly.battery, ly.charging_label);
+    }
     if (els.lymowState) els.lymowState.textContent = ly.work_label || '—';
     if (els.lymowProgress) els.lymowProgress.textContent = ly.mow_progress_label || '—';
     if (els.lymowCharging) els.lymowCharging.textContent = ly.charging_label || '—';
@@ -2210,16 +2227,17 @@ function applyCompanionSettingsVisibility() {
         'hidden',
         !els.settingsModuleLymow?.checked,
     );
+    applyVestaboardLiveChoices({
+        powerwall: Boolean(els.settingsModulePowerwall?.checked),
+        lymow: Boolean(els.settingsModuleLymow?.checked),
+    }, els.settingsVestaboardLive?.value || 'yarbo');
 }
 
 function updateStatus(data) {
     applyRobotNameSubtitle(typeof data.robot_name === 'string' ? data.robot_name : '');
     applyHubFromStatus(data);
     els.battery.textContent = data.battery != null ? `${data.battery}%` : '—';
-    {
-        const level = batteryLevelName(data.battery, data.charging_label);
-        els.battery.className = level ? `value battery-level battery-level--${level}` : 'value';
-    }
+    applyBatteryLevel(els.battery, data.battery, data.charging_label);
     {
         const state = data.state ?? '';
         els.state.textContent = state.toLowerCase() === 'rain' ? 'Rain' : (state || '—');
@@ -2505,13 +2523,44 @@ function applyVestaboardLiveSwitch(data) {
     if (!els.vestaboardLiveSwitch) return;
     const enabled = Boolean(data?.vestaboard?.enabled);
     els.vestaboardLiveSwitch.classList.toggle('hidden', !enabled);
-    if (!enabled) return;
-    const live = data?.hub?.vestaboard_live || data?.vestaboard_live || 'yarbo';
-    els.vestaboardLiveSwitch.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
-        btn.classList.toggle('is-active', btn.getAttribute('data-vestaboard-live') === live);
+    const extras = vestaboardExtraModules(data?.hub);
+    applyVestaboardLiveChoices(extras, data?.hub?.vestaboard_live || data?.vestaboard_live || 'yarbo');
+}
+
+function vestaboardExtraModules(hub) {
+    return {
+        powerwall: Boolean(hub?.modules?.powerwall),
+        lymow: Boolean(hub?.modules?.lymow),
+    };
+}
+
+function applyVestaboardLiveChoices(extras, live) {
+    const pw = Boolean(extras?.powerwall);
+    const ly = Boolean(extras?.lymow);
+    const show = {
+        yarbo: true,
+        powerwall: pw,
+        lymow: ly,
+        batteries: pw || ly,
+    };
+    let chosen = live || 'yarbo';
+    if (!show[chosen]) chosen = 'yarbo';
+    els.vestaboardLiveSwitch?.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
+        const id = btn.getAttribute('data-vestaboard-live') || '';
+        btn.classList.toggle('hidden', !show[id]);
+        btn.classList.toggle('is-active', show[id] && id === chosen);
     });
-    if (els.settingsVestaboardLive && [...els.settingsVestaboardLive.options].some((o) => o.value === live)) {
-        els.settingsVestaboardLive.value = live;
+    if (els.settingsVestaboardLive) {
+        [...els.settingsVestaboardLive.options].forEach((opt) => {
+            const hide = !show[opt.value];
+            opt.hidden = hide;
+            opt.disabled = hide;
+        });
+        if ([...els.settingsVestaboardLive.options].some((o) => o.value === chosen && !o.hidden)) {
+            els.settingsVestaboardLive.value = chosen;
+        } else {
+            els.settingsVestaboardLive.value = 'yarbo';
+        }
     }
 }
 

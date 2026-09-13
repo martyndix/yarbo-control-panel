@@ -12,8 +12,8 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.4-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.2-color';
+    public const FIRMWARE_VERSION = '0.1.5-beta';
+    public const FIRMWARE_VERSION_COLOR = '0.2.3-color';
     private const PLANS_CACHE_TTL_S = 300;
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
     public const FIRMWARE_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware.bin';
@@ -257,6 +257,8 @@ final class YarboPaperDevice
             'hub' => $hub->publicView(),
             'vestaboard_enabled' => !empty($vb['enabled']),
             'vestaboard_live' => $hub->vestaboardLive(),
+            'powerwall_enabled' => $hub->enabled(YarboHub::MODULE_POWERWALL),
+            'lymow_enabled' => $hub->enabled(YarboHub::MODULE_LYMOW),
             'powerwall_pct' => isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : -1,
             'powerwall_solar' => (string) ($pw['solar_label'] ?? '—'),
             'powerwall_load' => (string) ($pw['load_label'] ?? '—'),

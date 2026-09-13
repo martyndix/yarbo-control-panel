@@ -29,7 +29,7 @@ On the **same machine that runs the panel**:
 6. Enter 2.4 GHz Wi-Fi, the panel URL as the tablet will reach it (not `localhost`), and a device name.
 7. Click **Flash Paper Colour firmware & send Wi-Fi**. Leave Settings open for one to two minutes.
 
-Rebuild after panel updates that bump Colour firmware (`0.2.2-color` and later):
+Rebuild after panel updates that bump Colour firmware (`0.2.3-color` and later):
 
 ```bash
 pio run -e papercolor -d firmware/papercolor
@@ -43,6 +43,6 @@ Do not flash with PlatformIO env `papermono` — that is the grayscale touch UI.
 
 ## Pages
 
-Yarbo Home / Status when the robot is online. Extra pages for Powerwall and Lymow (battery %, state). The Lymow page header shows the Lymow-app name (or the name set in Settings). Do not expect 15-second redraws — Spectra 6 is a set-and-leave sign. Reflash **0.2.2-color** for the Lymow name.
+Yarbo Home / Status when the robot is online. Extra pages for Powerwall and Lymow (battery %, state) only when those modules are enabled. The Lymow page header shows the Lymow-app name (or the name set in Settings). Do not expect 15-second redraws — Spectra 6 is a set-and-leave sign. Reflash **0.2.3-color** so disabled modules drop out of the pager.
 
 Compact status is `GET /api/device.php?action=compact`.

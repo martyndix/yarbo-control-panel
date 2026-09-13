@@ -28,7 +28,7 @@ BATTERY    FULL
 CHARGED
 ```
 
-Powerwall live module (watts, battery `%` kept on the last flap before the colour chip; chip is green ≥60%, yellow ≥40%, orange ≥20%, red below that):
+Powerwall live module (watts, battery `%` kept on the last flap before the colour chip; chip follows live battery % on the same scale as Yarbo and Lymow: green ≥60%, yellow ≥40%, orange ≥20%, red below that):
 
 ```
 POWERWALL   89%
@@ -93,7 +93,7 @@ If the flaps no longer match the last layout this panel wrote, live status pause
 
 The dashboard shows **Resume previous status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
-The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the pills on the **Vestaboard Note** card, or PaperMono’s **NOTE** page after flashing **0.1.3-beta**. App-hold and Quiet hours still apply. ALL is available even when Powerwall or Lymow are not enabled as dashboards. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), **STATE** plus the work label or mowing progress **%**, and **CHARGING YES/NO**.
+The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the pills on the **Vestaboard Note** card, or PaperMono’s **NOTE** page after flashing **0.1.5-beta**. Powerwall, Lymow, and ALL buttons only appear when those dashboards are enabled. App-hold and Quiet hours still apply. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), **STATE** plus the work label or mowing progress **%**, and **CHARGING YES/NO**.
 
 ## Setup (either API)
 

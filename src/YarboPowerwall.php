@@ -284,7 +284,7 @@ final class YarboPowerwall
     {
         $data = $this->dashboardPayload();
         $online = !empty($data['online']) && (isset($data['battery_percent']) || isset($data['load_w']));
-        $batt = isset($data['battery_percent']) ? (int) round((float) $data['battery_percent']) : null;
+        $batt = self::normalizeBatteryPercent($data['battery_percent'] ?? null);
         $solarW = isset($data['solar_w']) ? (int) round((float) $data['solar_w']) : null;
         $loadW = isset($data['load_w']) ? (int) round((float) $data['load_w']) : null;
         $config = $this->load();
@@ -311,7 +311,10 @@ final class YarboPowerwall
             $this->pair('SOLAR', $solarShow !== null ? $this->formatW((float) $solarShow) : '--'),
             $this->pair('DRAW', $loadShow !== null ? $this->formatW((float) $loadShow) : '--'),
         ];
-        $codes = YarboVestaboard::normalizeQuietCodes($this->encodeLines($lines, $battShow, $showLive));
+        $chipBatt = $showLive
+            ? ($batt ?? (is_numeric($battShow) ? (int) $battShow : null))
+            : null;
+        $codes = $this->encodeLines($lines, $chipBatt, $showLive && $chipBatt !== null);
 
         return [
             'ok' => true,
@@ -572,17 +575,33 @@ final class YarboPowerwall
             'solar_w' => $solarW,
             'grid_w' => $gridW,
             'battery_w' => $batteryW,
-            'battery_percent' => $percent,
+            'battery_percent' => self::normalizeBatteryPercent($percent),
             'load_label' => $this->formatW($loadW),
             'solar_label' => $this->formatW($solarW),
             'grid_label' => $this->formatW($gridW),
-            'battery_label' => (string) (int) round($percent) . '%',
+            'battery_label' => ($pct = self::normalizeBatteryPercent($percent)) !== null ? $pct . '%' : '—',
         ];
     }
 
     private function formatW(float $watts): string
     {
         return (int) round($watts) . 'W';
+    }
+
+    public static function normalizeBatteryPercent(mixed $raw): ?int
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (!is_numeric($raw)) {
+            return null;
+        }
+        $n = (float) $raw;
+        if (is_nan($n) || is_infinite($n)) {
+            return null;
+        }
+
+        return max(0, min(100, (int) round($n)));
     }
 
     /**
@@ -778,7 +797,7 @@ final class YarboPowerwall
             $codes[] = $row;
         }
         $chip = YarboVestaboard::batteryPercentChip($battery, $online);
-        $codes[0][14] = $chip;
+        $codes[0][YarboVestaboard::COLS - 1] = $chip;
 
         return $codes;
     }

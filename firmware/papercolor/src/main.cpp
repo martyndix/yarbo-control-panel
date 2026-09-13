@@ -50,6 +50,11 @@ String lymowName = "";
 int lymowBattery = -1;
 String lymowState = "—";
 String lymowCharging = "—";
+bool powerwallOn = false;
+bool lymowOn = false;
+int powerwallPct = -1;
+String powerwallSolar = "—";
+String powerwallLoad = "—";
 int partialRefreshCount = 0;
 String lastDrawnKey;
 int currentPage = PAPERMONO_PAGE_HOME;
@@ -149,7 +154,45 @@ String screenKey()
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + lymowName + "|"
-        + String(lymowBattery) + "|" + lymowState + "|" + String((int) WiFi.status());
+        + String(lymowBattery) + "|" + lymowState + "|" + (powerwallOn ? "1" : "0") + "|"
+        + (lymowOn ? "1" : "0") + "|" + String(powerwallPct) + "|" + powerwallSolar + "|"
+        + powerwallLoad + "|" + String((int) WiFi.status());
+}
+
+bool pageEnabled(int page)
+{
+    if (page == PAPERMONO_PAGE_POWERWALL) return powerwallOn;
+    if (page == PAPERMONO_PAGE_LYMOW) return lymowOn;
+    return true;
+}
+
+int visiblePageCount()
+{
+    int n = 0;
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        if (pageEnabled(i)) n++;
+    }
+    return n > 0 ? n : 1;
+}
+
+int firstEnabledPage()
+{
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        if (pageEnabled(i)) return i;
+    }
+    return PAPERMONO_PAGE_HOME;
+}
+
+int stepEnabledPage(int from, int dir)
+{
+    int p = from;
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        p += dir;
+        if (p < 0) p = PAPERMONO_PAGE_COUNT - 1;
+        p = p % PAPERMONO_PAGE_COUNT;
+        if (pageEnabled(p)) return p;
+    }
+    return firstEnabledPage();
 }
 
 void drawButton(int x, int y, int w, int h, const char *label, bool invert)
@@ -204,16 +247,20 @@ void drawPager()
     const char *labels[PAPERMONO_PAGE_COUNT] = {"HOME", "STATUS", "HEALTH", "PLANS", "WALL", "LYMOW"};
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(1);
-    int slot = W / PAPERMONO_PAGE_COUNT;
+    int n = visiblePageCount();
+    int slot = W / n;
+    int drawn = 0;
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
-        int x = slot * i + slot / 2;
+        if (!pageEnabled(i)) continue;
+        int x = slot * drawn + slot / 2;
         if (i == currentPage) {
             M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-            M5.Display.fillRect(slot * i + 8, H - 36, slot - 16, 18, TFT_BLACK);
+            M5.Display.fillRect(slot * drawn + 8, H - 36, slot - 16, 18, TFT_BLACK);
         } else {
             M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
         }
         M5.Display.drawString(labels[i], x, H - 33);
+        drawn++;
     }
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(BL_DATUM);
@@ -387,6 +434,26 @@ void drawPlansPage(bool forceFull)
     M5.Display.display();
 }
 
+void drawPowerwallPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(5);
+    String bat = powerwallPct >= 0 ? (String(powerwallPct) + "%") : String("--");
+    M5.Display.drawString(bat, 16, 108);
+    drawKv("Solar", powerwallSolar, 220);
+    drawKv("Draw", powerwallLoad, 260);
+    if (lastError.length()) {
+        M5.Display.setTextSize(1);
+        M5.Display.drawString(lastError.substring(0, 40), 16, 320);
+    }
+    drawPager();
+    M5.Display.display();
+}
+
 void drawLymowPage(bool forceFull)
 {
     beginEpdFrame(forceFull);
@@ -420,9 +487,19 @@ void drawScreen(bool forceFull)
     } else if (currentPage == PAPERMONO_PAGE_PLANS) {
         drawPlansPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_POWERWALL) {
-        drawStatusPage(forceFull);
+        if (!pageEnabled(PAPERMONO_PAGE_POWERWALL)) {
+            currentPage = firstEnabledPage();
+            drawHome(forceFull);
+        } else {
+            drawPowerwallPage(forceFull);
+        }
     } else if (currentPage == PAPERMONO_PAGE_LYMOW) {
-        drawLymowPage(forceFull);
+        if (!pageEnabled(PAPERMONO_PAGE_LYMOW)) {
+            currentPage = firstEnabledPage();
+            drawHome(forceFull);
+        } else {
+            drawLymowPage(forceFull);
+        }
     } else {
         drawHome(forceFull);
     }
@@ -520,6 +597,11 @@ bool httpGetStatus()
     rainSensor = doc["rain_sensor"] | rainSensor;
     netModule = doc["net_module"] | netModule;
     planActivity = doc["plan_activity"] | planActivity;
+    powerwallOn = doc["powerwall_enabled"] | false;
+    lymowOn = doc["lymow_enabled"] | false;
+    powerwallPct = doc["powerwall_pct"] | powerwallPct;
+    powerwallSolar = doc["powerwall_solar"] | powerwallSolar;
+    powerwallLoad = doc["powerwall_load"] | powerwallLoad;
     lymowName = doc["lymow_name"] | lymowName;
     lymowBattery = doc["lymow_battery"] | lymowBattery;
     lymowState = doc["lymow_state"] | lymowState;
@@ -629,10 +711,9 @@ void runCommand(const char *cmd)
 
 void showPage(int page, bool loadPlansIfNeeded)
 {
-    if (page < 0) {
-        page = PAPERMONO_PAGE_COUNT - 1;
+    if (!pageEnabled(page)) {
+        page = stepEnabledPage(page, 1);
     }
-    page = page % PAPERMONO_PAGE_COUNT;
     currentPage = page;
     if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
         httpGetPlans(false);
@@ -642,12 +723,12 @@ void showPage(int page, bool loadPlansIfNeeded)
 
 void nextPage()
 {
-    showPage(currentPage + 1, true);
+    showPage(stepEnabledPage(currentPage, 1), true);
 }
 
 void prevPage()
 {
-    showPage(currentPage - 1, true);
+    showPage(stepEnabledPage(currentPage, -1), true);
 }
 
 void handlePlansTouch(int x, int y)
@@ -774,10 +855,15 @@ void loop()
     if (millis() - lastPoll > PAPERMONO_POLL_MS) {
         lastPoll = millis();
         httpGetStatus();
-        if (currentPage == PAPERMONO_PAGE_PLANS) {
+        if (!pageEnabled(currentPage)) {
+            currentPage = stepEnabledPage(currentPage, 1);
+            drawScreen(true);
+        } else if (currentPage == PAPERMONO_PAGE_PLANS) {
             httpGetPlans(false);
+            drawScreen(false);
+        } else {
+            drawScreen(false);
         }
-        drawScreen(false);
     }
     delay(30);
 }

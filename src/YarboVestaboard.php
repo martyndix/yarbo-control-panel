@@ -592,7 +592,7 @@ final class YarboVestaboard
         $yarboPct = $this->batteryPercentValue($yarboOnline ? $parsed : null);
 
         $pw = (new YarboPowerwall($this->projectRoot))->dashboardPayload();
-        $pwPct = isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : null;
+        $pwPct = YarboPowerwall::normalizeBatteryPercent($pw['battery_percent'] ?? null);
         $pwOnline = $pwPct !== null || !empty($pw['online']);
 
         $ly = (new YarboLymow($this->projectRoot))->dashboardPayload();

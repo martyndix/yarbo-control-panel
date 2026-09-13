@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.13] - 2026-09-13
+
+### Changed
+- Vestaboard **Powerwall**, **Lymow**, and **ALL** view buttons only appear when those modules are enabled (Note card, Settings, PaperMono **NOTE**). Paper Colour skips **WALL** / **LYMOW** pager pages the same way. Reflash PaperMono **0.1.5-beta** and Paper Colour **0.2.3-color**.
+- Powerwall Vestaboard colour chip tracks live battery % on the same scale as Yarbo and Lymow: green ≥60%, yellow ≥40%, orange ≥20%, red below that. The printed % is still at most every 2 minutes.
+
 ## [2.0.12] - 2026-09-13
 
 ### Added

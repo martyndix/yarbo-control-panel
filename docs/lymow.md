@@ -15,7 +15,7 @@ Settings → **Lymow**:
 
 Leave the password blank on later saves to keep the stored one.
 
-**Lymow name** is shown under the title on the Lymow page (same place as the Yarbo name). Leave the Settings field blank to use the nickname from the Lymow app when that is published. PaperMono and Paper Colour Lymow pages show the same name after a reflash (**0.1.4-beta** / **0.2.2-color**).
+**Lymow name** is shown under the title on the Lymow page (same place as the Yarbo name). Leave the Settings field blank to use the nickname from the Lymow app when that is published. PaperMono and Paper Colour Lymow pages show the same name after a reflash (**0.1.5-beta** / **0.2.3-color**).
 
 ## Camera
 
@@ -33,4 +33,4 @@ The Note shows **LYMOW** plus battery **%** (colour chip on the last column, so 
 
 The Lymow card has a **Progress** stat for the same percent. The MQTT listener writes each robot status message as it arrives (and asks for a status refresh about every 15 seconds) so the tile and Note are not a minute behind.
 
-There is also a Vestaboard live option that stacks **Yarbo**, **Powerwall**, and **Lymow** battery percents (one row each, colour chip on each row). Pick it under Settings → Modules → Vestaboard live module. It does not require the Powerwall or Lymow dashboards to be enabled.
+There is also a Vestaboard live option that stacks **Yarbo**, **Powerwall**, and **Lymow** battery percents (one row each, colour chip on each row). Pick it under Settings → Modules → Vestaboard live module. **ALL** only appears when Powerwall or Lymow is enabled.
