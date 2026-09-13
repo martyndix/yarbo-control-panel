@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.6] - 2026-09-13
+
+### Fixed
+- Lymow battery: install `websocket-client` with paho (required for AWS IoT websockets), register as a connected app, and fall back to the IoT device shadow over HTTPS if MQTT is quiet.
+- Powerwall Vestaboard colour chip uses the same battery scale as Yarbo (green ≥60%, yellow ≥40%, orange ≥20%, red below).
+
 ## [2.0.5] - 2026-09-13
 
 ### Fixed

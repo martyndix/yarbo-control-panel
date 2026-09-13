@@ -823,11 +823,7 @@ final class YarboLymow
             }
             $codes[] = $row;
         }
-        $chip = !$online ? YarboVestaboard::COLOR_RED : YarboVestaboard::COLOR_GREEN;
-        if ($online && $battery !== null) {
-            $chip = $battery >= 60 ? YarboVestaboard::COLOR_GREEN
-                : ($battery >= 30 ? YarboVestaboard::COLOR_YELLOW : YarboVestaboard::COLOR_ORANGE);
-        }
+        $chip = YarboVestaboard::batteryPercentChip($battery, $online);
         $codes[0][14] = $chip;
 
         return $codes;

@@ -889,6 +889,27 @@ final class YarboVestaboard
         return $this->pair('BATTERY', $text, 14);
     }
 
+    public static function batteryPercentChip(?int $percent, bool $online = true): int
+    {
+        if (!$online) {
+            return self::COLOR_RED;
+        }
+        if ($percent === null) {
+            return self::COLOR_RED;
+        }
+        if ($percent >= 60) {
+            return self::COLOR_GREEN;
+        }
+        if ($percent >= 40) {
+            return self::COLOR_YELLOW;
+        }
+        if ($percent >= 20) {
+            return self::COLOR_ORANGE;
+        }
+
+        return self::COLOR_RED;
+    }
+
     /**
      * Vestaboard color chip for battery: green ≥60%, yellow ≥40%, orange ≥20%, else red.
      *
@@ -906,18 +927,8 @@ final class YarboVestaboard
         if (!is_numeric($raw)) {
             return self::COLOR_RED;
         }
-        $percent = (int) $raw;
-        if ($percent >= 60) {
-            return self::COLOR_GREEN;
-        }
-        if ($percent >= 40) {
-            return self::COLOR_YELLOW;
-        }
-        if ($percent >= 20) {
-            return self::COLOR_ORANGE;
-        }
 
-        return self::COLOR_RED;
+        return self::batteryPercentChip((int) $raw, true);
     }
 
     /**

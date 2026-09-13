@@ -27,7 +27,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 
-from lymow_protocol import decode_pboutput, encode_status_query, unwrap_envelope, wrap_envelope  # noqa: E402
+from lymow_protocol import (  # noqa: E402
+    decode_pboutput,
+    encode_app_connect_heartbeat,
+    encode_status_query,
+    unwrap_envelope,
+    wrap_envelope,
+)
 
 CLIENT_ID = "3h1sqv3hishjiofbv8giskjgb0"
 REGIONS = ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]
@@ -413,15 +419,17 @@ def build_presigned_ws_path(host: str, region: str, access_key: str, secret_key:
 def ensure_paho() -> tuple[Any | None, str | None]:
     try:
         import paho.mqtt.client as mqtt
+        import websocket  # noqa: F401  # websocket-client, required for paho websockets
 
         return mqtt, None
     except ImportError:
         pass
     import subprocess
 
+    packages = ["paho-mqtt", "websocket-client"]
     attempts = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "paho-mqtt"],
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--user", "paho-mqtt"],
+        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *packages],
+        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--user", *packages],
         [
             sys.executable,
             "-m",
@@ -429,10 +437,10 @@ def ensure_paho() -> tuple[Any | None, str | None]:
             "install",
             "--disable-pip-version-check",
             "--break-system-packages",
-            "paho-mqtt",
+            *packages,
         ],
     ]
-    last = "paho-mqtt is not installed"
+    last = "paho-mqtt / websocket-client missing"
     for cmd in attempts:
         try:
             result = subprocess.run(cmd, check=False, capture_output=True, timeout=90)
@@ -442,15 +450,160 @@ def ensure_paho() -> tuple[Any | None, str | None]:
 
             importlib.invalidate_caches()
             import paho.mqtt.client as mqtt  # type: ignore
+            import websocket  # noqa: F401
 
             return mqtt, None
         except Exception as exc:  # noqa: BLE001
             last = str(exc)
     return None, (
-        "Could not import paho-mqtt (needed for live battery). On the Pi: "
-        "python3 -m pip install --break-system-packages paho-mqtt"
+        "Could not import paho-mqtt + websocket-client (needed for live battery). On the Pi: "
+        "python3 -m pip install --break-system-packages paho-mqtt websocket-client"
         + (f" ({last.strip()})" if last.strip() else "")
     )
+
+
+def _sigv4_iot_headers(
+    method: str,
+    host: str,
+    uri: str,
+    region: str,
+    access_key: str,
+    secret_key: str,
+    session_token: str,
+    payload: bytes = b"",
+) -> dict[str, str]:
+    now = datetime.now(timezone.utc)
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    date_str = now.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(payload).hexdigest()
+    canonical = (
+        f"{method}\n{uri}\n\n"
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+        f"x-amz-security-token:{session_token}\n\n"
+        "host;x-amz-content-sha256;x-amz-date;x-amz-security-token\n"
+        f"{payload_hash}"
+    )
+    scope = f"{date_str}/{region}/iotdata/aws4_request"
+    sts = f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
+    k = _hmac_sha256(("AWS4" + secret_key).encode(), date_str)
+    k = _hmac_sha256(k, region)
+    k = _hmac_sha256(k, "iotdata")
+    k = _hmac_sha256(k, "aws4_request")
+    signature = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
+    return {
+        "Authorization": (
+            f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, "
+            "SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-security-token, "
+            f"Signature={signature}"
+        ),
+        "x-amz-date": amz_date,
+        "x-amz-content-sha256": payload_hash,
+        "x-amz-security-token": session_token,
+    }
+
+
+def extract_shadow_state(obj: Any) -> dict[str, Any]:
+    found: dict[str, Any] = {}
+
+    def consider_battery(value: Any) -> None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return
+        pct = int(round(float(value)))
+        if 0 <= pct <= 100:
+            found["battery"] = pct
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                lk = str(key).lower().replace("_", "")
+                if lk in {"battery", "batterylevel", "batterypercent", "soc", "batterysoc"}:
+                    consider_battery(value)
+                elif lk in {"workstatus", "workstate"} and isinstance(value, int):
+                    found["workStatus"] = value
+                elif lk in {"ischarging", "charging"}:
+                    found["isCharging"] = bool(value)
+                elif lk in {"isrecharging", "recharging"}:
+                    found["isRecharging"] = bool(value)
+                elif lk in {"message", "payload", "pboutput"} and isinstance(value, str) and len(value) > 8:
+                    try:
+                        found.update(decode_pboutput(base64.b64decode(value)))
+                    except Exception:
+                        walk(value)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    if isinstance(obj, dict) and isinstance(obj.get("state"), dict):
+        reported = obj["state"].get("reported", obj["state"])
+        walk(reported)
+    else:
+        walk(obj)
+    return found
+
+
+def fetch_iot_shadow(config: dict[str, Any], thing: str) -> dict[str, Any]:
+    region = str(config["region"])
+    id_token = str(config.get("id_token") or "")
+    try:
+        ident = aws_credentials(id_token, region)
+    except Exception as exc:  # noqa: BLE001
+        return {"shadow_error": f"AWS credentials failed: {exc}"}
+    creds = ident["credentials"]
+    access_key = str(creds.get("AccessKeyId") or "")
+    secret_key = str(creds.get("SecretKey") or "")
+    session_token = str(creds.get("SessionToken") or "")
+    mqtt_host = str(REGION_CONFIG[region]["iot_host"])
+    hosts = [
+        mqtt_host.replace(".iot.", ".data.iot.", 1),
+        mqtt_host,
+        f"data.iot.{region}.amazonaws.com",
+        f"data.ats.iot.{region}.amazonaws.com",
+    ]
+    uri = f"/things/{urllib.parse.quote(thing, safe='')}/shadow"
+    last = "no IoT shadow host answered"
+    for host in hosts:
+        try:
+            headers = _sigv4_iot_headers("GET", host, uri, region, access_key, secret_key, session_token)
+            req = urllib.request.Request(f"https://{host}{uri}", method="GET")
+            for key, value in headers.items():
+                req.add_header(key, value)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+            decoded = json.loads(body) if body else {}
+            extracted = extract_shadow_state(decoded)
+            if extracted:
+                return extracted
+            last = f"{host} returned a shadow without battery"
+        except Exception as exc:  # noqa: BLE001
+            last = f"{host}: {exc}"
+    return {"shadow_error": last}
+
+
+def collect_live_state(
+    config: dict[str, Any],
+    thing: str,
+    wait_s: float,
+    stop_on_battery: bool = True,
+) -> dict[str, Any]:
+    got = fetch_iot_shadow(config, thing)
+    if stop_on_battery and "battery" in got:
+        return got
+    mqtt = mqtt_wait_state(config, thing, wait_s, stop_on_battery=stop_on_battery)
+    for key, value in mqtt.items():
+        if value is not None:
+            got[key] = value
+    if "battery" in got or "workStatus" in got:
+        got.pop("mqtt_error", None)
+        got.pop("shadow_error", None)
+    elif got.get("mqtt_error") and got.get("shadow_error"):
+        got["mqtt_error"] = f"{got['mqtt_error']} ({got['shadow_error']})"
+    elif got.get("shadow_error") and not got.get("mqtt_error"):
+        got["mqtt_error"] = got["shadow_error"]
+    return got
 
 
 def mqtt_wait_state(
@@ -478,7 +631,10 @@ def mqtt_wait_state(
         str(creds.get("SessionToken") or ""),
     )
     got: dict[str, Any] = {}
+    session_id = uuid.uuid4().hex
     query = wrap_envelope(encode_status_query()).encode()
+    heartbeat = wrap_envelope(encode_app_connect_heartbeat(session_id)).encode()
+    client_id = f"yarbo-lymow-{uuid.uuid4().hex[:8]}"
 
     def on_connect(client: Any, _userdata: Any, *_args: Any) -> None:
         rc = 0
@@ -490,6 +646,7 @@ def mqtt_wait_state(
             return
         client.subscribe(f"/device/{thing}/pboutput", qos=1)
         client.subscribe(f"/device/{thing}/notify-app", qos=1)
+        client.publish(f"/device/{thing}/pbinput", heartbeat, qos=1)
         client.publish(f"/device/{thing}/pbinput", query, qos=1)
 
     def on_message(_client: Any, _userdata: Any, message: Any) -> None:
@@ -507,7 +664,7 @@ def mqtt_wait_state(
             got["mqtt_error"] = f"MQTT decode failed: {exc}"
 
     kwargs: dict[str, Any] = {
-        "client_id": f"yarbo-lymow-{uuid.uuid4().hex[:8]}",
+        "client_id": client_id,
         "transport": "websockets",
         "protocol": mqtt.MQTTv311,
     }
@@ -521,11 +678,16 @@ def mqtt_wait_state(
         client.ws_set_options(path=path)
     client.on_connect = on_connect
     client.on_message = on_message
+    last_beat = 0.0
     try:
         client.connect(host, 443, 60)
         deadline = time.time() + max(3.0, wait_s)
         while time.time() < deadline:
             client.loop(timeout=1.0)
+            now = time.time()
+            if now - last_beat >= 10:
+                client.publish(f"/device/{thing}/pbinput", heartbeat, qos=1)
+                last_beat = now
             if stop_on_battery and ("battery" in got or "workStatus" in got):
                 break
     except Exception as exc:  # noqa: BLE001
@@ -612,7 +774,7 @@ def cmd_login(config_path: Path, state_path: Path) -> int:
         config["device_thing_name"] = bundle["thing"]
         config["last_error"] = ""
         save_config(config_path, config)
-        mqtt_state = mqtt_wait_state(config, str(bundle["thing"]), 35.0)
+        mqtt_state = collect_live_state(config, str(bundle["thing"]), 35.0)
         state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -629,7 +791,7 @@ def cmd_state(config_path: Path, state_path: Path, wait_s: float) -> int:
         config = ensure_tokens(config)
         bundle = fetch_device_bundle(config)
         config["device_thing_name"] = bundle["thing"]
-        mqtt_state = mqtt_wait_state(config, str(bundle["thing"]), wait_s) if wait_s > 0 else {}
+        mqtt_state = collect_live_state(config, str(bundle["thing"]), wait_s) if wait_s > 0 else {}
         config["last_error"] = ""
         save_config(config_path, config)
         state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
@@ -654,7 +816,7 @@ def cmd_listen(config_path: Path, state_path: Path) -> int:
             thing = str(bundle["thing"])
             config["device_thing_name"] = thing
             save_config(config_path, config)
-            mqtt_state = mqtt_wait_state(config, thing, 70, stop_on_battery=False)
+            mqtt_state = collect_live_state(config, thing, 70, stop_on_battery=False)
             state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
             state_path.parent.mkdir(parents=True, exist_ok=True)
             state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

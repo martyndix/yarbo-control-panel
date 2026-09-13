@@ -28,7 +28,7 @@ BATTERY    FULL
 CHARGED
 ```
 
-Powerwall live module (watts, battery `%` kept on the last flap before the colour chip):
+Powerwall live module (watts, battery `%` kept on the last flap before the colour chip; chip is green ≥60%, yellow ≥40%, orange ≥20%, red below that):
 
 ```
 POWERWALL   89%

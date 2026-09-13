@@ -34,6 +34,10 @@ def _field_i32(field_no: int, value: int) -> bytes:
     return _encode_varint((field_no << 3) | 0) + _encode_varint(value & 0xFFFFFFFFFFFFFFFF)
 
 
+def _field_bytes(field_no: int, data: bytes) -> bytes:
+    return _encode_varint((field_no << 3) | 2) + _encode_varint(len(data)) + data
+
+
 def wrap_envelope(pb_bytes: bytes) -> str:
     return json.dumps({"message": base64.b64encode(pb_bytes).decode()})
 
@@ -45,6 +49,11 @@ def encode_userctrl(command: int) -> bytes:
 def encode_status_query() -> bytes:
     """Read-only Wi-Fi/4G query the app sends at startup; reply includes robot info."""
     return encode_userctrl(USER_CTRL_QUERY_WIFI_4G)
+
+
+def encode_app_connect_heartbeat(session_id: str) -> bytes:
+    """Register as a connected app so the robot streams pboutput (ha-lymow)."""
+    return _field_i32(7, 2) + _field_bytes(27, session_id.encode())
 
 
 def unwrap_envelope(payload: str | bytes) -> bytes:
