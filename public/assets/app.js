@@ -3021,39 +3021,93 @@ function setPaperMonoResult(message, type) {
     els.papermonoResult.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
+function paperMonoSelectedKind() {
+    const checked = document.querySelector('input[name="papermono-kind"]:checked');
+    return checked?.value === 'papercolor' ? 'papercolor' : 'papermono';
+}
+
+function paperMonoLabel(kind = paperMonoSelectedKind()) {
+    return kind === 'papercolor' ? 'Paper Colour' : 'PaperMono';
+}
+
+function paperMonoDefaultName(kind = paperMonoSelectedKind()) {
+    return paperMonoLabel(kind);
+}
+
+function applyPaperMonoKindUi(dashboard) {
+    const kind = paperMonoSelectedKind();
+    const label = paperMonoLabel(kind);
+    const fw = dashboard?.firmware?.[kind];
+    const nameEl = els.papermonoName;
+    if (nameEl) {
+        const current = nameEl.value.trim();
+        if (current === '' || current === 'PaperMono' || current === 'Paper Colour') {
+            nameEl.value = paperMonoDefaultName(kind);
+        }
+    }
+    document.getElementById('papermono-preview-grid')?.classList.toggle('hidden', kind === 'papercolor');
+    document.getElementById('papermono-color-extra')?.classList.toggle('hidden', kind !== 'papercolor');
+    if (els.papermonoFwStatus) {
+        if (fw) {
+            const built = fw.built
+                ? 'built on this host'
+                : `not built yet — run ${fw.pio} before flashing`;
+            els.papermonoFwStatus.textContent = `${label} firmware ${fw.version} (${built}).`;
+        } else if (dashboard) {
+            els.papermonoFwStatus.textContent = `Could not read ${label} firmware status.`;
+        }
+    }
+    const hint = document.getElementById('papermono-flash-hint');
+    if (hint) {
+        const pio = fw?.pio || (kind === 'papercolor'
+            ? 'pio run -e papercolor -d firmware/papercolor'
+            : 'pio run -d firmware/papermono');
+        const extra = kind === 'papercolor'
+            ? ' Paper Colour is Spectra 6: A/B change pages, C sleeps. It is slow — do not expect 15-second redraws.'
+            : ' The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll.';
+        hint.innerHTML = `First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && ${pio}</code>. If the port list fails, click <strong>Install USB tools</strong> to add <code>pyserial</code> and <code>esptool</code> to this panel’s Python environment.${extra} Keep the tablet out of direct sun.`;
+    }
+}
+
 function paperMonoFormPayload() {
+    const kind = paperMonoSelectedKind();
     return {
+        kind,
         port: els.papermonoPort?.value.trim() ?? '',
         wifi_ssid: els.papermonoSsid?.value.trim() ?? '',
         wifi_password: els.papermonoWifiPassword?.value ?? '',
         panel_url: els.papermonoPanelUrl?.value.trim() ?? '',
-        name: els.papermonoName?.value.trim() || 'PaperMono',
+        name: els.papermonoName?.value.trim() || paperMonoDefaultName(kind),
     };
 }
 
 function renderPaperMonoDevices(devices) {
     if (!els.papermonoDevices) return;
     if (!Array.isArray(devices) || devices.length === 0) {
-        els.papermonoDevices.innerHTML = '<p class="hint">None yet. Flash a PaperMono to pair it.</p>';
+        els.papermonoDevices.innerHTML = '<p class="hint">None yet. Flash a tablet to pair it.</p>';
         return;
     }
     els.papermonoDevices.innerHTML = devices.map((device) => {
         const last = device.last_seen_at
             ? `Last seen ${escapeHtml(String(device.last_seen_at).replace('T', ' ').replace('Z', ' UTC'))}`
             : 'Never seen';
+        const kindLabel = device.kind_label ? `${escapeHtml(String(device.kind_label))} · ` : '';
         const fw = device.fw_reported ? ` · fw ${escapeHtml(String(device.fw_reported))}` : '';
+        const revokeLabel = device.kind_label || device.name || 'companion';
         return `<div class="papermono-device-row">
             <div>
                 <strong>${escapeHtml(device.name || 'PaperMono')}</strong>
-                <p class="hint">${escapeHtml(last)}${fw}</p>
+                <p class="hint">${kindLabel}${escapeHtml(last)}${fw}</p>
             </div>
-            <button type="button" class="btn btn-secondary btn-compact" data-papermono-revoke="${escapeHtml(device.id)}">Revoke</button>
+            <button type="button" class="btn btn-secondary btn-compact" data-papermono-revoke="${escapeHtml(device.id)}" data-papermono-revoke-label="${escapeHtml(String(revokeLabel))}">Revoke</button>
         </div>`;
     }).join('');
     els.papermonoDevices.querySelectorAll('[data-papermono-revoke]').forEach((button) => {
         button.addEventListener('click', () => revokePaperMono(button.dataset.papermonoRevoke, button));
     });
 }
+
+let paperMonoDashboardCache = null;
 
 async function loadPaperMonoDashboard() {
     if (els.papermonoPanelUrl && !els.papermonoPanelUrl.value) {
@@ -3062,16 +3116,12 @@ async function loadPaperMonoDashboard() {
     try {
         const res = await fetch('/api/device.php?action=dashboard');
         const data = await parseJsonResponse(res);
-        if (els.papermonoFwStatus) {
-            const built = data.firmware_built
-                ? 'built on this host'
-                : 'not built yet — run pio in firmware/papermono before flashing';
-            els.papermonoFwStatus.textContent = `Firmware ${data.firmware_version || '0.1.2-beta'} (${built}).`;
-        }
+        paperMonoDashboardCache = data;
+        applyPaperMonoKindUi(data);
         renderPaperMonoDevices(data.devices);
     } catch (err) {
         if (els.papermonoFwStatus) {
-            els.papermonoFwStatus.textContent = err.message || 'Could not load PaperMono status.';
+            els.papermonoFwStatus.textContent = err.message || 'Could not load e-paper companion status.';
         }
     }
     refreshPaperMonoPorts();
@@ -3080,6 +3130,7 @@ async function loadPaperMonoDashboard() {
 async function refreshPaperMonoPorts() {
     if (!els.papermonoPort) return { ok: false, count: 0 };
     const previous = els.papermonoPort.value;
+    const label = paperMonoLabel();
     try {
         const res = await fetch('/api/device.php?action=ports');
         const data = await parseJsonResponse(res);
@@ -3096,13 +3147,13 @@ async function refreshPaperMonoPorts() {
             setPaperMonoResult('');
         }
         if (ports.length === 0) {
-            els.papermonoPort.innerHTML = '<option value="">No USB serial ports found — plug in the PaperMono and refresh</option>';
+            els.papermonoPort.innerHTML = `<option value="">No USB serial ports found — plug in the ${label} and refresh</option>`;
             return { ok: true, count: 0 };
         }
         els.papermonoPort.innerHTML = ports.map((port) => {
             const device = port.device || '';
-            const label = port.label || device;
-            return `<option value="${escapeHtml(device)}">${escapeHtml(label)}</option>`;
+            const portLabel = port.label || device;
+            return `<option value="${escapeHtml(device)}">${escapeHtml(portLabel)}</option>`;
         }).join('');
         if (previous && ports.some((port) => port.device === previous)) {
             els.papermonoPort.value = previous;
@@ -3118,6 +3169,7 @@ async function refreshPaperMonoPorts() {
 async function installPaperMonoUsbTools(button) {
     if (button) button.disabled = true;
     if (els.papermonoPortsRefresh) els.papermonoPortsRefresh.disabled = true;
+    const label = paperMonoLabel();
     setPaperMonoResult('Installing pyserial and esptool into this panel’s Python environment. This can take a minute…');
     try {
         const res = await fetch('/api/device.php', {
@@ -3139,7 +3191,7 @@ async function installPaperMonoUsbTools(button) {
             setPaperMonoResult(
                 listed?.count
                     ? 'Installed pyserial and esptool. USB ports are ready.'
-                    : 'Installed pyserial and esptool. Plug the PaperMono in over USB, then click Refresh USB ports.',
+                    : `Installed pyserial and esptool. Plug the ${label} in over USB, then click Refresh USB ports.`,
                 'success',
             );
         }
@@ -3153,22 +3205,23 @@ async function installPaperMonoUsbTools(button) {
 
 async function runPaperMonoUsb(action, button) {
     const payload = paperMonoFormPayload();
+    const label = paperMonoLabel(payload.kind);
     if (!payload.port) {
-        setPaperMonoResult('Select the USB serial port for the PaperMono.', 'error');
+        setPaperMonoResult(`Select the USB serial port for the ${label}.`, 'error');
         return;
     }
     if (!payload.wifi_ssid) {
-        setPaperMonoResult('Wi-Fi name (SSID) is required. PaperMono is 2.4 GHz only.', 'error');
+        setPaperMonoResult(`Wi-Fi name (SSID) is required. ${label} is 2.4 GHz only.`, 'error');
         return;
     }
     if (!payload.panel_url) {
-        setPaperMonoResult('Panel URL is required so the PaperMono can reach this server.', 'error');
+        setPaperMonoResult(`Panel URL is required so the ${label} can reach this server.`, 'error');
         return;
     }
     if (button) button.disabled = true;
     setPaperMonoResult(
         action === 'flash'
-            ? 'Flashing firmware over USB, then sending Wi-Fi. This takes one to two minutes…'
+            ? `Flashing ${label} firmware over USB, then sending Wi-Fi. This takes one to two minutes…`
             : 'Sending Wi-Fi and panel URL over USB…',
     );
     try {
@@ -3182,15 +3235,15 @@ async function runPaperMonoUsb(action, button) {
             throw new Error(data.error || 'USB step failed');
         }
         const tokenHint = data.device?.token
-            ? `\nPaired as ${data.device.name || 'PaperMono'}. Keep that cable in until the setup screen clears.`
+            ? `\nPaired as ${data.device.name || label}. Keep that cable in until the setup screen clears.`
             : '';
         setPaperMonoResult(
             action === 'flash'
-                ? `Firmware flashed and Wi-Fi sent.${tokenHint}`
+                ? `${label} firmware flashed and Wi-Fi sent.${tokenHint}`
                 : `Wi-Fi sent.${tokenHint}`,
             'success',
         );
-        showToast(action === 'flash' ? 'PaperMono flashed' : 'PaperMono Wi-Fi sent', 'success');
+        showToast(action === 'flash' ? `${label} flashed` : `${label} Wi-Fi sent`, 'success');
         loadPaperMonoDashboard();
     } catch (err) {
         setPaperMonoResult(err.message || 'USB step failed', 'error');
@@ -3201,7 +3254,8 @@ async function runPaperMonoUsb(action, button) {
 
 async function revokePaperMono(id, button) {
     if (!id) return;
-    if (!window.confirm('Revoke this PaperMono? It will stop receiving status until you flash or pair it again.')) {
+    const label = button?.dataset?.papermonoRevokeLabel || 'companion';
+    if (!window.confirm(`Revoke this ${label}? It will stop receiving status until you flash or pair it again.`)) {
         return;
     }
     if (button) button.disabled = true;
@@ -3213,7 +3267,7 @@ async function revokePaperMono(id, button) {
         });
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Revoke failed');
-        showToast('PaperMono revoked', 'success');
+        showToast(`${label} revoked`, 'success');
         loadPaperMonoDashboard();
     } catch (err) {
         setPaperMonoResult(err.message || 'Revoke failed', 'error');
@@ -4762,6 +4816,12 @@ els.papermonoPortsRefresh?.addEventListener('click', () => refreshPaperMonoPorts
 els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbTools(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));
 els.papermonoConfig?.addEventListener('click', (e) => runPaperMonoUsb('configure_usb', e.currentTarget));
+document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
+    input.addEventListener('change', () => {
+        applyPaperMonoKindUi(paperMonoDashboardCache);
+        refreshPaperMonoPorts();
+    });
+});
 els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));
 els.settingsUpdateViewNotes?.addEventListener('click', (e) => viewReleaseNotes(e.currentTarget));
 els.settingsUpdateRun?.addEventListener('click', (e) => runPanelUpdate(e.currentTarget));

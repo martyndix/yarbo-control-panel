@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-09-13
+
+### Added
+- Settings → **E-paper companions** lets you pick **PaperMono** or **Paper Colour**, then flash the matching firmware over USB (same Wi-Fi CFG as PaperMono).
+
+### Changed
+- Paired tablets store hardware kind. Compact status and firmware download use that kind so Paper Colour keeps `0.2.0-color` instead of the grayscale binary.
+
 ## [2.0.1] - 2026-09-13
 
 ### Fixed

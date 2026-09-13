@@ -876,6 +876,10 @@ body.modal-open {
     color: var(--muted);
 }
 
+.papermono-kind {
+    margin: 0.35rem 0 0.85rem;
+}
+
 .camera-mode label {
     display: flex;
     align-items: center;

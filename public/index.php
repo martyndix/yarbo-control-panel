@@ -791,10 +791,20 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         </section>
 
                         <section class="settings-section" id="settings-papermono-section">
-                            <h3 class="settings-subtitle">PaperMono companion <span class="settings-beta-badge">Beta</span></h3>
-                            <p class="hint">Built for <a href="https://docs.m5stack.com/en/core/PaperMono" target="_blank" rel="noopener">M5Stack PaperMono SKU C153</a> (<a href="https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display" target="_blank" rel="noopener">shop</a>): ESP32-S3R8, 3.97″ 480×800 SSD1677 e-paper, FT6336G touch, 2.4 GHz Wi-Fi. Not PaperMono-Lite. It has no browser — this panel flashes native firmware over USB, then the device talks HTTP JSON to the panel (the panel stays the MQTT brain). Home is Stop / Dock / Pause / Lights. Hardware keys cycle Home, Status, Health, and Plans (start a work plan from that page). No map, cameras, or hold-to-drive. See <code>docs/papermono.md</code>.</p>
-                            <p class="hint"><strong>Paper Colour</strong> (M5Stack PaperColor, no touch): firmware lives in <code>firmware/papercolor/</code>. Flash with PlatformIO env <code>papercolor</code>, same Wi-Fi CFG USB line as PaperMono. Buttons A/B change pages; C sleeps/wakes. Colour Home/Status plus Powerwall and Lymow when those modules are on. Spectra 6 is slow — it does not redraw every 15s. See <code>docs/papercolor.md</code>.</p>
-                            <div class="papermono-preview-grid" aria-hidden="true">
+                            <h3 class="settings-subtitle">E-paper companions <span class="settings-beta-badge">Beta</span></h3>
+                            <p class="hint" id="papermono-kind-hint">Plug in the tablet over USB, pick the hardware, then flash. PaperMono is the grayscale touch C153. Paper Colour is the no-touch Spectra 6 PaperColor. Same Wi-Fi and panel URL; the panel flashes the matching firmware so the tablet UI is correct. See <code>docs/papermono.md</code> and <code>docs/papercolor.md</code>.</p>
+                            <div class="map-mode papermono-kind" role="radiogroup" aria-label="E-paper hardware">
+                                <label>
+                                    <input type="radio" name="papermono-kind" value="papermono" checked>
+                                    PaperMono
+                                </label>
+                                <label>
+                                    <input type="radio" name="papermono-kind" value="papercolor">
+                                    Paper Colour
+                                </label>
+                            </div>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour has no touch. After flash, buttons <strong>A/B</strong> change pages and <strong>C</strong> sleeps. Colour Home/Status plus Powerwall and Lymow when those modules are on. Spectra 6 is slow — it does not redraw every 15s.</p>
+                            <div class="papermono-preview-grid" id="papermono-preview-grid" aria-hidden="true">
                                 <figure class="papermono-preview">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
@@ -926,7 +936,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
                                 <select id="papermono-port">
-                                    <option value="">Refresh ports with the PaperMono plugged in</option>
+                                    <option value="">Refresh ports with the tablet plugged in</option>
                                 </select>
                             </label>
                             <div class="papermono-actions">
@@ -940,10 +950,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                             <label class="settings-field">
                                 <span class="label">Wi-Fi password</span>
-                                <input type="password" id="papermono-wifi-password" name="papermono_wifi_password" autocomplete="new-password" placeholder="2.4 GHz only — PaperMono has no 5 GHz">
+                                <input type="password" id="papermono-wifi-password" name="papermono_wifi_password" autocomplete="new-password" placeholder="2.4 GHz only — these tablets have no 5 GHz">
                             </label>
                             <label class="settings-field">
-                                <span class="label">Panel URL (this server, as the PaperMono will reach it)</span>
+                                <span class="label">Panel URL (this server, as the tablet will reach it)</span>
                                 <input type="url" id="papermono-panel-url" name="papermono_panel_url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:8080">
                             </label>
                             <label class="settings-field">
@@ -954,7 +964,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn" id="papermono-flash">Flash firmware &amp; send Wi-Fi</button>
                                 <button type="button" class="btn btn-secondary" id="papermono-config">Send Wi-Fi only (already flashed)</button>
                             </div>
-                            <p class="hint">First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && pio run -d firmware/papermono</code>. If the port list fails, click <strong>Install USB tools</strong> to add <code>pyserial</code> and <code>esptool</code> to this panel’s Python environment. The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll. Keep the tablet out of direct sun.</p>
+                            <p class="hint" id="papermono-flash-hint">First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && pio run -d firmware/papermono</code>. If the port list fails, click <strong>Install USB tools</strong> to add <code>pyserial</code> and <code>esptool</code> to this panel’s Python environment. The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll. Keep the tablet out of direct sun.</p>
                             <h4 class="settings-subtitle">Paired devices</h4>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>

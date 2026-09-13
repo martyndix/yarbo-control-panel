@@ -51,12 +51,14 @@ if ($method === 'GET' && $action === 'ports') {
 }
 
 if ($method === 'GET' && $action === 'compact') {
-    $device = $devices->findByToken(device_token_from_request());
+    $token = device_token_from_request();
+    $device = $devices->findByToken($token);
     if ($device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
     $devices->touch((string) $device['id'], isset($_GET['fw']) ? (string) $_GET['fw'] : null);
-    json_response($devices->compactStatus());
+    $device = $devices->findByToken($token) ?? $device;
+    json_response($devices->compactStatus($devices->deviceKind($device)));
 }
 
 if ($method === 'GET' && $action === 'plans') {
@@ -65,8 +67,9 @@ if ($method === 'GET' && $action === 'plans') {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
     $devices->touch((string) $device['id'], isset($_GET['fw']) ? (string) $_GET['fw'] : null);
+    $device = $devices->findByToken(device_token_from_request()) ?? $device;
     $refresh = isset($_GET['refresh']) && $_GET['refresh'] !== '0';
-    json_response($devices->compactPlans($refresh));
+    json_response($devices->compactPlans($refresh, $devices->deviceKind($device)));
 }
 
 if ($method === 'GET' && $action === 'firmware') {
@@ -74,16 +77,21 @@ if ($method === 'GET' && $action === 'firmware') {
     if ($device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
-    $path = $devices->firmwarePath();
-    if (!$devices->firmwareAvailable()) {
+    $kind = $devices->deviceKind($device);
+    $path = $devices->firmwarePath($kind);
+    if (!$devices->firmwareAvailable($kind)) {
         json_response([
             'ok' => false,
-            'error' => 'Firmware binary is not built yet. Use Settings → PaperMono to flash after building, or run pio in firmware/papermono.',
+            'error' => 'Firmware binary is not built yet. Use Settings → e-paper companions to flash after building.',
         ], 404);
     }
+    $version = $devices->firmwareVersionForKind($kind);
+    $filename = $kind === YarboPaperDevice::KIND_COLOR
+        ? 'papercolor-' . $version . '.bin'
+        : 'papermono-' . $version . '.bin';
     header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="papermono-' . YarboPaperDevice::FIRMWARE_VERSION . '.bin"');
-    header('X-PaperMono-Version: ' . YarboPaperDevice::FIRMWARE_VERSION);
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('X-PaperMono-Version: ' . $version);
     header('Content-Length: ' . (string) filesize($path));
     readfile($path);
     exit;

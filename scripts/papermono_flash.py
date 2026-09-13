@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""USB helper for M5Stack PaperMono (beta): list ports, flash firmware, push Wi-Fi config."""
+"""USB helper for M5Stack PaperMono and Paper Colour: list ports, flash firmware, push Wi-Fi config."""
 
 from __future__ import annotations
 
@@ -11,7 +11,27 @@ import time
 from pathlib import Path
 
 ROOT = Path(os.environ.get("PAPERMONO_ROOT") or Path(__file__).resolve().parents[1])
-FIRMWARE_BIN = ROOT / "firmware" / "papermono" / ".pio" / "build" / "papermono" / "firmware.bin"
+KIND_MONO = "papermono"
+KIND_COLOR = "papercolor"
+FIRMWARE_BINS = {
+    KIND_MONO: ROOT / "firmware" / "papermono" / ".pio" / "build" / "papermono" / "firmware.bin",
+    KIND_COLOR: ROOT / "firmware" / "papercolor" / ".pio" / "build" / "papercolor" / "firmware.bin",
+}
+PIO_HINTS = {
+    KIND_MONO: "pip3 install platformio && pio run -d firmware/papermono",
+    KIND_COLOR: "pip3 install platformio && pio run -e papercolor -d firmware/papercolor",
+}
+
+
+def normalize_kind(kind: str | None) -> str:
+    value = (kind or KIND_MONO).strip().lower().replace(" ", "")
+    if value in ("papercolor", "papercolour", "color", "colour"):
+        return KIND_COLOR
+    return KIND_MONO
+
+
+def firmware_bin(kind: str) -> Path:
+    return FIRMWARE_BINS[normalize_kind(kind)]
 
 
 def emit(payload: dict) -> None:
@@ -98,15 +118,19 @@ def send_config(port: str, ssid: str, password: str, panel_url: str, token: str,
     }
 
 
-def flash_firmware(port: str) -> dict:
-    if not FIRMWARE_BIN.is_file() or FIRMWARE_BIN.stat().st_size < 1024:
+def flash_firmware(port: str, kind: str = KIND_MONO) -> dict:
+    kind = normalize_kind(kind)
+    path = firmware_bin(kind)
+    label = "Paper Colour" if kind == KIND_COLOR else "PaperMono"
+    if not path.is_file() or path.stat().st_size < 1024:
         return {
             "ok": False,
             "error": (
-                "Firmware binary is not built yet. On the panel host, from the project root run: "
-                "pip3 install platformio && pio run -d firmware/papermono"
+                f"{label} firmware is not built yet. On the panel host, from the project root run: "
+                f"{PIO_HINTS[kind]}"
             ),
-            "firmware_path": str(FIRMWARE_BIN),
+            "firmware_path": str(path),
+            "kind": kind,
         }
 
     try:
@@ -128,7 +152,7 @@ def flash_firmware(port: str) -> dict:
         "write_flash",
         "-z",
         "0x0",
-        str(FIRMWARE_BIN),
+        str(path),
     ]
     try:
         esptool.main(argv)
@@ -139,7 +163,7 @@ def flash_firmware(port: str) -> dict:
     except Exception as exc:
         return {"ok": False, "error": f"esptool failed: {exc}"}
 
-    return {"ok": True, "firmware_path": str(FIRMWARE_BIN)}
+    return {"ok": True, "firmware_path": str(path), "kind": kind}
 
 
 def install_tools() -> dict:
@@ -192,6 +216,7 @@ def main() -> int:
         p.add_argument("--panel-url", required=True)
         p.add_argument("--token", required=True)
         p.add_argument("--name", default="PaperMono")
+        p.add_argument("--kind", default=KIND_MONO)
     args = parser.parse_args()
 
     if args.cmd == "ports":
@@ -204,7 +229,7 @@ def main() -> int:
         return 0 if result.get("ok") else 1
 
     if args.cmd == "flash":
-        flashed = flash_firmware(args.port)
+        flashed = flash_firmware(args.port, args.kind)
         if not flashed.get("ok"):
             emit(flashed)
             return 1
@@ -217,6 +242,7 @@ def main() -> int:
                 "ok": bool(configured.get("ok")),
                 "flashed": True,
                 "configured": bool(configured.get("ok")),
+                "kind": normalize_kind(args.kind),
                 "error": configured.get("error"),
                 "ack": configured.get("ack"),
             }

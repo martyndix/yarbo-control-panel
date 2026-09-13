@@ -11,17 +11,30 @@ Firmware for **[M5Stack PaperColor](https://docs.m5stack.com/en/core/PaperColor)
 
 This is **not** PaperS3 (touch, grayscale) and **not** PaperMono C153.
 
-## Build and flash
+## First-time setup (same as PaperMono)
 
-```bash
-cd firmware/papercolor
-pio run -e papercolor
-```
+On the **same machine that runs the panel**:
 
-Hold the side power/reset about **3 seconds** for download mode. Then flash with esptool / PlatformIO, same idea as PaperMono. USB Wi-Fi config uses the same `CFG:{...}` JSON as PaperMono (`docs/papermono.md`).
+1. Build the Colour firmware (once):
 
-Point `panel_url` at this control panel. Compact status is `GET /api/device.php?action=compact`.
+   ```bash
+   pip3 install platformio
+   pio run -e papercolor -d firmware/papercolor
+   ```
+
+2. Plug the PaperColor in by USB. Hold the side power/reset about **3 seconds** for download mode (M5Stack docs).
+3. Open the panel → **Settings → E-paper companions**.
+4. Choose **Paper Colour** (not PaperMono). That is what selects the Colour binary — the USB port list is the same.
+5. Refresh USB ports and select the tablet. If the list fails, click **Install USB tools**.
+6. Enter 2.4 GHz Wi-Fi, the panel URL as the tablet will reach it (not `localhost`), and a device name.
+7. Click **Flash firmware & send Wi-Fi**. Leave Settings open for one to two minutes.
+
+**Send Wi-Fi only** reuses already-flashed firmware and pushes the same `CFG:{...}` JSON as PaperMono.
+
+Do not flash with PlatformIO env `papermono` — that is the grayscale touch UI.
 
 ## Pages
 
 Yarbo Home / Status when the robot is online. Extra pages when Powerwall or Lymow modules are enabled (battery %, solar/draw, camera up/down). Do not expect 15-second redraws — Spectra 6 is a set-and-leave sign.
+
+Compact status is `GET /api/device.php?action=compact`.

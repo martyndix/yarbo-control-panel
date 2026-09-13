@@ -5,15 +5,18 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * PaperMono companion devices (beta): pairing tokens, compact status, USB flash.
- * Target hardware: M5Stack PaperMono SKU C153 (https://docs.m5stack.com/en/core/PaperMono).
+ * Paper companion devices (beta): pairing tokens, compact status, USB flash.
+ * Hardware: M5Stack PaperMono SKU C153, or PaperColor (Spectra 6, no touch).
  */
 final class YarboPaperDevice
 {
+    public const KIND_MONO = 'papermono';
+    public const KIND_COLOR = 'papercolor';
     public const FIRMWARE_VERSION = '0.1.2-beta';
+    public const FIRMWARE_VERSION_COLOR = '0.2.0-color';
     private const PLANS_CACHE_TTL_S = 300;
-    // PlatformIO env is papermono, so the binary lands in .pio/build/papermono/
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
+    public const FIRMWARE_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware.bin';
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -24,14 +27,20 @@ final class YarboPaperDevice
         return $this->projectRoot . '/data/papermono-devices.json';
     }
 
-    public function firmwarePath(): string
+    public function firmwarePath(?string $kind = null): string
     {
-        return $this->projectRoot . '/' . self::FIRMWARE_RELATIVE;
+        $relative = $this->normalizeKind($kind) === self::KIND_COLOR
+            ? self::FIRMWARE_RELATIVE_COLOR
+            : self::FIRMWARE_RELATIVE;
+
+        return $this->projectRoot . '/' . $relative;
     }
 
-    public function firmwareAvailable(): bool
+    public function firmwareAvailable(?string $kind = null): bool
     {
-        return is_file($this->firmwarePath()) && filesize($this->firmwarePath()) > 1024;
+        $path = $this->firmwarePath($kind);
+
+        return is_file($path) && filesize($path) > 1024;
     }
 
     /**
@@ -42,8 +51,24 @@ final class YarboPaperDevice
         return [
             'beta' => true,
             'firmware_version' => self::FIRMWARE_VERSION,
-            'firmware_built' => $this->firmwareAvailable(),
+            'firmware_built' => $this->firmwareAvailable(self::KIND_MONO),
             'firmware_path' => self::FIRMWARE_RELATIVE,
+            'firmware' => [
+                self::KIND_MONO => [
+                    'label' => 'PaperMono',
+                    'version' => self::FIRMWARE_VERSION,
+                    'built' => $this->firmwareAvailable(self::KIND_MONO),
+                    'path' => self::FIRMWARE_RELATIVE,
+                    'pio' => 'pio run -d firmware/papermono',
+                ],
+                self::KIND_COLOR => [
+                    'label' => 'Paper Colour',
+                    'version' => self::FIRMWARE_VERSION_COLOR,
+                    'built' => $this->firmwareAvailable(self::KIND_COLOR),
+                    'path' => self::FIRMWARE_RELATIVE_COLOR,
+                    'pio' => 'pio run -e papercolor -d firmware/papercolor',
+                ],
+            ],
             'devices' => $this->publicDevices(),
         ];
     }
@@ -69,13 +94,15 @@ final class YarboPaperDevice
      */
     public function register(array $input): array
     {
-        $name = trim((string) ($input['name'] ?? 'PaperMono'));
+        $kind = $this->normalizeKind($input['kind'] ?? $input['hardware'] ?? null);
+        $name = trim((string) ($input['name'] ?? ''));
         if ($name === '') {
-            $name = 'PaperMono';
+            $name = $kind === self::KIND_COLOR ? 'Paper Colour' : 'PaperMono';
         }
         $device = [
             'id' => bin2hex(random_bytes(4)),
             'name' => $name,
+            'kind' => $kind,
             'token' => bin2hex(random_bytes(16)),
             'created_at' => gmdate('c'),
             'last_seen_at' => null,
@@ -129,6 +156,10 @@ final class YarboPaperDevice
             $device['last_seen_at'] = gmdate('c');
             if ($fwReported !== null && $fwReported !== '') {
                 $device['fw_reported'] = $fwReported;
+                $inferred = $this->kindFromFirmware($fwReported);
+                if ($inferred !== null) {
+                    $device['kind'] = $inferred;
+                }
             }
         }
         unset($device);
@@ -138,8 +169,9 @@ final class YarboPaperDevice
     /**
      * @return array<string, mixed>
      */
-    public function compactStatus(): array
+    public function compactStatus(?string $kind = null): array
     {
+        $latest = $this->firmwareVersionForKind($kind);
         $agent = YarboMqttAgentClient::fromEnv();
         $result = $agent->telemetry(4.0, false);
         $raw = $result['raw'] ?? null;
@@ -147,7 +179,7 @@ final class YarboPaperDevice
             return [
                 'ok' => false,
                 'error' => (string) ($result['error'] ?? 'telemetry unavailable'),
-                'firmware_latest' => self::FIRMWARE_VERSION,
+                'firmware_latest' => $latest,
             ] + $this->companionCompact();
         }
 
@@ -206,7 +238,7 @@ final class YarboPaperDevice
             'net_module' => self::formatNetModule($network['net_module_status'] ?? null),
             'plan_activity' => self::clip($planActivity, 40),
             'hold_controller' => (bool) ($result['hold_controller'] ?? false),
-            'firmware_latest' => self::FIRMWARE_VERSION,
+            'firmware_latest' => $latest,
             'updated_at' => $parsed['updated_at'] ?? gmdate('c'),
         ] + $this->companionCompact();
     }
@@ -235,8 +267,9 @@ final class YarboPaperDevice
      *
      * @return array<string, mixed>
      */
-    public function compactPlans(bool $forceRefresh = false): array
+    public function compactPlans(bool $forceRefresh = false, ?string $kind = null): array
     {
+        $latest = $this->firmwareVersionForKind($kind);
         $cachePath = $this->projectRoot . '/data/papermono-plans.json';
         if (!$forceRefresh && is_file($cachePath)) {
             $raw = file_get_contents($cachePath);
@@ -245,7 +278,7 @@ final class YarboPaperDevice
             if (is_array($cached) && $at !== false && (time() - $at) < self::PLANS_CACHE_TTL_S) {
                 $cached['ok'] = true;
                 $cached['cached'] = true;
-                $cached['firmware_latest'] = self::FIRMWARE_VERSION;
+                $cached['firmware_latest'] = $latest;
 
                 return $cached;
             }
@@ -279,7 +312,7 @@ final class YarboPaperDevice
             'source' => (string) ($fetched['via'] ?? 'none'),
             'note' => $this->plansNote($fetched, $plans),
             'updated_at' => gmdate('c'),
-            'firmware_latest' => self::FIRMWARE_VERSION,
+            'firmware_latest' => $latest,
         ];
 
         $dir = $this->projectRoot . '/data';
@@ -325,14 +358,19 @@ final class YarboPaperDevice
      */
     public function flash(array $input): array
     {
+        $kind = $this->normalizeKind($input['kind'] ?? null);
         $port = trim((string) ($input['port'] ?? ''));
         $ssid = trim((string) ($input['wifi_ssid'] ?? ''));
         $password = (string) ($input['wifi_password'] ?? '');
         $panelUrl = rtrim(trim((string) ($input['panel_url'] ?? '')), '/');
-        $name = trim((string) ($input['name'] ?? 'PaperMono'));
+        $name = trim((string) ($input['name'] ?? ''));
+        if ($name === '') {
+            $name = $kind === self::KIND_COLOR ? 'Paper Colour' : 'PaperMono';
+        }
+        $label = $kind === self::KIND_COLOR ? 'Paper Colour' : 'PaperMono';
 
         if ($port === '') {
-            return ['ok' => false, 'error' => 'Select the USB serial port for the PaperMono.'];
+            return ['ok' => false, 'error' => 'Select the USB serial port for the ' . $label . '.'];
         }
         if ($ssid === '') {
             return ['ok' => false, 'error' => 'Wi-Fi name (SSID) is required.'];
@@ -341,7 +379,7 @@ final class YarboPaperDevice
             return ['ok' => false, 'error' => 'Panel URL must start with http:// or https://'];
         }
 
-        $registered = $this->register(['name' => $name]);
+        $registered = $this->register(['name' => $name, 'kind' => $kind]);
         $result = $this->runPython([
             'flash',
             '--port', $port,
@@ -350,6 +388,7 @@ final class YarboPaperDevice
             '--panel-url', $panelUrl,
             '--token', (string) $registered['token'],
             '--name', $name,
+            '--kind', $kind,
         ], 180.0);
         $result['device'] = $registered;
         if (!($result['ok'] ?? false)) {
@@ -365,24 +404,28 @@ final class YarboPaperDevice
      */
     public function configureUsb(array $input): array
     {
+        $kind = $this->normalizeKind($input['kind'] ?? null);
         $port = trim((string) ($input['port'] ?? ''));
         $ssid = trim((string) ($input['wifi_ssid'] ?? ''));
         $password = (string) ($input['wifi_password'] ?? '');
         $panelUrl = rtrim(trim((string) ($input['panel_url'] ?? '')), '/');
         $token = trim((string) ($input['token'] ?? ''));
-        $name = trim((string) ($input['name'] ?? 'PaperMono'));
+        $name = trim((string) ($input['name'] ?? ''));
+        if ($name === '') {
+            $name = $kind === self::KIND_COLOR ? 'Paper Colour' : 'PaperMono';
+        }
 
         if ($port === '' || $ssid === '' || $panelUrl === '') {
             return ['ok' => false, 'error' => 'USB port, Wi-Fi name, and panel URL are required.'];
         }
 
         if ($token === '') {
-            $device = $this->register(['name' => $name]);
+            $device = $this->register(['name' => $name, 'kind' => $kind]);
             $token = (string) $device['token'];
         } else {
             $device = $this->findByToken($token);
             if ($device === null) {
-                return ['ok' => false, 'error' => 'Unknown device token. Leave it blank to create a new PaperMono entry.'];
+                return ['ok' => false, 'error' => 'Unknown device token. Leave it blank to create a new companion entry.'];
             }
             $device = $this->publicDevice($device, true);
         }
@@ -395,6 +438,7 @@ final class YarboPaperDevice
             '--panel-url', $panelUrl,
             '--token', $token,
             '--name', $name,
+            '--kind', $kind,
         ], 45.0);
         $result['device'] = $device;
 
@@ -497,6 +541,60 @@ final class YarboPaperDevice
         return 'python3';
     }
 
+    public function normalizeKind(mixed $kind): string
+    {
+        $value = strtolower(str_replace([' ', '_'], '', (string) $kind));
+        if (in_array($value, ['papercolor', 'papercolour', 'color', 'colour'], true)) {
+            return self::KIND_COLOR;
+        }
+
+        return self::KIND_MONO;
+    }
+
+    public function kindLabel(string $kind): string
+    {
+        return $this->normalizeKind($kind) === self::KIND_COLOR ? 'Paper Colour' : 'PaperMono';
+    }
+
+    public function firmwareVersionForKind(?string $kind): string
+    {
+        return $this->normalizeKind($kind) === self::KIND_COLOR
+            ? self::FIRMWARE_VERSION_COLOR
+            : self::FIRMWARE_VERSION;
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     */
+    public function deviceKind(array $device): string
+    {
+        $inferred = $this->kindFromFirmware((string) ($device['fw_reported'] ?? ''));
+        if ($inferred !== null) {
+            return $inferred;
+        }
+        if (isset($device['kind']) && (string) $device['kind'] !== '') {
+            return $this->normalizeKind($device['kind']);
+        }
+
+        return self::KIND_MONO;
+    }
+
+    private function kindFromFirmware(string $fw): ?string
+    {
+        $fw = strtolower($fw);
+        if ($fw === '') {
+            return null;
+        }
+        if (str_contains($fw, 'color') || str_contains($fw, 'colour')) {
+            return self::KIND_COLOR;
+        }
+        if (str_contains($fw, 'beta') || str_starts_with($fw, '0.1')) {
+            return self::KIND_MONO;
+        }
+
+        return null;
+    }
+
     /**
      * @return array{devices: list<array<string, mixed>>}
      */
@@ -536,9 +634,12 @@ final class YarboPaperDevice
      */
     private function publicDevice(array $device, bool $includeToken = false): array
     {
+        $kind = $this->deviceKind($device);
         $row = [
             'id' => (string) ($device['id'] ?? ''),
-            'name' => (string) ($device['name'] ?? 'PaperMono'),
+            'name' => (string) ($device['name'] ?? $this->kindLabel($kind)),
+            'kind' => $kind,
+            'kind_label' => $this->kindLabel($kind),
             'created_at' => $device['created_at'] ?? null,
             'last_seen_at' => $device['last_seen_at'] ?? null,
             'fw_reported' => $device['fw_reported'] ?? null,

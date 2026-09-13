@@ -1,6 +1,6 @@
 # PaperMono companion (beta)
 
-This firmware and Settings flash path are built for **M5Stack PaperMono, SKU C153** (the full unit with NFC and LoRa). That is the board whose datasheet you pasted: ESP32-S3R8, 3.97″ SSD1677 480×800 e-paper, FT6336G touch.
+This firmware and Settings flash path are built for **M5Stack PaperMono, SKU C153** (the full unit with NFC and LoRa). That is the board whose datasheet you pasted: ESP32-S3R8, 3.97″ SSD1677 480×800 e-paper, FT6336G touch. Paper Colour (Spectra 6, no touch) uses the same Settings page: pick **Paper Colour** so the panel flashes `firmware/papercolor/` instead. See `docs/papercolor.md`.
 
 | | |
 | --- | --- |
@@ -79,7 +79,7 @@ On the **same machine that runs the panel**:
    ```
 
 2. Plug the PaperMono in by USB. To enter download mode, hold the power button about 2 seconds until the red LED blinks, then release (M5Stack docs). First boot of our firmware shows a setup screen until config arrives.
-3. Open the panel → **Settings → PaperMono companion**.
+3. Open the panel → **Settings → E-paper companions** and leave **PaperMono** selected (not Paper Colour).
 4. Refresh USB ports and select the PaperMono serial device. If the list fails because `pyserial` / `esptool` are missing, click **Install USB tools** (that runs `pip` into the panel’s `.venv`).
 5. Enter:
    - Wi-Fi SSID and password (**2.4 GHz only**)

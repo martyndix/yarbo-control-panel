@@ -81,7 +81,7 @@ Open the panel in a browser and you can:
 - **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: Home (Stop / Dock / Pause / Lights), plus Status, Health, and Plans pages. Flash and Wi-Fi from **Settings**. See [PaperMono](#papermono-companion-beta)
 - **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / rain / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
 - **Modules (v2.0)** — header switcher for Yarbo, Tesla Powerwall, and Lymow. Powerwall: [docs/powerwall.md](docs/powerwall.md) (Tesla cloud by default). Lymow: LAN RTSP camera. Vestaboard live module is chosen in Settings.
-- **Paper Colour companion (beta)** — no-touch M5Stack PaperColor. See [docs/papercolor.md](docs/papercolor.md).
+- **Paper Colour companion (beta)** — no-touch M5Stack PaperColor. Same Settings flash path as PaperMono: pick **Paper Colour**, then flash. See [docs/papercolor.md](docs/papercolor.md).
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
 Opening the panel only watches live telemetry. It does **not** take the MQTT controller role, so a job already running in the official app should keep going. Starting a plan, going to a waypoint, or turning **Controller On** (needed for lights/drive) does take that role — only one app can command at a time.
@@ -94,9 +94,9 @@ Opening the panel only watches live telemetry. It does **not** take the MQTT con
 Browser  →  PHP web server  →  Local MQTT (port 1883)  →  Yarbo robot
            (this project)         on your LAN              (controls + live status)
 
-PaperMono (beta, optional):
+PaperMono / Paper Colour (beta, optional):
 E-ink tablet  →  HTTP JSON  →  this panel  →  MQTT  →  robot
-(flash/Wi-Fi over USB from Settings)
+(pick hardware in Settings, flash/Wi-Fi over USB)
 
 Optional (map/plan reads only):
 Browser  →  PHP  →  cloud_bridge.py  →  Yarbo cloud  →  robot data
@@ -130,7 +130,7 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 | **Same network as Yarbo** | The host must reach the robot on port **1883** |
 | **Python 3 + yarbo-data-sdk** | Optional — cloud map/plan reads (`./scripts/install.sh`) |
 | **Python 3 + python-yarbo** | Recommended for controls — MQTT agent (`scripts/mqtt_agent.py`); install puts it in `.venv` |
-| **PaperMono (optional)** | USB flash from Settings; **Install USB tools** adds `pyserial` + `esptool`. Building firmware needs PlatformIO. See [PaperMono](#papermono-companion-beta) |
+| **PaperMono / Paper Colour (optional)** | USB flash from Settings → **E-paper companions**; pick hardware so the matching firmware is written. **Install USB tools** adds `pyserial` + `esptool`. Building firmware needs PlatformIO. |
 | **Vestaboard Note (optional)** | Local API (LAN + local key) or Cloud API (Vestaboard token). Enable in Settings. See [Vestaboard Note](#vestaboard-note-optional) |
 | **ffmpeg** | Only relevant if experimenting with cameras (not working for most users — see below) |
 
@@ -187,7 +187,7 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Connect robot** | Pi/host must be on the same network as Yarbo; port **1883** reachable |
 | **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
 | **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
-| **PaperMono (beta)** | Settings → PaperMono companion — USB flash + Wi-Fi. See [PaperMono](#papermono-companion-beta) |
+| **PaperMono / Paper Colour (beta)** | Settings → E-paper companions — pick hardware, USB flash + Wi-Fi. See [PaperMono](#papermono-companion-beta) and [docs/papercolor.md](docs/papercolor.md) |
 | **Vestaboard Note (optional)** | Settings → enable Vestaboard Note — Local or Cloud API. See [Vestaboard Note](#vestaboard-note-optional) |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
 | **Update panel** | Settings → **Panel updates**, or `./scripts/update.sh` (see [Updating](#updating-an-existing-install)) |
@@ -210,7 +210,7 @@ Built for **[M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperM
 **On the e-ink screen:** Home still has battery plus **Stop**, **Dock**, **Pause**, and **Lights**. The two user keys cycle **Home → Status → Health → Plans** (and back). Status and Health show the same tiles as the web cards. Plans lists work plans — tap a row, then **START**. No map, cameras, or hold-to-drive (e-ink is too slow).
 
 1. Plug the PaperMono into the computer that runs this panel.
-2. Open **Settings → PaperMono companion**.
+2. Open **Settings → E-paper companions** and pick **PaperMono** (or **Paper Colour** for the Spectra 6 tablet).
 3. Enter 2.4 GHz Wi-Fi, the panel URL (how the tablet reaches this host), and flash firmware.
 
 Build the binary once on that host (`pip3 install platformio && pio run -d firmware/papermono`). If USB ports fail to list, use **Install USB tools** on that Settings page (`pyserial` + `esptool`). Full walkthrough: [`docs/papermono.md`](docs/papermono.md).
