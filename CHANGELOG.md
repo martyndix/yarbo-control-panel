@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.11] - 2026-09-13
+
+### Added
+- Settings **Lymow name**, shown on the Lymow page (uses the Lymow-app nickname when that field is blank).
+
+### Changed
+- Vestaboard view pills (Yarbo / Powerwall / Lymow / ALL) sit on the **Vestaboard Note** card so they are not mixed with the module tabs.
+- The Yarbo name under the title only appears on the Yarbo page.
+
 ## [2.0.10] - 2026-09-13
 
 ### Added

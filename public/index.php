@@ -79,13 +79,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h1 id="panel-title"><?= $panelTitleSafe ?></h1>
                 <p class="robot-name hidden" id="device-name"></p>
                 <nav class="module-switcher hidden" id="module-switcher" aria-label="Modules"></nav>
-                <nav class="vestaboard-live-switch hidden" id="vestaboard-live-switch" aria-label="Vestaboard view">
-                    <span class="vestaboard-live-label">Note</span>
-                    <button type="button" class="module-switcher-btn" data-vestaboard-live="yarbo">Yarbo</button>
-                    <button type="button" class="module-switcher-btn" data-vestaboard-live="powerwall">Powerwall</button>
-                    <button type="button" class="module-switcher-btn" data-vestaboard-live="lymow">Lymow</button>
-                    <button type="button" class="module-switcher-btn" data-vestaboard-live="batteries">ALL</button>
-                </nav>
             </div>
             <div class="settings-button-wrap">
                 <button
@@ -147,8 +140,16 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         </section>
 
         <section class="card panel-section vestaboard-card hidden" id="vestaboard-card" data-panel-id="vestaboard" data-module="shared">
-            <div class="section-header section-header--simple">
-                <h2>Vestaboard Note</h2>
+            <div class="section-header section-header--simple vestaboard-card-header">
+                <div class="vestaboard-card-heading">
+                    <h2>Vestaboard Note</h2>
+                    <nav class="vestaboard-live-switch hidden" id="vestaboard-live-switch" aria-label="Vestaboard view">
+                        <button type="button" class="module-switcher-btn" data-vestaboard-live="yarbo">Yarbo</button>
+                        <button type="button" class="module-switcher-btn" data-vestaboard-live="powerwall">Powerwall</button>
+                        <button type="button" class="module-switcher-btn" data-vestaboard-live="lymow">Lymow</button>
+                        <button type="button" class="module-switcher-btn" data-vestaboard-live="batteries">ALL</button>
+                    </nav>
+                </div>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
             <div class="vestaboard-preview vestaboard-preview--dashboard" id="vestaboard-board" aria-label="Vestaboard Note 3 by 15 live display"></div>
@@ -510,7 +511,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         <section class="card panel-section module-pane-hidden" data-panel-id="lymow" data-module="lymow" id="lymow-card">
             <div class="section-header section-header--simple">
-                <h2 id="lymow-heading">Lymow</h2>
+                <div>
+                    <h2 id="lymow-heading">Lymow</h2>
+                    <p class="robot-name hidden" id="lymow-device-name"></p>
+                </div>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
             <div class="status-grid">
@@ -589,7 +593,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 >
                             </label>
                             <label class="settings-field">
-                                <span class="label">Robot name</span>
+                                <span class="label">Yarbo name</span>
                                 <input
                                     type="text"
                                     id="settings-robot-name"
@@ -600,7 +604,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     spellcheck="true"
                                 >
                             </label>
-                            <p class="hint">Shown under the panel title and on PaperMono. Leave blank to hide it. Do not use the serial number.</p>
+                            <p class="hint">Shown on the Yarbo page under the title, and on PaperMono. Leave blank to hide it. Do not use the serial number.</p>
                             <p id="settings-connection-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-connection-test">Test local connection</button>
                         </section>
@@ -644,7 +648,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-modules-section">
                             <h3 class="settings-subtitle">Modules</h3>
-                            <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard shows the <strong>live</strong> module — change it here, with the <strong>Note</strong> pills at the top of the page, or on PaperMono’s <strong>NOTE</strong> page (Quiet hours and Vestaboard-app hold still apply). ALL does not need Powerwall or Lymow turned on as dashboards.</p>
+                            <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard shows the <strong>live</strong> module — change it here, with the pills on the <strong>Vestaboard Note</strong> card, or on PaperMono’s <strong>NOTE</strong> page (Quiet hours and Vestaboard-app hold still apply). ALL does not need Powerwall or Lymow turned on as dashboards.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-powerwall" name="module_powerwall">
                                 <span>Tesla Powerwall (house draw, solar, battery)</span>
@@ -690,6 +694,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <div class="settings-update-actions">
                                 <button type="button" class="btn btn-secondary" id="settings-lymow-login">Sign in / Test Lymow</button>
                             </div>
+                            <label class="settings-field">
+                                <span class="label">Lymow name</span>
+                                <input type="text" id="settings-lymow-name" name="lymow_display_name" maxlength="48" placeholder="e.g. Front lawn" autocomplete="off" spellcheck="true">
+                            </label>
+                            <p class="hint">Shown on the Lymow page. Leave blank to use the name from the Lymow app when it is available.</p>
                             <label class="settings-field">
                                 <span class="label">Lymow IP (camera)</span>
                                 <input type="text" id="settings-lymow-host" name="lymow_host" autocomplete="off" spellcheck="false" inputmode="decimal" placeholder="192.168.40.154">

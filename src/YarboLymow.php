@@ -146,6 +146,7 @@ final class YarboLymow
     public function publicView(): array
     {
         $config = $this->load();
+        $cloud = $this->readCloudState();
 
         return [
             'host' => $config['host'],
@@ -158,6 +159,8 @@ final class YarboLymow
             'password_set' => $config['password'] !== '',
             'signed_in' => $this->cloudSignedIn(),
             'display_name' => $config['display_name'],
+            'device_name' => $this->apiDeviceName($cloud),
+            'page_name' => $this->pageName($config, $cloud),
         ];
     }
 
@@ -200,11 +203,45 @@ final class YarboLymow
             'charging_label' => !empty($cloud['is_charging']) ? 'Yes' : (!empty($cloud['is_recharging']) ? 'Returning' : 'No'),
             'mow_progress' => $showProgress ? $progress : null,
             'mow_progress_label' => $showProgress ? $progress . '%' : '—',
-            'device_name' => $cloud['device_name'] ?? null,
+            'device_name' => $this->apiDeviceName($cloud),
             'display_name' => $config['display_name'],
+            'page_name' => $this->pageName($config, $cloud),
             'cloud_updated' => $cloud['fetched_at'] ?? null,
             'cloud_error' => $this->cloudHint($cloud, $battery),
         ];
+    }
+
+    /**
+     * Custom Settings name, else a real Lymow-app nickname (not the generic product word).
+     *
+     * @param array<string, mixed> $config
+     * @param array<string, mixed> $cloud
+     */
+    public function pageName(array $config, array $cloud = []): string
+    {
+        $custom = YarboHub::normalizeDisplayName((string) ($config['display_name'] ?? ''));
+        if ($custom !== '') {
+            return $custom;
+        }
+
+        return $this->apiDeviceName($cloud);
+    }
+
+    /**
+     * @param array<string, mixed> $cloud
+     */
+    private function apiDeviceName(array $cloud): string
+    {
+        $api = YarboHub::normalizeDisplayName((string) ($cloud['device_name'] ?? ''));
+        if ($api === '') {
+            return '';
+        }
+        $generic = strtolower($api);
+        if ($generic === 'lymow' || str_starts_with($generic, 'lymow ')) {
+            return '';
+        }
+
+        return $api;
     }
 
     public function probe(): array

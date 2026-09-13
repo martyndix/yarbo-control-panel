@@ -41,7 +41,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 - **Status:** the same tiles as the web Status card (including heading and rain)
 - **Health:** the same tiles as Connection & Health (Wi-Fi, pad, RTK, and so on)
 - **Plans:** named work plans. Tap a row to select, tap **START** to run it from 0% (same MQTT start as the web panel)
-- **Note:** Vestaboard live view. Tap **YARBO**, **WALL** (Powerwall), **LYMOW**, or **ALL** (three batteries). Same choice as the web Note pills and Settings. Needs PaperMono **0.1.3-beta**.
+- **Note:** Vestaboard live view. Tap **YARBO**, **WALL** (Powerwall), **LYMOW**, or **ALL** (three batteries). Same choice as the Vestaboard Note card pills and Settings. Needs PaperMono **0.1.3-beta**.
 - The two hardware keys cycle **Home → Status → Health → Plans → Note**. Stop / Dock are Home buttons only.
 - Tap above the Home buttons (or the pager on other pages) also changes page if the keys are not mapped.
 

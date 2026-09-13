@@ -892,7 +892,7 @@ def merge_state(
         "online": str(info.get("deviceState") or device.get("deviceState") or "").lower() == "online"
         or bool(mqtt_state.get("mqtt_online")),
         "device_thing_name": bundle.get("thing"),
-        "device_name": str(device.get("deviceName") or device.get("deviceType") or "Lymow"),
+        "device_name": str(device.get("deviceName") or "").strip(),
         "sn": str(info.get("sn") or device.get("sn") or ""),
         "ip_address": ip,
         "software_version": str(info.get("softwareVersion") or mqtt_state.get("softwareVersion") or ""),

@@ -15,6 +15,8 @@ Settings → **Lymow**:
 
 Leave the password blank on later saves to keep the stored one.
 
+**Lymow name** (optional) is shown on the Lymow page. Leave it blank to use the nickname from the Lymow app when that is published.
+
 ## Camera
 
 LAN IP of the mower. The panel always uses `rtsp://IP:10022/h264ESVideoTest` (same path as Homebridge CameraUI). Needs `ffmpeg` on the panel host (`sudo apt install -y ffmpeg` on a Pi).
