@@ -54,6 +54,7 @@ final class YarboLymow
             'email' => '',
             'password' => '',
             'region' => 'auto',
+            'display_name' => '',
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -80,6 +81,7 @@ final class YarboLymow
             'email' => trim((string) ($decoded['email'] ?? '')),
             'password' => (string) ($decoded['password'] ?? ''),
             'region' => $region,
+            'display_name' => YarboHub::normalizeDisplayName((string) ($decoded['display_name'] ?? '')),
         ];
     }
 
@@ -111,6 +113,10 @@ final class YarboLymow
         if (array_key_exists('lymow_region', $input) || array_key_exists('region', $input)) {
             $region = strtolower(trim((string) ($input['lymow_region'] ?? $input['region'] ?? 'auto'))) ?: 'auto';
         }
+        $displayName = $current['display_name'];
+        if (array_key_exists('lymow_display_name', $input) || array_key_exists('display_name', $input)) {
+            $displayName = YarboHub::normalizeDisplayName((string) ($input['lymow_display_name'] ?? $input['display_name'] ?? ''));
+        }
         $next = [
             'host' => $host,
             'rtsp_url' => self::rtspForHost($host),
@@ -120,6 +126,7 @@ final class YarboLymow
             'email' => $email,
             'password' => $password,
             'region' => $region,
+            'display_name' => $displayName,
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -150,6 +157,7 @@ final class YarboLymow
             'region' => $config['region'],
             'password_set' => $config['password'] !== '',
             'signed_in' => $this->cloudSignedIn(),
+            'display_name' => $config['display_name'],
         ];
     }
 
@@ -193,6 +201,7 @@ final class YarboLymow
             'mow_progress' => $showProgress ? $progress : null,
             'mow_progress_label' => $showProgress ? $progress . '%' : '—',
             'device_name' => $cloud['device_name'] ?? null,
+            'display_name' => $config['display_name'],
             'cloud_updated' => $cloud['fetched_at'] ?? null,
             'cloud_error' => $this->cloudHint($cloud, $battery),
         ];

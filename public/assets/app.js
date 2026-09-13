@@ -12,7 +12,8 @@ function isCommandAckError(msg) {
 
 const els = {
     battery: document.getElementById('battery'),
-    robotName: document.getElementById('robot-name'),
+    robotName: document.getElementById('device-name'),
+    vestaboardLiveSwitch: document.getElementById('vestaboard-live-switch'),
     state: document.getElementById('state'),
     charging: document.getElementById('charging'),
     heading: document.getElementById('heading'),
@@ -1957,6 +1958,9 @@ function applyHubFromStatus(data) {
     setActiveModule(active, false);
     updatePowerwallDashboard(data.powerwall);
     updateLymowDashboard(data.lymow);
+    if (data.vestaboard) {
+        applyVestaboardLiveSwitch(data);
+    }
 }
 
 function setActiveModule(id, persist = true) {
@@ -2418,6 +2422,7 @@ function updateVestaboardDashboard(data) {
     const board = data.vestaboard;
     const enabled = Boolean(board?.enabled);
     els.vestaboardCard.classList.toggle('hidden', !enabled);
+    applyVestaboardLiveSwitch(data);
     if (!enabled) return;
     renderVestaboardPreview(board.lines, els.vestaboardBoard, board.codes);
     if (els.vestaboardUpdatedAt) {
@@ -2455,6 +2460,52 @@ function updateVestaboardDashboard(data) {
     }
     if (board.pending && !board.external_hold) {
         syncVestaboardIfPending();
+    }
+}
+
+function applyVestaboardLiveSwitch(data) {
+    if (!els.vestaboardLiveSwitch) return;
+    const enabled = Boolean(data?.vestaboard?.enabled);
+    els.vestaboardLiveSwitch.classList.toggle('hidden', !enabled);
+    if (!enabled) return;
+    const live = data?.hub?.vestaboard_live || data?.vestaboard_live || 'yarbo';
+    els.vestaboardLiveSwitch.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-vestaboard-live') === live);
+    });
+    if (els.settingsVestaboardLive && [...els.settingsVestaboardLive.options].some((o) => o.value === live)) {
+        els.settingsVestaboardLive.value = live;
+    }
+}
+
+async function setVestaboardLiveView(id, button) {
+    if (button) button.disabled = true;
+    els.vestaboardLiveSwitch?.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-vestaboard-live') === id);
+    });
+    try {
+        const res = await fetch('/api/vestaboard.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'live', vestaboard_live: id }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not change Vestaboard view');
+        applyVestaboardLiveSwitch({
+            hub: data.hub || { vestaboard_live: data.vestaboard_live || id },
+            vestaboard: { enabled: true },
+            vestaboard_live: data.vestaboard_live || id,
+        });
+        if (data.lines) {
+            renderVestaboardPreview(data.lines, els.vestaboardBoard, data.codes);
+        }
+        const label = { yarbo: 'Yarbo', powerwall: 'Powerwall', lymow: 'Lymow', batteries: 'ALL' }[id] || id;
+        showToast(`Vestaboard: ${label}`, 'success');
+        fetchStatus().catch(() => {});
+    } catch (err) {
+        showToast(err.message || 'Could not change Vestaboard view', 'error');
+        fetchStatus().catch(() => {});
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -4906,6 +4957,12 @@ els.moduleSwitcher?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-module-id]');
     if (!btn) return;
     setActiveModule(btn.getAttribute('data-module-id') || 'yarbo');
+});
+els.vestaboardLiveSwitch?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-vestaboard-live]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-vestaboard-live') || 'yarbo';
+    setVestaboardLiveView(id, btn);
 });
 document.querySelectorAll('input[name="powerwall-transport"]').forEach((radio) => {
     radio.addEventListener('change', () => applyPowerwallTransport());

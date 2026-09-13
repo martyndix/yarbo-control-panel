@@ -105,6 +105,22 @@ header h1 {
     background: rgba(61, 154, 95, 0.15);
 }
 
+.vestaboard-live-switch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.vestaboard-live-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 0.15rem;
+}
+
 .module-pane-hidden {
     display: none !important;
 }

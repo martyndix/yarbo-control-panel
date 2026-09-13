@@ -519,6 +519,27 @@ final class YarboVestaboard
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function setLiveModule(string $id): array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        if (!$hub->save(['vestaboard_live' => $id])) {
+            return ['ok' => false, 'error' => 'Could not save the Vestaboard live view.'];
+        }
+        $saved = [
+            'ok' => true,
+            'vestaboard_live' => $hub->vestaboardLive(),
+            'hub' => $hub->publicView(),
+        ];
+        if (!$this->load()['enabled']) {
+            return $saved;
+        }
+
+        return $this->sendNow() + $saved;
+    }
+
+    /**
      * @param array<string, mixed>|null $parsed
      * @return array{ok: bool, online: bool, lines: list<string>, codes: list<list<int>>, verb: string, error?: string}
      */
@@ -529,10 +550,10 @@ final class YarboVestaboard
         if ($live === YarboHub::LIVE_BATTERIES) {
             return $this->batteriesLayout($parsed, $online);
         }
-        if ($live === YarboHub::MODULE_POWERWALL && $hub->enabled($live)) {
+        if ($live === YarboHub::MODULE_POWERWALL) {
             return (new YarboPowerwall($this->projectRoot))->vestaboardLayout();
         }
-        if ($live === YarboHub::MODULE_LYMOW && $hub->enabled($live)) {
+        if ($live === YarboHub::MODULE_LYMOW) {
             return (new YarboLymow($this->projectRoot))->vestaboardLayout();
         }
         if ($parsed !== null || $online !== null) {

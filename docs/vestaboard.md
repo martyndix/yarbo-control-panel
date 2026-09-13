@@ -93,7 +93,7 @@ If the flaps no longer match the last layout this panel wrote, live status pause
 
 The dashboard shows **Resume previous status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
-Settings → **Modules** chooses which page is **live** on the Note: Yarbo, Powerwall, Lymow, or **Yarbo + Powerwall + Lymow batteries**. App-hold and Quiet hours still apply. The batteries page is available even when Powerwall or Lymow are not enabled as dashboards. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), **STATE** plus the work label or mowing progress **%**, and **CHARGING YES/NO**.
+The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the **Note** pills under the page title (shown when the Note is enabled), or PaperMono’s **NOTE** page after flashing **0.1.3-beta**. App-hold and Quiet hours still apply. ALL is available even when Powerwall or Lymow are not enabled as dashboards. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), **STATE** plus the work label or mowing progress **%**, and **CHARGING YES/NO**.
 
 ## Setup (either API)
 

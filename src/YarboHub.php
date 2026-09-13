@@ -11,6 +11,13 @@ final class YarboHub
     public const MODULE_LYMOW = 'lymow';
     public const LIVE_BATTERIES = 'batteries';
 
+    public const VESTABOARD_LIVE_CHOICES = [
+        self::MODULE_YARBO,
+        self::MODULE_POWERWALL,
+        self::MODULE_LYMOW,
+        self::LIVE_BATTERIES,
+    ];
+
     /** @var list<string> */
     public const MODULES = [
         self::MODULE_YARBO,
@@ -31,7 +38,8 @@ final class YarboHub
      * @return array{
      *   modules: array<string, bool>,
      *   active_module: string,
-     *   vestaboard_live: string
+     *   vestaboard_live: string,
+     *   house_name: string
      * }
      */
     public function load(): array
@@ -44,6 +52,7 @@ final class YarboHub
             ],
             'active_module' => self::MODULE_YARBO,
             'vestaboard_live' => self::MODULE_YARBO,
+            'house_name' => '',
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -64,11 +73,13 @@ final class YarboHub
         $modules[self::MODULE_YARBO] = true;
         $active = $this->normalizeModule((string) ($decoded['active_module'] ?? self::MODULE_YARBO), $modules);
         $live = $this->normalizeVestaboardLive((string) ($decoded['vestaboard_live'] ?? self::MODULE_YARBO), $modules);
+        $house = self::normalizeDisplayName((string) ($decoded['house_name'] ?? ''));
 
         return [
             'modules' => $modules,
             'active_module' => $active,
             'vestaboard_live' => $live,
+            'house_name' => $house,
         ];
     }
 
@@ -103,10 +114,14 @@ final class YarboHub
         $live = array_key_exists('vestaboard_live', $input)
             ? $this->normalizeVestaboardLive((string) $input['vestaboard_live'], $modules)
             : $this->normalizeVestaboardLive($current['vestaboard_live'], $modules);
+        $house = array_key_exists('house_name', $input)
+            ? self::normalizeDisplayName((string) $input['house_name'])
+            : $current['house_name'];
         $json = json_encode([
             'modules' => $modules,
             'active_module' => $active,
             'vestaboard_live' => $live,
+            'house_name' => $house,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
             return false;
@@ -125,6 +140,45 @@ final class YarboHub
     public function vestaboardLive(): string
     {
         return $this->load()['vestaboard_live'];
+    }
+
+    /**
+     * @return list<array{id: string, label: string}>
+     */
+    public static function vestaboardLiveChoices(): array
+    {
+        return [
+            ['id' => self::MODULE_YARBO, 'label' => 'Yarbo'],
+            ['id' => self::MODULE_POWERWALL, 'label' => 'Powerwall'],
+            ['id' => self::MODULE_LYMOW, 'label' => 'Lymow'],
+            ['id' => self::LIVE_BATTERIES, 'label' => 'ALL'],
+        ];
+    }
+
+    public function houseName(): string
+    {
+        return $this->load()['house_name'];
+    }
+
+    public static function panelTitle(string $houseName): string
+    {
+        $house = self::normalizeDisplayName($houseName);
+
+        return $house === '' ? 'Control Panel' : $house . ' Control Panel';
+    }
+
+    public static function normalizeDisplayName(string $raw, int $max = 48): string
+    {
+        $name = trim(preg_replace('/[\r\n\t]+/', ' ', $raw) ?? '');
+        $name = trim(preg_replace('/ {2,}/', ' ', $name) ?? '');
+        if ($name === '') {
+            return '';
+        }
+        if (strlen($name) > $max) {
+            $name = rtrim(substr($name, 0, $max));
+        }
+
+        return $name;
     }
 
     /**
@@ -153,6 +207,9 @@ final class YarboHub
             'enabled' => $enabled,
             'active_module' => $config['active_module'],
             'vestaboard_live' => $config['vestaboard_live'],
+            'house_name' => $config['house_name'],
+            'panel_title' => self::panelTitle($config['house_name']),
+            'vestaboard_live_choices' => self::vestaboardLiveChoices(),
         ];
     }
 
@@ -177,10 +234,13 @@ final class YarboHub
     private function normalizeVestaboardLive(string $id, array $modules): string
     {
         $id = strtolower(trim($id));
-        if ($id === self::LIVE_BATTERIES) {
-            return self::LIVE_BATTERIES;
+        if ($id === 'all') {
+            $id = self::LIVE_BATTERIES;
+        }
+        if (in_array($id, self::VESTABOARD_LIVE_CHOICES, true)) {
+            return $id;
         }
 
-        return $this->normalizeModule($id, $modules);
+        return self::MODULE_YARBO;
     }
 }

@@ -41,7 +41,8 @@ Home and extra-page mocks (not photos of a flashed unit):
 - **Status:** the same tiles as the web Status card (including heading and rain)
 - **Health:** the same tiles as Connection & Health (Wi-Fi, pad, RTK, and so on)
 - **Plans:** named work plans. Tap a row to select, tap **START** to run it from 0% (same MQTT start as the web panel)
-- The two hardware keys cycle **Home → Status → Health → Plans**. Stop / Dock are Home buttons only.
+- **Note:** Vestaboard live view. Tap **YARBO**, **WALL** (Powerwall), **LYMOW**, or **ALL** (three batteries). Same choice as the web Note pills and Settings. Needs PaperMono **0.1.3-beta**.
+- The two hardware keys cycle **Home → Status → Health → Plans → Note**. Stop / Dock are Home buttons only.
 - Tap above the Home buttons (or the pager on other pages) also changes page if the keys are not mapped.
 
 It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, LoRa, mic, IMU, and the SD slot are unused in this firmware.
@@ -91,9 +92,9 @@ On the **same machine that runs the panel**:
 
 ## Runtime
 
-The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. The Plans page also calls `GET /api/device.php?action=plans` (cached on the Pi for about five minutes). Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`, `start_plan` with `plan_id`).
+The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. Compact status includes `vestaboard_enabled` and `vestaboard_live`. The Plans page also calls `GET /api/device.php?action=plans` (cached on the Pi for about five minutes). Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`, `start_plan` with `plan_id`, and `vestaboard_live` with `vestaboard_live` set to `yarbo`, `powerwall`, `lymow`, or `batteries`).
 
-Those commands use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Firmware later can pull `GET /api/device.php?action=firmware` for OTA; that is not wired in 0.1.2-beta yet.
+Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. Firmware later can pull `GET /api/device.php?action=firmware` for OTA; that is not wired in 0.1.3-beta yet.
 
 ## Limits
 

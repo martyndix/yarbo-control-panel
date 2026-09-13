@@ -31,13 +31,16 @@ $panelVersion = panel_version();
 $jsMtime = (int) (@filemtime(__DIR__ . '/assets/app.js') ?: 0);
 $cssMtime = (int) (@filemtime(__DIR__ . '/assets/style.css') ?: 0);
 $assetVersion = $panelVersion . '.' . (string) (max($jsMtime, $cssMtime) ?: time());
+require_once dirname(__DIR__) . '/src/YarboHub.php';
+$panelTitle = \Yarbo\YarboHub::panelTitle((new \Yarbo\YarboHub(dirname(__DIR__)))->houseName());
+$panelTitleSafe = htmlspecialchars($panelTitle, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yarbo Control Panel</title>
+    <title><?= $panelTitleSafe ?></title>
     <script>
         (function () {
             try {
@@ -73,9 +76,16 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
     <main class="container">
         <header class="app-header">
             <div>
-                <h1>Yarbo Control Panel</h1>
-                <p class="robot-name hidden" id="robot-name"></p>
+                <h1 id="panel-title"><?= $panelTitleSafe ?></h1>
+                <p class="robot-name hidden" id="device-name"></p>
                 <nav class="module-switcher hidden" id="module-switcher" aria-label="Modules"></nav>
+                <nav class="vestaboard-live-switch hidden" id="vestaboard-live-switch" aria-label="Vestaboard view">
+                    <span class="vestaboard-live-label">Note</span>
+                    <button type="button" class="module-switcher-btn" data-vestaboard-live="yarbo">Yarbo</button>
+                    <button type="button" class="module-switcher-btn" data-vestaboard-live="powerwall">Powerwall</button>
+                    <button type="button" class="module-switcher-btn" data-vestaboard-live="lymow">Lymow</button>
+                    <button type="button" class="module-switcher-btn" data-vestaboard-live="batteries">ALL</button>
+                </nav>
             </div>
             <div class="settings-button-wrap">
                 <button
@@ -500,7 +510,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         <section class="card panel-section module-pane-hidden" data-panel-id="lymow" data-module="lymow" id="lymow-card">
             <div class="section-header section-header--simple">
-                <h2>Lymow</h2>
+                <h2 id="lymow-heading">Lymow</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
             <div class="status-grid">
@@ -634,7 +644,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-modules-section">
                             <h3 class="settings-subtitle">Modules</h3>
-                            <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard shows the <strong>live</strong> module (Quiet hours and Vestaboard-app hold still apply). The batteries view does not need Powerwall or Lymow turned on as dashboards.</p>
+                            <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard shows the <strong>live</strong> module — change it here, with the <strong>Note</strong> pills at the top of the page, or on PaperMono’s <strong>NOTE</strong> page (Quiet hours and Vestaboard-app hold still apply). ALL does not need Powerwall or Lymow turned on as dashboards.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-powerwall" name="module_powerwall">
                                 <span>Tesla Powerwall (house draw, solar, battery)</span>
@@ -650,7 +660,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="yarbo">Yarbo</option>
                                     <option value="powerwall">Powerwall</option>
                                     <option value="lymow">Lymow</option>
-                                    <option value="batteries">Yarbo + Powerwall + Lymow batteries</option>
+                                    <option value="batteries">ALL (Yarbo + Powerwall + Lymow)</option>
                                 </select>
                             </label>
                         </section>

@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.10] - 2026-09-13
+
+### Added
+- Header **Note** pills to switch the Vestaboard live view (Yarbo, Powerwall, Lymow, ALL) without opening Settings.
+- PaperMono **NOTE** page for the same Vestaboard view (YARBO / WALL / LYMOW / ALL). Reflash PaperMono to **0.1.3-beta**.
+
+### Changed
+- Vestaboard Powerwall, Lymow, and ALL views no longer require those dashboards to be enabled.
+
 ## [2.0.9] - 2026-09-13
 
 ### Added

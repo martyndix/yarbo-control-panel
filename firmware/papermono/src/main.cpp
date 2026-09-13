@@ -46,6 +46,8 @@ String rainSensor = "—";
 String netModule = "—";
 String planActivity = "idle";
 bool lightsOn = false;
+String vestaboardLive = "yarbo";
+bool vestaboardOn = false;
 int partialRefreshCount = 0;
 String lastDrawnKey;
 int currentPage = PAPERMONO_PAGE_HOME;
@@ -133,6 +135,7 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_STATUS) return "STATUS";
     if (page == PAPERMONO_PAGE_HEALTH) return "HEALTH";
     if (page == PAPERMONO_PAGE_PLANS) return "PLANS";
+    if (page == PAPERMONO_PAGE_NOTE) return "NOTE";
     return "HOME";
 }
 
@@ -142,7 +145,8 @@ String screenKey()
         + errorLabel + "|" + heading + "|" + rainLabel + "|" + connectionType + "|" + connectionStatus + "|"
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
-        + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + String((int) WiFi.status());
+        + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + vestaboardLive + "|"
+        + (vestaboardOn ? "1" : "0") + "|" + String((int) WiFi.status());
 }
 
 void drawButton(int x, int y, int w, int h, const char *label, bool invert)
@@ -184,7 +188,7 @@ void drawPager()
 {
     int H = M5.Display.height();
     int W = M5.Display.width();
-    const char *labels[PAPERMONO_PAGE_COUNT] = {"HOME", "STATUS", "HEALTH", "PLANS"};
+    const char *labels[PAPERMONO_PAGE_COUNT] = {"HOME", "STATUS", "HEALTH", "PLANS", "NOTE"};
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(1);
     int slot = W / PAPERMONO_PAGE_COUNT;
@@ -370,6 +374,34 @@ void drawPlansPage(bool forceFull)
     M5.Display.display();
 }
 
+void drawNotePage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("Vestaboard view", 16, 118);
+    M5.Display.setTextSize(1);
+    if (!vestaboardOn) {
+        M5.Display.drawString("Enable the Note in panel Settings.", 16, 156);
+    } else {
+        M5.Display.drawString("Tap a view. ALL is three batteries.", 16, 156);
+    }
+    if (lastError.length()) {
+        M5.Display.drawString(lastError.substring(0, 40), 16, 188);
+    }
+    int bw, bh, gap, y0;
+    layoutButtons(bw, bh, gap, y0);
+    drawButton(16, y0, bw, bh, "YARBO", vestaboardLive == "yarbo");
+    drawButton(16 + bw + gap, y0, bw, bh, "WALL", vestaboardLive == "powerwall");
+    drawButton(16, y0 + bh + gap, bw, bh, "LYMOW", vestaboardLive == "lymow");
+    drawButton(16 + bw + gap, y0 + bh + gap, bw, bh, "ALL", vestaboardLive == "batteries");
+    drawPager();
+    M5.Display.display();
+}
+
 void drawScreen(bool forceFull)
 {
     String key = screenKey();
@@ -382,6 +414,8 @@ void drawScreen(bool forceFull)
         drawHealthPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_PLANS) {
         drawPlansPage(forceFull);
+    } else if (currentPage == PAPERMONO_PAGE_NOTE) {
+        drawNotePage(forceFull);
     } else {
         drawHome(forceFull);
     }
@@ -479,6 +513,8 @@ bool httpGetStatus()
     rainSensor = doc["rain_sensor"] | rainSensor;
     netModule = doc["net_module"] | netModule;
     planActivity = doc["plan_activity"] | planActivity;
+    vestaboardLive = doc["vestaboard_live"] | vestaboardLive;
+    vestaboardOn = doc["vestaboard_enabled"] | vestaboardOn;
     lastError = "";
     return true;
 }
@@ -541,7 +577,7 @@ bool httpGetPlans(bool refresh)
     return true;
 }
 
-bool httpCommand(const char *cmd, const char *planId = nullptr)
+bool httpCommand(const char *cmd, const char *planId = nullptr, const char *live = nullptr)
 {
     if (WiFi.status() != WL_CONNECTED) {
         return false;
@@ -556,6 +592,9 @@ bool httpCommand(const char *cmd, const char *planId = nullptr)
     doc["token"] = token;
     if (planId && planId[0]) {
         doc["plan_id"] = planId;
+    }
+    if (live && live[0]) {
+        doc["vestaboard_live"] = live;
     }
     String payload;
     serializeJson(doc, payload);
@@ -582,6 +621,14 @@ void runCommand(const char *cmd)
     drawScreen(false);
 }
 
+void setVestaboardLive(const char *live)
+{
+    vestaboardLive = live;
+    httpCommand("vestaboard_live", nullptr, live);
+    httpGetStatus();
+    drawScreen(false);
+}
+
 void showPage(int page, bool loadPlansIfNeeded)
 {
     if (page < 0) {
@@ -603,6 +650,30 @@ void nextPage()
 void prevPage()
 {
     showPage(currentPage - 1, true);
+}
+
+void handleNoteTouch(int x, int y)
+{
+    int which = homeButtonAt(x, y);
+    if (which == 1) {
+        setVestaboardLive("yarbo");
+        return;
+    }
+    if (which == 2) {
+        setVestaboardLive("powerwall");
+        return;
+    }
+    if (which == 3) {
+        setVestaboardLive("lymow");
+        return;
+    }
+    if (which == 4) {
+        setVestaboardLive("batteries");
+        return;
+    }
+    if (tapOnPager(y) || y < 110) {
+        nextPage();
+    }
 }
 
 void handlePlansTouch(int x, int y)
@@ -711,6 +782,8 @@ void loop()
             }
         } else if (currentPage == PAPERMONO_PAGE_PLANS) {
             handlePlansTouch(t.x, t.y);
+        } else if (currentPage == PAPERMONO_PAGE_NOTE) {
+            handleNoteTouch(t.x, t.y);
         } else if (tapOnPager(t.y) || t.y < 110) {
             nextPage();
         }

@@ -51,6 +51,11 @@ if ($method === 'POST' && $action === 'send') {
     json_response($board->sendNow($input) + ['config' => $board->publicView()]);
 }
 
+if ($method === 'POST' && $action === 'live') {
+    $live = (string) ($input['vestaboard_live'] ?? $input['live'] ?? '');
+    json_response($board->setLiveModule($live) + ['config' => $board->publicView()]);
+}
+
 if ($method === 'POST' && $action === 'resume') {
     json_response($board->resumeYarboStatus($input) + ['config' => $board->publicView()]);
 }

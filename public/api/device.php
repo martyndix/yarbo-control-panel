@@ -135,6 +135,21 @@ if ($action === 'command') {
     }
     $devices->touch((string) $device['id']);
     $cmd = (string) ($input['command'] ?? '');
+    if ($cmd === 'vestaboard_live') {
+        $live = (string) ($input['vestaboard_live'] ?? $input['live'] ?? '');
+        $result = (new \Yarbo\YarboVestaboard(dirname(__DIR__, 2)))->setLiveModule($live);
+        if (!($result['ok'] ?? false)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Could not set Vestaboard view'),
+            ], 500);
+        }
+        json_response([
+            'ok' => true,
+            'command' => $cmd,
+            'vestaboard_live' => $result['vestaboard_live'] ?? $live,
+        ]);
+    }
     $allowed = [
         'stop' => 'stop',
         'return_to_dock' => 'return_to_dock',
