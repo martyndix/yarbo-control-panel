@@ -75,6 +75,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div>
                 <h1>Yarbo Control Panel</h1>
                 <p class="robot-name hidden" id="robot-name"></p>
+                <nav class="module-switcher hidden" id="module-switcher" aria-label="Modules"></nav>
             </div>
             <div class="settings-button-wrap">
                 <button
@@ -97,7 +98,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         <div id="panel-sections" class="panel-sections">
 
-        <section class="card panel-section status-card" data-panel-id="status">
+        <section class="card panel-section status-card" data-panel-id="status" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Status</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
@@ -135,7 +136,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p class="updated">Last updated: <span id="updated-at">never</span></p>
         </section>
 
-        <section class="card panel-section vestaboard-card hidden" id="vestaboard-card" data-panel-id="vestaboard">
+        <section class="card panel-section vestaboard-card hidden" id="vestaboard-card" data-panel-id="vestaboard" data-module="shared">
             <div class="section-header section-header--simple">
                 <h2>Vestaboard Note</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
@@ -145,7 +146,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <button type="button" class="btn btn-secondary vestaboard-resume hidden" id="vestaboard-resume">Resume Yarbo status</button>
         </section>
 
-        <section class="card panel-section diagnostics-card" data-panel-id="diagnostics">
+        <section class="card panel-section diagnostics-card" data-panel-id="diagnostics" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Connection &amp; Health</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
@@ -202,7 +203,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </section>
 
-        <section class="card panel-section map-card" data-panel-id="map">
+        <section class="card panel-section map-card" data-panel-id="map" data-module="yarbo">
             <div class="section-header">
                 <h2>Location Map</h2>
                 <div class="section-header-actions">
@@ -285,7 +286,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         </section>
 
         <?php if ($camerasEnabled): ?>
-        <section class="card panel-section cameras-card" data-panel-id="cameras">
+        <section class="card panel-section cameras-card" data-panel-id="cameras" data-module="yarbo">
             <div class="section-header">
                 <h2>Cameras</h2>
                 <div class="section-header-actions">
@@ -314,7 +315,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         </section>
         <?php endif; ?>
 
-        <section class="card panel-section drive-card" data-panel-id="drive">
+        <section class="card panel-section drive-card" data-panel-id="drive" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Manual Drive</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
@@ -338,7 +339,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p class="drive-status" id="drive-status">Ready</p>
         </section>
 
-        <section class="card panel-section plans-card" data-panel-id="plans">
+        <section class="card panel-section plans-card" data-panel-id="plans" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Work Plans</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
@@ -386,7 +387,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div id="plans-list" class="plans-list"></div>
         </section>
 
-        <section class="card panel-section waypoints-card" data-panel-id="waypoints">
+        <section class="card panel-section waypoints-card" data-panel-id="waypoints" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Waypoints</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
@@ -407,7 +408,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </form>
         </section>
 
-        <section class="card panel-section head-card hidden" id="head-controls-card" data-panel-id="head">
+        <section class="card panel-section head-card hidden" id="head-controls-card" data-panel-id="head" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Head controls</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
@@ -437,7 +438,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </section>
 
-        <section class="card panel-section controls-card" data-panel-id="controls">
+        <section class="card panel-section controls-card" data-panel-id="controls" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Controls</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
@@ -471,6 +472,43 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </section>
 
+        <section class="card panel-section module-pane-hidden" data-panel-id="powerwall" data-module="powerwall" id="powerwall-card">
+            <div class="section-header section-header--simple">
+                <h2>Powerwall</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
+            <div class="status-grid">
+                <div class="stat">
+                    <span class="label">House draw</span>
+                    <span id="powerwall-load" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Solar</span>
+                    <span id="powerwall-solar" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Battery</span>
+                    <span id="powerwall-battery" class="value">—</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Grid</span>
+                    <span id="powerwall-grid" class="value">—</span>
+                </div>
+            </div>
+            <p class="updated">Source: <span id="powerwall-source">—</span> · <span id="powerwall-updated">never</span><span id="powerwall-error"></span></p>
+        </section>
+
+        <section class="card panel-section module-pane-hidden" data-panel-id="lymow" data-module="lymow" id="lymow-card">
+            <div class="section-header section-header--simple">
+                <h2>Lymow camera</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
+            <p class="hint" id="lymow-status">RTSP: —</p>
+            <div class="lymow-video-wrap">
+                <img id="lymow-stream" class="lymow-stream" alt="Lymow camera" width="640" height="480">
+            </div>
+        </section>
+
         </div>
 
         <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -478,7 +516,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="modal-panel card settings-modal">
                 <div class="settings-modal-header">
                     <h2 id="settings-title">Settings</h2>
-                    <p class="hint settings-modal-lead">Connection, optional cloud reads, Vestaboard Note, PaperMono companion (beta), and panel updates.</p>
+                    <p class="hint settings-modal-lead">Connection, modules (Yarbo, Powerwall, Lymow), Vestaboard Note, PaperMono / Paper Colour companions, and panel updates.</p>
                 </div>
                 <form id="settings-form" class="settings-form">
                     <div class="settings-modal-scroll">
@@ -559,6 +597,106 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <label class="settings-field">
                                 <span class="label">App slider value</span>
                                 <input type="number" id="settings-rain-sensitivity" name="rain_sensitivity" min="20" max="1000" step="1" placeholder="20" inputmode="numeric">
+                            </label>
+                        </section>
+
+                        <section class="settings-section" id="settings-modules-section">
+                            <h3 class="settings-subtitle">Modules</h3>
+                            <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard shows only the <strong>live</strong> module (Quiet hours and Vestaboard-app hold still apply).</p>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-module-powerwall" name="module_powerwall">
+                                <span>Tesla Powerwall (house draw, solar, battery)</span>
+                            </label>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-module-lymow" name="module_lymow">
+                                <span>Lymow camera (LAN RTSP)</span>
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Vestaboard live module</span>
+                                <select id="settings-vestaboard-live" name="vestaboard_live">
+                                    <option value="yarbo">Yarbo</option>
+                                    <option value="powerwall">Powerwall</option>
+                                    <option value="lymow">Lymow</option>
+                                </select>
+                            </label>
+                        </section>
+
+                        <section class="settings-section" id="settings-powerwall-section">
+                            <h3 class="settings-subtitle">Tesla Powerwall</h3>
+                            <p class="hint">You do <strong>not</strong> need the Gateway LAN password. Cloud (Tesla Fleet API) is the default. Local Gateway is optional if you later find the sticker password. Full walkthrough: <code>docs/powerwall.md</code>.</p>
+                            <div class="map-mode vestaboard-transport" role="radiogroup" aria-label="Powerwall connection">
+                                <label class="settings-inline-radio">
+                                    <input type="radio" name="powerwall-transport" value="cloud" checked>
+                                    <span>Tesla cloud</span>
+                                </label>
+                                <label class="settings-inline-radio">
+                                    <input type="radio" name="powerwall-transport" value="local">
+                                    <span>Local Gateway</span>
+                                </label>
+                            </div>
+                            <div id="settings-powerwall-cloud-fields">
+                                <p class="hint">1. Create an app at <a href="https://developer.tesla.com/dashboard" target="_blank" rel="noopener">developer.tesla.com</a> (energy products are free). Enable <strong>energy_device_data</strong>.<br>
+                                2. Set the app’s allowed origin / redirect to this panel on <strong>HTTPS</strong> (Cloudflare Tunnel, Tailscale Funnel, or a reverse proxy). Redirect URI: <code>https://YOUR-HOST/api/tesla.php?action=callback</code>.<br>
+                                3. Generate the Fleet public key here, then put the same origin in Tesla’s dashboard so they can GET <code>/.well-known/appspecific/com.tesla.3p.public-key.pem</code>.<br>
+                                4. Save, then <strong>Sign in with Tesla</strong>. Or paste a refresh token if you already have one.</p>
+                                <label class="settings-field">
+                                    <span class="label">Region</span>
+                                    <select id="settings-powerwall-region" name="powerwall_region">
+                                        <option value="eu">Europe / Middle East / Africa</option>
+                                        <option value="na">North America / Australia / NZ</option>
+                                        <option value="cn">China</option>
+                                    </select>
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Public panel URL (HTTPS)</span>
+                                    <input type="url" id="settings-powerwall-public-url" name="powerwall_public_url" placeholder="https://panel.example.com" autocomplete="off">
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Client ID</span>
+                                    <input type="text" id="settings-powerwall-client-id" name="powerwall_client_id" autocomplete="off" spellcheck="false">
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Client secret</span>
+                                    <input type="password" id="settings-powerwall-client-secret" name="powerwall_client_secret" autocomplete="off" placeholder="Leave blank to keep the saved secret">
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Refresh token (optional)</span>
+                                    <input type="password" id="settings-powerwall-refresh" name="powerwall_refresh_token" autocomplete="off" placeholder="Leave blank to keep the saved token">
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Energy site ID (optional)</span>
+                                    <input type="text" id="settings-powerwall-site" name="powerwall_energy_site_id" autocomplete="off" placeholder="Filled automatically after sign-in">
+                                </label>
+                                <p id="settings-powerwall-result" class="settings-cloud-result hidden" role="status"></p>
+                                <div class="settings-update-actions">
+                                    <button type="button" class="btn btn-secondary" id="settings-powerwall-keys">Generate Tesla public key</button>
+                                    <a class="btn btn-secondary" id="settings-powerwall-oauth" href="#">Sign in with Tesla</a>
+                                    <button type="button" class="btn btn-secondary" id="settings-powerwall-test">Test Powerwall</button>
+                                </div>
+                            </div>
+                            <div id="settings-powerwall-local-fields" class="hidden">
+                                <p class="hint">Tesla app → energy site, or your router’s DHCP list (Tesla / Powerwall / Tegra). Customer password is usually the <strong>last 5 characters</strong> of the sticker inside the Backup Gateway door — not your Tesla.com password.</p>
+                                <label class="settings-field">
+                                    <span class="label">Gateway IP</span>
+                                    <input type="text" id="settings-powerwall-host" name="powerwall_gateway_host" placeholder="192.168.1.50" autocomplete="off">
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Email (any Tesla-account email)</span>
+                                    <input type="email" id="settings-powerwall-email" name="powerwall_gateway_email" autocomplete="off">
+                                </label>
+                                <label class="settings-field">
+                                    <span class="label">Customer password</span>
+                                    <input type="password" id="settings-powerwall-password" name="powerwall_gateway_password" autocomplete="off" placeholder="Leave blank to keep the saved password">
+                                </label>
+                            </div>
+                        </section>
+
+                        <section class="settings-section" id="settings-lymow-section">
+                            <h3 class="settings-subtitle">Lymow camera</h3>
+                            <p class="hint">Local RTSP (same URL as Homebridge CameraUI). Needs <code>ffmpeg</code> on the Pi. Default matches your working stream.</p>
+                            <label class="settings-field">
+                                <span class="label">RTSP URL</span>
+                                <input type="text" id="settings-lymow-rtsp" name="lymow_rtsp_url" autocomplete="off" spellcheck="false" placeholder="rtsp://192.168.40.154:10022/h264ESVideoTest">
                             </label>
                         </section>
 
@@ -655,6 +793,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <section class="settings-section" id="settings-papermono-section">
                             <h3 class="settings-subtitle">PaperMono companion <span class="settings-beta-badge">Beta</span></h3>
                             <p class="hint">Built for <a href="https://docs.m5stack.com/en/core/PaperMono" target="_blank" rel="noopener">M5Stack PaperMono SKU C153</a> (<a href="https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display" target="_blank" rel="noopener">shop</a>): ESP32-S3R8, 3.97″ 480×800 SSD1677 e-paper, FT6336G touch, 2.4 GHz Wi-Fi. Not PaperMono-Lite. It has no browser — this panel flashes native firmware over USB, then the device talks HTTP JSON to the panel (the panel stays the MQTT brain). Home is Stop / Dock / Pause / Lights. Hardware keys cycle Home, Status, Health, and Plans (start a work plan from that page). No map, cameras, or hold-to-drive. See <code>docs/papermono.md</code>.</p>
+                            <p class="hint"><strong>Paper Colour</strong> (M5Stack PaperColor, no touch): firmware lives in <code>firmware/papercolor/</code>. Flash with PlatformIO env <code>papercolor</code>, same Wi-Fi CFG USB line as PaperMono. Buttons A/B change pages; C sleeps/wakes. Colour Home/Status plus Powerwall and Lymow when those modules are on. Spectra 6 is slow — it does not redraw every 15s. See <code>docs/papercolor.md</code>.</p>
                             <div class="papermono-preview-grid" aria-hidden="true">
                                 <figure class="papermono-preview">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
@@ -852,6 +991,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="waypoints" checked><span>Waypoints</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="head" checked><span>Head controls</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="controls" checked><span>Controls</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="powerwall" checked><span>Powerwall</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="lymow" checked><span>Lymow camera</span></label>
                                 </div>
                             </fieldset>
                             <button type="button" class="btn btn-secondary" id="settings-reset-layout">Reset dashboard layout</button>

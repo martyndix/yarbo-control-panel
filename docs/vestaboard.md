@@ -61,6 +61,8 @@ If the flaps no longer match the last layout this panel wrote, Yarbo status paus
 
 The dashboard shows **Resume Yarbo status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
+Settings → **Modules** chooses which enabled module is **live** on the Note (Yarbo, Powerwall, or Lymow). App-hold and Quiet hours still apply.
+
 ## Setup (either API)
 
 1. Open the panel → **Settings → Vestaboard Note**.

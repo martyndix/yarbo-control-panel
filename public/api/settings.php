@@ -7,6 +7,9 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
 use Yarbo\YarboConfig;
+use Yarbo\YarboHub;
+use Yarbo\YarboLymow;
+use Yarbo\YarboPowerwall;
 use Yarbo\YarboRainSettings;
 use Yarbo\YarboRobotName;
 use Yarbo\YarboVestaboard;
@@ -17,6 +20,9 @@ $dataDir = $projectRoot . '/data';
 $cloudSettings = new YarboCloudSettings($dataDir);
 $cloud = new YarboCloud($cloudSettings, $projectRoot);
 $vestaboard = new YarboVestaboard($projectRoot);
+$hub = new YarboHub($projectRoot);
+$powerwall = new YarboPowerwall($projectRoot);
+$lymow = new YarboLymow($projectRoot);
 $rainSettings = new YarboRainSettings($dataDir);
 $robotName = new YarboRobotName($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -32,6 +38,9 @@ if ($method === 'GET') {
         'writable' => is_writable($configPath),
         'cloud' => $cloudSettings->publicView(),
         'vestaboard' => $vestaboard->publicView(),
+        'hub' => $hub->publicView(),
+        'powerwall' => $powerwall->publicView(),
+        'lymow' => $lymow->publicView(),
         'rain' => $rainSettings->publicView(),
         // Skip Python SDK probe by default — it can block the single-threaded php -S server.
         'cloud_status' => $includeCloudStatus ? $cloud->status() : null,
@@ -90,6 +99,27 @@ if (!$vestaboard->save($input)) {
     ], 500);
 }
 
+if (!$hub->save($input)) {
+    json_response([
+        'ok' => false,
+        'error' => 'Could not write module settings. Check permissions on the data/ directory.',
+    ], 500);
+}
+
+if (!$powerwall->save($input)) {
+    json_response([
+        'ok' => false,
+        'error' => 'Could not write Powerwall settings. Check permissions on the data/ directory.',
+    ], 500);
+}
+
+if (!$lymow->save($input)) {
+    json_response([
+        'ok' => false,
+        'error' => 'Could not write Lymow settings. Check permissions on the data/ directory.',
+    ], 500);
+}
+
 if (!$rainSettings->save($input)) {
     json_response([
         'ok' => false,
@@ -113,5 +143,8 @@ json_response([
     'robot_name' => $robotName->settingsName($serial),
     'cloud' => $cloudSettings->publicView(),
     'vestaboard' => $vestaboard->publicView(),
+    'hub' => $hub->publicView(),
+    'powerwall' => $powerwall->publicView(),
+    'lymow' => $lymow->publicView(),
     'rain' => $rainSettings->publicView(),
 ]);

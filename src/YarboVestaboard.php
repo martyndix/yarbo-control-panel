@@ -346,8 +346,8 @@ final class YarboVestaboard
             ];
         }
         $usable = $online && is_array($parsed);
-        $layout = $this->compose($usable ? $parsed : null, $usable);
-        $hash = hash('sha256', json_encode($layout['codes']));
+        $layout = $this->layoutForLiveModule($usable ? $parsed : null, $usable);
+        $hash = hash('sha256', json_encode($layout['codes'] ?? []));
 
         return $holdMeta + [
             'enabled' => true,
@@ -437,7 +437,8 @@ final class YarboVestaboard
             return $result;
         }
 
-        $layout = $this->layoutFromTelemetry();
+        $this->refreshCompanionModules();
+        $layout = $this->layoutForLiveModule();
         if (!($layout['ok'] ?? false)) {
             $this->save(['last_error' => (string) ($layout['error'] ?? 'Could not compose layout')]);
 
@@ -502,12 +503,41 @@ final class YarboVestaboard
         if ($this->isQuietHours()) {
             return $this->sendLayout($this->quietLayout(), true, $override);
         }
-        $layout = $this->layoutFromTelemetry();
+        $layout = $this->layoutForLiveModule();
         if (!($layout['ok'] ?? false)) {
             return $layout;
         }
 
         return $this->sendLayout($layout, true, $override);
+    }
+
+    /**
+     * @param array<string, mixed>|null $parsed
+     * @return array{ok: bool, online: bool, lines: list<string>, codes: list<list<int>>, verb: string, error?: string}
+     */
+    public function layoutForLiveModule(?array $parsed = null, ?bool $online = null): array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        $live = $hub->vestaboardLive();
+        if ($live === YarboHub::MODULE_POWERWALL && $hub->enabled($live)) {
+            return (new YarboPowerwall($this->projectRoot))->vestaboardLayout();
+        }
+        if ($live === YarboHub::MODULE_LYMOW && $hub->enabled($live)) {
+            return (new YarboLymow($this->projectRoot))->vestaboardLayout();
+        }
+        if ($parsed !== null || $online !== null) {
+            $usable = (bool) $online && is_array($parsed);
+
+            return ['ok' => true, 'online' => $usable] + $this->compose($usable ? $parsed : null, $usable);
+        }
+
+        return $this->layoutFromTelemetry();
+    }
+
+    public function refreshCompanionModules(): void
+    {
+        (new YarboPowerwall($this->projectRoot))->refreshIfStale();
+        (new YarboLymow($this->projectRoot))->refreshIfStale();
     }
 
     /**

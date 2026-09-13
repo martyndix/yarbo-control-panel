@@ -83,6 +83,48 @@ header h1 {
     margin-bottom: 1.25rem;
 }
 
+.module-switcher {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.65rem;
+}
+
+.module-switcher-btn {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.module-switcher-btn.is-active {
+    border-color: var(--accent);
+    background: rgba(61, 154, 95, 0.15);
+}
+
+.module-pane-hidden {
+    display: none !important;
+}
+
+.lymow-video-wrap {
+    margin-top: 0.75rem;
+    background: #111;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.lymow-stream {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 420px;
+    object-fit: contain;
+    background: #000;
+}
+
 .btn-settings {
     flex-shrink: 0;
     margin-top: 0.15rem;

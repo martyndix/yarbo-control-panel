@@ -14,7 +14,14 @@
 /data/robot-name.json
 /data/vestaboard-watch.heartbeat
 /data/rain-config.json
+/data/hub-config.json
+/data/powerwall-config.json
+/data/powerwall-cache.json
+/data/lymow-config.json
+/data/tesla-fleet-private.pem
+/public/.well-known/appspecific/com.tesla.3p.public-key.pem
 /firmware/papermono/.pio/
+/firmware/papercolor/.pio/
 /scripts/__pycache__/
 **/__pycache__/
 .DS_Store

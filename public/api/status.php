@@ -5,8 +5,11 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboErrors;
+use Yarbo\YarboHub;
+use Yarbo\YarboLymow;
 use Yarbo\YarboMqtt;
 use Yarbo\YarboMqttAgentClient;
+use Yarbo\YarboPowerwall;
 use Yarbo\YarboRobotName;
 use Yarbo\YarboTelemetry;
 use Yarbo\YarboVestaboard;
@@ -29,6 +32,22 @@ function vestaboard_status_payload(?array $parsed, bool $online): array
 }
 
 vestaboard_board()->rememberClientTimezoneFromRequest();
+
+function hub_status_extras(): array
+{
+    $root = dirname(__DIR__, 2);
+    $hub = new YarboHub($root);
+
+    return [
+        'hub' => $hub->publicView(),
+        'powerwall' => $hub->enabled(YarboHub::MODULE_POWERWALL)
+            ? (new YarboPowerwall($root))->dashboardPayload()
+            : null,
+        'lymow' => $hub->enabled(YarboHub::MODULE_LYMOW)
+            ? (new YarboLymow($root))->dashboardPayload()
+            : null,
+    ];
+}
 
 function attach_robot_name(array $parsed): array
 {
@@ -79,6 +98,7 @@ function status_from_agent(array $result): void
             'wifi' => YarboWifi::parse($wifiEnvelope),
             'vestaboard' => vestaboard_status_payload($parsed, true),
         ],
+        hub_status_extras(),
     ));
 }
 
@@ -151,7 +171,7 @@ if (!$tcp['ok']) {
         'ok' => false,
         'stage' => 'tcp',
         'error' => $message,
-    ], 500);
+    ] + hub_status_extras(), 500);
 }
 
 try {
@@ -162,7 +182,7 @@ try {
         'ok' => false,
         'stage' => 'connect',
         'error' => friendly_error($e),
-    ], 500);
+    ] + hub_status_extras(), 500);
 }
 
 try {
@@ -192,9 +212,10 @@ try {
         ['ok' => true, 'via' => 'direct'],
         $parsed,
         [
-            'wifi' => YarboWifi::parse($wifiResponse),
+            'wifi' => YarboWifi::parse($wifiEnvelope),
             'vestaboard' => vestaboard_status_payload($parsed, true),
         ],
+        hub_status_extras(),
     ));
 } catch (Throwable $e) {
     $client->disconnect();

@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-13
+
+### Added
+- **Modules:** header switcher for Yarbo, Tesla Powerwall, and Lymow. Enable them in Settings. Vestaboard shows one **live** module (Quiet hours and Vestaboard-app hold unchanged).
+- **Tesla Powerwall:** house draw, solar, and battery % via **Tesla Fleet cloud** (setup in Settings and `docs/powerwall.md`) or optional local Gateway.
+- **Lymow camera:** LAN RTSP (default `rtsp://192.168.40.154:10022/h264ESVideoTest`), same stream as Homebridge CameraUI.
+- **Paper Colour** firmware tree (`firmware/papercolor/`, `docs/papercolor.md`) for the no-touch M5Stack PaperColor: A/B pages, C sleep.
+
 ## [1.3.53] - 2026-09-10
 
 ### Fixed

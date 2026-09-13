@@ -30,6 +30,7 @@ function vestaboard_run_tick(YarboVestaboard $board): void
 {
     static $failStreak = 0;
     try {
+        $board->refreshCompanionModules();
         $result = $board->tick();
         if (($result['ok'] ?? false)) {
             $failStreak = 0;
@@ -57,6 +58,9 @@ $startedAt = time();
 $watchFiles = [
     __FILE__,
     $root . '/src/YarboVestaboard.php',
+    $root . '/src/YarboHub.php',
+    $root . '/src/YarboPowerwall.php',
+    $root . '/src/YarboLymow.php',
     $root . '/src/YarboTelemetry.php',
     $root . '/src/YarboRainSettings.php',
     $root . '/data/rain-config.json',

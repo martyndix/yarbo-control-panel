@@ -148,7 +148,7 @@ final class YarboPaperDevice
                 'ok' => false,
                 'error' => (string) ($result['error'] ?? 'telemetry unavailable'),
                 'firmware_latest' => self::FIRMWARE_VERSION,
-            ];
+            ] + $this->companionCompact();
         }
 
         $cells = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
@@ -208,6 +208,25 @@ final class YarboPaperDevice
             'hold_controller' => (bool) ($result['hold_controller'] ?? false),
             'firmware_latest' => self::FIRMWARE_VERSION,
             'updated_at' => $parsed['updated_at'] ?? gmdate('c'),
+        ] + $this->companionCompact();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function companionCompact(): array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        $pw = (new YarboPowerwall($this->projectRoot))->dashboardPayload();
+        $ly = (new YarboLymow($this->projectRoot))->dashboardPayload();
+
+        return [
+            'hub' => $hub->publicView(),
+            'powerwall_pct' => isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : -1,
+            'powerwall_solar' => (string) ($pw['solar_label'] ?? '—'),
+            'powerwall_load' => (string) ($pw['load_label'] ?? '—'),
+            'powerwall_ok' => !empty($pw['ok']) || !empty($pw['online']),
+            'lymow_ok' => !empty($ly['ok']) || !empty($ly['online']),
         ];
     }
 

@@ -108,6 +108,33 @@ const els = {
     vestaboardUpdatedAt: document.getElementById('vestaboard-updated-at'),
     vestaboardUpdatedDetail: document.getElementById('vestaboard-updated-detail'),
     vestaboardResume: document.getElementById('vestaboard-resume'),
+    moduleSwitcher: document.getElementById('module-switcher'),
+    settingsModulePowerwall: document.getElementById('settings-module-powerwall'),
+    settingsModuleLymow: document.getElementById('settings-module-lymow'),
+    settingsVestaboardLive: document.getElementById('settings-vestaboard-live'),
+    settingsPowerwallRegion: document.getElementById('settings-powerwall-region'),
+    settingsPowerwallPublicUrl: document.getElementById('settings-powerwall-public-url'),
+    settingsPowerwallClientId: document.getElementById('settings-powerwall-client-id'),
+    settingsPowerwallClientSecret: document.getElementById('settings-powerwall-client-secret'),
+    settingsPowerwallRefresh: document.getElementById('settings-powerwall-refresh'),
+    settingsPowerwallSite: document.getElementById('settings-powerwall-site'),
+    settingsPowerwallHost: document.getElementById('settings-powerwall-host'),
+    settingsPowerwallEmail: document.getElementById('settings-powerwall-email'),
+    settingsPowerwallPassword: document.getElementById('settings-powerwall-password'),
+    settingsPowerwallResult: document.getElementById('settings-powerwall-result'),
+    settingsPowerwallKeys: document.getElementById('settings-powerwall-keys'),
+    settingsPowerwallOauth: document.getElementById('settings-powerwall-oauth'),
+    settingsPowerwallTest: document.getElementById('settings-powerwall-test'),
+    settingsLymowRtsp: document.getElementById('settings-lymow-rtsp'),
+    powerwallLoad: document.getElementById('powerwall-load'),
+    powerwallSolar: document.getElementById('powerwall-solar'),
+    powerwallBattery: document.getElementById('powerwall-battery'),
+    powerwallGrid: document.getElementById('powerwall-grid'),
+    powerwallSource: document.getElementById('powerwall-source'),
+    powerwallUpdated: document.getElementById('powerwall-updated'),
+    powerwallError: document.getElementById('powerwall-error'),
+    lymowStatus: document.getElementById('lymow-status'),
+    lymowStream: document.getElementById('lymow-stream'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -189,9 +216,10 @@ const MAP_CENTER_ZOOM = 20;
 const PANEL_ORDER_KEY = 'yarbo_panel_order';
 const PANEL_HIDDEN_KEY = 'yarbo_panel_hidden';
 const THEME_KEY = 'yarbo_theme';
+const ACTIVE_MODULE_KEY = 'yarbo_active_module';
 const LIGHTS_ON_KEY = 'yarbo_lights_on';
 const CONTROLLER_HOLD_KEY = 'yarbo_hold_controller';
-const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls'];
+const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls', 'powerwall', 'lymow'];
 const PANEL_LABELS = {
     status: 'Status',
     vestaboard: 'Vestaboard Note',
@@ -203,6 +231,8 @@ const PANEL_LABELS = {
     waypoints: 'Waypoints',
     head: 'Head controls',
     controls: 'Controls',
+    powerwall: 'Powerwall',
+    lymow: 'Lymow camera',
 };
 
 const ZONE_COLORS = {
@@ -1901,7 +1931,80 @@ function applyRobotNameSubtitle(name) {
     document.title = visible ? `${show} · Yarbo Control Panel` : 'Yarbo Control Panel';
 }
 
+function applyHubFromStatus(data) {
+    const hub = data?.hub;
+    if (!hub) return;
+    const enabled = Array.isArray(hub.enabled) ? hub.enabled : [];
+    const ids = enabled.map((m) => m.id);
+    if (els.moduleSwitcher) {
+        els.moduleSwitcher.classList.toggle('hidden', ids.length < 2);
+        els.moduleSwitcher.innerHTML = enabled.map((m) => (
+            `<button type="button" class="module-switcher-btn" data-module-id="${m.id}">${m.label}</button>`
+        )).join('');
+    }
+    let active = localStorage.getItem(ACTIVE_MODULE_KEY) || hub.active_module || 'yarbo';
+    if (!ids.includes(active)) active = 'yarbo';
+    setActiveModule(active, false);
+    updatePowerwallDashboard(data.powerwall);
+    updateLymowDashboard(data.lymow);
+}
+
+function setActiveModule(id, persist = true) {
+    const moduleId = id || 'yarbo';
+    if (persist) {
+        try { localStorage.setItem(ACTIVE_MODULE_KEY, moduleId); } catch { /* ignore */ }
+    }
+    document.querySelectorAll('#panel-sections .panel-section[data-module]').forEach((section) => {
+        const owner = section.getAttribute('data-module');
+        const show = owner === 'shared' || owner === moduleId;
+        section.classList.toggle('module-pane-hidden', !show);
+    });
+    els.moduleSwitcher?.querySelectorAll('[data-module-id]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-module-id') === moduleId);
+    });
+    if (moduleId === 'lymow' && els.lymowStream && !els.lymowStream.getAttribute('src')) {
+        els.lymowStream.src = `/api/lymow.php?action=stream&t=${Date.now()}`;
+    }
+}
+
+function updatePowerwallDashboard(pw) {
+    if (!els.powerwallLoad) return;
+    if (!pw) {
+        els.powerwallLoad.textContent = '—';
+        return;
+    }
+    els.powerwallLoad.textContent = pw.load_label || '—';
+    els.powerwallSolar.textContent = pw.solar_label || '—';
+    els.powerwallBattery.textContent = pw.battery_label || '—';
+    els.powerwallGrid.textContent = pw.grid_label || '—';
+    if (els.powerwallSource) els.powerwallSource.textContent = pw.source || '—';
+    if (els.powerwallUpdated) els.powerwallUpdated.textContent = pw.fetched_at ? formatUpdatedAt(pw.fetched_at) : 'never';
+    if (els.powerwallError) els.powerwallError.textContent = pw.error ? ` · ${pw.error}` : '';
+}
+
+function updateLymowDashboard(ly) {
+    if (!els.lymowStatus) return;
+    if (!ly) {
+        els.lymowStatus.textContent = 'RTSP: —';
+        return;
+    }
+    const ok = Boolean(ly.online || ly.ok);
+    els.lymowStatus.textContent = `${ok ? 'Camera up' : 'Camera down'} · ${ly.rtsp_url || ''}`;
+}
+
+function powerwallTransport() {
+    const checked = document.querySelector('input[name="powerwall-transport"]:checked');
+    return checked?.value === 'local' ? 'local' : 'cloud';
+}
+
+function applyPowerwallTransport() {
+    const local = powerwallTransport() === 'local';
+    document.getElementById('settings-powerwall-local-fields')?.classList.toggle('hidden', !local);
+    document.getElementById('settings-powerwall-cloud-fields')?.classList.toggle('hidden', local);
+}
+
 function updateStatus(data) {
+    applyHubFromStatus(data);
     applyRobotNameSubtitle(typeof data.robot_name === 'string' ? data.robot_name : '');
     els.battery.textContent = data.battery != null ? `${data.battery}%` : '—';
     {
@@ -2856,6 +2959,38 @@ async function loadSettings() {
             const n = data.rain?.sensitivity;
             els.settingsRainSensitivity.value = n != null ? String(n) : '';
         }
+        if (els.settingsModulePowerwall) {
+            els.settingsModulePowerwall.checked = Boolean(data.hub?.modules?.powerwall);
+        }
+        if (els.settingsModuleLymow) {
+            els.settingsModuleLymow.checked = Boolean(data.hub?.modules?.lymow);
+        }
+        if (els.settingsVestaboardLive) {
+            els.settingsVestaboardLive.value = data.hub?.vestaboard_live || 'yarbo';
+        }
+        const pw = data.powerwall || {};
+        document.querySelectorAll('input[name="powerwall-transport"]').forEach((radio) => {
+            radio.checked = radio.value === (pw.transport || 'cloud');
+        });
+        applyPowerwallTransport();
+        if (els.settingsPowerwallRegion) els.settingsPowerwallRegion.value = pw.region || 'eu';
+        if (els.settingsPowerwallPublicUrl) els.settingsPowerwallPublicUrl.value = pw.public_panel_url || '';
+        if (els.settingsPowerwallClientId) els.settingsPowerwallClientId.value = pw.client_id || '';
+        if (els.settingsPowerwallClientSecret) els.settingsPowerwallClientSecret.value = '';
+        if (els.settingsPowerwallRefresh) els.settingsPowerwallRefresh.value = '';
+        if (els.settingsPowerwallSite) els.settingsPowerwallSite.value = pw.energy_site_id || '';
+        if (els.settingsPowerwallHost) els.settingsPowerwallHost.value = pw.gateway_host || '';
+        if (els.settingsPowerwallEmail) els.settingsPowerwallEmail.value = pw.gateway_email || '';
+        if (els.settingsPowerwallPassword) els.settingsPowerwallPassword.value = '';
+        if (els.settingsPowerwallOauth) {
+            if (pw.oauth_url) {
+                els.settingsPowerwallOauth.href = pw.oauth_url;
+                els.settingsPowerwallOauth.classList.remove('is-disabled');
+            } else {
+                els.settingsPowerwallOauth.href = '#';
+            }
+        }
+        if (els.settingsLymowRtsp) els.settingsLymowRtsp.value = data.lymow?.rtsp_url || 'rtsp://192.168.40.154:10022/h264ESVideoTest';
         applyVestaboardEnabled();
         if (els.settingsCloudStatus) {
             if (data.cloud_status) {
@@ -3414,6 +3549,17 @@ async function saveSettings(event) {
             vestaboard_quiet_end: els.settingsVestaboardQuietEnd?.value || '07:00',
             vestaboard_quiet_codes: quietCodesSnapshot(),
             vestaboard_quiet_timezone: clientTimezone(),
+            module_powerwall: Boolean(els.settingsModulePowerwall?.checked),
+            module_lymow: Boolean(els.settingsModuleLymow?.checked),
+            vestaboard_live: els.settingsVestaboardLive?.value || 'yarbo',
+            powerwall_transport: powerwallTransport(),
+            powerwall_region: els.settingsPowerwallRegion?.value || 'eu',
+            powerwall_public_url: els.settingsPowerwallPublicUrl?.value.trim() || '',
+            powerwall_client_id: els.settingsPowerwallClientId?.value.trim() || '',
+            powerwall_energy_site_id: els.settingsPowerwallSite?.value.trim() || '',
+            powerwall_gateway_host: els.settingsPowerwallHost?.value.trim() || '',
+            powerwall_gateway_email: els.settingsPowerwallEmail?.value.trim() || '',
+            lymow_rtsp_url: els.settingsLymowRtsp?.value.trim() || '',
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;
@@ -3428,6 +3574,12 @@ async function saveSettings(event) {
         if (vestaboardCloudToken !== '') {
             payload.vestaboard_cloud_token = vestaboardCloudToken;
         }
+        const pwSecret = els.settingsPowerwallClientSecret?.value ?? '';
+        if (pwSecret !== '') payload.powerwall_client_secret = pwSecret;
+        const pwRefresh = els.settingsPowerwallRefresh?.value ?? '';
+        if (pwRefresh !== '') payload.powerwall_refresh_token = pwRefresh;
+        const pwPass = els.settingsPowerwallPassword?.value ?? '';
+        if (pwPass !== '') payload.powerwall_gateway_password = pwPass;
         const res = await fetch('/api/settings.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4049,8 +4201,10 @@ async function fetchStatus() {
             updateStatus(data);
             updateCameraStatus(data.camera_state);
         } else if (data.transient && hasStatusSnapshot) {
+            applyHubFromStatus(data);
             return;
         } else {
+            applyHubFromStatus(data);
             setError(data.error || 'Failed to fetch status');
         }
     } catch (err) {
@@ -4509,6 +4663,60 @@ els.settingsVestaboardSample?.addEventListener('change', () => loadVestaboardPre
 els.settingsVestaboardTest?.addEventListener('click', (e) => testVestaboardConnection(e.currentTarget));
 els.settingsVestaboardSend?.addEventListener('click', (e) => sendVestaboardNow(e.currentTarget));
 els.vestaboardResume?.addEventListener('click', (e) => resumeVestaboardStatus(e.currentTarget));
+els.moduleSwitcher?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-module-id]');
+    if (!btn) return;
+    setActiveModule(btn.getAttribute('data-module-id') || 'yarbo');
+});
+document.querySelectorAll('input[name="powerwall-transport"]').forEach((radio) => {
+    radio.addEventListener('change', () => applyPowerwallTransport());
+});
+els.settingsPowerwallKeys?.addEventListener('click', async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+        const res = await fetch('/api/powerwall.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'generate_keys' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not generate keys');
+        if (els.settingsPowerwallResult) {
+            els.settingsPowerwallResult.textContent = data.message || 'Keys created.';
+            els.settingsPowerwallResult.classList.remove('hidden');
+        }
+        showToast('Tesla public key created', 'success');
+    } catch (err) {
+        showToast(err.message || 'Key generation failed', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+els.settingsPowerwallTest?.addEventListener('click', async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+        const res = await fetch('/api/powerwall.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'test' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Powerwall test failed');
+        showToast(data.message || 'Powerwall OK', 'success');
+    } catch (err) {
+        showToast(err.message || 'Powerwall test failed', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+els.settingsPowerwallOauth?.addEventListener('click', (event) => {
+    if ((els.settingsPowerwallOauth.getAttribute('href') || '#') === '#') {
+        event.preventDefault();
+        showToast('Save a Client ID and HTTPS public panel URL first.', 'error');
+    }
+});
 els.settingsVestaboardQuiet?.addEventListener('change', () => applyVestaboardQuietHours());
 els.settingsVestaboardQuietBoard?.addEventListener('click', (event) => {
     const cell = event.target.closest('[data-quiet-r]');
