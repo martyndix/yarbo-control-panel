@@ -745,6 +745,125 @@ def mqtt_wait_state(
     return got
 
 
+def write_state(state_path: Path, state: dict[str, Any]) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = state_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(state_path)
+
+
+def mqtt_listen_session(
+    config: dict[str, Any],
+    thing: str,
+    bundle: dict[str, Any],
+    state_path: Path,
+    max_s: float = 3600.0,
+) -> None:
+    """Stay on MQTT and write lymow-state.json as soon as each pboutput arrives."""
+    mqtt, import_error = ensure_paho()
+    if mqtt is None:
+        raise RuntimeError(import_error or "paho-mqtt is not installed")
+    region = resolved_region(config)
+    config["region"] = region
+    host = str(REGION_CONFIG[region]["iot_host"])
+    id_token = str(config.get("id_token") or "")
+    ident = aws_credentials(id_token, region)
+    creds = ident["credentials"]
+    path = build_presigned_ws_path(
+        host,
+        region,
+        str(creds.get("AccessKeyId") or ""),
+        str(creds.get("SecretKey") or ""),
+        str(creds.get("SessionToken") or ""),
+    )
+    got: dict[str, Any] = {}
+    last_key: tuple[Any, ...] | None = None
+    session_id = uuid.uuid4().hex
+    query = wrap_envelope(encode_status_query()).encode()
+    heartbeat = wrap_envelope(encode_app_connect_heartbeat(session_id)).encode()
+    client_id = f"yarbo-lymow-{uuid.uuid4().hex[:8]}"
+
+    def persist() -> None:
+        nonlocal last_key
+        state = merge_state(bundle, got, read_previous_state(state_path))
+        key = (
+            state.get("battery"),
+            state.get("work_status"),
+            state.get("mow_progress"),
+            state.get("is_charging"),
+            state.get("is_recharging"),
+            state.get("error_code"),
+        )
+        if key == last_key:
+            return
+        last_key = key
+        write_state(state_path, state)
+
+    def on_connect(client: Any, _userdata: Any, *_args: Any) -> None:
+        rc = 0
+        if len(_args) >= 2:
+            code = _args[1]
+            rc = int(getattr(code, "value", code) or 0)
+        if rc not in (0,):
+            got["mqtt_error"] = f"MQTT connect failed ({rc})"
+            return
+        client.subscribe(f"/device/{thing}/pboutput", qos=1)
+        client.subscribe(f"/device/{thing}/notify-app", qos=1)
+        client.publish(f"/device/{thing}/pbinput", heartbeat, qos=1)
+        client.publish(f"/device/{thing}/pbinput", query, qos=1)
+
+    def on_message(_client: Any, _userdata: Any, message: Any) -> None:
+        try:
+            if str(message.topic).endswith("/notify-app"):
+                raw = message.payload
+                text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+                data = json.loads(text)
+                got["mqtt_online"] = str(data.get("robotState", "")).lower() == "online"
+                persist()
+                return
+            pb = unwrap_envelope(message.payload)
+            got.update(decode_pboutput(pb))
+            got.pop("mqtt_error", None)
+            persist()
+        except Exception as exc:  # noqa: BLE001
+            got["mqtt_error"] = f"MQTT decode failed: {exc}"
+
+    kwargs: dict[str, Any] = {
+        "client_id": client_id,
+        "transport": "websockets",
+        "protocol": mqtt.MQTTv311,
+    }
+    if hasattr(mqtt, "CallbackAPIVersion"):
+        kwargs["callback_api_version"] = mqtt.CallbackAPIVersion.VERSION2
+    client = mqtt.Client(**kwargs)
+    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+    try:
+        client.ws_set_options(path=path, headers={"Host": host})
+    except TypeError:
+        client.ws_set_options(path=path)
+    client.on_connect = on_connect
+    client.on_message = on_message
+    last_beat = 0.0
+    last_query = 0.0
+    try:
+        client.connect(host, 443, 60)
+        deadline = time.time() + max(60.0, max_s)
+        while time.time() < deadline:
+            client.loop(timeout=0.5)
+            now = time.time()
+            if now - last_beat >= 10:
+                client.publish(f"/device/{thing}/pbinput", heartbeat, qos=1)
+                last_beat = now
+            if now - last_query >= 15:
+                client.publish(f"/device/{thing}/pbinput", query, qos=1)
+                last_query = now
+    finally:
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+
+
 def merge_state(
     bundle: dict[str, Any],
     mqtt_state: dict[str, Any] | None,
@@ -848,8 +967,7 @@ def cmd_state(config_path: Path, state_path: Path, wait_s: float) -> int:
         config["last_error"] = ""
         save_config(config_path, config)
         state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        write_state(state_path, state)
         emit(state)
         return 0
     except Exception as exc:  # noqa: BLE001
@@ -873,26 +991,18 @@ def cmd_listen(config_path: Path, state_path: Path) -> int:
             thing = str(bundle["thing"])
             config["device_thing_name"] = thing
             save_config(config_path, config)
-            mqtt_state = collect_live_state(config, thing, 70, stop_on_battery=False)
-            state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            mqtt_listen_session(config, thing, bundle, state_path, max_s=3600.0)
         except Exception as exc:  # noqa: BLE001
             err = {"ok": False, "error": str(exc), "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-            try:
-                prev = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
-            except Exception:
-                prev = {}
-            if isinstance(prev, dict) and prev.get("battery") is not None:
+            prev = read_previous_state(state_path)
+            if prev.get("battery") is not None:
                 prev["ok"] = False
                 prev["error"] = str(exc)
-                state_path.write_text(json.dumps(prev, indent=2) + "\n", encoding="utf-8")
+                write_state(state_path, prev)
             else:
-                state_path.parent.mkdir(parents=True, exist_ok=True)
-                state_path.write_text(json.dumps(err, indent=2) + "\n", encoding="utf-8")
+                write_state(state_path, err)
             time.sleep(8)
             continue
-        time.sleep(2)
 
 
 def main() -> int:

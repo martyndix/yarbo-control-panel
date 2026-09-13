@@ -513,6 +513,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span id="lymow-state" class="value">—</span>
                 </div>
                 <div class="stat">
+                    <span class="label">Progress</span>
+                    <span id="lymow-progress" class="value">—</span>
+                </div>
+                <div class="stat">
                     <span class="label">Charging</span>
                     <span id="lymow-charging" class="value">—</span>
                 </div>
@@ -521,7 +525,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span id="lymow-cam" class="value">—</span>
                 </div>
             </div>
-            <p class="hint" id="lymow-status">Camera: —</p>
             <div class="camera-mode lymow-mode" role="radiogroup" aria-label="Lymow camera mode">
                 <label>
                     <input type="radio" name="lymow-cam-mode" value="stills" checked>
@@ -631,7 +634,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-modules-section">
                             <h3 class="settings-subtitle">Modules</h3>
-                            <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard shows only the <strong>live</strong> module (Quiet hours and Vestaboard-app hold still apply).</p>
+                            <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard shows the <strong>live</strong> module (Quiet hours and Vestaboard-app hold still apply). The batteries view does not need Powerwall or Lymow turned on as dashboards.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-powerwall" name="module_powerwall">
                                 <span>Tesla Powerwall (house draw, solar, battery)</span>
@@ -647,6 +650,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="yarbo">Yarbo</option>
                                     <option value="powerwall">Powerwall</option>
                                     <option value="lymow">Lymow</option>
+                                    <option value="batteries">Yarbo + Powerwall + Lymow batteries</option>
                                 </select>
                             </label>
                         </section>

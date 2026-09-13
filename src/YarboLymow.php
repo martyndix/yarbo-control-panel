@@ -168,6 +168,10 @@ final class YarboLymow
         }
         $cloudOk = !empty($cloud['ok']) || $battery !== null || !empty($cloud['online']);
         $camOk = (bool) $config['last_ok'];
+        $progress = isset($cloud['mow_progress']) && is_numeric($cloud['mow_progress'])
+            ? max(0, min(100, (int) round((float) $cloud['mow_progress'])))
+            : null;
+        $showProgress = $progress !== null && in_array($work, [2, 3, 8, 9], true);
 
         return [
             'ok' => $camOk || $cloudOk,
@@ -186,7 +190,8 @@ final class YarboLymow
             'work_label' => self::workLabel($work, !empty($cloud['is_charging'])),
             'charging' => !empty($cloud['is_charging']) || !empty($cloud['is_recharging']),
             'charging_label' => !empty($cloud['is_charging']) ? 'Yes' : (!empty($cloud['is_recharging']) ? 'Returning' : 'No'),
-            'mow_progress' => isset($cloud['mow_progress']) ? (float) $cloud['mow_progress'] : null,
+            'mow_progress' => $showProgress ? $progress : null,
+            'mow_progress_label' => $showProgress ? $progress . '%' : '—',
             'device_name' => $cloud['device_name'] ?? null,
             'cloud_updated' => $cloud['fetched_at'] ?? null,
             'cloud_error' => $this->cloudHint($cloud, $battery),
@@ -231,18 +236,19 @@ final class YarboLymow
         $camOk = !empty($data['camera_ok']);
         $cloudOk = $battery !== null || !empty($data['online']);
         $showLive = $camOk || $cloudOk;
-        $work = (string) ($data['work_label'] ?? '—');
+        $work = (string) ($data['work_label'] ?? '');
         if ($work === '—' || $work === '') {
             $work = $battery !== null ? 'IDLE' : '--';
         }
-        $progress = isset($data['mow_progress']) ? (int) round((float) $data['mow_progress']) : null;
-        $workRight = ($work === 'MOWING' && $progress !== null) ? $progress . '%' : '';
+        $charging = (($data['charging_label'] ?? '') === 'Yes') ? 'YES' : 'NO';
+        $progress = isset($data['mow_progress']) ? (int) $data['mow_progress'] : null;
+        $stateRight = $progress !== null ? $progress . '%' : $work;
         $lines = [
             $showLive
                 ? $this->pair('LYMOW', $battery !== null ? $battery . '%' : '--', 14)
                 : $this->pair('OFFLINE', '', 14),
-            $this->pair($work, $workRight),
-            $this->pair('CAM', $camOk ? 'UP' : 'DOWN'),
+            $this->pair('STATE', $stateRight),
+            $this->pair('CHARGING', $charging),
         ];
         $codes = $this->encodeLines($lines, $battery, $showLive);
 
@@ -478,10 +484,12 @@ final class YarboLymow
      */
     public function startListener(): array
     {
-        if ($this->listenRunning()) {
+        $script = $this->projectRoot . '/scripts/lymow_bridge.py';
+        $protocol = $this->projectRoot . '/scripts/lib/lymow_protocol.py';
+        if ($this->listenRunning() && !$this->listenerScriptsNewer($script, $protocol)) {
             return ['ok' => true, 'running' => true];
         }
-        $script = $this->projectRoot . '/scripts/lymow_bridge.py';
+        $this->stopListener();
         if (!is_file($script)) {
             return ['ok' => false, 'error' => 'scripts/lymow_bridge.py is missing.'];
         }
@@ -534,6 +542,37 @@ final class YarboLymow
         }
 
         return false;
+    }
+
+    private function listenerScriptsNewer(string $script, string $protocol): bool
+    {
+        $pidPath = $this->listenPidPath();
+        if (!is_file($pidPath)) {
+            return true;
+        }
+        $started = (int) filemtime($pidPath);
+        foreach ([$script, $protocol] as $path) {
+            if (is_file($path) && filemtime($path) > $started) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function stopListener(): void
+    {
+        $pid = $this->listenPid();
+        if ($pid > 0 && function_exists('posix_kill')) {
+            @posix_kill($pid, 15);
+            usleep(250000);
+            if (@posix_kill($pid, 0)) {
+                @posix_kill($pid, 9);
+            }
+        }
+        if (is_file($this->listenPidPath())) {
+            @unlink($this->listenPidPath());
+        }
     }
 
     /**

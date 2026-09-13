@@ -190,7 +190,9 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         progress_raw = _first(area_fields, 5)
         if isinstance(progress_raw, int):
             pct = _decode_f32(progress_raw)
-            if 0.0 <= pct <= 1.0:
-                state["mowProgress"] = round(pct * 100, 1)
+            if 0.0 <= pct <= 1.05:
+                state["mowProgress"] = round(min(pct, 1.0) * 100, 1)
+            elif 1.05 < pct <= 100.0:
+                state["mowProgress"] = round(pct, 1)
 
     return state

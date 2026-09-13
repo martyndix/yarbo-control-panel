@@ -6,6 +6,19 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.9] - 2026-09-13
+
+### Added
+- Lymow **Progress** on the web card, and mowing **%** on the Vestaboard **STATE** row while a job is running.
+- Vestaboard live module **Yarbo + Powerwall + Lymow batteries**: three rows of `%` with a colour chip on each.
+
+### Changed
+- Lymow card no longer shows the Camera up / signed in / IP hint; Battery, State, Progress, Charging, and Camera stay on the stats row.
+- Vestaboard Lymow page is **LYMOW 99%**, **STATE WAIT** (or **STATE 42%** while mowing), **CHARGING YES/NO**. Colour chip stays on row 0.
+
+### Fixed
+- Lymow mowing percent was up to a minute late because the MQTT listener only wrote state after a 70s wait. It now stays connected and writes each status message as it arrives, and asks the mower for a refresh about every 15 seconds.
+
 ## [2.0.8] - 2026-09-13
 
 ### Fixed

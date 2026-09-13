@@ -387,7 +387,7 @@ final class YarboVestaboard
             return ['ok' => true] + $layout;
         }
 
-        return $this->layoutFromTelemetry();
+        return $this->layoutForLiveModule();
     }
 
     /**
@@ -526,6 +526,9 @@ final class YarboVestaboard
     {
         $hub = new YarboHub($this->projectRoot);
         $live = $hub->vestaboardLive();
+        if ($live === YarboHub::LIVE_BATTERIES) {
+            return $this->batteriesLayout($parsed, $online);
+        }
         if ($live === YarboHub::MODULE_POWERWALL && $hub->enabled($live)) {
             return (new YarboPowerwall($this->projectRoot))->vestaboardLayout();
         }
@@ -539,6 +542,81 @@ final class YarboVestaboard
         }
 
         return $this->layoutFromTelemetry();
+    }
+
+    /**
+     * Three battery percents with a colour chip on each row.
+     *
+     * @param array<string, mixed>|null $parsed
+     * @return array{ok: bool, online: bool, lines: list<string>, codes: list<list<int>>, verb: string}
+     */
+    private function batteriesLayout(?array $parsed, ?bool $online): array
+    {
+        if ($parsed === null && $online === null) {
+            try {
+                $agent = YarboMqttAgentClient::fromEnv();
+                $result = $agent->telemetry(4.0, false);
+                $raw = $result['raw'] ?? null;
+                if (($result['ok'] ?? false) && is_array($raw) && $raw !== []) {
+                    $cells = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
+                    $parsed = YarboTelemetry::parseForPanel($raw, $cells, $this->projectRoot);
+                    $online = true;
+                }
+            } catch (\Throwable $e) {
+                $parsed = null;
+                $online = false;
+            }
+        }
+        $yarboOnline = (bool) $online && is_array($parsed);
+        $yarboPct = $this->batteryPercentValue($yarboOnline ? $parsed : null);
+
+        $pw = (new YarboPowerwall($this->projectRoot))->dashboardPayload();
+        $pwPct = isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : null;
+        $pwOnline = $pwPct !== null || !empty($pw['online']);
+
+        $ly = (new YarboLymow($this->projectRoot))->dashboardPayload();
+        $lyPct = isset($ly['battery']) ? (int) $ly['battery'] : null;
+        $lyOnline = $lyPct !== null || !empty($ly['signed_in']) || !empty($ly['online']);
+
+        $rows = [
+            ['YARBO', $yarboPct, $yarboOnline],
+            ['POWERWALL', $pwPct, $pwOnline],
+            ['LYMOW', $lyPct, $lyOnline],
+        ];
+        $lines = [];
+        $codes = [];
+        foreach ($rows as [$label, $pct, $on]) {
+            $text = $this->pair($label, ($on && $pct !== null) ? $pct . '%' : '--', self::COLS - 1);
+            $lines[] = $text;
+            $row = $this->encodeLine($text);
+            $row[self::COLS - 1] = self::batteryPercentChip($on ? $pct : null, $on);
+            $codes[] = $row;
+        }
+        $anyOnline = $yarboOnline || $pwOnline || $lyOnline;
+
+        return [
+            'ok' => true,
+            'online' => $anyOnline,
+            'lines' => $lines,
+            'codes' => $codes,
+            'verb' => 'BATTERIES',
+        ];
+    }
+
+    /**
+     * @param array<string, mixed>|null $parsed
+     */
+    private function batteryPercentValue(?array $parsed): ?int
+    {
+        if ($parsed === null) {
+            return null;
+        }
+        $raw = $parsed['battery'] ?? null;
+        if (!is_numeric($raw)) {
+            return null;
+        }
+
+        return max(0, min(100, (int) $raw));
     }
 
     public function refreshCompanionModules(): void
@@ -1381,7 +1459,8 @@ final class YarboVestaboard
         $ours = $hash === $lastHash
             || in_array($hash, $this->normalizeRecentHashes($config['recent_hashes'] ?? null, $lastHash), true)
             || $this->codesLookLikeOwnPowerwall($codes)
-            || $this->codesLookLikeOwnLymow($codes);
+            || $this->codesLookLikeOwnLymow($codes)
+            || $this->codesLookLikeOwnBatteries($codes);
         if ($ours) {
             if (!empty($config['external_hold'])) {
                 $saved['external_hold'] = false;
@@ -1480,7 +1559,7 @@ final class YarboVestaboard
     }
 
     /**
-     * LYMOW/OFFLINE + CAM is this panel's Lymow page, not an app scribble.
+     * LYMOW/OFFLINE + CHARGING (or the older CAM row) is this panel's Lymow page, not an app scribble.
      *
      * @param list<list<int>> $codes
      */
@@ -1491,7 +1570,24 @@ final class YarboVestaboard
         $row2 = strtoupper(trim($lines[2] ?? ''));
 
         return (str_starts_with($row0, 'LYMOW') || str_starts_with($row0, 'OFFLINE'))
-            && str_starts_with($row2, 'CAM');
+            && (str_starts_with($row2, 'CHARGING') || str_starts_with($row2, 'CAM'));
+    }
+
+    /**
+     * YARBO / POWERWALL / LYMOW stacked percents — not a Yarbo-only live page.
+     *
+     * @param list<list<int>> $codes
+     */
+    private function codesLookLikeOwnBatteries(array $codes): bool
+    {
+        $lines = self::linesFromCodes($codes);
+        $row0 = strtoupper(trim($lines[0] ?? ''));
+        $row1 = strtoupper(trim($lines[1] ?? ''));
+        $row2 = strtoupper(trim($lines[2] ?? ''));
+
+        return str_starts_with($row0, 'YARBO')
+            && str_starts_with($row1, 'POWERWALL')
+            && str_starts_with($row2, 'LYMOW');
     }
 
     /**
@@ -1543,7 +1639,7 @@ final class YarboVestaboard
 
     private function snapshotLiveLayout(): void
     {
-        $layout = $this->layoutFromTelemetry();
+        $layout = $this->layoutForLiveModule();
         if (!($layout['ok'] ?? false) || !($layout['online'] ?? false)) {
             return;
         }

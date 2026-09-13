@@ -9,6 +9,7 @@ final class YarboHub
     public const MODULE_YARBO = 'yarbo';
     public const MODULE_POWERWALL = 'powerwall';
     public const MODULE_LYMOW = 'lymow';
+    public const LIVE_BATTERIES = 'batteries';
 
     /** @var list<string> */
     public const MODULES = [
@@ -62,7 +63,7 @@ final class YarboHub
         }
         $modules[self::MODULE_YARBO] = true;
         $active = $this->normalizeModule((string) ($decoded['active_module'] ?? self::MODULE_YARBO), $modules);
-        $live = $this->normalizeModule((string) ($decoded['vestaboard_live'] ?? self::MODULE_YARBO), $modules);
+        $live = $this->normalizeVestaboardLive((string) ($decoded['vestaboard_live'] ?? self::MODULE_YARBO), $modules);
 
         return [
             'modules' => $modules,
@@ -100,8 +101,8 @@ final class YarboHub
             ? $this->normalizeModule((string) $input['active_module'], $modules)
             : $this->normalizeModule($current['active_module'], $modules);
         $live = array_key_exists('vestaboard_live', $input)
-            ? $this->normalizeModule((string) $input['vestaboard_live'], $modules)
-            : $this->normalizeModule($current['vestaboard_live'], $modules);
+            ? $this->normalizeVestaboardLive((string) $input['vestaboard_live'], $modules)
+            : $this->normalizeVestaboardLive($current['vestaboard_live'], $modules);
         $json = json_encode([
             'modules' => $modules,
             'active_module' => $active,
@@ -166,5 +167,20 @@ final class YarboHub
         }
 
         return $id;
+    }
+
+    /**
+     * Combined batteries is a Vestaboard page, not a dashboard module.
+     *
+     * @param array<string, bool> $modules
+     */
+    private function normalizeVestaboardLive(string $id, array $modules): string
+    {
+        $id = strtolower(trim($id));
+        if ($id === self::LIVE_BATTERIES) {
+            return self::LIVE_BATTERIES;
+        }
+
+        return $this->normalizeModule($id, $modules);
     }
 }

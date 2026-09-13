@@ -260,8 +260,22 @@ final class YarboPaperDevice
             'powerwall_ok' => !empty($pw['ok']) || !empty($pw['online']),
             'lymow_ok' => !empty($ly['ok']) || !empty($ly['online']),
             'lymow_battery' => isset($ly['battery']) ? (int) $ly['battery'] : -1,
-            'lymow_state' => (string) ($ly['work_label'] ?? '—'),
+            'lymow_state' => $this->lymowCompanionState($ly),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $ly
+     */
+    private function lymowCompanionState(array $ly): string
+    {
+        $state = (string) ($ly['work_label'] ?? '—');
+        $progress = (string) ($ly['mow_progress_label'] ?? '—');
+        if ($progress !== '' && $progress !== '—') {
+            return trim($state . ' ' . $progress);
+        }
+
+        return $state !== '' ? $state : '—';
     }
 
     /**

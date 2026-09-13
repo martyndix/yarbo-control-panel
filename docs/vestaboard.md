@@ -36,6 +36,30 @@ SOLAR      0W
 DRAW     590W
 ```
 
+Lymow live module:
+
+```
+LYMOW       99%
+STATE       WAIT
+CHARGING    YES
+```
+
+While mowing, **STATE** shows progress instead of the work word:
+
+```
+LYMOW       99%
+STATE       42%
+CHARGING     NO
+```
+
+Combined batteries (Settings → Vestaboard live module; colour chip on each row):
+
+```
+YARBO       96%
+POWERWALL   89%
+LYMOW       99%
+```
+
 ```
 YARBO      IDLE
 BATTERY    FULL
@@ -69,7 +93,7 @@ If the flaps no longer match the last layout this panel wrote, live status pause
 
 The dashboard shows **Resume previous status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
-Settings → **Modules** chooses which enabled module is **live** on the Note (Yarbo, Powerwall, or Lymow). App-hold and Quiet hours still apply. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), work state, and **CAM UP/DOWN**.
+Settings → **Modules** chooses which page is **live** on the Note: Yarbo, Powerwall, Lymow, or **Yarbo + Powerwall + Lymow batteries**. App-hold and Quiet hours still apply. The batteries page is available even when Powerwall or Lymow are not enabled as dashboards. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), **STATE** plus the work label or mowing progress **%**, and **CHARGING YES/NO**.
 
 ## Setup (either API)
 

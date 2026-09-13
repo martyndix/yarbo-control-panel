@@ -138,9 +138,9 @@ const els = {
     powerwallSource: document.getElementById('powerwall-source'),
     powerwallUpdated: document.getElementById('powerwall-updated'),
     powerwallError: document.getElementById('powerwall-error'),
-    lymowStatus: document.getElementById('lymow-status'),
     lymowBattery: document.getElementById('lymow-battery'),
     lymowState: document.getElementById('lymow-state'),
+    lymowProgress: document.getElementById('lymow-progress'),
     lymowCharging: document.getElementById('lymow-charging'),
     lymowCam: document.getElementById('lymow-cam'),
     lymowStream: document.getElementById('lymow-stream'),
@@ -1997,27 +1997,21 @@ function updatePowerwallDashboard(pw) {
 }
 
 function updateLymowDashboard(ly) {
-    if (!els.lymowStatus) return;
+    if (!els.lymowBattery && !els.lymowState && !els.lymowCharging && !els.lymowCam) return;
     if (!ly) {
-        els.lymowStatus.textContent = 'Camera: —';
         if (els.lymowBattery) els.lymowBattery.textContent = '—';
         if (els.lymowState) els.lymowState.textContent = '—';
+        if (els.lymowProgress) els.lymowProgress.textContent = '—';
         if (els.lymowCharging) els.lymowCharging.textContent = '—';
         if (els.lymowCam) els.lymowCam.textContent = '—';
         return;
     }
-    const host = ly.host || '';
     const camOk = Boolean(ly.camera_ok);
     if (els.lymowBattery) els.lymowBattery.textContent = ly.battery_label || '—';
     if (els.lymowState) els.lymowState.textContent = ly.work_label || '—';
+    if (els.lymowProgress) els.lymowProgress.textContent = ly.mow_progress_label || '—';
     if (els.lymowCharging) els.lymowCharging.textContent = ly.charging_label || '—';
     if (els.lymowCam) els.lymowCam.textContent = camOk ? 'Up' : 'Down';
-    const bits = [];
-    if (ly.signed_in) bits.push('signed in');
-    else if (ly.battery == null) bits.push('sign in under Settings → Lymow for battery');
-    if (host) bits.push(host);
-    if (ly.cloud_error) bits.push(ly.cloud_error);
-    els.lymowStatus.textContent = `${camOk ? 'Camera up' : 'Camera down'}${bits.length ? ' · ' + bits.join(' · ') : ''}`;
 }
 
 function lymowCamMode() {
@@ -2141,7 +2135,7 @@ function startLymowCloudPoll() {
         } catch { /* keep last reading */ }
     };
     tick();
-    lymowCloudTimer = setInterval(tick, 20000);
+    lymowCloudTimer = setInterval(tick, 4000);
 }
 
 document.addEventListener('visibilitychange', () => {
