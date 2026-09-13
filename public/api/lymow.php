@@ -10,12 +10,14 @@ $projectRoot = dirname(__DIR__, 2);
 $lymow = new YarboLymow($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = (string) ($_GET['action'] ?? '');
+set_time_limit(20);
 
 if ($method === 'GET' && $action === 'snapshot') {
     try {
         $jpeg = $lymow->snapshotJpeg();
         header('Content-Type: image/jpeg');
-        header('Cache-Control: no-cache');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Content-Length: ' . (string) strlen($jpeg));
         echo $jpeg;
         exit;
     } catch (Throwable $e) {

@@ -19,7 +19,7 @@ String wifiSsid;
 String wifiPass;
 String panelUrl;
 String token;
-String deviceName = "PaperMono";
+String deviceName = "Paper Colour";
 String robotName = "";
 
 uint32_t lastPoll = 0;
@@ -76,7 +76,7 @@ void loadConfig()
     wifiPass = prefs.getString("pass", "");
     panelUrl = prefs.getString("url", "");
     token = prefs.getString("token", "");
-    deviceName = prefs.getString("name", "PaperMono");
+    deviceName = prefs.getString("name", "Paper Colour");
     prefs.end();
 }
 
@@ -399,16 +399,16 @@ void drawSetup()
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(3);
-    M5.Display.drawString("PaperMono", 16, 28);
+    M5.Display.drawString("Paper Colour", 16, 28);
     M5.Display.setTextSize(2);
     M5.Display.drawString("setup  ·  BETA", 16, 78);
     M5.Display.setTextSize(1);
     M5.Display.drawString("1. Plug USB into the computer", 16, 140);
     M5.Display.drawString("   running this Yarbo panel.", 16, 162);
-    M5.Display.drawString("2. Open Settings, then", 16, 198);
-    M5.Display.drawString("   PaperMono companion.", 16, 220);
-    M5.Display.drawString("3. Flash firmware and send", 16, 256);
-    M5.Display.drawString("   2.4 GHz Wi-Fi from that page.", 16, 278);
+    M5.Display.drawString("2. Settings, E-paper companions", 16, 198);
+    M5.Display.drawString("   Choose Paper Colour.", 16, 220);
+    M5.Display.drawString("3. Flash Paper Colour firmware", 16, 256);
+    M5.Display.drawString("   and send 2.4 GHz Wi-Fi.", 16, 278);
     M5.Display.drawString("Keep this cable connected", 16, 330);
     M5.Display.drawString("until CFG_OK.", 16, 352);
     M5.Display.display();

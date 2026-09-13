@@ -6,6 +6,9 @@ namespace Yarbo;
 
 final class YarboLymow
 {
+    public const DEFAULT_HOST = '192.168.40.154';
+    public const RTSP_PORT = 10022;
+    public const RTSP_PATH = '/h264ESVideoTest';
     public const DEFAULT_RTSP = 'rtsp://192.168.40.154:10022/h264ESVideoTest';
 
     public function __construct(private readonly string $projectRoot)
@@ -17,12 +20,33 @@ final class YarboLymow
         return $this->projectRoot . '/data/lymow-config.json';
     }
 
+    public static function rtspForHost(string $host): string
+    {
+        return 'rtsp://' . self::normalizeHost($host) . ':' . self::RTSP_PORT . self::RTSP_PATH;
+    }
+
+    public static function normalizeHost(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return self::DEFAULT_HOST;
+        }
+        if (preg_match('#rtsp://([^/:]+)#i', $value, $matches)) {
+            return $matches[1];
+        }
+        $value = preg_replace('#^https?://#i', '', $value) ?? $value;
+        $host = explode('/', explode(':', $value, 2)[0])[0];
+
+        return $host !== '' ? $host : self::DEFAULT_HOST;
+    }
+
     /**
-     * @return array{rtsp_url: string, last_ok: bool, last_error: string, last_check: ?string}
+     * @return array{host: string, rtsp_url: string, last_ok: bool, last_error: string, last_check: ?string}
      */
     public function load(): array
     {
         $defaults = [
+            'host' => self::DEFAULT_HOST,
             'rtsp_url' => self::DEFAULT_RTSP,
             'last_ok' => false,
             'last_error' => '',
@@ -36,9 +60,11 @@ final class YarboLymow
         if (!is_array($decoded)) {
             return $defaults;
         }
+        $host = self::normalizeHost((string) ($decoded['host'] ?? $decoded['rtsp_url'] ?? self::DEFAULT_HOST));
 
         return [
-            'rtsp_url' => trim((string) ($decoded['rtsp_url'] ?? self::DEFAULT_RTSP)) ?: self::DEFAULT_RTSP,
+            'host' => $host,
+            'rtsp_url' => self::rtspForHost($host),
             'last_ok' => (bool) ($decoded['last_ok'] ?? false),
             'last_error' => (string) ($decoded['last_error'] ?? ''),
             'last_check' => isset($decoded['last_check']) && is_string($decoded['last_check'])
@@ -57,14 +83,13 @@ final class YarboLymow
             return false;
         }
         $current = $this->load();
-        $url = array_key_exists('rtsp_url', $input) || array_key_exists('lymow_rtsp_url', $input)
-            ? trim((string) ($input['rtsp_url'] ?? $input['lymow_rtsp_url'] ?? ''))
-            : $current['rtsp_url'];
-        if ($url === '') {
-            $url = self::DEFAULT_RTSP;
-        }
+        $hostInput = $input['lymow_host'] ?? $input['lymow_rtsp_url'] ?? $input['rtsp_url'] ?? null;
+        $host = $hostInput !== null
+            ? self::normalizeHost((string) $hostInput)
+            : $current['host'];
         $next = [
-            'rtsp_url' => $url,
+            'host' => $host,
+            'rtsp_url' => self::rtspForHost($host),
             'last_ok' => array_key_exists('last_ok', $input) ? (bool) $input['last_ok'] : $current['last_ok'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
             'last_check' => $input['last_check'] ?? $current['last_check'],
@@ -85,6 +110,7 @@ final class YarboLymow
         $config = $this->load();
 
         return [
+            'host' => $config['host'],
             'rtsp_url' => $config['rtsp_url'],
             'last_ok' => $config['last_ok'],
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
@@ -102,8 +128,8 @@ final class YarboLymow
         return [
             'ok' => $config['last_ok'],
             'online' => $config['last_ok'],
+            'host' => $config['host'],
             'rtsp_url' => $config['rtsp_url'],
-            'stream' => '/api/lymow.php?action=stream',
             'snapshot' => '/api/lymow.php?action=snapshot',
             'last_check' => $config['last_check'],
             'error' => $config['last_error'] !== '' ? $config['last_error'] : null,
@@ -173,77 +199,90 @@ final class YarboLymow
 
     public function snapshotJpeg(): string
     {
-        $url = $this->load()['rtsp_url'];
-        $ffmpeg = $this->ffmpegPath();
-        $cmd = sprintf(
-            '%s -hide_banner -loglevel error -rtsp_transport tcp -stimeout 5000000 -i %s -an -frames:v 1 -f image2 pipe:1',
-            escapeshellcmd($ffmpeg),
-            escapeshellarg($url),
-        );
-        $data = $this->runCommand($cmd);
-        if ($data === '') {
-            throw new \RuntimeException('Could not grab a still from Lymow RTSP. Is ffmpeg installed, and is the mower on the LAN?');
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
         }
-        $this->save(['last_ok' => true, 'last_error' => '', 'last_check' => gmdate('c')]);
+        $jpgPath = $dir . '/lymow-snapshot.jpg';
+        $lockPath = $dir . '/lymow-snapshot.lock';
+        if (is_file($jpgPath) && (time() - (int) filemtime($jpgPath)) < 2) {
+            $cached = (string) file_get_contents($jpgPath);
+            if (str_starts_with($cached, "\xff\xd8")) {
+                return $cached;
+            }
+        }
 
-        return $data;
+        $lock = fopen($lockPath, 'c');
+        if (!is_resource($lock)) {
+            throw new \RuntimeException('Could not lock Lymow snapshot capture.');
+        }
+        if (!flock($lock, LOCK_EX | LOCK_NB)) {
+            $stale = is_file($jpgPath) ? (string) file_get_contents($jpgPath) : '';
+            fclose($lock);
+            if (str_starts_with($stale, "\xff\xd8")) {
+                return $stale;
+            }
+            throw new \RuntimeException('Lymow camera is busy capturing a frame. Try again in a moment.');
+        }
+
+        try {
+            if (is_file($jpgPath) && (time() - (int) filemtime($jpgPath)) < 2) {
+                $cached = (string) file_get_contents($jpgPath);
+                if (str_starts_with($cached, "\xff\xd8")) {
+                    return $cached;
+                }
+            }
+            $url = $this->load()['rtsp_url'];
+            $ffmpeg = $this->ffmpegBinary();
+            $args = [
+                '-hide_banner',
+                '-loglevel', 'error',
+                '-nostdin',
+                '-rtsp_transport', 'tcp',
+                '-i', $url,
+                '-an',
+                '-frames:v', '1',
+                '-q:v', '5',
+                '-f', 'mjpeg',
+                'pipe:1',
+            ];
+            $ran = $this->runFfmpeg($ffmpeg, $args, 12.0);
+            $jpeg = $ran['out'];
+            if ($jpeg === '' || !str_starts_with($jpeg, "\xff\xd8")) {
+                $err = trim($ran['err']);
+                if ($err === '') {
+                    $err = 'No JPEG from Lymow RTSP. Is the mower on, and is ffmpeg installed?';
+                }
+                $this->save([
+                    'last_ok' => false,
+                    'last_error' => $err,
+                    'last_check' => gmdate('c'),
+                ]);
+                throw new \RuntimeException($err);
+            }
+            file_put_contents($jpgPath, $jpeg);
+            $this->save(['last_ok' => true, 'last_error' => '', 'last_check' => gmdate('c')]);
+
+            return $jpeg;
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
     }
 
     public function streamMjpeg(): void
     {
-        $url = $this->load()['rtsp_url'];
-        $ffmpeg = $this->ffmpegPath();
-        $cmd = sprintf(
-            '%s -hide_banner -loglevel error -rtsp_transport tcp -stimeout 5000000 -i %s -an -f mjpeg -q:v 5 pipe:1',
-            escapeshellcmd($ffmpeg),
-            escapeshellarg($url),
-        );
+        $jpeg = $this->snapshotJpeg();
         header('Cache-Control: no-cache, no-store, must-revalidate');
-        header('Content-Type: multipart/x-mixed-replace; boundary=frame');
-        $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
-        if (!is_resource($proc)) {
-            throw new \RuntimeException('Failed to start ffmpeg');
-        }
-        stream_set_blocking($pipes[1], false);
-        $buffer = '';
-        while (!feof($pipes[1])) {
-            $chunk = fread($pipes[1], 8192);
-            if ($chunk === false || $chunk === '') {
-                usleep(20000);
-                continue;
-            }
-            $buffer .= $chunk;
-            while (($start = strpos($buffer, "\xff\xd8")) !== false) {
-                $next = strpos($buffer, "\xff\xd8", $start + 2);
-                if ($next === false) {
-                    break;
-                }
-                $frame = substr($buffer, $start, $next - $start);
-                $buffer = substr($buffer, $next);
-                echo "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " . strlen($frame) . "\r\n\r\n";
-                echo $frame . "\r\n";
-                flush();
-            }
-        }
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        proc_close($proc);
+        header('Content-Type: image/jpeg');
+        header('Content-Length: ' . (string) strlen($jpeg));
+        echo $jpeg;
     }
 
     private function tcpReachable(string $rtsp): bool
     {
-        $host = '';
-        $port = 10022;
-        if (preg_match('#rtsp://([^/:]+)(?::(\d+))?#i', $rtsp, $matches)) {
-            $host = $matches[1];
-            if (isset($matches[2]) && $matches[2] !== '') {
-                $port = (int) $matches[2];
-            }
-        }
-        if ($host === '') {
-            return false;
-        }
-        $fp = @fsockopen($host, $port, $errno, $errstr, 1.5);
+        $host = self::normalizeHost($rtsp);
+        $fp = @fsockopen($host, self::RTSP_PORT, $errno, $errstr, 1.5);
         if (!is_resource($fp)) {
             return false;
         }
@@ -252,30 +291,59 @@ final class YarboLymow
         return true;
     }
 
-    private function ffmpegPath(): string
+    private function ffmpegBinary(): string
     {
         $config = @include $this->projectRoot . '/config.php';
         $fromConfig = is_array($config) ? trim((string) ($config['ffmpeg_path'] ?? '')) : '';
-        if ($fromConfig !== '') {
+        if ($fromConfig !== '' && $fromConfig !== 'ffmpeg' && is_file($fromConfig)) {
             return $fromConfig;
         }
         $which = trim((string) shell_exec('command -v ffmpeg 2>/dev/null'));
+        if ($which === '') {
+            throw new \RuntimeException('ffmpeg is not installed on this panel host. On a Pi: sudo apt install -y ffmpeg');
+        }
 
-        return $which !== '' ? $which : 'ffmpeg';
+        return $which;
     }
 
-    private function runCommand(string $cmd): string
+    /**
+     * @param list<string> $args
+     * @return array{out: string, err: string}
+     */
+    private function runFfmpeg(string $ffmpeg, array $args, float $timeout): array
     {
-        $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $cmd = array_merge([$ffmpeg], $args);
+        $escaped = implode(' ', array_map('escapeshellarg', $cmd));
+        $proc = proc_open($escaped, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (!is_resource($proc)) {
-            return '';
+            return ['out' => '', 'err' => 'Failed to start ffmpeg'];
         }
-        $out = stream_get_contents($pipes[1]) ?: '';
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $out = '';
+        $err = '';
+        $deadline = microtime(true) + $timeout;
+        while (microtime(true) < $deadline) {
+            $out .= (string) fread($pipes[1], 8192);
+            $err .= (string) fread($pipes[2], 8192);
+            $status = proc_get_status($proc);
+            if (!($status['running'] ?? true)) {
+                break;
+            }
+            usleep(30000);
+        }
+        $status = proc_get_status($proc);
+        if ($status['running'] ?? false) {
+            proc_terminate($proc, 9);
+            $err = trim($err . ' ffmpeg timed out after ' . (int) $timeout . 's');
+        }
+        $out .= (string) stream_get_contents($pipes[1]);
+        $err .= (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
         proc_close($proc);
 
-        return $out;
+        return ['out' => $out, 'err' => trim($err)];
     }
 
     private function charToCode(string $ch): int

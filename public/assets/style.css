@@ -110,6 +110,7 @@ header h1 {
 }
 
 .lymow-video-wrap {
+    position: relative;
     margin-top: 0.75rem;
     background: #111;
     border-radius: 8px;
@@ -123,6 +124,19 @@ header h1 {
     max-height: 420px;
     object-fit: contain;
     background: #000;
+    min-height: 180px;
+}
+
+.lymow-stream-error {
+    margin: 0;
+    padding: 0.75rem 1rem;
+    color: #f6d0d0;
+    background: rgba(80, 16, 16, 0.92);
+    font-size: 0.85rem;
+}
+
+.lymow-stream-error.hidden {
+    display: none;
 }
 
 .btn-settings {
@@ -876,8 +890,49 @@ body.modal-open {
     color: var(--muted);
 }
 
-.papermono-kind {
-    margin: 0.35rem 0 0.85rem;
+.papermono-kind-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+    margin: 0.5rem 0 1rem;
+}
+
+.papermono-kind-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.9rem 1rem;
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    background: var(--surface);
+}
+
+.papermono-kind-card input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.papermono-kind-card.is-active,
+.papermono-kind-card:has(input:checked) {
+    border-color: var(--accent);
+    background: rgba(61, 154, 95, 0.12);
+}
+
+.papermono-kind-card-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+.papermono-kind-card-meta {
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.35;
+}
+
+.papercolor-preview svg {
+    background: #fffef6;
 }
 
 .camera-mode label {
@@ -2154,6 +2209,10 @@ html[data-theme="light"] .plan-activity {
 
 @media (max-width: 720px) {
     .papermono-preview-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .papermono-kind-switch {
         grid-template-columns: 1fr;
     }
 }

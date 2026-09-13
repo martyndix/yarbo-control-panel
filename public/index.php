@@ -503,9 +503,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Lymow camera</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint" id="lymow-status">RTSP: —</p>
+            <p class="hint" id="lymow-status">Camera: —</p>
             <div class="lymow-video-wrap">
                 <img id="lymow-stream" class="lymow-stream" alt="Lymow camera" width="640" height="480">
+                <p id="lymow-stream-error" class="lymow-stream-error hidden" role="status"></p>
             </div>
         </section>
 
@@ -693,10 +694,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-lymow-section">
                             <h3 class="settings-subtitle">Lymow camera</h3>
-                            <p class="hint">Local RTSP (same URL as Homebridge CameraUI). Needs <code>ffmpeg</code> on the Pi. Default matches your working stream.</p>
+                            <p class="hint">LAN IP of the Lymow. The panel always uses <code>rtsp://IP:10022/h264ESVideoTest</code> (same path as Homebridge CameraUI). Needs <code>ffmpeg</code> on this host (<code>sudo apt install -y ffmpeg</code> on a Pi). The dashboard shows stills about every 2–3 seconds, not a live RTSP player.</p>
                             <label class="settings-field">
-                                <span class="label">RTSP URL</span>
-                                <input type="text" id="settings-lymow-rtsp" name="lymow_rtsp_url" autocomplete="off" spellcheck="false" placeholder="rtsp://192.168.40.154:10022/h264ESVideoTest">
+                                <span class="label">Lymow IP</span>
+                                <input type="text" id="settings-lymow-host" name="lymow_host" autocomplete="off" spellcheck="false" inputmode="decimal" placeholder="192.168.40.154">
                             </label>
                         </section>
 
@@ -792,18 +793,53 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-papermono-section">
                             <h3 class="settings-subtitle">E-paper companions <span class="settings-beta-badge">Beta</span></h3>
-                            <p class="hint" id="papermono-kind-hint">Plug in the tablet over USB, pick the hardware, then flash. PaperMono is the grayscale touch C153. Paper Colour is the no-touch Spectra 6 PaperColor. Same Wi-Fi and panel URL; the panel flashes the matching firmware so the tablet UI is correct. See <code>docs/papermono.md</code> and <code>docs/papercolor.md</code>.</p>
-                            <div class="map-mode papermono-kind" role="radiogroup" aria-label="E-paper hardware">
-                                <label>
+                            <p class="hint" id="papermono-kind-hint">Choose the tablet you plugged in. That choice is what gets flashed — Paper Colour is a different binary and a different on-screen UI (no touch, A/B/C keys).</p>
+                            <div class="papermono-kind-switch" role="radiogroup" aria-label="E-paper hardware">
+                                <label class="papermono-kind-card is-active">
                                     <input type="radio" name="papermono-kind" value="papermono" checked>
-                                    PaperMono
+                                    <span class="papermono-kind-card-title">PaperMono</span>
+                                    <span class="papermono-kind-card-meta">C153 · grayscale · touch · Stop / Dock / Pause</span>
                                 </label>
-                                <label>
+                                <label class="papermono-kind-card">
                                     <input type="radio" name="papermono-kind" value="papercolor">
-                                    Paper Colour
+                                    <span class="papermono-kind-card-title">Paper Colour</span>
+                                    <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour has no touch. After flash, buttons <strong>A/B</strong> change pages and <strong>C</strong> sleeps. Colour Home/Status plus Powerwall and Lymow when those modules are on. Spectra 6 is slow — it does not redraw every 15s.</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.1-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C sleeps. Build first: <code>pio run -e papercolor -d firmware/papercolor</code>.</p>
+                            <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
+                            <label class="settings-field">
+                                <span class="label">USB serial port</span>
+                                <select id="papermono-port">
+                                    <option value="">Refresh ports with the tablet plugged in</option>
+                                </select>
+                            </label>
+                            <div class="papermono-actions">
+                                <button type="button" class="btn btn-secondary" id="papermono-ports-refresh">Refresh USB ports</button>
+                                <button type="button" class="btn btn-secondary" id="papermono-install-tools">Install USB tools</button>
+                            </div>
+                            <p id="papermono-result" class="settings-cloud-result hidden" role="status"></p>
+                            <label class="settings-field">
+                                <span class="label">Wi-Fi name (SSID)</span>
+                                <input type="text" id="papermono-ssid" name="papermono_ssid" autocomplete="off" spellcheck="false" placeholder="Home network 2.4 GHz">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Wi-Fi password</span>
+                                <input type="password" id="papermono-wifi-password" name="papermono_wifi_password" autocomplete="new-password" placeholder="2.4 GHz only — these tablets have no 5 GHz">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Panel URL (this server, as the tablet will reach it)</span>
+                                <input type="url" id="papermono-panel-url" name="papermono_panel_url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:8080">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Device name</span>
+                                <input type="text" id="papermono-name" name="papermono_name" value="PaperMono" autocomplete="off">
+                            </label>
+                            <div class="papermono-actions">
+                                <button type="button" class="btn" id="papermono-flash">Flash PaperMono firmware &amp; send Wi-Fi</button>
+                                <button type="button" class="btn btn-secondary" id="papermono-config">Send Wi-Fi only (already flashed)</button>
+                            </div>
+                            <p class="hint" id="papermono-flash-hint">First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && pio run -d firmware/papermono</code>. If the port list fails, click <strong>Install USB tools</strong> to add <code>pyserial</code> and <code>esptool</code> to this panel’s Python environment. The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll. Keep the tablet out of direct sun.</p>
                             <div class="papermono-preview-grid" id="papermono-preview-grid" aria-hidden="true">
                                 <figure class="papermono-preview">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
@@ -932,39 +968,50 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <figcaption>First boot — until Wi-Fi is sent over USB</figcaption>
                                 </figure>
                             </div>
-                            <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
-                            <label class="settings-field">
-                                <span class="label">USB serial port</span>
-                                <select id="papermono-port">
-                                    <option value="">Refresh ports with the tablet plugged in</option>
-                                </select>
-                            </label>
-                            <div class="papermono-actions">
-                                <button type="button" class="btn btn-secondary" id="papermono-ports-refresh">Refresh USB ports</button>
-                                <button type="button" class="btn btn-secondary" id="papermono-install-tools">Install USB tools</button>
+                            <div class="papermono-preview-grid hidden" id="papercolor-preview-grid" aria-hidden="true">
+                                <figure class="papermono-preview papercolor-preview">
+                                    <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour home screen mock, 400 by 600 Spectra 6">
+                                        <rect width="400" height="600" fill="#fffef6"/>
+                                        <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
+                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOR</text>
+                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lawnbot  0.2.1-color</text>
+                                        <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">HOME</text>
+                                        <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">87%</text>
+                                        <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">Charging  No</text>
+                                        <text x="20" y="238" font-family="ui-monospace, monospace" font-size="16" fill="#111">State     idle</text>
+                                        <text x="20" y="266" font-family="ui-monospace, monospace" font-size="16" fill="#111">Head      Mower</text>
+                                        <rect x="20" y="300" width="18" height="18" fill="#c41e3a"/>
+                                        <rect x="44" y="300" width="18" height="18" fill="#e6c200"/>
+                                        <rect x="68" y="300" width="18" height="18" fill="#2e8b57"/>
+                                        <rect x="92" y="300" width="18" height="18" fill="#1e5aa8"/>
+                                        <text x="20" y="348" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#444">No touch · A/B pages · C sleep</text>
+                                        <rect x="16" y="548" width="70" height="16" fill="#111"/>
+                                        <text x="51" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#fffef6">HOME</text>
+                                        <text x="140" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#111">STATUS</text>
+                                        <text x="230" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#111">PWRWALL</text>
+                                        <text x="325" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#111">LYMOW</text>
+                                        <text x="20" y="586" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">A prev · B next · C sleep</text>
+                                    </svg>
+                                    <figcaption>Paper Colour Home — 400×600, no Stop/Dock tiles</figcaption>
+                                </figure>
+                                <figure class="papermono-preview papercolor-preview">
+                                    <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour first-boot setup mock">
+                                        <rect width="400" height="600" fill="#fffef6"/>
+                                        <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
+                                        <text x="20" y="56" font-family="ui-sans-serif, system-ui, sans-serif" font-size="28" font-weight="700" fill="#0b6b3a">Paper Colour</text>
+                                        <text x="20" y="88" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#111">setup  ·  BETA</text>
+                                        <text x="20" y="150" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" fill="#222">1. Plug USB into the computer</text>
+                                        <text x="20" y="174" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" fill="#222">running this Yarbo panel.</text>
+                                        <text x="20" y="214" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" fill="#222">2. Settings → E-paper companions</text>
+                                        <text x="20" y="238" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" fill="#222">→ choose Paper Colour.</text>
+                                        <text x="20" y="278" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" fill="#222">3. Flash Paper Colour firmware</text>
+                                        <text x="20" y="302" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" fill="#222">and send 2.4 GHz Wi-Fi.</text>
+                                        <text x="20" y="360" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#444">Keep this cable connected</text>
+                                        <text x="20" y="382" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#444">until CFG_OK.</text>
+                                    </svg>
+                                    <figcaption>First boot — pick Paper Colour in Settings before flashing</figcaption>
+                                </figure>
                             </div>
-                            <p id="papermono-result" class="settings-cloud-result hidden" role="status"></p>
-                            <label class="settings-field">
-                                <span class="label">Wi-Fi name (SSID)</span>
-                                <input type="text" id="papermono-ssid" name="papermono_ssid" autocomplete="off" spellcheck="false" placeholder="Home network 2.4 GHz">
-                            </label>
-                            <label class="settings-field">
-                                <span class="label">Wi-Fi password</span>
-                                <input type="password" id="papermono-wifi-password" name="papermono_wifi_password" autocomplete="new-password" placeholder="2.4 GHz only — these tablets have no 5 GHz">
-                            </label>
-                            <label class="settings-field">
-                                <span class="label">Panel URL (this server, as the tablet will reach it)</span>
-                                <input type="url" id="papermono-panel-url" name="papermono_panel_url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:8080">
-                            </label>
-                            <label class="settings-field">
-                                <span class="label">Device name</span>
-                                <input type="text" id="papermono-name" name="papermono_name" value="PaperMono" autocomplete="off">
-                            </label>
-                            <div class="papermono-actions">
-                                <button type="button" class="btn" id="papermono-flash">Flash firmware &amp; send Wi-Fi</button>
-                                <button type="button" class="btn btn-secondary" id="papermono-config">Send Wi-Fi only (already flashed)</button>
-                            </div>
-                            <p class="hint" id="papermono-flash-hint">First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && pio run -d firmware/papermono</code>. If the port list fails, click <strong>Install USB tools</strong> to add <code>pyserial</code> and <code>esptool</code> to this panel’s Python environment. The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll. Keep the tablet out of direct sun.</p>
                             <h4 class="settings-subtitle">Paired devices</h4>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>

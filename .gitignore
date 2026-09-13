@@ -18,6 +18,8 @@
 /data/powerwall-config.json
 /data/powerwall-cache.json
 /data/lymow-config.json
+/data/lymow-snapshot.jpg
+/data/lymow-snapshot.lock
 /data/tesla-fleet-private.pem
 /public/.well-known/appspecific/com.tesla.3p.public-key.pem
 /firmware/papermono/.pio/

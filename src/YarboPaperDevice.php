@@ -13,7 +13,7 @@ final class YarboPaperDevice
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
     public const FIRMWARE_VERSION = '0.1.2-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.0-color';
+    public const FIRMWARE_VERSION_COLOR = '0.2.1-color';
     private const PLANS_CACHE_TTL_S = 300;
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
     public const FIRMWARE_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware.bin';

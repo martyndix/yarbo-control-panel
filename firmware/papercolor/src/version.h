@@ -1,6 +1,6 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.2.0-color"
+#define PAPERMONO_FW_VERSION "0.2.1-color"
 #define PAPERMONO_POLL_MS 60000
 #define PAPERMONO_PAGE_HOME 0
 #define PAPERMONO_PAGE_STATUS 1

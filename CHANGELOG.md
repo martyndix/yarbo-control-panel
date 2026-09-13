@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-09-13
+
+### Fixed
+- Lymow camera: Settings is **IP only** (not a full RTSP URL). The dashboard shows JPEG stills about every 2–3 seconds with the ffmpeg error if a frame fails, instead of a broken MJPEG image.
+- Settings → E-paper companions: large **PaperMono / Paper Colour** cards, Colour mockups, and **Flash Paper Colour firmware** so the Colour path is obvious. Colour setup screen on the tablet says Paper Colour (`0.2.1-color`).
+
 ## [2.0.2] - 2026-09-13
 
 ### Added

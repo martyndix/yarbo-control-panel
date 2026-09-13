@@ -125,7 +125,7 @@ const els = {
     settingsPowerwallKeys: document.getElementById('settings-powerwall-keys'),
     settingsPowerwallOauth: document.getElementById('settings-powerwall-oauth'),
     settingsPowerwallTest: document.getElementById('settings-powerwall-test'),
-    settingsLymowRtsp: document.getElementById('settings-lymow-rtsp'),
+    settingsLymowHost: document.getElementById('settings-lymow-host'),
     powerwallLoad: document.getElementById('powerwall-load'),
     powerwallSolar: document.getElementById('powerwall-solar'),
     powerwallBattery: document.getElementById('powerwall-battery'),
@@ -135,6 +135,7 @@ const els = {
     powerwallError: document.getElementById('powerwall-error'),
     lymowStatus: document.getElementById('lymow-status'),
     lymowStream: document.getElementById('lymow-stream'),
+    lymowStreamError: document.getElementById('lymow-stream-error'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -1962,8 +1963,10 @@ function setActiveModule(id, persist = true) {
     els.moduleSwitcher?.querySelectorAll('[data-module-id]').forEach((btn) => {
         btn.classList.toggle('is-active', btn.getAttribute('data-module-id') === moduleId);
     });
-    if (moduleId === 'lymow' && els.lymowStream && !els.lymowStream.getAttribute('src')) {
-        els.lymowStream.src = `/api/lymow.php?action=stream&t=${Date.now()}`;
+    if (moduleId === 'lymow') {
+        startLymowSnapshots();
+    } else {
+        stopLymowSnapshots();
     }
 }
 
@@ -1985,12 +1988,89 @@ function updatePowerwallDashboard(pw) {
 function updateLymowDashboard(ly) {
     if (!els.lymowStatus) return;
     if (!ly) {
-        els.lymowStatus.textContent = 'RTSP: —';
+        els.lymowStatus.textContent = 'Camera: —';
         return;
     }
+    const host = ly.host || '';
     const ok = Boolean(ly.online || ly.ok);
-    els.lymowStatus.textContent = `${ok ? 'Camera up' : 'Camera down'} · ${ly.rtsp_url || ''}`;
+    els.lymowStatus.textContent = host
+        ? `${ok ? 'Camera up' : 'Camera down'} · ${host}`
+        : (ok ? 'Camera up' : 'Camera down');
+    if (document.querySelector('#lymow-card:not(.module-pane-hidden)')) {
+        startLymowSnapshots();
+    }
 }
+
+let lymowSnapTimer = null;
+let lymowSnapBusy = false;
+let lymowSnapObjectUrl = '';
+
+function stopLymowSnapshots() {
+    if (lymowSnapTimer) {
+        clearInterval(lymowSnapTimer);
+        lymowSnapTimer = null;
+    }
+}
+
+async function grabLymowSnapshot() {
+    if (!els.lymowStream || lymowSnapBusy || document.hidden) return;
+    if (els.lymowStream.closest('.module-pane-hidden')) return;
+    lymowSnapBusy = true;
+    try {
+        const res = await fetch(`/api/lymow.php?action=snapshot&t=${Date.now()}`, { cache: 'no-store' });
+        const type = (res.headers.get('content-type') || '').toLowerCase();
+        if (!res.ok || !type.includes('jpeg')) {
+            let message = `Camera snapshot failed (${res.status})`;
+            if (type.includes('json')) {
+                try {
+                    const data = await res.json();
+                    if (data.error) message = String(data.error);
+                } catch { /* keep message */ }
+            }
+            throw new Error(message);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        els.lymowStream.src = url;
+        if (lymowSnapObjectUrl) URL.revokeObjectURL(lymowSnapObjectUrl);
+        lymowSnapObjectUrl = url;
+        if (els.lymowStreamError) {
+            els.lymowStreamError.textContent = '';
+            els.lymowStreamError.classList.add('hidden');
+        }
+        if (els.lymowStatus && !els.lymowStatus.textContent.startsWith('Camera up')) {
+            const host = (els.lymowStatus.textContent.split('·')[1] || '').trim();
+            els.lymowStatus.textContent = host ? `Camera up · ${host}` : 'Camera up';
+        }
+    } catch (err) {
+        if (els.lymowStreamError) {
+            els.lymowStreamError.textContent = err.message || 'Could not load Lymow camera.';
+            els.lymowStreamError.classList.remove('hidden');
+        }
+        if (els.lymowStatus) {
+            const host = (els.lymowStatus.textContent.split('·')[1] || '').trim();
+            els.lymowStatus.textContent = host ? `Camera down · ${host}` : 'Camera down';
+        }
+    } finally {
+        lymowSnapBusy = false;
+    }
+}
+
+function startLymowSnapshots() {
+    if (!els.lymowStream || document.hidden) return;
+    if (els.lymowStream.closest('.module-pane-hidden')) return;
+    if (lymowSnapTimer) return;
+    grabLymowSnapshot();
+    lymowSnapTimer = setInterval(grabLymowSnapshot, 2500);
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        stopLymowSnapshots();
+    } else if (document.querySelector('#lymow-card:not(.module-pane-hidden)')) {
+        startLymowSnapshots();
+    }
+});
 
 function powerwallTransport() {
     const checked = document.querySelector('input[name="powerwall-transport"]:checked');
@@ -2990,7 +3070,7 @@ async function loadSettings() {
                 els.settingsPowerwallOauth.href = '#';
             }
         }
-        if (els.settingsLymowRtsp) els.settingsLymowRtsp.value = data.lymow?.rtsp_url || 'rtsp://192.168.40.154:10022/h264ESVideoTest';
+        if (els.settingsLymowHost) els.settingsLymowHost.value = data.lymow?.host || '192.168.40.154';
         applyVestaboardEnabled();
         if (els.settingsCloudStatus) {
             if (data.cloud_status) {
@@ -3046,7 +3126,17 @@ function applyPaperMonoKindUi(dashboard) {
         }
     }
     document.getElementById('papermono-preview-grid')?.classList.toggle('hidden', kind === 'papercolor');
+    document.getElementById('papercolor-preview-grid')?.classList.toggle('hidden', kind !== 'papercolor');
     document.getElementById('papermono-color-extra')?.classList.toggle('hidden', kind !== 'papercolor');
+    document.querySelectorAll('.papermono-kind-card').forEach((card) => {
+        const input = card.querySelector('input[name="papermono-kind"]');
+        card.classList.toggle('is-active', input?.value === kind);
+    });
+    if (els.papermonoFlash) {
+        els.papermonoFlash.textContent = kind === 'papercolor'
+            ? 'Flash Paper Colour firmware & send Wi-Fi'
+            : 'Flash PaperMono firmware & send Wi-Fi';
+    }
     if (els.papermonoFwStatus) {
         if (fw) {
             const built = fw.built
@@ -3613,7 +3703,7 @@ async function saveSettings(event) {
             powerwall_energy_site_id: els.settingsPowerwallSite?.value.trim() || '',
             powerwall_gateway_host: els.settingsPowerwallHost?.value.trim() || '',
             powerwall_gateway_email: els.settingsPowerwallEmail?.value.trim() || '',
-            lymow_rtsp_url: els.settingsLymowRtsp?.value.trim() || '',
+            lymow_host: els.settingsLymowHost?.value.trim() || '',
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;

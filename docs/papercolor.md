@@ -27,7 +27,15 @@ On the **same machine that runs the panel**:
 4. Choose **Paper Colour** (not PaperMono). That is what selects the Colour binary — the USB port list is the same.
 5. Refresh USB ports and select the tablet. If the list fails, click **Install USB tools**.
 6. Enter 2.4 GHz Wi-Fi, the panel URL as the tablet will reach it (not `localhost`), and a device name.
-7. Click **Flash firmware & send Wi-Fi**. Leave Settings open for one to two minutes.
+7. Click **Flash Paper Colour firmware & send Wi-Fi**. Leave Settings open for one to two minutes.
+
+Rebuild after panel updates that bump Colour firmware (`0.2.1-color` and later):
+
+```bash
+pio run -e papercolor -d firmware/papercolor
+```
+
+Then flash again from Settings with **Paper Colour** selected.
 
 **Send Wi-Fi only** reuses already-flashed firmware and pushes the same `CFG:{...}` JSON as PaperMono.
 
