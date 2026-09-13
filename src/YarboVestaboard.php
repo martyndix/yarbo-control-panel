@@ -16,6 +16,8 @@ final class YarboVestaboard
     public const MIN_SEND_GAP_SECONDS = 15.0;
     public const MIN_PROGRESS_SEND_GAP_SECONDS = 120.0;
     public const EXTERNAL_HOLD_SECONDS = 3600;
+    public const EXTERNAL_HOLD_SETTLE_SECONDS = 30;
+    public const RECENT_HASH_LIMIT = 3;
     public const DEFAULT_HOST = 'vestaboard.local';
     public const DEFAULT_PORT = 7000;
     public const TRANSPORT_LOCAL = 'local';
@@ -116,6 +118,7 @@ final class YarboVestaboard
             'board_fetched_at' => null,
             'external_hold' => false,
             'external_hold_until' => null,
+            'recent_hashes' => [],
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -160,6 +163,7 @@ final class YarboVestaboard
                 && $decoded['external_hold_until'] !== ''
                 ? $decoded['external_hold_until']
                 : null,
+            'recent_hashes' => $this->normalizeRecentHashes($decoded['recent_hashes'] ?? null, (string) ($decoded['last_hash'] ?? '')),
         ];
     }
 
@@ -257,6 +261,9 @@ final class YarboVestaboard
                     ? $input['external_hold_until']
                     : null)
                 : ($current['external_hold_until'] ?? null),
+            'recent_hashes' => array_key_exists('recent_hashes', $input)
+                ? $this->normalizeRecentHashes($input['recent_hashes'] ?? null, (string) ($input['last_hash'] ?? $current['last_hash']))
+                : $this->normalizeRecentHashes($current['recent_hashes'] ?? null, (string) ($current['last_hash'] ?? '')),
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -605,6 +612,7 @@ final class YarboVestaboard
             'board_fetched_at' => gmdate('c'),
             'external_hold' => false,
             'external_hold_until' => null,
+            'recent_hashes' => $this->pushRecentHash($config['recent_hashes'] ?? [], $hash),
         ];
         if (!$isQuiet) {
             $saved['last_live_codes'] = $layout['codes'];
@@ -1359,7 +1367,10 @@ final class YarboVestaboard
             'board_hash' => $hash,
             'board_fetched_at' => gmdate('c'),
         ];
-        if ($lastHash !== '' && $hash === $lastHash) {
+        $ours = $hash === $lastHash
+            || in_array($hash, $this->normalizeRecentHashes($config['recent_hashes'] ?? null, $lastHash), true)
+            || $this->codesLookLikeOwnPowerwall($codes);
+        if ($ours) {
             if (!empty($config['external_hold'])) {
                 $saved['external_hold'] = false;
                 $saved['external_hold_until'] = null;
@@ -1368,12 +1379,12 @@ final class YarboVestaboard
 
             return;
         }
-        if ($lastHash === '' || $hash === $lastHash) {
+        if ($lastHash === '') {
             $this->save($saved);
 
             return;
         }
-        if ($this->isExternalHoldExpired($config)) {
+        if ($this->isOwnWriteSettling($config) || $this->isExternalHoldExpired($config)) {
             $this->save($saved);
 
             return;
@@ -1385,6 +1396,75 @@ final class YarboVestaboard
             $saved['external_hold_until'] = $until->setTimezone(new \DateTimeZone('UTC'))->format('c');
         }
         $this->save($saved);
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<string>
+     */
+    private function normalizeRecentHashes(mixed $raw, string $lastHash = ''): array
+    {
+        $out = [];
+        if (is_array($raw)) {
+            foreach ($raw as $hash) {
+                if (is_string($hash) && $hash !== '' && !in_array($hash, $out, true)) {
+                    $out[] = $hash;
+                }
+            }
+        }
+        if ($lastHash !== '' && !in_array($lastHash, $out, true)) {
+            array_unshift($out, $lastHash);
+        }
+
+        return array_slice($out, 0, self::RECENT_HASH_LIMIT);
+    }
+
+    /**
+     * @param list<string>|mixed $existing
+     * @return list<string>
+     */
+    private function pushRecentHash(mixed $existing, string $hash): array
+    {
+        $next = [];
+        if (is_array($existing)) {
+            foreach ($existing as $item) {
+                if (is_string($item) && $item !== '' && $item !== $hash) {
+                    $next[] = $item;
+                }
+            }
+        }
+        array_unshift($next, $hash);
+
+        return array_slice($next, 0, self::RECENT_HASH_LIMIT);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function isOwnWriteSettling(array $config): bool
+    {
+        $then = isset($config['last_sent_at']) && is_string($config['last_sent_at'])
+            ? strtotime($config['last_sent_at'])
+            : false;
+
+        return $then !== false && (time() - $then) < self::EXTERNAL_HOLD_SETTLE_SECONDS;
+    }
+
+    /**
+     * HOME/POWERWALL/OFFLINE + SOLAR + DRAW is this panel's Powerwall page, not an app scribble.
+     *
+     * @param list<list<int>> $codes
+     */
+    private function codesLookLikeOwnPowerwall(array $codes): bool
+    {
+        $lines = self::linesFromCodes($codes);
+        $row0 = strtoupper(trim($lines[0] ?? ''));
+        $row1 = strtoupper(trim($lines[1] ?? ''));
+        $row2 = strtoupper(trim($lines[2] ?? ''));
+
+        return (str_starts_with($row0, 'HOME') || str_starts_with($row0, 'POWERWALL') || str_starts_with($row0, 'OFFLINE'))
+            && str_starts_with($row1, 'SOLAR')
+            && str_starts_with($row2, 'DRAW');
     }
 
     /**

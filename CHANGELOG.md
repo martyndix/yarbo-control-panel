@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-09-13
+
+### Fixed
+- Powerwall Vestaboard: colour chip no longer eats the last character (`89%` and `OFFLINE` stay whole). Label is **POWERWALL**. Solar, draw, and grid show **watts** on the Note and the web card.
+- Late Powerwall polls keep the last good reading instead of posting OFFLINE and tripping a false **Vestaboard app** hold.
+- Vestaboard GET lag after our own write is not treated as an app message (recent hashes + 30s settle). Dashboard button is **Resume previous status**.
+
+### Changed
+- Powerwall Note updates: battery % at most every 2 minutes; solar and draw at most every 5 minutes.
+
 ## [2.0.0] - 2026-09-13
 
 ### Added

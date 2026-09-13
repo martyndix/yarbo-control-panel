@@ -9,6 +9,9 @@ final class YarboPowerwall
     public const TRANSPORT_LOCAL = 'local';
     public const TRANSPORT_CLOUD = 'cloud';
     public const CACHE_TTL_SECONDS = 12;
+    public const STALE_ONLINE_SECONDS = 600;
+    public const VB_BATTERY_INTERVAL_SECONDS = 120;
+    public const VB_POWER_INTERVAL_SECONDS = 300;
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -53,6 +56,12 @@ final class YarboPowerwall
             'energy_site_id' => '',
             'public_panel_url' => '',
             'last_error' => '',
+            'vb_batt' => null,
+            'vb_batt_at' => null,
+            'vb_solar_w' => null,
+            'vb_solar_at' => null,
+            'vb_load_w' => null,
+            'vb_load_at' => null,
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -79,6 +88,12 @@ final class YarboPowerwall
             'energy_site_id' => trim((string) ($decoded['energy_site_id'] ?? '')),
             'public_panel_url' => rtrim(trim((string) ($decoded['public_panel_url'] ?? '')), '/'),
             'last_error' => (string) ($decoded['last_error'] ?? ''),
+            'vb_batt' => $this->nullableInt($decoded['vb_batt'] ?? null),
+            'vb_batt_at' => $this->nullableTime($decoded['vb_batt_at'] ?? null),
+            'vb_solar_w' => $this->nullableInt($decoded['vb_solar_w'] ?? null),
+            'vb_solar_at' => $this->nullableTime($decoded['vb_solar_at'] ?? null),
+            'vb_load_w' => $this->nullableInt($decoded['vb_load_w'] ?? null),
+            'vb_load_at' => $this->nullableTime($decoded['vb_load_at'] ?? null),
         ]);
     }
 
@@ -141,6 +156,12 @@ final class YarboPowerwall
                 ? rtrim(trim((string) ($input['public_panel_url'] ?? $input['powerwall_public_url'] ?? '')), '/')
                 : $current['public_panel_url'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
+            'vb_batt' => array_key_exists('vb_batt', $input) ? $this->nullableInt($input['vb_batt']) : $current['vb_batt'],
+            'vb_batt_at' => array_key_exists('vb_batt_at', $input) ? $this->nullableTime($input['vb_batt_at']) : $current['vb_batt_at'],
+            'vb_solar_w' => array_key_exists('vb_solar_w', $input) ? $this->nullableInt($input['vb_solar_w']) : $current['vb_solar_w'],
+            'vb_solar_at' => array_key_exists('vb_solar_at', $input) ? $this->nullableTime($input['vb_solar_at']) : $current['vb_solar_at'],
+            'vb_load_w' => array_key_exists('vb_load_w', $input) ? $this->nullableInt($input['vb_load_w']) : $current['vb_load_w'],
+            'vb_load_at' => array_key_exists('vb_load_at', $input) ? $this->nullableTime($input['vb_load_at']) : $current['vb_load_at'],
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -181,9 +202,20 @@ final class YarboPowerwall
      */
     public function dashboardPayload(): array
     {
-        $cached = $this->readCache();
-        if ($cached !== null) {
-            return $cached;
+        $fresh = $this->readCache(true);
+        if ($fresh !== null) {
+            return $fresh;
+        }
+        $stale = $this->readCache(false);
+        if ($stale !== null && $this->readingStillUsable($stale)) {
+            $stale['online'] = true;
+            $error = $this->load()['last_error'];
+            if ($error !== '') {
+                $stale['ok'] = false;
+                $stale['error'] = $error;
+            }
+
+            return $stale;
         }
 
         return [
@@ -215,8 +247,9 @@ final class YarboPowerwall
             $message = $e->getMessage();
             $this->save(['last_error' => $message]);
             $stale = $this->readCache(false);
-            if ($stale !== null) {
+            if ($stale !== null && $this->readingStillUsable($stale)) {
                 $stale['ok'] = false;
+                $stale['online'] = true;
                 $stale['error'] = $message;
 
                 return $stale;
@@ -250,21 +283,39 @@ final class YarboPowerwall
     public function vestaboardLayout(): array
     {
         $data = $this->dashboardPayload();
-        $online = !empty($data['online']);
+        $online = !empty($data['online']) && (isset($data['battery_percent']) || isset($data['load_w']));
         $batt = isset($data['battery_percent']) ? (int) round((float) $data['battery_percent']) : null;
-        $solarKw = isset($data['solar_w']) ? $this->formatKw((float) $data['solar_w']) : '--';
-        $loadKw = isset($data['load_w']) ? $this->formatKw((float) $data['load_w']) : '--';
-        $verb = $online ? 'HOME' : 'OFFLINE';
+        $solarW = isset($data['solar_w']) ? (int) round((float) $data['solar_w']) : null;
+        $loadW = isset($data['load_w']) ? (int) round((float) $data['load_w']) : null;
+        $config = $this->load();
+        [$battShow, $touchBatt] = $this->rateLimitField($config['vb_batt'], $config['vb_batt_at'], $batt, self::VB_BATTERY_INTERVAL_SECONDS);
+        [$solarShow, $touchSolar] = $this->rateLimitField($config['vb_solar_w'], $config['vb_solar_at'], $solarW, self::VB_POWER_INTERVAL_SECONDS);
+        [$loadShow, $touchLoad] = $this->rateLimitField($config['vb_load_w'], $config['vb_load_at'], $loadW, self::VB_POWER_INTERVAL_SECONDS);
+        if ($touchBatt || $touchSolar || $touchLoad) {
+            $this->save([
+                'vb_batt' => $touchBatt ? $battShow : $config['vb_batt'],
+                'vb_batt_at' => $touchBatt ? gmdate('c') : $config['vb_batt_at'],
+                'vb_solar_w' => $touchSolar ? $solarShow : $config['vb_solar_w'],
+                'vb_solar_at' => $touchSolar ? gmdate('c') : $config['vb_solar_at'],
+                'vb_load_w' => $touchLoad ? $loadShow : $config['vb_load_w'],
+                'vb_load_at' => $touchLoad ? gmdate('c') : $config['vb_load_at'],
+            ]);
+        }
+        $hasNumbers = $battShow !== null || $solarShow !== null || $loadShow !== null;
+        $showLive = $online || $hasNumbers;
+        $verb = $showLive ? 'POWERWALL' : 'OFFLINE';
         $lines = [
-            $this->pair('HOME', $batt !== null ? $batt . '%' : $verb),
-            $this->pair('SOLAR', $solarKw),
-            $this->pair('DRAW', $loadKw),
+            $showLive
+                ? $this->pair('POWERWALL', $battShow !== null ? $battShow . '%' : '--', 14)
+                : $this->pair('OFFLINE', '', 14),
+            $this->pair('SOLAR', $solarShow !== null ? $this->formatW((float) $solarShow) : '--'),
+            $this->pair('DRAW', $loadShow !== null ? $this->formatW((float) $loadShow) : '--'),
         ];
-        $codes = YarboVestaboard::normalizeQuietCodes($this->encodeLines($lines, $batt, $online));
+        $codes = YarboVestaboard::normalizeQuietCodes($this->encodeLines($lines, $battShow, $showLive));
 
         return [
             'ok' => true,
-            'online' => $online,
+            'online' => $showLive,
             'lines' => YarboVestaboard::linesFromCodes($codes),
             'codes' => $codes,
             'verb' => $verb,
@@ -522,20 +573,72 @@ final class YarboPowerwall
             'grid_w' => $gridW,
             'battery_w' => $batteryW,
             'battery_percent' => $percent,
-            'load_label' => $this->formatKw($loadW),
-            'solar_label' => $this->formatKw($solarW),
-            'grid_label' => $this->formatKw($gridW),
+            'load_label' => $this->formatW($loadW),
+            'solar_label' => $this->formatW($solarW),
+            'grid_label' => $this->formatW($gridW),
             'battery_label' => (string) (int) round($percent) . '%',
         ];
     }
 
-    private function formatKw(float $watts): string
+    private function formatW(float $watts): string
     {
-        $kw = $watts / 1000;
-        $sign = $kw < 0 ? '-' : '';
-        $n = abs($kw);
+        return (int) round($watts) . 'W';
+    }
 
-        return $sign . number_format($n, $n >= 10 ? 1 : 2) . 'kW';
+    /**
+     * @param mixed $held
+     * @param mixed $at
+     * @param mixed $current
+     * @return array{0: mixed, 1: bool}
+     */
+    private function rateLimitField(mixed $held, mixed $at, mixed $current, int $seconds): array
+    {
+        if ($current === null) {
+            return [$held, false];
+        }
+        $atTs = is_string($at) && $at !== '' ? strtotime($at) : false;
+        if ($held === null || $atTs === false) {
+            return [$current, true];
+        }
+        if ($current === $held) {
+            return [$held, false];
+        }
+        if ((time() - $atTs) >= $seconds) {
+            return [$current, true];
+        }
+
+        return [$held, false];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function readingStillUsable(array $row): bool
+    {
+        $at = strtotime((string) ($row['fetched_at'] ?? ''));
+        if ($at === false || (time() - $at) > self::STALE_ONLINE_SECONDS) {
+            return false;
+        }
+
+        return array_key_exists('battery_percent', $row) || array_key_exists('load_w', $row);
+    }
+
+    private function nullableInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return (int) $value;
+    }
+
+    private function nullableTime(mixed $value): ?string
+    {
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+
+        return $value;
     }
 
     /**

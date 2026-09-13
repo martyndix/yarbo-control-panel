@@ -1,6 +1,6 @@
 # Vestaboard Note (optional)
 
-Show Yarbo status on a [Vestaboard Note](https://docs.vestaboard.com/) (3 rows × 15 columns). In Settings you choose **Local API** (LAN only) or **Cloud API** (Vestaboard’s [Read/Write API](https://docs.vestaboard.com/docs/read-write-api/introduction/)).
+Show live status on a [Vestaboard Note](https://docs.vestaboard.com/) (3 rows × 15 columns). In Settings you choose **Local API** (LAN only) or **Cloud API** (Vestaboard’s [Read/Write API](https://docs.vestaboard.com/docs/read-write-api/introduction/)).
 
 This is optional. Leave **Enable Vestaboard Note** off if you do not have a board.
 
@@ -26,6 +26,14 @@ ON DOCK
 YARBO      IDLE
 BATTERY    FULL
 CHARGED
+```
+
+Powerwall live module (watts, battery `%` kept on the last flap before the colour chip):
+
+```
+POWERWALL   89%
+SOLAR      0W
+DRAW     590W
 ```
 
 ```
@@ -54,12 +62,12 @@ This is separate from Quiet Hours in the Vestaboard **app**. The app setting can
 
 The watcher **GETs** the Note (same Local key or Cloud Read token) about every 15 seconds and shows that grid on the dashboard card.
 
-If the flaps no longer match the last layout this panel wrote, Yarbo status pauses:
+If the flaps no longer match the last layout this panel wrote, live status pauses:
 
 - During the day, for **one hour** (a later different app message resets that hour).
 - During **Quiet hours**, until that window **ends** (not one hour). The same applies if a custom message is already on the board when quiet hours start — the overnight quiet template is not written over it.
 
-The dashboard shows **Resume Yarbo status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
+The dashboard shows **Resume previous status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
 Settings → **Modules** chooses which enabled module is **live** on the Note (Yarbo, Powerwall, or Lymow). App-hold and Quiet hours still apply.
 

@@ -3357,9 +3357,9 @@ function updateQuietHoursClockHint(board) {
     const tz = board?.quiet_timezone || clientTimezone();
     const now = board?.quiet_clock_now;
     const clock = tz && now ? ` Times use ${tz} (now ${now}), not UTC.` : ' Times use your local timezone (not UTC).';
-    hint.textContent = 'Stops Yarbo status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open.'
+    hint.textContent = 'Stops live status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open.'
         + clock
-        + ' Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.';
+        + ' A custom message from the Vestaboard app during this window stays until quiet hours end (Resume previous status on the dashboard takes the panel back). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.';
 }
 
 function vestaboardTransport() {
@@ -3472,7 +3472,7 @@ async function testVestaboardConnection(button) {
 
 async function sendVestaboardNow(button) {
     if (button) button.disabled = true;
-    setVestaboardResult('Sending current Yarbo status to the Note…');
+    setVestaboardResult('Sending current status to the Note…');
     try {
         const res = await fetch('/api/vestaboard.php', {
             method: 'POST',
@@ -3502,11 +3502,11 @@ async function resumeVestaboardStatus(button) {
             body: JSON.stringify({ action: 'resume' }),
         });
         const data = await parseJsonResponse(res);
-        if (!data.ok) throw new Error(data.error || 'Could not resume Yarbo status');
-        showToast('Yarbo status resumed on Vestaboard', 'success');
+        if (!data.ok) throw new Error(data.error || 'Could not resume previous status');
+        showToast('Previous status resumed on Vestaboard', 'success');
         els.vestaboardResume?.classList.add('hidden');
     } catch (err) {
-        showToast(err.message || 'Could not resume Yarbo status', 'error');
+        showToast(err.message || 'Could not resume previous status', 'error');
     } finally {
         if (button) button.disabled = false;
     }
