@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.8] - 2026-09-13
+
+### Fixed
+- Lymow Sign in with region **Auto** no longer fails with `'auto'`. Settings can stay on Auto; the resolved AWS region (e.g. `eu-west-1`) is kept for MQTT.
+
 ## [2.0.7] - 2026-09-13
 
 ### Added

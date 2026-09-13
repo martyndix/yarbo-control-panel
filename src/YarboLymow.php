@@ -668,7 +668,13 @@ final class YarboLymow
         if (($config['password'] ?? '') !== '') {
             $cloud['password'] = $config['password'];
         }
-        $cloud['region'] = $config['region'] ?: 'auto';
+        $incoming = strtolower(trim((string) ($config['region'] ?? 'auto'))) ?: 'auto';
+        $existing = strtolower(trim((string) ($cloud['region'] ?? '')));
+        $known = ['eu-west-1', 'us-east-2', 'ap-southeast-2', 'ap-east-1'];
+        if ($incoming === 'auto' && in_array($existing, $known, true)) {
+            $incoming = $existing;
+        }
+        $cloud['region'] = $incoming;
         file_put_contents(
             $this->cloudConfigPath(),
             json_encode($cloud, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",

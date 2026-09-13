@@ -284,26 +284,49 @@ def load_config(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def resolved_region(config: dict[str, Any]) -> str:
+    region = str(config.get("region") or "").strip().lower()
+    if region in REGION_CONFIG:
+        return region
+    identity = str(config.get("identity_id") or "")
+    for candidate in REGIONS:
+        if identity.startswith(candidate + ":"):
+            return candidate
+    return "eu-west-1"
+
+
 def save_config(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def ensure_tokens(config: dict[str, Any]) -> dict[str, Any]:
-    region = str(config.get("region") or "eu-west-1")
     access = str(config.get("access_token") or "")
     refresh = str(config.get("refresh_token") or "")
     expires = int(config.get("access_expires_at") or 0)
     if access and expires > time.time() + 60:
+        config["region"] = resolved_region(config)
         return config
     if refresh:
-        tokens = refresh_tokens(refresh, region)
-        config["access_token"] = tokens["AccessToken"]
-        config["id_token"] = tokens.get("IdToken", config.get("id_token", ""))
-        if tokens.get("RefreshToken"):
-            config["refresh_token"] = tokens["RefreshToken"]
-        config["access_expires_at"] = int(time.time()) + max(60, int(tokens.get("ExpiresIn") or 3600) - 60)
-        return config
+        preferred = str(config.get("region") or "").strip().lower()
+        order = [preferred] + [r for r in REGIONS if r != preferred] if preferred in REGION_CONFIG else list(REGIONS)
+        last_error = "Refresh failed"
+        for candidate in order:
+            if not REGION_CONFIG[candidate].get("user_pool_id"):
+                continue
+            try:
+                tokens = refresh_tokens(refresh, candidate)
+                config["region"] = candidate
+                config["access_token"] = tokens["AccessToken"]
+                config["id_token"] = tokens.get("IdToken", config.get("id_token", ""))
+                if tokens.get("RefreshToken"):
+                    config["refresh_token"] = tokens["RefreshToken"]
+                config["access_expires_at"] = int(time.time()) + max(60, int(tokens.get("ExpiresIn") or 3600) - 60)
+                return config
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+        if not str(config.get("email") or "") or not str(config.get("password") or ""):
+            raise RuntimeError(last_error)
     email = str(config.get("email") or "")
     password = str(config.get("password") or "")
     if not email or not password:
@@ -328,7 +351,8 @@ def ensure_tokens(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def fetch_device_bundle(config: dict[str, Any]) -> dict[str, Any]:
-    region = str(config["region"])
+    region = resolved_region(config)
+    config["region"] = region
     access = str(config["access_token"])
     id_token = str(config.get("id_token") or "")
     if not config.get("identity_id"):
@@ -560,7 +584,8 @@ def extract_shadow_state(obj: Any) -> dict[str, Any]:
 
 
 def fetch_iot_shadow(config: dict[str, Any], thing: str) -> dict[str, Any]:
-    region = str(config["region"])
+    region = resolved_region(config)
+    config["region"] = region
     id_token = str(config.get("id_token") or "")
     try:
         ident = aws_credentials(id_token, region)
@@ -629,7 +654,8 @@ def mqtt_wait_state(
     mqtt, import_error = ensure_paho()
     if mqtt is None:
         return {"mqtt_error": import_error or "paho-mqtt is not installed"}
-    region = str(config["region"])
+    region = resolved_region(config)
+    config["region"] = region
     host = str(REGION_CONFIG[region]["iot_host"])
     id_token = str(config.get("id_token") or "")
     try:
