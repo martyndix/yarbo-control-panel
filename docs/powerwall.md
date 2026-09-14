@@ -36,10 +36,10 @@ Use this if you find the Backup Gateway on the LAN.
 2. Sticker **inside the Gateway door / QR**: customer password is usually the **last 5 characters** of the printed password, **not** Tesla.com.
 3. Settings → Local Gateway: IP, email, that password → Test.
 
-Local JSON: `POST /api/login/Basic`, then `GET /api/meters/aggregates` and `GET /api/system_status/soe`. Powerwall 3 often has a weaker local API; use cloud if login fails.
+Local JSON: `POST /api/login/Basic`, then `GET /api/meters/aggregates` and `GET /api/system_status/soe`. Gateway `percentage` is the raw pack (about 5% higher than the Tesla app). The panel converts that to the same 0–100 scale as the app / Fleet API. Powerwall 3 often has a weaker local API; use cloud if login fails.
 
 ## Vestaboard
 
 Settings → Modules → **Vestaboard live module** → Powerwall. Quiet hours and Vestaboard-app hold still apply. There is also a **Yarbo + Powerwall + Lymow batteries** page that stacks the three percents.
 
-The Note shows `POWERWALL` plus battery `%`, then solar and house draw in **watts**. The colour chip next to `%` uses the same live battery scale as Yarbo and Lymow: green at 60% or more, yellow from 40%, orange from 20%, red below that. Printed battery `%` writes at most every 2 minutes; solar and draw at most every 5 minutes. A late Gateway poll keeps the last good reading instead of flashing OFFLINE.
+The Note shows `POWERWALL` plus battery `%`, then solar and house draw in **watts**. The colour chip next to `%` uses the same live battery scale as Yarbo and Lymow: green at 60% or more, yellow from 40%, orange from 20%, red below that. Printed battery `%` writes at most every 2 minutes unless it jumps by 2% or more; solar and draw at most every 5 minutes. A late Gateway poll keeps the last good reading instead of flashing OFFLINE.

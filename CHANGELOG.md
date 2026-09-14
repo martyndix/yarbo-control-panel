@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.14] - 2026-09-14
+
+### Fixed
+- Powerwall battery % now polls Tesla when the 12s cache expires (the dashboard no longer keeps a 10-minute-old reading). Local Gateway SoC is converted to the Tesla-app scale. Vestaboard still holds 1% chatter for 2 minutes, but a jump of 2% or more writes immediately.
+
 ## [2.0.13] - 2026-09-13
 
 ### Changed

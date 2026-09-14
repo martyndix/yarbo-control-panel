@@ -11,7 +11,10 @@ final class YarboPowerwall
     public const CACHE_TTL_SECONDS = 12;
     public const STALE_ONLINE_SECONDS = 600;
     public const VB_BATTERY_INTERVAL_SECONDS = 120;
+    public const VB_BATTERY_FORCE_DELTA = 2;
     public const VB_POWER_INTERVAL_SECONDS = 300;
+    /** Gateway /system_status/soe includes the unusable bottom ~5%; Tesla app / Fleet do not. */
+    private const LOCAL_SOE_UNUSABLE_PERCENT = 5.0;
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -206,24 +209,8 @@ final class YarboPowerwall
         if ($fresh !== null) {
             return $fresh;
         }
-        $stale = $this->readCache(false);
-        if ($stale !== null && $this->readingStillUsable($stale)) {
-            $stale['online'] = true;
-            $error = $this->load()['last_error'];
-            if ($error !== '') {
-                $stale['ok'] = false;
-                $stale['error'] = $error;
-            }
 
-            return $stale;
-        }
-
-        return [
-            'ok' => false,
-            'online' => false,
-            'source' => $this->load()['transport'],
-            'error' => $this->load()['last_error'] !== '' ? $this->load()['last_error'] : 'No Powerwall reading yet.',
-        ];
+        return $this->refresh();
     }
 
     /**
@@ -270,11 +257,7 @@ final class YarboPowerwall
         if (!$hub->enabled(YarboHub::MODULE_POWERWALL)) {
             return;
         }
-        $cached = $this->readCache();
-        if ($cached !== null && !empty($cached['ok'])) {
-            return;
-        }
-        $this->refresh();
+        $this->dashboardPayload();
     }
 
     /**
@@ -288,7 +271,13 @@ final class YarboPowerwall
         $solarW = isset($data['solar_w']) ? (int) round((float) $data['solar_w']) : null;
         $loadW = isset($data['load_w']) ? (int) round((float) $data['load_w']) : null;
         $config = $this->load();
-        [$battShow, $touchBatt] = $this->rateLimitField($config['vb_batt'], $config['vb_batt_at'], $batt, self::VB_BATTERY_INTERVAL_SECONDS);
+        [$battShow, $touchBatt] = $this->rateLimitField(
+            $config['vb_batt'],
+            $config['vb_batt_at'],
+            $batt,
+            self::VB_BATTERY_INTERVAL_SECONDS,
+            self::VB_BATTERY_FORCE_DELTA,
+        );
         [$solarShow, $touchSolar] = $this->rateLimitField($config['vb_solar_w'], $config['vb_solar_at'], $solarW, self::VB_POWER_INTERVAL_SECONDS);
         [$loadShow, $touchLoad] = $this->rateLimitField($config['vb_load_w'], $config['vb_load_at'], $loadW, self::VB_POWER_INTERVAL_SECONDS);
         if ($touchBatt || $touchSolar || $touchLoad) {
@@ -462,7 +451,7 @@ final class YarboPowerwall
             (float) ($agg['solar']['instant_power'] ?? 0),
             (float) ($agg['site']['instant_power'] ?? 0),
             (float) ($agg['battery']['instant_power'] ?? 0),
-            (float) ($soe['percentage'] ?? 0),
+            $this->teslaAppPercentFromLocalSoe((float) ($soe['percentage'] ?? 0)),
             'local'
         );
     }
@@ -492,7 +481,7 @@ final class YarboPowerwall
             (float) ($response['solar_power'] ?? 0),
             (float) ($response['grid_power'] ?? 0),
             (float) ($response['battery_power'] ?? 0),
-            (float) ($response['percentage_charged'] ?? 0),
+            $this->cloudBatteryPercent($response),
             'cloud'
         );
     }
@@ -610,7 +599,7 @@ final class YarboPowerwall
      * @param mixed $current
      * @return array{0: mixed, 1: bool}
      */
-    private function rateLimitField(mixed $held, mixed $at, mixed $current, int $seconds): array
+    private function rateLimitField(mixed $held, mixed $at, mixed $current, int $seconds, int $forceDelta = 0): array
     {
         if ($current === null) {
             return [$held, false];
@@ -622,11 +611,45 @@ final class YarboPowerwall
         if ($current === $held) {
             return [$held, false];
         }
+        if ($forceDelta > 0 && is_numeric($held) && abs((int) $current - (int) $held) >= $forceDelta) {
+            return [$current, true];
+        }
         if ((time() - $atTs) >= $seconds) {
             return [$current, true];
         }
 
         return [$held, false];
+    }
+
+    /**
+     * Gateway SoC is the raw pack including the unusable bottom ~5%.
+     * Tesla app / Fleet `percentage_charged` is that remaining 95% scaled to 0–100.
+     */
+    private function teslaAppPercentFromLocalSoe(float $raw): float
+    {
+        $usable = 100.0 - self::LOCAL_SOE_UNUSABLE_PERCENT;
+        if ($usable <= 0) {
+            return max(0.0, min(100.0, $raw));
+        }
+
+        return max(0.0, min(100.0, ($raw - self::LOCAL_SOE_UNUSABLE_PERCENT) / $usable * 100.0));
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     */
+    private function cloudBatteryPercent(array $response): float
+    {
+        if (isset($response['percentage_charged']) && is_numeric($response['percentage_charged'])) {
+            return (float) $response['percentage_charged'];
+        }
+        $left = $response['energy_left'] ?? null;
+        $pack = $response['total_pack_energy'] ?? null;
+        if (is_numeric($left) && is_numeric($pack) && (float) $pack > 0) {
+            return ((float) $left / (float) $pack) * 100.0;
+        }
+
+        return 0.0;
     }
 
     /**
