@@ -32,7 +32,15 @@ Powerwall live module (watts, battery `%` kept on the last flap before the colou
 
 ```
 POWERWALL   89%
-SOLAR      0W
+SOLAR    2100W
+DRAW     590W
+```
+
+When solar is 0W (or a small negative night reading), that line becomes **GRID** with signed watts (import positive, export negative):
+
+```
+POWERWALL   89%
+GRID    -450W
 DRAW     590W
 ```
 

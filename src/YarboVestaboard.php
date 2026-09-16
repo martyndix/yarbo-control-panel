@@ -1563,7 +1563,7 @@ final class YarboVestaboard
     }
 
     /**
-     * HOME/POWERWALL/OFFLINE + SOLAR + DRAW is this panel's Powerwall page, not an app scribble.
+     * HOME/POWERWALL/OFFLINE + SOLAR/GRID + DRAW is this panel's Powerwall page, not an app scribble.
      *
      * @param list<list<int>> $codes
      */
@@ -1575,7 +1575,7 @@ final class YarboVestaboard
         $row2 = strtoupper(trim($lines[2] ?? ''));
 
         return (str_starts_with($row0, 'HOME') || str_starts_with($row0, 'POWERWALL') || str_starts_with($row0, 'OFFLINE'))
-            && str_starts_with($row1, 'SOLAR')
+            && (str_starts_with($row1, 'SOLAR') || str_starts_with($row1, 'GRID'))
             && str_starts_with($row2, 'DRAW');
     }
 

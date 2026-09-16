@@ -63,6 +63,9 @@ final class YarboPowerwall
             'vb_batt_at' => null,
             'vb_solar_w' => null,
             'vb_solar_at' => null,
+            'vb_grid_w' => null,
+            'vb_grid_at' => null,
+            'vb_row1_grid' => false,
             'vb_load_w' => null,
             'vb_load_at' => null,
         ];
@@ -95,6 +98,9 @@ final class YarboPowerwall
             'vb_batt_at' => $this->nullableTime($decoded['vb_batt_at'] ?? null),
             'vb_solar_w' => $this->nullableInt($decoded['vb_solar_w'] ?? null),
             'vb_solar_at' => $this->nullableTime($decoded['vb_solar_at'] ?? null),
+            'vb_grid_w' => $this->nullableInt($decoded['vb_grid_w'] ?? null),
+            'vb_grid_at' => $this->nullableTime($decoded['vb_grid_at'] ?? null),
+            'vb_row1_grid' => (bool) ($decoded['vb_row1_grid'] ?? false),
             'vb_load_w' => $this->nullableInt($decoded['vb_load_w'] ?? null),
             'vb_load_at' => $this->nullableTime($decoded['vb_load_at'] ?? null),
         ]);
@@ -163,6 +169,11 @@ final class YarboPowerwall
             'vb_batt_at' => array_key_exists('vb_batt_at', $input) ? $this->nullableTime($input['vb_batt_at']) : $current['vb_batt_at'],
             'vb_solar_w' => array_key_exists('vb_solar_w', $input) ? $this->nullableInt($input['vb_solar_w']) : $current['vb_solar_w'],
             'vb_solar_at' => array_key_exists('vb_solar_at', $input) ? $this->nullableTime($input['vb_solar_at']) : $current['vb_solar_at'],
+            'vb_grid_w' => array_key_exists('vb_grid_w', $input) ? $this->nullableInt($input['vb_grid_w']) : $current['vb_grid_w'],
+            'vb_grid_at' => array_key_exists('vb_grid_at', $input) ? $this->nullableTime($input['vb_grid_at']) : $current['vb_grid_at'],
+            'vb_row1_grid' => array_key_exists('vb_row1_grid', $input)
+                ? (bool) $input['vb_row1_grid']
+                : (bool) ($current['vb_row1_grid'] ?? false),
             'vb_load_w' => array_key_exists('vb_load_w', $input) ? $this->nullableInt($input['vb_load_w']) : $current['vb_load_w'],
             'vb_load_at' => array_key_exists('vb_load_at', $input) ? $this->nullableTime($input['vb_load_at']) : $current['vb_load_at'],
         ];
@@ -269,8 +280,11 @@ final class YarboPowerwall
         $online = !empty($data['online']) && (isset($data['battery_percent']) || isset($data['load_w']));
         $batt = self::normalizeBatteryPercent($data['battery_percent'] ?? null);
         $solarW = isset($data['solar_w']) ? (int) round((float) $data['solar_w']) : null;
+        $gridW = isset($data['grid_w']) ? (int) round((float) $data['grid_w']) : null;
         $loadW = isset($data['load_w']) ? (int) round((float) $data['load_w']) : null;
         $config = $this->load();
+        $wantGrid = $solarW !== null && $solarW <= 0;
+        $wasGrid = (bool) ($config['vb_row1_grid'] ?? false);
         [$battShow, $touchBatt] = $this->rateLimitField(
             $config['vb_batt'],
             $config['vb_batt_at'],
@@ -278,26 +292,55 @@ final class YarboPowerwall
             self::VB_BATTERY_INTERVAL_SECONDS,
             self::VB_BATTERY_FORCE_DELTA,
         );
-        [$solarShow, $touchSolar] = $this->rateLimitField($config['vb_solar_w'], $config['vb_solar_at'], $solarW, self::VB_POWER_INTERVAL_SECONDS);
         [$loadShow, $touchLoad] = $this->rateLimitField($config['vb_load_w'], $config['vb_load_at'], $loadW, self::VB_POWER_INTERVAL_SECONDS);
-        if ($touchBatt || $touchSolar || $touchLoad) {
+        $touchSolar = false;
+        $touchGrid = false;
+        $row1Show = null;
+        if ($wantGrid) {
+            if ($wasGrid) {
+                [$row1Show, $touchGrid] = $this->rateLimitField(
+                    $config['vb_grid_w'],
+                    $config['vb_grid_at'],
+                    $gridW,
+                    self::VB_POWER_INTERVAL_SECONDS,
+                );
+            } else {
+                $row1Show = $gridW;
+                $touchGrid = true;
+            }
+        } elseif ($wasGrid) {
+            $row1Show = $solarW;
+            $touchSolar = true;
+        } else {
+            [$row1Show, $touchSolar] = $this->rateLimitField(
+                $config['vb_solar_w'],
+                $config['vb_solar_at'],
+                $solarW,
+                self::VB_POWER_INTERVAL_SECONDS,
+            );
+        }
+        $touchMode = $wantGrid !== $wasGrid;
+        if ($touchBatt || $touchSolar || $touchLoad || $touchGrid || $touchMode) {
             $this->save([
                 'vb_batt' => $touchBatt ? $battShow : $config['vb_batt'],
                 'vb_batt_at' => $touchBatt ? gmdate('c') : $config['vb_batt_at'],
-                'vb_solar_w' => $touchSolar ? $solarShow : $config['vb_solar_w'],
+                'vb_solar_w' => $touchSolar ? $row1Show : $config['vb_solar_w'],
                 'vb_solar_at' => $touchSolar ? gmdate('c') : $config['vb_solar_at'],
+                'vb_grid_w' => $touchGrid ? $row1Show : $config['vb_grid_w'],
+                'vb_grid_at' => $touchGrid ? gmdate('c') : $config['vb_grid_at'],
+                'vb_row1_grid' => $wantGrid,
                 'vb_load_w' => $touchLoad ? $loadShow : $config['vb_load_w'],
                 'vb_load_at' => $touchLoad ? gmdate('c') : $config['vb_load_at'],
             ]);
         }
-        $hasNumbers = $battShow !== null || $solarShow !== null || $loadShow !== null;
+        $hasNumbers = $battShow !== null || $row1Show !== null || $loadShow !== null;
         $showLive = $online || $hasNumbers;
         $verb = $showLive ? 'POWERWALL' : 'OFFLINE';
         $lines = [
             $showLive
                 ? $this->pair('POWERWALL', $battShow !== null ? $battShow . '%' : '--', 14)
                 : $this->pair('OFFLINE', '', 14),
-            $this->pair('SOLAR', $solarShow !== null ? $this->formatW((float) $solarShow) : '--'),
+            $this->pair($wantGrid ? 'GRID' : 'SOLAR', $row1Show !== null ? $this->formatW((float) $row1Show) : '--'),
             $this->pair('DRAW', $loadShow !== null ? $this->formatW((float) $loadShow) : '--'),
         ];
         $chipBatt = $showLive

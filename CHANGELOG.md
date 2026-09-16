@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.15] - 2026-09-16
+
+### Changed
+- Vestaboard Powerwall middle line shows **GRID** (import positive W, export negative W) when solar is 0W, and **SOLAR** again when generation resumes.
+
 ## [2.0.14] - 2026-09-14
 
 ### Fixed
