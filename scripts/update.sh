@@ -110,7 +110,10 @@ if ! git remote get-url origin >/dev/null 2>&1; then
 fi
 
 step "Fetching origin/${BRANCH}"
-git fetch --quiet origin "${BRANCH}" 2>&1 || fail "git fetch failed"
+# '+' updates origin/main even after a rewritten GitHub history (force-push / replaced tag).
+if ! git fetch --prune --quiet origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" 2>&1; then
+  fail "git fetch failed"
+fi
 
 REMOTE_REF="origin/${BRANCH}"
 if ! git rev-parse --verify "${REMOTE_REF}" >/dev/null 2>&1; then
@@ -176,10 +179,13 @@ fi
 acquire_update_lock
 trap cleanup_update_lock EXIT
 
-step "Pulling origin/${BRANCH} (fast-forward only)"
+step "Updating to origin/${BRANCH}"
 write_status "pulling" "Pulling latest code from GitHub"
-if ! run_owner "git pull --ff-only origin ${BRANCH}"; then
-  fail "git pull failed. Resolve local changes (e.g. git stash) and try again."
+if ! run_owner "git merge --ff-only '${REMOTE_REF}'"; then
+  step "Fast-forward failed; resetting to origin/${BRANCH}"
+  if ! run_owner "git reset --hard '${REMOTE_REF}'"; then
+    fail "git update failed. Resolve local changes (e.g. git stash) and try again."
+  fi
 fi
 
 NEW="$(git rev-parse HEAD)"

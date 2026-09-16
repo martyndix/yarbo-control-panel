@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.16] - 2026-09-16
+
+### Fixed
+- Panel updates follow GitHub `main` after a rewritten release (the first v2.0.15 was published then removed). Settings no longer stays on “update available” because `origin/main` was stuck on the deleted commit.
+
 ## [2.0.15] - 2026-09-16
 
 ### Changed
