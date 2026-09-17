@@ -288,12 +288,13 @@ final class YarboLymow
         }
         $charging = (($data['charging_label'] ?? '') === 'Yes') ? 'YES' : 'NO';
         $progress = isset($data['mow_progress']) ? (int) $data['mow_progress'] : null;
+        $stateLeft = $progress !== null ? $work : 'STATE';
         $stateRight = $progress !== null ? $progress . '%' : $work;
         $lines = [
             $showLive
                 ? $this->pair('LYMOW', $battery !== null ? $battery . '%' : '--', 14)
                 : $this->pair('OFFLINE', '', 14),
-            $this->pair('STATE', $stateRight),
+            $this->pair($stateLeft, $stateRight),
             $this->pair('CHARGING', $charging),
         ];
         $codes = $this->encodeLines($lines, $battery, $showLive);

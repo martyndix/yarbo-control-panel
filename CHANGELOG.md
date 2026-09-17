@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.17] - 2026-09-17
+
+### Changed
+- Vestaboard Lymow page shows **MOWING n%** (or **PAUSE n%**) on the middle row while a job is running, instead of **STATE n%**.
+
 ## [2.0.16] - 2026-09-16
 
 ### Fixed

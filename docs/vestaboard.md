@@ -52,11 +52,11 @@ STATE       WAIT
 CHARGING    YES
 ```
 
-While mowing, **STATE** shows progress instead of the work word:
+While mowing, the middle row is **MOWING** plus progress instead of **STATE** plus the work word:
 
 ```
 LYMOW       99%
-STATE       42%
+MOWING      42%
 CHARGING     NO
 ```
 
@@ -101,7 +101,7 @@ If the flaps no longer match the last layout this panel wrote, live status pause
 
 The dashboard shows **Resume previous status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
-The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the pills on the **Vestaboard Note** card, or PaperMono’s **NOTE** page after flashing **0.1.5-beta**. Powerwall, Lymow, and ALL buttons only appear when those dashboards are enabled. App-hold and Quiet hours still apply. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), **STATE** plus the work label or mowing progress **%**, and **CHARGING YES/NO**.
+The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the pills on the **Vestaboard Note** card, or PaperMono’s **NOTE** page after flashing **0.1.5-beta**. Powerwall, Lymow, and ALL buttons only appear when those dashboards are enabled. App-hold and Quiet hours still apply. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), **STATE** plus the work label (or **MOWING** plus progress **%** while a job is running), and **CHARGING YES/NO**.
 
 ## Setup (either API)
 

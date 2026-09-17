@@ -29,7 +29,7 @@ Sign-in may fill the IP from the cloud if it is still the default.
 
 Settings → Modules → **Vestaboard live module** → Lymow.
 
-The Note shows **LYMOW** plus battery **%** (colour chip on the last column, so `99%` stays whole), **STATE** plus the work label (WAIT, MOWING, DOCKING, …) or the mowing **progress %** while a job is running, and **CHARGING YES** or **NO**.
+The Note shows **LYMOW** plus battery **%** (colour chip on the last column, so `99%` stays whole), **STATE** plus the work label (WAIT, DOCKING, …), or **MOWING** plus the mowing **progress %** while a job is running, and **CHARGING YES** or **NO**.
 
 The Lymow card has a **Progress** stat for the same percent. The MQTT listener writes each robot status message as it arrives (and asks for a status refresh about every 15 seconds) so the tile and Note are not a minute behind.
 
