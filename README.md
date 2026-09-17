@@ -455,7 +455,7 @@ After a successful load, zones are **cached in the browser** so a page refresh r
 
 | Control | Behaviour |
 |---------|-----------|
-| **Map zones** | Lists loaded zones with type colours; toggle visibility per zone |
+| **Map zones** | Collapsed until opened; lists loaded zones with type colours and the draft edit/export tools |
 | **Export GeoJSON** | Download the currently loaded zones |
 | **Edit map (draft)** | Opens Leaflet.draw tools on a local draft copy — does not change the robot map |
 | **Export draft** | Download edited draft GeoJSON |

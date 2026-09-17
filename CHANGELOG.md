@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.18] - 2026-09-17
+
+### Changed
+- Map zones starts collapsed. The zone list, draft edit/export buttons, and hint only appear after opening **Map zones**.
+
 ## [2.0.17] - 2026-09-17
 
 ### Changed

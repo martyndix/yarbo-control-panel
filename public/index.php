@@ -276,24 +276,24 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p id="map-status" class="map-status">Waiting for GPS fix...</p>
             <p id="map-areas-status" class="map-areas-status">Saved areas: not loaded yet.</p>
             <div id="map-inspector" class="map-inspector hidden">
-                <details open>
+                <details>
                     <summary>Map zones</summary>
                     <ul id="map-zone-list" class="map-zone-list"></ul>
+                    <div class="map-editor-actions">
+                        <button type="button" class="btn btn-secondary" id="map-edit-toggle">Edit map (draft)</button>
+                        <button type="button" class="btn btn-secondary" id="map-export">Export GeoJSON</button>
+                        <button type="button" class="btn btn-secondary" id="map-export-draft" disabled>Export draft</button>
+                        <button
+                            type="button"
+                            class="btn btn-secondary"
+                            id="map-save-robot"
+                            disabled
+                            title="Map write MQTT commands are not yet verified — use the Yarbo app or export a draft"
+                        >Save to robot</button>
+                    </div>
+                    <p class="hint map-editor-hint">Drag polygon corners to adjust boundaries. Changes are local until Save to robot is supported.</p>
                 </details>
             </div>
-            <div class="map-editor-actions">
-                <button type="button" class="btn btn-secondary" id="map-edit-toggle">Edit map (draft)</button>
-                <button type="button" class="btn btn-secondary" id="map-export">Export GeoJSON</button>
-                <button type="button" class="btn btn-secondary" id="map-export-draft" disabled>Export draft</button>
-                <button
-                    type="button"
-                    class="btn btn-secondary"
-                    id="map-save-robot"
-                    disabled
-                    title="Map write MQTT commands are not yet verified — use the Yarbo app or export a draft"
-                >Save to robot</button>
-            </div>
-            <p class="hint map-editor-hint">Drag polygon corners to adjust boundaries. Changes are local until Save to robot is supported.</p>
         </section>
 
         <?php if ($camerasEnabled): ?>

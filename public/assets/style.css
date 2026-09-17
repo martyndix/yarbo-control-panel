@@ -1250,6 +1250,10 @@ body.map-is-fullscreen {
     line-height: 1.2;
 }
 
+.map-inspector .map-editor-actions {
+    margin-top: 0.65rem;
+}
+
 .map-editor-actions {
     display: flex;
     flex-wrap: wrap;
