@@ -30,6 +30,9 @@ final class YarboVestaboard
     public const COLOR_BLUE = 67;
     public const COLOR_VIOLET = 68;
     public const COLOR_WHITE = 69;
+    public const ROTATE_DEFAULT_MINUTES = 5;
+    public const ROTATE_MIN_MINUTES = 1;
+    public const ROTATE_MAX_MINUTES = 60;
 
     private const HEAD_SHORT = [
         'None' => '',
@@ -119,6 +122,10 @@ final class YarboVestaboard
             'external_hold' => false,
             'external_hold_until' => null,
             'recent_hashes' => [],
+            'rotate_enabled' => false,
+            'rotate_views' => [YarboHub::MODULE_YARBO],
+            'rotate_minutes' => self::ROTATE_DEFAULT_MINUTES,
+            'rotate_at' => null,
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -164,6 +171,12 @@ final class YarboVestaboard
                 ? $decoded['external_hold_until']
                 : null,
             'recent_hashes' => $this->normalizeRecentHashes($decoded['recent_hashes'] ?? null, (string) ($decoded['last_hash'] ?? '')),
+            'rotate_enabled' => (bool) ($decoded['rotate_enabled'] ?? false),
+            'rotate_views' => $this->normalizeRotateViews($decoded['rotate_views'] ?? [YarboHub::MODULE_YARBO]),
+            'rotate_minutes' => $this->normalizeRotateMinutes($decoded['rotate_minutes'] ?? self::ROTATE_DEFAULT_MINUTES),
+            'rotate_at' => isset($decoded['rotate_at']) && is_string($decoded['rotate_at']) && $decoded['rotate_at'] !== ''
+                ? $decoded['rotate_at']
+                : null,
         ];
     }
 
@@ -264,6 +277,18 @@ final class YarboVestaboard
             'recent_hashes' => array_key_exists('recent_hashes', $input)
                 ? $this->normalizeRecentHashes($input['recent_hashes'] ?? null, (string) ($input['last_hash'] ?? $current['last_hash']))
                 : $this->normalizeRecentHashes($current['recent_hashes'] ?? null, (string) ($current['last_hash'] ?? '')),
+            'rotate_enabled' => array_key_exists('rotate_enabled', $input)
+                ? (bool) $input['rotate_enabled']
+                : (bool) ($current['rotate_enabled'] ?? false),
+            'rotate_views' => array_key_exists('rotate_views', $input)
+                ? $this->normalizeRotateViews($input['rotate_views'])
+                : $this->normalizeRotateViews($current['rotate_views'] ?? [YarboHub::MODULE_YARBO]),
+            'rotate_minutes' => array_key_exists('rotate_minutes', $input)
+                ? $this->normalizeRotateMinutes($input['rotate_minutes'])
+                : $this->normalizeRotateMinutes($current['rotate_minutes'] ?? self::ROTATE_DEFAULT_MINUTES),
+            'rotate_at' => array_key_exists('rotate_at', $input)
+                ? (is_string($input['rotate_at']) && $input['rotate_at'] !== '' ? $input['rotate_at'] : null)
+                : ($current['rotate_at'] ?? null),
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -297,7 +322,7 @@ final class YarboVestaboard
             'quiet_hours_active' => $this->isQuietHours(),
             'quiet_timezone' => $this->resolveQuietTimezone($config),
             'quiet_clock_now' => $this->quietNowHm($config),
-        ];
+        ] + $this->rotatePublicFields($config);
     }
 
     /**
@@ -310,7 +335,7 @@ final class YarboVestaboard
     {
         $config = $this->load();
         if (!$config['enabled']) {
-            return ['enabled' => false];
+            return ['enabled' => false] + $this->rotatePublicFields($config);
         }
         $held = $this->isExternalHoldActive($config);
         $holdMeta = $this->externalHoldPublicView($config);
@@ -330,7 +355,7 @@ final class YarboVestaboard
                     'pending' => false,
                     'last_error' => $this->publicLastError($config['last_error']),
                     'watcher_ok' => !$this->watcherStale(),
-                ];
+                ] + $this->rotatePublicFields($config);
             }
         }
         if ($this->isQuietHours()) {
@@ -350,7 +375,7 @@ final class YarboVestaboard
                 'pending' => !$held && $hash !== (string) $config['last_hash'],
                 'last_error' => $this->publicLastError($config['last_error']),
                 'watcher_ok' => !$this->watcherStale(),
-            ];
+            ] + $this->rotatePublicFields($config);
         }
         $usable = $online && is_array($parsed);
         $layout = $this->layoutForLiveModule($usable ? $parsed : null, $usable);
@@ -365,7 +390,7 @@ final class YarboVestaboard
             'pending' => !$held && $hash !== (string) $config['last_hash'],
             'last_error' => $this->publicLastError($config['last_error']),
             'watcher_ok' => !$this->watcherStale(),
-        ];
+        ] + $this->rotatePublicFields($config);
     }
 
     /**
@@ -445,6 +470,7 @@ final class YarboVestaboard
         }
 
         $this->refreshCompanionModules();
+        $rotated = $this->maybeAdvanceRotation();
         $layout = $this->layoutForLiveModule();
         if (!($layout['ok'] ?? false)) {
             $this->save(['last_error' => (string) ($layout['error'] ?? 'Could not compose layout')]);
@@ -471,7 +497,7 @@ final class YarboVestaboard
             ];
         }
 
-        $result = $this->sendLayout($layout, $forceResume);
+        $result = $this->sendLayout($layout, $forceResume || $rotated);
         if ($forceResume && !empty($result['ok'])) {
             $this->save(['quiet_active' => false]);
         }
@@ -527,6 +553,7 @@ final class YarboVestaboard
         if (!$hub->save(['vestaboard_live' => $id])) {
             return ['ok' => false, 'error' => 'Could not save the Vestaboard live view.'];
         }
+        $this->save(['rotate_at' => gmdate('c')]);
         $saved = [
             'ok' => true,
             'vestaboard_live' => $hub->vestaboardLive(),
@@ -537,6 +564,174 @@ final class YarboVestaboard
         }
 
         return $this->sendNow() + $saved;
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function saveRotate(array $input): array
+    {
+        $views = $this->normalizeRotateViews($input['rotate_views'] ?? $input['views'] ?? []);
+        $minutes = $this->normalizeRotateMinutes($input['rotate_minutes'] ?? $input['minutes'] ?? self::ROTATE_DEFAULT_MINUTES);
+        $enabled = (bool) ($input['rotate_enabled'] ?? $input['enabled'] ?? false);
+        $available = $this->availableRotateViews($views);
+        if (count($available) < 2) {
+            $enabled = false;
+        }
+        if (!$this->save([
+            'rotate_enabled' => $enabled,
+            'rotate_views' => $views,
+            'rotate_minutes' => $minutes,
+            'rotate_at' => gmdate('c'),
+        ])) {
+            return ['ok' => false, 'error' => 'Could not save rotation settings.'];
+        }
+        $hub = new YarboHub($this->projectRoot);
+        $current = $hub->vestaboardLive();
+        if ($enabled && $available !== [] && !in_array($current, $available, true)) {
+            return $this->setLiveModule($available[0]) + $this->rotatePublicFields() + [
+                'config' => $this->publicView(),
+            ];
+        }
+
+        return ['ok' => true, 'config' => $this->publicView()] + $this->rotatePublicFields();
+    }
+
+    /**
+     * @param array<string, mixed>|null $config
+     * @return array{rotate_enabled: bool, rotate_views: list<string>, rotate_minutes: int, rotating: bool}
+     */
+    private function rotatePublicFields(?array $config = null): array
+    {
+        $config ??= $this->load();
+        $views = $this->normalizeRotateViews($config['rotate_views'] ?? []);
+        $available = $this->availableRotateViews($views);
+        $enabled = (bool) ($config['rotate_enabled'] ?? false);
+
+        return [
+            'rotate_enabled' => $enabled,
+            'rotate_views' => $views,
+            'rotate_minutes' => $this->normalizeRotateMinutes($config['rotate_minutes'] ?? self::ROTATE_DEFAULT_MINUTES),
+            'rotating' => $enabled && count($available) >= 2,
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function normalizeRotateViews(mixed $raw): array
+    {
+        if (is_string($raw)) {
+            $raw = preg_split('/[,\s]+/', $raw) ?: [];
+        }
+        if (!is_array($raw)) {
+            return [YarboHub::MODULE_YARBO];
+        }
+        $wanted = [];
+        $isList = array_is_list($raw);
+        foreach ($raw as $key => $value) {
+            if ($isList) {
+                if (is_string($value) && $value !== '') {
+                    $wanted[] = strtolower(trim($value));
+                }
+                continue;
+            }
+            if ($value) {
+                $wanted[] = strtolower(trim((string) $key));
+            }
+        }
+        $out = [];
+        foreach (YarboHub::VESTABOARD_LIVE_CHOICES as $id) {
+            if (in_array($id, $wanted, true) || ($id === YarboHub::LIVE_BATTERIES && in_array('all', $wanted, true))) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
+    }
+
+    private function normalizeRotateMinutes(mixed $raw): int
+    {
+        $n = is_numeric($raw) ? (int) $raw : self::ROTATE_DEFAULT_MINUTES;
+        if ($n < self::ROTATE_MIN_MINUTES) {
+            return self::ROTATE_MIN_MINUTES;
+        }
+        if ($n > self::ROTATE_MAX_MINUTES) {
+            return self::ROTATE_MAX_MINUTES;
+        }
+
+        return $n;
+    }
+
+    /**
+     * @param list<string> $wanted
+     * @return list<string>
+     */
+    private function availableRotateViews(array $wanted): array
+    {
+        $out = [];
+        foreach ($wanted as $id) {
+            if ($this->rotateViewIsAvailable($id)) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
+    }
+
+    private function rotateViewIsAvailable(string $id): bool
+    {
+        $modules = (new YarboHub($this->projectRoot))->load()['modules'];
+        if ($id === YarboHub::MODULE_YARBO) {
+            return true;
+        }
+        if ($id === YarboHub::MODULE_POWERWALL) {
+            return !empty($modules[YarboHub::MODULE_POWERWALL]);
+        }
+        if ($id === YarboHub::MODULE_LYMOW) {
+            return !empty($modules[YarboHub::MODULE_LYMOW]);
+        }
+        if ($id === YarboHub::LIVE_BATTERIES) {
+            return !empty($modules[YarboHub::MODULE_POWERWALL]) || !empty($modules[YarboHub::MODULE_LYMOW]);
+        }
+
+        return false;
+    }
+
+    private function maybeAdvanceRotation(): bool
+    {
+        $config = $this->load();
+        if (empty($config['rotate_enabled'])) {
+            return false;
+        }
+        $views = $this->availableRotateViews($this->normalizeRotateViews($config['rotate_views'] ?? []));
+        if (count($views) < 2) {
+            return false;
+        }
+        $started = isset($config['rotate_at']) && is_string($config['rotate_at'])
+            ? strtotime($config['rotate_at'])
+            : false;
+        $minutes = $this->normalizeRotateMinutes($config['rotate_minutes'] ?? self::ROTATE_DEFAULT_MINUTES);
+        if ($started === false) {
+            $this->save(['rotate_at' => gmdate('c')]);
+
+            return false;
+        }
+        if ((time() - $started) < ($minutes * 60)) {
+            return false;
+        }
+        $hub = new YarboHub($this->projectRoot);
+        $current = $hub->vestaboardLive();
+        $idx = array_search($current, $views, true);
+        $nextIdx = $idx === false ? 0 : ($idx + 1) % count($views);
+        $next = $views[$nextIdx];
+        $this->save(['rotate_at' => gmdate('c')]);
+        if ($next === $current) {
+            return false;
+        }
+
+        return $hub->save(['vestaboard_live' => $next]);
     }
 
     /**

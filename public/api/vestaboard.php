@@ -56,6 +56,10 @@ if ($method === 'POST' && $action === 'live') {
     json_response($board->setLiveModule($live) + ['config' => $board->publicView()]);
 }
 
+if ($method === 'POST' && $action === 'rotate') {
+    json_response($board->saveRotate($input));
+}
+
 if ($method === 'POST' && $action === 'resume') {
     json_response($board->resumeYarboStatus($input) + ['config' => $board->publicView()]);
 }

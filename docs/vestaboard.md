@@ -107,6 +107,8 @@ The dashboard shows **Resume previous status** while paused. That (or Settings �
 
 The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the pills on the **Vestaboard Note** card, or PaperMono’s **NOTE** page after flashing **0.1.5-beta**. Powerwall, Lymow, and ALL buttons only appear when those dashboards are enabled. App-hold and Quiet hours still apply. Lymow uses the same layout as Yarbo: **LYMOW** plus the activity verb (**MOWING**, **CHARGING**, **IDLE**, **DOCKING**, **PAUSED**, …), **BATTERY** plus **%** or **FULL** (colour chip on the last column), and a context line (**WORK DONE n%**, **ON DOCK**, **CHARGED**, **READY**, **HEADING HOME**, **PLAN HOLD**).
 
+**Rotate** on the Vestaboard Note card opens a modal to cycle those views automatically. Tick two or more (Yarbo, Powerwall, Lymow, ALL) and set minutes per view. The watcher on the Pi advances the live page even with the browser closed. A pill tap (or PaperMono **NOTE**) still switches immediately and starts a fresh dwell. Quiet hours and a Vestaboard app message pause rotation with the rest of live status.
+
 ## Setup (either API)
 
 1. Open the panel → **Settings → Vestaboard Note**.

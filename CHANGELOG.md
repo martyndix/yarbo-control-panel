@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.20] - 2026-09-18
+
+### Added
+- Vestaboard **Rotate** on the Note card: pick which views to cycle (Yarbo, Powerwall, Lymow, ALL) and minutes per view. The board keeps rotating with the browser closed.
+
 ## [2.0.19] - 2026-09-18
 
 ### Changed

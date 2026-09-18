@@ -110,6 +110,12 @@ const els = {
     vestaboardUpdatedAt: document.getElementById('vestaboard-updated-at'),
     vestaboardUpdatedDetail: document.getElementById('vestaboard-updated-detail'),
     vestaboardResume: document.getElementById('vestaboard-resume'),
+    vestaboardRotateOpen: document.getElementById('vestaboard-rotate-open'),
+    vestaboardRotateModal: document.getElementById('vestaboard-rotate-modal'),
+    vestaboardRotateEnabled: document.getElementById('vestaboard-rotate-enabled'),
+    vestaboardRotateMinutes: document.getElementById('vestaboard-rotate-minutes'),
+    vestaboardRotateHint: document.getElementById('vestaboard-rotate-hint'),
+    vestaboardRotateSave: document.getElementById('vestaboard-rotate-save'),
     moduleSwitcher: document.getElementById('module-switcher'),
     settingsModulePowerwall: document.getElementById('settings-module-powerwall'),
     settingsModuleLymow: document.getElementById('settings-module-lymow'),
@@ -290,6 +296,7 @@ let mapHasCentered = false;
 let mapFullscreen = false;
 let vestaboardSyncAt = 0;
 let vestaboardSyncInFlight = false;
+let lastVestaboardRotate = { rotate_enabled: false, rotate_views: ['yarbo'], rotate_minutes: 5, rotating: false };
 let currentHeadType = null;
 let defaultDataSource = 'auto';
 let areasLayer = null;
@@ -2479,6 +2486,7 @@ function updateVestaboardDashboard(data) {
     const enabled = Boolean(board?.enabled);
     els.vestaboardCard.classList.toggle('hidden', !enabled);
     applyVestaboardLiveSwitch(data);
+    applyVestaboardRotateState(board);
     if (!enabled) return;
     renderVestaboardPreview(board.lines, els.vestaboardBoard, board.codes);
     if (els.vestaboardUpdatedAt) {
@@ -2510,6 +2518,8 @@ function updateVestaboardDashboard(data) {
             els.vestaboardUpdatedDetail.textContent = ' · background updater idle — restart the panel';
         } else if (board.quiet_hours) {
             els.vestaboardUpdatedDetail.textContent = ` · quiet hours until ${board.quiet_until || ''}`;
+        } else if (board.rotating) {
+            els.vestaboardUpdatedDetail.textContent = ' · rotating';
         } else {
             els.vestaboardUpdatedDetail.textContent = '';
         }
@@ -2525,6 +2535,132 @@ function applyVestaboardLiveSwitch(data) {
     els.vestaboardLiveSwitch.classList.toggle('hidden', !enabled);
     const extras = vestaboardExtraModules(data?.hub);
     applyVestaboardLiveChoices(extras, data?.hub?.vestaboard_live || data?.vestaboard_live || 'yarbo');
+}
+
+function applyVestaboardRotateState(board) {
+    lastVestaboardRotate = {
+        rotate_enabled: Boolean(board?.rotate_enabled),
+        rotate_views: Array.isArray(board?.rotate_views) ? board.rotate_views : lastVestaboardRotate.rotate_views,
+        rotate_minutes: Number(board?.rotate_minutes) > 0 ? Number(board.rotate_minutes) : lastVestaboardRotate.rotate_minutes,
+        rotating: Boolean(board?.rotating),
+    };
+    els.vestaboardRotateOpen?.classList.toggle('is-active', lastVestaboardRotate.rotating);
+}
+
+function rotateViewCheckboxes() {
+    return [...document.querySelectorAll('[data-rotate-view]')];
+}
+
+function applyRotateViewChoices(extras) {
+    const pw = Boolean(extras?.powerwall);
+    const ly = Boolean(extras?.lymow);
+    const show = {
+        yarbo: true,
+        powerwall: pw,
+        lymow: ly,
+        batteries: pw || ly,
+    };
+    document.querySelectorAll('[data-rotate-choice]').forEach((label) => {
+        const id = label.getAttribute('data-rotate-choice') || '';
+        label.classList.toggle('hidden', !show[id]);
+        const box = label.querySelector('[data-rotate-view]');
+        if (box && !show[id]) box.checked = false;
+    });
+}
+
+function fillVestaboardRotateForm() {
+    applyRotateViewChoices(vestaboardExtraModules(lastStatusData?.hub || {}));
+    if (els.vestaboardRotateEnabled) {
+        els.vestaboardRotateEnabled.checked = lastVestaboardRotate.rotate_enabled;
+    }
+    if (els.vestaboardRotateMinutes) {
+        els.vestaboardRotateMinutes.value = String(lastVestaboardRotate.rotate_minutes || 5);
+    }
+    const selected = new Set(lastVestaboardRotate.rotate_views || []);
+    rotateViewCheckboxes().forEach((box) => {
+        const id = box.getAttribute('data-rotate-view') || '';
+        const label = box.closest('[data-rotate-choice]');
+        const visible = !label?.classList.contains('hidden');
+        box.checked = visible && selected.has(id);
+    });
+    updateVestaboardRotateHint();
+}
+
+function selectedRotateViews() {
+    return rotateViewCheckboxes()
+        .filter((box) => box.checked && !box.closest('[data-rotate-choice]')?.classList.contains('hidden'))
+        .map((box) => box.getAttribute('data-rotate-view') || '')
+        .filter(Boolean);
+}
+
+function updateVestaboardRotateHint() {
+    const views = selectedRotateViews();
+    const needTwo = Boolean(els.vestaboardRotateEnabled?.checked) && views.length < 2;
+    els.vestaboardRotateHint?.classList.toggle('hidden', !needTwo);
+}
+
+function openVestaboardRotateModal() {
+    if (!els.vestaboardRotateModal) return;
+    fillVestaboardRotateForm();
+    els.vestaboardRotateModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+}
+
+function closeVestaboardRotateModal() {
+    if (!els.vestaboardRotateModal) return;
+    els.vestaboardRotateModal.classList.add('hidden');
+    if (
+        (!els.settingsModal || els.settingsModal.classList.contains('hidden'))
+        && (!els.batteryCellsModal || els.batteryCellsModal.classList.contains('hidden'))
+        && (!els.plansManageModal || els.plansManageModal.classList.contains('hidden'))
+        && (!els.updateConfirmModal || els.updateConfirmModal.classList.contains('hidden'))
+    ) {
+        document.body.classList.remove('modal-open');
+    }
+}
+
+async function saveVestaboardRotate(button) {
+    const views = selectedRotateViews();
+    const enabled = Boolean(els.vestaboardRotateEnabled?.checked);
+    if (enabled && views.length < 2) {
+        updateVestaboardRotateHint();
+        showToast('Tick at least two views to rotate', 'error');
+        return;
+    }
+    const minutes = Math.max(1, Math.min(60, parseInt(els.vestaboardRotateMinutes?.value || '5', 10) || 5));
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/vestaboard.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'rotate',
+                rotate_enabled: enabled,
+                rotate_views: views,
+                rotate_minutes: minutes,
+            }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not save rotation');
+        applyVestaboardRotateState(data);
+        if (data.hub || data.vestaboard_live) {
+            applyVestaboardLiveSwitch({
+                hub: data.hub || { vestaboard_live: data.vestaboard_live },
+                vestaboard: { enabled: true, rotating: data.rotating },
+                vestaboard_live: data.vestaboard_live,
+            });
+        }
+        if (data.lines) {
+            renderVestaboardPreview(data.lines, els.vestaboardBoard, data.codes);
+        }
+        closeVestaboardRotateModal();
+        showToast(data.rotating ? 'Vestaboard rotation on' : 'Vestaboard rotation off', 'success');
+        fetchStatus().catch(() => {});
+    } catch (err) {
+        showToast(err.message || 'Could not save rotation', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
 }
 
 function vestaboardExtraModules(hub) {
@@ -5056,6 +5192,15 @@ els.settingsVestaboardSample?.addEventListener('change', () => loadVestaboardPre
 els.settingsVestaboardTest?.addEventListener('click', (e) => testVestaboardConnection(e.currentTarget));
 els.settingsVestaboardSend?.addEventListener('click', (e) => sendVestaboardNow(e.currentTarget));
 els.vestaboardResume?.addEventListener('click', (e) => resumeVestaboardStatus(e.currentTarget));
+els.vestaboardRotateOpen?.addEventListener('click', openVestaboardRotateModal);
+els.vestaboardRotateSave?.addEventListener('click', (e) => saveVestaboardRotate(e.currentTarget));
+els.vestaboardRotateEnabled?.addEventListener('change', updateVestaboardRotateHint);
+document.querySelectorAll('[data-rotate-view]').forEach((box) => {
+    box.addEventListener('change', updateVestaboardRotateHint);
+});
+document.querySelectorAll('[data-vestaboard-rotate-close]').forEach((btn) => {
+    btn.addEventListener('click', closeVestaboardRotateModal);
+});
 els.moduleSwitcher?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-module-id]');
     if (!btn) return;

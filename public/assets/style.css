@@ -129,6 +129,21 @@ header h1 {
     gap: 0.4rem;
 }
 
+.vestaboard-rotate-panel {
+    max-width: 24rem;
+}
+
+.vestaboard-rotate-views {
+    border: 0;
+    margin: 0.75rem 0 0.5rem;
+    padding: 0;
+}
+
+.vestaboard-rotate-views .label {
+    display: block;
+    margin-bottom: 0.35rem;
+}
+
 .module-pane-hidden {
     display: none !important;
 }
