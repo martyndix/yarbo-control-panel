@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.21] - 2026-09-18
+
+### Changed
+- Vestaboard Rotate modal puts each checkbox on the same row as its label, in a tighter two-column view list.
+
 ## [2.0.20] - 2026-09-18
 
 ### Added

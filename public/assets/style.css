@@ -130,18 +130,56 @@ header h1 {
 }
 
 .vestaboard-rotate-panel {
-    max-width: 24rem;
+    max-width: 22rem;
+}
+
+.vestaboard-rotate-panel > .hint {
+    margin: 0.35rem 0 0.75rem;
+}
+
+.vestaboard-rotate-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.2;
+    cursor: pointer;
+    color: var(--text);
+}
+
+.vestaboard-rotate-option input {
+    width: 1.05rem;
+    height: 1.05rem;
+    margin: 0;
+    padding: 0;
+    flex-shrink: 0;
+    accent-color: var(--accent);
 }
 
 .vestaboard-rotate-views {
     border: 0;
-    margin: 0.75rem 0 0.5rem;
+    margin: 0.7rem 0 0.75rem;
     padding: 0;
 }
 
 .vestaboard-rotate-views .label {
     display: block;
-    margin-bottom: 0.35rem;
+    margin-bottom: 0.4rem;
+}
+
+.vestaboard-rotate-views-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem 0.85rem;
+}
+
+.vestaboard-rotate-panel .settings-field {
+    margin-top: 0.15rem;
+}
+
+.vestaboard-rotate-panel .modal-actions {
+    margin-top: 0.9rem;
 }
 
 .module-pane-hidden {

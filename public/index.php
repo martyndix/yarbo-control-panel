@@ -1181,29 +1181,31 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <button type="button" class="modal-backdrop" data-vestaboard-rotate-close aria-label="Close rotate settings"></button>
             <div class="modal-panel card vestaboard-rotate-panel">
                 <h2 id="vestaboard-rotate-title">Rotate views</h2>
-                <p class="hint">Cycle the Note through the ticked views. Needs two or more. Quiet hours and a message from the Vestaboard app still pause the board.</p>
-                <label class="settings-field settings-checkbox">
+                <p class="hint">Cycle the Note through the ticked views. Needs two or more.</p>
+                <label class="vestaboard-rotate-option">
                     <input type="checkbox" id="vestaboard-rotate-enabled">
                     <span>Rotate views</span>
                 </label>
                 <fieldset class="vestaboard-rotate-views">
                     <legend class="label">Views</legend>
-                    <label class="settings-field settings-checkbox" data-rotate-choice="yarbo">
-                        <input type="checkbox" data-rotate-view="yarbo">
-                        <span>Yarbo</span>
-                    </label>
-                    <label class="settings-field settings-checkbox" data-rotate-choice="powerwall">
-                        <input type="checkbox" data-rotate-view="powerwall">
-                        <span>Powerwall</span>
-                    </label>
-                    <label class="settings-field settings-checkbox" data-rotate-choice="lymow">
-                        <input type="checkbox" data-rotate-view="lymow">
-                        <span>Lymow</span>
-                    </label>
-                    <label class="settings-field settings-checkbox" data-rotate-choice="batteries">
-                        <input type="checkbox" data-rotate-view="batteries">
-                        <span>ALL</span>
-                    </label>
+                    <div class="vestaboard-rotate-views-list">
+                        <label class="vestaboard-rotate-option" data-rotate-choice="yarbo">
+                            <input type="checkbox" data-rotate-view="yarbo">
+                            <span>Yarbo</span>
+                        </label>
+                        <label class="vestaboard-rotate-option" data-rotate-choice="powerwall">
+                            <input type="checkbox" data-rotate-view="powerwall">
+                            <span>Powerwall</span>
+                        </label>
+                        <label class="vestaboard-rotate-option" data-rotate-choice="lymow">
+                            <input type="checkbox" data-rotate-view="lymow">
+                            <span>Lymow</span>
+                        </label>
+                        <label class="vestaboard-rotate-option" data-rotate-choice="batteries">
+                            <input type="checkbox" data-rotate-view="batteries">
+                            <span>ALL</span>
+                        </label>
+                    </div>
                 </fieldset>
                 <label class="settings-field">
                     <span class="label">Minutes per view</span>
