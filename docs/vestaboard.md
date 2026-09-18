@@ -44,20 +44,24 @@ GRID    -450W
 DRAW     590W
 ```
 
-Lymow live module:
+Lymow live module uses the same 3-line pattern as Yarbo (activity on row 1, **BATTERY** with a colour chip on row 2, context on row 3):
 
 ```
-LYMOW       99%
-STATE       WAIT
-CHARGING    YES
+LYMOW    MOWING
+BATTERY     99%
+WORK DONE   42%
 ```
 
-While mowing, the middle row is **MOWING** plus progress instead of **STATE** plus the work word:
+```
+LYMOW  CHARGING
+BATTERY     55%
+ON DOCK
+```
 
 ```
-LYMOW       99%
-MOWING      42%
-CHARGING     NO
+LYMOW      IDLE
+BATTERY    FULL
+CHARGED
 ```
 
 Combined batteries (Settings → Vestaboard live module; colour chip on each row):
@@ -101,7 +105,7 @@ If the flaps no longer match the last layout this panel wrote, live status pause
 
 The dashboard shows **Resume previous status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
-The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the pills on the **Vestaboard Note** card, or PaperMono’s **NOTE** page after flashing **0.1.5-beta**. Powerwall, Lymow, and ALL buttons only appear when those dashboards are enabled. App-hold and Quiet hours still apply. Lymow uses **LYMOW** plus battery **%** (colour chip on the last column so the percent stays whole), **STATE** plus the work label (or **MOWING** plus progress **%** while a job is running), and **CHARGING YES/NO**.
+The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the pills on the **Vestaboard Note** card, or PaperMono’s **NOTE** page after flashing **0.1.5-beta**. Powerwall, Lymow, and ALL buttons only appear when those dashboards are enabled. App-hold and Quiet hours still apply. Lymow uses the same layout as Yarbo: **LYMOW** plus the activity verb (**MOWING**, **CHARGING**, **IDLE**, **DOCKING**, **PAUSED**, …), **BATTERY** plus **%** or **FULL** (colour chip on the last column), and a context line (**WORK DONE n%**, **ON DOCK**, **CHARGED**, **READY**, **HEADING HOME**, **PLAN HOLD**).
 
 ## Setup (either API)
 

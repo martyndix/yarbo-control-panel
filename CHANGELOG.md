@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.19] - 2026-09-18
+
+### Changed
+- Vestaboard Lymow page matches Yarbo: **LYMOW MOWING**, **BATTERY n%**, **WORK DONE n%** (and the same charging / idle / docking / paused lines).
+
 ## [2.0.18] - 2026-09-17
 
 ### Changed

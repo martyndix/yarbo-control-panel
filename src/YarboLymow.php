@@ -278,33 +278,118 @@ final class YarboLymow
     public function vestaboardLayout(): array
     {
         $data = $this->dashboardPayload();
+        $board = new YarboVestaboard($this->projectRoot);
         $battery = isset($data['battery']) ? (int) $data['battery'] : null;
         $camOk = !empty($data['camera_ok']);
         $cloudOk = $battery !== null || !empty($data['online']);
         $showLive = $camOk || $cloudOk;
-        $work = (string) ($data['work_label'] ?? '');
-        if ($work === '—' || $work === '') {
-            $work = $battery !== null ? 'IDLE' : '--';
-        }
-        $charging = (($data['charging_label'] ?? '') === 'Yes') ? 'YES' : 'NO';
+        $workStatus = isset($data['work_status']) ? (int) $data['work_status'] : null;
+        $chargingLabel = (string) ($data['charging_label'] ?? 'No');
+        $charging = $chargingLabel === 'Yes';
+        $returning = $chargingLabel === 'Returning';
         $progress = isset($data['mow_progress']) ? (int) $data['mow_progress'] : null;
-        $stateLeft = $progress !== null ? $work : 'STATE';
-        $stateRight = $progress !== null ? $progress . '%' : $work;
-        $lines = [
-            $showLive
-                ? $this->pair('LYMOW', $battery !== null ? $battery . '%' : '--', 14)
-                : $this->pair('OFFLINE', '', 14),
-            $this->pair($stateLeft, $stateRight),
-            $this->pair('CHARGING', $charging),
-        ];
-        $codes = $this->encodeLines($lines, $battery, $showLive);
+        $full = $workStatus === 12 || ($charging && $battery !== null && $battery >= 95);
 
+        if (!$showLive) {
+            return $this->vestaboardResult($board->brandedLayout(
+                'LYMOW',
+                'OFFLINE',
+                $this->pair('BATTERY', '--', 14),
+                'NO TELEMETRY',
+                YarboVestaboard::COLOR_RED,
+            ), false);
+        }
+
+        $batteryLine = $full
+            ? $this->pair('BATTERY', 'FULL', 14)
+            : $this->pair('BATTERY', $battery !== null ? ($battery === 100 ? '100%' : $battery . '%') : '--', 14);
+        $batteryColor = $full
+            ? YarboVestaboard::COLOR_GREEN
+            : YarboVestaboard::batteryPercentChip($battery, true);
+
+        if ($workStatus === 7) {
+            return $this->vestaboardResult($board->brandedLayout(
+                'LYMOW',
+                'ERROR',
+                $batteryLine,
+                'STOPPED',
+                YarboVestaboard::COLOR_RED,
+                YarboVestaboard::COLOR_RED,
+            ), true);
+        }
+        if ($returning || in_array($workStatus, [4, 10], true)) {
+            return $this->vestaboardResult($board->brandedLayout(
+                'LYMOW',
+                'DOCKING',
+                $batteryLine,
+                'HEADING HOME',
+                $batteryColor,
+            ), true);
+        }
+        if ($workStatus === 3) {
+            return $this->vestaboardResult($board->brandedPaused('LYMOW', $batteryLine, $batteryColor), true);
+        }
+        if ($charging && !$full) {
+            return $this->vestaboardResult($board->brandedLayout(
+                'LYMOW',
+                'CHARGING',
+                $batteryLine,
+                'ON DOCK',
+                $batteryColor,
+            ), true);
+        }
+        if (in_array($workStatus, [2, 8, 9], true) && !$charging) {
+            $line3 = $progress !== null ? $this->pair('WORK DONE', $progress . '%') : 'READY';
+
+            return $this->vestaboardResult($board->brandedLayout(
+                'LYMOW',
+                'MOWING',
+                $batteryLine,
+                $line3,
+                $batteryColor,
+                YarboVestaboard::COLOR_GREEN,
+            ), true);
+        }
+        if ($full) {
+            return $this->vestaboardResult($board->brandedLayout(
+                'LYMOW',
+                'IDLE',
+                $batteryLine,
+                'CHARGED',
+                $batteryColor,
+            ), true);
+        }
+
+        $verb = match ($workStatus) {
+            6 => 'REMOTE',
+            11 => 'UPDATE',
+            13 => 'STOP',
+            14 => 'ESCAPE',
+            default => 'IDLE',
+        };
+        $line3 = $workStatus === 13 ? 'STOPPED' : 'READY';
+
+        return $this->vestaboardResult($board->brandedLayout(
+            'LYMOW',
+            $verb,
+            $batteryLine,
+            $line3,
+            $batteryColor,
+        ), true);
+    }
+
+    /**
+     * @param array{lines: list<string>, codes: list<list<int>>, verb: string} $layout
+     * @return array{ok: bool, online: bool, lines: list<string>, codes: list<list<int>>, verb: string}
+     */
+    private function vestaboardResult(array $layout, bool $online): array
+    {
         return [
             'ok' => true,
-            'online' => $showLive,
-            'lines' => YarboVestaboard::linesFromCodes($codes),
-            'codes' => $codes,
-            'verb' => $showLive ? 'LYMOW' : 'OFFLINE',
+            'online' => $online,
+            'lines' => $layout['lines'],
+            'codes' => $layout['codes'],
+            'verb' => $layout['verb'],
         ];
     }
 
@@ -911,52 +996,4 @@ final class YarboLymow
         return $left . str_repeat(' ', $pad) . $right;
     }
 
-    /**
-     * @param list<string> $lines
-     * @return list<list<int>>
-     */
-    private function encodeLines(array $lines, ?int $battery, bool $online): array
-    {
-        $codes = [];
-        for ($r = 0; $r < 3; $r++) {
-            $line = str_pad(strtoupper($lines[$r] ?? ''), 15);
-            $row = [];
-            for ($c = 0; $c < 15; $c++) {
-                $row[] = $this->charToCode($line[$c] ?? ' ');
-            }
-            $codes[] = $row;
-        }
-        $chip = YarboVestaboard::batteryPercentChip($battery, $online);
-        $codes[0][14] = $chip;
-
-        return $codes;
-    }
-
-    private function charToCode(string $ch): int
-    {
-        if ($ch === ' ') {
-            return 0;
-        }
-        $ord = ord($ch);
-        if ($ord >= 65 && $ord <= 90) {
-            return $ord - 64;
-        }
-        if ($ord >= 49 && $ord <= 57) {
-            return $ord - 22;
-        }
-        if ($ch === '0') {
-            return 36;
-        }
-        if ($ch === '%') {
-            return 54;
-        }
-        if ($ch === '.') {
-            return 56;
-        }
-        if ($ch === '-') {
-            return 44;
-        }
-
-        return 0;
-    }
 }

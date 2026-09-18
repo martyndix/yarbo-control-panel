@@ -903,6 +903,31 @@ final class YarboVestaboard
     }
 
     /**
+     * Same 3-line pack as Yarbo, with another name on row 1 (for example LYMOW).
+     *
+     * @return array{lines: list<string>, codes: list<list<int>>, verb: string}
+     */
+    public function brandedLayout(
+        string $brand,
+        string $verb,
+        string $line2,
+        string $line3,
+        int $line2Color = 0,
+        int $line1Color = 0,
+        int $line3Color = 0,
+    ): array {
+        return $this->pack($verb, $line2, $line3, $line2Color, $line1Color, $line3Color, $brand);
+    }
+
+    /**
+     * @return array{lines: list<string>, codes: list<list<int>>, verb: string}
+     */
+    public function brandedPaused(string $brand, string $batteryLine, int $batteryColor): array
+    {
+        return $this->packPaused($batteryLine, $batteryColor, $brand);
+    }
+
+    /**
      * @return array{lines: list<string>, codes: list<list<int>>, verb: string}
      */
     private function pack(
@@ -912,6 +937,7 @@ final class YarboVestaboard
         int $line2Color = 0,
         int $line1Color = 0,
         int $line3Color = 0,
+        string $brand = 'YARBO',
     ): array {
         $line1Width = $line1Color !== 0 ? self::COLS - 1 : self::COLS;
         $line2Text = $this->clip($line2);
@@ -923,7 +949,7 @@ final class YarboVestaboard
             $line3Text = substr($line3Text, 0, self::COLS - 1) . ' ';
         }
         $lines = [
-            $this->pair('YARBO', $verb, $line1Width),
+            $this->pair($brand, $verb, $line1Width),
             $line2Text,
             $line3Text,
         ];
@@ -950,9 +976,9 @@ final class YarboVestaboard
      *
      * @return array{lines: list<string>, codes: list<list<int>>, verb: string}
      */
-    private function packPaused(string $batteryLine, int $batteryColor): array
+    private function packPaused(string $batteryLine, int $batteryColor, string $brand = 'YARBO'): array
     {
-        $packed = $this->pack('PAUSED', $batteryLine, str_repeat(' ', self::COLS), $batteryColor);
+        $packed = $this->pack('PAUSED', $batteryLine, str_repeat(' ', self::COLS), $batteryColor, 0, 0, $brand);
         $phrase = 'PLAN HOLD';
         $start = intdiv(self::COLS - strlen($phrase), 2);
         $line3 = str_repeat(' ', $start) . $phrase . str_repeat(' ', self::COLS - $start - strlen($phrase));
@@ -1580,7 +1606,7 @@ final class YarboVestaboard
     }
 
     /**
-     * LYMOW/OFFLINE + CHARGING (or the older CAM row) is this panel's Lymow page, not an app scribble.
+     * LYMOW + BATTERY (or the older CHARGING/CAM row) is this panel's Lymow page, not an app scribble.
      *
      * @param list<list<int>> $codes
      */
@@ -1588,10 +1614,16 @@ final class YarboVestaboard
     {
         $lines = self::linesFromCodes($codes);
         $row0 = strtoupper(trim($lines[0] ?? ''));
+        $row1 = strtoupper(trim($lines[1] ?? ''));
         $row2 = strtoupper(trim($lines[2] ?? ''));
 
-        return (str_starts_with($row0, 'LYMOW') || str_starts_with($row0, 'OFFLINE'))
-            && (str_starts_with($row2, 'CHARGING') || str_starts_with($row2, 'CAM'));
+        if (!str_starts_with($row0, 'LYMOW') && !str_starts_with($row0, 'OFFLINE')) {
+            return false;
+        }
+
+        return str_starts_with($row1, 'BATTERY')
+            || str_starts_with($row2, 'CHARGING')
+            || str_starts_with($row2, 'CAM');
     }
 
     /**
