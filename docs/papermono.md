@@ -38,7 +38,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 ## What it shows
 
 - **Home:** battery, charging, working state, attached head, error code, and large **Stop**, **Dock**, **Pause** / **Resume**, **Lights**
-- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Needs firmware **0.1.6-beta**.
+- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.7-beta**.
 - **Status:** the same tiles as the web Status card (including heading and rain)
 - **Health:** the same tiles as Connection & Health (Wi-Fi, pad, RTK, and so on)
 - **Plans:** named work plans. Tap a row to select, tap **START** to run it from 0% (same MQTT start as the web panel)

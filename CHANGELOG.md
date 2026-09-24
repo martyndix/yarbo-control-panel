@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.23] - 2026-09-24
+
+### Changed
+- Paper companion header logo is larger (about 180px on PaperMono, 140px on Paper Colour) and keeps a transparent PNG background. Re-upload the logo, then reflash **0.1.7-beta** / **0.2.5-color**.
+
 ## [2.0.22] - 2026-09-24
 
 ### Added

@@ -2139,10 +2139,10 @@ html[data-theme="light"] .plan-activity {
 }
 
 .papermono-logo-thumb {
-    width: 64px;
-    height: 64px;
+    width: 96px;
+    height: 96px;
     object-fit: contain;
-    background: #f4f1e8;
+    background: transparent;
     border: 1px solid var(--border);
     border-radius: 8px;
 }

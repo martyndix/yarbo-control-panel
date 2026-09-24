@@ -272,7 +272,7 @@ void drawHeader()
     M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     M5.Display.setTextSize(2);
     M5.Display.drawString(pageName(currentPage), 16, 72);
-    int logoSize = 64;
+    int logoSize = 180;
     if (SPIFFS.exists("/logo.png")) {
         M5.Display.drawPngFile(SPIFFS, "/logo.png", M5.Display.width() - logoSize - 16, 16, logoSize, logoSize);
     }

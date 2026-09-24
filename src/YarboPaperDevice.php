@@ -12,9 +12,9 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.6-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.4-color';
-    public const LOGO_MAX_EDGE = 96;
+    public const FIRMWARE_VERSION = '0.1.7-beta';
+    public const FIRMWARE_VERSION_COLOR = '0.2.5-color';
+    public const LOGO_MAX_EDGE = 240;
     public const LOGO_MAX_UPLOAD_BYTES = 2097152;
     private const PLANS_CACHE_TTL_S = 300;
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
@@ -178,12 +178,17 @@ final class YarboPaperDevice
 
                 return 'Could not resize the logo.';
             }
-            $white = imagecolorallocate($dst, 255, 255, 255);
-            if ($white !== false) {
-                imagefilledrectangle($dst, 0, 0, $dw, $dh, $white);
+            imagealphablending($dst, false);
+            imagesavealpha($dst, true);
+            $clear = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+            if ($clear !== false) {
+                imagefilledrectangle($dst, 0, 0, $dw, $dh, $clear);
             }
+            imagealphablending($dst, true);
             imagecopyresampled($dst, $src, 0, 0, 0, 0, $dw, $dh, $sw, $sh);
             imagedestroy($src);
+            imagealphablending($dst, false);
+            imagesavealpha($dst, true);
             $ok = imagepng($dst, $this->logoPath(), 6);
             imagedestroy($dst);
 

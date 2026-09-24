@@ -897,7 +897,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.4-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C sleeps. Build first: <code>pio run -e papercolor -d firmware/papercolor</code>.</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.5-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C sleeps. Build first: <code>pio run -e papercolor -d firmware/papercolor</code>.</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -930,7 +930,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span class="label">Header logo</span>
                                 <input type="file" id="papermono-logo" name="papermono_logo" accept="image/png,image/jpeg,.png,.jpg,.jpeg">
                             </label>
-                            <p class="hint">One PNG or JPEG for both PaperMono and Paper Colour. It sits top-right of the header on every page. Max 2 MB; the panel stores a 96×96 PNG. Reflash the tablet after uploading so the glass updates.</p>
+                            <p class="hint">One PNG or JPEG for both PaperMono and Paper Colour. It sits large in the top-right of every page. Prefer a PNG with a transparent background. Max 2 MB. Re-upload if you already saved a logo (the first version flattened it on white), then reflash the tablet.</p>
                             <div class="papermono-logo-row">
                                 <img id="papermono-logo-thumb" class="papermono-logo-thumb hidden" alt="Header logo preview">
                                 <button type="button" class="btn btn-secondary" id="papermono-logo-clear">Remove logo</button>
@@ -947,7 +947,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
-                                        <image class="paper-logo-preview" href="" x="400" y="16" width="64" height="64" preserveAspectRatio="xMaxYMin meet"/>
+                                        <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
                                         <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOME</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">87%</text>
@@ -978,7 +978,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
-                                        <image class="paper-logo-preview" href="" x="400" y="16" width="64" height="64" preserveAspectRatio="xMaxYMin meet"/>
+                                        <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
                                         <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">STATUS</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">100%</text>
@@ -1003,7 +1003,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
-                                        <image class="paper-logo-preview" href="" x="400" y="16" width="64" height="64" preserveAspectRatio="xMaxYMin meet"/>
+                                        <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
                                         <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HEALTH</text>
                                         <text x="24" y="140" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn type  HaLow</text>
@@ -1033,7 +1033,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
-                                        <image class="paper-logo-preview" href="" x="400" y="16" width="64" height="64" preserveAspectRatio="xMaxYMin meet"/>
+                                        <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
                                         <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PLANS</text>
                                         <text x="24" y="124" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">idle</text>
@@ -1079,7 +1079,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect width="400" height="600" fill="#fffef6"/>
                                         <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
                                         <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOR</text>
-                                        <image class="paper-logo-preview" href="" x="332" y="12" width="52" height="52" preserveAspectRatio="xMaxYMin meet"/>
+                                        <image class="paper-logo-preview" href="" x="244" y="12" width="140" height="140" preserveAspectRatio="xMaxYMin meet"/>
                                         <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lawnbot  0.2.1-color</text>
                                         <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">HOME</text>
                                         <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">87%</text>
