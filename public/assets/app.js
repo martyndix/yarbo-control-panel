@@ -204,6 +204,10 @@ const els = {
     papermonoWifiPassword: document.getElementById('papermono-wifi-password'),
     papermonoPanelUrl: document.getElementById('papermono-panel-url'),
     papermonoName: document.getElementById('papermono-name'),
+    papermonoLogo: document.getElementById('papermono-logo'),
+    papermonoLogoThumb: document.getElementById('papermono-logo-thumb'),
+    papermonoLogoClear: document.getElementById('papermono-logo-clear'),
+    papermonoLogoResult: document.getElementById('papermono-logo-result'),
     papermonoResult: document.getElementById('papermono-result'),
     papermonoFwStatus: document.getElementById('papermono-fw-status'),
     papermonoDevices: document.getElementById('papermono-devices'),
@@ -3532,6 +3536,77 @@ function applyPaperMonoKindUi(dashboard) {
     }
 }
 
+function setPaperLogoResult(message, type) {
+    if (!els.papermonoLogoResult) return;
+    if (!message) {
+        els.papermonoLogoResult.textContent = '';
+        els.papermonoLogoResult.className = 'settings-cloud-result hidden';
+        return;
+    }
+    els.papermonoLogoResult.textContent = message;
+    els.papermonoLogoResult.className = `settings-cloud-result ${type || ''}`.trim();
+    els.papermonoLogoResult.classList.remove('hidden');
+}
+
+function applyPaperLogoPreview(url) {
+    const href = url || '';
+    document.querySelectorAll('.paper-logo-preview').forEach((el) => {
+        if (href) {
+            el.setAttribute('href', href);
+            el.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
+        } else {
+            el.removeAttribute('href');
+            el.removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        }
+    });
+    if (els.papermonoLogoThumb) {
+        if (href) {
+            els.papermonoLogoThumb.src = href;
+            els.papermonoLogoThumb.classList.remove('hidden');
+        } else {
+            els.papermonoLogoThumb.removeAttribute('src');
+            els.papermonoLogoThumb.classList.add('hidden');
+        }
+    }
+}
+
+async function uploadPaperLogo(file) {
+    if (!file) return;
+    setPaperLogoResult('Saving logo…');
+    const body = new FormData();
+    body.append('action', 'logo_upload');
+    body.append('logo', file);
+    try {
+        const res = await fetch('/api/device.php', { method: 'POST', body });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not save the logo');
+        applyPaperLogoPreview(data.logo_url || null);
+        setPaperLogoResult(data.message || 'Logo saved.', 'success');
+        showToast('Logo saved', 'success');
+        if (els.papermonoLogo) els.papermonoLogo.value = '';
+    } catch (err) {
+        setPaperLogoResult(err.message || 'Could not save the logo', 'error');
+    }
+}
+
+async function clearPaperLogo() {
+    setPaperLogoResult('Removing logo…');
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'logo_clear' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not remove the logo');
+        applyPaperLogoPreview(null);
+        setPaperLogoResult(data.message || 'Logo removed.', 'success');
+        if (els.papermonoLogo) els.papermonoLogo.value = '';
+    } catch (err) {
+        setPaperLogoResult(err.message || 'Could not remove the logo', 'error');
+    }
+}
+
 function paperMonoFormPayload() {
     const kind = paperMonoSelectedKind();
     return {
@@ -3581,6 +3656,7 @@ async function loadPaperMonoDashboard() {
         const data = await parseJsonResponse(res);
         paperMonoDashboardCache = data;
         applyPaperMonoKindUi(data);
+        applyPaperLogoPreview(data.logo_url || null);
         renderPaperMonoDevices(data.devices);
     } catch (err) {
         if (els.papermonoFwStatus) {
@@ -5370,6 +5446,14 @@ els.papermonoPortsRefresh?.addEventListener('click', () => refreshPaperMonoPorts
 els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbTools(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));
 els.papermonoConfig?.addEventListener('click', (e) => runPaperMonoUsb('configure_usb', e.currentTarget));
+els.papermonoLogo?.addEventListener('change', (e) => {
+    const file = e.currentTarget?.files?.[0];
+    if (!file) return;
+    const localUrl = URL.createObjectURL(file);
+    applyPaperLogoPreview(localUrl);
+    uploadPaperLogo(file);
+});
+els.papermonoLogoClear?.addEventListener('click', () => clearPaperLogo());
 document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
     input.addEventListener('change', () => {
         applyPaperMonoKindUi(paperMonoDashboardCache);

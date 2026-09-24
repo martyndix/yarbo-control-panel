@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
+#include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include <M5Unified.h>
 #include "version.h"
@@ -57,6 +58,7 @@ String powerwallSolar = "—";
 String powerwallLoad = "—";
 int partialRefreshCount = 0;
 String lastDrawnKey;
+String logoHash = "";
 int currentPage = PAPERMONO_PAGE_HOME;
 
 String planIds[PAPERMONO_PLAN_MAX];
@@ -156,7 +158,7 @@ String screenKey()
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + lymowName + "|"
         + String(lymowBattery) + "|" + lymowState + "|" + (powerwallOn ? "1" : "0") + "|"
         + (lymowOn ? "1" : "0") + "|" + String(powerwallPct) + "|" + powerwallSolar + "|"
-        + powerwallLoad + "|" + String((int) WiFi.status());
+        + powerwallLoad + "|" + String((int) WiFi.status()) + "|" + logoHash;
 }
 
 bool pageEnabled(int page)
@@ -238,6 +240,10 @@ void drawHeader()
     M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     M5.Display.setTextSize(2);
     M5.Display.drawString(pageName(currentPage), 16, 72);
+    int logoSize = 52;
+    if (SPIFFS.exists("/logo.png")) {
+        M5.Display.drawPngFile(SPIFFS, "/logo.png", M5.Display.width() - logoSize - 16, 16, logoSize, logoSize);
+    }
 }
 
 void drawPager()
@@ -549,6 +555,64 @@ bool tapOnPager(int y)
     return y >= M5.Display.height() - 48;
 }
 
+bool syncPaperLogo(const String &hash)
+{
+    if (hash.length() == 0) {
+        if (SPIFFS.exists("/logo.png")) {
+            SPIFFS.remove("/logo.png");
+        }
+        logoHash = "";
+        return true;
+    }
+    if (hash == logoHash && SPIFFS.exists("/logo.png")) {
+        return true;
+    }
+    HTTPClient http;
+    http.begin(panelUrl + "/api/device.php?action=logo");
+    http.addHeader("X-PaperMono-Token", token);
+    http.setTimeout(12000);
+    int code = http.GET();
+    if (code != 200) {
+        http.end();
+        return false;
+    }
+    int len = http.getSize();
+    File f = SPIFFS.open("/logo.png", FILE_WRITE);
+    if (!f) {
+        http.end();
+        return false;
+    }
+    WiFiClient *stream = http.getStreamPtr();
+    uint8_t buf[1024];
+    int written = 0;
+    unsigned long start = millis();
+    while (http.connected() && (len < 0 || written < len) && millis() - start < 12000) {
+        int avail = stream->available();
+        if (avail <= 0) {
+            delay(10);
+            continue;
+        }
+        size_t want = avail > (int) sizeof(buf) ? sizeof(buf) : (size_t) avail;
+        int n = stream->readBytes(buf, want);
+        if (n <= 0) {
+            break;
+        }
+        f.write(buf, n);
+        written += n;
+        if (len >= 0 && written >= len) {
+            break;
+        }
+    }
+    f.close();
+    http.end();
+    if (written < 8) {
+        SPIFFS.remove("/logo.png");
+        return false;
+    }
+    logoHash = hash;
+    return true;
+}
+
 bool httpGetStatus()
 {
     if (WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
@@ -607,6 +671,7 @@ bool httpGetStatus()
     lymowState = doc["lymow_state"] | lymowState;
     lymowCharging = doc["lymow_charging"] | lymowCharging;
     lastError = "";
+    syncPaperLogo(String((const char *) (doc["logo_hash"] | "")));
     return true;
 }
 
@@ -782,6 +847,7 @@ void setup()
     cfg.clear_display = true;
     M5.begin(cfg);
     M5.Display.setRotation(0);
+    SPIFFS.begin(true);
     loadConfig();
     if (wifiSsid.length()) {
         WiFi.mode(WIFI_STA);

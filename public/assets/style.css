@@ -2131,6 +2131,22 @@ html[data-theme="light"] .plan-activity {
     gap: 0.5rem;
 }
 
+.papermono-logo-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.35rem 0 0.75rem;
+}
+
+.papermono-logo-thumb {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    background: #f4f1e8;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
 .vestaboard-preview {
     display: grid;
     grid-template-columns: repeat(15, 1fr);

@@ -12,8 +12,10 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.5-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.3-color';
+    public const FIRMWARE_VERSION = '0.1.6-beta';
+    public const FIRMWARE_VERSION_COLOR = '0.2.4-color';
+    public const LOGO_MAX_EDGE = 96;
+    public const LOGO_MAX_UPLOAD_BYTES = 2097152;
     private const PLANS_CACHE_TTL_S = 300;
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
     public const FIRMWARE_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware.bin';
@@ -70,7 +72,131 @@ final class YarboPaperDevice
                 ],
             ],
             'devices' => $this->publicDevices(),
+        ] + $this->logoPublicView();
+    }
+
+    public function logoPath(): string
+    {
+        return $this->projectRoot . '/data/paper-logo.png';
+    }
+
+    /**
+     * @return array{logo_hash: string, logo_set: bool, logo_url: ?string}
+     */
+    public function logoPublicView(): array
+    {
+        $hash = $this->logoHash();
+
+        return [
+            'logo_hash' => $hash,
+            'logo_set' => $hash !== '',
+            'logo_url' => $hash !== '' ? '/api/device.php?action=logo&v=' . substr($hash, 0, 16) : null,
         ];
+    }
+
+    public function logoHash(): string
+    {
+        $path = $this->logoPath();
+        if (!is_file($path) || filesize($path) < 8) {
+            return '';
+        }
+        $hash = hash_file('sha256', $path);
+
+        return is_string($hash) ? $hash : '';
+    }
+
+    /**
+     * @param array<string, mixed> $file $_FILES['logo']
+     * @return array<string, mixed>
+     */
+    public function saveUploadedLogo(array $file): array
+    {
+        $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK) {
+            return ['ok' => false, 'error' => 'Choose a PNG or JPEG image (max 2 MB).'];
+        }
+        $tmp = (string) ($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            return ['ok' => false, 'error' => 'Could not read the uploaded image.'];
+        }
+        $size = (int) ($file['size'] ?? 0);
+        if ($size <= 0 || $size > self::LOGO_MAX_UPLOAD_BYTES) {
+            return ['ok' => false, 'error' => 'Image is larger than 2 MB.'];
+        }
+        $raw = file_get_contents($tmp);
+        if (!is_string($raw) || $raw === '') {
+            return ['ok' => false, 'error' => 'Could not read the uploaded image.'];
+        }
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return ['ok' => false, 'error' => 'Could not create the data folder.'];
+        }
+        $saved = $this->writeLogoPng($raw);
+        if ($saved !== null) {
+            return ['ok' => false, 'error' => $saved];
+        }
+
+        return ['ok' => true, 'message' => 'Logo saved. Reflash the tablet so it appears in the header.'] + $this->logoPublicView();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function clearLogo(): array
+    {
+        $path = $this->logoPath();
+        if (is_file($path)) {
+            @unlink($path);
+        }
+
+        return ['ok' => true, 'message' => 'Logo removed.'] + $this->logoPublicView();
+    }
+
+    /**
+     * @return ?string error
+     */
+    private function writeLogoPng(string $raw): ?string
+    {
+        if (function_exists('imagecreatefromstring')) {
+            $src = @imagecreatefromstring($raw);
+            if ($src === false) {
+                return 'Use a PNG or JPEG image.';
+            }
+            $sw = imagesx($src);
+            $sh = imagesy($src);
+            if ($sw < 1 || $sh < 1) {
+                imagedestroy($src);
+
+                return 'That image has no size.';
+            }
+            $scale = min(1.0, self::LOGO_MAX_EDGE / max($sw, $sh));
+            $dw = max(1, (int) round($sw * $scale));
+            $dh = max(1, (int) round($sh * $scale));
+            $dst = imagecreatetruecolor($dw, $dh);
+            if ($dst === false) {
+                imagedestroy($src);
+
+                return 'Could not resize the logo.';
+            }
+            $white = imagecolorallocate($dst, 255, 255, 255);
+            if ($white !== false) {
+                imagefilledrectangle($dst, 0, 0, $dw, $dh, $white);
+            }
+            imagecopyresampled($dst, $src, 0, 0, 0, 0, $dw, $dh, $sw, $sh);
+            imagedestroy($src);
+            $ok = imagepng($dst, $this->logoPath(), 6);
+            imagedestroy($dst);
+
+            return $ok ? null : 'Could not save the logo.';
+        }
+        if (!str_starts_with($raw, "\x89PNG\r\n\x1a\n")) {
+            return 'This PHP has no GD. Upload a PNG (max 200 KB).';
+        }
+        if (strlen($raw) > 204800) {
+            return 'This PHP has no GD. Upload a PNG of 200 KB or less.';
+        }
+
+        return file_put_contents($this->logoPath(), $raw) !== false ? null : 'Could not save the logo.';
     }
 
     /**
@@ -268,7 +394,7 @@ final class YarboPaperDevice
             'lymow_state' => $this->lymowCompanionState($ly),
             'lymow_charging' => (string) ($ly['charging_label'] ?? '—'),
             'lymow_name' => (string) ($ly['page_name'] ?? ''),
-        ];
+        ] + $this->logoPublicView();
     }
 
     /**

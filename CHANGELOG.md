@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.22] - 2026-09-24
+
+### Added
+- Settings **Header logo** for PaperMono and Paper Colour (one PNG/JPEG, previewed on the mocks). After a reflash (**0.1.6-beta** / **0.2.4-color**) the tablet draws it top-right on every page.
+
 ## [2.0.21] - 2026-09-18
 
 ### Changed

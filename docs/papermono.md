@@ -38,10 +38,11 @@ Home and extra-page mocks (not photos of a flashed unit):
 ## What it shows
 
 - **Home:** battery, charging, working state, attached head, error code, and large **Stop**, **Dock**, **Pause** / **Resume**, **Lights**
+- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Needs firmware **0.1.6-beta**.
 - **Status:** the same tiles as the web Status card (including heading and rain)
 - **Health:** the same tiles as Connection & Health (Wi-Fi, pad, RTK, and so on)
 - **Plans:** named work plans. Tap a row to select, tap **START** to run it from 0% (same MQTT start as the web panel)
-- **Note:** Vestaboard live view. Tap **YARBO**, and **WALL** / **LYMOW** / **ALL** only when those modules are enabled. Same choice as the Vestaboard Note card pills and Settings. The **NOTE** page is hidden when Vestaboard is off. Needs PaperMono **0.1.5-beta**.
+- **Note:** Vestaboard live view. Tap **YARBO**, and **WALL** / **LYMOW** / **ALL** only when those modules are enabled. Same choice as the Vestaboard Note card pills and Settings. The **NOTE** page is hidden when Vestaboard is off.
 - **Lymow:** Lymow battery, state, and charging. Hidden when the Lymow module is off. The header shows the Lymow-app name (or the name set in Settings).
 - The two hardware keys cycle enabled pages only (**Home → Status → Health → Plans**, then **Note** and **Lymow** when those modules are on). Stop / Dock are Home buttons only.
 - Tap above the Home buttons (or the pager on other pages) also changes page if the keys are not mapped.
@@ -87,6 +88,7 @@ On the **same machine that runs the panel**:
    - Wi-Fi SSID and password (**2.4 GHz only**)
    - Panel URL as the tablet will reach it (for example `http://192.168.1.50:8080`, not `localhost`)
    - A device name
+   - Optional header logo (PNG/JPEG). Preview shows on the mocks; reflash so the glass updates.
 6. Click **Flash firmware & send Wi-Fi**. Leave Settings open for one to two minutes.
 
 **Send Wi-Fi only** reuses already-flashed firmware and pushes a new `CFG:` line over serial (SSID, password, panel URL, token).
@@ -95,7 +97,7 @@ On the **same machine that runs the panel**:
 
 The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. Compact status includes `vestaboard_enabled`, `vestaboard_live`, `powerwall_enabled`, and `lymow_enabled`. The Plans page also calls `GET /api/device.php?action=plans` (cached on the Pi for about five minutes). Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`, `start_plan` with `plan_id`, and `vestaboard_live` with `vestaboard_live` set to `yarbo`, `powerwall`, `lymow`, or `batteries`).
 
-Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. Firmware later can pull `GET /api/device.php?action=firmware` for OTA; that is not wired in 0.1.5-beta yet.
+Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. Firmware later can pull `GET /api/device.php?action=firmware` for OTA; that is not wired yet. The header logo is `GET /api/device.php?action=logo` when compact status includes `logo_hash`.
 
 ## Limits
 

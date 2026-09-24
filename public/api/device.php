@@ -72,6 +72,18 @@ if ($method === 'GET' && $action === 'plans') {
     json_response($devices->compactPlans($refresh, $devices->deviceKind($device)));
 }
 
+if ($method === 'GET' && $action === 'logo') {
+    $path = $devices->logoPath();
+    if (!is_file($path)) {
+        json_response(['ok' => false, 'error' => 'No logo uploaded'], 404);
+    }
+    header('Content-Type: image/png');
+    header('Cache-Control: public, max-age=3600');
+    header('Content-Length: ' . (string) filesize($path));
+    readfile($path);
+    exit;
+}
+
 if ($method === 'GET' && $action === 'firmware') {
     $device = $devices->findByToken(device_token_from_request());
     if ($device === null) {
@@ -126,6 +138,14 @@ if ($action === 'configure_usb') {
 
 if ($action === 'install_usb_tools') {
     json_response($devices->installUsbTools());
+}
+
+if ($action === 'logo_upload') {
+    json_response($devices->saveUploadedLogo($_FILES['logo'] ?? []));
+}
+
+if ($action === 'logo_clear') {
+    json_response($devices->clearLogo());
 }
 
 if ($action === 'command') {
