@@ -12,8 +12,8 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.9-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.6-color';
+    public const FIRMWARE_VERSION = '0.1.10-beta';
+    public const FIRMWARE_VERSION_COLOR = '0.2.7-color';
     public const MESSAGE_MAX = 50;
     public const MESSAGE_CHARS = 180;
     public const LOGO_MAX_EDGE = 240;
@@ -499,6 +499,7 @@ final class YarboPaperDevice
         $ly = (new YarboLymow($this->projectRoot))->dashboardPayload();
         $vbObj = new YarboVestaboard($this->projectRoot);
         $vb = $vbObj->load();
+        $yarboEnabled = $hub->enabled(YarboHub::MODULE_YARBO);
         $pwEnabled = $hub->enabled(YarboHub::MODULE_POWERWALL);
         $lyEnabled = $hub->enabled(YarboHub::MODULE_LYMOW);
         $errorCode = is_array($parsed) ? ($parsed['error_code'] ?? 0) : 0;
@@ -509,6 +510,7 @@ final class YarboPaperDevice
             'hub' => $hub->publicView(),
             'vestaboard_enabled' => !empty($vb['enabled']),
             'vestaboard_live' => $hub->vestaboardLive(),
+            'yarbo_enabled' => $yarboEnabled,
             'powerwall_enabled' => $pwEnabled,
             'lymow_enabled' => $lyEnabled,
             'powerwall_pct' => isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : -1,
@@ -520,7 +522,7 @@ final class YarboPaperDevice
             'lymow_state' => $this->lymowCompanionState($ly),
             'lymow_charging' => (string) ($ly['charging_label'] ?? '—'),
             'lymow_name' => (string) ($ly['page_name'] ?? ''),
-            'yarbo_error' => $online && ((int) $errorCode !== 0 || $powerFault > 0),
+            'yarbo_error' => $yarboEnabled && $online && ((int) $errorCode !== 0 || $powerFault > 0),
             'powerwall_error' => $pwEnabled && empty($pw['online']) && empty($pw['ok']),
             'lymow_error' => $lyEnabled && ($lyWork === 7 || (empty($ly['ok']) && empty($ly['online']))),
         ] + $this->logoPublicView()

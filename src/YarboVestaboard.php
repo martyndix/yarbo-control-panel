@@ -684,7 +684,7 @@ final class YarboVestaboard
     {
         $modules = (new YarboHub($this->projectRoot))->load()['modules'];
         if ($id === YarboHub::MODULE_YARBO) {
-            return true;
+            return !empty($modules[YarboHub::MODULE_YARBO]);
         }
         if ($id === YarboHub::MODULE_POWERWALL) {
             return !empty($modules[YarboHub::MODULE_POWERWALL]);
@@ -693,7 +693,7 @@ final class YarboVestaboard
             return !empty($modules[YarboHub::MODULE_LYMOW]);
         }
         if ($id === YarboHub::LIVE_BATTERIES) {
-            return !empty($modules[YarboHub::MODULE_POWERWALL]) || !empty($modules[YarboHub::MODULE_LYMOW]);
+            return YarboHub::allViewAvailable($modules);
         }
 
         return false;
@@ -783,22 +783,36 @@ final class YarboVestaboard
                 $online = false;
             }
         }
-        $yarboOnline = (bool) $online && is_array($parsed);
+        $hub = new YarboHub($this->projectRoot);
+        $modules = $hub->load()['modules'];
+        $yarboOn = !empty($modules[YarboHub::MODULE_YARBO]);
+        $pwOn = !empty($modules[YarboHub::MODULE_POWERWALL]);
+        $lyOn = !empty($modules[YarboHub::MODULE_LYMOW]);
+
+        $yarboOnline = $yarboOn && (bool) $online && is_array($parsed);
         $yarboPct = $this->batteryPercentValue($yarboOnline ? $parsed : null);
 
-        $pw = (new YarboPowerwall($this->projectRoot))->dashboardPayload();
+        $pw = $pwOn ? (new YarboPowerwall($this->projectRoot))->dashboardPayload() : [];
         $pwPct = YarboPowerwall::normalizeBatteryPercent($pw['battery_percent'] ?? null);
-        $pwOnline = $pwPct !== null || !empty($pw['online']);
+        $pwOnline = $pwOn && ($pwPct !== null || !empty($pw['online']));
 
-        $ly = (new YarboLymow($this->projectRoot))->dashboardPayload();
+        $ly = $lyOn ? (new YarboLymow($this->projectRoot))->dashboardPayload() : [];
         $lyPct = isset($ly['battery']) ? (int) $ly['battery'] : null;
-        $lyOnline = $lyPct !== null || !empty($ly['signed_in']) || !empty($ly['online']);
+        $lyOnline = $lyOn && ($lyPct !== null || !empty($ly['signed_in']) || !empty($ly['online']));
 
-        $rows = [
-            ['YARBO', $yarboPct, $yarboOnline],
-            ['POWERWALL', $pwPct, $pwOnline],
-            ['LYMOW', $lyPct, $lyOnline],
-        ];
+        $rows = [];
+        if ($yarboOn) {
+            $rows[] = ['YARBO', $yarboPct, $yarboOnline];
+        }
+        if ($pwOn) {
+            $rows[] = ['POWERWALL', $pwPct, $pwOnline];
+        }
+        if ($lyOn) {
+            $rows[] = ['LYMOW', $lyPct, $lyOnline];
+        }
+        if ($rows === []) {
+            $rows[] = ['BATTERIES', null, false];
+        }
         $lines = [];
         $codes = [];
         foreach ($rows as [$label, $pct, $on]) {
@@ -807,6 +821,10 @@ final class YarboVestaboard
             $row = $this->encodeLine($text);
             $row[self::COLS - 1] = self::batteryPercentChip($on ? $pct : null, $on);
             $codes[] = $row;
+        }
+        while (count($lines) < self::ROWS) {
+            $lines[] = str_repeat(' ', self::COLS);
+            $codes[] = array_fill(0, self::COLS, 0);
         }
         $anyOnline = $yarboOnline || $pwOnline || $lyOnline;
 

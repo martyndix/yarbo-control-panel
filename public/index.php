@@ -599,13 +599,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 >
                             </label>
                             <p class="hint">Shown as the title. <strong>28LPC</strong> becomes <strong>28LPC Control Panel</strong>. Leave blank for <strong>Control Panel</strong>.</p>
+                            <div id="settings-yarbo-connection-fields">
                             <label class="settings-field">
                                 <span class="label">Broker IP (Yarbo host)</span>
                                 <input
                                     type="text"
                                     id="settings-host"
                                     name="broker_host"
-                                    required
                                     placeholder="192.168.1.24"
                                     autocomplete="off"
                                     inputmode="decimal"
@@ -617,7 +617,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     type="text"
                                     id="settings-serial"
                                     name="serial"
-                                    required
                                     placeholder="24460102..."
                                     autocomplete="off"
                                     spellcheck="false"
@@ -638,6 +637,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">Shown on the Yarbo page under the title, and on PaperMono / Paper Colour Yarbo pages. Leave blank to hide it. Do not use the serial number.</p>
                             <p id="settings-connection-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-connection-test">Test local connection</button>
+                            </div>
                         </section>
 
                         <section class="settings-section" id="settings-cloud-section" data-settings-pane="cloud">
@@ -679,7 +679,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-modules-section" data-settings-pane="modules">
                             <h3 class="settings-subtitle">Modules</h3>
-                            <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard live buttons only list modules that are on (Quiet hours and Vestaboard-app hold still apply).</p>
+                            <p class="hint">Turn dashboards on or off. Keep at least one. The header switcher jumps between enabled modules. Vestaboard live buttons only list modules that are on (Quiet hours and Vestaboard-app hold still apply).</p>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-module-yarbo" name="module_yarbo" checked>
+                                <span>Yarbo (mower / snow, local MQTT)</span>
+                            </label>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-powerwall" name="module_powerwall">
                                 <span>Tesla Powerwall (house draw, solar, battery)</span>
@@ -695,7 +699,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="yarbo">Yarbo</option>
                                     <option value="powerwall">Powerwall</option>
                                     <option value="lymow">Lymow</option>
-                                    <option value="batteries">ALL (Yarbo + Powerwall + Lymow)</option>
+                                    <option value="batteries">ALL (enabled modules)</option>
                                 </select>
                             </label>
                         </section>
@@ -990,13 +994,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             <p class="hint" id="papermono-flash-hint">Leave this Settings page open. Click <strong>Build firmware</strong> for the tablet you selected (first build can take several minutes). If the port list fails, click <strong>Install USB tools</strong>. Flash then sends the binary and Wi-Fi over USB. Keep the tablet out of direct sun.</p>
                             <div class="papermono-preview-grid" id="papermono-preview-grid" aria-hidden="true">
-                                <figure class="papermono-preview">
+                                <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.10-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOME</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">87%</text>
                                         <text x="24" y="240" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging  No</text>
@@ -1021,13 +1025,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </svg>
                                     <figcaption>Home — battery and Stop / Dock / Pause / Lights</figcaption>
                                 </figure>
-                                <figure class="papermono-preview">
+                                <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono status screen mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.10-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">STATUS</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">100%</text>
                                         <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">State      idle</text>
@@ -1046,13 +1050,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </svg>
                                     <figcaption>Status — same tiles as the web Status card</figcaption>
                                 </figure>
-                                <figure class="papermono-preview">
+                                <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono connection and health screen mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.10-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HEALTH</text>
                                         <text x="24" y="140" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn type  HaLow</text>
                                         <text x="24" y="176" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn stat  Connected</text>
@@ -1076,13 +1080,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </svg>
                                     <figcaption>Health — Connection &amp; Health tiles</figcaption>
                                 </figure>
-                                <figure class="papermono-preview">
+                                <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono work plans screen mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.2-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.10-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PLANS</text>
                                         <text x="24" y="124" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">idle</text>
                                         <rect x="24" y="150" width="432" height="44" rx="10" fill="#111"/>
@@ -1103,7 +1107,47 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </svg>
                                     <figcaption>Plans — tap a row, then START</figcaption>
                                 </figure>
-                                <figure class="papermono-preview">
+                                <figure class="papermono-preview" data-preview-for="lock">
+                                    <div class="paper-lock-mock paper-lock-mock--mono" aria-label="PaperMono lock screen from current settings">
+                                        <p class="paper-lock-name" data-lock-name>PaperMono</p>
+                                        <p class="paper-lock-clock">14:32</p>
+                                        <img class="paper-logo-preview paper-lock-logo" alt="">
+                                        <div class="paper-lock-board vestaboard-preview" data-lock-board></div>
+                                        <p class="paper-lock-hint">Opposite corners: tap 1, then 2</p>
+                                    </div>
+                                    <figcaption>Lock screen — logo, Vestaboard, or both from companion settings</figcaption>
+                                </figure>
+                                <figure class="papermono-preview" data-preview-for="lymow">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono Lymow page mock">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lymow  0.1.10-beta</text>
+                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LYMOW</text>
+                                        <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">64%</text>
+                                        <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">State      Mowing</text>
+                                        <text x="24" y="288" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging   No</text>
+                                        <text x="24" y="792" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">LYMOW page when the module is on</text>
+                                    </svg>
+                                    <figcaption>Lymow — battery and work state</figcaption>
+                                </figure>
+                                <figure class="papermono-preview" data-preview-for="powerwall">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono Powerwall page mock">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">PaperMono  0.1.10-beta</text>
+                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">POWERWALL</text>
+                                        <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">81%</text>
+                                        <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">Solar      1.2 kW</text>
+                                        <text x="24" y="288" font-family="ui-monospace, monospace" font-size="22" fill="#111">Draw       0.4 kW</text>
+                                        <text x="24" y="792" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">WALL page when Powerwall is on</text>
+                                    </svg>
+                                    <figcaption>Powerwall — house battery, solar, and draw</figcaption>
+                                </figure>
+                                <figure class="papermono-preview" data-preview-for="setup">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono setup screen mock, portrait">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
@@ -1122,13 +1166,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 </figure>
                             </div>
                             <div class="papermono-preview-grid hidden" id="papercolor-preview-grid" aria-hidden="true">
-                                <figure class="papermono-preview papercolor-preview">
+                                <figure class="papermono-preview papercolor-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour home screen mock, 400 by 600 Spectra 6">
                                         <rect width="400" height="600" fill="#fffef6"/>
                                         <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
                                         <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOR</text>
                                         <image class="paper-logo-preview" href="" x="244" y="12" width="140" height="140" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lawnbot  0.2.1-color</text>
+                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lawnbot  0.2.7-color</text>
                                         <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">HOME</text>
                                         <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">87%</text>
                                         <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">Charging  No</text>
@@ -1138,17 +1182,54 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="44" y="300" width="18" height="18" fill="#e6c200"/>
                                         <rect x="68" y="300" width="18" height="18" fill="#2e8b57"/>
                                         <rect x="92" y="300" width="18" height="18" fill="#1e5aa8"/>
-                                        <text x="20" y="348" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#444">No touch · A/B pages · C sleep</text>
+                                        <text x="20" y="348" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#444">No touch · A/B pages · C lock</text>
                                         <rect x="16" y="548" width="70" height="16" fill="#111"/>
                                         <text x="51" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#fffef6">HOME</text>
                                         <text x="140" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#111">STATUS</text>
-                                        <text x="230" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#111">PWRWALL</text>
-                                        <text x="325" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#111">LYMOW</text>
-                                        <text x="20" y="586" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">A prev · B next · C sleep</text>
+                                        <text x="230" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#111">HEALTH</text>
+                                        <text x="325" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#111">PLANS</text>
+                                        <text x="20" y="586" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">A prev · B next · C lock</text>
                                     </svg>
                                     <figcaption>Paper Colour Home — 400×600, no Stop/Dock tiles</figcaption>
                                 </figure>
-                                <figure class="papermono-preview papercolor-preview">
+                                <figure class="papermono-preview papercolor-preview" data-preview-for="lock">
+                                    <div class="paper-lock-mock paper-lock-mock--color" aria-label="Paper Colour lock screen from current settings">
+                                        <p class="paper-lock-name" data-lock-name>Paper Colour</p>
+                                        <p class="paper-lock-clock">14:32</p>
+                                        <p class="paper-lock-date">Fri 25 Sep</p>
+                                        <img class="paper-logo-preview paper-lock-logo" alt="">
+                                        <div class="paper-lock-board vestaboard-preview" data-lock-board></div>
+                                        <p class="paper-lock-hint">C unlocks</p>
+                                    </div>
+                                    <figcaption>Lock screen — logo, Vestaboard, or both from companion settings</figcaption>
+                                </figure>
+                                <figure class="papermono-preview papercolor-preview" data-preview-for="lymow">
+                                    <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour Lymow page mock">
+                                        <rect width="400" height="600" fill="#fffef6"/>
+                                        <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
+                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOR</text>
+                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lymow  0.2.7-color</text>
+                                        <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">LYMOW</text>
+                                        <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">64%</text>
+                                        <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">State     Mowing</text>
+                                        <text x="20" y="238" font-family="ui-monospace, monospace" font-size="16" fill="#111">Charging  No</text>
+                                    </svg>
+                                    <figcaption>Lymow — shown when the Lymow module is on</figcaption>
+                                </figure>
+                                <figure class="papermono-preview papercolor-preview" data-preview-for="powerwall">
+                                    <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour Powerwall page mock">
+                                        <rect width="400" height="600" fill="#fffef6"/>
+                                        <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
+                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOR</text>
+                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Paper Colour  0.2.7-color</text>
+                                        <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">POWERWALL</text>
+                                        <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">81%</text>
+                                        <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">Solar     1.2 kW</text>
+                                        <text x="20" y="238" font-family="ui-monospace, monospace" font-size="16" fill="#111">Draw      0.4 kW</text>
+                                    </svg>
+                                    <figcaption>Powerwall — shown when the Powerwall module is on</figcaption>
+                                </figure>
+                                <figure class="papermono-preview papercolor-preview" data-preview-for="setup">
                                     <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour first-boot setup mock">
                                         <rect width="400" height="600" fill="#fffef6"/>
                                         <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>

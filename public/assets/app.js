@@ -117,6 +117,7 @@ const els = {
     vestaboardRotateHint: document.getElementById('vestaboard-rotate-hint'),
     vestaboardRotateSave: document.getElementById('vestaboard-rotate-save'),
     moduleSwitcher: document.getElementById('module-switcher'),
+    settingsModuleYarbo: document.getElementById('settings-module-yarbo'),
     settingsModulePowerwall: document.getElementById('settings-module-powerwall'),
     settingsModuleLymow: document.getElementById('settings-module-lymow'),
     settingsVestaboardLive: document.getElementById('settings-vestaboard-live'),
@@ -2022,8 +2023,8 @@ function applyHubFromStatus(data) {
         applyVestaboardLiveSwitch(data);
     }
     applyPanelTitle(hub);
-    let active = localStorage.getItem(ACTIVE_MODULE_KEY) || hub.active_module || 'yarbo';
-    if (!ids.includes(active)) active = 'yarbo';
+    let active = localStorage.getItem(ACTIVE_MODULE_KEY) || hub.active_module || ids[0] || 'yarbo';
+    if (!ids.includes(active)) active = ids[0] || 'yarbo';
     setActiveModule(active, false);
 }
 
@@ -2246,8 +2247,16 @@ function applyPowerwallTransport() {
 }
 
 function applyCompanionSettingsVisibility() {
+    const yarboOn = Boolean(els.settingsModuleYarbo?.checked);
     const powerwallOn = Boolean(els.settingsModulePowerwall?.checked);
     const lymowOn = Boolean(els.settingsModuleLymow?.checked);
+    document.getElementById('settings-yarbo-connection-fields')?.classList.toggle('hidden', !yarboOn);
+    document.getElementById('settings-cloud-section')?.classList.toggle('hidden', !yarboOn);
+    document.getElementById('settings-rain-section')?.classList.toggle('hidden', !yarboOn);
+    document.querySelector('[data-settings-nav="cloud"]')?.classList.toggle('hidden', !yarboOn);
+    document.querySelector('[data-settings-nav="rain"]')?.classList.toggle('hidden', !yarboOn);
+    if (els.settingsHost) els.settingsHost.required = yarboOn;
+    if (els.settingsSerial) els.settingsSerial.required = yarboOn;
     document.getElementById('settings-powerwall-section')?.classList.toggle(
         'hidden',
         !powerwallOn,
@@ -2258,14 +2267,31 @@ function applyCompanionSettingsVisibility() {
     );
     document.querySelector('[data-settings-nav="powerwall"]')?.classList.toggle('hidden', !powerwallOn);
     document.querySelector('[data-settings-nav="lymow"]')?.classList.toggle('hidden', !lymowOn);
+    document.getElementById('papermono-alert-yarbo')?.closest('label')?.classList.toggle('hidden', !yarboOn);
+    document.getElementById('papermono-alert-powerwall')?.closest('label')?.classList.toggle('hidden', !powerwallOn);
+    document.getElementById('papermono-alert-lymow')?.closest('label')?.classList.toggle('hidden', !lymowOn);
     const active = document.querySelector('.settings-section.is-active');
     if (active?.classList.contains('hidden')) {
         showSettingsPane('modules');
     }
     applyVestaboardLiveChoices({
+        yarbo: yarboOn,
         powerwall: powerwallOn,
         lymow: lymowOn,
-    }, els.settingsVestaboardLive?.value || 'yarbo');
+    }, els.settingsVestaboardLive?.value || '');
+    applyPaperPreviewModules();
+}
+
+function onModuleCheckboxChange(event) {
+    const yarboOn = Boolean(els.settingsModuleYarbo?.checked);
+    const powerwallOn = Boolean(els.settingsModulePowerwall?.checked);
+    const lymowOn = Boolean(els.settingsModuleLymow?.checked);
+    if (!yarboOn && !powerwallOn && !lymowOn) {
+        if (event?.currentTarget) event.currentTarget.checked = true;
+        showToast('Keep at least one module on', 'error');
+        return;
+    }
+    applyCompanionSettingsVisibility();
 }
 
 function updateStatus(data) {
@@ -2562,7 +2588,7 @@ function applyVestaboardLiveSwitch(data) {
     const enabled = Boolean(data?.vestaboard?.enabled);
     els.vestaboardLiveSwitch.classList.toggle('hidden', !enabled);
     const extras = vestaboardExtraModules(data?.hub);
-    applyVestaboardLiveChoices(extras, data?.hub?.vestaboard_live || data?.vestaboard_live || 'yarbo');
+    applyVestaboardLiveChoices(extras, data?.hub?.vestaboard_live || data?.vestaboard_live || '');
 }
 
 function applyVestaboardRotateState(board) {
@@ -2580,13 +2606,15 @@ function rotateViewCheckboxes() {
 }
 
 function applyRotateViewChoices(extras) {
+    const yarbo = extras?.yarbo !== false;
     const pw = Boolean(extras?.powerwall);
     const ly = Boolean(extras?.lymow);
+    const enabledCount = [yarbo, pw, ly].filter(Boolean).length;
     const show = {
-        yarbo: true,
+        yarbo,
         powerwall: pw,
         lymow: ly,
-        batteries: pw || ly,
+        batteries: enabledCount >= 2,
     };
     document.querySelectorAll('[data-rotate-choice]').forEach((label) => {
         const id = label.getAttribute('data-rotate-choice') || '';
@@ -2686,22 +2714,29 @@ async function saveVestaboardRotate(button) {
 
 function vestaboardExtraModules(hub) {
     return {
+        yarbo: hub?.modules?.yarbo !== false,
         powerwall: Boolean(hub?.modules?.powerwall),
         lymow: Boolean(hub?.modules?.lymow),
     };
 }
 
+function firstShownVestaboardLive(show) {
+    return ['yarbo', 'powerwall', 'lymow', 'batteries'].find((id) => show[id]) || 'yarbo';
+}
+
 function applyVestaboardLiveChoices(extras, live) {
+    const yarbo = extras?.yarbo !== false;
     const pw = Boolean(extras?.powerwall);
     const ly = Boolean(extras?.lymow);
+    const enabledCount = [yarbo, pw, ly].filter(Boolean).length;
     const show = {
-        yarbo: true,
+        yarbo,
         powerwall: pw,
         lymow: ly,
-        batteries: pw || ly,
+        batteries: enabledCount >= 2,
     };
-    let chosen = live || 'yarbo';
-    if (!show[chosen]) chosen = 'yarbo';
+    let chosen = live || firstShownVestaboardLive(show);
+    if (!show[chosen]) chosen = firstShownVestaboardLive(show);
     els.vestaboardLiveSwitch?.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
         const id = btn.getAttribute('data-vestaboard-live') || '';
         btn.classList.toggle('hidden', !show[id]);
@@ -2716,7 +2751,7 @@ function applyVestaboardLiveChoices(extras, live) {
         if ([...els.settingsVestaboardLive.options].some((o) => o.value === chosen && !o.hidden)) {
             els.settingsVestaboardLive.value = chosen;
         } else {
-            els.settingsVestaboardLive.value = 'yarbo';
+            els.settingsVestaboardLive.value = firstShownVestaboardLive(show);
         }
     }
 }
@@ -3466,6 +3501,9 @@ async function loadSettings() {
             const n = data.rain?.sensitivity;
             els.settingsRainSensitivity.value = n != null ? String(n) : '';
         }
+        if (els.settingsModuleYarbo) {
+            els.settingsModuleYarbo.checked = data.hub?.modules?.yarbo !== false;
+        }
         if (els.settingsModulePowerwall) {
             els.settingsModulePowerwall.checked = Boolean(data.hub?.modules?.powerwall);
         }
@@ -3597,6 +3635,51 @@ function applyPaperMonoKindUi(dashboard) {
             : ' The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll.';
         hint.innerHTML = `Leave this Settings page open. Click <strong>Build firmware</strong> for this tablet (first build can take several minutes and installs PlatformIO if needed). <strong>Flash</strong> builds automatically if the binary is missing or stale, then sends Wi-Fi over USB. If the port list fails, click <strong>Install USB tools</strong>.${extra} Keep the tablet out of direct sun.`;
     }
+    applyPaperPreviewModules();
+}
+
+function applyPaperPreviewModules() {
+    const yarbo = Boolean(els.settingsModuleYarbo?.checked);
+    const pw = Boolean(els.settingsModulePowerwall?.checked);
+    const ly = Boolean(els.settingsModuleLymow?.checked);
+    document.querySelectorAll('[data-preview-for]').forEach((fig) => {
+        const kind = fig.getAttribute('data-preview-for');
+        let show = true;
+        if (kind === 'yarbo') show = yarbo;
+        else if (kind === 'lymow') show = ly;
+        else if (kind === 'powerwall') show = pw;
+        fig.classList.toggle('hidden', !show);
+    });
+    refreshPaperLockPreview();
+}
+
+function fillPaperLockBoards() {
+    const source = els.settingsVestaboardPreview?.innerHTML || '';
+    document.querySelectorAll('[data-lock-board]').forEach((el) => {
+        el.innerHTML = source;
+    });
+}
+
+function refreshPaperLockPreview() {
+    const name = els.papermonoName?.value.trim() || paperMonoDefaultName();
+    document.querySelectorAll('[data-lock-name]').forEach((el) => {
+        el.textContent = name;
+    });
+    const lock = els.papermonoLockScreen?.value || 'logo';
+    const vestaboardOn = Boolean(els.settingsVestaboardEnabled?.checked);
+    const showLogo = lock === 'logo' || lock === 'both';
+    const showBoard = vestaboardOn && (lock === 'vestaboard' || lock === 'both');
+    document.querySelectorAll('.paper-lock-logo').forEach((el) => {
+        el.classList.toggle('hidden', !showLogo);
+    });
+    document.querySelectorAll('[data-lock-board]').forEach((el) => {
+        el.classList.toggle('hidden', !showBoard);
+    });
+    fillPaperLockBoards();
+    const clock = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    document.querySelectorAll('.paper-lock-clock').forEach((el) => {
+        el.textContent = clock;
+    });
 }
 
 function setPaperLogoResult(message, type) {
@@ -3614,6 +3697,12 @@ function setPaperLogoResult(message, type) {
 function applyPaperLogoPreview(url) {
     const href = url || '';
     document.querySelectorAll('.paper-logo-preview').forEach((el) => {
+        if (el.tagName === 'IMG') {
+            if (href) el.src = href;
+            else el.removeAttribute('src');
+            el.classList.toggle('is-empty', !href);
+            return;
+        }
         if (href) {
             el.setAttribute('href', href);
             el.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
@@ -3913,6 +4002,7 @@ function applyPaperMonoPrefs(prefs) {
     if (els.papermonoAlertYarbo) els.papermonoAlertYarbo.checked = prefs.alert_yarbo !== false;
     if (els.papermonoAlertLymow) els.papermonoAlertLymow.checked = prefs.alert_lymow !== false;
     if (els.papermonoAlertPowerwall) els.papermonoAlertPowerwall.checked = prefs.alert_powerwall !== false;
+    applyPaperPreviewModules();
 }
 
 function paperMonoPrefsPayload() {
@@ -4226,6 +4316,7 @@ async function loadVestaboardPreview() {
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Could not preview Vestaboard');
         renderVestaboardPreview(data.lines, els.settingsVestaboardPreview, data.codes);
+        fillPaperLockBoards();
         if (els.settingsVestaboardPreviewCaption) {
             const verb = data.verb ? ` ${data.verb}` : '';
             const source = sample === 'live' ? (data.online ? 'live' : 'offline') : 'sample';
@@ -4313,11 +4404,12 @@ async function saveSettings(event) {
     const cloudEmail = els.settingsCloudEmail?.value.trim() ?? '';
     const cloudPassword = els.settingsCloudPassword?.value ?? '';
     const dataSource = els.settingsDataSource?.value || 'auto';
-    if (!brokerHost || !serial) {
+    const yarboOn = Boolean(els.settingsModuleYarbo?.checked);
+    if (yarboOn && (!brokerHost || !serial)) {
         setSettingsError('Broker IP and serial number are required.');
         return;
     }
-    if (robotName && looksLikeRobotSerial(robotName, serial)) {
+    if (yarboOn && robotName && looksLikeRobotSerial(robotName, serial)) {
         setSettingsError('Robot name cannot be the serial number.');
         return;
     }
@@ -4340,6 +4432,7 @@ async function saveSettings(event) {
             vestaboard_quiet_end: els.settingsVestaboardQuietEnd?.value || '07:00',
             vestaboard_quiet_codes: quietCodesSnapshot(),
             vestaboard_quiet_timezone: clientTimezone(),
+            module_yarbo: Boolean(els.settingsModuleYarbo?.checked),
             module_powerwall: Boolean(els.settingsModulePowerwall?.checked),
             module_lymow: Boolean(els.settingsModuleLymow?.checked),
             vestaboard_live: els.settingsVestaboardLive?.value || 'yarbo',
@@ -5450,6 +5543,7 @@ els.settingsConnectionTest?.addEventListener('click', (e) => testLocalConnection
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
 els.settingsVestaboardEnabled?.addEventListener('change', () => {
     applyVestaboardEnabled();
+    applyPaperPreviewModules();
     if (els.settingsVestaboardEnabled.checked) loadVestaboardPreview();
 });
 document.querySelectorAll('input[name="vestaboard-transport"]').forEach((radio) => {
@@ -5528,8 +5622,9 @@ els.settingsPowerwallOauth?.addEventListener('click', (event) => {
         showToast('Save a Client ID and HTTPS public panel URL first.', 'error');
     }
 });
-els.settingsModulePowerwall?.addEventListener('change', applyCompanionSettingsVisibility);
-els.settingsModuleLymow?.addEventListener('change', applyCompanionSettingsVisibility);
+els.settingsModuleYarbo?.addEventListener('change', onModuleCheckboxChange);
+els.settingsModulePowerwall?.addEventListener('change', onModuleCheckboxChange);
+els.settingsModuleLymow?.addEventListener('change', onModuleCheckboxChange);
 els.settingsLymowLogin?.addEventListener('click', async (e) => {
     const button = e.currentTarget;
     button.disabled = true;
@@ -5646,6 +5741,8 @@ els.papermonoLogo?.addEventListener('change', (e) => {
     uploadPaperLogo(file);
 });
 els.papermonoLogoClear?.addEventListener('click', () => clearPaperLogo());
+els.papermonoLockScreen?.addEventListener('change', () => applyPaperPreviewModules());
+els.papermonoName?.addEventListener('input', () => refreshPaperLockPreview());
 els.papermonoPrefsSave?.addEventListener('click', (e) => savePaperMonoPrefs(e.currentTarget));
 document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
     input.addEventListener('change', () => {

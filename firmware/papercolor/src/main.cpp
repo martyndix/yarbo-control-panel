@@ -51,6 +51,7 @@ String lymowName = "";
 int lymowBattery = -1;
 String lymowState = "—";
 String lymowCharging = "—";
+bool yarboOn = true;
 bool powerwallOn = false;
 bool lymowOn = false;
 int powerwallPct = -1;
@@ -167,7 +168,8 @@ String screenKey()
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + lymowName + "|"
-        + String(lymowBattery) + "|" + lymowState + "|" + (powerwallOn ? "1" : "0") + "|"
+        + String(lymowBattery) + "|" + lymowState + "|" + (yarboOn ? "1" : "0") + "|"
+        + (powerwallOn ? "1" : "0") + "|"
         + (lymowOn ? "1" : "0") + "|" + String(powerwallPct) + "|" + powerwallSolar + "|"
         + powerwallLoad + "|" + String((int) WiFi.status()) + "|" + logoHash + "|"
         + String(screenLocked ? 1 : 0) + "|" + lockScreen + "|" + vestaboardHash + "|"
@@ -176,6 +178,10 @@ String screenKey()
 
 bool pageEnabled(int page)
 {
+    if (page == PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_STATUS
+        || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS) {
+        return yarboOn;
+    }
     if (page == PAPERMONO_PAGE_POWERWALL) return powerwallOn;
     if (page == PAPERMONO_PAGE_LYMOW) return lymowOn;
     if (page == PAPERMONO_PAGE_BOARD) return vestaboardOn;
@@ -624,6 +630,9 @@ void drawScreen(bool forceFull)
     if (!forceFull && key == lastDrawnKey) {
         return;
     }
+    if (!pageEnabled(currentPage)) {
+        currentPage = firstEnabledPage();
+    }
     if (currentPage == PAPERMONO_PAGE_STATUS) {
         drawStatusPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_HEALTH) {
@@ -806,6 +815,7 @@ bool httpGetStatus()
     rainSensor = doc["rain_sensor"] | rainSensor;
     netModule = doc["net_module"] | netModule;
     planActivity = doc["plan_activity"] | planActivity;
+    yarboOn = doc["yarbo_enabled"] | true;
     powerwallOn = doc["powerwall_enabled"] | false;
     lymowOn = doc["lymow_enabled"] | false;
     powerwallPct = doc["powerwall_pct"] | powerwallPct;

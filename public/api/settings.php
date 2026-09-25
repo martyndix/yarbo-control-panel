@@ -62,27 +62,55 @@ if ($input === []) {
     }
 }
 
+$currentModules = $hub->load()['modules'];
+$modules = $currentModules;
+foreach (YarboHub::MODULES as $id) {
+    $key = 'module_' . $id;
+    if (array_key_exists($key, $input)) {
+        $modules[$id] = (bool) $input[$key];
+    }
+}
+if (!YarboHub::anyEnabled($modules)) {
+    json_response(['ok' => false, 'error' => 'Keep at least one module on'], 400);
+}
+$yarboOn = !empty($modules[YarboHub::MODULE_YARBO]);
+
 $host = trim((string) ($input['broker_host'] ?? $input['host'] ?? ''));
 $serial = trim((string) ($input['serial'] ?? ''));
 
-if ($host === '') {
-    json_response(['ok' => false, 'error' => 'broker_host is required'], 400);
-}
-if ($serial === '') {
-    json_response(['ok' => false, 'error' => 'serial is required'], 400);
-}
-if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
-    json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address'], 400);
-}
+if ($yarboOn) {
+    if ($host === '') {
+        json_response(['ok' => false, 'error' => 'broker_host is required'], 400);
+    }
+    if ($serial === '') {
+        json_response(['ok' => false, 'error' => 'serial is required'], 400);
+    }
+    if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+        json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address'], 400);
+    }
 
-if (!YarboConfig::applySettings($configPath, [
-    'broker_host' => $host,
-    'serial' => $serial,
-])) {
-    json_response([
-        'ok' => false,
-        'error' => 'Could not write config.php. Check file permissions on the server.',
-    ], 500);
+    if (!YarboConfig::applySettings($configPath, [
+        'broker_host' => $host,
+        'serial' => $serial,
+    ])) {
+        json_response([
+            'ok' => false,
+            'error' => 'Could not write config.php. Check file permissions on the server.',
+        ], 500);
+    }
+} elseif ($host !== '' || $serial !== '') {
+    if ($host !== '' && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+        json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address'], 400);
+    }
+    if ($host !== '' && $serial !== '' && !YarboConfig::applySettings($configPath, [
+        'broker_host' => $host,
+        'serial' => $serial,
+    ])) {
+        json_response([
+            'ok' => false,
+            'error' => 'Could not write config.php. Check file permissions on the server.',
+        ], 500);
+    }
 }
 
 if (!$cloudSettings->save($input)) {
@@ -127,7 +155,7 @@ if (!$rainSettings->save($input)) {
     ], 500);
 }
 
-if (!$robotName->saveFromInput($input, $serial)) {
+if ($serial !== '' && !$robotName->saveFromInput($input, $serial)) {
     json_response([
         'ok' => false,
         'error' => 'Could not write robot name. Check permissions on the data/ directory.',

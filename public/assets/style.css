@@ -2215,6 +2215,76 @@ html[data-theme="light"] .plan-activity {
     color: var(--muted);
 }
 
+.papermono-preview.hidden {
+    display: none;
+}
+
+.paper-lock-mock {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0 auto;
+    padding: 1.1rem 0.85rem 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #f4f1e8;
+    color: #111;
+    box-sizing: border-box;
+}
+
+.paper-lock-mock--mono {
+    width: min(100%, 15rem);
+    min-height: 22rem;
+}
+
+.paper-lock-mock--color {
+    width: min(100%, 13.5rem);
+    min-height: 18rem;
+    background: #fffef6;
+}
+
+.paper-lock-name,
+.paper-lock-clock,
+.paper-lock-date,
+.paper-lock-hint {
+    margin: 0;
+    text-align: center;
+}
+
+.paper-lock-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.paper-lock-clock {
+    font-size: 1.6rem;
+    font-weight: 700;
+}
+
+.paper-lock-date,
+.paper-lock-hint {
+    font-size: 0.75rem;
+    color: #444;
+}
+
+.paper-lock-logo {
+    max-width: 7rem;
+    max-height: 7rem;
+    object-fit: contain;
+}
+
+.paper-lock-logo.is-empty,
+.paper-lock-logo:not([src]) {
+    display: none;
+}
+
+.paper-lock-board.vestaboard-preview {
+    width: 100%;
+    transform: scale(0.92);
+    transform-origin: top center;
+}
+
 .papermono-actions {
     display: flex;
     flex-wrap: wrap;

@@ -52,8 +52,12 @@ String planActivity = "idle";
 bool lightsOn = false;
 String vestaboardLive = "yarbo";
 bool vestaboardOn = false;
+bool yarboOn = true;
 bool powerwallOn = false;
 bool lymowOn = false;
+int powerwallPct = -1;
+String powerwallSolar = "—";
+String powerwallLoad = "—";
 String lymowName = "";
 int lymowBattery = -1;
 String lymowState = "—";
@@ -195,6 +199,7 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_PLANS) return "PLANS";
     if (page == PAPERMONO_PAGE_NOTE) return "NOTE";
     if (page == PAPERMONO_PAGE_BOARD) return "BOARD";
+    if (page == PAPERMONO_PAGE_POWERWALL) return "POWERWALL";
     if (page == PAPERMONO_PAGE_LYMOW) return "LYMOW";
     if (page == PAPERMONO_PAGE_RADIO) return "RADIO";
     if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
@@ -208,8 +213,9 @@ String screenKey()
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + vestaboardLive + "|"
-        + (vestaboardOn ? "1" : "0") + "|" + (powerwallOn ? "1" : "0") + "|" + (lymowOn ? "1" : "0") + "|"
-        + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
+        + (vestaboardOn ? "1" : "0") + "|" + (yarboOn ? "1" : "0") + "|" + (powerwallOn ? "1" : "0") + "|"
+        + (lymowOn ? "1" : "0") + "|" + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
+        + String(powerwallPct) + "|" + powerwallSolar + "|" + powerwallLoad + "|"
         + String((int) WiFi.status()) + "|" + logoHash + "|" + String(screenLocked ? 1 : 0) + "|"
         + lockScreen + "|" + clockLocal + "|" + String(unreadCount) + "|" + vestaboardHash + "|"
         + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
@@ -219,8 +225,13 @@ String screenKey()
 
 bool pageEnabled(int page)
 {
+    if (page == PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_STATUS
+        || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS) {
+        return yarboOn;
+    }
     if (page == PAPERMONO_PAGE_NOTE) return vestaboardOn;
     if (page == PAPERMONO_PAGE_BOARD) return vestaboardOn;
+    if (page == PAPERMONO_PAGE_POWERWALL) return powerwallOn;
     if (page == PAPERMONO_PAGE_LYMOW) return lymowOn;
     return true;
 }
@@ -256,22 +267,24 @@ int stepEnabledPage(int from, int dir)
 
 int noteChoiceCount()
 {
-    int n = 1;
+    int n = 0;
+    if (yarboOn) n++;
     if (powerwallOn) n++;
     if (lymowOn) n++;
-    if (powerwallOn || lymowOn) n++;
-    return n;
+    if ((int) yarboOn + (int) powerwallOn + (int) lymowOn >= 2) n++;
+    return n > 0 ? n : 1;
 }
 
 const char *noteChoiceId(int i)
 {
     const char *ids[4];
     int n = 0;
-    ids[n++] = "yarbo";
+    if (yarboOn) ids[n++] = "yarbo";
     if (powerwallOn) ids[n++] = "powerwall";
     if (lymowOn) ids[n++] = "lymow";
-    if (powerwallOn || lymowOn) ids[n++] = "batteries";
-    if (i < 0 || i >= n) return "yarbo";
+    if ((int) yarboOn + (int) powerwallOn + (int) lymowOn >= 2) ids[n++] = "batteries";
+    if (n == 0) return "yarbo";
+    if (i < 0 || i >= n) return ids[0];
     return ids[i];
 }
 
@@ -279,11 +292,12 @@ const char *noteChoiceLabel(int i)
 {
     const char *labels[4];
     int n = 0;
-    labels[n++] = "YARBO";
+    if (yarboOn) labels[n++] = "YARBO";
     if (powerwallOn) labels[n++] = "WALL";
     if (lymowOn) labels[n++] = "LYMOW";
-    if (powerwallOn || lymowOn) labels[n++] = "ALL";
-    if (i < 0 || i >= n) return "YARBO";
+    if ((int) yarboOn + (int) powerwallOn + (int) lymowOn >= 2) labels[n++] = "ALL";
+    if (n == 0) return "YARBO";
+    if (i < 0 || i >= n) return labels[0];
     return labels[i];
 }
 
@@ -317,7 +331,8 @@ String headerDeviceName()
     if (currentPage == PAPERMONO_PAGE_NOTE) {
         return deviceName;
     }
-    if (currentPage == PAPERMONO_PAGE_BOARD || currentPage == PAPERMONO_PAGE_RADIO || currentPage == PAPERMONO_PAGE_DEVICE) {
+    if (currentPage == PAPERMONO_PAGE_BOARD || currentPage == PAPERMONO_PAGE_POWERWALL
+        || currentPage == PAPERMONO_PAGE_RADIO || currentPage == PAPERMONO_PAGE_DEVICE) {
         return deviceName;
     }
     return robotName.length() ? robotName : deviceName;
@@ -349,7 +364,7 @@ void drawPager()
     int H = M5.Display.height();
     int W = M5.Display.width();
     const char *labels[PAPERMONO_PAGE_COUNT] = {
-        "HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "BOARD", "LYMOW", "RADIO", "DEVICE"
+        "HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "BOARD", "WALL", "LYMOW", "RADIO", "DEVICE"
     };
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(1);
@@ -584,6 +599,26 @@ void drawLymowPage(bool forceFull)
     M5.Display.drawString(bat, 16, 108);
     drawKv("State", lymowState, 220);
     drawKv("Charging", lymowCharging, 260);
+    if (lastError.length()) {
+        M5.Display.setTextSize(1);
+        M5.Display.drawString(lastError.substring(0, 40), 16, 320);
+    }
+    drawPager();
+    M5.Display.display();
+}
+
+void drawPowerwallPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(5);
+    String bat = powerwallPct >= 0 ? (String(powerwallPct) + "%") : String("--");
+    M5.Display.drawString(bat, 16, 108);
+    drawKv("Solar", powerwallSolar, 220);
+    drawKv("Draw", powerwallLoad, 260);
     if (lastError.length()) {
         M5.Display.setTextSize(1);
         M5.Display.drawString(lastError.substring(0, 40), 16, 320);
@@ -881,6 +916,9 @@ void drawScreen(bool forceFull)
     if (!forceFull && key == lastDrawnKey) {
         return;
     }
+    if (!pageEnabled(currentPage)) {
+        currentPage = firstEnabledPage();
+    }
     if (currentPage == PAPERMONO_PAGE_STATUS) {
         drawStatusPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_HEALTH) {
@@ -901,6 +939,13 @@ void drawScreen(bool forceFull)
         } else {
             drawBoardPage(forceFull);
         }
+    } else if (currentPage == PAPERMONO_PAGE_POWERWALL) {
+        if (!pageEnabled(PAPERMONO_PAGE_POWERWALL)) {
+            currentPage = firstEnabledPage();
+            drawScreen(forceFull);
+            return;
+        }
+        drawPowerwallPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_LYMOW) {
         if (!pageEnabled(PAPERMONO_PAGE_LYMOW)) {
             currentPage = firstEnabledPage();
@@ -1126,7 +1171,9 @@ void applyCompactExtras(JsonDocument &doc)
             }
         }
     }
-    bool anyError = (yarboError && alertYarboOn) || (lymowError && alertLymowOn) || (powerwallError && alertPowerwallOn);
+    bool anyError = (yarboOn && yarboError && alertYarboOn)
+        || (lymowOn && lymowError && alertLymowOn)
+        || (powerwallOn && powerwallError && alertPowerwallOn);
     alertsSetErrorActive(anyError);
     if (anyError && millis() - lastErrorAlert > 60000) {
         lastErrorAlert = millis();
@@ -1389,8 +1436,12 @@ bool httpGetStatus()
     planActivity = doc["plan_activity"] | planActivity;
     vestaboardLive = doc["vestaboard_live"] | vestaboardLive;
     vestaboardOn = doc["vestaboard_enabled"] | false;
+    yarboOn = doc["yarbo_enabled"] | true;
     powerwallOn = doc["powerwall_enabled"] | false;
     lymowOn = doc["lymow_enabled"] | false;
+    powerwallPct = doc["powerwall_pct"] | powerwallPct;
+    powerwallSolar = doc["powerwall_solar"] | powerwallSolar;
+    powerwallLoad = doc["powerwall_load"] | powerwallLoad;
     lymowName = doc["lymow_name"] | lymowName;
     lymowBattery = doc["lymow_battery"] | lymowBattery;
     lymowState = doc["lymow_state"] | lymowState;

@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.27] - 2026-09-25
+
+### Added
+- Settings → Modules can turn **Yarbo** off like Powerwall and Lymow. At least one module must stay on. PaperMono **0.1.10-beta** and Paper Colour **0.2.7-color** hide Home / Status / Health / Plans when Yarbo is off, and PaperMono gains a Powerwall page.
+- E-paper Settings examples follow the enabled modules, and the lock-screen mock uses the current tablet name, logo, and Vestaboard layout.
+
+### Changed
+- Broker IP and serial are required only when the Yarbo module is on. Vestaboard ALL and rotate views list only enabled modules.
+
 ## [2.0.26] - 2026-09-25
 
 ### Added

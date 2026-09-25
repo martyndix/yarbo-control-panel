@@ -70,8 +70,10 @@ final class YarboHub
                 }
             }
         }
-        $modules[self::MODULE_YARBO] = true;
-        $active = $this->normalizeModule((string) ($decoded['active_module'] ?? self::MODULE_YARBO), $modules);
+        if (!self::anyEnabled($modules)) {
+            $modules[self::MODULE_YARBO] = true;
+        }
+        $active = $this->normalizeModule((string) ($decoded['active_module'] ?? ''), $modules);
         $live = $this->normalizeVestaboardLive((string) ($decoded['vestaboard_live'] ?? self::MODULE_YARBO), $modules);
         $house = self::normalizeDisplayName((string) ($decoded['house_name'] ?? ''));
 
@@ -107,7 +109,9 @@ final class YarboHub
                 $modules[$id] = (bool) $input[$key];
             }
         }
-        $modules[self::MODULE_YARBO] = true;
+        if (!self::anyEnabled($modules)) {
+            return false;
+        }
         $active = array_key_exists('active_module', $input)
             ? $this->normalizeModule((string) $input['active_module'], $modules)
             : $this->normalizeModule($current['active_module'], $modules);
@@ -213,6 +217,53 @@ final class YarboHub
         ];
     }
 
+    public static function anyEnabled(array $modules): bool
+    {
+        foreach (self::MODULES as $id) {
+            if (!empty($modules[$id])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function enabledCount(array $modules): int
+    {
+        $n = 0;
+        foreach (self::MODULES as $id) {
+            if (!empty($modules[$id])) {
+                $n++;
+            }
+        }
+
+        return $n;
+    }
+
+    /**
+     * @param array<string, bool> $modules
+     */
+    public static function firstEnabledId(array $modules): string
+    {
+        foreach (self::MODULES as $id) {
+            if (!empty($modules[$id])) {
+                return $id;
+            }
+        }
+
+        return self::MODULE_YARBO;
+    }
+
+    /**
+     * Combined batteries is a Vestaboard page, not a dashboard module.
+     *
+     * @param array<string, bool> $modules
+     */
+    public static function allViewAvailable(array $modules): bool
+    {
+        return self::enabledCount($modules) >= 2;
+    }
+
     /**
      * @param array<string, bool> $modules
      */
@@ -220,7 +271,7 @@ final class YarboHub
     {
         $id = strtolower(trim($id));
         if ($id === '' || !in_array($id, self::MODULES, true) || empty($modules[$id])) {
-            return self::MODULE_YARBO;
+            return self::firstEnabledId($modules);
         }
 
         return $id;
@@ -238,11 +289,11 @@ final class YarboHub
             $id = self::LIVE_BATTERIES;
         }
         if ($id === self::LIVE_BATTERIES) {
-            if (!empty($modules[self::MODULE_POWERWALL]) || !empty($modules[self::MODULE_LYMOW])) {
+            if (self::allViewAvailable($modules)) {
                 return self::LIVE_BATTERIES;
             }
 
-            return self::MODULE_YARBO;
+            return self::firstEnabledId($modules);
         }
         if ($id === self::MODULE_POWERWALL && !empty($modules[self::MODULE_POWERWALL])) {
             return $id;
@@ -250,7 +301,10 @@ final class YarboHub
         if ($id === self::MODULE_LYMOW && !empty($modules[self::MODULE_LYMOW])) {
             return $id;
         }
+        if ($id === self::MODULE_YARBO && !empty($modules[self::MODULE_YARBO])) {
+            return $id;
+        }
 
-        return self::MODULE_YARBO;
+        return self::firstEnabledId($modules);
     }
 }
