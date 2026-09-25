@@ -897,7 +897,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.6-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Build first: <code>pio run -e papercolor -d firmware/papercolor</code>.</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.6-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -908,6 +908,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <div class="papermono-actions">
                                 <button type="button" class="btn btn-secondary" id="papermono-ports-refresh">Refresh USB ports</button>
                                 <button type="button" class="btn btn-secondary" id="papermono-install-tools">Install USB tools</button>
+                                <button type="button" class="btn" id="papermono-build">Build firmware</button>
                             </div>
                             <p id="papermono-result" class="settings-cloud-result hidden" role="status"></p>
                             <label class="settings-field">
@@ -973,7 +974,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn" id="papermono-flash">Flash PaperMono firmware &amp; send Wi-Fi</button>
                                 <button type="button" class="btn btn-secondary" id="papermono-config">Send Wi-Fi only (already flashed)</button>
                             </div>
-                            <p class="hint" id="papermono-flash-hint">First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && pio run -d firmware/papermono</code>. If the port list fails, click <strong>Install USB tools</strong> to add <code>pyserial</code> and <code>esptool</code> to this panel’s Python environment. The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll. Keep the tablet out of direct sun.</p>
+                            <p class="hint" id="papermono-flash-hint">Leave this Settings page open. Click <strong>Build firmware</strong> for the tablet you selected (first build can take several minutes). If the port list fails, click <strong>Install USB tools</strong>. Flash then sends the binary and Wi-Fi over USB. Keep the tablet out of direct sun.</p>
                             <div class="papermono-preview-grid" id="papermono-preview-grid" aria-hidden="true">
                                 <figure class="papermono-preview">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">

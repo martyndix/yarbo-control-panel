@@ -77,22 +77,16 @@ Paired devices are stored in `data/papermono-devices.json` (not committed). The 
 
 On the **same machine that runs the panel**:
 
-1. Build the firmware binary (once):
-
-   ```bash
-   pip3 install platformio
-   pio run -d firmware/papermono
-   ```
-
-2. Plug the PaperMono in by USB. To enter download mode, hold the power button about 2 seconds until the red LED blinks, then release (M5Stack docs). First boot of our firmware shows a setup screen until config arrives.
-3. Open the panel → **Settings → E-paper companions** and leave **PaperMono** selected (not Paper Colour).
-4. Refresh USB ports and select the PaperMono serial device. If the list fails because `pyserial` / `esptool` are missing, click **Install USB tools** (that runs `pip` into the panel’s `.venv`).
+1. Plug the PaperMono in by USB. To enter download mode, hold the power button about 2 seconds until the red LED blinks, then release (M5Stack docs). First boot of our firmware shows a setup screen until config arrives.
+2. Open the panel → **Settings → E-paper companions** and leave **PaperMono** selected (not Paper Colour).
+3. Click **Build firmware** and wait until the status says it is built (first time can take several minutes).
+4. Refresh USB ports and select the PaperMono serial device. If the list fails because `pyserial` / `esptool` are missing, click **Install USB tools**.
 5. Enter:
    - Wi-Fi SSID and password (**2.4 GHz only**)
    - Panel URL as the tablet will reach it (for example `http://192.168.1.50:8080`, not `localhost`)
    - A device name
    - Optional header logo (PNG/JPEG). Preview shows on the mocks; reflash so the glass updates.
-6. Click **Flash firmware & send Wi-Fi**. Leave Settings open for one to two minutes.
+6. Click **Flash firmware & send Wi-Fi**. Leave Settings open. Flash will build first if the binary is missing or stale.
 
 **Send Wi-Fi only** reuses already-flashed firmware and pushes a new `CFG:` line over serial (SSID, password, panel URL, token).
 
@@ -107,4 +101,4 @@ Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Con
 - One MQTT controller at a time, same as the web panel.
 - Status watch does not take the controller. Stop / Dock / Pause / Lights do, via the agent.
 - Mild ghosting between full refreshes is normal.
-- If flash fails, check the USB port, click **Install USB tools** if `pyserial` / `esptool` are missing, and confirm `firmware/papermono/.pio/build/papermono/firmware.bin` exists.
+- If flash fails, check the USB port, click **Install USB tools** if `pyserial` / `esptool` are missing, and click **Build firmware** if the binary is missing.

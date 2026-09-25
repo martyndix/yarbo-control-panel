@@ -32,6 +32,7 @@
 /public/.well-known/appspecific/com.tesla.3p.public-key.pem
 /firmware/papermono/.pio/
 /firmware/papercolor/.pio/
+/.pio-core/
 /scripts/__pycache__/
 **/__pycache__/
 .DS_Store

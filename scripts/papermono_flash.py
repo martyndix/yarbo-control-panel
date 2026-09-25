@@ -126,8 +126,8 @@ def flash_firmware(port: str, kind: str = KIND_MONO) -> dict:
         return {
             "ok": False,
             "error": (
-                f"{label} firmware is not built yet. On the panel host, from the project root run: "
-                f"{PIO_HINTS[kind]}"
+                f"{label} firmware is not built yet. In Settings → E-paper companions click Build firmware, "
+                f"or from the project root run: {PIO_HINTS[kind]}"
             ),
             "firmware_path": str(path),
             "kind": kind,

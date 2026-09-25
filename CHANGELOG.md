@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.25] - 2026-09-25
+
+### Added
+- Settings **Build firmware** compiles PaperMono or Paper Colour on the panel host (installs PlatformIO if needed). **Flash** also builds first when the binary is missing or the source is newer, so you do not need a Pi terminal.
+
 ## [2.0.24] - 2026-09-25
 
 ### Added

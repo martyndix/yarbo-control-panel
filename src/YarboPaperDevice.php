@@ -62,6 +62,7 @@ final class YarboPaperDevice
                     'label' => 'PaperMono',
                     'version' => self::FIRMWARE_VERSION,
                     'built' => $this->firmwareAvailable(self::KIND_MONO),
+                    'needs_build' => $this->firmwareNeedsBuild(self::KIND_MONO),
                     'path' => self::FIRMWARE_RELATIVE,
                     'pio' => 'pio run -d firmware/papermono',
                 ],
@@ -69,6 +70,7 @@ final class YarboPaperDevice
                     'label' => 'Paper Colour',
                     'version' => self::FIRMWARE_VERSION_COLOR,
                     'built' => $this->firmwareAvailable(self::KIND_COLOR),
+                    'needs_build' => $this->firmwareNeedsBuild(self::KIND_COLOR),
                     'path' => self::FIRMWARE_RELATIVE_COLOR,
                     'pio' => 'pio run -e papercolor -d firmware/papercolor',
                 ],
@@ -811,6 +813,93 @@ final class YarboPaperDevice
     }
 
     /**
+     * Install PlatformIO if needed, then compile the selected tablet firmware.
+     *
+     * @return array<string, mixed>
+     */
+    public function buildFirmware(?string $kind, bool $force = true): array
+    {
+        $kind = $this->normalizeKind($kind);
+        $label = $this->kindLabel($kind);
+        $venv = $this->ensureProjectVenv();
+        if (!($venv['ok'] ?? false)) {
+            return $venv;
+        }
+        $pio = $this->ensurePlatformio();
+        if (!($pio['ok'] ?? false)) {
+            return $pio;
+        }
+        if (!$force && !$this->firmwareNeedsBuild($kind)) {
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'built' => true,
+                'kind' => $kind,
+                'version' => $this->firmwareVersionForKind($kind),
+                'message' => $label . ' firmware is already built.',
+            ] + $this->dashboard();
+        }
+
+        $dir = $this->firmwareDir($kind);
+        $cmd = [$this->pioBin(), 'run', '-d', $dir];
+        if ($kind === self::KIND_COLOR) {
+            $cmd = [$this->pioBin(), 'run', '-e', 'papercolor', '-d', $dir];
+        }
+        $result = $this->runProcess($cmd, 900.0, $this->pioEnv());
+        $log = (string) ($result['log'] ?? '');
+        if (!($result['ok'] ?? false) || !$this->firmwareAvailable($kind)) {
+            $detail = trim((string) ($result['error'] ?? ''));
+            if ($detail === '') {
+                $detail = 'PlatformIO did not produce a firmware binary.';
+            }
+
+            return [
+                'ok' => false,
+                'kind' => $kind,
+                'error' => 'Could not build ' . $label . ' firmware. ' . $detail,
+                'log' => $this->tailLog($log, 1800),
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'kind' => $kind,
+            'built' => true,
+            'version' => $this->firmwareVersionForKind($kind),
+            'message' => $label . ' firmware ' . $this->firmwareVersionForKind($kind) . ' is built. You can flash it over USB.',
+            'log' => $this->tailLog($log, 800),
+        ] + $this->dashboard();
+    }
+
+    public function firmwareNeedsBuild(?string $kind = null): bool
+    {
+        if (!$this->firmwareAvailable($kind)) {
+            return true;
+        }
+        $binMtime = (int) filemtime($this->firmwarePath($kind));
+        $dir = $this->firmwareDir($kind);
+        $watch = [$dir . '/platformio.ini', $dir . '/src'];
+        foreach ($watch as $path) {
+            if (is_file($path) && filemtime($path) > $binMtime) {
+                return true;
+            }
+            if (!is_dir($path)) {
+                continue;
+            }
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if ($file->isFile() && $file->getMTime() > $binMtime) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
@@ -837,6 +926,15 @@ final class YarboPaperDevice
             return ['ok' => false, 'error' => 'Panel URL must start with http:// or https://'];
         }
 
+        $builtNow = false;
+        if ($this->firmwareNeedsBuild($kind)) {
+            $build = $this->buildFirmware($kind, true);
+            if (!($build['ok'] ?? false)) {
+                return $build;
+            }
+            $builtNow = true;
+        }
+
         $registered = $this->register(['name' => $name, 'kind' => $kind]);
         $result = $this->runPython([
             'flash',
@@ -849,6 +947,7 @@ final class YarboPaperDevice
             '--kind', $kind,
         ], 180.0);
         $result['device'] = $registered;
+        $result['built'] = $builtNow;
         if (!($result['ok'] ?? false)) {
             $this->revoke((string) $registered['id']);
         }
@@ -997,6 +1096,143 @@ final class YarboPaperDevice
         }
 
         return 'python3';
+    }
+
+    public function firmwareDir(?string $kind = null): string
+    {
+        return $this->normalizeKind($kind) === self::KIND_COLOR
+            ? $this->projectRoot . '/firmware/papercolor'
+            : $this->projectRoot . '/firmware/papermono';
+    }
+
+    private function pioBin(): string
+    {
+        $venv = $this->projectRoot . '/.venv/bin/pio';
+        if (is_file($venv)) {
+            return $venv;
+        }
+
+        return 'pio';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function ensurePlatformio(): array
+    {
+        if (is_file($this->projectRoot . '/.venv/bin/pio')) {
+            return ['ok' => true];
+        }
+        $result = $this->runProcess(
+            [$this->pythonBin(), '-m', 'pip', 'install', '--disable-pip-version-check', 'platformio'],
+            180.0,
+            $this->pioEnv()
+        );
+        if (!($result['ok'] ?? false) || !is_file($this->projectRoot . '/.venv/bin/pio')) {
+            return [
+                'ok' => false,
+                'error' => 'Could not install PlatformIO into this panel’s Python environment. '
+                    . trim((string) ($result['error'] ?? 'pip install platformio failed.')),
+                'log' => $this->tailLog((string) ($result['log'] ?? ''), 1200),
+            ];
+        }
+
+        return ['ok' => true];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function pioEnv(): array
+    {
+        $path = $this->projectRoot . '/.venv/bin';
+        $existing = (string) getenv('PATH');
+        if ($existing === '') {
+            $existing = '/usr/local/bin:/usr/bin:/bin';
+        }
+        $path .= PATH_SEPARATOR . $existing;
+        $home = getenv('HOME');
+        if (!is_string($home) || $home === '') {
+            $home = $this->projectRoot;
+        }
+
+        return [
+            'HOME' => $home,
+            'PATH' => $path,
+            'PLATFORMIO_CORE_DIR' => $this->projectRoot . '/.pio-core',
+            'PLATFORMIO_NO_ANALYTICS' => '1',
+        ];
+    }
+
+    /**
+     * @param list<string> $cmd
+     * @param array<string, string> $env
+     * @return array<string, mixed>
+     */
+    private function runProcess(array $cmd, float $timeout, array $env = []): array
+    {
+        $escaped = implode(' ', array_map('escapeshellarg', $cmd));
+        $spec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $fullEnv = $env + $_ENV;
+        $proc = proc_open($escaped, $spec, $pipes, $this->projectRoot, $fullEnv !== [] ? $fullEnv : null);
+        if (!is_resource($proc)) {
+            return ['ok' => false, 'error' => 'Could not start ' . ($cmd[0] ?? 'command') . '.'];
+        }
+        fclose($pipes[0]);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $stdout = '';
+        $stderr = '';
+        $deadline = microtime(true) + $timeout;
+        $timedOut = false;
+        while (true) {
+            $stdout .= (string) stream_get_contents($pipes[1]);
+            $stderr .= (string) stream_get_contents($pipes[2]);
+            $status = proc_get_status($proc);
+            if (empty($status['running'])) {
+                break;
+            }
+            if (microtime(true) > $deadline) {
+                $timedOut = true;
+                proc_terminate($proc, 15);
+                usleep(200000);
+                proc_terminate($proc, 9);
+                break;
+            }
+            usleep(150000);
+        }
+        $stdout .= (string) stream_get_contents($pipes[1]);
+        $stderr .= (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($proc);
+        $log = trim($stdout . "\n" . $stderr);
+        if ($timedOut) {
+            return [
+                'ok' => false,
+                'error' => 'Timed out after ' . (int) $timeout . 's.',
+                'log' => $log,
+            ];
+        }
+        if ($code !== 0) {
+            return [
+                'ok' => false,
+                'error' => 'Command failed (exit ' . $code . ').',
+                'log' => $log,
+            ];
+        }
+
+        return ['ok' => true, 'log' => $log];
+    }
+
+    private function tailLog(string $log, int $limit = 1200): string
+    {
+        $log = trim($log);
+        if (strlen($log) <= $limit) {
+            return $log;
+        }
+
+        return substr($log, -$limit);
     }
 
     public function normalizeKind(mixed $kind): string

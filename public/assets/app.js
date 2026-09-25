@@ -223,6 +223,7 @@ const els = {
     papermonoDevices: document.getElementById('papermono-devices'),
     papermonoPortsRefresh: document.getElementById('papermono-ports-refresh'),
     papermonoInstallTools: document.getElementById('papermono-install-tools'),
+    papermonoBuild: document.getElementById('papermono-build'),
     papermonoFlash: document.getElementById('papermono-flash'),
     papermonoConfig: document.getElementById('papermono-config'),
     headControlsCard: document.getElementById('head-controls-card'),
@@ -3524,11 +3525,17 @@ function applyPaperMonoKindUi(dashboard) {
             ? 'Flash Paper Colour firmware & send Wi-Fi'
             : 'Flash PaperMono firmware & send Wi-Fi';
     }
+    if (els.papermonoBuild) {
+        els.papermonoBuild.textContent = `Build ${label} firmware`;
+    }
     if (els.papermonoFwStatus) {
         if (fw) {
-            const built = fw.built
-                ? 'built on this host'
-                : `not built yet — run ${fw.pio} before flashing`;
+            let built = 'not built yet — click Build firmware';
+            if (fw.built && fw.needs_build) {
+                built = 'built, but source is newer — click Build firmware';
+            } else if (fw.built) {
+                built = 'built on this host';
+            }
             els.papermonoFwStatus.textContent = `${label} firmware ${fw.version} (${built}).`;
         } else if (dashboard) {
             els.papermonoFwStatus.textContent = `Could not read ${label} firmware status.`;
@@ -3536,13 +3543,10 @@ function applyPaperMonoKindUi(dashboard) {
     }
     const hint = document.getElementById('papermono-flash-hint');
     if (hint) {
-        const pio = fw?.pio || (kind === 'papercolor'
-            ? 'pio run -e papercolor -d firmware/papercolor'
-            : 'pio run -d firmware/papermono');
         const extra = kind === 'papercolor'
-            ? ' Paper Colour is Spectra 6: A/B change pages, C sleeps. It is slow — do not expect 15-second redraws.'
+            ? ' Paper Colour is Spectra 6: A/B change pages, C locks. It is slow — do not expect 15-second redraws.'
             : ' The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll.';
-        hint.innerHTML = `First flash takes one to two minutes. Leave this Settings page open. Build the binary on this host first: <code>pip3 install platformio && ${pio}</code>. If the port list fails, click <strong>Install USB tools</strong> to add <code>pyserial</code> and <code>esptool</code> to this panel’s Python environment.${extra} Keep the tablet out of direct sun.`;
+        hint.innerHTML = `Leave this Settings page open. Click <strong>Build firmware</strong> for this tablet (first build can take several minutes and installs PlatformIO if needed). <strong>Flash</strong> builds automatically if the binary is missing or stale, then sends Wi-Fi over USB. If the port list fails, click <strong>Install USB tools</strong>.${extra} Keep the tablet out of direct sun.`;
     }
 }
 
@@ -3762,6 +3766,37 @@ async function installPaperMonoUsbTools(button) {
     }
 }
 
+async function buildPaperMonoFirmware(button) {
+    const kind = paperMonoSelectedKind();
+    const label = paperMonoLabel(kind);
+    if (button) button.disabled = true;
+    if (els.papermonoFlash) els.papermonoFlash.disabled = true;
+    setPaperMonoResult(`Building ${label} firmware on this host. First time can take several minutes (PlatformIO and the ESP32 toolchain)…`);
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'build_firmware', kind }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) {
+            const extra = typeof data.log === 'string' && data.log.trim() !== ''
+                ? `\n${data.log.trim().slice(-600)}`
+                : '';
+            throw new Error((data.error || 'Could not build firmware') + extra);
+        }
+        paperMonoDashboardCache = data;
+        applyPaperMonoKindUi(data);
+        setPaperMonoResult(data.message || `${label} firmware is built.`, 'success');
+        showToast(`${label} firmware built`, 'success');
+    } catch (err) {
+        setPaperMonoResult(err.message || 'Could not build firmware', 'error');
+    } finally {
+        if (button) button.disabled = false;
+        if (els.papermonoFlash) els.papermonoFlash.disabled = false;
+    }
+}
+
 async function runPaperMonoUsb(action, button) {
     const payload = paperMonoFormPayload();
     const label = paperMonoLabel(payload.kind);
@@ -3778,9 +3813,10 @@ async function runPaperMonoUsb(action, button) {
         return;
     }
     if (button) button.disabled = true;
+    if (els.papermonoBuild) els.papermonoBuild.disabled = true;
     setPaperMonoResult(
         action === 'flash'
-            ? `Flashing ${label} firmware over USB, then sending Wi-Fi. This takes one to two minutes…`
+            ? `Building if needed, then flashing ${label} over USB and sending Wi-Fi. Leave this page open…`
             : 'Sending Wi-Fi and panel URL over USB…',
     );
     try {
@@ -3791,14 +3827,20 @@ async function runPaperMonoUsb(action, button) {
         });
         const data = await parseJsonResponse(res);
         if (!data.ok) {
-            throw new Error(data.error || 'USB step failed');
+            const extra = typeof data.log === 'string' && data.log.trim() !== ''
+                ? `\n${data.log.trim().slice(-600)}`
+                : '';
+            throw new Error((data.error || 'USB step failed') + extra);
         }
         const tokenHint = data.device?.token
             ? `\nPaired as ${data.device.name || label}. Keep that cable in until the setup screen clears.`
             : '';
+        const builtHint = action === 'flash' && data.built
+            ? ' Firmware was built first, then flashed.'
+            : '';
         setPaperMonoResult(
             action === 'flash'
-                ? `${label} firmware flashed and Wi-Fi sent.${tokenHint}`
+                ? `${label} firmware flashed and Wi-Fi sent.${builtHint}${tokenHint}`
                 : `Wi-Fi sent.${tokenHint}`,
             'success',
         );
@@ -3808,6 +3850,7 @@ async function runPaperMonoUsb(action, button) {
         setPaperMonoResult(err.message || 'USB step failed', 'error');
     } finally {
         if (button) button.disabled = false;
+        if (els.papermonoBuild) els.papermonoBuild.disabled = false;
     }
 }
 
@@ -5549,6 +5592,7 @@ els.settingsVestaboardQuietPalette?.addEventListener('click', (event) => {
 });
 els.papermonoPortsRefresh?.addEventListener('click', () => refreshPaperMonoPorts());
 els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbTools(e.currentTarget));
+els.papermonoBuild?.addEventListener('click', (e) => buildPaperMonoFirmware(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));
 els.papermonoConfig?.addEventListener('click', (e) => runPaperMonoUsb('configure_usb', e.currentTarget));
 els.papermonoLogo?.addEventListener('change', (e) => {

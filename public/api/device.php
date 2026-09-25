@@ -156,7 +156,13 @@ if ($action === 'paper_message') {
 }
 
 if ($action === 'flash') {
+    set_time_limit(1200);
     json_response($devices->flash($input));
+}
+
+if ($action === 'build_firmware') {
+    set_time_limit(1200);
+    json_response($devices->buildFirmware($input['kind'] ?? null, true));
 }
 
 if ($action === 'configure_usb') {

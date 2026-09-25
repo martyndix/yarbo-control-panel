@@ -15,27 +15,14 @@ This is **not** PaperS3 (touch, grayscale) and **not** PaperMono C153.
 
 On the **same machine that runs the panel**:
 
-1. Build the Colour firmware (once):
+1. Plug the PaperColor in by USB. Hold the side power/reset about **3 seconds** for download mode (M5Stack docs).
+2. Open the panel → **Settings → E-paper companions**.
+3. Choose **Paper Colour** (not PaperMono). Click **Build firmware** and wait until it finishes.
+4. Refresh USB ports and select the tablet. If the list fails, click **Install USB tools**.
+5. Enter 2.4 GHz Wi-Fi, the panel URL as the tablet will reach it (not `localhost`), and a device name.
+6. Click **Flash Paper Colour firmware & send Wi-Fi**. Leave Settings open. Flash builds first if needed.
 
-   ```bash
-   pip3 install platformio
-   pio run -e papercolor -d firmware/papercolor
-   ```
-
-2. Plug the PaperColor in by USB. Hold the side power/reset about **3 seconds** for download mode (M5Stack docs).
-3. Open the panel → **Settings → E-paper companions**.
-4. Choose **Paper Colour** (not PaperMono). That is what selects the Colour binary — the USB port list is the same.
-5. Refresh USB ports and select the tablet. If the list fails, click **Install USB tools**.
-6. Enter 2.4 GHz Wi-Fi, the panel URL as the tablet will reach it (not `localhost`), and a device name.
-7. Click **Flash Paper Colour firmware & send Wi-Fi**. Leave Settings open for one to two minutes.
-
-Rebuild after panel updates that bump Colour firmware (`0.2.6-color` and later):
-
-```bash
-pio run -e papercolor -d firmware/papercolor
-```
-
-Then flash again from Settings with **Paper Colour** selected.
+Rebuild after panel updates that bump Colour firmware (`0.2.6-color` and later): click **Build firmware** with Paper Colour selected (or Flash, which builds when source is newer).
 
 **Send Wi-Fi only** reuses already-flashed firmware and pushes the same `CFG:{...}` JSON as PaperMono.
 

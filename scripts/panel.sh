@@ -70,4 +70,4 @@ VESTABOARD_PID=$!
 echo "==> Starting panel on http://${HOST}:${PORT}"
 echo "    Keep this process running. Hard-refresh the browser after start."
 echo "    Close the official Yarbo app while testing controls/drive."
-"$PHP_BIN" -d max_execution_time=120 -S "${HOST}:${PORT}" -t "${ROOT}/public"
+"$PHP_BIN" -d max_execution_time=1200 -S "${HOST}:${PORT}" -t "${ROOT}/public"
