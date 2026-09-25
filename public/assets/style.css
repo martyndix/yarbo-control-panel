@@ -2472,6 +2472,11 @@ html[data-theme="light"] .plan-activity {
     justify-content: flex-end;
 }
 
+.papermono-device-ota-name {
+    margin: 0;
+    font-weight: 650;
+}
+
 .papermono-device-row .hint {
     margin: 0.15rem 0 0;
 }

@@ -85,6 +85,7 @@ if ($method === 'GET' && $action === 'logo') {
 }
 
 if ($method === 'GET' && $action === 'firmware') {
+    set_time_limit(300);
     $device = $devices->findByToken(device_token_from_request());
     if ($device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
@@ -136,6 +137,14 @@ if ($action === 'rename') {
         json_response(['ok' => false, 'error' => 'Could not rename that tablet'], 400);
     }
     json_response(['ok' => true, 'device' => $device]);
+}
+
+if ($action === 'ota') {
+    $id = trim((string) ($input['id'] ?? ''));
+    if ($id === '' || $id === '*') {
+        json_response($devices->requestOtaAll());
+    }
+    json_response($devices->requestOta($id));
 }
 
 if ($action === 'prefs') {

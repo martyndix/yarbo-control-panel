@@ -12,4 +12,5 @@ void rgbOff();
 void rgbTick();
 void alertMessage();
 void alertError();
+void alertOta();
 void alertsSetErrorActive(bool on);

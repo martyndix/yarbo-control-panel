@@ -17,7 +17,7 @@ Hardware we compile for:
 - FT6336G touch, built-in frontlight
 - Two user buttons + power (ON / OFF / RESET / BOOT)
 - 1150mAh battery, USB-C
-- Onboard NFC (ST25R3916) and LoRa (SX1262). Firmware **0.1.13-beta** uses LoRa for RADIO (868 MHz, house sync word) with Wi-Fi fallback.
+- Onboard NFC (ST25R3916) and LoRa (SX1262). Firmware **0.1.14-beta** uses LoRa for RADIO (868 MHz, house sync word) with Wi-Fi fallback.
 
 It has **no browser**. This panel flashes native firmware over USB from **Settings**, then the tablet talks HTTP JSON to the panel. The panel stays the MQTT brain.
 
@@ -38,7 +38,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 ## What it shows
 
 - **Home / Status / Health / Plans:** Yarbo robot tiles (Stop / Dock on Home). Hidden when the Yarbo module is off in Settings.
-- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.13-beta**.
+- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.14-beta**.
 - Top line is the current module (**YARBO**, **POWERWALL**, **LYMOW**, **VESTABOARD**, **RADIO**, **DEVICE**), not a fixed YARBO brand. Single-page modules do not repeat that name as a second title.
 - **Note:** Vestaboard live view picker. Only lists modules that are on. Hidden when Vestaboard is off.
 - **Board:** live 3×15 preview of what the Vestaboard Note is showing. Hidden when Vestaboard is off.
@@ -93,7 +93,7 @@ On the **same machine that runs the panel**:
 
 The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. Compact status includes `vestaboard_enabled`, `vestaboard_live`, `powerwall_enabled`, and `lymow_enabled`. The Plans page also calls `GET /api/device.php?action=plans` (cached on the Pi for about five minutes). Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`, `start_plan` with `plan_id`, and `vestaboard_live` with `vestaboard_live` set to `yarbo`, `powerwall`, `lymow`, or `batteries`).
 
-Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. Firmware later can pull `GET /api/device.php?action=firmware` for OTA; that is not wired yet. The header logo is `GET /api/device.php?action=logo` when compact status includes `logo_hash`.
+Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. After the first USB flash of **0.1.14-beta**, later firmware is pushed over Wi-Fi: Settings → paired device **Update**, or Settings → Updates. The tablet must have polled recently. Compact status includes `ota_pending`; the tablet downloads `GET /api/device.php?action=firmware`, stays on Wi-Fi, then reboots. PaperMono beeps and lights green. The header logo is `GET /api/device.php?action=logo` when compact status includes `logo_hash`.
 
 ## Limits
 

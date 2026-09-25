@@ -248,6 +248,18 @@ void alertError()
     beep(700, 280);
 }
 
+void alertOta()
+{
+    rgbError = false;
+    rgbIsError = false;
+    rgbUntil = 0;
+    rgbOn = true;
+    writeRgb(true, false);
+    beep(1600, 220);
+    delay(90);
+    beep(2000, 280);
+}
+
 void alertsSetErrorActive(bool on)
 {
     if (on) {

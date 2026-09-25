@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClient.h>
 #include <HTTPClient.h>
+#include <HTTPUpdate.h>
 #include <Preferences.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
@@ -27,6 +29,7 @@ String deviceName = "PaperMono";
 String robotName = "";
 
 uint32_t lastPoll = 0;
+bool otaBusy = false;
 String lastError;
 int battery = -1;
 String charging = "—";
@@ -1399,6 +1402,44 @@ void handleLockTouch(int x, int y)
     unlockStep = 0;
 }
 
+void drawOtaScreen()
+{
+    beginEpdFrame(true);
+    M5.Display.fillScreen(TFT_WHITE);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextSize(3);
+    M5.Display.drawString("UPDATING", M5.Display.width() / 2, M5.Display.height() / 2 - 40);
+    M5.Display.setTextSize(1);
+    M5.Display.drawString("Stay on Wi-Fi. Do not power off.", M5.Display.width() / 2, M5.Display.height() / 2 + 16);
+    M5.Display.display();
+}
+
+void runOtaUpdate()
+{
+    if (otaBusy || WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
+        return;
+    }
+    otaBusy = true;
+    WiFi.setSleep(false);
+    applyFrontlight(true);
+    drawOtaScreen();
+    alertOta();
+    delay(1200);
+    HTTPUpdate updater(180000);
+    updater.rebootOnUpdate(true);
+    updater.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    String url = panelUrl + "/api/device.php?action=firmware&token=" + token;
+    WiFiClient client;
+    t_httpUpdate_return ret = updater.update(client, url);
+    otaBusy = false;
+    rgbOff();
+    if (ret != HTTP_UPDATE_OK) {
+        lastError = "update failed";
+        drawScreen(true);
+    }
+}
+
 bool httpGetStatus()
 {
     if (WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
@@ -1462,6 +1503,11 @@ bool httpGetStatus()
     lastError = "";
     applyCompactExtras(doc);
     syncPaperLogo(String((const char *) (doc["logo_hash"] | "")));
+    bool otaPending = doc["ota_pending"] | false;
+    String latest = doc["firmware_latest"] | "";
+    if (otaPending && latest.length() && latest != PAPERMONO_FW_VERSION) {
+        runOtaUpdate();
+    }
     return true;
 }
 
@@ -1716,7 +1762,7 @@ void loop()
     }
 
     uint32_t now = millis();
-    if (!screenLocked && wifiSsid.length() && now - lastActivity > (uint32_t) lockAfterS * 1000) {
+    if (!otaBusy && !screenLocked && wifiSsid.length() && now - lastActivity > (uint32_t) lockAfterS * 1000) {
         enterLock();
     }
     if (screenLocked && lightOn && now - lastLight > (uint32_t) lightOffS * 1000) {

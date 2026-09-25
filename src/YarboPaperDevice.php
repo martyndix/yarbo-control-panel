@@ -12,8 +12,10 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.13-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.10-colour';
+    public const FIRMWARE_VERSION = '0.1.14-beta';
+    public const FIRMWARE_VERSION_COLOR = '0.2.11-colour';
+    public const OTA_ONLINE_MONO_S = 90;
+    public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
     public const MESSAGE_CHARS = 180;
     public const LOGO_MAX_EDGE = 240;
@@ -243,6 +245,7 @@ final class YarboPaperDevice
             'created_at' => gmdate('c'),
             'last_seen_at' => null,
             'fw_reported' => null,
+            'ota_pending' => false,
         ];
         $store = $this->load();
         $store['devices'][] = $device;
@@ -286,6 +289,113 @@ final class YarboPaperDevice
         unset($device);
 
         return null;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function requestOta(string $id): array
+    {
+        $store = $this->load();
+        foreach ($store['devices'] as &$device) {
+            if (!is_array($device) || (string) ($device['id'] ?? '') !== $id) {
+                continue;
+            }
+            $kind = $this->deviceKind($device);
+            $latest = $this->firmwareVersionForKind($kind);
+            $label = (string) ($device['name'] ?? $this->kindLabel($kind));
+            if (!$this->firmwareAvailable($kind)) {
+                return [
+                    'ok' => false,
+                    'error' => 'Build firmware for ' . $this->kindLabel($kind) . ' first.',
+                ];
+            }
+            if (!$this->deviceIsOnline($device)) {
+                return [
+                    'ok' => false,
+                    'error' => $label . ' is not online. Wait until it polls, then try again.',
+                ];
+            }
+            $reported = (string) ($device['fw_reported'] ?? '');
+            if ($reported !== '' && $reported === $latest) {
+                return [
+                    'ok' => false,
+                    'error' => $label . ' is already on ' . $latest . '.',
+                ];
+            }
+            $device['ota_pending'] = true;
+            $device['ota_requested_at'] = gmdate('c');
+            $this->save($store);
+
+            return [
+                'ok' => true,
+                'device' => $this->publicDevice($device),
+                'message' => 'Update queued for ' . $label . '. It starts on the next poll (beep and green LED on PaperMono).',
+            ];
+        }
+        unset($device);
+
+        return ['ok' => false, 'error' => 'Device not found'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function requestOtaAll(): array
+    {
+        $queued = [];
+        $errors = [];
+        foreach ($this->load()['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = (string) ($device['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $public = $this->publicDevice($device);
+            if (empty($public['ota_available']) || empty($public['online'])) {
+                continue;
+            }
+            $result = $this->requestOta($id);
+            if ($result['ok'] ?? false) {
+                $queued[] = $public['name'] ?? $id;
+            } else {
+                $errors[] = (string) ($result['error'] ?? 'Could not queue an update');
+            }
+        }
+        if ($queued === []) {
+            return [
+                'ok' => false,
+                'error' => $errors[0] ?? 'No online tablets need a firmware update.',
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'queued' => $queued,
+            'errors' => $errors,
+            'message' => 'Update queued for ' . implode(', ', $queued) . '.',
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     */
+    public function deviceIsOnline(array $device): bool
+    {
+        $seen = (string) ($device['last_seen_at'] ?? '');
+        if ($seen === '') {
+            return false;
+        }
+        $ts = strtotime($seen);
+        if ($ts === false) {
+            return false;
+        }
+        $kind = $this->deviceKind($device);
+        $window = $kind === self::KIND_COLOR ? self::OTA_ONLINE_COLOR_S : self::OTA_ONLINE_MONO_S;
+
+        return (time() - $ts) <= $window;
     }
 
     /**
@@ -398,6 +508,11 @@ final class YarboPaperDevice
                 $inferred = $this->kindFromFirmware($fwReported);
                 if ($inferred !== null) {
                     $device['kind'] = $inferred;
+                }
+                $latest = $this->firmwareVersionForKind($this->deviceKind($device));
+                if (!empty($device['ota_pending']) && $fwReported === $latest) {
+                    $device['ota_pending'] = false;
+                    $device['ota_requested_at'] = null;
                 }
             }
         }
@@ -525,6 +640,7 @@ final class YarboPaperDevice
             'yarbo_error' => $yarboEnabled && $online && ((int) $errorCode !== 0 || $powerFault > 0),
             'powerwall_error' => $pwEnabled && empty($pw['online']) && empty($pw['ok']),
             'lymow_error' => $lyEnabled && ($lyWork === 7 || (empty($ly['ok']) && empty($ly['online']))),
+            'ota_pending' => !empty($forDevice['ota_pending']),
         ] + $this->logoPublicView()
             + $this->prefsCompact($forDevice)
             + $this->vestaboardCompact($vbObj, $vb, $parsed, $online)
@@ -1356,6 +1472,12 @@ final class YarboPaperDevice
             'created_at' => $device['created_at'] ?? null,
             'last_seen_at' => $device['last_seen_at'] ?? null,
             'fw_reported' => $device['fw_reported'] ?? null,
+            'firmware_latest' => $this->firmwareVersionForKind($kind),
+            'firmware_built' => $this->firmwareAvailable($kind),
+            'online' => $this->deviceIsOnline($device),
+            'ota_pending' => !empty($device['ota_pending']),
+            'ota_available' => $this->firmwareAvailable($kind)
+                && (string) ($device['fw_reported'] ?? '') !== $this->firmwareVersionForKind($kind),
         ];
         if ($includeToken) {
             $row['token'] = (string) ($device['token'] ?? '');

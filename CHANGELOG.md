@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.31] - 2026-09-25
+
+### Added
+- After the first USB flash, PaperMono and Paper Colour firmware can be pushed over Wi-Fi from **Paired devices** or **Settings → Updates**. The tablet must be online. PaperMono shows **UPDATING**, beeps, and lights green; Colour shows the message. Wi-Fi stays up for the download, then the tablet reboots onto the new image. Firmware **0.1.14-beta** / **0.2.11-colour**.
+
 ## [2.0.30] - 2026-09-25
 
 ### Changed

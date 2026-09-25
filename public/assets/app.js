@@ -222,6 +222,9 @@ const els = {
     papermonoResult: document.getElementById('papermono-result'),
     papermonoFwStatus: document.getElementById('papermono-fw-status'),
     papermonoDevices: document.getElementById('papermono-devices'),
+    settingsPaperOtaList: document.getElementById('settings-paper-ota-list'),
+    settingsPaperOtaAll: document.getElementById('settings-paper-ota-all'),
+    settingsPaperOtaResult: document.getElementById('settings-paper-ota-result'),
     papermonoPortsRefresh: document.getElementById('papermono-ports-refresh'),
     papermonoInstallTools: document.getElementById('papermono-install-tools'),
     papermonoBuild: document.getElementById('papermono-build'),
@@ -3789,10 +3792,63 @@ function paperMonoFormPayload() {
     };
 }
 
+function paperOtaUpdateButton(device) {
+    const id = escapeHtml(device.id || '');
+    if (device.ota_pending) {
+        return `<button type="button" class="btn btn-compact" disabled>Updating…</button>`;
+    }
+    if (!device.ota_available) {
+        return '';
+    }
+    if (!device.online) {
+        return `<button type="button" class="btn btn-secondary btn-compact" disabled title="Tablet not seen recently">Update</button>`;
+    }
+    return `<button type="button" class="btn btn-compact" data-papermono-ota="${id}">Update</button>`;
+}
+
+function bindPaperOtaButtons(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-papermono-ota]').forEach((button) => {
+        button.addEventListener('click', () => queuePaperOta(button.dataset.papermonoOta, button));
+    });
+}
+
+function renderPaperOtaPanel(devices) {
+    if (!els.settingsPaperOtaList) return;
+    if (!Array.isArray(devices) || devices.length === 0) {
+        els.settingsPaperOtaList.innerHTML = '<p class="hint">No paired tablets yet. Flash over USB once, then updates can go over Wi-Fi.</p>';
+        if (els.settingsPaperOtaAll) els.settingsPaperOtaAll.disabled = true;
+        return;
+    }
+    const ready = devices.filter((d) => d.ota_available && d.online && !d.ota_pending);
+    els.settingsPaperOtaList.innerHTML = devices.map((device) => {
+        const last = device.last_seen_at
+            ? `Last seen ${escapeHtml(String(device.last_seen_at).replace('T', ' ').replace('Z', ' UTC'))}`
+            : 'Never seen';
+        const reported = device.fw_reported ? escapeHtml(String(device.fw_reported)) : 'unknown';
+        const latest = escapeHtml(String(device.firmware_latest || ''));
+        const status = device.ota_pending
+            ? 'Update queued'
+            : (device.online ? 'Online' : 'Offline');
+        return `<div class="papermono-device-row">
+            <div class="papermono-device-meta">
+                <p class="papermono-device-ota-name">${escapeHtml(device.name || device.kind_label || 'Tablet')}</p>
+                <p class="hint">${escapeHtml(device.kind_label || '')} · ${escapeHtml(status)} · fw ${reported} → ${latest} · ${escapeHtml(last)}</p>
+            </div>
+            <div class="papermono-device-actions">${paperOtaUpdateButton(device)}</div>
+        </div>`;
+    }).join('');
+    bindPaperOtaButtons(els.settingsPaperOtaList);
+    if (els.settingsPaperOtaAll) {
+        els.settingsPaperOtaAll.disabled = ready.length === 0;
+    }
+}
+
 function renderPaperMonoDevices(devices) {
     if (!els.papermonoDevices) return;
     if (!Array.isArray(devices) || devices.length === 0) {
         els.papermonoDevices.innerHTML = '<p class="hint">None yet. Flash a tablet to pair it.</p>';
+        renderPaperOtaPanel(devices);
         return;
     }
     els.papermonoDevices.innerHTML = devices.map((device) => {
@@ -3801,6 +3857,7 @@ function renderPaperMonoDevices(devices) {
             : 'Never seen';
         const kindLabel = device.kind_label ? `${escapeHtml(String(device.kind_label))} · ` : '';
         const fw = device.fw_reported ? ` · fw ${escapeHtml(String(device.fw_reported))}` : '';
+        const online = device.online ? 'online' : 'offline';
         const revokeLabel = device.kind_label || device.name || 'companion';
         return `<div class="papermono-device-row">
             <div class="papermono-device-meta">
@@ -3808,9 +3865,10 @@ function renderPaperMonoDevices(devices) {
                     <span class="label">Tablet name</span>
                     <input type="text" maxlength="40" value="${escapeHtml(device.name || 'PaperMono')}" data-papermono-name="${escapeHtml(device.id)}" data-papermono-kind="${escapeHtml(device.kind || 'papermono')}">
                 </label>
-                <p class="hint">${kindLabel}${escapeHtml(last)}${fw}</p>
+                <p class="hint">${kindLabel}${escapeHtml(online)} · ${escapeHtml(last)}${fw}</p>
             </div>
             <div class="papermono-device-actions">
+                ${paperOtaUpdateButton(device)}
                 <button type="button" class="btn btn-secondary btn-compact" data-papermono-rename="${escapeHtml(device.id)}">Save name</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-papermono-revoke="${escapeHtml(device.id)}" data-papermono-revoke-label="${escapeHtml(String(revokeLabel))}">Revoke</button>
             </div>
@@ -3825,7 +3883,45 @@ function renderPaperMonoDevices(devices) {
     els.papermonoDevices.querySelectorAll('[data-papermono-name]').forEach((input) => {
         input.addEventListener('input', () => refreshPaperLockPreview());
     });
+    bindPaperOtaButtons(els.papermonoDevices);
     refreshPaperLockPreview();
+    renderPaperOtaPanel(devices);
+}
+
+async function queuePaperOta(id, button) {
+    const all = id === '*';
+    const label = all ? 'all online tablets' : 'this tablet';
+    if (!window.confirm(`Push firmware to ${label}? The tablet stays on Wi-Fi, shows UPDATING, then reboots. PaperMono beeps and lights green.`)) {
+        return;
+    }
+    if (button) button.disabled = true;
+    if (els.settingsPaperOtaResult) {
+        els.settingsPaperOtaResult.textContent = 'Queuing update…';
+        els.settingsPaperOtaResult.className = 'settings-cloud-result';
+        els.settingsPaperOtaResult.classList.remove('hidden');
+    }
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'ota', id: id || '*' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not queue the update');
+        showToast(data.message || 'Update queued', 'success');
+        if (els.settingsPaperOtaResult) {
+            els.settingsPaperOtaResult.textContent = data.message || 'Update queued.';
+            els.settingsPaperOtaResult.className = 'settings-cloud-result success';
+        }
+        loadPaperMonoDashboard();
+    } catch (err) {
+        showToast(err.message || 'Could not queue the update', 'error');
+        if (els.settingsPaperOtaResult) {
+            els.settingsPaperOtaResult.textContent = err.message || 'Could not queue the update';
+            els.settingsPaperOtaResult.className = 'settings-cloud-result error';
+        }
+        if (button) button.disabled = false;
+    }
 }
 
 let paperMonoDashboardCache = null;
@@ -5775,6 +5871,7 @@ document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
 els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));
 els.settingsUpdateViewNotes?.addEventListener('click', (e) => viewReleaseNotes(e.currentTarget));
 els.settingsUpdateRun?.addEventListener('click', (e) => runPanelUpdate(e.currentTarget));
+els.settingsPaperOtaAll?.addEventListener('click', (e) => queuePaperOta('*', e.currentTarget));
 document.querySelectorAll('[data-settings-close]').forEach((el) => {
     el.addEventListener('click', closeSettingsModal);
 });
