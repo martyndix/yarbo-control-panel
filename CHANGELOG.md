@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.29] - 2026-09-25
+
+### Changed
+- PaperMono and Paper Colour top line follows the current module: **YARBO** (Colour: **YARBO · COLOUR**), **POWERWALL**, **LYMOW**, **VESTABOARD**, **RADIO**, or **DEVICE**. Firmware **0.1.12-beta** / **0.2.9-colour**.
+
 ## [2.0.28] - 2026-09-25
 
 ### Changed

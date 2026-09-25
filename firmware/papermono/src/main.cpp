@@ -338,12 +338,22 @@ String headerDeviceName()
     return robotName.length() ? robotName : deviceName;
 }
 
+String headerBrand()
+{
+    if (currentPage == PAPERMONO_PAGE_POWERWALL) return "POWERWALL";
+    if (currentPage == PAPERMONO_PAGE_LYMOW) return "LYMOW";
+    if (currentPage == PAPERMONO_PAGE_NOTE || currentPage == PAPERMONO_PAGE_BOARD) return "VESTABOARD";
+    if (currentPage == PAPERMONO_PAGE_RADIO) return "RADIO";
+    if (currentPage == PAPERMONO_PAGE_DEVICE) return "DEVICE";
+    return "YARBO";
+}
+
 void drawHeader()
 {
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(2);
-    M5.Display.drawString("YARBO", 16, 16);
+    M5.Display.drawString(headerBrand(), 16, 16);
     M5.Display.setTextSize(1);
     M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     M5.Display.setTextSize(2);
