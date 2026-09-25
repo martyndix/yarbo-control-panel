@@ -3660,10 +3660,28 @@ function fillPaperLockBoards() {
     });
 }
 
+function lockPreviewName(kind) {
+    const generic = paperMonoDefaultName(kind);
+    const row = [...document.querySelectorAll('#papermono-devices .papermono-device-row')]
+        .find((el) => (el.querySelector('[data-papermono-kind]')?.getAttribute('data-papermono-kind') || 'papermono') === kind);
+    const paired = row?.querySelector('[data-papermono-name]')?.value.trim();
+    if (paired) return paired;
+    if (paperMonoSelectedKind() === kind) {
+        const typed = els.papermonoName?.value.trim() || '';
+        if (typed !== '' && typed !== 'PaperMono' && typed !== 'Paper Colour') {
+            return typed;
+        }
+        if (typed) return typed;
+    }
+    return generic;
+}
+
 function refreshPaperLockPreview() {
-    const name = els.papermonoName?.value.trim() || paperMonoDefaultName();
-    document.querySelectorAll('[data-lock-name]').forEach((el) => {
-        el.textContent = name;
+    document.querySelectorAll('.paper-lock-mock--mono [data-lock-name]').forEach((el) => {
+        el.textContent = lockPreviewName('papermono');
+    });
+    document.querySelectorAll('.paper-lock-mock--color [data-lock-name]').forEach((el) => {
+        el.textContent = lockPreviewName('papercolor');
     });
     const lock = els.papermonoLockScreen?.value || 'logo';
     const vestaboardOn = Boolean(els.settingsVestaboardEnabled?.checked);
@@ -3788,7 +3806,7 @@ function renderPaperMonoDevices(devices) {
             <div class="papermono-device-meta">
                 <label class="settings-field papermono-device-name-field">
                     <span class="label">Tablet name</span>
-                    <input type="text" maxlength="40" value="${escapeHtml(device.name || 'PaperMono')}" data-papermono-name="${escapeHtml(device.id)}">
+                    <input type="text" maxlength="40" value="${escapeHtml(device.name || 'PaperMono')}" data-papermono-name="${escapeHtml(device.id)}" data-papermono-kind="${escapeHtml(device.kind || 'papermono')}">
                 </label>
                 <p class="hint">${kindLabel}${escapeHtml(last)}${fw}</p>
             </div>
@@ -3804,6 +3822,10 @@ function renderPaperMonoDevices(devices) {
     els.papermonoDevices.querySelectorAll('[data-papermono-rename]').forEach((button) => {
         button.addEventListener('click', () => renamePaperMono(button.dataset.papermonoRename, button));
     });
+    els.papermonoDevices.querySelectorAll('[data-papermono-name]').forEach((input) => {
+        input.addEventListener('input', () => refreshPaperLockPreview());
+    });
+    refreshPaperLockPreview();
 }
 
 let paperMonoDashboardCache = null;

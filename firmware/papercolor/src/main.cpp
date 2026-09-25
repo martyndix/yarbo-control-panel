@@ -255,7 +255,7 @@ void drawHeader()
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(2);
-    M5.Display.drawString("YARBO  ·  COLOR", 16, 16);
+    M5.Display.drawString("YARBO  ·  COLOUR", 16, 16);
     M5.Display.setTextSize(1);
     M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     M5.Display.setTextSize(2);

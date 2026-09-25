@@ -2281,8 +2281,15 @@ html[data-theme="light"] .plan-activity {
 
 .paper-lock-board.vestaboard-preview {
     width: 100%;
-    transform: scale(0.92);
-    transform-origin: top center;
+    max-width: none;
+    padding: 6px;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.paper-lock-board .vestaboard-cell {
+    min-width: 0;
+    font-size: 0.48rem;
 }
 
 .papermono-actions {

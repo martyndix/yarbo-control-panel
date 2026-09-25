@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.28] - 2026-09-25
+
+### Changed
+- PaperMono header is **YARBO** (no BETA). Paper Colour header is **YARBO · COLOUR**. Firmware **0.1.11-beta** / **0.2.8-colour**.
+- E-paper lock examples use the tablet names from Settings, and the Vestaboard 3×15 tiles stay inside the board.
+
+### Removed
+- Four Spectra colour squares on the Paper Colour home example.
+
 ## [2.0.27] - 2026-09-25
 
 ### Added

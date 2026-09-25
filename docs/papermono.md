@@ -17,7 +17,7 @@ Hardware we compile for:
 - FT6336G touch, built-in frontlight
 - Two user buttons + power (ON / OFF / RESET / BOOT)
 - 1150mAh battery, USB-C
-- Onboard NFC (ST25R3916) and LoRa (SX1262). Firmware **0.1.10-beta** uses LoRa for RADIO (868 MHz, house sync word) with Wi-Fi fallback.
+- Onboard NFC (ST25R3916) and LoRa (SX1262). Firmware **0.1.11-beta** uses LoRa for RADIO (868 MHz, house sync word) with Wi-Fi fallback.
 
 It has **no browser**. This panel flashes native firmware over USB from **Settings**, then the tablet talks HTTP JSON to the panel. The panel stays the MQTT brain.
 
@@ -38,7 +38,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 ## What it shows
 
 - **Home / Status / Health / Plans:** Yarbo robot tiles (Stop / Dock on Home). Hidden when the Yarbo module is off in Settings.
-- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.10-beta**.
+- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.11-beta**.
 - **Note:** Vestaboard live view picker. Only lists modules that are on. Hidden when Vestaboard is off.
 - **Board:** live 3×15 preview of what the Vestaboard Note is showing. Hidden when Vestaboard is off.
 - **Powerwall:** house battery, solar, and draw. Hidden when the Powerwall module is off.

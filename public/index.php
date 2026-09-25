@@ -915,7 +915,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.6-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.8-colour</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOUR</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -998,9 +998,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.10-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.11-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOME</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">87%</text>
                                         <text x="24" y="240" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging  No</text>
@@ -1029,9 +1029,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono status screen mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.10-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.11-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">STATUS</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">100%</text>
                                         <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">State      idle</text>
@@ -1054,9 +1054,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono connection and health screen mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.10-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.11-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HEALTH</text>
                                         <text x="24" y="140" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn type  HaLow</text>
                                         <text x="24" y="176" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn stat  Connected</text>
@@ -1084,9 +1084,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono work plans screen mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.10-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.11-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PLANS</text>
                                         <text x="24" y="124" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">idle</text>
                                         <rect x="24" y="150" width="432" height="44" rx="10" fill="#111"/>
@@ -1121,9 +1121,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono Lymow page mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lymow  0.1.10-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lymow  0.1.11-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LYMOW</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">64%</text>
                                         <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">State      Mowing</text>
@@ -1136,9 +1136,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono Powerwall page mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO  ·  BETA</text>
+                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">PaperMono  0.1.10-beta</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">PaperMono  0.1.11-beta</text>
                                         <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">POWERWALL</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">81%</text>
                                         <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">Solar      1.2 kW</text>
@@ -1152,7 +1152,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="72" font-family="ui-sans-serif, system-ui, sans-serif" font-size="36" font-weight="700" fill="#111">PaperMono</text>
-                                        <text x="24" y="116" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" fill="#111">setup  ·  BETA</text>
+                                        <text x="24" y="116" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" fill="#111">setup</text>
                                         <text x="24" y="190" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">1. Plug USB into the computer</text>
                                         <text x="24" y="216" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">running this Yarbo panel.</text>
                                         <text x="24" y="264" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" fill="#222">2. Open Settings, then</text>
@@ -1170,18 +1170,14 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour home screen mock, 400 by 600 Spectra 6">
                                         <rect width="400" height="600" fill="#fffef6"/>
                                         <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
-                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOR</text>
+                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOUR</text>
                                         <image class="paper-logo-preview" href="" x="244" y="12" width="140" height="140" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lawnbot  0.2.7-color</text>
+                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lawnbot  0.2.8-colour</text>
                                         <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">HOME</text>
                                         <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">87%</text>
                                         <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">Charging  No</text>
                                         <text x="20" y="238" font-family="ui-monospace, monospace" font-size="16" fill="#111">State     idle</text>
                                         <text x="20" y="266" font-family="ui-monospace, monospace" font-size="16" fill="#111">Head      Mower</text>
-                                        <rect x="20" y="300" width="18" height="18" fill="#c41e3a"/>
-                                        <rect x="44" y="300" width="18" height="18" fill="#e6c200"/>
-                                        <rect x="68" y="300" width="18" height="18" fill="#2e8b57"/>
-                                        <rect x="92" y="300" width="18" height="18" fill="#1e5aa8"/>
                                         <text x="20" y="348" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#444">No touch · A/B pages · C lock</text>
                                         <rect x="16" y="548" width="70" height="16" fill="#111"/>
                                         <text x="51" y="560" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#fffef6">HOME</text>
@@ -1207,8 +1203,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour Lymow page mock">
                                         <rect width="400" height="600" fill="#fffef6"/>
                                         <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
-                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOR</text>
-                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lymow  0.2.7-color</text>
+                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOUR</text>
+                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lymow  0.2.8-colour</text>
                                         <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">LYMOW</text>
                                         <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">64%</text>
                                         <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">State     Mowing</text>
@@ -1220,8 +1216,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour Powerwall page mock">
                                         <rect width="400" height="600" fill="#fffef6"/>
                                         <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
-                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOR</text>
-                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Paper Colour  0.2.7-color</text>
+                                        <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOUR</text>
+                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Paper Colour  0.2.8-colour</text>
                                         <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">POWERWALL</text>
                                         <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">81%</text>
                                         <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">Solar     1.2 kW</text>

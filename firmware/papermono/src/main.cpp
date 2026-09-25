@@ -343,7 +343,7 @@ void drawHeader()
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(2);
-    M5.Display.drawString("YARBO  ·  BETA", 16, 16);
+    M5.Display.drawString("YARBO", 16, 16);
     M5.Display.setTextSize(1);
     M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     M5.Display.setTextSize(2);
@@ -972,7 +972,7 @@ void drawSetup()
     M5.Display.setTextSize(3);
     M5.Display.drawString("PaperMono", 16, 28);
     M5.Display.setTextSize(2);
-    M5.Display.drawString("setup  ·  BETA", 16, 78);
+    M5.Display.drawString("setup", 16, 78);
     M5.Display.setTextSize(1);
     M5.Display.drawString("1. Plug USB into the computer", 16, 140);
     M5.Display.drawString("   running this Yarbo panel.", 16, 162);
