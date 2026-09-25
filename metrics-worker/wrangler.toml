@@ -1,9 +1,10 @@
 name = "yarbo-panel-metrics"
 main = "src/worker.js"
 compatibility_date = "2026-09-25"
+workers_dev = true
+preview_urls = false
 
-# After `npx wrangler d1 create yarbo-panel-metrics`, paste the database_id here.
 [[d1_databases]]
 binding = "DB"
 database_name = "yarbo-panel-metrics"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "86439e37-32fd-4349-8fac-862379efe8b7"

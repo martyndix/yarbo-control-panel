@@ -1,0 +1,7 @@
+{
+  "name": "yarbo-panel-metrics",
+  "private": true,
+  "devDependencies": {
+    "wrangler": "^4.140.0"
+  }
+}
