@@ -356,8 +356,11 @@ void drawHeader()
     M5.Display.drawString(headerBrand(), 16, 16);
     M5.Display.setTextSize(1);
     M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
-    M5.Display.setTextSize(2);
-    M5.Display.drawString(pageName(currentPage), 16, 72);
+    String page = pageName(currentPage);
+    if (page != headerBrand()) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString(page, 16, 72);
+    }
     M5.Display.setTextSize(1);
     M5.Display.setTextDatum(TR_DATUM);
     String bat = tabletBat >= 0 ? (String(tabletBat) + "%") : String("--");

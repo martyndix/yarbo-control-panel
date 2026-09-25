@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.30] - 2026-09-25
+
+### Changed
+- Single-page e-paper modules (Lymow, Powerwall, Radio, Device) show the module name once. Firmware **0.1.13-beta** / **0.2.10-colour**.
+
 ## [2.0.29] - 2026-09-25
 
 ### Changed
