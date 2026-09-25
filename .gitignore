@@ -18,6 +18,7 @@
 /data/hub-config.json
 /data/install-id.json
 /data/metrics-last.json
+/data/metrics-ping.log
 /data/powerwall-config.json
 /data/powerwall-cache.json
 /data/lymow-config.json

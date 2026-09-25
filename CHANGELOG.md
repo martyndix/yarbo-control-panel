@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.33] - 2026-09-25
+
+### Fixed
+- Anonymous usage ping uses `curl` (the same HTTPS path as GitHub updates) and also fires from the web UI, so a Pi on the LAN can check in even if PHP URL wrappers are off.
+
 ## [2.0.32] - 2026-09-25
 
 ### Added

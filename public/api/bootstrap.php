@@ -56,3 +56,8 @@ function json_response(array $data, int $status = 200): void
     echo $json;
     exit;
 }
+
+try {
+    (new \Yarbo\YarboMetrics(dirname(__DIR__, 2)))->kickBackground();
+} catch (\Throwable) {
+}
