@@ -12,8 +12,10 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.7-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.5-color';
+    public const FIRMWARE_VERSION = '0.1.8-beta';
+    public const FIRMWARE_VERSION_COLOR = '0.2.6-color';
+    public const MESSAGE_MAX = 50;
+    public const MESSAGE_CHARS = 180;
     public const LOGO_MAX_EDGE = 240;
     public const LOGO_MAX_UPLOAD_BYTES = 2097152;
     private const PLANS_CACHE_TTL_S = 300;
@@ -72,6 +74,7 @@ final class YarboPaperDevice
                 ],
             ],
             'devices' => $this->publicDevices(),
+            'prefs' => $this->publicPrefs(),
         ] + $this->logoPublicView();
     }
 
@@ -262,6 +265,109 @@ final class YarboPaperDevice
         return true;
     }
 
+    public function rename(string $id, string $name): ?array
+    {
+        $name = trim($name);
+        if ($name === '' || strlen($name) > 40) {
+            return null;
+        }
+        $store = $this->load();
+        foreach ($store['devices'] as &$device) {
+            if (!is_array($device) || (string) ($device['id'] ?? '') !== $id) {
+                continue;
+            }
+            $device['name'] = $name;
+            $this->save($store);
+
+            return $this->publicDevice($device);
+        }
+        unset($device);
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function savePrefs(array $input): array
+    {
+        $store = $this->load();
+        $store['prefs'] = $this->normalizePrefs($input + $store['prefs']);
+        $this->save($store);
+
+        return ['ok' => true, 'prefs' => $this->publicPrefs($store['prefs'])];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function publicPrefs(?array $prefs = null): array
+    {
+        return $this->normalizePrefs($prefs ?? $this->load()['prefs']);
+    }
+
+    /**
+     * @param array<string, mixed> $fromDevice
+     * @return array<string, mixed>
+     */
+    public function postPaperMessage(array $fromDevice, string $to, string $text): array
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return ['ok' => false, 'error' => 'Message is empty'];
+        }
+        if (strlen($text) > self::MESSAGE_CHARS) {
+            $text = substr($text, 0, self::MESSAGE_CHARS);
+        }
+        $to = trim($to);
+        if ($to === '' || $to === '*') {
+            $to = '*';
+        }
+        $fromId = (string) ($fromDevice['id'] ?? '');
+        $fromName = (string) ($fromDevice['name'] ?? 'PaperMono');
+        $toName = 'ALL';
+        if ($to !== '*') {
+            $peer = $this->findById($to);
+            if ($peer === null) {
+                return ['ok' => false, 'error' => 'Unknown recipient'];
+            }
+            $toName = (string) ($peer['name'] ?? $to);
+        }
+        $store = $this->load();
+        $message = [
+            'id' => bin2hex(random_bytes(4)),
+            'from' => $fromId,
+            'from_name' => $fromName,
+            'to' => $to,
+            'to_name' => $toName,
+            'text' => $text,
+            'at' => gmdate('c'),
+        ];
+        $store['messages'][] = $message;
+        if (count($store['messages']) > self::MESSAGE_MAX) {
+            $store['messages'] = array_slice($store['messages'], -self::MESSAGE_MAX);
+        }
+        $this->save($store);
+
+        return ['ok' => true, 'message' => $message];
+    }
+
+    public function findById(string $id): ?array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return null;
+        }
+        foreach ($this->load()['devices'] as $device) {
+            if (is_array($device) && (string) ($device['id'] ?? '') === $id) {
+                return $device;
+            }
+        }
+
+        return null;
+    }
+
     public function findByToken(?string $token): ?array
     {
         $token = trim((string) $token);
@@ -300,7 +406,11 @@ final class YarboPaperDevice
     /**
      * @return array<string, mixed>
      */
-    public function compactStatus(?string $kind = null): array
+    /**
+     * @param array<string, mixed>|null $forDevice
+     * @return array<string, mixed>
+     */
+    public function compactStatus(?string $kind = null, ?array $forDevice = null): array
     {
         $latest = $this->firmwareVersionForKind($kind);
         $agent = YarboMqttAgentClient::fromEnv();
@@ -311,7 +421,8 @@ final class YarboPaperDevice
                 'ok' => false,
                 'error' => (string) ($result['error'] ?? 'telemetry unavailable'),
                 'firmware_latest' => $latest,
-            ] + $this->companionCompact();
+                'error_code' => 0,
+            ] + $this->companionCompact(null, false, $forDevice);
         }
 
         $cells = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
@@ -371,25 +482,33 @@ final class YarboPaperDevice
             'hold_controller' => (bool) ($result['hold_controller'] ?? false),
             'firmware_latest' => $latest,
             'updated_at' => $parsed['updated_at'] ?? gmdate('c'),
-        ] + $this->companionCompact();
+        ] + $this->companionCompact($parsed, true, $forDevice);
     }
 
     /**
+     * @param array<string, mixed>|null $parsed
+     * @param array<string, mixed>|null $forDevice
      * @return array<string, mixed>
      */
-    private function companionCompact(): array
+    private function companionCompact(?array $parsed = null, bool $online = false, ?array $forDevice = null): array
     {
         $hub = new YarboHub($this->projectRoot);
         $pw = (new YarboPowerwall($this->projectRoot))->dashboardPayload();
         $ly = (new YarboLymow($this->projectRoot))->dashboardPayload();
-        $vb = (new YarboVestaboard($this->projectRoot))->load();
+        $vbObj = new YarboVestaboard($this->projectRoot);
+        $vb = $vbObj->load();
+        $pwEnabled = $hub->enabled(YarboHub::MODULE_POWERWALL);
+        $lyEnabled = $hub->enabled(YarboHub::MODULE_LYMOW);
+        $errorCode = is_array($parsed) ? ($parsed['error_code'] ?? 0) : 0;
+        $powerFault = is_array($parsed) ? (int) ($parsed['power_fault'] ?? 0) : 0;
+        $lyWork = isset($ly['work_status']) ? (int) $ly['work_status'] : null;
 
         return [
             'hub' => $hub->publicView(),
             'vestaboard_enabled' => !empty($vb['enabled']),
             'vestaboard_live' => $hub->vestaboardLive(),
-            'powerwall_enabled' => $hub->enabled(YarboHub::MODULE_POWERWALL),
-            'lymow_enabled' => $hub->enabled(YarboHub::MODULE_LYMOW),
+            'powerwall_enabled' => $pwEnabled,
+            'lymow_enabled' => $lyEnabled,
             'powerwall_pct' => isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : -1,
             'powerwall_solar' => (string) ($pw['solar_label'] ?? '—'),
             'powerwall_load' => (string) ($pw['load_label'] ?? '—'),
@@ -399,7 +518,13 @@ final class YarboPaperDevice
             'lymow_state' => $this->lymowCompanionState($ly),
             'lymow_charging' => (string) ($ly['charging_label'] ?? '—'),
             'lymow_name' => (string) ($ly['page_name'] ?? ''),
-        ] + $this->logoPublicView();
+            'yarbo_error' => $online && ((int) $errorCode !== 0 || $powerFault > 0),
+            'powerwall_error' => $pwEnabled && empty($pw['online']) && empty($pw['ok']),
+            'lymow_error' => $lyEnabled && ($lyWork === 7 || (empty($ly['ok']) && empty($ly['online']))),
+        ] + $this->logoPublicView()
+            + $this->prefsCompact($forDevice)
+            + $this->vestaboardCompact($vbObj, $vb, $parsed, $online)
+            + $this->clockCompact($vbObj);
     }
 
     /**
@@ -414,6 +539,185 @@ final class YarboPaperDevice
         }
 
         return $state !== '' ? $state : '—';
+    }
+
+    /**
+     * @param array<string, mixed>|null $forDevice
+     * @return array<string, mixed>
+     */
+    private function prefsCompact(?array $forDevice): array
+    {
+        $store = $this->load();
+        $prefs = $this->normalizePrefs($store['prefs']);
+        $id = (string) ($forDevice['id'] ?? '');
+        $name = (string) ($forDevice['name'] ?? '');
+        $peers = [];
+        foreach ($store['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $peerId = (string) ($device['id'] ?? '');
+            if ($peerId === '' || $peerId === $id) {
+                continue;
+            }
+            $peers[] = [
+                'id' => $peerId,
+                'name' => (string) ($device['name'] ?? $this->kindLabel($this->deviceKind($device))),
+                'kind' => $this->deviceKind($device),
+            ];
+        }
+        $inbox = [];
+        foreach ($store['messages'] as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+            $to = (string) ($message['to'] ?? '*');
+            if ($to !== '*' && $to !== $id) {
+                continue;
+            }
+            if ((string) ($message['from'] ?? '') === $id) {
+                continue;
+            }
+            $inbox[] = [
+                'id' => (string) ($message['id'] ?? ''),
+                'from' => (string) ($message['from'] ?? ''),
+                'from_name' => (string) ($message['from_name'] ?? ''),
+                'to' => $to,
+                'to_name' => (string) ($message['to_name'] ?? ''),
+                'text' => (string) ($message['text'] ?? ''),
+                'at' => (string) ($message['at'] ?? ''),
+            ];
+        }
+        $inbox = array_slice($inbox, -8);
+
+        return $prefs + [
+            'device_id' => $id,
+            'device_name' => $name,
+            'paper_peers' => $peers,
+            'paper_messages' => $inbox,
+            'radio_sync' => $this->radioSyncWord(),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $vb
+     * @param array<string, mixed>|null $parsed
+     * @return array<string, mixed>
+     */
+    private function vestaboardCompact(YarboVestaboard $vbObj, array $vb, ?array $parsed, bool $online): array
+    {
+        $codes = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
+        $lines = null;
+        if ($codes === null) {
+            $dash = $vbObj->dashboardPayload($parsed, $online);
+            $codes = YarboVestaboard::normalizeLiveCodes($dash['codes'] ?? null) ?? [
+                array_fill(0, 15, 0),
+                array_fill(0, 15, 0),
+                array_fill(0, 15, 0),
+            ];
+            $lines = is_array($dash['lines'] ?? null) ? $dash['lines'] : YarboVestaboard::linesFromCodes($codes);
+        }
+        if (!is_array($lines)) {
+            $lines = YarboVestaboard::linesFromCodes($codes);
+        }
+        $hash = hash('sha256', json_encode($codes));
+
+        return [
+            'vestaboard_codes' => $codes,
+            'vestaboard_lines' => $lines,
+            'vestaboard_hash' => $hash,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function clockCompact(YarboVestaboard $vbObj): array
+    {
+        $zoneName = $vbObj->resolveQuietTimezone();
+        if ($zoneName === '') {
+            $zoneName = date_default_timezone_get() ?: 'UTC';
+        }
+        try {
+            $tz = new \DateTimeZone($zoneName);
+        } catch (\Exception $e) {
+            $tz = new \DateTimeZone('UTC');
+            $zoneName = 'UTC';
+        }
+        $now = new \DateTimeImmutable('now', $tz);
+
+        return [
+            'clock_tz' => $zoneName,
+            'clock_local' => $now->format('H:i'),
+            'clock_date' => $now->format('D j M'),
+            'clock_epoch' => $now->getTimestamp(),
+            'clock_offset' => $now->getOffset(),
+        ];
+    }
+
+    public function radioSyncWord(): int
+    {
+        $config = @include $this->projectRoot . '/config.php';
+        $serial = is_array($config) ? (string) ($config['serial'] ?? '') : '';
+        $hash = hexdec(substr(hash('sha256', 'yarbo-paper-lora|' . $serial), 0, 2));
+        $word = $hash & 0xFF;
+        if ($word === 0 || $word === 0x12 || $word === 0x34) {
+            $word = 0xA5;
+        }
+
+        return $word;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function defaultPrefs(): array
+    {
+        return [
+            'lock_after_s' => 60,
+            'light_off_s' => 15,
+            'brightness' => 80,
+            'lock_screen' => 'logo',
+            'alert_message' => true,
+            'alert_yarbo' => true,
+            'alert_lymow' => true,
+            'alert_powerwall' => true,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    private function normalizePrefs(array $input): array
+    {
+        $defaults = $this->defaultPrefs();
+        $lockScreen = strtolower(trim((string) ($input['lock_screen'] ?? $defaults['lock_screen'])));
+        if (!in_array($lockScreen, ['logo', 'vestaboard', 'both'], true)) {
+            $lockScreen = 'logo';
+        }
+        $bool = static function (mixed $value, bool $fallback): bool {
+            if ($value === null) {
+                return $fallback;
+            }
+            if (is_bool($value)) {
+                return $value;
+            }
+            $s = strtolower(trim((string) $value));
+
+            return in_array($s, ['1', 'true', 'yes', 'on'], true);
+        };
+
+        return [
+            'lock_after_s' => max(10, min(600, (int) ($input['lock_after_s'] ?? $defaults['lock_after_s']))),
+            'light_off_s' => max(5, min(300, (int) ($input['light_off_s'] ?? $defaults['light_off_s']))),
+            'brightness' => max(0, min(100, (int) ($input['brightness'] ?? $defaults['brightness']))),
+            'lock_screen' => $lockScreen,
+            'alert_message' => $bool($input['alert_message'] ?? null, $defaults['alert_message']),
+            'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),
+            'alert_lymow' => $bool($input['alert_lymow'] ?? null, $defaults['alert_lymow']),
+            'alert_powerwall' => $bool($input['alert_powerwall'] ?? null, $defaults['alert_powerwall']),
+        ];
     }
 
     /**
@@ -750,21 +1054,38 @@ final class YarboPaperDevice
     }
 
     /**
-     * @return array{devices: list<array<string, mixed>>}
+     * @return array{devices: list<array<string, mixed>>, prefs: array<string, mixed>, messages: list<array<string, mixed>>}
      */
     private function load(): array
     {
+        $empty = [
+            'devices' => [],
+            'prefs' => $this->defaultPrefs(),
+            'messages' => [],
+        ];
         $path = $this->storePath();
         if (!is_file($path)) {
-            return ['devices' => []];
+            return $empty;
         }
         $raw = file_get_contents($path);
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
         if (!is_array($decoded) || !isset($decoded['devices']) || !is_array($decoded['devices'])) {
-            return ['devices' => []];
+            return $empty;
+        }
+        $messages = [];
+        if (isset($decoded['messages']) && is_array($decoded['messages'])) {
+            foreach ($decoded['messages'] as $message) {
+                if (is_array($message)) {
+                    $messages[] = $message;
+                }
+            }
         }
 
-        return ['devices' => array_values($decoded['devices'])];
+        return [
+            'devices' => array_values($decoded['devices']),
+            'prefs' => $this->normalizePrefs(is_array($decoded['prefs'] ?? null) ? $decoded['prefs'] : []),
+            'messages' => $messages,
+        ];
     }
 
     /**

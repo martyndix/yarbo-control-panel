@@ -208,6 +208,16 @@ const els = {
     papermonoLogoThumb: document.getElementById('papermono-logo-thumb'),
     papermonoLogoClear: document.getElementById('papermono-logo-clear'),
     papermonoLogoResult: document.getElementById('papermono-logo-result'),
+    papermonoLockScreen: document.getElementById('papermono-lock-screen'),
+    papermonoLockAfter: document.getElementById('papermono-lock-after'),
+    papermonoLightOff: document.getElementById('papermono-light-off'),
+    papermonoBrightness: document.getElementById('papermono-brightness'),
+    papermonoAlertMessage: document.getElementById('papermono-alert-message'),
+    papermonoAlertYarbo: document.getElementById('papermono-alert-yarbo'),
+    papermonoAlertLymow: document.getElementById('papermono-alert-lymow'),
+    papermonoAlertPowerwall: document.getElementById('papermono-alert-powerwall'),
+    papermonoPrefsSave: document.getElementById('papermono-prefs-save'),
+    papermonoPrefsResult: document.getElementById('papermono-prefs-result'),
     papermonoResult: document.getElementById('papermono-result'),
     papermonoFwStatus: document.getElementById('papermono-fw-status'),
     papermonoDevices: document.getElementById('papermono-devices'),
@@ -3633,15 +3643,24 @@ function renderPaperMonoDevices(devices) {
         const fw = device.fw_reported ? ` · fw ${escapeHtml(String(device.fw_reported))}` : '';
         const revokeLabel = device.kind_label || device.name || 'companion';
         return `<div class="papermono-device-row">
-            <div>
-                <strong>${escapeHtml(device.name || 'PaperMono')}</strong>
+            <div class="papermono-device-meta">
+                <label class="settings-field papermono-device-name-field">
+                    <span class="label">Tablet name</span>
+                    <input type="text" maxlength="40" value="${escapeHtml(device.name || 'PaperMono')}" data-papermono-name="${escapeHtml(device.id)}">
+                </label>
                 <p class="hint">${kindLabel}${escapeHtml(last)}${fw}</p>
             </div>
-            <button type="button" class="btn btn-secondary btn-compact" data-papermono-revoke="${escapeHtml(device.id)}" data-papermono-revoke-label="${escapeHtml(String(revokeLabel))}">Revoke</button>
+            <div class="papermono-device-actions">
+                <button type="button" class="btn btn-secondary btn-compact" data-papermono-rename="${escapeHtml(device.id)}">Save name</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-papermono-revoke="${escapeHtml(device.id)}" data-papermono-revoke-label="${escapeHtml(String(revokeLabel))}">Revoke</button>
+            </div>
         </div>`;
     }).join('');
     els.papermonoDevices.querySelectorAll('[data-papermono-revoke]').forEach((button) => {
         button.addEventListener('click', () => revokePaperMono(button.dataset.papermonoRevoke, button));
+    });
+    els.papermonoDevices.querySelectorAll('[data-papermono-rename]').forEach((button) => {
+        button.addEventListener('click', () => renamePaperMono(button.dataset.papermonoRename, button));
     });
 }
 
@@ -3657,6 +3676,7 @@ async function loadPaperMonoDashboard() {
         paperMonoDashboardCache = data;
         applyPaperMonoKindUi(data);
         applyPaperLogoPreview(data.logo_url || null);
+        applyPaperMonoPrefs(data.prefs);
         renderPaperMonoDevices(data.devices);
     } catch (err) {
         if (els.papermonoFwStatus) {
@@ -3786,6 +3806,91 @@ async function runPaperMonoUsb(action, button) {
         loadPaperMonoDashboard();
     } catch (err) {
         setPaperMonoResult(err.message || 'USB step failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function applyPaperMonoPrefs(prefs) {
+    if (!prefs || typeof prefs !== 'object') return;
+    if (els.papermonoLockScreen) els.papermonoLockScreen.value = prefs.lock_screen || 'logo';
+    if (els.papermonoLockAfter) els.papermonoLockAfter.value = String(prefs.lock_after_s ?? 60);
+    if (els.papermonoLightOff) els.papermonoLightOff.value = String(prefs.light_off_s ?? 15);
+    if (els.papermonoBrightness) els.papermonoBrightness.value = String(prefs.brightness ?? 80);
+    if (els.papermonoAlertMessage) els.papermonoAlertMessage.checked = prefs.alert_message !== false;
+    if (els.papermonoAlertYarbo) els.papermonoAlertYarbo.checked = prefs.alert_yarbo !== false;
+    if (els.papermonoAlertLymow) els.papermonoAlertLymow.checked = prefs.alert_lymow !== false;
+    if (els.papermonoAlertPowerwall) els.papermonoAlertPowerwall.checked = prefs.alert_powerwall !== false;
+}
+
+function paperMonoPrefsPayload() {
+    return {
+        action: 'prefs',
+        lock_screen: els.papermonoLockScreen?.value || 'logo',
+        lock_after_s: Number(els.papermonoLockAfter?.value || 60),
+        light_off_s: Number(els.papermonoLightOff?.value || 15),
+        brightness: Number(els.papermonoBrightness?.value || 80),
+        alert_message: !!els.papermonoAlertMessage?.checked,
+        alert_yarbo: !!els.papermonoAlertYarbo?.checked,
+        alert_lymow: !!els.papermonoAlertLymow?.checked,
+        alert_powerwall: !!els.papermonoAlertPowerwall?.checked,
+    };
+}
+
+function setPaperMonoPrefsResult(message, type) {
+    if (!els.papermonoPrefsResult) return;
+    if (!message) {
+        els.papermonoPrefsResult.textContent = '';
+        els.papermonoPrefsResult.className = 'settings-cloud-result hidden';
+        return;
+    }
+    els.papermonoPrefsResult.textContent = message;
+    els.papermonoPrefsResult.className = `settings-cloud-result ${type || ''}`.trim();
+    els.papermonoPrefsResult.classList.remove('hidden');
+}
+
+async function savePaperMonoPrefs(button) {
+    if (button) button.disabled = true;
+    setPaperMonoPrefsResult('');
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(paperMonoPrefsPayload()),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not save companion settings');
+        applyPaperMonoPrefs(data.prefs);
+        setPaperMonoPrefsResult('Companion settings saved. Tablets pick them up on the next poll.', 'success');
+        showToast('Companion settings saved', 'success');
+    } catch (err) {
+        setPaperMonoPrefsResult(err.message || 'Could not save companion settings', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function renamePaperMono(id, button) {
+    if (!id || !els.papermonoDevices) return;
+    const input = els.papermonoDevices.querySelector(`[data-papermono-name="${id}"]`);
+    const name = input?.value.trim() || '';
+    if (name === '') {
+        setPaperMonoResult('Give the tablet a name', 'error');
+        return;
+    }
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'rename', id, name }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not rename');
+        showToast(`Renamed to ${data.device?.name || name}`, 'success');
+        loadPaperMonoDashboard();
+    } catch (err) {
+        setPaperMonoResult(err.message || 'Could not rename', 'error');
     } finally {
         if (button) button.disabled = false;
     }
@@ -5454,6 +5559,7 @@ els.papermonoLogo?.addEventListener('change', (e) => {
     uploadPaperLogo(file);
 });
 els.papermonoLogoClear?.addEventListener('click', () => clearPaperLogo());
+els.papermonoPrefsSave?.addEventListener('click', (e) => savePaperMonoPrefs(e.currentTarget));
 document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
     input.addEventListener('change', () => {
         applyPaperMonoKindUi(paperMonoDashboardCache);

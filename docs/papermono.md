@@ -8,7 +8,7 @@ This firmware and Settings flash path are built for **M5Stack PaperMono, SKU C15
 | **SKU** | **C153** |
 | **Docs** | [docs.m5stack.com/en/core/PaperMono](https://docs.m5stack.com/en/core/PaperMono) |
 | **Shop** | [M5PaperMono with LoRa & NFC (3.97″)](https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display) |
-| **Not this SKU** | [PaperMono-Lite (C153-Lite)](https://docs.m5stack.com/en/core/PaperMono-Lite) — same screen/SoC, no NFC/LoRa. This companion does not use NFC or LoRa, so Lite may run the same binary, but it is not the model we targeted. |
+| **Not this SKU** | [PaperMono-Lite (C153-Lite)](https://docs.m5stack.com/en/core/PaperMono-Lite) — same screen/SoC, no NFC/LoRa. RADIO will use Wi-Fi fallback only on Lite. |
 
 Hardware we compile for:
 
@@ -17,7 +17,7 @@ Hardware we compile for:
 - FT6336G touch, built-in frontlight
 - Two user buttons + power (ON / OFF / RESET / BOOT)
 - 1150mAh battery, USB-C
-- Onboard NFC (ST25R3916) and LoRa (SX1262) are **present on C153 and unused** by this firmware
+- Onboard NFC (ST25R3916) and LoRa (SX1262). Firmware **0.1.8-beta** uses LoRa for RADIO (868 MHz, house sync word) with Wi-Fi fallback.
 
 It has **no browser**. This panel flashes native firmware over USB from **Settings**, then the tablet talks HTTP JSON to the panel. The panel stays the MQTT brain.
 
@@ -38,16 +38,19 @@ Home and extra-page mocks (not photos of a flashed unit):
 ## What it shows
 
 - **Home:** battery, charging, working state, attached head, error code, and large **Stop**, **Dock**, **Pause** / **Resume**, **Lights**
-- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.7-beta**.
+- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.8-beta**.
 - **Status:** the same tiles as the web Status card (including heading and rain)
 - **Health:** the same tiles as Connection & Health (Wi-Fi, pad, RTK, and so on)
 - **Plans:** named work plans. Tap a row to select, tap **START** to run it from 0% (same MQTT start as the web panel)
-- **Note:** Vestaboard live view. Tap **YARBO**, and **WALL** / **LYMOW** / **ALL** only when those modules are enabled. Same choice as the Vestaboard Note card pills and Settings. The **NOTE** page is hidden when Vestaboard is off.
-- **Lymow:** Lymow battery, state, and charging. Hidden when the Lymow module is off. The header shows the Lymow-app name (or the name set in Settings).
-- The two hardware keys cycle enabled pages only (**Home → Status → Health → Plans**, then **Note** and **Lymow** when those modules are on). Stop / Dock are Home buttons only.
-- Tap above the Home buttons (or the pager on other pages) also changes page if the keys are not mapped.
+- **Note:** Vestaboard live view picker. Tap **YARBO**, and **WALL** / **LYMOW** / **ALL** only when those modules are enabled. Hidden when Vestaboard is off.
+- **Board:** live 3×15 preview of what the Vestaboard Note is showing. Hidden when Vestaboard is off.
+- **Lymow:** Lymow battery, state, and charging. Hidden when the Lymow module is off.
+- **Radio:** house messages (~180 characters) to **ALL** or a named peer. Tries LoRa first, then Wi-Fi via the panel.
+- **Device:** this tablet’s battery, clock, and **OFF** (full power-off). Brightness, mute, and timers are Settings only.
+- **Lock screen:** idle timer from Settings. Layout is logo, Vestaboard, or both. Tablet name is on the lock screen. Unlock is two opposite-corner taps (1 then 2). The red side button returns to lock. Incoming messages stay locked and badge + beep/flash if alerts are on.
+- Hardware keys cycle enabled pages when unlocked. Stop / Dock are Home buttons only.
 
-It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, LoRa, mic, IMU, and the SD slot are unused in this firmware.
+It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, mic, IMU, and the SD slot are unused in this firmware. Sleep timers, brightness, buzzer, and RGB alerts are set in **Settings → E-paper companions**, not on the tablet.
 
 ## E-paper care (manufacturer)
 

@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.24] - 2026-09-25
+
+### Added
+- PaperMono **0.1.8-beta**: pocket lock (logo / live Vestaboard / both), opposite-corner unlock, DEVICE page (tablet battery, clock, power off), BOARD live Vestaboard preview, RADIO messaging over LoRa with Wi-Fi fallback, RGB + buzzer on receive and on Yarbo / Lymow / Powerwall errors.
+- Paper Colour **0.2.6-color**: BOARD live Vestaboard preview and a lock screensaver (C toggles it). Same lock layout choice as PaperMono.
+- Settings **E-paper companions**: rename each tablet, lock-screen layout, lock/frontlight timers, brightness, and alert toggles. All of these are central — tablets apply them on the next poll.
+
+### Changed
+- PaperMono red power button short-press returns to the lock screen. Full power-off is the DEVICE **OFF** control.
+
 ## [2.0.23] - 2026-09-24
 
 ### Changed

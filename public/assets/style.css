@@ -2280,13 +2280,29 @@ html[data-theme="light"] .plan-activity {
 
 .papermono-device-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.65rem 0.75rem;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--bg);
+}
+
+.papermono-device-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.papermono-device-name-field {
+    margin: 0;
+}
+
+.papermono-device-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: flex-end;
 }
 
 .papermono-device-row .hint {

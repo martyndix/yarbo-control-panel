@@ -58,7 +58,7 @@ if ($method === 'GET' && $action === 'compact') {
     }
     $devices->touch((string) $device['id'], isset($_GET['fw']) ? (string) $_GET['fw'] : null);
     $device = $devices->findByToken($token) ?? $device;
-    json_response($devices->compactStatus($devices->deviceKind($device)));
+    json_response($devices->compactStatus($devices->deviceKind($device), $device));
 }
 
 if ($method === 'GET' && $action === 'plans') {
@@ -126,6 +126,33 @@ if ($action === 'revoke') {
         json_response(['ok' => false, 'error' => 'Device not found'], 404);
     }
     json_response(['ok' => true]);
+}
+
+if ($action === 'rename') {
+    $id = trim((string) ($input['id'] ?? ''));
+    $name = trim((string) ($input['name'] ?? ''));
+    $device = $id !== '' ? $devices->rename($id, $name) : null;
+    if ($device === null) {
+        json_response(['ok' => false, 'error' => 'Could not rename that tablet'], 400);
+    }
+    json_response(['ok' => true, 'device' => $device]);
+}
+
+if ($action === 'prefs') {
+    json_response($devices->savePrefs($input));
+}
+
+if ($action === 'paper_message') {
+    $device = $devices->findByToken((string) ($input['token'] ?? device_token_from_request()));
+    if ($device === null) {
+        json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
+    }
+    $devices->touch((string) $device['id']);
+    json_response($devices->postPaperMessage(
+        $device,
+        (string) ($input['to'] ?? '*'),
+        (string) ($input['text'] ?? '')
+    ));
 }
 
 if ($action === 'flash') {

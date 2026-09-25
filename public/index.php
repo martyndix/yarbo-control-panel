@@ -897,7 +897,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.5-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C sleeps. Build first: <code>pio run -e papercolor -d firmware/papercolor</code>.</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.6-color</code> in <code>firmware/papercolor/</code>. After flash the tablet says <strong>YARBO · COLOR</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Build first: <code>pio run -e papercolor -d firmware/papercolor</code>.</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -930,12 +930,45 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span class="label">Header logo</span>
                                 <input type="file" id="papermono-logo" name="papermono_logo" accept="image/png,image/jpeg,.png,.jpg,.jpeg">
                             </label>
-                            <p class="hint">One PNG or JPEG for both PaperMono and Paper Colour. It sits large in the top-right of every page. Prefer a PNG with a transparent background. Max 2 MB. Re-upload if you already saved a logo (the first version flattened it on white), then reflash the tablet.</p>
+                            <p class="hint">One PNG or JPEG for both PaperMono and Paper Colour. It sits large in the top-right of every page, and on the lock screen when you choose Logo or Both. Prefer a PNG with a transparent background. Max 2 MB. Re-upload if you already saved a logo, then reflash the tablet.</p>
                             <div class="papermono-logo-row">
                                 <img id="papermono-logo-thumb" class="papermono-logo-thumb hidden" alt="Header logo preview">
                                 <button type="button" class="btn btn-secondary" id="papermono-logo-clear">Remove logo</button>
                             </div>
                             <p id="papermono-logo-result" class="settings-cloud-result hidden" role="status"></p>
+                            <h4 class="settings-subtitle">Companion settings</h4>
+                            <p class="hint">These apply to every paired tablet. PaperMono also uses them for pocket lock, frontlight, buzzer, and RGB. Paper Colour uses lock layout and the Vestaboard preview page. Sleep timers and alerts are not set on the glass.</p>
+                            <label class="settings-field">
+                                <span class="label">Lock screen</span>
+                                <select id="papermono-lock-screen">
+                                    <option value="logo">Logo</option>
+                                    <option value="vestaboard">Vestaboard</option>
+                                    <option value="both">Logo and Vestaboard</option>
+                                </select>
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Lock after (seconds)</span>
+                                <input type="number" id="papermono-lock-after" min="10" max="600" step="5" value="60">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Frontlight off after (seconds)</span>
+                                <input type="number" id="papermono-light-off" min="5" max="300" step="5" value="15">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Frontlight brightness (0–100)</span>
+                                <input type="number" id="papermono-brightness" min="0" max="100" step="5" value="80">
+                            </label>
+                            <fieldset class="settings-theme-fieldset">
+                                <legend class="label">Alerts</legend>
+                                <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer + RGB)</span></label>
+                                <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-yarbo" checked><span>Yarbo error (red + buzzer)</span></label>
+                                <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-lymow" checked><span>Lymow error (red + buzzer)</span></label>
+                                <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-powerwall" checked><span>Powerwall error (red + buzzer)</span></label>
+                            </fieldset>
+                            <div class="papermono-actions">
+                                <button type="button" class="btn" id="papermono-prefs-save">Save companion settings</button>
+                            </div>
+                            <p id="papermono-prefs-result" class="settings-cloud-result hidden" role="status"></p>
                             <div class="papermono-actions">
                                 <button type="button" class="btn" id="papermono-flash">Flash PaperMono firmware &amp; send Wi-Fi</button>
                                 <button type="button" class="btn btn-secondary" id="papermono-config">Send Wi-Fi only (already flashed)</button>

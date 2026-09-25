@@ -5,7 +5,10 @@
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include <M5Unified.h>
+#include <cstring>
+#include <time.h>
 #include "version.h"
+#include "paper_hw.h"
 
 // M5Stack PaperMono SKU C153 (https://docs.m5stack.com/en/core/PaperMono)
 // ESP32-S3R8, SSD1677 480x800 4-level gray, FT6336G touch. Not PaperMono-Lite.
@@ -59,6 +62,46 @@ int partialRefreshCount = 0;
 String lastDrawnKey;
 String logoHash = "";
 int currentPage = PAPERMONO_PAGE_HOME;
+bool screenLocked = false;
+uint32_t lastActivity = 0;
+uint32_t lastLight = 0;
+bool lightOn = true;
+int lockAfterS = 60;
+int lightOffS = 15;
+int brightnessPct = 80;
+String lockScreen = "logo";
+bool alertMessageOn = true;
+bool alertYarboOn = true;
+bool alertLymowOn = true;
+bool alertPowerwallOn = true;
+bool yarboError = false;
+bool lymowError = false;
+bool powerwallError = false;
+uint32_t lastErrorAlert = 0;
+int tabletBat = -1;
+String clockLocal = "--:--";
+String clockDate = "";
+int clockOffset = 0;
+String deviceId = "";
+int vestaboardCodes[3][15];
+String vestaboardLines[3];
+String vestaboardHash = "";
+int unreadCount = 0;
+int unlockStep = 0;
+uint32_t unlockStepAt = 0;
+bool offConfirm = false;
+bool kbNumbers = false;
+String radioDraft = "";
+int radioToIndex = 0;
+String peerIds[PAPERMONO_PEER_MAX];
+String peerNames[PAPERMONO_PEER_MAX];
+int peerCount = 0;
+String inboxFrom[PAPERMONO_INBOX_MAX];
+String inboxText[PAPERMONO_INBOX_MAX];
+String inboxIds[PAPERMONO_INBOX_MAX];
+int inboxCount = 0;
+String lastInboxId = "";
+uint8_t radioSync = 0xA5;
 
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
@@ -67,6 +110,13 @@ int planOffset = 0;
 int selectedPlan = -1;
 String plansNote = "";
 bool plansLoaded = false;
+
+void drawScreen(bool forceFull);
+void enterLock();
+void exitLock();
+void noteActivity();
+void nextPage();
+void prevPage();
 
 void saveConfig()
 {
@@ -144,7 +194,10 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_HEALTH) return "HEALTH";
     if (page == PAPERMONO_PAGE_PLANS) return "PLANS";
     if (page == PAPERMONO_PAGE_NOTE) return "NOTE";
+    if (page == PAPERMONO_PAGE_BOARD) return "BOARD";
     if (page == PAPERMONO_PAGE_LYMOW) return "LYMOW";
+    if (page == PAPERMONO_PAGE_RADIO) return "RADIO";
+    if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
     return "HOME";
 }
 
@@ -157,12 +210,17 @@ String screenKey()
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + vestaboardLive + "|"
         + (vestaboardOn ? "1" : "0") + "|" + (powerwallOn ? "1" : "0") + "|" + (lymowOn ? "1" : "0") + "|"
         + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
-        + String((int) WiFi.status()) + "|" + logoHash;
+        + String((int) WiFi.status()) + "|" + logoHash + "|" + String(screenLocked ? 1 : 0) + "|"
+        + lockScreen + "|" + clockLocal + "|" + String(unreadCount) + "|" + vestaboardHash + "|"
+        + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
+        + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
+        + String(inboxCount);
 }
 
 bool pageEnabled(int page)
 {
     if (page == PAPERMONO_PAGE_NOTE) return vestaboardOn;
+    if (page == PAPERMONO_PAGE_BOARD) return vestaboardOn;
     if (page == PAPERMONO_PAGE_LYMOW) return lymowOn;
     return true;
 }
@@ -259,6 +317,9 @@ String headerDeviceName()
     if (currentPage == PAPERMONO_PAGE_NOTE) {
         return deviceName;
     }
+    if (currentPage == PAPERMONO_PAGE_BOARD || currentPage == PAPERMONO_PAGE_RADIO || currentPage == PAPERMONO_PAGE_DEVICE) {
+        return deviceName;
+    }
     return robotName.length() ? robotName : deviceName;
 }
 
@@ -272,6 +333,11 @@ void drawHeader()
     M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     M5.Display.setTextSize(2);
     M5.Display.drawString(pageName(currentPage), 16, 72);
+    M5.Display.setTextSize(1);
+    M5.Display.setTextDatum(TR_DATUM);
+    String bat = tabletBat >= 0 ? (String(tabletBat) + "%") : String("--");
+    M5.Display.drawString("TAB " + bat, M5.Display.width() - 16, 48);
+    M5.Display.setTextDatum(TL_DATUM);
     int logoSize = 180;
     if (SPIFFS.exists("/logo.png")) {
         M5.Display.drawPngFile(SPIFFS, "/logo.png", M5.Display.width() - logoSize - 16, 16, logoSize, logoSize);
@@ -282,7 +348,9 @@ void drawPager()
 {
     int H = M5.Display.height();
     int W = M5.Display.width();
-    const char *labels[PAPERMONO_PAGE_COUNT] = {"HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "LYMOW"};
+    const char *labels[PAPERMONO_PAGE_COUNT] = {
+        "HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "BOARD", "LYMOW", "RADIO", "DEVICE"
+    };
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(1);
     int n = visiblePageCount();
@@ -524,8 +592,291 @@ void drawLymowPage(bool forceFull)
     M5.Display.display();
 }
 
+char vestaboardGlyph(int code)
+{
+    if (code >= 1 && code <= 26) return (char) (64 + code);
+    if (code >= 27 && code <= 35) return (char) (code + 22);
+    if (code == 36) return '0';
+    if (code == 37) return '!';
+    if (code == 38) return '@';
+    if (code == 39) return '#';
+    if (code == 40) return '$';
+    if (code == 41) return '(';
+    if (code == 42) return ')';
+    if (code == 44) return '-';
+    if (code == 46) return '+';
+    if (code == 47) return '&';
+    if (code == 48) return '=';
+    if (code == 49) return ';';
+    if (code == 50) return ':';
+    if (code == 52) return '\'';
+    if (code == 53) return '"';
+    if (code == 54) return '%';
+    if (code == 55) return ',';
+    if (code == 56) return '.';
+    if (code == 59) return '/';
+    if (code == 60) return '?';
+    return ' ';
+}
+
+uint16_t vestaboardFill(int code)
+{
+    if (code == 63 || code == 64) return TFT_BLACK;
+    if (code == 65) return TFT_LIGHTGREY;
+    if (code == 66 || code == 67 || code == 68) return TFT_DARKGREY;
+    return TFT_WHITE;
+}
+
+void drawVestaboardGrid(int x, int y, int cell, int gap)
+{
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextSize(1);
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 15; c++) {
+            int code = vestaboardCodes[r][c];
+            int cx = x + c * (cell + gap);
+            int cy = y + r * (cell + gap);
+            uint16_t fill = vestaboardFill(code);
+            M5.Display.fillRect(cx, cy, cell, cell, fill);
+            M5.Display.drawRect(cx, cy, cell, cell, TFT_BLACK);
+            char glyph = vestaboardGlyph(code);
+            if (glyph != ' ' && code < 63) {
+                M5.Display.setTextColor(TFT_BLACK, fill);
+                String s;
+                s += glyph;
+                M5.Display.drawString(s, cx + cell / 2, cy + cell / 2);
+            }
+        }
+    }
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+}
+
+int brightnessValue()
+{
+    return map(constrain(brightnessPct, 0, 100), 0, 100, 0, 255);
+}
+
+void applyFrontlight(bool on)
+{
+    lightOn = on;
+    M5.Display.setBrightness(on ? brightnessValue() : 0);
+}
+
+void noteActivity()
+{
+    lastActivity = millis();
+    lastLight = millis();
+    if (!lightOn) {
+        applyFrontlight(true);
+    }
+}
+
+void drawLockScreen(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TC_DATUM);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(deviceName.length() ? deviceName : String("PaperMono"), M5.Display.width() / 2, 18);
+    M5.Display.setTextSize(3);
+    M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), M5.Display.width() / 2, 52);
+    M5.Display.setTextSize(1);
+    String bat = tabletBat >= 0 ? (String("TAB ") + tabletBat + "%") : String("TAB --");
+    if (unreadCount > 0) {
+        bat += "  ·  " + String(unreadCount) + " msg";
+    }
+    M5.Display.drawString(bat, M5.Display.width() / 2, 92);
+
+    bool showLogo = lockScreen != "vestaboard" || !vestaboardOn;
+    bool showBoard = vestaboardOn && (lockScreen == "vestaboard" || lockScreen == "both");
+    if (lockScreen == "logo" || !vestaboardOn) {
+        showLogo = true;
+        showBoard = false;
+    }
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    if (showLogo && SPIFFS.exists("/logo.png")) {
+        int logoSize = showBoard ? 160 : 280;
+        M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 118 : 150, logoSize, logoSize);
+    }
+    if (showBoard) {
+        int cell = showLogo ? 22 : 28;
+        int gap = 3;
+        int gridW = 15 * cell + 14 * gap;
+        int gridY = showLogo ? 300 : 180;
+        drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
+    }
+
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("1", 18, 18);
+    M5.Display.setTextDatum(BR_DATUM);
+    M5.Display.drawString("2", W - 18, H - 18);
+    M5.Display.setTextDatum(BC_DATUM);
+    M5.Display.setTextSize(1);
+    M5.Display.drawString("opposite corners to unlock", W / 2, H - 8);
+    M5.Display.display();
+}
+
+void enterLock()
+{
+    screenLocked = true;
+    unlockStep = 0;
+    offConfirm = false;
+    applyFrontlight(false);
+    drawLockScreen(true);
+    lastDrawnKey = screenKey();
+}
+
+void exitLock()
+{
+    screenLocked = false;
+    unlockStep = 0;
+    noteActivity();
+    applyFrontlight(true);
+    drawScreen(true);
+}
+
+void drawBoardPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    int cell = 26;
+    int gap = 4;
+    int gridW = 15 * cell + 14 * gap;
+    drawVestaboardGrid((M5.Display.width() - gridW) / 2, 130, cell, gap);
+    M5.Display.setTextDatum(TC_DATUM);
+    M5.Display.setTextSize(1);
+    M5.Display.drawString("live Vestaboard", M5.Display.width() / 2, 250);
+    drawPager();
+    M5.Display.display();
+}
+
+const char *kbRow(int row)
+{
+    if (kbNumbers) {
+        if (row == 0) return "1234567890";
+        if (row == 1) return "-/:;()$&@\"";
+        return ".,?!'#+=";
+    }
+    if (row == 0) return "QWERTYUIOP";
+    if (row == 1) return "ASDFGHJKL";
+    return "ZXCVBNM";
+}
+
+void drawKeyboard(int y0)
+{
+    int W = M5.Display.width();
+    for (int r = 0; r < 3; r++) {
+        const char *row = kbRow(r);
+        int n = strlen(row);
+        int keyW = (W - 20) / n;
+        int y = y0 + r * 42;
+        for (int i = 0; i < n; i++) {
+            int x = 10 + i * keyW;
+            M5.Display.drawRect(x, y, keyW - 4, 38, TFT_BLACK);
+            M5.Display.setTextDatum(MC_DATUM);
+            M5.Display.setTextSize(1);
+            String s;
+            s += row[i];
+            M5.Display.drawString(s, x + (keyW - 4) / 2, y + 19);
+        }
+    }
+    int y = y0 + 3 * 42;
+    drawButton(16, y, 90, 44, kbNumbers ? "ABC" : "123", false);
+    drawButton(114, y, 180, 44, "SPACE", false);
+    drawButton(302, y, 70, 44, "DEL", false);
+    drawButton(380, y, 84, 44, "SEND", true);
+}
+
+void drawRadioPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(1);
+    String path = loraReady() ? "LoRa + Wi-Fi fallback" : "Wi-Fi only";
+    M5.Display.drawString(path, 16, 108);
+    M5.Display.setTextSize(2);
+    String toLabel = "ALL";
+    if (radioToIndex > 0 && radioToIndex <= peerCount) {
+        toLabel = peerNames[radioToIndex - 1];
+    }
+    M5.Display.drawString("To  " + toLabel, 16, 128);
+    M5.Display.setTextSize(1);
+    int y = 158;
+    int shown = min(3, inboxCount);
+    for (int i = inboxCount - shown; i < inboxCount; i++) {
+        if (i < 0) continue;
+        String line = inboxFrom[i] + ": " + inboxText[i];
+        if (line.length() > 42) line = line.substring(0, 42);
+        M5.Display.drawString(line, 16, y);
+        y += 18;
+    }
+    M5.Display.setTextSize(1);
+    String draft = radioDraft.length() ? radioDraft : String("(type a message)");
+    if (draft.length() > 42) draft = draft.substring(draft.length() - 42);
+    M5.Display.drawString(draft, 16, 220);
+    M5.Display.drawString(String(radioDraft.length()) + "/" + String(PAPERMONO_MSG_CHARS), 16, 238);
+    int n = min(4, peerCount + 1);
+    int pw = (M5.Display.width() - 24) / n;
+    for (int i = 0; i < n; i++) {
+        const char *lab = i == 0 ? "ALL" : peerNames[i - 1].c_str();
+        bool on = radioToIndex == i;
+        drawButton(12 + i * pw, 258, pw - 8, 40, lab, on);
+    }
+    drawKeyboard(310);
+    drawPager();
+    M5.Display.display();
+}
+
+void drawDevicePage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(5);
+    String bat = tabletBat >= 0 ? (String(tabletBat) + "%") : String("--");
+    M5.Display.drawString(bat, 16, 110);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), 16, 210);
+    M5.Display.setTextSize(1);
+    M5.Display.drawString(clockDate, 16, 250);
+    M5.Display.drawString("Tablet battery  ·  " + deviceName, 16, 280);
+    if (offConfirm) {
+        drawButton(16, 360, 208, 88, "CANCEL", false);
+        drawButton(248, 360, 208, 88, "OFF NOW", true);
+        M5.Display.setTextDatum(TL_DATUM);
+        M5.Display.setTextSize(1);
+        M5.Display.drawString("Power off this tablet?", 16, 330);
+    } else {
+        drawButton(16, 360, 440, 88, "OFF", true);
+        M5.Display.setTextDatum(TL_DATUM);
+        M5.Display.setTextSize(1);
+        M5.Display.drawString("Full power off. Side button turns it on.", 16, 330);
+    }
+    drawPager();
+    M5.Display.display();
+}
+
 void drawScreen(bool forceFull)
 {
+    if (screenLocked) {
+        String key = screenKey();
+        if (!forceFull && key == lastDrawnKey) {
+            return;
+        }
+        drawLockScreen(forceFull);
+        lastDrawnKey = screenKey();
+        return;
+    }
     String key = screenKey();
     if (!forceFull && key == lastDrawnKey) {
         return;
@@ -543,6 +894,13 @@ void drawScreen(bool forceFull)
         } else {
             drawNotePage(forceFull);
         }
+    } else if (currentPage == PAPERMONO_PAGE_BOARD) {
+        if (!pageEnabled(PAPERMONO_PAGE_BOARD)) {
+            currentPage = firstEnabledPage();
+            drawHome(forceFull);
+        } else {
+            drawBoardPage(forceFull);
+        }
     } else if (currentPage == PAPERMONO_PAGE_LYMOW) {
         if (!pageEnabled(PAPERMONO_PAGE_LYMOW)) {
             currentPage = firstEnabledPage();
@@ -550,6 +908,10 @@ void drawScreen(bool forceFull)
         } else {
             drawLymowPage(forceFull);
         }
+    } else if (currentPage == PAPERMONO_PAGE_RADIO) {
+        drawRadioPage(forceFull);
+    } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
+        drawDevicePage(forceFull);
     } else {
         drawHome(forceFull);
     }
@@ -657,6 +1019,326 @@ bool syncPaperLogo(const String &hash)
     return true;
 }
 
+void pushInbox(const String &id, const String &from, const String &text, bool alert)
+{
+    if (id.length() && lastInboxId == id) {
+        return;
+    }
+    for (int i = 0; i < inboxCount; i++) {
+        if (id.length() && inboxIds[i] == id) {
+            return;
+        }
+    }
+    if (inboxCount >= PAPERMONO_INBOX_MAX) {
+        for (int i = 1; i < PAPERMONO_INBOX_MAX; i++) {
+            inboxIds[i - 1] = inboxIds[i];
+            inboxFrom[i - 1] = inboxFrom[i];
+            inboxText[i - 1] = inboxText[i];
+        }
+        inboxCount = PAPERMONO_INBOX_MAX - 1;
+    }
+    inboxIds[inboxCount] = id;
+    inboxFrom[inboxCount] = from;
+    inboxText[inboxCount] = text;
+    inboxCount++;
+    if (id.length()) {
+        lastInboxId = id;
+    }
+    unreadCount++;
+    if (alert && alertMessageOn) {
+        alertMessage();
+    }
+}
+
+void applyCompactExtras(JsonDocument &doc)
+{
+    String newName = doc["device_name"] | deviceName;
+    if (newName.length()) {
+        deviceName = newName;
+    }
+    deviceId = doc["device_id"] | deviceId;
+    lockAfterS = doc["lock_after_s"] | lockAfterS;
+    lightOffS = doc["light_off_s"] | lightOffS;
+    int b = doc["brightness"] | brightnessPct;
+    if (b != brightnessPct) {
+        brightnessPct = b;
+        if (lightOn && !screenLocked) {
+            applyFrontlight(true);
+        }
+    }
+    lockScreen = doc["lock_screen"] | lockScreen;
+    alertMessageOn = doc["alert_message"] | alertMessageOn;
+    alertYarboOn = doc["alert_yarbo"] | alertYarboOn;
+    alertLymowOn = doc["alert_lymow"] | alertLymowOn;
+    alertPowerwallOn = doc["alert_powerwall"] | alertPowerwallOn;
+    yarboError = doc["yarbo_error"] | false;
+    lymowError = doc["lymow_error"] | false;
+    powerwallError = doc["powerwall_error"] | false;
+    clockLocal = doc["clock_local"] | clockLocal;
+    clockDate = doc["clock_date"] | clockDate;
+    clockOffset = doc["clock_offset"] | clockOffset;
+    uint8_t sync = (uint8_t) ((int) (doc["radio_sync"] | (int) radioSync));
+    if (sync != radioSync) {
+        radioSync = sync;
+        loraSetSyncWord(radioSync);
+    }
+    vestaboardHash = doc["vestaboard_hash"] | vestaboardHash;
+    JsonArray lines = doc["vestaboard_lines"].as<JsonArray>();
+    if (!lines.isNull()) {
+        for (int r = 0; r < 3; r++) {
+            vestaboardLines[r] = String((const char *) (lines[r] | ""));
+        }
+    }
+    JsonArray codes = doc["vestaboard_codes"].as<JsonArray>();
+    if (!codes.isNull()) {
+        for (int r = 0; r < 3; r++) {
+            JsonArray row = codes[r].as<JsonArray>();
+            for (int c = 0; c < 15; c++) {
+                vestaboardCodes[r][c] = row.isNull() ? 0 : (int) (row[c] | 0);
+            }
+        }
+    }
+    peerCount = 0;
+    JsonArray peers = doc["paper_peers"].as<JsonArray>();
+    if (!peers.isNull()) {
+        for (JsonVariant item : peers) {
+            if (peerCount >= PAPERMONO_PEER_MAX) break;
+            JsonObject p = item.as<JsonObject>();
+            if (p.isNull()) continue;
+            peerIds[peerCount] = String((const char *) (p["id"] | ""));
+            peerNames[peerCount] = String((const char *) (p["name"] | ""));
+            if (peerIds[peerCount].length()) {
+                peerCount++;
+            }
+        }
+    }
+    JsonArray msgs = doc["paper_messages"].as<JsonArray>();
+    if (!msgs.isNull()) {
+        for (JsonVariant item : msgs) {
+            JsonObject m = item.as<JsonObject>();
+            if (m.isNull()) continue;
+            String id = String((const char *) (m["id"] | ""));
+            String from = String((const char *) (m["from_name"] | "tablet"));
+            String text = String((const char *) (m["text"] | ""));
+            if (text.length()) {
+                bool primed = lastInboxId.length() > 0;
+                pushInbox(id, from, text, primed);
+            }
+        }
+    }
+    bool anyError = (yarboError && alertYarboOn) || (lymowError && alertLymowOn) || (powerwallError && alertPowerwallOn);
+    alertsSetErrorActive(anyError);
+    if (anyError && millis() - lastErrorAlert > 60000) {
+        lastErrorAlert = millis();
+        alertError();
+    }
+}
+
+bool postPaperMessage(const String &to, const String &text)
+{
+    if (WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
+        return false;
+    }
+    HTTPClient http;
+    http.begin(panelUrl + "/api/device.php");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-PaperMono-Token", token);
+    JsonDocument doc;
+    doc["action"] = "paper_message";
+    doc["token"] = token;
+    doc["to"] = to;
+    doc["text"] = text;
+    String payload;
+    serializeJson(doc, payload);
+    int code = http.POST(payload);
+    String body = http.getString();
+    http.end();
+    JsonDocument res;
+    deserializeJson(res, body);
+    return code == 200 && res["ok"];
+}
+
+void handleIncomingRadio(const String &raw)
+{
+    JsonDocument doc;
+    if (deserializeJson(doc, raw)) {
+        return;
+    }
+    String to = doc["to"] | "*";
+    String fromId = doc["from"] | "";
+    if (fromId == deviceId && deviceId.length()) {
+        return;
+    }
+    if (to != "*" && to.length() && to != deviceId) {
+        return;
+    }
+    String from = doc["from_name"] | "tablet";
+    String text = doc["text"] | "";
+    String id = doc["id"] | String(millis());
+    if (text.length()) {
+        pushInbox(id, from, text, true);
+        drawScreen(false);
+    }
+}
+
+bool sendRadioMessage()
+{
+    radioDraft.trim();
+    if (radioDraft.length() == 0) {
+        return false;
+    }
+    if (radioDraft.length() > PAPERMONO_MSG_CHARS) {
+        radioDraft = radioDraft.substring(0, PAPERMONO_MSG_CHARS);
+    }
+    String to = "*";
+    String toName = "ALL";
+    if (radioToIndex > 0 && radioToIndex <= peerCount) {
+        to = peerIds[radioToIndex - 1];
+        toName = peerNames[radioToIndex - 1];
+    }
+    JsonDocument doc;
+    doc["from"] = deviceId;
+    doc["from_name"] = deviceName;
+    doc["to"] = to;
+    doc["to_name"] = toName;
+    doc["text"] = radioDraft;
+    doc["id"] = String((uint32_t) millis(), HEX);
+    String payload;
+    serializeJson(doc, payload);
+    bool ok = loraReady() && loraSendText(payload);
+    if (!ok) {
+        ok = postPaperMessage(to, radioDraft);
+    }
+    if (ok) {
+        lastError = "";
+        radioDraft = "";
+    } else {
+        lastError = "send failed";
+    }
+    drawScreen(true);
+    return ok;
+}
+
+int keyboardHit(int x, int y)
+{
+    int y0 = 310;
+    if (y < y0 || y > y0 + 3 * 42 + 44) {
+        return -1;
+    }
+    if (y >= y0 + 3 * 42) {
+        if (x < 110) return 100;
+        if (x < 300) return 101;
+        if (x < 372) return 102;
+        return 103;
+    }
+    int row = (y - y0) / 42;
+    const char *keys = kbRow(row);
+    int n = strlen(keys);
+    int keyW = (M5.Display.width() - 20) / n;
+    int i = (x - 10) / keyW;
+    if (i < 0 || i >= n) return -1;
+    return (row * 32) + i;
+}
+
+void handleRadioTouch(int x, int y)
+{
+    if (tapOnPager(y)) {
+        nextPage();
+        return;
+    }
+    int n = min(4, peerCount + 1);
+    int pw = (M5.Display.width() - 24) / n;
+    if (y >= 258 && y <= 298) {
+        int i = (x - 12) / pw;
+        if (i >= 0 && i < n) {
+            radioToIndex = i;
+            drawScreen(true);
+        }
+        return;
+    }
+    int hit = keyboardHit(x, y);
+    if (hit < 0) {
+        if (y < 110) nextPage();
+        return;
+    }
+    if (hit == 100) {
+        kbNumbers = !kbNumbers;
+        drawScreen(true);
+        return;
+    }
+    if (hit == 101) {
+        if (radioDraft.length() < PAPERMONO_MSG_CHARS) radioDraft += ' ';
+        drawScreen(false);
+        return;
+    }
+    if (hit == 102) {
+        if (radioDraft.length()) radioDraft.remove(radioDraft.length() - 1);
+        drawScreen(false);
+        return;
+    }
+    if (hit == 103) {
+        sendRadioMessage();
+        return;
+    }
+    int row = hit / 32;
+    int col = hit % 32;
+    const char *keys = kbRow(row);
+    if (col < (int) strlen(keys) && radioDraft.length() < PAPERMONO_MSG_CHARS) {
+        radioDraft += keys[col];
+        drawScreen(false);
+    }
+}
+
+void handleDeviceTouch(int x, int y)
+{
+    if (tapOnPager(y)) {
+        nextPage();
+        return;
+    }
+    if (y >= 360 && y <= 448) {
+        if (offConfirm) {
+            if (x < 240) {
+                offConfirm = false;
+                drawScreen(true);
+            } else {
+                M5.Power.powerOff();
+            }
+        } else {
+            offConfirm = true;
+            drawScreen(true);
+        }
+        return;
+    }
+    if (y < 110) nextPage();
+}
+
+void handleLockTouch(int x, int y)
+{
+    lastLight = millis();
+    if (!lightOn) {
+        applyFrontlight(true);
+    }
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    bool c1 = x <= 80 && y <= 80;
+    bool c2 = x >= W - 80 && y >= H - 80;
+    uint32_t now = millis();
+    if (unlockStep == 1 && now - unlockStepAt > 4000) {
+        unlockStep = 0;
+    }
+    if (unlockStep == 0 && c1) {
+        unlockStep = 1;
+        unlockStepAt = now;
+        return;
+    }
+    if (unlockStep == 1 && c2) {
+        unreadCount = 0;
+        exitLock();
+        return;
+    }
+    unlockStep = 0;
+}
+
 bool httpGetStatus()
 {
     if (WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
@@ -714,6 +1396,7 @@ bool httpGetStatus()
     lymowState = doc["lymow_state"] | lymowState;
     lymowCharging = doc["lymow_charging"] | lymowCharging;
     lastError = "";
+    applyCompactExtras(doc);
     syncPaperLogo(String((const char *) (doc["logo_hash"] | "")));
     return true;
 }
@@ -834,6 +1517,8 @@ void showPage(int page, bool loadPlansIfNeeded)
         page = stepEnabledPage(page, 1);
     }
     currentPage = page;
+    offConfirm = false;
+    noteActivity();
     if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
         httpGetPlans(false);
     }
@@ -923,8 +1608,13 @@ void setup()
     cfg.clear_display = true;
     M5.begin(cfg);
     M5.Display.setRotation(0);
+    M5.Speaker.begin();
     SPIFFS.begin(true);
     loadConfig();
+    paperHwBegin();
+    applyFrontlight(true);
+    lastActivity = millis();
+    lastLight = millis();
     if (wifiSsid.length()) {
         WiFi.mode(WIFI_STA);
         WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
@@ -938,56 +1628,94 @@ void loop()
 {
     M5.update();
     pollSerialConfig();
+    loraService();
+    rgbTick();
+    tabletBat = M5.Power.getBatteryLevel();
+
+    String loraIn;
+    if (loraTakeRx(loraIn)) {
+        handleIncomingRadio(loraIn);
+    }
 
     if (wifiSsid.isEmpty()) {
         delay(50);
         return;
     }
 
+    if (M5.BtnPWR.wasClicked() || M5.BtnPWR.wasHold()) {
+        if (!screenLocked) {
+            enterLock();
+        } else {
+            lastLight = millis();
+            applyFrontlight(true);
+        }
+    }
+
+    uint32_t now = millis();
+    if (!screenLocked && wifiSsid.length() && now - lastActivity > (uint32_t) lockAfterS * 1000) {
+        enterLock();
+    }
+    if (screenLocked && lightOn && now - lastLight > (uint32_t) lightOffS * 1000) {
+        applyFrontlight(false);
+    }
+
     if (WiFi.status() != WL_CONNECTED) {
         static uint32_t lastJoinDraw = 0;
-        if (millis() - lastJoinDraw > 20000) {
+        if (now - lastJoinDraw > 20000) {
             lastError = "joining " + wifiSsid;
             drawScreen(false);
-            lastJoinDraw = millis();
+            lastJoinDraw = now;
         }
-        delay(50);
+        delay(30);
         return;
     }
 
-    if (M5.BtnA.wasPressed()) {
-        nextPage();
-    } else if (M5.BtnB.wasPressed()) {
-        prevPage();
+    if (!screenLocked) {
+        if (M5.BtnA.wasPressed()) {
+            noteActivity();
+            nextPage();
+        } else if (M5.BtnB.wasPressed()) {
+            noteActivity();
+            prevPage();
+        }
     }
 
     auto t = M5.Touch.getDetail();
     if (t.wasPressed()) {
-        if (currentPage == PAPERMONO_PAGE_HOME) {
-            int which = homeButtonAt(t.x, t.y);
-            if (which == 0) {
+        if (screenLocked) {
+            handleLockTouch(t.x, t.y);
+        } else {
+            noteActivity();
+            if (currentPage == PAPERMONO_PAGE_HOME) {
+                int which = homeButtonAt(t.x, t.y);
+                if (which == 0) {
+                    nextPage();
+                } else if (which == 1) {
+                    runCommand("stop");
+                } else if (which == 2) {
+                    runCommand("return_to_dock");
+                } else if (which == 3) {
+                    runCommand(state == "active" ? "pause" : "resume");
+                } else if (which == 4) {
+                    lightsOn = !lightsOn;
+                    runCommand(lightsOn ? "lights_on" : "lights_off");
+                }
+            } else if (currentPage == PAPERMONO_PAGE_PLANS) {
+                handlePlansTouch(t.x, t.y);
+            } else if (currentPage == PAPERMONO_PAGE_NOTE) {
+                handleNoteTouch(t.x, t.y);
+            } else if (currentPage == PAPERMONO_PAGE_RADIO) {
+                handleRadioTouch(t.x, t.y);
+            } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
+                handleDeviceTouch(t.x, t.y);
+            } else if (tapOnPager(t.y) || t.y < 110) {
                 nextPage();
-            } else if (which == 1) {
-                runCommand("stop");
-            } else if (which == 2) {
-                runCommand("return_to_dock");
-            } else if (which == 3) {
-                runCommand(state == "active" ? "pause" : "resume");
-            } else if (which == 4) {
-                lightsOn = !lightsOn;
-                runCommand(lightsOn ? "lights_on" : "lights_off");
             }
-        } else if (currentPage == PAPERMONO_PAGE_PLANS) {
-            handlePlansTouch(t.x, t.y);
-        } else if (currentPage == PAPERMONO_PAGE_NOTE) {
-            handleNoteTouch(t.x, t.y);
-        } else if (tapOnPager(t.y) || t.y < 110) {
-            nextPage();
         }
     }
 
-    if (millis() - lastPoll > PAPERMONO_POLL_MS) {
-        lastPoll = millis();
+    if (now - lastPoll > PAPERMONO_POLL_MS) {
+        lastPoll = now;
         httpGetStatus();
         if (!pageEnabled(currentPage)) {
             currentPage = stepEnabledPage(currentPage, 1);
@@ -999,5 +1727,5 @@ void loop()
             drawScreen(false);
         }
     }
-    delay(30);
+    delay(20);
 }
