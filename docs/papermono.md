@@ -17,7 +17,7 @@ Hardware we compile for:
 - FT6336G touch, built-in frontlight
 - Two user buttons + power (ON / OFF / RESET / BOOT)
 - 1150mAh battery, USB-C
-- Onboard NFC (ST25R3916) and LoRa (SX1262). Firmware **0.1.8-beta** uses LoRa for RADIO (868 MHz, house sync word) with Wi-Fi fallback.
+- Onboard NFC (ST25R3916) and LoRa (SX1262). Firmware **0.1.9-beta** uses LoRa for RADIO (868 MHz, house sync word) with Wi-Fi fallback.
 
 It has **no browser**. This panel flashes native firmware over USB from **Settings**, then the tablet talks HTTP JSON to the panel. The panel stays the MQTT brain.
 
@@ -38,7 +38,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 ## What it shows
 
 - **Home:** battery, charging, working state, attached head, error code, and large **Stop**, **Dock**, **Pause** / **Resume**, **Lights**
-- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.8-beta**.
+- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.9-beta**.
 - **Status:** the same tiles as the web Status card (including heading and rain)
 - **Health:** the same tiles as Connection & Health (Wi-Fi, pad, RTK, and so on)
 - **Plans:** named work plans. Tap a row to select, tap **START** to run it from 0% (same MQTT start as the web panel)

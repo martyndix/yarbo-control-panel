@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.8-beta';
+    public const FIRMWARE_VERSION = '0.1.9-beta';
     public const FIRMWARE_VERSION_COLOR = '0.2.6-color';
     public const MESSAGE_MAX = 50;
     public const MESSAGE_CHARS = 180;

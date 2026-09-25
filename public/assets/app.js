@@ -70,7 +70,7 @@ const els = {
     waypointsNote: document.getElementById('waypoints-note'),
     settingsOpen: document.getElementById('settings-open'),
     settingsUpdateBadge: document.getElementById('settings-update-badge'),
-    settingsModal: document.getElementById('settings-modal'),
+    settingsModal: document.getElementById('settings-page'),
     settingsForm: document.getElementById('settings-form'),
     settingsHost: document.getElementById('settings-host'),
     settingsSerial: document.getElementById('settings-serial'),
@@ -337,7 +337,18 @@ let draggedPanelId = null;
 let themeMediaQuery = null;
 let lastUpdateStatus = null;
 let updateConfirmResolver = null;
-let updateSectionRestoreBefore = null;
+
+const SETTINGS_PANES = ['connection', 'cloud', 'rain', 'modules', 'lymow', 'powerwall', 'vestaboard', 'papermono', 'appearance', 'updates'];
+
+function syncBodyModalClass() {
+    const open = [
+        els.batteryCellsModal,
+        els.plansManageModal,
+        els.updateConfirmModal,
+        els.vestaboardRotateModal,
+    ].some((modal) => modal && !modal.classList.contains('hidden'));
+    document.body.classList.toggle('modal-open', open);
+}
 
 function resolveTheme(mode) {
     if (mode === 'light' || mode === 'dark') return mode;
@@ -1638,13 +1649,7 @@ function openBatteryCellsModal() {
 function closeBatteryCellsModal() {
     if (!els.batteryCellsModal) return;
     els.batteryCellsModal.classList.add('hidden');
-    if (
-        (!els.settingsModal || els.settingsModal.classList.contains('hidden'))
-        && (!els.plansManageModal || els.plansManageModal.classList.contains('hidden'))
-        && (!els.updateConfirmModal || els.updateConfirmModal.classList.contains('hidden'))
-    ) {
-        document.body.classList.remove('modal-open');
-    }
+    syncBodyModalClass();
 }
 
 function setupBatteryTempClick() {
@@ -2241,17 +2246,25 @@ function applyPowerwallTransport() {
 }
 
 function applyCompanionSettingsVisibility() {
+    const powerwallOn = Boolean(els.settingsModulePowerwall?.checked);
+    const lymowOn = Boolean(els.settingsModuleLymow?.checked);
     document.getElementById('settings-powerwall-section')?.classList.toggle(
         'hidden',
-        !els.settingsModulePowerwall?.checked,
+        !powerwallOn,
     );
     document.getElementById('settings-lymow-section')?.classList.toggle(
         'hidden',
-        !els.settingsModuleLymow?.checked,
+        !lymowOn,
     );
+    document.querySelector('[data-settings-nav="powerwall"]')?.classList.toggle('hidden', !powerwallOn);
+    document.querySelector('[data-settings-nav="lymow"]')?.classList.toggle('hidden', !lymowOn);
+    const active = document.querySelector('.settings-section.is-active');
+    if (active?.classList.contains('hidden')) {
+        showSettingsPane('modules');
+    }
     applyVestaboardLiveChoices({
-        powerwall: Boolean(els.settingsModulePowerwall?.checked),
-        lymow: Boolean(els.settingsModuleLymow?.checked),
+        powerwall: powerwallOn,
+        lymow: lymowOn,
     }, els.settingsVestaboardLive?.value || 'yarbo');
 }
 
@@ -2624,14 +2637,7 @@ function openVestaboardRotateModal() {
 function closeVestaboardRotateModal() {
     if (!els.vestaboardRotateModal) return;
     els.vestaboardRotateModal.classList.add('hidden');
-    if (
-        (!els.settingsModal || els.settingsModal.classList.contains('hidden'))
-        && (!els.batteryCellsModal || els.batteryCellsModal.classList.contains('hidden'))
-        && (!els.plansManageModal || els.plansManageModal.classList.contains('hidden'))
-        && (!els.updateConfirmModal || els.updateConfirmModal.classList.contains('hidden'))
-    ) {
-        document.body.classList.remove('modal-open');
-    }
+    syncBodyModalClass();
 }
 
 async function saveVestaboardRotate(button) {
@@ -2925,13 +2931,7 @@ function closePlansManageModal() {
     if (!els.plansManageModal) return;
     pendingPlanDeleteId = null;
     els.plansManageModal.classList.add('hidden');
-    if (!els.settingsModal || els.settingsModal.classList.contains('hidden')) {
-        if (!els.updateConfirmModal || els.updateConfirmModal.classList.contains('hidden')) {
-            if (!els.batteryCellsModal || els.batteryCellsModal.classList.contains('hidden')) {
-                document.body.classList.remove('modal-open');
-            }
-        }
-    }
+    syncBodyModalClass();
 }
 
 function escapeHtml(value) {
@@ -3325,39 +3325,88 @@ function setSettingsError(message) {
     els.settingsError.classList.remove('hidden');
 }
 
-function openSettingsModal() {
+function settingsHashPane() {
+    const hash = (location.hash || '').replace(/^#/, '');
+    if (hash === 'settings') return 'connection';
+    if (hash.startsWith('settings/')) {
+        const pane = hash.slice('settings/'.length);
+        return SETTINGS_PANES.includes(pane) ? pane : 'connection';
+    }
+    return null;
+}
+
+function showSettingsPane(pane, { updateHash = true } = {}) {
+    let id = SETTINGS_PANES.includes(pane) ? pane : 'connection';
+    const section = document.querySelector(`[data-settings-pane="${id}"]`);
+    if (section?.classList.contains('hidden')) {
+        id = 'modules';
+    }
+    document.querySelectorAll('[data-settings-pane]').forEach((el) => {
+        el.classList.toggle('is-active', el.getAttribute('data-settings-pane') === id);
+    });
+    document.querySelectorAll('[data-settings-nav]').forEach((el) => {
+        el.classList.toggle('is-active', el.getAttribute('data-settings-nav') === id);
+    });
+    if (updateHash && settingsModalOpen) {
+        const next = id === 'connection' ? '#settings' : `#settings/${id}`;
+        if (location.hash !== next) {
+            history.replaceState(null, '', `${location.pathname}${location.search}${next}`);
+        }
+    }
+}
+
+function openSettingsModal(pane) {
     if (!els.settingsModal) return;
+    const alreadyOpen = settingsModalOpen;
     settingsModalOpen = true;
-    // Stop in-flight status polls so the single-threaded php -S server can handle settings.
     if (statusAbort) {
         statusAbort.abort();
         statusAbort = null;
         polling = false;
     }
     els.settingsModal.classList.remove('hidden');
-    document.body.classList.add('modal-open');
-    setCloudTestResult(null);
-    setConnectionTestResult(null);
-    setUpdateResult(null);
-    loadSettings();
-    loadPaperMonoDashboard();
-    loadVestaboardPreview();
-    if (lastUpdateStatus) {
-        applyUpdateAvailability(lastUpdateStatus);
+    document.body.classList.add('settings-page-open');
+    if (els.settingsOpen) {
+        els.settingsOpen.textContent = 'Dashboard';
+        els.settingsOpen.setAttribute('aria-expanded', 'true');
     }
-    loadUpdateStatus();
-    els.settingsHost?.focus();
+    if (!alreadyOpen) {
+        setCloudTestResult(null);
+        setConnectionTestResult(null);
+        setUpdateResult(null);
+        loadSettings();
+        loadPaperMonoDashboard();
+        loadVestaboardPreview();
+        if (lastUpdateStatus) {
+            applyUpdateAvailability(lastUpdateStatus);
+        }
+        loadUpdateStatus();
+    }
+    const hashPane = typeof pane === 'string' ? pane : settingsHashPane();
+    const start = hashPane
+        || (isUpdateAvailable(lastUpdateStatus) ? 'updates' : 'connection');
+    showSettingsPane(start);
+    if (!alreadyOpen) {
+        els.settingsHost?.focus();
+    }
 }
 
 function closeSettingsModal() {
     if (!els.settingsModal) return;
     els.settingsModal.classList.add('hidden');
-    document.body.classList.remove('modal-open');
+    document.body.classList.remove('settings-page-open');
     settingsModalOpen = false;
+    if (els.settingsOpen) {
+        els.settingsOpen.textContent = 'Settings';
+        els.settingsOpen.setAttribute('aria-expanded', 'false');
+    }
     setSettingsError(null);
     setCloudTestResult(null);
     setConnectionTestResult(null);
     setUpdateResult(null);
+    if ((location.hash || '').startsWith('#settings')) {
+        history.replaceState(null, '', `${location.pathname}${location.search}`);
+    }
 }
 
 async function loadCloudStatusHint() {
@@ -4348,8 +4397,7 @@ async function saveSettings(event) {
         applyDeviceNameSubtitle();
         applyPanelTitle(data.hub);
         showToast('Settings saved', 'success');
-        closeSettingsModal();
-        // Don't block on status — polling resumes after the modal closes.
+        // Stay on Settings so Build firmware and other actions still work.
         fetchStatus().catch(() => {});
     } catch (err) {
         setSettingsError(err.message || 'Save failed');
@@ -4473,22 +4521,8 @@ function applyUpdateAvailability(data, { enableUpdateButton = true } = {}) {
     }
 }
 
-function ensureUpdateSectionAnchor() {
-    if (!els.settingsUpdateSection || updateSectionRestoreBefore) return;
-    updateSectionRestoreBefore = els.settingsUpdateSection.nextElementSibling;
-}
-
 function moveUpdateSectionToTop(available) {
-    const scroll = document.querySelector('.settings-modal-scroll');
-    if (!scroll || !els.settingsUpdateSection) return;
-    ensureUpdateSectionAnchor();
-    if (available) {
-        scroll.insertBefore(els.settingsUpdateSection, scroll.firstChild);
-        return;
-    }
-    if (updateSectionRestoreBefore) {
-        scroll.insertBefore(els.settingsUpdateSection, updateSectionRestoreBefore);
-    }
+    document.querySelector('[data-settings-nav="updates"]')?.classList.toggle('has-update', Boolean(available));
 }
 
 function showSettingsReleaseNotes(data, showPanel = true) {
@@ -4591,11 +4625,7 @@ function closeUpdateConfirmModal(confirmed = false) {
     if (!els.updateConfirmModal) return;
     els.updateConfirmModal.classList.add('hidden');
     setUpdateModalViewOnly(false);
-    if (!els.settingsModal?.classList.contains('hidden')) {
-        document.body.classList.add('modal-open');
-    } else {
-        document.body.classList.remove('modal-open');
-    }
+    syncBodyModalClass();
     if (updateConfirmResolver) {
         updateConfirmResolver(confirmed);
         updateConfirmResolver = null;
@@ -5401,7 +5431,20 @@ if (document.getElementById('waypoints-list')) {
     });
 }
 
-els.settingsOpen?.addEventListener('click', openSettingsModal);
+els.settingsOpen?.addEventListener('click', () => {
+    if (settingsModalOpen) closeSettingsModal();
+    else openSettingsModal();
+});
+document.querySelector('.settings-nav')?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-settings-nav]');
+    if (!btn) return;
+    showSettingsPane(btn.getAttribute('data-settings-nav') || 'connection');
+});
+window.addEventListener('hashchange', () => {
+    const pane = settingsHashPane();
+    if (pane) openSettingsModal(pane);
+    else if (settingsModalOpen) closeSettingsModal();
+});
 els.settingsForm?.addEventListener('submit', saveSettings);
 els.settingsConnectionTest?.addEventListener('click', (e) => testLocalConnection(e.currentTarget));
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
@@ -5666,5 +5709,8 @@ initAppearance();
 initUpdateConfirmModal();
 loadSettings().catch(() => {});
 refreshUpdateBadge();
+if (settingsHashPane()) {
+    openSettingsModal();
+}
 fetchStatus();
 setInterval(fetchStatus, POLL_INTERVAL_MS);

@@ -159,7 +159,8 @@ bool loraSendText(const String &payload)
         return false;
     }
     ioe1.digitalWrite(kAntennaSwitchPin, HIGH);
-    int state = radio.transmit(payload);
+    String tx = payload;
+    int state = radio.transmit(tx);
     startRx();
     return state == RADIOLIB_ERR_NONE;
 }

@@ -680,7 +680,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **1.3.14** (2026-08-22).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.26** (2026-09-25).
 
 ---
 

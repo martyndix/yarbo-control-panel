@@ -85,8 +85,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     type="button"
                     id="settings-open"
                     class="btn btn-secondary btn-settings"
-                    aria-haspopup="dialog"
-                    aria-controls="settings-modal"
+                    aria-controls="settings-page"
+                    aria-expanded="false"
                 >Settings</button>
                 <span
                     id="settings-update-badge"
@@ -558,17 +558,34 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         </div>
 
-        <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-            <button type="button" class="modal-backdrop" data-settings-close aria-label="Close settings"></button>
-            <div class="modal-panel card settings-modal">
-                <div class="settings-modal-header">
-                    <h2 id="settings-title">Settings</h2>
-                    <p class="hint settings-modal-lead">Connection, modules (Yarbo, Powerwall, Lymow), Vestaboard Note, PaperMono / Paper Colour companions, and panel updates.</p>
-                </div>
+        <div id="settings-page" class="settings-page hidden" role="region" aria-labelledby="settings-title">
                 <form id="settings-form" class="settings-form">
-                    <div class="settings-modal-scroll">
-                        <section class="settings-section">
-                            <h3 class="settings-subtitle">Panel</h3>
+                    <div class="settings-page-toolbar">
+                        <div>
+                            <h2 id="settings-title">Settings</h2>
+                            <p class="hint settings-page-lead">Connection, modules, Vestaboard, PaperMono / Paper Colour, and panel updates.</p>
+                        </div>
+                        <div class="settings-page-toolbar-actions">
+                            <p id="settings-error" class="settings-error hidden" role="alert"></p>
+                            <button type="submit" class="btn" id="settings-save">Save</button>
+                        </div>
+                    </div>
+                    <div class="settings-page-layout">
+                    <nav class="settings-nav" aria-label="Settings sections">
+                        <button type="button" class="settings-nav-btn is-active" data-settings-nav="connection">Connection</button>
+                        <button type="button" class="settings-nav-btn" data-settings-nav="cloud">Cloud</button>
+                        <button type="button" class="settings-nav-btn" data-settings-nav="rain">Rain</button>
+                        <button type="button" class="settings-nav-btn" data-settings-nav="modules">Modules</button>
+                        <button type="button" class="settings-nav-btn hidden" data-settings-nav="lymow">Lymow</button>
+                        <button type="button" class="settings-nav-btn hidden" data-settings-nav="powerwall">Powerwall</button>
+                        <button type="button" class="settings-nav-btn" data-settings-nav="vestaboard">Vestaboard</button>
+                        <button type="button" class="settings-nav-btn" data-settings-nav="papermono">E-paper</button>
+                        <button type="button" class="settings-nav-btn" data-settings-nav="appearance">Appearance</button>
+                        <button type="button" class="settings-nav-btn" data-settings-nav="updates">Updates</button>
+                    </nav>
+                    <div class="settings-page-pane">
+                        <section class="settings-section is-active" id="settings-connection-section" data-settings-pane="connection">
+                            <h3 class="settings-subtitle">Connection</h3>
                             <label class="settings-field">
                                 <span class="label">Panel name</span>
                                 <input
@@ -582,9 +599,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 >
                             </label>
                             <p class="hint">Shown as the title. <strong>28LPC</strong> becomes <strong>28LPC Control Panel</strong>. Leave blank for <strong>Control Panel</strong>.</p>
-                        </section>
-                        <section class="settings-section">
-                            <h3 class="settings-subtitle">Connection</h3>
                             <label class="settings-field">
                                 <span class="label">Broker IP (Yarbo host)</span>
                                 <input
@@ -626,7 +640,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <button type="button" class="btn btn-secondary" id="settings-connection-test">Test local connection</button>
                         </section>
 
-                        <section class="settings-section">
+                        <section class="settings-section" id="settings-cloud-section" data-settings-pane="cloud">
                             <h3 class="settings-subtitle">Cloud reads (optional)</h3>
                             <p class="hint">Map/plan data from your Yarbo account when local MQTT returns nothing. Controls always use local MQTT.</p>
                             <label class="settings-field settings-checkbox">
@@ -654,7 +668,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
                         </section>
 
-                        <section class="settings-section" id="settings-rain-section">
+                        <section class="settings-section" id="settings-rain-section" data-settings-pane="rain">
                             <h3 class="settings-subtitle">Rain sensitivity</h3>
                             <p class="hint">Match the Yarbo app <strong>Detection &amp; Rain Sensitivity</strong> slider (20–1000). Status and the Vestaboard only show rain when the sensor reading is at or above this value. Readings below 20 always clear (the app never blocks mowing there). Leave blank to use 20. If the robot publishes its slider over MQTT, that value is used instead.</p>
                             <label class="settings-field">
@@ -663,7 +677,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                         </section>
 
-                        <section class="settings-section" id="settings-modules-section">
+                        <section class="settings-section" id="settings-modules-section" data-settings-pane="modules">
                             <h3 class="settings-subtitle">Modules</h3>
                             <p class="hint">Turn extra dashboards on or off. Yarbo stays available. The header switcher jumps between enabled modules. Vestaboard live buttons only list modules that are on (Quiet hours and Vestaboard-app hold still apply).</p>
                             <label class="settings-field settings-checkbox">
@@ -674,7 +688,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <input type="checkbox" id="settings-module-lymow" name="module_lymow">
                                 <span>Lymow (account, battery, camera)</span>
                             </label>
-                            <p class="hint">Tick a module, then fill its login section that appears below. Lymow uses the same email and password as the Lymow phone app.</p>
+                            <p class="hint">Tick a module, then open its section in the sidebar. Lymow uses the same email and password as the Lymow phone app.</p>
                             <label class="settings-field">
                                 <span class="label">Vestaboard live module</span>
                                 <select id="settings-vestaboard-live" name="vestaboard_live">
@@ -686,7 +700,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                         </section>
 
-                        <section class="settings-section hidden" id="settings-lymow-section">
+                        <section class="settings-section hidden" id="settings-lymow-section" data-settings-pane="lymow">
                             <h3 class="settings-subtitle">Lymow</h3>
                             <p class="hint">Unofficial Lymow app login (same account as the phone app) for battery and work status. Camera is the LAN IP — stream path is always <code>rtsp://IP:10022/h264ESVideoTest</code>. Needs <code>ffmpeg</code> on this host. This panel does not send start, dock, or pause. Protocol notes from <a href="https://github.com/8408323/ha-lymow" target="_blank" rel="noopener">ha-lymow</a> (MIT). See <code>docs/lymow.md</code>.</p>
                             <label class="settings-field">
@@ -722,7 +736,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                         </section>
 
-                        <section class="settings-section hidden" id="settings-powerwall-section">
+                        <section class="settings-section hidden" id="settings-powerwall-section" data-settings-pane="powerwall">
                             <h3 class="settings-subtitle">Tesla Powerwall</h3>
                             <p class="hint">You do <strong>not</strong> need the Gateway LAN password. Cloud (Tesla Fleet API) is the default. Local Gateway is optional if you later find the sticker password. Full walkthrough: <code>docs/powerwall.md</code>.</p>
                             <div class="map-mode vestaboard-transport" role="radiogroup" aria-label="Powerwall connection">
@@ -792,7 +806,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                         </section>
 
-                        <section class="settings-section" id="settings-vestaboard-section">
+                        <section class="settings-section" id="settings-vestaboard-section" data-settings-pane="vestaboard">
                             <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
                             <p class="hint">Show live status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The Note updates in the background while the panel (or MQTT agent) is running — the browser does not need to stay open. Writes happen when the message changes (at most every 15 seconds). A message from the Vestaboard app pauses live status for one hour (or until Quiet hours end overnight). Optional Quiet hours pause those writes overnight. See <code>docs/vestaboard.md</code>.</p>
                             <label class="settings-field settings-checkbox">
@@ -882,7 +896,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                         </section>
 
-                        <section class="settings-section" id="settings-papermono-section">
+                        <section class="settings-section" id="settings-papermono-section" data-settings-pane="papermono">
                             <h3 class="settings-subtitle">E-paper companions <span class="settings-beta-badge">Beta</span></h3>
                             <p class="hint" id="papermono-kind-hint">Choose the tablet you plugged in. That choice is what gets flashed — Paper Colour is a different binary and a different on-screen UI (no touch, A/B/C keys).</p>
                             <div class="papermono-kind-switch" role="radiogroup" aria-label="E-paper hardware">
@@ -1156,7 +1170,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 
-                        <section class="settings-section">
+                        <section class="settings-section" id="settings-appearance-section" data-settings-pane="appearance">
                             <h3 class="settings-subtitle">Appearance</h3>
                             <p class="hint">Theme and dashboard layout are saved in this browser only.</p>
                             <fieldset class="settings-theme-fieldset">
@@ -1195,7 +1209,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <button type="button" class="btn btn-secondary" id="settings-reset-layout">Reset dashboard layout</button>
                         </section>
 
-                        <section class="settings-section" id="settings-update-section">
+                        <section class="settings-section" id="settings-update-section" data-settings-pane="updates">
                             <div id="settings-update-callout" class="settings-update-callout hidden" role="status">
                                 <strong>Panel update available</strong>
                                 <span id="settings-update-callout-text"></span>
@@ -1214,16 +1228,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <p class="hint settings-trusted-note">Use only on a trusted home network.</p>
                     </div>
-
-                    <div class="settings-modal-footer">
-                        <p id="settings-error" class="settings-error hidden" role="alert"></p>
-                        <div class="modal-actions">
-                            <button type="submit" class="btn" id="settings-save">Save</button>
-                            <button type="button" class="btn btn-secondary" data-settings-close>Cancel</button>
-                        </div>
                     </div>
                 </form>
-            </div>
         </div>
 
         <div id="vestaboard-rotate-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="vestaboard-rotate-title">

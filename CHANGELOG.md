@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.26] - 2026-09-25
+
+### Added
+- Settings is a full page with a left sidebar of sections (Connection, Cloud, Rain, Modules, Vestaboard, E-paper, Appearance, Updates). Lymow and Powerwall appear in the sidebar when those modules are on. `#settings` and `#settings/papermono` open the matching section.
+
+### Fixed
+- PaperMono firmware **0.1.9-beta** compiles with RadioLib 7: LoRa `transmit()` uses a mutable String so Settings → **Build firmware** succeeds.
+
 ## [2.0.25] - 2026-09-25
 
 ### Added
