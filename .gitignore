@@ -16,6 +16,8 @@
 /data/vestaboard-watch.heartbeat
 /data/rain-config.json
 /data/hub-config.json
+/data/install-id.json
+/data/metrics-last.json
 /data/powerwall-config.json
 /data/powerwall-cache.json
 /data/lymow-config.json

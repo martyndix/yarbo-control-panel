@@ -1304,6 +1304,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <div class="settings-update-actions">
                                 <button type="button" class="btn" id="settings-paper-ota-all" disabled>Update all online tablets</button>
                             </div>
+                            <h3 class="settings-subtitle">Anonymous usage ping</h3>
+                            <p class="hint">While this panel is running it sends a daily anonymous ping: a random install id, panel version, which modules are on, how many PaperMono / Paper Colour tablets are paired, and Linux or Mac. It does not include your serial, location, names, or secrets. Set <code>YARBO_METRICS=0</code> to turn it off.</p>
                         </section>
 
                         <p class="hint settings-trusted-note">Use only on a trusted home network.</p>

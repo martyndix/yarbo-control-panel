@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.32] - 2026-09-25
+
+### Added
+- Anonymous daily usage ping (install id, panel version, module flags, tablet counts, OS family). Documented in the README and Settings → Updates. Set `YARBO_METRICS=0` to turn it off.
+
 ## [2.0.31] - 2026-09-25
 
 ### Added

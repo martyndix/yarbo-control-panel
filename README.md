@@ -634,6 +634,18 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 
 ---
 
+## Anonymous usage ping
+
+While the panel is running it sends a **daily anonymous ping** (and one ping at start, at most about once per 20 hours). This is so the project can see how many installs exist. It is **not** tied to your robot.
+
+**Included:** a random install id (not your Yarbo serial), panel version, which modules are on (Yarbo / Powerwall / Lymow / Vestaboard), how many PaperMono and Paper Colour tablets are paired, and `linux` or `darwin`.
+
+**Never included:** serial number, broker IP, GPS, emails, Tesla/Lymow secrets, tablet names, or LAN URLs.
+
+To turn it off, set `YARBO_METRICS=0` in the systemd unit (`sudo systemctl edit yarbo-panel`) or in `config.php` (`'metrics_enabled' => false`), then restart the panel.
+
+---
+
 ## Troubleshooting
 
 | Problem | What to check |
@@ -673,6 +685,7 @@ yarbo-control-panel/
 │   ├── update.sh         # Pull latest from GitHub, composer install, restart panel + MQTT agent
 │   └── cloud_bridge.py   # Optional Yarbo cloud map/plan reads
 ├── deploy/               # Reference systemd unit (install.sh generates the real one)
+├── metrics-worker/       # Optional Cloudflare collector for anonymous install counts
 └── docs/                 # Screenshots and Pi quick-reference (HTML)
 ```
 
@@ -680,7 +693,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.31** (2026-09-25).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.32** (2026-09-25).
 
 ---
 

@@ -26,6 +26,10 @@ cleanup() {
     pkill -P "${VESTABOARD_PID}" 2>/dev/null || true
     kill "${VESTABOARD_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${METRICS_PID:-}" ]]; then
+    pkill -P "${METRICS_PID}" 2>/dev/null || true
+    kill "${METRICS_PID}" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -66,6 +70,15 @@ echo "==> Starting Vestaboard Note watcher"
   done
 ) &
 VESTABOARD_PID=$!
+
+echo "==> Starting anonymous usage ping"
+(
+  while true; do
+    "$PHP_BIN" "${ROOT}/scripts/metrics_ping.php" >/dev/null 2>&1 || true
+    sleep 86400
+  done
+) &
+METRICS_PID=$!
 
 echo "==> Starting panel on http://${HOST}:${PORT}"
 echo "    Keep this process running. Hard-refresh the browser after start."

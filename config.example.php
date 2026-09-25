@@ -18,6 +18,10 @@ return [
     // Credentials are stored in data/cloud-config.json, not here.
     'data_source' => 'auto', // local | cloud | auto
 
+    // Anonymous daily usage ping (version + which modules are on). Default is on.
+    // Set false, or export YARBO_METRICS=0, to disable.
+    // 'metrics_enabled' => true,
+
     // Default Yarbo RTSP ports: 19201=front, 19202=left, 19203=right, 19204=rear
     // Override with full rtsp URL per camera if needed:
     // 'front' => ['name' => 'Front', 'rtsp' => 'rtsp://127.0.0.1:19201/live/chn0'],

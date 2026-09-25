@@ -11,6 +11,8 @@ User=pi
 WorkingDirectory=/home/pi/yarbo-control-panel
 Environment=YARBO_PANEL_HOST=0.0.0.0
 Environment=YARBO_PANEL_PORT=8080
+# Environment=YARBO_METRICS=0
+# Environment=YARBO_METRICS_URL=https://yarbo-panel-metrics.YOUR-SUBDOMAIN.workers.dev/ping
 ExecStart=/home/pi/yarbo-control-panel/scripts/panel.sh
 Restart=on-failure
 RestartSec=5
