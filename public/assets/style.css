@@ -2518,18 +2518,32 @@ html[data-theme="light"] .plan-activity {
 
 .home-node-heading {
     grid-column: 1 / -1;
-    margin: 0.25rem 0 0.15rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin: 0.1rem 0 0.05rem;
 }
 
 .home-node-title {
-    margin: 0 0 0.25rem;
-    font-size: 1rem;
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.home-device-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
 }
 
 .home-device {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) auto auto;
+    align-items: center;
+    gap: 0.3rem 0.45rem;
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0.85rem;
+    border-radius: 8px;
+    padding: 0.28rem 0.45rem;
     background: var(--surface);
 }
 
@@ -2539,31 +2553,72 @@ html[data-theme="light"] .plan-activity {
 
 .home-device-name {
     font-weight: 600;
-    margin: 0 0 0.2rem;
+    font-size: 0.88rem;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .home-device-meta {
-    color: var(--muted, #666);
-    font-size: 0.85rem;
-    margin-bottom: 0.6rem;
+    display: none;
 }
 
 .home-device-actions {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
+    flex-wrap: nowrap;
+    gap: 0.3rem;
     align-items: center;
+}
+
+.home-device-actions input[type="range"] {
+    width: 5.5rem;
+    max-width: 28vw;
+    height: 1.1rem;
+    margin: 0;
+}
+
+.home-device .btn-compact {
+    padding: 0.18rem 0.45rem;
+    font-size: 0.75rem;
+    border-radius: 6px;
 }
 
 .home-device-manage {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    margin-top: 0.5rem;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    margin: 0;
+    justify-content: flex-end;
+}
+
+.home-device--hidden {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0.12rem 0.35rem;
+    border-radius: 6px;
+}
+
+.home-device--hidden .home-device-name {
+    font-weight: 500;
+    font-size: 0.78rem;
+}
+
+.home-device--hidden .btn-compact {
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
 }
 
 .home-hidden-wrap {
-    margin-top: 1rem;
+    margin-top: 0.65rem;
+}
+
+.home-hidden-wrap .settings-subtitle {
+    margin-bottom: 0.15rem;
+}
+
+#home-hidden-devices {
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+    gap: 0.2rem;
 }
 
 .home-scene-add {
@@ -2621,5 +2676,13 @@ html[data-theme="light"] .plan-activity {
 
     .papermono-kind-switch {
         grid-template-columns: 1fr;
+    }
+
+    .home-device:not(.home-device--hidden) {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .home-device:not(.home-device--hidden) .home-device-actions {
+        grid-column: 1 / -1;
     }
 }

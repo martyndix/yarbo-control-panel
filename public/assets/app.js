@@ -2555,13 +2555,12 @@ function homeDeviceCardHtml(d, hidden) {
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
         : `<button type="button" class="btn btn-secondary btn-compact" data-home-hide="${escapeHtml(d.id)}">Hide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`;
-    return `<article class="home-device${on ? ' is-on' : ''}" data-home-id="${escapeHtml(d.id)}">
+    return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         <p class="home-device-name">${escapeHtml(d.name)}</p>
-        <p class="home-device-meta">${escapeHtml(meta)}</p>
-        <div class="home-device-actions">
-            ${hidden ? '' : `<button type="button" class="btn btn-secondary" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>`}
+        ${hidden ? '' : `<div class="home-device-actions">
+            <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             ${bright}
-        </div>
+        </div>`}
         <div class="home-device-manage">${manage}</div>
     </article>`;
 }
@@ -2599,8 +2598,7 @@ function renderHomeDashboard(data) {
                 const heading = many
                     ? `<div class="home-node-heading">
                         <h3 class="home-node-title">${escapeHtml(source)} · ${list.length} ${list.length === 1 ? 'item' : 'items'}</h3>
-                        <p class="hint">Each row is one light, plug, or switch on that device. Hide a single Hue light, or remove the whole bridge.</p>
-                        <button type="button" class="btn btn-secondary btn-compact" data-home-forget="${escapeHtml(String(first.node_id || ''))}">Remove all</button>
+                        <button type="button" class="btn btn-secondary btn-compact" data-home-forget="${escapeHtml(String(first.node_id || ''))}" title="Unpair this whole Matter node (all lights on a Hue Bridge)">Remove all</button>
                     </div>`
                     : '';
                 const cards = list.map((d) => homeDeviceCardHtml(d, false)).join('');

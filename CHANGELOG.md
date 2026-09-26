@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.5] - 2026-09-26
+
+### Changed
+- Home device tiles are compact single-row controls (name, on/off, brightness, hide/remove). Hidden devices are smaller still: name plus Unhide/Remove only.
+
 ## [3.0.4] - 2026-09-26
 
 ### Added
