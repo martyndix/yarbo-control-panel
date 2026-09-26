@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.51] - 2026-09-26
+
+### Fixed
+- **Save to robot** no longer dies with MQTT error 66 (broker closed an idle LAN socket while probing pathway commands on cloud). The panel reconnects if the socket drops, skips unknown commands after one timeout, and still returns the save result.
+
 ## [2.0.50] - 2026-09-26
 
 ### Fixed

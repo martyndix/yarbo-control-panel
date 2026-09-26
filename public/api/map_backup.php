@@ -44,39 +44,34 @@ try {
     $client->connect();
 
     if ($action === 'list') {
-        $result = $backups->listAndFetch($client, $input['backup_id'] ?? null, $cloud, $serial);
-        $client->disconnect();
-        json_response($result);
+        json_response($backups->listAndFetch($client, $input['backup_id'] ?? null, $cloud, $serial));
     }
 
     if ($action === 'restore') {
         $collection = $input['geojson'] ?? null;
         if (!is_array($collection)) {
-            $client->disconnect();
             json_response(['ok' => false, 'error' => 'geojson draft is required'], 400);
         }
-        $result = $backups->restoreDraft(
+        json_response($backups->restoreDraft(
             $client,
             $collection,
             (bool) ($input['confirm'] ?? false),
             $cloud,
             $serial
-        );
-        $client->disconnect();
-        json_response($result);
+        ));
     }
 
-    $client->disconnect();
     json_response(['ok' => false, 'error' => 'Unknown action. Valid: list, restore'], 400);
 } catch (Throwable $e) {
+    json_response([
+        'ok' => false,
+        'error' => friendly_error($e),
+    ], 500);
+} finally {
     if ($client !== null) {
         try {
             $client->disconnect();
         } catch (Throwable) {
         }
     }
-    json_response([
-        'ok' => false,
-        'error' => friendly_error($e),
-    ], 500);
 }

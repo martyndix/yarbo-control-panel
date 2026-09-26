@@ -671,6 +671,9 @@ final class YarboMapBackup
                         $last['envelope'] = $sent['envelope'];
                     }
                     if (!self::ackLooksOk($sent['envelope'])) {
+                        if ($sent['envelope'] === null && $cmd !== self::SAVE_AREA_CMD) {
+                            break;
+                        }
                         continue;
                     }
                     sleep(5);
@@ -1045,7 +1048,15 @@ final class YarboMapBackup
      */
     private function readCurrentMap(YarboMqtt $client, ?YarboCloud $cloud, string $serial): ?array
     {
-        $envelope = $client->requestDataFeedback('get_map', [], 25.0, false);
+        try {
+            $client->ensureConnected();
+            $envelope = $client->requestDataFeedback('get_map', [], 25.0, false);
+        } catch (\Throwable $e) {
+            if (!YarboMqtt::isBrokenSocket($e)) {
+                throw $e;
+            }
+            $envelope = null;
+        }
         if ($envelope !== null) {
             $located = self::locateMap(self::envelopeData($envelope));
             if ($located['map'] !== null) {

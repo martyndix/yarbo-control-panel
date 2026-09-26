@@ -25,6 +25,8 @@ final class YarboErrors
     public const MSG_MQTT_FAILED = 'Cannot connect to the Yarbo MQTT broker. Check the broker IP and port (1883) in Settings, '
         . 'and confirm the robot is powered on.';
 
+    public const MSG_MQTT_CLOSED = 'The MQTT connection dropped during save (the LAN broker closed an idle socket while waiting on cloud). Try Save again.';
+
     public static function friendly(string $message): string
     {
         $lower = strtolower($message);
@@ -51,6 +53,14 @@ final class YarboErrors
 
         if (str_contains($lower, 'establishing a connection to the mqtt broker failed')) {
             return self::MSG_MQTT_FAILED;
+        }
+
+        if (
+            str_contains($lower, 'eof')
+            || str_contains($message, '[66]')
+            || str_contains($lower, 'transferring data over socket')
+        ) {
+            return self::MSG_MQTT_CLOSED;
         }
 
         return $message;

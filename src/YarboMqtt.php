@@ -26,11 +26,43 @@ final class YarboMqtt
     public function connect(int $connectTimeout = 3, int $socketTimeout = 3): void
     {
         $settings = (new ConnectionSettings())
-            ->setKeepAliveInterval(30)
+            ->setKeepAliveInterval(60)
             ->setConnectTimeout($connectTimeout)
             ->setSocketTimeout($socketTimeout);
 
         $this->client->connect($settings, true);
+    }
+
+    public function reconnect(): void
+    {
+        $this->disconnect();
+        $this->client = new MqttClient($this->host, $this->port, 'yarbo-php-' . bin2hex(random_bytes(4)));
+        $this->connect();
+    }
+
+    public function ensureConnected(): void
+    {
+        try {
+            if ($this->client->isConnected()) {
+                $this->briefLoop(0.05);
+                if ($this->client->isConnected()) {
+                    return;
+                }
+            }
+        } catch (\Throwable) {
+        }
+        $this->reconnect();
+    }
+
+    public static function isBrokenSocket(\Throwable $e): bool
+    {
+        $message = strtolower($e->getMessage());
+
+        return str_contains($message, 'eof')
+            || str_contains($message, '[66]')
+            || str_contains($message, 'not connected')
+            || str_contains($message, 'socket has been closed')
+            || str_contains($message, 'transferring data over socket');
     }
 
     /**
@@ -56,8 +88,11 @@ final class YarboMqtt
 
     public function disconnect(): void
     {
-        if ($this->client->isConnected()) {
-            $this->client->disconnect();
+        try {
+            if ($this->client->isConnected()) {
+                $this->client->disconnect();
+            }
+        } catch (\Throwable) {
         }
     }
 
@@ -156,6 +191,47 @@ final class YarboMqtt
         bool $acquireController = true,
         array $acceptTopics = [],
         bool $acceptMapShaped = false,
+        int $attempt = 0,
+    ): ?array {
+        $this->ensureConnected();
+        try {
+            return $this->requestDataFeedbackOnce(
+                $cmd,
+                $payload,
+                $timeoutSeconds,
+                $acquireController,
+                $acceptTopics,
+                $acceptMapShaped
+            );
+        } catch (\Throwable $e) {
+            if ($attempt > 0 || !self::isBrokenSocket($e)) {
+                throw $e;
+            }
+            $this->reconnect();
+
+            return $this->requestDataFeedback(
+                $cmd,
+                $payload,
+                $timeoutSeconds,
+                $acquireController,
+                $acceptTopics,
+                $acceptMapShaped,
+                1
+            );
+        }
+    }
+
+    /**
+     * @param list<string> $acceptTopics
+     * @return array<string, mixed>|null
+     */
+    private function requestDataFeedbackOnce(
+        string $cmd,
+        array $payload,
+        float $timeoutSeconds,
+        bool $acquireController,
+        array $acceptTopics,
+        bool $acceptMapShaped,
     ): ?array {
         $feedbackTopic = $this->topic('device', 'data_feedback');
         /** @var array<string, mixed>|null $feedbackResponse */
