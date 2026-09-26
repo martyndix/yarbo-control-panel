@@ -235,6 +235,23 @@ if ($isFixture) {
     }
 }
 
+if (isset($map['areas'][0]['ref']['latitude'], $map['areas'][0]['range'][0]['y'])) {
+    $sameRef = YarboMap::rebaseZoneOnto($map['areas'][0], $map['areas'][0]);
+    if (YarboMap::maxRangeDelta(['area' => [$map['areas'][0]]], ['area' => [$sameRef]]) > $roundTripLimit) {
+        $failures[] = 'rebase onto the same ref moved vertices';
+    }
+    $offsetTarget = $map['areas'][0];
+    $offsetTarget['ref'] = [
+        'latitude' => (float) $map['areas'][0]['ref']['latitude'] + (10.0 / 111_320.0),
+        'longitude' => $map['areas'][0]['ref']['longitude'],
+    ];
+    $rebased = YarboMap::rebaseZoneOnto($map['areas'][0], $offsetTarget);
+    $dy = (float) $rebased['range'][0]['y'] - (float) $map['areas'][0]['range'][0]['y'];
+    if (abs($dy + 10.0) > 0.05) {
+        $failures[] = sprintf('rebase onto a 10 m north ref should shift y by -10 m, got %+.3f', $dy);
+    }
+}
+
 $featureCount = count($collection['features'] ?? []);
 echo "source={$source}\n";
 echo "features={$featureCount}\n";

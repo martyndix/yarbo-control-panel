@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.48] - 2026-09-26
+
+### Fixed
+- **Save to robot** converts the edited zone into the live `get_map` frame before `save_clean_area`. Sending backup-file local metres as a bare zone moved the polygon ~80 m. Read-back is matched by zone id. Stale Listen results no longer appear on page load.
+
 ## [2.0.47] - 2026-09-26
 
 ### Fixed

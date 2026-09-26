@@ -460,6 +460,151 @@ final class YarboMap
     }
 
     /**
+     * Largest vertex move between maps, matching zones by id then name (not list index).
+     *
+     * @param array<string, mixed> $a
+     * @param array<string, mixed> $b
+     */
+    public static function maxAlignedRangeDelta(array $a, array $b): float
+    {
+        $max = 0.0;
+        foreach (array_keys(self::canonicalListNames()) as $canonical) {
+            $left = self::zoneList($a, $canonical);
+            $right = self::zoneList($b, $canonical);
+            foreach ($left as $lz) {
+                $rz = self::findMatchingZone($right, $lz);
+                if ($rz === null) {
+                    continue;
+                }
+                $r1 = is_array($lz['range'] ?? null) ? $lz['range'] : [];
+                $r2 = is_array($rz['range'] ?? null) ? $rz['range'] : [];
+                $p = min(count($r1), count($r2));
+                for ($j = 0; $j < $p; $j++) {
+                    $x1 = is_numeric($r1[$j]['x'] ?? null) ? (float) $r1[$j]['x'] : 0.0;
+                    $y1 = is_numeric($r1[$j]['y'] ?? null) ? (float) $r1[$j]['y'] : 0.0;
+                    $x2 = is_numeric($r2[$j]['x'] ?? null) ? (float) $r2[$j]['x'] : 0.0;
+                    $y2 = is_numeric($r2[$j]['y'] ?? null) ? (float) $r2[$j]['y'] : 0.0;
+                    $max = max($max, hypot($x1 - $x2, $y1 - $y2));
+                }
+            }
+        }
+
+        return $max;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $zones
+     * @param array<string, mixed> $needle
+     * @return array<string, mixed>|null
+     */
+    public static function findMatchingZone(array $zones, array $needle): ?array
+    {
+        $id = $needle['id'] ?? null;
+        if ($id !== null && $id !== '') {
+            foreach ($zones as $zone) {
+                if (is_array($zone) && (string) ($zone['id'] ?? '') === (string) $id) {
+                    return $zone;
+                }
+            }
+        }
+        $name = $needle['name'] ?? null;
+        if ($name !== null && $name !== '') {
+            foreach ($zones as $zone) {
+                if (is_array($zone) && (string) ($zone['name'] ?? '') === (string) $name) {
+                    return $zone;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Copy edited range/name onto a live get_map zone, converting local metres between refs.
+     *
+     * @param array<string, mixed> $source
+     * @param array<string, mixed> $target
+     * @return array<string, mixed>
+     */
+    public static function rebaseZoneOnto(array $source, array $target): array
+    {
+        $out = $target;
+        if (array_key_exists('name', $source)) {
+            $out['name'] = $source['name'];
+        }
+        $range = $source['range'] ?? null;
+        if (!is_array($range)) {
+            return $out;
+        }
+        $srcRef = YarboGeo::extractGpsRef($source);
+        $dstRef = YarboGeo::extractGpsRef($target);
+        if ($srcRef === null || $dstRef === null) {
+            $out['range'] = $range;
+
+            return $out;
+        }
+        $sameRef = abs($srcRef['latitude'] - $dstRef['latitude']) < 1e-8
+            && abs($srcRef['longitude'] - $dstRef['longitude']) < 1e-8;
+        if ($sameRef) {
+            $out['range'] = $range;
+
+            return $out;
+        }
+        $converted = [];
+        foreach ($range as $point) {
+            if (!is_array($point)) {
+                continue;
+            }
+            $x = is_numeric($point['x'] ?? null) ? (float) $point['x'] : 0.0;
+            $y = is_numeric($point['y'] ?? null) ? (float) $point['y'] : 0.0;
+            [$lat, $lon] = YarboGeo::localToGps($x, $y, $srcRef['latitude'], $srcRef['longitude']);
+            [$nx, $ny] = YarboGeo::gpsToLocal($lat, $lon, $dstRef['latitude'], $dstRef['longitude']);
+            $next = $point;
+            $next['x'] = $nx;
+            $next['y'] = $ny;
+            $converted[] = $next;
+        }
+        $out['range'] = $converted;
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $map
+     * @param array<string, mixed> $zone
+     * @return array<string, mixed>
+     */
+    public static function replaceMatchingZone(array $map, string $canonical, array $zone): array
+    {
+        $key = self::presentListKey($map, $canonical);
+        if ($key === null) {
+            return $map;
+        }
+        $value = $map[$key];
+        if (self::isSingleZone($value)) {
+            $map[$key] = $zone;
+
+            return $map;
+        }
+        if (!is_array($value)) {
+            return $map;
+        }
+        foreach ($value as $i => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            if (self::findMatchingZone([$item], $zone) !== null) {
+                $value[$i] = $zone;
+                $map[$key] = $value;
+
+                return $map;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
      * get_map uses plural list keys; backup files use the singular form.
      *
      * @return array<string, list<string>>

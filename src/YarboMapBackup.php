@@ -310,8 +310,8 @@ final class YarboMapBackup
         }
 
         $restoreFile = $this->writeRestoreCopy($stored);
-        $changes = self::changedZones($stored['map'], $sentMap);
-        if ($changes === []) {
+        $backupChanges = self::changedZones($stored['map'], $sentMap);
+        if ($backupChanges === []) {
             return [
                 'ok' => false,
                 'error' => 'No zone vertices or names differ from the loaded map, so save_clean_area was not sent.',
@@ -321,7 +321,45 @@ final class YarboMapBackup
         }
 
         $preferCloud = $cloud !== null && $serial !== '';
-        $write = $this->saveChangedZones($client, $cloud, $serial, $changes, $sentMap, $preferCloud, null, $stored['map']);
+        $liveBefore = $this->readCurrentMap($client, $cloud, $serial);
+        if (!is_array($liveBefore)) {
+            return [
+                'ok' => false,
+                'error' => 'Could not read live get_map to convert coordinates. Original is on the Pi: ' . basename($restoreFile),
+                'restore_file' => basename($restoreFile),
+            ];
+        }
+
+        $changes = [];
+        $patchedLive = $liveBefore;
+        foreach ($backupChanges as $change) {
+            $liveList = YarboMap::zoneList($liveBefore, $change['canonical']);
+            $target = YarboMap::findMatchingZone($liveList, $change['zone'])
+                ?? YarboMap::findMatchingZone($liveList, $change['original']);
+            if ($target === null) {
+                continue;
+            }
+            $rebased = YarboMap::rebaseZoneOnto($change['zone'], $target);
+            $key = YarboMap::presentListKey($liveBefore, $change['canonical']) ?? $change['key'];
+            $changes[] = [
+                'canonical' => $change['canonical'],
+                'key' => $key,
+                'index' => $change['index'],
+                'zone' => $rebased,
+                'original' => $target,
+                'delta_m' => YarboMap::maxRangeDelta(['area' => [$target]], ['area' => [$rebased]]),
+            ];
+            $patchedLive = YarboMap::replaceMatchingZone($patchedLive, $change['canonical'], $rebased);
+        }
+        if ($changes === []) {
+            return [
+                'ok' => false,
+                'error' => 'The edited zone was not found on live get_map (id/name). Original is on the Pi: ' . basename($restoreFile),
+                'restore_file' => basename($restoreFile),
+            ];
+        }
+
+        $write = $this->saveChangedZones($client, $cloud, $serial, $changes, $patchedLive, $preferCloud, null, $liveBefore);
         $ack = $write['envelope'];
         $via = $write['via'];
         $saveShape = $write['shape'];
@@ -337,16 +375,16 @@ final class YarboMapBackup
         }
 
         $readMap = $write['read_map'];
-        $delta = is_array($readMap) ? YarboMap::maxRangeDelta($sentMap, $readMap) : null;
-        $vsOriginal = is_array($readMap) ? YarboMap::maxRangeDelta($stored['map'], $readMap) : null;
+        $delta = is_array($readMap) ? YarboMap::maxAlignedRangeDelta($patchedLive, $readMap) : null;
+        $vsOriginal = is_array($readMap) ? YarboMap::maxAlignedRangeDelta($liveBefore, $readMap) : null;
         $robotMoved = $vsOriginal !== null && $vsOriginal > self::VERIFY_M;
         if ($delta === null || ($blobDelta > self::VERIFY_M && !$robotMoved)) {
             sleep(5);
             $retryMap = $this->readCurrentMap($client, $cloud, $serial);
             if (is_array($retryMap)) {
                 $readMap = $retryMap;
-                $delta = YarboMap::maxRangeDelta($sentMap, $readMap);
-                $vsOriginal = YarboMap::maxRangeDelta($stored['map'], $readMap);
+                $delta = YarboMap::maxAlignedRangeDelta($patchedLive, $readMap);
+                $vsOriginal = YarboMap::maxAlignedRangeDelta($liveBefore, $readMap);
                 $robotMoved = $vsOriginal !== null && $vsOriginal > self::VERIFY_M;
             }
         }
@@ -360,11 +398,11 @@ final class YarboMapBackup
                 $client,
                 $cloud,
                 $serial,
-                self::changedZones($sentMap, $stored['map']),
-                $stored['map'],
+                self::changedZones($patchedLive, $liveBefore),
+                $liveBefore,
                 $via === 'cloud',
                 $saveShape,
-                $sentMap
+                $patchedLive
             );
             $rolledBack = true;
         }
@@ -565,10 +603,13 @@ final class YarboMapBackup
             if (!is_array($readMap)) {
                 continue;
             }
-            if ($originalMap === null) {
+            $vsPatch = YarboMap::maxAlignedRangeDelta($sentMap, $readMap);
+            if ($vsPatch <= self::VERIFY_M) {
                 return $last;
             }
-            $vsOriginal = YarboMap::maxRangeDelta($originalMap, $readMap);
+            $vsOriginal = $originalMap === null
+                ? 0.0
+                : YarboMap::maxAlignedRangeDelta($originalMap, $readMap);
             if ($vsOriginal > self::VERIFY_M) {
                 return $last;
             }
@@ -594,11 +635,8 @@ final class YarboMapBackup
                 continue;
             }
             $seen[$sig] = true;
-            $shapes[] = ['name' => 'zone', 'payload' => $zone];
             $shapes[] = ['name' => $key . '-list', 'payload' => [$key => [$zone]]];
-            $shapes[] = ['name' => 'data', 'payload' => ['data' => YarboCodec::encodePayloadField($zone)]];
         }
-        $shapes[] = ['name' => 'map', 'payload' => $encodedMap];
 
         return $shapes;
     }
@@ -871,7 +909,7 @@ final class YarboMapBackup
             return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
         if ($unchanged) {
-            return 'Robot map did not change. Save now uses save_clean_area (the command heard when renaming an area), not map_recovery. Original left in place ('
+            return 'Robot map did not change. Save now uses save_clean_area in the live get_map frame. Original left in place ('
                 . $restoreFile . '). Enable Settings → cloud fallback if this was LAN-only.' . $detail;
         }
         if (!$readMap) {

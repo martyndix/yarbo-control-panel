@@ -336,6 +336,7 @@ let mapViewSaveTimer = null;
 let mapLoadingTimer = null;
 let mapLoadingStartedAt = 0;
 let mapListenTimer = null;
+let mapListenShowResult = false;
 let mapBackupCompatible = false;
 let lightsOn = false;
 let holdController = false;
@@ -2126,6 +2127,9 @@ function renderMapListenStatus(data) {
     }
     if (btn) btn.textContent = 'Listen for map save';
     if (state === 'done') {
+        if (!mapListenShowResult) {
+            return;
+        }
         let text = data.message || 'Listen finished.';
         if (unknown.length) {
             text = `Heard unpublished command: ${unknown.join(', ')}. Leave this on screen.`;
@@ -2175,6 +2179,7 @@ async function toggleMapListen() {
         const res = await fetch('/api/map_capture.php', { cache: 'no-store' });
         const current = await parseJsonResponse(res);
         const action = current.state === 'listening' ? 'stop' : 'start';
+        mapListenShowResult = true;
         const start = await fetch('/api/map_capture.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
