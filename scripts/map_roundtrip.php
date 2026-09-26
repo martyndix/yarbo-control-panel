@@ -13,6 +13,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use Yarbo\YarboMap;
+use Yarbo\YarboMapBackup;
 
 $defaultFixture = __DIR__ . '/../tests/fixtures/map_app_sample.json';
 $lastMap = __DIR__ . '/../data/map-last.json';
@@ -99,6 +100,43 @@ if ($isFixture) {
         if (abs($newX - $oldX) > 0.02) {
             $failures[] = sprintf('north nudge should not change x (Δx=%.3f m)', $newX - $oldX);
         }
+    }
+
+    $wrapper = [
+        'areas' => [],
+        'pathways' => [],
+        'nogozones' => [],
+        'backups' => [
+            ['id' => 7, 'name' => 'auto', 'map' => $map],
+        ],
+    ];
+    $located = YarboMapBackup::locateMapFromList($wrapper, 7);
+    if (($located['map']['areas'][0]['id'] ?? null) !== ($map['areas'][0]['id'] ?? null)) {
+        $failures[] = 'locateMapFromList kept the empty list wrapper instead of the nested backup map';
+    }
+    $emptyEncode = YarboMap::encodeDraft($wrapper, $collection);
+    if ($emptyEncode['ok'] ?? false) {
+        $failures[] = 'encodeDraft should reject an empty areas[] wrapper';
+    }
+    $nestedEncode = YarboMap::encodeDraft($located['map'], $collection);
+    if (!($nestedEncode['ok'] ?? false)) {
+        $failures[] = 'encodeDraft failed on nested backup map: ' . implode('; ', $nestedEncode['errors'] ?? []);
+    }
+
+    $keyedMap = $map;
+    $keyedMap['areas'] = [
+        'area-open' => $map['areas'][0],
+        'area-closed' => $map['areas'][1],
+    ];
+    $keyedCollection = json_decode(
+        json_encode(YarboMap::normalize(['get_map' => ['data' => $keyedMap]])['feature_collection'], JSON_THROW_ON_ERROR),
+        true
+    );
+    $keyedEncode = YarboMap::encodeDraft($keyedMap, $keyedCollection);
+    if (!($keyedEncode['ok'] ?? false)) {
+        $failures[] = 'encodeDraft failed on string-keyed areas: ' . implode('; ', $keyedEncode['errors'] ?? []);
+    } elseif (($keyedEncode['map']['areas']['area-open']['extra_keep_me'] ?? null) !== true) {
+        $failures[] = 'string-keyed encode dropped extra_keep_me';
     }
 }
 

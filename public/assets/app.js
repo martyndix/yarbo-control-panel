@@ -1363,9 +1363,20 @@ function exportLoadedMapGeoJson() {
 function draftLayerToGeoJson() {
     const features = [];
     draftLayer?.eachLayer((layer) => {
-        if (typeof layer.toGeoJSON === 'function') {
-            features.push(layer.toGeoJSON());
-        }
+        if (typeof layer.toGeoJSON !== 'function') return;
+        const geo = layer.toGeoJSON();
+        const list = geo?.type === 'FeatureCollection' ? (geo.features || []) : [geo];
+        list.forEach((feature) => {
+            if (!feature || feature.type !== 'Feature') return;
+            const props = {
+                ...(layer.feature?.properties || {}),
+                ...(feature.properties || {}),
+            };
+            if (Object.keys(props).length) {
+                feature.properties = props;
+            }
+            features.push(feature);
+        });
     });
     return { type: 'FeatureCollection', features };
 }
@@ -1544,7 +1555,24 @@ async function loadMapBackups() {
         const extra = [counts, ids ? `ids ${ids}` : ''].filter(Boolean).join('. ');
         const message = `${data.message || 'Backup read finished.'}${extra ? ` ${extra}` : ''}`;
         if (els.mapListenStatus) els.mapListenStatus.textContent = message;
-        showToast(data.compatible ? 'Backup extracted. Edit, then Save to robot while docked.' : (data.message || 'Backup is not get_map-shaped'), data.compatible ? 'success' : 'error');
+        const featureCollection = data.geojson || { type: 'FeatureCollection', features: [] };
+        const features = Array.isArray(featureCollection.features) ? featureCollection.features : [];
+        if (features.length > 0 && map && areasLayer) {
+            applyLoadedMapFeatures(features, {
+                meta: {
+                    feature_count: features.length,
+                    data_via: data.via || null,
+                },
+            });
+            saveMapCache({ data_via: data.via || 'backup' }, features);
+            if (mapEditMode) {
+                copyFeaturesToDraft();
+                setAreasLayerVisible(false);
+                enableDraftVertexEditing();
+            }
+            updateMapAreasStatus(`Map backup loaded (${features.length} feature${features.length === 1 ? '' : 's'}).`);
+        }
+        showToast(data.compatible ? 'Backup extracted. Edit these zones, then Save to robot while docked.' : (data.message || 'Backup is not get_map-shaped'), data.compatible ? 'success' : 'error');
     } catch (err) {
         setMapSaveEnabled(false);
         showToast(err.message || 'Could not load map backups', 'error');

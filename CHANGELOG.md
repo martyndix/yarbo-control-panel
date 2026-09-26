@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.37] - 2026-09-26
+
+### Fixed
+- **Save to robot** no longer treats an empty backup-list wrapper (`areas: []`) as the map. It finds the nested get_map blob, draws that backup on the Location Map, and matches draft zones by id so edited vertices can be written back.
+
 ## [2.0.36] - 2026-09-26
 
 ### Fixed

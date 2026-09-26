@@ -151,6 +151,7 @@ final class YarboMap
                 continue;
             }
             [$list, $listIndex] = $parsed;
+            $zoneId = $feature['properties']['zone_id'] ?? $feature['properties']['source_key'] ?? null;
 
             if ($list === 'chargingData') {
                 $zone = is_array($encoded['chargingData'] ?? null) ? $encoded['chargingData'] : null;
@@ -170,33 +171,45 @@ final class YarboMap
 
             if ($list === 'allchargingData') {
                 $zones = is_array($encoded['allchargingData'] ?? null) ? $encoded['allchargingData'] : [];
-                if (!isset($zones[$listIndex]) || !is_array($zones[$listIndex])) {
-                    $errors[] = sprintf('Draft charging station %s is not on the original map', $path);
+                $zoneKey = self::findZoneKey($zones, $listIndex, $zoneId);
+                if ($zoneKey === null) {
+                    $errors[] = sprintf(
+                        'Draft charging station %s is not on the original map (%s has %d stations)',
+                        $path,
+                        $list,
+                        count($zones)
+                    );
                     continue;
                 }
-                $result = self::encodeChargingPoint($zones[$listIndex], $feature);
+                $result = self::encodeChargingPoint($zones[$zoneKey], $feature);
                 if ($result['error'] !== null) {
                     $errors[] = $result['error'];
                     continue;
                 }
-                $encoded['allchargingData'][$listIndex] = $result['zone'];
+                $encoded['allchargingData'][$zoneKey] = $result['zone'];
                 $maxDelta = max($maxDelta, $result['delta_m']);
                 continue;
             }
 
             $zones = is_array($encoded[$list] ?? null) ? $encoded[$list] : [];
-            if (!isset($zones[$listIndex]) || !is_array($zones[$listIndex])) {
-                $errors[] = sprintf('Draft zone %s is not on the original map', $path);
+            $zoneKey = self::findZoneKey($zones, $listIndex, $zoneId);
+            if ($zoneKey === null) {
+                $errors[] = sprintf(
+                    'Draft zone %s is not on the original map (%s has %d zones)',
+                    $path,
+                    $list,
+                    count($zones)
+                );
                 continue;
             }
             $kind = (string) ($feature['properties']['kind'] ?? ($feature['geometry']['type'] ?? ''));
             $isLine = $kind === 'line' || $kind === 'LineString';
-            $result = self::encodeZoneRange($zones[$listIndex], $feature, $isLine);
+            $result = self::encodeZoneRange($zones[$zoneKey], $feature, $isLine);
             if ($result['error'] !== null) {
                 $errors[] = $path . ': ' . $result['error'];
                 continue;
             }
-            $encoded[$list][$listIndex] = $result['zone'];
+            $encoded[$list][$zoneKey] = $result['zone'];
             $maxDelta = max($maxDelta, $result['delta_m']);
         }
 
@@ -239,25 +252,107 @@ final class YarboMap
 
     public static function isAppMap(array $data): bool
     {
-        foreach (['areas', 'pathways', 'nogozones', 'novisionzones', 'elec_fence', 'sidewalks', 'deadends'] as $key) {
-            if (isset($data[$key]) && is_array($data[$key])) {
-                return true;
-            }
-        }
-
-        return isset($data['chargingData']) && is_array($data['chargingData']);
+        return self::appGeometryCount($data) > 0;
     }
 
     /**
-     * @return array{0: string, 1: int}|null
+     * Count drawable app-format zones (empty `areas: []` wrappers score 0).
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function appGeometryCount(array $data): int
+    {
+        $count = 0;
+        foreach (['areas', 'pathways', 'nogozones', 'novisionzones', 'elec_fence', 'sidewalks', 'deadends'] as $key) {
+            $zones = $data[$key] ?? null;
+            if (!is_array($zones)) {
+                continue;
+            }
+            foreach ($zones as $zone) {
+                if (is_array($zone) && is_array($zone['range'] ?? null) && $zone['range'] !== []) {
+                    $count++;
+                }
+            }
+        }
+        $charging = $data['chargingData'] ?? null;
+        if (is_array($charging)) {
+            $point = $charging['chargingPoint'] ?? $charging['charging_point'] ?? null;
+            if (is_array($point)) {
+                $count++;
+            }
+        }
+        $allCharging = $data['allchargingData'] ?? null;
+        if (is_array($allCharging)) {
+            foreach ($allCharging as $station) {
+                if (!is_array($station)) {
+                    continue;
+                }
+                $point = $station['chargingPoint'] ?? $station['charging_point'] ?? null;
+                if (is_array($point)) {
+                    $count++;
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * @return array{0: string, 1: int|string}|null
      */
     private static function parseMapPath(string $path): ?array
     {
         if ($path === 'chargingData') {
             return ['chargingData', 0];
         }
-        if (preg_match('/^(areas|nogozones|novisionzones|elec_fence|pathways|sidewalks|deadends|allchargingData)\[(\d+)\]$/', $path, $matches)) {
-            return [$matches[1], (int) $matches[2]];
+        if (preg_match('/^(areas|nogozones|novisionzones|elec_fence|pathways|sidewalks|deadends|allchargingData)\[([^\]]+)\]$/', $path, $matches)) {
+            $index = $matches[2];
+            if (ctype_digit($index)) {
+                return [$matches[1], (int) $index];
+            }
+
+            return [$matches[1], $index];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<int|string, mixed> $zones
+     */
+    private static function findZoneKey(array $zones, int|string $listIndex, mixed $zoneId): int|string|null
+    {
+        if (array_key_exists($listIndex, $zones) && is_array($zones[$listIndex])) {
+            return $listIndex;
+        }
+        $asString = (string) $listIndex;
+        if (array_key_exists($asString, $zones) && is_array($zones[$asString])) {
+            return $asString;
+        }
+        if ($zoneId !== null && $zoneId !== '') {
+            foreach ($zones as $key => $zone) {
+                if (!is_array($zone)) {
+                    continue;
+                }
+                foreach (['id', 'area_id', 'map_id'] as $idKey) {
+                    if (isset($zone[$idKey]) && (string) $zone[$idKey] === (string) $zoneId) {
+                        return $key;
+                    }
+                }
+            }
+        }
+        if (is_int($listIndex) || ctype_digit($asString)) {
+            $want = (int) $listIndex;
+            $i = 0;
+            foreach ($zones as $key => $zone) {
+                if (!is_array($zone)) {
+                    continue;
+                }
+                if ($i === $want) {
+                    return $key;
+                }
+                $i++;
+            }
         }
 
         return null;
@@ -602,13 +697,17 @@ final class YarboMap
                 continue;
             }
 
+            $sourceKey = is_int($index) || ctype_digit((string) $index) ? (int) $index : (string) $index;
             $props = [
                 'zone_type' => $zoneType,
-                'zone_id' => $zone['id'] ?? $index,
+                'zone_id' => $zone['id'] ?? $sourceKey,
                 'name' => $zone['name'] ?? null,
                 'map_list' => $key,
+                'source_key' => $sourceKey,
             ];
-            $path = sprintf('%s[%d]', $key, (int) $index);
+            $path = is_int($sourceKey)
+                ? sprintf('%s[%d]', $key, $sourceKey)
+                : sprintf('%s[%s]', $key, $sourceKey);
             $features[] = $geometry === 'line'
                 ? self::lineStringFeature($coords, 'get_map', $path, $props)
                 : self::polygonFeature($coords, 'get_map', $path, $props);
