@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.41] - 2026-09-26
+
+### Fixed
+- Backup files from `get_map_buckup_from_id` use singular zone keys (`area`, `pathway`, `nogozone`, …). The panel now draws that blob and writes it back with those keys, so Save to robot can use the real backup file instead of live `get_map`.
+
 ## [2.0.40] - 2026-09-26
 
 ### Fixed

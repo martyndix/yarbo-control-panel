@@ -781,8 +781,8 @@ final class YarboMapBackup
     public static function publicSummary(array $map): array
     {
         $counts = [];
-        foreach (['areas', 'pathways', 'nogozones', 'novisionzones', 'elec_fence', 'sidewalks', 'deadends'] as $key) {
-            $counts[$key] = is_array($map[$key] ?? null) ? count($map[$key]) : 0;
+        foreach (array_keys(YarboMap::canonicalListNames()) as $key) {
+            $counts[$key] = count(YarboMap::zoneList($map, $key));
         }
 
         return [

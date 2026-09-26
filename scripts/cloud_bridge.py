@@ -151,8 +151,24 @@ def _feedback_matches_command(cmd: str, data: dict[str, Any]) -> bool:
 def _looks_like_app_map(data: Any) -> bool:
     if not isinstance(data, dict):
         return False
-    for key in ("areas", "pathways", "nogozones", "novisionzones", "elec_fence", "sidewalks", "deadends"):
+    for key in (
+        "areas",
+        "area",
+        "pathways",
+        "pathway",
+        "nogozones",
+        "nogozone",
+        "novisionzones",
+        "novisionzone",
+        "elec_fence",
+        "sidewalks",
+        "sidewalk",
+        "deadends",
+        "deadend",
+    ):
         zones = data.get(key)
+        if isinstance(zones, dict) and isinstance(zones.get("range"), list) and zones["range"]:
+            return True
         if not isinstance(zones, list) or not zones:
             continue
         first = zones[0]

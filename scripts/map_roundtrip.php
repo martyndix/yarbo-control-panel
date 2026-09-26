@@ -138,6 +138,23 @@ if ($isFixture) {
     } elseif (($keyedEncode['map']['areas']['area-open']['extra_keep_me'] ?? null) !== true) {
         $failures[] = 'string-keyed encode dropped extra_keep_me';
     }
+
+    $singularPath = __DIR__ . '/../tests/fixtures/map_backup_singular.json';
+    $singularMap = json_decode((string) file_get_contents($singularPath), true);
+    if (!is_array($singularMap) || YarboMap::appGeometryCount($singularMap) < 3) {
+        $failures[] = 'singular backup fixture was not counted as drawable';
+    } else {
+        $singularNorm = YarboMap::normalize(['get_map' => ['data' => $singularMap]]);
+        $singularCol = json_decode(json_encode($singularNorm['feature_collection'], JSON_THROW_ON_ERROR), true);
+        $singularEncode = YarboMap::encodeDraft($singularMap, $singularCol);
+        if (!($singularEncode['ok'] ?? false)) {
+            $failures[] = 'encodeDraft failed on singular backup keys: ' . implode('; ', $singularEncode['errors'] ?? []);
+        } elseif (($singularEncode['map']['area'][0]['extra_keep_me'] ?? null) !== true) {
+            $failures[] = 'singular backup encode dropped extra_keep_me';
+        } elseif (!isset($singularEncode['map']['area']) || isset($singularEncode['map']['areas'])) {
+            $failures[] = 'singular backup encode should keep area and not invent areas';
+        }
+    }
 }
 
 $featureCount = count($collection['features'] ?? []);

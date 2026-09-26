@@ -1,0 +1,45 @@
+{
+  "id": 217,
+  "is_auto_backup": true,
+  "name": "auto",
+  "timestamp": 1,
+  "ref": { "latitude": 51.5, "longitude": -0.12 },
+  "area": [
+    {
+      "id": "area-open",
+      "name": "Lawn",
+      "extra_keep_me": true,
+      "ref": { "latitude": 51.5, "longitude": -0.12 },
+      "range": [
+        { "x": 0, "y": 0, "z": 0 },
+        { "x": 10, "y": 0 },
+        { "x": 10, "y": 8 },
+        { "x": 0, "y": 8 }
+      ]
+    }
+  ],
+  "pathway": [
+    {
+      "id": "path-1",
+      "name": "Path",
+      "ref": { "latitude": 51.5, "longitude": -0.12 },
+      "range": [
+        { "x": 1, "y": 1 },
+        { "x": 2, "y": 3 }
+      ]
+    }
+  ],
+  "nogozone": [
+    {
+      "id": "nogo-1",
+      "name": "Bed",
+      "ref": { "latitude": 51.5002, "longitude": -0.1203 },
+      "range": [
+        { "x": 0, "y": 0 },
+        { "x": 2, "y": 0 },
+        { "x": 1, "y": 2 }
+      ]
+    }
+  ],
+  "chargingPoint": { "x": 0.5, "y": -0.2 }
+}
