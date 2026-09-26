@@ -325,7 +325,7 @@ final class YarboMapBackup
         }
 
         $preferCloud = $cloud !== null && $serial !== '';
-        $liveBefore = $this->readCurrentMap($client, $cloud, $serial);
+        $liveBefore = $this->readCurrentMap($client, $cloud, $serial, $preferCloud);
         if (!is_array($liveBefore)) {
             return [
                 'ok' => false,
@@ -421,8 +421,8 @@ final class YarboMapBackup
         $robotMoved = ($vsOriginal !== null && $vsOriginal > self::VERIFY_M)
             || ($sideEffect !== null && $sideEffect > self::VERIFY_M);
         if ($delta === null || ($blobDelta > self::VERIFY_M && !$robotMoved)) {
-            sleep(5);
-            $retryMap = $this->readCurrentMap($client, $cloud, $serial);
+            sleep(2);
+            $retryMap = $this->readCurrentMap($client, $cloud, $serial, $preferCloud);
             if (is_array($retryMap)) {
                 $readMap = $retryMap;
                 $listFromOriginal = YarboMap::alignedListDeltas($liveBefore, $readMap);
@@ -464,9 +464,10 @@ final class YarboMapBackup
                 self::UPLOAD_CMD,
                 [],
                 $preferCloud,
-                15.0,
-                30.0,
-                self::UPLOAD_TOPICS
+                8.0,
+                12.0,
+                self::UPLOAD_TOPICS,
+                false
             );
             $uploadState = $snap['envelope']['state'] ?? null;
         }
@@ -648,9 +649,6 @@ final class YarboMapBackup
                     if ($onlyShape !== null && $shape['name'] !== $onlyShape) {
                         continue;
                     }
-                    $known = self::isKnownSaveCmd($cmd);
-                    $lanTimeout = $known ? 15.0 : 8.0;
-                    $cloudTimeout = $known ? 20.0 : 12.0;
                     $sent = $this->sendUnpublished(
                         $client,
                         $cloud,
@@ -658,11 +656,11 @@ final class YarboMapBackup
                         $cmd,
                         $shape['payload'],
                         $preferCloud,
-                        $lanTimeout,
-                        $cloudTimeout,
+                        8.0,
+                        12.0,
                         $cmd === self::SAVE_PATH_CMD ? self::SAVE_PATH_TOPICS
                             : ($cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd]),
-                        $known
+                        false
                     );
                     $tried[] = [
                         'command' => $cmd,
@@ -688,8 +686,8 @@ final class YarboMapBackup
                         }
                         continue;
                     }
-                    sleep(5);
-                    $readMap = $this->readCurrentMap($client, $cloud, $serial);
+                    sleep(2);
+                    $readMap = $this->readCurrentMap($client, $cloud, $serial, $preferCloud);
                     $last['read_map'] = $readMap;
                     if (!is_array($readMap)) {
                         continue;
@@ -752,11 +750,11 @@ final class YarboMapBackup
                     $cmd,
                     $shape['payload'],
                     $preferCloud,
-                    self::isKnownSaveCmd($cmd) ? 15.0 : 8.0,
-                    self::isKnownSaveCmd($cmd) ? 20.0 : 12.0,
+                    8.0,
+                    12.0,
                     $cmd === self::SAVE_PATH_CMD ? self::SAVE_PATH_TOPICS
                         : ($cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd]),
-                    self::isKnownSaveCmd($cmd)
+                    false
                 );
                 sleep(3);
             }
@@ -822,23 +820,7 @@ final class YarboMapBackup
      */
     private function pathwayCommands(): array
     {
-        $cmds = [self::SAVE_PATH_CMD];
-        $heard = (new YarboMapCapture($this->projectRoot))->heardWriteCommands();
-        foreach ($heard as $cmd) {
-            if ($cmd === self::SAVE_AREA_CMD || $cmd === self::SAVE_PATH_CMD) {
-                continue;
-            }
-            if (
-                str_contains($cmd, 'path')
-                || str_contains($cmd, 'channel')
-                || str_contains($cmd, 'road')
-                || str_contains($cmd, 'transit')
-            ) {
-                $cmds[] = $cmd;
-            }
-        }
-
-        return array_values(array_unique($cmds));
+        return [self::SAVE_PATH_CMD];
     }
 
     private static function isKnownSaveCmd(string $cmd): bool
@@ -866,15 +848,15 @@ final class YarboMapBackup
             $seen[$sig] = true;
             if ($cmd === self::SAVE_PATH_CMD && $canonical === 'pathways') {
                 $shapes[] = ['name' => 'zone', 'payload' => $zone];
-                foreach (array_values(array_unique([$key, 'pathways', 'pathway', 'path_area_list'])) as $alias) {
-                    $shapes[] = ['name' => $alias . '-list', 'payload' => [$alias => [$zone]]];
-                }
+                $shapes[] = ['name' => $key . '-list', 'payload' => [$key => [$zone]]];
+                continue;
+            }
+            if ($cmd === self::SAVE_AREA_CMD && $canonical === 'areas') {
+                $shapes[] = ['name' => $key . '-list', 'payload' => [$key => [$zone]]];
+                $shapes[] = ['name' => 'zone', 'payload' => $zone];
                 continue;
             }
             if ($cmd === self::SAVE_AREA_CMD && $canonical === 'pathways') {
-                foreach (['path_area_list', 'pathway'] as $alias) {
-                    $shapes[] = ['name' => $alias . '-list', 'payload' => [$alias => [$zone]]];
-                }
                 continue;
             }
             $aliases = match ($canonical) {
@@ -1101,33 +1083,47 @@ final class YarboMapBackup
      *
      * @return array<string, mixed>|null
      */
-    private function readCurrentMap(YarboMqtt $client, ?YarboCloud $cloud, string $serial): ?array
+    private function readCurrentMap(YarboMqtt $client, ?YarboCloud $cloud, string $serial, bool $preferCloud = false): ?array
     {
-        try {
-            $client->ensureConnected();
-            $envelope = $client->requestDataFeedback('get_map', [], 25.0, false);
-        } catch (\Throwable $e) {
-            if (!YarboMqtt::isBrokenSocket($e)) {
-                throw $e;
+        $tryCloud = static function () use ($cloud, $serial): ?array {
+            if ($cloud === null || $serial === '') {
+                return null;
             }
-            $envelope = null;
-        }
-        if ($envelope !== null) {
-            $located = self::locateMap(self::envelopeData($envelope));
-            if ($located['map'] !== null) {
-                return $located['map'];
+            $raw = $cloud->fetch('get_map', $serial, 18.0);
+            if (!is_array($raw) || ($raw['ok'] ?? true) === false) {
+                return null;
             }
-        }
-        if ($cloud === null || $serial === '') {
-            return null;
-        }
-        $raw = $cloud->fetch('get_map', $serial, 35.0);
-        if (!is_array($raw) || ($raw['ok'] ?? true) === false) {
-            return null;
-        }
-        $located = self::locateMap($raw);
+            $located = self::locateMap($raw);
 
-        return $located['map'];
+            return $located['map'];
+        };
+        $tryLocal = function () use ($client): ?array {
+            try {
+                $client->ensureConnected();
+                $envelope = $client->requestDataFeedback('get_map', [], 8.0, false);
+            } catch (\Throwable $e) {
+                if (!YarboMqtt::isBrokenSocket($e)) {
+                    throw $e;
+                }
+                $envelope = null;
+            }
+            if ($envelope === null) {
+                return null;
+            }
+            $located = self::locateMap(self::envelopeData($envelope));
+
+            return $located['map'];
+        };
+
+        $order = $preferCloud ? ['cloud', 'local'] : ['local', 'cloud'];
+        foreach ($order as $via) {
+            $map = $via === 'cloud' ? $tryCloud() : $tryLocal();
+            if (is_array($map)) {
+                return $map;
+            }
+        }
+
+        return null;
     }
 
     /**

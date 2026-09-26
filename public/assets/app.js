@@ -1745,10 +1745,13 @@ async function restoreMapBackupDraft() {
     }
     if (els.mapSaveRobot) els.mapSaveRobot.disabled = true;
     setMapLoading(true, 'Saving to robot');
+    const saveAbort = new AbortController();
+    const saveTimer = setTimeout(() => saveAbort.abort(), 90000);
     try {
         const res = await fetch('/api/map_backup.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: saveAbort.signal,
             body: JSON.stringify({
                 action: 'restore',
                 confirm: true,
@@ -1763,8 +1766,10 @@ async function restoreMapBackupDraft() {
             setMapEditMode(false);
         }
     } catch (err) {
-        showToast(err.message || 'Restore failed', 'error');
+        const aborted = err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')));
+        showToast(aborted ? 'Save timed out after 90s. Try again; the robot may already have the edit.' : (err.message || 'Restore failed'), 'error');
     } finally {
+        clearTimeout(saveTimer);
         setMapLoading(false);
         setMapSaveEnabled(mapBackupCompatible);
     }

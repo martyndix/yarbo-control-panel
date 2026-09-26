@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.54] - 2026-09-26
+
+### Fixed
+- **Save to robot** no longer waits many minutes. Pathway Save sends at most two `save_pathway` payloads (12s each), verifies `get_map` over cloud first, and the page stops after 90s.
+
 ## [2.0.53] - 2026-09-26
 
 ### Fixed
