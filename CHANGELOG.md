@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.42] - 2026-09-26
+
+### Fixed
+- Editing a zone no longer leaves the original line in the draft. Save was writing the leftover original vertices (encode looked like metres of movement; the robot map did not change). Drag existing vertices only — drawing a new polygon on top is ignored. Read-back match is 25 cm so a 7 cm get_map residual counts as success.
+
 ## [2.0.41] - 2026-09-26
 
 ### Fixed

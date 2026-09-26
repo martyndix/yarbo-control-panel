@@ -100,6 +100,42 @@ if ($isFixture) {
         if (abs($newX - $oldX) > 0.02) {
             $failures[] = sprintf('north nudge should not change x (Δx=%.3f m)', $newX - $oldX);
         }
+
+        $leftoverLast = [
+            'type' => 'FeatureCollection',
+            'features' => [$nudged['features'][0], $collection['features'][0]],
+        ];
+        $leftoverEncode = YarboMap::encodeDraft($map, $leftoverLast);
+        if (!($leftoverEncode['ok'] ?? false)) {
+            $failures[] = 'leftover-line encode failed: ' . implode('; ', $leftoverEncode['errors'] ?? []);
+        } else {
+            $leftoverY = (float) $leftoverEncode['map']['areas'][0]['range'][0]['y'];
+            if (abs($leftoverY - $newY) > 0.02) {
+                $failures[] = sprintf(
+                    'leftover original line overwrote the edit (got y %+0.3f m, want %+0.3f m)',
+                    $leftoverY - $oldY,
+                    $dy
+                );
+            }
+        }
+
+        $drawnOnTop = [
+            'type' => 'FeatureCollection',
+            'features' => [
+                $nudged['features'][0],
+                [
+                    'type' => 'Feature',
+                    'properties' => ['zone_type' => 'clean', 'name' => 'New zone'],
+                    'geometry' => $nudged['features'][0]['geometry'],
+                ],
+            ],
+        ];
+        $drawnEncode = YarboMap::encodeDraft($map, $drawnOnTop);
+        if (!($drawnEncode['ok'] ?? false)) {
+            $failures[] = 'pathless extra polygon should be skipped: ' . implode('; ', $drawnEncode['errors'] ?? []);
+        } elseif (abs(((float) $drawnEncode['map']['areas'][0]['range'][0]['y']) - $newY) > 0.02) {
+            $failures[] = 'pathless extra polygon dropped the vertex edit';
+        }
     }
 
     $wrapper = [

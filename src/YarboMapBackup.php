@@ -16,6 +16,8 @@ final class YarboMapBackup
         'get_map_backup',
         'map_backup',
     ];
+    /** get_map vs backup-file frames are not millimetre-accurate. */
+    private const VERIFY_M = 0.25;
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -279,6 +281,17 @@ final class YarboMapBackup
             ];
         }
 
+        $encodeDelta = (float) ($encoded['max_delta_m'] ?? 0);
+        $blobDelta = YarboMap::maxRangeDelta($stored['map'], $encoded['map']);
+        if ($encodeDelta > self::VERIFY_M && $blobDelta <= self::VERIFY_M) {
+            return [
+                'ok' => false,
+                'error' => 'The draft still includes the original line for a zone you moved, so the backup file was not actually changed. Stop editing, Load map backups again, then drag the existing vertices — do not draw a new polygon on top.',
+                'encode_delta_m' => $encodeDelta,
+                'blob_delta_m' => $blobDelta,
+            ];
+        }
+
         $payload = $this->payloadWithMap($stored, $encoded['map']);
         if (isset($stored['backup_id']) && $stored['backup_id'] !== null && $stored['backup_id'] !== '') {
             $payload['id'] = is_numeric($stored['backup_id']) ? (int) $stored['backup_id'] : $stored['backup_id'];
@@ -299,8 +312,7 @@ final class YarboMapBackup
         sleep(4);
         $readMap = $this->readCurrentMap($client, $cloud, $serial);
         $delta = is_array($readMap) ? YarboMap::maxRangeDelta($encoded['map'], $readMap) : null;
-        $encodeDelta = (float) ($encoded['max_delta_m'] ?? 0);
-        if ($delta === null || ($delta > 0.05 && $encodeDelta > 0.05)) {
+        if ($delta === null || ($delta > self::VERIFY_M && $blobDelta > self::VERIFY_M)) {
             sleep(4);
             $retryMap = $this->readCurrentMap($client, $cloud, $serial);
             if (is_array($retryMap)) {
@@ -309,10 +321,12 @@ final class YarboMapBackup
             }
         }
 
-        $verified = $delta !== null && $delta <= 0.05;
-        $unchanged = is_array($readMap)
-            && YarboMap::maxRangeDelta($stored['map'], $readMap) <= 0.05
-            && $encodeDelta > 0.05;
+        $vsOriginal = is_array($readMap) ? YarboMap::maxRangeDelta($stored['map'], $readMap) : null;
+        $verified = $delta !== null && $delta <= self::VERIFY_M;
+        $unchanged = $vsOriginal !== null
+            && $vsOriginal <= self::VERIFY_M
+            && $blobDelta > self::VERIFY_M
+            && ($delta === null || $delta > self::VERIFY_M);
         $hasBackupBlob = ($stored['map_source'] ?? '') !== 'get_map';
         $rolledBack = false;
         if (!$verified && $hasBackupBlob && is_array($readMap) && !$unchanged) {
@@ -325,12 +339,13 @@ final class YarboMapBackup
             $unchanged,
             $rolledBack,
             $delta,
-            $encodeDelta,
+            $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
             $via,
             (string) ($stored['map_source'] ?? ''),
             $ack['state'] ?? null,
             basename($restoreFile),
-            is_array($readMap)
+            is_array($readMap),
+            $vsOriginal
         );
 
         $this->persistProbe([
@@ -339,8 +354,10 @@ final class YarboMapBackup
             'via' => $via,
             'map_source' => $stored['map_source'] ?? null,
             'recovery_state' => $ack['state'] ?? null,
-            'encode_delta_m' => $encodeDelta,
+            'encode_delta_m' => $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
+            'blob_delta_m' => $blobDelta,
             'readback_delta_m' => $delta,
+            'vs_original_m' => $vsOriginal,
             'verified' => $verified,
             'unchanged' => $unchanged,
             'rolled_back' => $rolledBack,
@@ -351,8 +368,10 @@ final class YarboMapBackup
             'via' => $via,
             'map_source' => $stored['map_source'] ?? null,
             'recovery_state' => $ack['state'] ?? null,
-            'encode_delta_m' => $encodeDelta,
+            'encode_delta_m' => $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
+            'blob_delta_m' => $blobDelta,
             'readback_delta_m' => $delta,
+            'vs_original_m' => $vsOriginal,
             'verified' => $verified,
             'unchanged' => $unchanged,
             'rolled_back' => $rolledBack,
@@ -504,19 +523,21 @@ final class YarboMapBackup
         mixed $state,
         string $restoreFile,
         bool $readMap,
+        ?float $vsOriginal = null,
     ): string {
         $detail = sprintf(
-            ' via %s%s, encode %.2f m, read-back %s.',
+            ' via %s%s, encode %.2f m, read-back %s, vs original %s.',
             $via,
             $mapSource !== '' ? ', source ' . $mapSource : '',
             $encodeDelta,
-            $delta === null ? 'unavailable' : sprintf('%.2f m', $delta)
+            $delta === null ? 'unavailable' : sprintf('%.2f m', $delta),
+            $vsOriginal === null ? 'unavailable' : sprintf('%.2f m', $vsOriginal)
         );
         if ($state !== null && $state !== '') {
             $detail .= ' recovery state ' . (is_scalar($state) ? (string) $state : json_encode($state)) . '.';
         }
         if ($verified) {
-            return 'Robot map matches the draft (within 5 cm). Check it in the official app.' . $detail;
+            return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
         if (!$readMap) {
             return 'Restore was sent, but get_map could not be read to verify. Check the official app. Original is on the Pi as '

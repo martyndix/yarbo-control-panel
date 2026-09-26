@@ -1094,13 +1094,21 @@ function setAreasLayerVisible(visible) {
 }
 
 function enableDraftVertexEditing() {
+    const editOptions = {
+        selectedPathOptions: {
+            maintainColor: true,
+            dashArray: null,
+            fillOpacity: 0.3,
+            weight: 3,
+        },
+    };
     draftLayer?.eachLayer((layer) => {
         if (layer.editing) {
             layer.editing.enable();
             return;
         }
         if (typeof L.Edit?.Poly === 'function' && typeof layer.getLatLngs === 'function') {
-            layer._yarboEditHandler = new L.Edit.Poly(layer);
+            layer._yarboEditHandler = new L.Edit.Poly(layer, editOptions);
             layer._yarboEditHandler.enable();
         }
     });
@@ -1360,7 +1368,71 @@ function exportLoadedMapGeoJson() {
     showToast('Map GeoJSON exported', 'success');
 }
 
-function draftLayerToGeoJson() {
+function featureMapPath(feature) {
+    return String(feature?.properties?.path || '');
+}
+
+function featureCoordinatePairs(feature) {
+    const geom = feature?.geometry;
+    if (!geom) return [];
+    if (geom.type === 'Polygon' && Array.isArray(geom.coordinates?.[0])) {
+        return geom.coordinates[0];
+    }
+    if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
+        return geom.coordinates;
+    }
+    if (geom.type === 'Point' && Array.isArray(geom.coordinates)) {
+        return [geom.coordinates];
+    }
+    return [];
+}
+
+function featureMoveScore(a, b) {
+    const left = featureCoordinatePairs(a);
+    const right = featureCoordinatePairs(b);
+    const n = Math.min(left.length, right.length);
+    let max = left.length === right.length ? 0 : 1;
+    for (let i = 0; i < n; i++) {
+        const lon = Number(left[i]?.[0]) - Number(right[i]?.[0]);
+        const lat = Number(left[i]?.[1]) - Number(right[i]?.[1]);
+        const metres = Math.hypot(
+            lon * 111320 * Math.cos((Number(left[i]?.[1]) * Math.PI) / 180),
+            lat * 111320,
+        );
+        max = Math.max(max, metres);
+    }
+    return max;
+}
+
+function splitDraftFeatures(features) {
+    const originalByPath = new Map();
+    loadedMapFeatures.forEach((feature) => {
+        const path = featureMapPath(feature);
+        if (path) originalByPath.set(path, feature);
+    });
+    const best = new Map();
+    let skippedNew = 0;
+    features.forEach((feature) => {
+        if (!feature || feature.type !== 'Feature') return;
+        const path = featureMapPath(feature);
+        if (!path) {
+            skippedNew += 1;
+            return;
+        }
+        const original = originalByPath.get(path);
+        const score = original ? featureMoveScore(feature, original) : 1;
+        const prev = best.get(path);
+        if (!prev || score >= prev.score) {
+            best.set(path, { feature, score });
+        }
+    });
+    return {
+        kept: [...best.values()].map((entry) => entry.feature),
+        skippedNew,
+    };
+}
+
+function rawDraftFeatures() {
     const features = [];
     draftLayer?.eachLayer((layer) => {
         if (typeof layer.toGeoJSON !== 'function') return;
@@ -1378,7 +1450,12 @@ function draftLayerToGeoJson() {
             features.push(feature);
         });
     });
-    return { type: 'FeatureCollection', features };
+    return features;
+}
+
+function draftLayerToGeoJson() {
+    const { kept } = splitDraftFeatures(rawDraftFeatures());
+    return { type: 'FeatureCollection', features: kept };
 }
 
 function exportDraftGeoJson() {
@@ -1428,8 +1505,9 @@ function setMapEditMode(enabled) {
     if (!enabled && mapEditMode) {
         disableDraftVertexEditing();
         clearDraftHighlights();
-        setAreasLayerVisible(true);
         applyDraftToView();
+        draftLayer?.clearLayers();
+        setAreasLayerVisible(true);
         if (drawControl) {
             map.removeControl(drawControl);
         }
@@ -1467,30 +1545,10 @@ function setMapEditMode(enabled) {
             position: 'topright',
             edit: {
                 featureGroup: draftLayer,
+                edit: false,
                 remove: true,
             },
-            draw: {
-                polygon: { allowIntersection: false, showArea: false },
-                polyline: false,
-                rectangle: false,
-                circle: false,
-                marker: false,
-                circlemarker: false,
-            },
-        });
-        map.on(L.Draw.Event.CREATED, (event) => {
-            const layer = event.layer;
-            layer._yarboZoneIndex = draftLayer.getLayers().length;
-            layer.feature = layer.feature || {
-                type: 'Feature',
-                properties: { zone_type: 'clean', name: 'New zone' },
-                geometry: layer.toGeoJSON().geometry,
-            };
-            draftLayer.addLayer(layer);
-            enableDraftVertexEditing();
-        });
-        map.on(L.Draw.Event.EDITED, () => {
-            enableDraftVertexEditing();
+            draw: false,
         });
         map.on(L.Draw.Event.DELETED, () => {
             enableDraftVertexEditing();
@@ -1506,11 +1564,13 @@ function saveMapDraft() {
 }
 
 function currentMapDraftCollection() {
-    if (mapEditMode) {
-        const draft = draftLayerToGeoJson();
-        if (draft.features.length) {
-            return draft;
-        }
+    const source = mapEditMode ? rawDraftFeatures() : loadedMapFeatures;
+    const { kept, skippedNew } = splitDraftFeatures(Array.isArray(source) ? source : []);
+    if (skippedNew > 0) {
+        showToast('Ignored a newly drawn shape. Drag vertices of the existing zone — do not draw a new polygon on top.', 'error');
+    }
+    if (kept.length) {
+        return { type: 'FeatureCollection', features: kept };
     }
     return { type: 'FeatureCollection', features: loadedMapFeatures };
 }
@@ -1611,6 +1671,9 @@ async function restoreMapBackupDraft() {
         const text = data.message || data.error || 'Restore finished';
         if (els.mapListenStatus) els.mapListenStatus.textContent = text;
         showToast(text, data.ok ? 'success' : 'error');
+        if (data.ok && mapEditMode) {
+            setMapEditMode(false);
+        }
     } catch (err) {
         showToast(err.message || 'Restore failed', 'error');
     } finally {

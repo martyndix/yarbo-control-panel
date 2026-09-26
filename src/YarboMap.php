@@ -139,108 +139,186 @@ final class YarboMap
 
         $features = is_array($collection['features'] ?? null) ? $collection['features'] : [];
         $maxDelta = 0.0;
+        $unpathed = 0;
+        $best = [];
 
-        foreach ($features as $index => $feature) {
+        foreach ($features as $feature) {
             if (!is_array($feature)) {
                 continue;
             }
-            $path = (string) ($feature['properties']['path'] ?? '');
-            $parsed = self::parseMapPath($path);
-            if ($parsed === null) {
-                $errors[] = sprintf('Feature %d is missing a map path (areas[0], pathways[1], …)', $index);
+            $patch = self::draftFeaturePatch($encoded, $feature);
+            if (($patch['skip'] ?? false) === true) {
+                $unpathed++;
                 continue;
             }
-            [$list, $listIndex] = $parsed;
-            $zoneId = $feature['properties']['zone_id'] ?? $feature['properties']['source_key'] ?? null;
-            $kind = (string) ($feature['properties']['kind'] ?? ($feature['geometry']['type'] ?? ''));
-            $isLine = $kind === 'line' || $kind === 'LineString';
-            $mapRef = YarboGeo::extractGpsRef($encoded);
+            if (($patch['error'] ?? null) !== null) {
+                $errors[] = (string) $patch['error'];
+                continue;
+            }
+            $key = (string) ($patch['key'] ?? '');
+            $delta = (float) ($patch['delta_m'] ?? 0);
+            if ($key === '') {
+                continue;
+            }
+            if (!isset($best[$key]) || $delta >= (float) $best[$key]['delta_m']) {
+                $best[$key] = $patch;
+            }
+        }
 
-            if ($list === 'chargingData' || $path === 'chargingData' || $list === 'chargingPoint' || $path === 'chargingPoint') {
-                $station = $encoded;
-                $writeKey = null;
-                if ($list === 'chargingData' || $path === 'chargingData') {
-                    if (is_array($encoded['chargingData'] ?? null)) {
-                        $station = $encoded['chargingData'];
-                        $writeKey = 'chargingData';
-                    }
-                } elseif (is_array($encoded['chargingPoint'] ?? null) && !isset($encoded['chargingPoint']['x']) && !isset($encoded['chargingPoint']['X'])) {
-                    $station = $encoded['chargingPoint'];
-                    $writeKey = 'chargingPoint';
-                }
-                $result = self::encodeChargingPoint($station, $feature);
-                if ($result['error'] !== null) {
-                    $errors[] = $result['error'];
-                    continue;
-                }
-                if ($writeKey === null) {
-                    $encoded = $result['zone'];
-                } else {
-                    $encoded[$writeKey] = $result['zone'];
-                }
-                $maxDelta = max($maxDelta, $result['delta_m']);
-                continue;
-            }
-
-            if ($list === 'allchargingData' || $list === 'chargingPoints') {
-                $zones = is_array($encoded[$list] ?? null) ? $encoded[$list] : [];
-                $zoneKey = self::findZoneKey($zones, $listIndex, $zoneId);
-                if ($zoneKey === null) {
-                    $errors[] = sprintf(
-                        'Draft charging station %s is not on the original map (%s has %d stations)',
-                        $path,
-                        $list,
-                        count($zones)
-                    );
-                    continue;
-                }
-                $result = self::encodeChargingPoint($zones[$zoneKey], $feature);
-                if ($result['error'] !== null) {
-                    $errors[] = $result['error'];
-                    continue;
-                }
-                $encoded[$list][$zoneKey] = $result['zone'];
-                $maxDelta = max($maxDelta, $result['delta_m']);
-                continue;
-            }
-
-            $rawList = $encoded[$list] ?? null;
-            if (self::isSingleZone($rawList)) {
-                $result = self::encodeZoneRange($rawList, $feature, $isLine, $mapRef);
-                if ($result['error'] !== null) {
-                    $errors[] = $path . ': ' . $result['error'];
-                    continue;
-                }
-                $encoded[$list] = $result['zone'];
-                $maxDelta = max($maxDelta, $result['delta_m']);
-                continue;
-            }
-
-            $zones = is_array($rawList) ? $rawList : [];
-            $zoneKey = self::findZoneKey($zones, $listIndex, $zoneId);
-            if ($zoneKey === null) {
-                $errors[] = sprintf(
-                    'Draft zone %s is not on the original map (%s has %d zones)',
-                    $path,
-                    $list,
-                    count($zones)
-                );
-                continue;
-            }
-            $result = self::encodeZoneRange($zones[$zoneKey], $feature, $isLine, $mapRef);
-            if ($result['error'] !== null) {
-                $errors[] = $path . ': ' . $result['error'];
-                continue;
-            }
-            $encoded[$list][$zoneKey] = $result['zone'];
-            $maxDelta = max($maxDelta, $result['delta_m']);
+        if ($best === [] && $unpathed > 0) {
+            $errors[] = 'Drawn shape has no map path. Drag vertices of the existing zone; do not draw a new polygon on top of it.';
         }
 
         if ($errors !== []) {
             return ['ok' => false, 'errors' => $errors, 'max_delta_m' => $maxDelta];
         }
 
+        foreach ($best as $patch) {
+            $encoded = self::applyDraftPatch($encoded, $patch);
+            $maxDelta = max($maxDelta, (float) ($patch['delta_m'] ?? 0));
+        }
+
         return ['ok' => true, 'map' => $encoded, 'errors' => [], 'max_delta_m' => $maxDelta];
+    }
+
+    /**
+     * @param array<string, mixed> $encoded
+     * @param array<string, mixed> $feature
+     * @return array<string, mixed>
+     */
+    private static function draftFeaturePatch(array $encoded, array $feature): array
+    {
+        $path = (string) ($feature['properties']['path'] ?? '');
+        $parsed = self::parseMapPath($path);
+        if ($parsed === null) {
+            return ['skip' => true];
+        }
+        [$list, $listIndex] = $parsed;
+        $zoneId = $feature['properties']['zone_id'] ?? $feature['properties']['source_key'] ?? null;
+        $kind = (string) ($feature['properties']['kind'] ?? ($feature['geometry']['type'] ?? ''));
+        $isLine = $kind === 'line' || $kind === 'LineString';
+        $mapRef = YarboGeo::extractGpsRef($encoded);
+
+        if ($list === 'chargingData' || $path === 'chargingData' || $list === 'chargingPoint' || $path === 'chargingPoint') {
+            $station = $encoded;
+            $writeKey = null;
+            if ($list === 'chargingData' || $path === 'chargingData') {
+                if (is_array($encoded['chargingData'] ?? null)) {
+                    $station = $encoded['chargingData'];
+                    $writeKey = 'chargingData';
+                }
+            } elseif (is_array($encoded['chargingPoint'] ?? null) && !isset($encoded['chargingPoint']['x']) && !isset($encoded['chargingPoint']['X'])) {
+                $station = $encoded['chargingPoint'];
+                $writeKey = 'chargingPoint';
+            }
+            $result = self::encodeChargingPoint($station, $feature);
+            if ($result['error'] !== null) {
+                return ['error' => $result['error']];
+            }
+
+            return [
+                'key' => $writeKey ?? 'chargingPoint',
+                'delta_m' => $result['delta_m'],
+                'writer' => $writeKey === null ? 'root' : 'key',
+                'write_key' => $writeKey,
+                'zone' => $result['zone'],
+            ];
+        }
+
+        if ($list === 'allchargingData' || $list === 'chargingPoints') {
+            $zones = is_array($encoded[$list] ?? null) ? $encoded[$list] : [];
+            $zoneKey = self::findZoneKey($zones, $listIndex, $zoneId);
+            if ($zoneKey === null) {
+                return ['error' => sprintf(
+                    'Draft charging station %s is not on the original map (%s has %d stations)',
+                    $path,
+                    $list,
+                    count($zones)
+                )];
+            }
+            $result = self::encodeChargingPoint($zones[$zoneKey], $feature);
+            if ($result['error'] !== null) {
+                return ['error' => $result['error']];
+            }
+
+            return [
+                'key' => $list . '[' . $zoneKey . ']',
+                'delta_m' => $result['delta_m'],
+                'writer' => 'list',
+                'list' => $list,
+                'zone_key' => $zoneKey,
+                'zone' => $result['zone'],
+            ];
+        }
+
+        $rawList = $encoded[$list] ?? null;
+        if (self::isSingleZone($rawList)) {
+            $result = self::encodeZoneRange($rawList, $feature, $isLine, $mapRef);
+            if ($result['error'] !== null) {
+                return ['error' => $path . ': ' . $result['error']];
+            }
+
+            return [
+                'key' => $list,
+                'delta_m' => $result['delta_m'],
+                'writer' => 'single',
+                'list' => $list,
+                'zone' => $result['zone'],
+            ];
+        }
+
+        $zones = is_array($rawList) ? $rawList : [];
+        $zoneKey = self::findZoneKey($zones, $listIndex, $zoneId);
+        if ($zoneKey === null) {
+            return ['error' => sprintf(
+                'Draft zone %s is not on the original map (%s has %d zones)',
+                $path,
+                $list,
+                count($zones)
+            )];
+        }
+        $result = self::encodeZoneRange($zones[$zoneKey], $feature, $isLine, $mapRef);
+        if ($result['error'] !== null) {
+            return ['error' => $path . ': ' . $result['error']];
+        }
+
+        return [
+            'key' => $list . '[' . $zoneKey . ']',
+            'delta_m' => $result['delta_m'],
+            'writer' => 'list',
+            'list' => $list,
+            'zone_key' => $zoneKey,
+            'zone' => $result['zone'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $encoded
+     * @param array<string, mixed> $patch
+     * @return array<string, mixed>
+     */
+    private static function applyDraftPatch(array $encoded, array $patch): array
+    {
+        $writer = (string) ($patch['writer'] ?? '');
+        $zone = is_array($patch['zone'] ?? null) ? $patch['zone'] : [];
+        if ($writer === 'root') {
+            return $zone;
+        }
+        if ($writer === 'key') {
+            $encoded[(string) $patch['write_key']] = $zone;
+
+            return $encoded;
+        }
+        if ($writer === 'single') {
+            $encoded[(string) $patch['list']] = $zone;
+
+            return $encoded;
+        }
+        if ($writer === 'list') {
+            $encoded[(string) $patch['list']][$patch['zone_key']] = $zone;
+        }
+
+        return $encoded;
     }
 
     /**
