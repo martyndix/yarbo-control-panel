@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.7] - 2026-09-26
+
+### Added
+- Home **rooms** group devices. Create a room from **⚙️**, assign lights, and turn the whole room on/off or set brightness.
+
 ## [3.0.6] - 2026-09-26
 
 ### Added

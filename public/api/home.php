@@ -27,7 +27,7 @@ if (!$hub->enabled(YarboHub::MODULE_HOME) && $action !== 'setup') {
     json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
 }
 
-set_time_limit($action === 'commission' ? 100 : ($action === 'setup' ? 12 : 40));
+set_time_limit($action === 'commission' ? 100 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'scene_run' ? 90 : 40)));
 ignore_user_abort($action === 'setup');
 
 try {
@@ -40,7 +40,10 @@ try {
         'remove' => $home->removeDevice((string) ($input['id'] ?? ''), (bool) ($input['whole_node'] ?? false)),
         'command' => $home->command($input),
         'rename' => $home->saveMeta(['names' => [$input['id'] ?? '' => $input['name'] ?? '']]),
-        'room' => $home->saveMeta(['rooms' => [$input['id'] ?? '' => $input['room'] ?? '']]),
+        'room' => $home->assignDeviceRoom((string) ($input['id'] ?? ''), (string) ($input['room_id'] ?? $input['room'] ?? '')),
+        'room_save' => $home->saveRoom($input),
+        'room_delete' => $home->deleteRoom((string) ($input['id'] ?? '')),
+        'room_command' => $home->commandRoom($input),
         'scene_save' => $home->saveScene($input),
         'scene_delete' => $home->deleteScene((string) ($input['id'] ?? '')),
         'scene_run' => $home->runScene((string) ($input['id'] ?? '')),

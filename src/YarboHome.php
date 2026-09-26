@@ -25,6 +25,7 @@ final class YarboHome
     /**
      * @return array{
      *   names: array<string, string>,
+     *   room_defs: list<array{id: string, name: string}>,
      *   rooms: array<string, string>,
      *   scenes: list<array<string, mixed>>,
      *   paper: array<string, list<string>>,
@@ -35,6 +36,7 @@ final class YarboHome
     {
         $defaults = [
             'names' => [],
+            'room_defs' => [],
             'rooms' => [],
             'scenes' => [],
             'paper' => [],
@@ -56,13 +58,50 @@ final class YarboHome
                 $names[$id] = $name;
             }
         }
-        $rooms = [];
-        foreach (is_array($decoded['rooms'] ?? null) ? $decoded['rooms'] : [] as $id => $room) {
-            $id = trim((string) $id);
-            $room = YarboHub::normalizeDisplayName((string) $room, 32);
-            if ($id !== '' && $room !== '') {
-                $rooms[$id] = $room;
+        $roomDefs = [];
+        $defIds = [];
+        foreach (is_array($decoded['room_defs'] ?? null) ? $decoded['room_defs'] : [] as $def) {
+            if (!is_array($def)) {
+                continue;
             }
+            $id = trim((string) ($def['id'] ?? ''));
+            $name = YarboHub::normalizeDisplayName((string) ($def['name'] ?? ''), 32);
+            if ($id === '' || $name === '' || isset($defIds[$id])) {
+                continue;
+            }
+            $roomDefs[] = ['id' => $id, 'name' => $name];
+            $defIds[$id] = true;
+        }
+        $rooms = [];
+        $migrated = false;
+        foreach (is_array($decoded['rooms'] ?? null) ? $decoded['rooms'] : [] as $deviceId => $value) {
+            $deviceId = trim((string) $deviceId);
+            $value = trim((string) $value);
+            if ($deviceId === '' || $value === '') {
+                continue;
+            }
+            if (isset($defIds[$value])) {
+                $rooms[$deviceId] = $value;
+                continue;
+            }
+            $name = YarboHub::normalizeDisplayName($value, 32);
+            if ($name === '') {
+                continue;
+            }
+            $matchId = null;
+            foreach ($roomDefs as $def) {
+                if (strcasecmp($def['name'], $name) === 0) {
+                    $matchId = $def['id'];
+                    break;
+                }
+            }
+            if ($matchId === null) {
+                $matchId = 'r' . bin2hex(random_bytes(3));
+                $roomDefs[] = ['id' => $matchId, 'name' => $name];
+                $defIds[$matchId] = true;
+                $migrated = true;
+            }
+            $rooms[$deviceId] = $matchId;
         }
         $scenes = [];
         foreach (is_array($decoded['scenes'] ?? null) ? $decoded['scenes'] : [] as $scene) {
@@ -83,13 +122,19 @@ final class YarboHome
         }
         $hidden = $this->normalizeIdList(is_array($decoded['hidden'] ?? null) ? $decoded['hidden'] : []);
 
-        return [
+        $store = [
             'names' => $names,
+            'room_defs' => $roomDefs,
             'rooms' => $rooms,
             'scenes' => $scenes,
             'paper' => $paper,
             'hidden' => $hidden,
         ];
+        if ($migrated) {
+            $this->write($store);
+        }
+
+        return $store;
     }
 
     /**
@@ -113,13 +158,17 @@ final class YarboHome
             }
         }
         if (isset($input['rooms']) && is_array($input['rooms'])) {
+            $known = [];
+            foreach ($store['room_defs'] as $def) {
+                $known[(string) ($def['id'] ?? '')] = true;
+            }
             foreach ($input['rooms'] as $id => $room) {
                 $id = trim((string) $id);
-                $room = YarboHub::normalizeDisplayName((string) $room, 32);
+                $room = trim((string) $room);
                 if ($id === '') {
                     continue;
                 }
-                if ($room === '') {
+                if ($room === '' || !isset($known[$room])) {
                     unset($store['rooms'][$id]);
                 } else {
                     $store['rooms'][$id] = $room;
@@ -144,6 +193,7 @@ final class YarboHome
                 'server' => ['ok' => false, 'error' => 'Home module is off'],
                 'devices' => [],
                 'hidden_devices' => [],
+                'rooms' => [],
                 'scenes' => [],
                 'paper_devices' => [],
                 'setup' => $setup,
@@ -161,6 +211,7 @@ final class YarboHome
                 ],
                 'devices' => [],
                 'hidden_devices' => [],
+                'rooms' => $this->roomsPayload($store, []),
                 'scenes' => $store['scenes'],
                 'paper_devices' => $this->paperDeviceList($store),
                 'setup' => $setup,
@@ -181,6 +232,16 @@ final class YarboHome
             }
             $defaultName = (string) ($device['name'] ?? $id);
             $name = $store['names'][$id] ?? $defaultName;
+            $roomId = (string) ($store['rooms'][$id] ?? '');
+            $roomName = '';
+            if ($roomId !== '') {
+                foreach ($store['room_defs'] as $def) {
+                    if (($def['id'] ?? '') === $roomId) {
+                        $roomName = (string) ($def['name'] ?? '');
+                        break;
+                    }
+                }
+            }
             $row = [
                 'id' => $id,
                 'node_id' => (int) ($device['node_id'] ?? 0),
@@ -196,7 +257,8 @@ final class YarboHome
                 'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
                 'dimmable' => (bool) ($device['dimmable'] ?? false),
                 'available' => (bool) ($device['available'] ?? true),
-                'room' => $store['rooms'][$id] ?? '',
+                'room_id' => $roomName !== '' ? $roomId : '',
+                'room' => $roomName,
                 'hidden' => isset($hidden[$id]),
             ];
             if ($row['hidden']) {
@@ -214,6 +276,7 @@ final class YarboHome
             ],
             'devices' => $devices,
             'hidden_devices' => $hiddenDevices,
+            'rooms' => $this->roomsPayload($store, $devices),
             'scenes' => $store['scenes'],
             'paper_devices' => $this->paperDeviceList($store),
             'setup' => $this->setupStatus(),
@@ -659,6 +722,151 @@ final class YarboHome
     }
 
     /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function saveRoom(array $input): array
+    {
+        $store = $this->load();
+        $id = trim((string) ($input['id'] ?? ''));
+        $name = YarboHub::normalizeDisplayName((string) ($input['name'] ?? ''), 32);
+        if ($name === '') {
+            return ['ok' => false, 'error' => 'Room needs a name'];
+        }
+        if ($id === '') {
+            $id = 'r' . bin2hex(random_bytes(3));
+            $store['room_defs'][] = ['id' => $id, 'name' => $name];
+        } else {
+            $found = false;
+            foreach ($store['room_defs'] as $i => $def) {
+                if (($def['id'] ?? '') === $id) {
+                    $store['room_defs'][$i]['name'] = $name;
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found) {
+                return ['ok' => false, 'error' => 'Unknown room'];
+            }
+        }
+        $this->write($store);
+
+        return ['ok' => true, 'room' => ['id' => $id, 'name' => $name]];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function deleteRoom(string $id): array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return ['ok' => false, 'error' => 'Pick a room'];
+        }
+        $store = $this->load();
+        $store['room_defs'] = array_values(array_filter(
+            $store['room_defs'],
+            static fn (array $def): bool => ($def['id'] ?? '') !== $id
+        ));
+        foreach ($store['rooms'] as $deviceId => $roomId) {
+            if ($roomId === $id) {
+                unset($store['rooms'][$deviceId]);
+            }
+        }
+        $this->write($store);
+
+        return ['ok' => true];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function assignDeviceRoom(string $deviceId, string $roomId): array
+    {
+        $deviceId = trim($deviceId);
+        $roomId = trim($roomId);
+        if ($deviceId === '') {
+            return ['ok' => false, 'error' => 'Pick a device'];
+        }
+        $store = $this->load();
+        if ($roomId === '') {
+            unset($store['rooms'][$deviceId]);
+        } else {
+            $known = false;
+            foreach ($store['room_defs'] as $def) {
+                if (($def['id'] ?? '') === $roomId) {
+                    $known = true;
+                    break;
+                }
+            }
+            if (!$known) {
+                return ['ok' => false, 'error' => 'Unknown room'];
+            }
+            $store['rooms'][$deviceId] = $roomId;
+        }
+        $this->write($store);
+
+        return ['ok' => true];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function commandRoom(array $input): array
+    {
+        $roomId = trim((string) ($input['room_id'] ?? $input['id'] ?? ''));
+        $action = strtolower(trim((string) ($input['command'] ?? $input['home_action'] ?? '')));
+        if ($roomId === '' || $action === '') {
+            return ['ok' => false, 'error' => 'Room and action are required'];
+        }
+        $known = false;
+        foreach ($this->load()['room_defs'] as $def) {
+            if (($def['id'] ?? '') === $roomId) {
+                $known = true;
+                break;
+            }
+        }
+        if (!$known) {
+            return ['ok' => false, 'error' => 'Unknown room'];
+        }
+        $ids = $this->visibleDeviceIdsInRoom($roomId);
+        if ($action === 'brightness') {
+            $dimmable = [];
+            $live = $this->liveDevices(6.0);
+            foreach ($live['devices'] as $device) {
+                if (!is_array($device)) {
+                    continue;
+                }
+                $id = (string) ($device['id'] ?? '');
+                if ($id !== '' && in_array($id, $ids, true) && !empty($device['dimmable'])) {
+                    $dimmable[] = $id;
+                }
+            }
+            $ids = $dimmable;
+        }
+        if ($ids === []) {
+            return ['ok' => false, 'error' => 'No devices in that room'];
+        }
+        $errors = [];
+        foreach ($ids as $id) {
+            $payload = ['id' => $id, 'command' => $action];
+            if ($action === 'brightness' && array_key_exists('brightness', $input)) {
+                $payload['brightness'] = (int) $input['brightness'];
+            }
+            $result = $this->command($payload);
+            if (!($result['ok'] ?? false)) {
+                $errors[] = (string) ($result['error'] ?? 'failed');
+            }
+        }
+        if ($errors !== []) {
+            return ['ok' => false, 'error' => 'Room partly failed: ' . $errors[0]];
+        }
+
+        return ['ok' => true];
+    }
+
+    /**
      * @param list<mixed> $ids
      * @return array<string, mixed>
      */
@@ -838,6 +1046,74 @@ final class YarboHome
         }
 
         return $out;
+    }
+
+    /**
+     * @param array{room_defs?: list<array{id: string, name: string}>} $store
+     * @param list<array<string, mixed>> $visibleDevices
+     * @return list<array{id: string, name: string, on: bool, brightness: ?int, dimmable: bool, count: int}>
+     */
+    private function roomsPayload(array $store, array $visibleDevices): array
+    {
+        $rooms = [];
+        foreach ($store['room_defs'] ?? [] as $def) {
+            $id = (string) ($def['id'] ?? '');
+            $name = (string) ($def['name'] ?? '');
+            if ($id === '' || $name === '') {
+                continue;
+            }
+            $rooms[$id] = [
+                'id' => $id,
+                'name' => $name,
+                'on' => false,
+                'brightness' => null,
+                'dimmable' => false,
+                'count' => 0,
+            ];
+        }
+        $brightSum = [];
+        $brightN = [];
+        foreach ($visibleDevices as $device) {
+            $roomId = (string) ($device['room_id'] ?? '');
+            if ($roomId === '' || !isset($rooms[$roomId])) {
+                continue;
+            }
+            $rooms[$roomId]['count']++;
+            if (!empty($device['on'])) {
+                $rooms[$roomId]['on'] = true;
+            }
+            if (!empty($device['dimmable'])) {
+                $rooms[$roomId]['dimmable'] = true;
+                $value = isset($device['brightness']) ? (int) $device['brightness'] : (( !empty($device['on'])) ? 100 : 0);
+                $brightSum[$roomId] = ($brightSum[$roomId] ?? 0) + $value;
+                $brightN[$roomId] = ($brightN[$roomId] ?? 0) + 1;
+            }
+        }
+        foreach ($rooms as $id => $room) {
+            if (($brightN[$id] ?? 0) > 0) {
+                $rooms[$id]['brightness'] = (int) round($brightSum[$id] / $brightN[$id]);
+            }
+        }
+
+        return array_values($rooms);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function visibleDeviceIdsInRoom(string $roomId): array
+    {
+        $store = $this->load();
+        $hidden = array_fill_keys($store['hidden'], true);
+        $ids = [];
+        foreach ($store['rooms'] as $deviceId => $assigned) {
+            if ($assigned !== $roomId || isset($hidden[$deviceId])) {
+                continue;
+            }
+            $ids[] = (string) $deviceId;
+        }
+
+        return $ids;
     }
 
     /**

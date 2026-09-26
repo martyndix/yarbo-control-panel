@@ -2575,7 +2575,7 @@ html[data-theme="light"] .plan-activity {
 }
 
 .home-card--manage .home-device:not(.home-device--hidden) {
-    grid-template-columns: minmax(0, 1.2fr) auto auto;
+    grid-template-columns: minmax(0, 1.1fr) auto auto auto;
 }
 
 .home-device.is-on {
@@ -2681,6 +2681,85 @@ html[data-theme="light"] .plan-activity {
     display: inline-block;
 }
 
+.home-room-add {
+    display: none;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+    margin: 0.35rem 0 0.55rem;
+}
+
+.home-card--manage .home-room-add {
+    display: flex;
+}
+
+.home-room-add input {
+    flex: 1 1 10rem;
+    min-width: 0;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+
+.home-room {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) auto;
+    align-items: center;
+    gap: 0.3rem 0.45rem;
+    margin-top: 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.32rem 0.5rem;
+    background: var(--bg);
+}
+
+.home-card--manage .home-room {
+    grid-template-columns: minmax(0, 1.2fr) auto auto;
+}
+
+.home-room.is-on {
+    background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+    border-color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.home-room-title {
+    margin: 0;
+    font-size: 0.95rem;
+}
+
+.home-room.is-on .home-room-title,
+.home-room.is-on .home-device-name-input {
+    color: var(--accent-hover);
+}
+
+.home-room.is-on [data-home-room-toggle] {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.home-room-empty {
+    grid-column: 1 / -1;
+    margin: 0 0.15rem 0.15rem;
+    font-size: 0.8rem;
+}
+
+.home-device-room-select {
+    max-width: 8.75rem;
+    padding: 0.12rem 0.3rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.75rem;
+}
+
 .home-device--hidden {
     grid-template-columns: minmax(0, 1fr) auto;
     padding: 0.12rem 0.35rem;
@@ -2775,7 +2854,16 @@ html[data-theme="light"] .plan-activity {
         grid-template-columns: minmax(0, 1fr) auto;
     }
 
-    .home-card--manage .home-device:not(.home-device--hidden) .home-device-actions {
+    .home-card--manage .home-device:not(.home-device--hidden) .home-device-actions,
+    .home-card--manage .home-device:not(.home-device--hidden) .home-device-room-select {
+        grid-column: 1 / -1;
+    }
+
+    .home-card--manage .home-room {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .home-card--manage .home-room .home-device-actions {
         grid-column: 1 / -1;
     }
 }

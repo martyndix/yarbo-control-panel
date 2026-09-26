@@ -2550,11 +2550,73 @@ function applyHomeManageUi() {
     if (btn) {
         btn.setAttribute('aria-pressed', homeManageOpen ? 'true' : 'false');
         btn.setAttribute('aria-label', homeManageOpen ? 'Hide device settings' : 'Show device settings');
-        btn.title = homeManageOpen ? 'Done renaming, hiding, and removing' : 'Rename, hide, and remove devices';
+        btn.title = homeManageOpen ? 'Done with names, rooms, hide, and remove' : 'Rename, rooms, hide, and remove devices';
     }
 }
 
-function homeDeviceCardHtml(d, hidden) {
+function homeRoomSelectHtml(d, rooms) {
+    if (!homeManageOpen) return '';
+    const current = d.room_id || '';
+    const opts = ['<option value="">No room</option>'].concat(
+        (rooms || []).map((r) => (
+            `<option value="${escapeHtml(r.id)}"${r.id === current ? ' selected' : ''}>${escapeHtml(r.name)}</option>`
+        ))
+    );
+    return `<select class="home-device-room-select" data-home-room-assign="${escapeHtml(d.id)}" aria-label="Room">${opts.join('')}</select>`;
+}
+
+function homeRoomHeadingHtml(room) {
+    const on = Boolean(room.on);
+    const bright = room.dimmable
+        ? `<input type="range" min="0" max="100" value="${Number(room.brightness ?? (on ? 100 : 0))}" data-home-room-bright="${escapeHtml(room.id)}">`
+        : '';
+    const name = homeManageOpen
+        ? `<input type="text" class="home-device-name-input" data-home-room-name="${escapeHtml(room.id)}" value="${escapeHtml(room.name)}" maxlength="32" aria-label="Room name">`
+        : `<h3 class="home-room-title">${escapeHtml(room.name)}</h3>`;
+    return `<div class="home-room${on ? ' is-on' : ''}" data-home-room="${escapeHtml(room.id)}">
+        <div class="home-device-label">
+            <span class="home-device-dot" aria-hidden="true"></span>
+            ${name}
+        </div>
+        <div class="home-device-actions">
+            <button type="button" class="btn btn-secondary btn-compact" data-home-room-toggle="${escapeHtml(room.id)}">${on ? 'Off' : 'On'}</button>
+            ${bright}
+        </div>
+        <div class="home-device-manage">
+            <button type="button" class="btn btn-secondary btn-compact" data-home-room-del="${escapeHtml(room.id)}">Delete room</button>
+        </div>
+    </div>`;
+}
+
+function homeNodeGroupsHtml(devices) {
+    const groups = [];
+    const byNode = new Map();
+    devices.forEach((d) => {
+        const key = String(d.node_id || d.id);
+        if (!byNode.has(key)) {
+            byNode.set(key, []);
+            groups.push(key);
+        }
+        byNode.get(key).push(d);
+    });
+    const rooms = homeDash.rooms || [];
+    return groups.map((key) => {
+        const list = byNode.get(key) || [];
+        const first = list[0] || {};
+        const source = first.source || first.vendor || first.product || 'Matter device';
+        const many = list.length > 1 || (homeManageOpen && Boolean(first.bridge));
+        const heading = many
+            ? `<div class="home-node-heading">
+                    <h3 class="home-node-title">${escapeHtml(source)} · ${list.length} ${list.length === 1 ? 'item' : 'items'}</h3>
+                    <button type="button" class="btn btn-secondary btn-compact" data-home-forget="${escapeHtml(String(first.node_id || ''))}" title="Unpair this whole Matter node (all lights on a Hue Bridge)">Remove all</button>
+                </div>`
+            : '';
+        const cards = list.map((d) => homeDeviceCardHtml(d, false, rooms)).join('');
+        return heading + cards;
+    }).join('');
+}
+
+function homeDeviceCardHtml(d, hidden, rooms) {
     const on = Boolean(d.on);
     const bright = !hidden && d.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
@@ -2571,11 +2633,13 @@ function homeDeviceCardHtml(d, hidden) {
     const label = homeManageOpen
         ? `<input type="text" class="home-device-name-input" data-home-name="${escapeHtml(d.id)}" value="${escapeHtml(d.name)}" placeholder="${escapeHtml(defaultName)}" maxlength="48" aria-label="Device name">`
         : `<p class="home-device-name">${escapeHtml(d.name)}</p>`;
+    const roomSelect = hidden ? '' : homeRoomSelectHtml(d, rooms || homeDash.rooms || []);
     return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
             ${label}
         </div>
+        ${roomSelect}
         ${hidden ? '' : `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             ${bright}
@@ -2587,7 +2651,7 @@ function homeDeviceCardHtml(d, hidden) {
 function renderHomeDashboard(data) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
-    const naming = document.activeElement?.matches?.('[data-home-name]') || document.activeElement?.closest?.('[data-home-name]');
+    const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-room-assign]');
     const status = document.getElementById('home-server-status');
     if (status) {
         const err = data.server?.error;
@@ -2598,33 +2662,32 @@ function renderHomeDashboard(data) {
     const grid = document.getElementById('home-devices');
     if (grid && !naming) {
         const devices = data.devices || [];
-        if (!devices.length) {
+        if (!devices.length && !(data.rooms || []).length) {
             grid.innerHTML = '<p class="hint">No Matter devices yet. Add the Hue Bridge or another pairing code above.</p>';
         } else {
-            const groups = [];
-            const byNode = new Map();
+            const rooms = data.rooms || [];
+            const byRoom = new Map(rooms.map((r) => [r.id, []]));
+            const ungrouped = [];
             devices.forEach((d) => {
-                const key = String(d.node_id || d.id);
-                if (!byNode.has(key)) {
-                    byNode.set(key, []);
-                    groups.push(key);
-                }
-                byNode.get(key).push(d);
+                if (d.room_id && byRoom.has(d.room_id)) byRoom.get(d.room_id).push(d);
+                else ungrouped.push(d);
             });
-            grid.innerHTML = groups.map((key) => {
-                const list = byNode.get(key) || [];
-                const first = list[0] || {};
-                const source = first.source || first.vendor || first.product || 'Matter device';
-                const many = list.length > 1 || Boolean(first.bridge);
-                const heading = many
-                    ? `<div class="home-node-heading">
-                        <h3 class="home-node-title">${escapeHtml(source)} · ${list.length} ${list.length === 1 ? 'item' : 'items'}</h3>
-                        <button type="button" class="btn btn-secondary btn-compact" data-home-forget="${escapeHtml(String(first.node_id || ''))}" title="Unpair this whole Matter node (all lights on a Hue Bridge)">Remove all</button>
-                    </div>`
-                    : '';
-                const cards = list.map((d) => homeDeviceCardHtml(d, false)).join('');
-                return heading + cards;
-            }).join('');
+            let html = '';
+            rooms.forEach((room) => {
+                const list = byRoom.get(room.id) || [];
+                if (!list.length && !homeManageOpen) return;
+                html += homeRoomHeadingHtml(room);
+                html += list.length
+                    ? list.map((d) => homeDeviceCardHtml(d, false, rooms)).join('')
+                    : (homeManageOpen ? '<p class="hint home-room-empty">No devices in this room yet. Pick it from a light’s room menu.</p>' : '');
+            });
+            if (ungrouped.length) {
+                if (html) {
+                    html += '<div class="home-node-heading"><h3 class="home-node-title">Ungrouped</h3></div>';
+                }
+                html += homeNodeGroupsHtml(ungrouped);
+            }
+            grid.innerHTML = html || '<p class="hint">No Matter devices yet. Add the Hue Bridge or another pairing code above.</p>';
         }
     }
     const hiddenWrap = document.getElementById('home-hidden-wrap');
@@ -2694,6 +2757,26 @@ async function saveHomeDeviceName(input) {
     }
 }
 
+async function saveHomeRoomName(input) {
+    const id = input.getAttribute('data-home-room-name') || '';
+    if (!id || input.dataset.homeNameSaving === '1') return;
+    const name = String(input.value || '').trim();
+    const current = (homeDash.rooms || []).find((r) => r.id === id);
+    if (current && String(current.name || '') === name) return;
+    input.dataset.homeNameSaving = '1';
+    try {
+        const data = await homeApi({ action: 'room_save', id, name });
+        if (!data.ok) throw new Error(data.error || 'Could not rename room');
+        if (current && data.room?.name) current.name = data.room.name;
+        showToast('Room name saved', 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not rename room', 'error');
+        if (current) input.value = current.name || '';
+    } finally {
+        delete input.dataset.homeNameSaving;
+    }
+}
+
 function bindHomeDashboard() {
     document.getElementById('home-manage-toggle')?.addEventListener('click', () => {
         homeManageOpen = !homeManageOpen;
@@ -2701,15 +2784,40 @@ function bindHomeDashboard() {
         if (homeDash) renderHomeDashboard(homeDash);
     });
     document.getElementById('home-card')?.addEventListener('focusout', (event) => {
-        const input = event.target.closest?.('[data-home-name]');
-        if (input) saveHomeDeviceName(input);
+        const deviceName = event.target.closest?.('[data-home-name]');
+        if (deviceName) saveHomeDeviceName(deviceName);
+        const roomName = event.target.closest?.('[data-home-room-name]');
+        if (roomName) saveHomeRoomName(roomName);
     });
     document.getElementById('home-card')?.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
-        const input = event.target.closest?.('[data-home-name]');
+        const input = event.target.closest?.('[data-home-name], [data-home-room-name]');
         if (!input) return;
         event.preventDefault();
         input.blur();
+    });
+    document.getElementById('home-room-save')?.addEventListener('click', async () => {
+        const input = document.getElementById('home-room-name');
+        const name = input?.value.trim() || '';
+        const btn = document.getElementById('home-room-save');
+        if (btn) btn.disabled = true;
+        try {
+            const data = await homeApi({ action: 'room_save', name });
+            if (!data.ok) throw new Error(data.error || 'Could not add room');
+            if (input) input.value = '';
+            homeManageOpen = true;
+            showToast('Room added', 'success');
+            await loadHomeDashboard();
+        } catch (err) {
+            showToast(err.message || 'Could not add room', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    });
+    document.getElementById('home-room-name')?.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        document.getElementById('home-room-save')?.click();
     });
     document.getElementById('home-card')?.addEventListener('click', async (event) => {
         const forget = event.target.closest('[data-home-forget]');
@@ -2781,6 +2889,45 @@ function bindHomeDashboard() {
             }
             return;
         }
+        const roomDel = event.target.closest('[data-home-room-del]');
+        if (roomDel) {
+            const id = roomDel.getAttribute('data-home-room-del') || '';
+            if (!id) return;
+            if (!window.confirm('Delete this room? Lights stay paired; they just become ungrouped.')) {
+                return;
+            }
+            roomDel.disabled = true;
+            try {
+                const data = await homeApi({ action: 'room_delete', id });
+                if (!data.ok) throw new Error(data.error || 'Could not delete room');
+                showToast('Room deleted', 'success');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not delete room', 'error');
+                roomDel.disabled = false;
+            }
+            return;
+        }
+        const roomToggle = event.target.closest('[data-home-room-toggle]');
+        if (roomToggle) {
+            const id = roomToggle.getAttribute('data-home-room-toggle') || '';
+            const room = (homeDash.rooms || []).find((r) => r.id === id);
+            roomToggle.disabled = true;
+            try {
+                const data = await homeApi({
+                    action: 'room_command',
+                    room_id: id,
+                    command: room?.on ? 'off' : 'on',
+                }, 90000);
+                if (!data.ok) throw new Error(data.error || 'Failed');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Room command failed', 'error');
+            } finally {
+                roomToggle.disabled = false;
+            }
+            return;
+        }
         const btn = event.target.closest('[data-home-toggle]');
         if (!btn) return;
         btn.disabled = true;
@@ -2795,6 +2942,36 @@ function bindHomeDashboard() {
         }
     });
     document.getElementById('home-devices')?.addEventListener('change', async (event) => {
+        const assign = event.target.closest('[data-home-room-assign]');
+        if (assign) {
+            try {
+                const data = await homeApi({
+                    action: 'room',
+                    id: assign.getAttribute('data-home-room-assign'),
+                    room_id: assign.value,
+                });
+                if (!data.ok) throw new Error(data.error || 'Could not assign room');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not assign room', 'error');
+            }
+            return;
+        }
+        const roomBright = event.target.closest('[data-home-room-bright]');
+        if (roomBright) {
+            try {
+                const data = await homeApi({
+                    action: 'room_command',
+                    room_id: roomBright.getAttribute('data-home-room-bright'),
+                    command: 'brightness',
+                    brightness: Number(roomBright.value),
+                }, 90000);
+                if (!data.ok) throw new Error(data.error || 'Failed');
+            } catch (err) {
+                showToast(err.message || 'Room brightness failed', 'error');
+            }
+            return;
+        }
         const input = event.target.closest('[data-home-bright]');
         if (!input) return;
         try {

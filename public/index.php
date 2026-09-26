@@ -562,7 +562,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="section-header section-header--simple">
                 <h2>Home</h2>
                 <div class="section-header-actions">
-                    <button type="button" class="home-manage-toggle" id="home-manage-toggle" aria-pressed="false" aria-label="Show device settings" title="Rename, hide, and remove devices">⚙️</button>
+                    <button type="button" class="home-manage-toggle" id="home-manage-toggle" aria-pressed="false" aria-label="Show device settings" title="Rename, rooms, hide, and remove devices">⚙️</button>
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
@@ -578,6 +578,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn" id="home-pair">Add device</button>
             </div>
             <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice.</p>
+            <div id="home-room-add" class="home-room-add">
+                <input type="text" id="home-room-name" placeholder="Kitchen" maxlength="32" aria-label="New room name">
+                <button type="button" class="btn btn-secondary btn-compact" id="home-room-save">Add room</button>
+            </div>
             <div id="home-devices" class="home-device-grid"></div>
             <div id="home-hidden-wrap" class="home-hidden-wrap hidden">
                 <h3 class="settings-subtitle">Hidden</h3>
