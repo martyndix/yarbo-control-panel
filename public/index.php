@@ -561,7 +561,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         <section class="card panel-section module-pane-hidden" data-panel-id="home" data-module="home" id="home-card">
             <div class="section-header section-header--simple">
                 <h2>Home</h2>
-                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+                <div class="section-header-actions">
+                    <button type="button" class="home-manage-toggle" id="home-manage-toggle" aria-pressed="false" aria-label="Show device settings" title="Rename, hide, and remove devices">⚙️</button>
+                    <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+                </div>
             </div>
             <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. A Hue Bridge is one pairing: every Hue light then appears as its own row. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps.</p>
             <p id="home-server-status" class="updated">Matter server: —</p>

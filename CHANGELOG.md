@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.6] - 2026-09-26
+
+### Added
+- Home devices can be **renamed** on the panel (saved in `data/home.json`). Open **⚙️** to edit names, hide/remove, or see the Hidden list. Lights that are on use a green row.
+
 ## [3.0.5] - 2026-09-26
 
 ### Changed

@@ -179,12 +179,14 @@ final class YarboHome
             if ($id === '') {
                 continue;
             }
-            $name = $store['names'][$id] ?? (string) ($device['name'] ?? $id);
+            $defaultName = (string) ($device['name'] ?? $id);
+            $name = $store['names'][$id] ?? $defaultName;
             $row = [
                 'id' => $id,
                 'node_id' => (int) ($device['node_id'] ?? 0),
                 'endpoint' => (int) ($device['endpoint'] ?? 0),
                 'name' => $name,
+                'default_name' => $defaultName,
                 'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
                 'vendor' => (string) ($device['vendor'] ?? ''),
                 'product' => (string) ($device['product'] ?? ''),

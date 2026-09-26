@@ -2516,6 +2516,33 @@ html[data-theme="light"] .plan-activity {
     margin: 0;
 }
 
+.home-manage-toggle {
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+}
+
+.home-manage-toggle:hover {
+    border-color: var(--accent);
+}
+
+.home-manage-toggle[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 .home-node-heading {
     grid-column: 1 / -1;
     display: flex;
@@ -2538,7 +2565,7 @@ html[data-theme="light"] .plan-activity {
 
 .home-device {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) auto auto;
+    grid-template-columns: minmax(0, 1.2fr) auto;
     align-items: center;
     gap: 0.3rem 0.45rem;
     border: 1px solid var(--border);
@@ -2547,8 +2574,34 @@ html[data-theme="light"] .plan-activity {
     background: var(--surface);
 }
 
+.home-card--manage .home-device:not(.home-device--hidden) {
+    grid-template-columns: minmax(0, 1.2fr) auto auto;
+}
+
 .home-device.is-on {
+    background: color-mix(in srgb, var(--accent) 26%, var(--surface));
     border-color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.home-device-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.home-device-dot {
+    flex-shrink: 0;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--muted);
+}
+
+.home-device.is-on .home-device-dot {
+    background: var(--accent);
+    box-shadow: 0 0 0.35rem color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 .home-device-name {
@@ -2558,6 +2611,24 @@ html[data-theme="light"] .plan-activity {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.home-device.is-on .home-device-name {
+    color: var(--accent-hover);
+}
+
+.home-device-name-input {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0.12rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
 }
 
 .home-device-meta {
@@ -2584,12 +2655,30 @@ html[data-theme="light"] .plan-activity {
     border-radius: 6px;
 }
 
+.home-device.is-on [data-home-toggle] {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
 .home-device-manage {
-    display: flex;
+    display: none;
     flex-wrap: nowrap;
     gap: 0.25rem;
     margin: 0;
     justify-content: flex-end;
+}
+
+.home-card--manage .home-device-manage {
+    display: flex;
+}
+
+.home-node-heading [data-home-forget] {
+    display: none;
+}
+
+.home-card--manage .home-node-heading [data-home-forget] {
+    display: inline-block;
 }
 
 .home-device--hidden {
@@ -2614,6 +2703,10 @@ html[data-theme="light"] .plan-activity {
 
 .home-hidden-wrap .settings-subtitle {
     margin-bottom: 0.15rem;
+}
+
+#home-card:not(.home-card--manage) #home-hidden-wrap {
+    display: none;
 }
 
 #home-hidden-devices {
@@ -2678,11 +2771,11 @@ html[data-theme="light"] .plan-activity {
         grid-template-columns: 1fr;
     }
 
-    .home-device:not(.home-device--hidden) {
+    .home-card--manage .home-device:not(.home-device--hidden) {
         grid-template-columns: minmax(0, 1fr) auto;
     }
 
-    .home-device:not(.home-device--hidden) .home-device-actions {
+    .home-card--manage .home-device:not(.home-device--hidden) .home-device-actions {
         grid-column: 1 / -1;
     }
 }

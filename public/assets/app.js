@@ -2440,6 +2440,7 @@ function updateLymowDashboard(ly) {
 let homeDash = { devices: [], scenes: [], paper_devices: [], setup: {} };
 let homeLoadBusy = false;
 let homeSetupPollTimer = 0;
+let homeManageOpen = false;
 
 async function homeApi(body, timeoutMs = 20000) {
     const res = await fetchWithTimeout('/api/home.php', {
@@ -2542,6 +2543,17 @@ async function loadHomeDashboard() {
     }
 }
 
+function applyHomeManageUi() {
+    const card = document.getElementById('home-card');
+    const btn = document.getElementById('home-manage-toggle');
+    card?.classList.toggle('home-card--manage', homeManageOpen);
+    if (btn) {
+        btn.setAttribute('aria-pressed', homeManageOpen ? 'true' : 'false');
+        btn.setAttribute('aria-label', homeManageOpen ? 'Hide device settings' : 'Show device settings');
+        btn.title = homeManageOpen ? 'Done renaming, hiding, and removing' : 'Rename, hide, and remove devices';
+    }
+}
+
 function homeDeviceCardHtml(d, hidden) {
     const on = Boolean(d.on);
     const bright = !hidden && d.dimmable
@@ -2550,13 +2562,20 @@ function homeDeviceCardHtml(d, hidden) {
     const meta = [d.kind, d.room, d.product && d.product !== d.name ? d.product : '']
         .filter(Boolean)
         .join(' · ');
+    const defaultName = d.default_name || d.name || '';
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
         : `<button type="button" class="btn btn-secondary btn-compact" data-home-hide="${escapeHtml(d.id)}">Hide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`;
+    const label = homeManageOpen
+        ? `<input type="text" class="home-device-name-input" data-home-name="${escapeHtml(d.id)}" value="${escapeHtml(d.name)}" placeholder="${escapeHtml(defaultName)}" maxlength="48" aria-label="Device name">`
+        : `<p class="home-device-name">${escapeHtml(d.name)}</p>`;
     return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
-        <p class="home-device-name">${escapeHtml(d.name)}</p>
+        <div class="home-device-label">
+            <span class="home-device-dot" aria-hidden="true"></span>
+            ${label}
+        </div>
         ${hidden ? '' : `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             ${bright}
@@ -2567,6 +2586,8 @@ function homeDeviceCardHtml(d, hidden) {
 
 function renderHomeDashboard(data) {
     applyHomeSetupUi(data);
+    applyHomeManageUi();
+    const naming = document.activeElement?.matches?.('[data-home-name]') || document.activeElement?.closest?.('[data-home-name]');
     const status = document.getElementById('home-server-status');
     if (status) {
         const err = data.server?.error;
@@ -2575,7 +2596,7 @@ function renderHomeDashboard(data) {
             : `Matter server: ${err || 'not running'}`;
     }
     const grid = document.getElementById('home-devices');
-    if (grid) {
+    if (grid && !naming) {
         const devices = data.devices || [];
         if (!devices.length) {
             grid.innerHTML = '<p class="hint">No Matter devices yet. Add the Hue Bridge or another pairing code above.</p>';
@@ -2609,7 +2630,7 @@ function renderHomeDashboard(data) {
     const hiddenWrap = document.getElementById('home-hidden-wrap');
     const hiddenGrid = document.getElementById('home-hidden-devices');
     const hiddenDevices = data.hidden_devices || [];
-    if (hiddenWrap && hiddenGrid) {
+    if (hiddenWrap && hiddenGrid && !naming) {
         hiddenWrap.classList.toggle('hidden', hiddenDevices.length === 0);
         hiddenGrid.innerHTML = hiddenDevices.map((d) => homeDeviceCardHtml(d, true)).join('');
     }
@@ -2650,7 +2671,46 @@ function renderHomeDashboard(data) {
     }
 }
 
+async function saveHomeDeviceName(input) {
+    const id = input.getAttribute('data-home-name') || '';
+    if (!id || input.dataset.homeNameSaving === '1') return;
+    const name = String(input.value || '').trim();
+    const current = [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])]
+        .find((d) => d.id === id);
+    if (current && String(current.name || '') === name) return;
+    input.dataset.homeNameSaving = '1';
+    try {
+        const data = await homeApi({ action: 'rename', id, name });
+        if (!data.ok) throw new Error(data.error || 'Could not rename');
+        const next = name || String(current?.default_name || name);
+        if (current) current.name = next;
+        if (!name && current?.default_name) input.value = current.default_name;
+        showToast('Name saved', 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not rename', 'error');
+        if (current) input.value = current.name || '';
+    } finally {
+        delete input.dataset.homeNameSaving;
+    }
+}
+
 function bindHomeDashboard() {
+    document.getElementById('home-manage-toggle')?.addEventListener('click', () => {
+        homeManageOpen = !homeManageOpen;
+        applyHomeManageUi();
+        if (homeDash) renderHomeDashboard(homeDash);
+    });
+    document.getElementById('home-card')?.addEventListener('focusout', (event) => {
+        const input = event.target.closest?.('[data-home-name]');
+        if (input) saveHomeDeviceName(input);
+    });
+    document.getElementById('home-card')?.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        const input = event.target.closest?.('[data-home-name]');
+        if (!input) return;
+        event.preventDefault();
+        input.blur();
+    });
     document.getElementById('home-card')?.addEventListener('click', async (event) => {
         const forget = event.target.closest('[data-home-forget]');
         if (forget) {
