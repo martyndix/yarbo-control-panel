@@ -117,8 +117,47 @@ final class YarboMap
 
         return [
             'type' => 'FeatureCollection',
-            'features' => $features,
+            'features' => self::dedupeFeatures($features),
         ];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $features
+     * @return list<array<string, mixed>>
+     */
+    public static function dedupeFeatures(array $features): array
+    {
+        $seen = [];
+        $out = [];
+        foreach ($features as $feature) {
+            if (!is_array($feature)) {
+                continue;
+            }
+            $id = self::featureIdentity($feature);
+            if (isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $out[] = $feature;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $feature
+     */
+    private static function featureIdentity(array $feature): string
+    {
+        $props = is_array($feature['properties'] ?? null) ? $feature['properties'] : [];
+        $geom = is_array($feature['geometry'] ?? null) ? $feature['geometry'] : [];
+
+        return implode('|', [
+            (string) ($props['zone_type'] ?? ''),
+            (string) ($props['name'] ?? ''),
+            (string) ($geom['type'] ?? ''),
+            json_encode($geom['coordinates'] ?? null, JSON_THROW_ON_ERROR),
+        ]);
     }
 
     /**
@@ -177,6 +216,8 @@ final class YarboMap
             $encoded = self::applyDraftPatch($encoded, $patch);
             $maxDelta = max($maxDelta, (float) ($patch['delta_m'] ?? 0));
         }
+
+        $encoded = self::syncDuplicateRanges($originalMap, $encoded);
 
         return ['ok' => true, 'map' => $encoded, 'errors' => [], 'max_delta_m' => $maxDelta];
     }
@@ -322,6 +363,73 @@ final class YarboMap
     }
 
     /**
+     * If the backup file stored the same zone several times, copy an edit onto every copy.
+     *
+     * @param array<string, mixed> $original
+     * @param array<string, mixed> $encoded
+     * @return array<string, mixed>
+     */
+    private static function syncDuplicateRanges(array $original, array $encoded): array
+    {
+        foreach (array_keys(self::canonicalListNames()) as $canonical) {
+            $key = self::presentListKey($encoded, $canonical);
+            if ($key === null || !isset($encoded[$key]) || self::isSingleZone($encoded[$key])) {
+                continue;
+            }
+            $origKey = self::presentListKey($original, $canonical) ?? $key;
+            $origList = is_array($original[$origKey] ?? null) ? $original[$origKey] : [];
+            if (self::isSingleZone($origList)) {
+                continue;
+            }
+            $newBySig = [];
+            foreach ($encoded[$key] as $i => $zone) {
+                if (!is_array($zone)) {
+                    continue;
+                }
+                $origZone = is_array($origList[$i] ?? null) ? $origList[$i] : [];
+                $origSig = self::rangeSignature($origZone['range'] ?? null);
+                $newSig = self::rangeSignature($zone['range'] ?? null);
+                if ($origSig !== '' && $origSig !== $newSig) {
+                    $newBySig[$origSig] = $zone['range'];
+                }
+            }
+            if ($newBySig === []) {
+                continue;
+            }
+            foreach ($encoded[$key] as $i => $zone) {
+                if (!is_array($zone)) {
+                    continue;
+                }
+                $origZone = is_array($origList[$i] ?? null) ? $origList[$i] : [];
+                $origSig = self::rangeSignature($origZone['range'] ?? null);
+                if (isset($newBySig[$origSig])) {
+                    $encoded[$key][$i]['range'] = $newBySig[$origSig];
+                }
+            }
+        }
+
+        return $encoded;
+    }
+
+    private static function rangeSignature(mixed $range): string
+    {
+        if (!is_array($range) || $range === []) {
+            return '';
+        }
+        $parts = [];
+        foreach ($range as $point) {
+            if (!is_array($point)) {
+                continue;
+            }
+            $x = is_numeric($point['x'] ?? null) ? round((float) $point['x'], 3) : 0.0;
+            $y = is_numeric($point['y'] ?? null) ? round((float) $point['y'], 3) : 0.0;
+            $parts[] = $x . ',' . $y;
+        }
+
+        return implode(';', $parts);
+    }
+
+    /**
      * Largest vertex move (metres) between two app-format maps. Missing lists count as 0.
      *
      * @param array<string, mixed> $a
@@ -399,9 +507,11 @@ final class YarboMap
     public static function presentListKey(array $data, string $canonical): ?string
     {
         foreach (self::canonicalListNames()[$canonical] ?? [$canonical] as $key) {
-            if (isset($data[$key]) && is_array($data[$key])) {
-                return $key;
+            if (!isset($data[$key]) || !is_array($data[$key]) || $data[$key] === []) {
+                continue;
             }
+
+            return $key;
         }
 
         return null;

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.44] - 2026-09-26
+
+### Fixed
+- The same zone was drawn several times (five “Pathway 7” rows). Moving one copy left the others in place. The map now shows each unique zone once, and Save copies that edit onto every duplicate slot in the backup file.
+
 ## [2.0.43] - 2026-09-26
 
 ### Fixed

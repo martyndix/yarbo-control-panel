@@ -191,6 +191,41 @@ if ($isFixture) {
             $failures[] = 'singular backup encode should keep area and not invent areas';
         }
     }
+
+    $dupMap = $map;
+    $dupMap['pathways'] = [$map['pathways'][0], $map['pathways'][0]];
+    $dupNorm = YarboMap::normalize(['get_map' => ['data' => $dupMap]]);
+    $dupFeatures = $dupNorm['feature_collection']['features'] ?? [];
+    $dupPaths = array_values(array_filter($dupFeatures, static fn ($f) => ($f['properties']['zone_type'] ?? '') === 'path'));
+    if (count($dupPaths) !== 1) {
+        $failures[] = sprintf('identical pathway copies should draw once, got %d', count($dupPaths));
+    } else {
+        $dupCol = ['type' => 'FeatureCollection', 'features' => $dupNorm['feature_collection']['features']];
+        $ring = &$dupCol['features'][array_key_first(array_filter(
+            array_keys($dupCol['features']),
+            static fn ($i) => ($dupCol['features'][$i]['properties']['zone_type'] ?? '') === 'path'
+        ))];
+        if (($ring['geometry']['type'] ?? '') === 'LineString') {
+            $ring['geometry']['coordinates'][0][1] += 0.5 / 111_320.0;
+        }
+        unset($ring);
+        $dupEncode = YarboMap::encodeDraft($dupMap, $dupCol);
+        if (!($dupEncode['ok'] ?? false)) {
+            $failures[] = 'duplicate pathway encode failed: ' . implode('; ', $dupEncode['errors'] ?? []);
+        } else {
+            $y0 = (float) $dupEncode['map']['pathways'][0]['range'][0]['y'];
+            $y1 = (float) $dupEncode['map']['pathways'][1]['range'][0]['y'];
+            $oldY = (float) $map['pathways'][0]['range'][0]['y'];
+            if (abs($y0 - $oldY - 0.5) > 0.05 || abs($y1 - $y0) > 0.02) {
+                $failures[] = sprintf(
+                    'duplicate pathway edit should move every copy (y0=%+.3f y1=%+.3f old=%+.3f)',
+                    $y0 - $oldY,
+                    $y1 - $oldY,
+                    0.0
+                );
+            }
+        }
+    }
 }
 
 $featureCount = count($collection['features'] ?? []);

@@ -959,7 +959,7 @@ function initMap() {
         },
     }).addTo(map);
 
-    draftLayer = L.featureGroup().addTo(map);
+    draftLayer = L.featureGroup();
 
     const centerControl = L.control({ position: 'bottomright' });
     centerControl.onAdd = function () {
@@ -1100,7 +1100,9 @@ function hideOriginalMapLayers() {
             map.removeLayer(entry.layer);
         }
     });
-    draftLayer?.bringToFront();
+    if (draftLayer && map.hasLayer(draftLayer)) {
+        draftLayer.bringToFront();
+    }
 }
 
 function enableDraftVertexEditing(onlyLayer) {
@@ -1290,22 +1292,45 @@ function clearMapZones() {
     loadedMapFeatures = [];
     loadedMapMeta = null;
     areasLayer?.clearLayers();
+    disableDraftVertexEditing();
+    draftLayer?.clearLayers();
     if (els.mapInspector) els.mapInspector.classList.add('hidden');
     if (els.mapZoneList) els.mapZoneList.innerHTML = '';
 }
 
+function dedupeMapFeatures(features) {
+    const seen = new Set();
+    const out = [];
+    (Array.isArray(features) ? features : []).forEach((feature) => {
+        if (!feature || feature.type !== 'Feature') return;
+        const props = feature.properties || {};
+        const geom = feature.geometry || {};
+        const id = [
+            props.zone_type || '',
+            props.name || '',
+            geom.type || '',
+            JSON.stringify(geom.coordinates ?? null),
+        ].join('|');
+        if (seen.has(id)) return;
+        seen.add(id);
+        out.push(feature);
+    });
+    return out;
+}
+
 function applyLoadedMapFeatures(features, context = {}) {
     if (!map || !areasLayer) return;
+    const unique = dedupeMapFeatures(features);
     clearMapZones();
-    const featureCollection = { type: 'FeatureCollection', features };
+    const featureCollection = { type: 'FeatureCollection', features: unique };
     areasLayer.addData(featureCollection);
-    loadedMapFeatures = features;
+    loadedMapFeatures = unique;
     loadedMapMeta = context.meta || null;
 
     if (context.restored) {
         const via = context.meta?.data_via ? ` via ${context.meta.data_via}` : '';
         const when = context.loaded_at ? ` from ${new Date(context.loaded_at).toLocaleString()}` : '';
-        updateMapAreasStatus(`Restored from last session (${features.length} feature${features.length === 1 ? '' : 's'})${via}${when}.`);
+        updateMapAreasStatus(`Restored from last session (${unique.length} feature${unique.length === 1 ? '' : 's'})${via}${when}.`);
     }
 
     renderMapInspector();
@@ -1577,6 +1602,9 @@ function setMapEditMode(enabled) {
         clearDraftHighlights();
         applyDraftToView();
         draftLayer?.clearLayers();
+        if (draftLayer && map.hasLayer(draftLayer)) {
+            map.removeLayer(draftLayer);
+        }
         setAreasLayerVisible(true);
         if (drawControl) {
             map.removeControl(drawControl);
@@ -1609,6 +1637,9 @@ function setMapEditMode(enabled) {
     }
 
     hideOriginalMapLayers();
+    if (draftLayer && !map.hasLayer(draftLayer)) {
+        draftLayer.addTo(map);
+    }
 
     if (drawControl) {
         map.removeControl(drawControl);
