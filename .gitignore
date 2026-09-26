@@ -20,6 +20,7 @@
 /data/metrics-last.json
 /data/map-last.json
 /data/map-backup-last.json
+/data/map-backup-probe.json
 /data/map-restore-*.json
 /data/map-capture.json
 /data/map-capture.json.tmp

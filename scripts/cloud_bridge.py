@@ -107,9 +107,14 @@ def run_unpublished_command(client: Any, device: Any, serial: str, cmd: str, pay
     box: dict[str, Any] = {}
 
     def on_feedback(_topic: str, data: Any) -> None:
-        if isinstance(data, dict) and data.get("topic") == cmd:
+        if not isinstance(data, dict):
+            return
+        if _feedback_matches_command(cmd, data):
             box["data"] = data
             done.set()
+            return
+        if _looks_like_app_map(data) or _looks_like_app_map(data.get("data")):
+            box["maybe"] = data
 
     subscribe_feedback = getattr(client, "subscribe_data_feedback", None)
     if not callable(subscribe_feedback):
@@ -121,11 +126,44 @@ def run_unpublished_command(client: Any, device: Any, serial: str, cmd: str, pay
     topic = f"snowbot/{serial}/app/{cmd}"
     mqtt.publish(topic, encode_mqtt_payload(payload if payload else {}))
     if not done.wait(timeout):
+        maybe = box.get("maybe")
+        if isinstance(maybe, dict):
+            return maybe
         raise TimeoutError(
             f"No cloud reply to {cmd} within {timeout:.0f}s. "
             "The Core must be online on the Yarbo account used in Settings."
         )
     return box.get("data")
+
+
+def _feedback_matches_command(cmd: str, data: dict[str, Any]) -> bool:
+    topic = data.get("topic")
+    aliases = {
+        cmd,
+        cmd.replace("buckup", "backup"),
+        cmd.replace("backup", "buckup"),
+        "get_map_backup_from_id",
+        "get_map_buckup_from_id",
+    }
+    return isinstance(topic, str) and topic in aliases
+
+
+def _looks_like_app_map(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    for key in ("areas", "pathways", "nogozones", "novisionzones", "elec_fence", "sidewalks", "deadends"):
+        zones = data.get(key)
+        if not isinstance(zones, list) or not zones:
+            continue
+        first = zones[0]
+        if isinstance(first, dict) and isinstance(first.get("range"), list) and first["range"]:
+            return True
+    charging = data.get("chargingData")
+    if isinstance(charging, dict) and (
+        isinstance(charging.get("chargingPoint"), dict) or isinstance(charging.get("charging_point"), dict)
+    ):
+        return True
+    return False
 
 
 def run_login_test(config: dict[str, Any]) -> dict[str, Any]:

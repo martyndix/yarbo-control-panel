@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.38] - 2026-09-26
+
+### Fixed
+- **Load map backups** fetches the backup blob on LAN and cloud even when the ID list arrived without geometry, and falls back to the live `get_map` so Save to robot can still turn on. The status line shows list-entry keys and fetch errors when the blob is missing.
+
 ## [2.0.37] - 2026-09-26
 
 ### Fixed

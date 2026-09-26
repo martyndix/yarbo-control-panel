@@ -8,7 +8,7 @@ use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
 use Yarbo\YarboMapBackup;
 
-set_time_limit(180);
+set_time_limit(240);
 
 $projectRoot = dirname(__DIR__, 2);
 $backups = new YarboMapBackup($projectRoot);

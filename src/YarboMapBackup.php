@@ -52,26 +52,72 @@ final class YarboMapBackup
         $fetchEnvelope = $fromList['map'] !== null ? $listEnvelope : null;
         $fetchPayloadUsed = null;
         $usedFetch = false;
-        if ($chosenId !== null) {
-            foreach (self::fetchPayloads($chosenId) as $payload) {
-                $candidate = $via === 'cloud' && $cloud !== null && $serial !== ''
-                    ? $this->envelopeFromCloud($cloud->command(self::FETCH_CMD, $serial, $payload, 25.0), self::FETCH_CMD)
-                    : $client->requestDataFeedback(self::FETCH_CMD, $payload, 20.0, false);
-                if ($candidate === null) {
-                    continue;
-                }
-                $located = self::locateMap(self::envelopeData($candidate));
-                if ($located['map'] !== null) {
-                    $fetched = $located;
-                    $fetchEnvelope = $candidate;
-                    $fetchPayloadUsed = $payload;
-                    $usedFetch = true;
-                    break;
+        $mapSource = $fetched !== null ? 'list' : null;
+        $fetchProbe = null;
+        $chosenFields = null;
+        foreach ($entries as $entry) {
+            if ((string) ($entry['id'] ?? '') === (string) $chosenId) {
+                $chosenFields = is_array($entry['fields'] ?? null) ? $entry['fields'] : null;
+                break;
+            }
+        }
+
+        if ($chosenId !== null && ($fetched === null || !YarboMap::isAppMap($fetched['map'] ?? []))) {
+            foreach (self::fetchPayloads($chosenId, $chosenFields) as $payload) {
+                foreach (['local', 'cloud'] as $tryVia) {
+                    if ($tryVia === 'local') {
+                        $candidate = $client->requestDataFeedback(self::FETCH_CMD, $payload, 8.0, false);
+                        $attemptError = $candidate === null ? 'No LAN reply' : null;
+                    } else {
+                        if ($cloud === null || $serial === '') {
+                            continue;
+                        }
+                        $raw = $cloud->command(self::FETCH_CMD, $serial, $payload, 40.0);
+                        $candidate = $this->envelopeFromCloud($raw, self::FETCH_CMD);
+                        $attemptError = $candidate === null ? (string) ($raw['error'] ?? 'No cloud reply') : null;
+                    }
+                    if ($candidate === null) {
+                        $fetchProbe = [
+                            'payload' => $payload,
+                            'via' => $tryVia,
+                            'error' => $attemptError,
+                        ];
+                        continue;
+                    }
+                    $fetchData = self::envelopeData($candidate);
+                    $fetchProbe = [
+                        'payload' => $payload,
+                        'via' => $tryVia,
+                        'topic' => $candidate['topic'] ?? null,
+                        'state' => $candidate['state'] ?? null,
+                        'keys' => self::probeKeys($fetchData),
+                    ];
+                    $located = self::locateMap($fetchData);
+                    if ($located['map'] !== null) {
+                        $fetched = $located;
+                        $fetchEnvelope = $candidate;
+                        $fetchPayloadUsed = $payload;
+                        $usedFetch = true;
+                        $mapSource = 'fetch';
+                        $via = $tryVia;
+                        break 2;
+                    }
                 }
             }
         }
 
         $compatible = is_array($fetched) && YarboMap::isAppMap($fetched['map'] ?? []);
+        if (!$compatible) {
+            $live = $this->fetchLiveMap($client, $cloud, $serial);
+            if (is_array($live)) {
+                $fetched = ['map' => $live, 'path' => null];
+                $fetchEnvelope = ['topic' => 'get_map', 'data' => $live];
+                $usedFetch = false;
+                $mapSource = 'get_map';
+                $compatible = true;
+            }
+        }
+
         $featureCollection = null;
         if ($compatible) {
             $normalized = YarboMap::normalize(['get_map' => ['data' => $fetched['map']]]);
@@ -80,12 +126,27 @@ final class YarboMapBackup
                 'saved_at' => gmdate('c'),
                 'backup_id' => $chosenId,
                 'map' => $fetched['map'],
+                'map_source' => $mapSource,
                 'map_path' => $usedFetch ? $fetched['path'] : null,
                 'recovery_payload' => $usedFetch
                     ? self::envelopeData($fetchEnvelope)
                     : $fetched['map'],
             ]);
         }
+
+        $this->persistProbe([
+            'saved_at' => gmdate('c'),
+            'via' => $via,
+            'list_keys' => self::probeKeys($listData),
+            'entry_keys' => $entries[0]['keys'] ?? [],
+            'selected_id' => $chosenId,
+            'fetch' => $fetchProbe,
+            'map_source' => $mapSource,
+            'compatible' => $compatible,
+        ]);
+
+        $entryKeys = $entries[0]['keys'] ?? [];
+        $idList = implode(', ', array_map(static fn ($row) => (string) ($row['id'] ?? ''), $entries));
 
         return [
             'ok' => true,
@@ -97,17 +158,21 @@ final class YarboMapBackup
             'fetch_command' => self::FETCH_CMD,
             'fetch_payload' => $fetchPayloadUsed,
             'fetch_state' => is_array($fetchEnvelope) ? ($fetchEnvelope['state'] ?? null) : null,
+            'fetch_probe' => $fetchProbe,
+            'map_source' => $mapSource,
             'via' => $via,
             'compatible' => $compatible,
             'summary' => $compatible ? self::publicSummary($fetched['map']) : null,
             'geojson' => $featureCollection,
-            'message' => $compatible
-                ? sprintf(
-                    'Backup extracted via %s (%s). Edit these zones, then Save to robot while docked.',
-                    $via,
-                    self::formatCounts(self::publicSummary($fetched['map'])['counts'])
-                )
-                : 'Backup list came back, but no drawable get_map blob was inside it. Save stays off.',
+            'message' => $this->listMessage(
+                $compatible,
+                $via,
+                $mapSource,
+                is_array($fetched) ? ($fetched['map'] ?? []) : [],
+                $idList,
+                $entryKeys,
+                $fetchProbe
+            ),
         ];
     }
 
@@ -239,6 +304,127 @@ final class YarboMapBackup
         }
 
         return $data;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function fetchLiveMap(YarboMqtt $client, ?YarboCloud $cloud, string $serial): ?array
+    {
+        $envelope = $client->requestDataFeedback('get_map', [], 20.0, false);
+        if ($envelope !== null) {
+            $located = self::locateMap(self::envelopeData($envelope));
+            if ($located['map'] !== null) {
+                return $located['map'];
+            }
+        }
+
+        $cached = $this->loadLiveMap();
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        if ($cloud === null || $serial === '') {
+            return null;
+        }
+        $raw = $cloud->fetch('get_map', $serial, 35.0);
+        if (!is_array($raw) || ($raw['ok'] ?? true) === false) {
+            return null;
+        }
+        $located = self::locateMap($raw);
+
+        return $located['map'];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function persistProbe(array $payload): void
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0775, true);
+        }
+        file_put_contents(
+            $dir . '/map-backup-probe.json',
+            json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, string>
+     */
+    private static function probeKeys(array $data): array
+    {
+        $out = [];
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                $out[(string) $key] = 'array:' . count($value);
+            } elseif (is_string($value)) {
+                $out[(string) $key] = 'string:' . strlen($value);
+            } else {
+                $out[(string) $key] = gettype($value);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @return array<string, scalar|null>
+     */
+    private static function scalarFields(array $item): array
+    {
+        $fields = [];
+        foreach ($item as $key => $value) {
+            if (is_scalar($value) || $value === null) {
+                $fields[(string) $key] = $value;
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
+     * @param array<string, mixed> $map
+     * @param list<string> $entryKeys
+     * @param array<string, mixed>|null $fetchProbe
+     */
+    private function listMessage(
+        bool $compatible,
+        string $via,
+        ?string $mapSource,
+        array $map,
+        string $idList,
+        array $entryKeys,
+        ?array $fetchProbe,
+    ): string {
+        $ids = $idList !== '' ? ' ids ' . $idList : '';
+        $keys = $entryKeys !== [] ? ' List entry keys: ' . implode(', ', $entryKeys) . '.' : '';
+        if ($compatible && $mapSource === 'get_map') {
+            return 'Backup list loaded, but the backup blob had no drawable zones. Using the live map instead.'
+                . $ids . $keys . ' Edit, then Save to robot while docked.';
+        }
+        if ($compatible) {
+            return sprintf(
+                'Backup extracted via %s (%s). Edit these zones, then Save to robot while docked.',
+                $via,
+                self::formatCounts(self::publicSummary($map)['counts'])
+            );
+        }
+        $fetchHint = ' Fetch did not return a drawable blob.';
+        if (is_array($fetchProbe)) {
+            if (isset($fetchProbe['error'])) {
+                $fetchHint = ' Fetch: ' . (string) $fetchProbe['error'] . '.';
+            } elseif (isset($fetchProbe['keys']) && is_array($fetchProbe['keys'])) {
+                $fetchHint = ' Fetch replied with keys ' . implode(', ', array_keys($fetchProbe['keys'])) . '.';
+            }
+        }
+
+        return 'Backup list came back, but no drawable get_map blob was inside it. Save stays off.'
+            . $ids . $keys . $fetchHint;
     }
 
     /**
@@ -382,6 +568,7 @@ final class YarboMapBackup
                     'id' => $id,
                     'name' => $item['name'] ?? $item['title'] ?? $item['time'] ?? $item['created_at'] ?? null,
                     'keys' => array_map('strval', array_keys($item)),
+                    'fields' => self::scalarFields($item),
                 ];
             }
         }
@@ -409,17 +596,26 @@ final class YarboMapBackup
     /**
      * @return list<array<string, mixed>>
      */
-    private static function fetchPayloads(mixed $id): array
+    private static function fetchPayloads(mixed $id, ?array $fields = null): array
     {
-        $payloads = [['id' => $id], ['backup_id' => $id], ['map_id' => $id]];
+        $payloads = [];
+        if (is_array($fields) && $fields !== []) {
+            $payloads[] = $fields;
+        }
         if (is_numeric($id)) {
-            $intId = (int) $id;
-            array_unshift($payloads, ['id' => $intId], ['backup_id' => $intId]);
+            $payloads[] = ['id' => (int) $id];
+            $payloads[] = ['map_backup_id' => (int) $id];
+        } else {
+            $payloads[] = ['id' => $id];
+            $payloads[] = ['map_backup_id' => $id];
         }
 
         $unique = [];
         foreach ($payloads as $payload) {
             $unique[json_encode($payload)] = $payload;
+            if (count($unique) >= 2) {
+                break;
+            }
         }
 
         return array_values($unique);

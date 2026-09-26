@@ -1549,12 +1549,9 @@ async function loadMapBackups() {
         }
         setMapSaveEnabled(Boolean(data.compatible));
         const counts = data.summary ? formatBackupCounts(data.summary) : '';
-        const ids = Array.isArray(data.backups)
-            ? data.backups.map((row) => row.id).filter((id) => id != null).join(', ')
-            : '';
-        const extra = [counts, ids ? `ids ${ids}` : ''].filter(Boolean).join('. ');
-        const message = `${data.message || 'Backup read finished.'}${extra ? ` ${extra}` : ''}`;
-        if (els.mapListenStatus) els.mapListenStatus.textContent = message;
+        const extra = [counts, data.map_source ? `source ${data.map_source}` : ''].filter(Boolean).join('. ');
+        const message = data.message || 'Backup read finished.';
+        if (els.mapListenStatus) els.mapListenStatus.textContent = extra ? `${message} ${extra}` : message;
         const featureCollection = data.geojson || { type: 'FeatureCollection', features: [] };
         const features = Array.isArray(featureCollection.features) ? featureCollection.features : [];
         if (features.length > 0 && map && areasLayer) {
