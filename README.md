@@ -459,7 +459,7 @@ After a successful load, zones are **cached in the browser** so a page refresh r
 | **Export GeoJSON** | Download the currently loaded zones |
 | **Edit map (draft)** | Click one zone, then drag its vertices. The original line is hidden. Do not edit every path at once |
 | **Export draft** | Download edited draft GeoJSON |
-| **Save to robot** | Writes a live-frame zone. Mowing areas use `save_clean_area`. Pathways use `save_pathway` (captured when renaming a path). One or two payloads, then a cloud `get_map` check. The page stops after 90s. Robot must be docked. After a verified live-map change, an empty `upload_cloud_map_backup` snapshots cloud Previous Maps |
+| **Save to robot** | Writes a live-frame zone. Mowing areas use `save_clean_area`. Pathways use `save_pathway`. One payload, then a cloud `get_map` check. If the same name exists as both an area and a path, delete the extra area in the Yarbo app. Load map backups is the stored backup; Load saved mowing areas is the live robot map. Robot must be docked. |
 
 To change zones: **Load map backups** (this draws the backup), edit vertices, dock, then **Save to robot**. **Load saved mowing areas** is still the live `get_map` view.
 
@@ -695,7 +695,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.54** (2026-09-26).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.55** (2026-09-26).
 
 ---
 

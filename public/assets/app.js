@@ -292,6 +292,17 @@ const ZONE_COLORS = {
     default: { color: '#67b3ff', fill: '#67b3ff' },
 };
 
+const ZONE_TYPE_LABELS = {
+    clean: 'area',
+    path: 'path',
+    forbidden: 'no-go',
+    no_vision: 'no-vision',
+    sidewalk: 'sidewalk',
+    obstacle: 'obstacle',
+    recharge: 'dock',
+    charging: 'dock',
+};
+
 let driveInterval = null;
 let driveActive = false;
 let driveInFlight = false;
@@ -1299,6 +1310,28 @@ function clearMapZones() {
     if (els.mapZoneList) els.mapZoneList.innerHTML = '';
 }
 
+function zoneTypeLabel(type) {
+    return ZONE_TYPE_LABELS[type] || type || 'zone';
+}
+
+function mapNameCollisionWarning(features) {
+    const byName = {};
+    (Array.isArray(features) ? features : []).forEach((feature) => {
+        const name = String(feature?.properties?.name || '').trim();
+        const type = String(feature?.properties?.zone_type || '').trim();
+        if (!name || !type) return;
+        if (!byName[name]) byName[name] = new Set();
+        byName[name].add(type);
+    });
+    const hits = Object.entries(byName).filter(([, types]) => types.size > 1);
+    if (!hits.length) return '';
+    const parts = hits.map(([name, types]) => {
+        const labels = [...types].map(zoneTypeLabel);
+        return `${name} is both ${labels[0]} and ${labels[1]}`;
+    });
+    return `${parts.join('. ')}. An earlier save created the extra mowing area. Delete that area in the Yarbo app (Edit Map). Load map backups is the stored backup; Load saved mowing areas is the live robot map.`;
+}
+
 function dedupeMapFeatures(features) {
     const seen = new Set();
     const out = [];
@@ -1335,6 +1368,12 @@ function applyLoadedMapFeatures(features, context = {}) {
     }
 
     renderMapInspector();
+    const collisionText = mapNameCollisionWarning(unique);
+    if (collisionText) {
+        updateMapAreasStatus(collisionText);
+        if (els.mapListenStatus) els.mapListenStatus.textContent = collisionText;
+        showToast(collisionText, 'error');
+    }
     if (!mapHasCentered && !context.skipFit) {
         const bounds = areasLayer.getBounds?.();
         if (bounds?.isValid?.()) {
@@ -1356,13 +1395,14 @@ function renderMapInspector() {
     els.mapZoneList.innerHTML = mapZoneLayers.map((entry, index) => {
         const props = entry.feature?.properties || {};
         const zoneType = props.zone_type || 'zone';
+        const typeLabel = ZONE_TYPE_LABELS[zoneType] || zoneType;
         const name = props.name || props.zone_id || `Zone ${index + 1}`;
         const points = countFeaturePoints(entry.feature);
         const palette = ZONE_COLORS[zoneType] || ZONE_COLORS.default;
         return `<li class="map-zone-item">
             <input type="checkbox" id="map-zone-vis-${index}" data-zone-index="${index}" ${entry.visible ? 'checked' : ''}>
             <span class="map-zone-swatch" style="background:${palette.color}"></span>
-            <label class="map-zone-meta" for="map-zone-vis-${index}">${name} · ${zoneType} · ${points} pts</label>
+            <label class="map-zone-meta" for="map-zone-vis-${index}">${name} · ${typeLabel} · ${points} pts</label>
             <button type="button" class="btn btn-secondary map-zone-edit" data-zone-edit="${index}">Edit</button>
         </li>`;
     }).join('');
@@ -1715,7 +1755,10 @@ async function loadMapBackups() {
                 copyFeaturesToDraft();
                 hideOriginalMapLayers();
             }
-            updateMapAreasStatus(`Map backup loaded (${features.length} feature${features.length === 1 ? '' : 's'}).`);
+            const collisionText = mapNameCollisionWarning(features);
+            updateMapAreasStatus(
+                collisionText || `Map backup loaded (${features.length} feature${features.length === 1 ? '' : 's'}).`
+            );
         }
         showToast(data.compatible ? 'Backup file extracted. Edit these zones, then Save to robot while docked.' : (data.message || 'Backup file was not in the list'), data.compatible ? 'success' : 'error');
     } catch (err) {
@@ -2082,8 +2125,13 @@ async function loadSavedAreas(button = null) {
             }
             saveMapCache(data, features);
             const via = data.data_via ? ` via ${data.data_via}` : '';
-            updateMapAreasStatus(`Saved areas loaded (${features.length} feature${features.length === 1 ? '' : 's'})${via}.`);
-            showToast(data.note || 'Saved mowing areas loaded', 'success');
+            const collisionText = mapNameCollisionWarning(features);
+            if (collisionText) {
+                updateMapAreasStatus(collisionText);
+            } else {
+                updateMapAreasStatus(`Saved areas loaded (${features.length} feature${features.length === 1 ? '' : 's'})${via}.`);
+                showToast(data.note || 'Saved mowing areas loaded', 'success');
+            }
             if (mapEditMode) {
                 copyFeaturesToDraft();
                 hideOriginalMapLayers();

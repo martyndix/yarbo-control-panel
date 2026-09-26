@@ -161,6 +161,78 @@ final class YarboMap
     }
 
     /**
+     * Same display name used as both a mowing area and a pathway (or other lists).
+     *
+     * @param array<string, mixed> $map
+     * @return list<array{name: string, lists: list<string>}>
+     */
+    public static function crossTypeNameCollisions(array $map): array
+    {
+        $byName = [];
+        foreach (array_keys(self::canonicalListNames()) as $canonical) {
+            foreach (self::zoneList($map, $canonical) as $zone) {
+                if (!is_array($zone)) {
+                    continue;
+                }
+                $name = trim((string) ($zone['name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $byName[$name][$canonical] = true;
+            }
+        }
+        $out = [];
+        foreach ($byName as $name => $lists) {
+            if (count($lists) < 2) {
+                continue;
+            }
+            $out[] = [
+                'name' => (string) $name,
+                'lists' => array_keys($lists),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array{name: string, lists?: list<string>, types?: list<string>}> $collisions
+     */
+    public static function formatCrossTypeCollisions(array $collisions): string
+    {
+        if ($collisions === []) {
+            return '';
+        }
+        $parts = [];
+        foreach ($collisions as $hit) {
+            $name = trim((string) ($hit['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $labels = [];
+            foreach ($hit['lists'] ?? $hit['types'] ?? [] as $kind) {
+                $labels[] = match ((string) $kind) {
+                    'areas', 'clean' => 'a mowing area',
+                    'pathways', 'path' => 'a pathway',
+                    default => (string) $kind,
+                };
+            }
+            $labels = array_values(array_unique($labels));
+            if (count($labels) < 2) {
+                $parts[] = $name . ' is on more than one map list';
+                continue;
+            }
+            $parts[] = $name . ' is both ' . $labels[0] . ' and ' . $labels[1];
+        }
+        if ($parts === []) {
+            return '';
+        }
+
+        return implode('. ', $parts)
+            . '. An earlier save created the extra mowing area. Delete that area in the Yarbo app (Edit Map). Load map backups is the stored backup; Load saved mowing areas is the live robot map.';
+    }
+
+    /**
      * Patch original get_map data with a GeoJSON draft. Keeps every original
      * zone key and only replaces range / charging points. Does not talk to the robot.
      *
@@ -311,12 +383,7 @@ final class YarboMap
         $zones = is_array($rawList) ? $rawList : [];
         $zoneKey = self::findZoneKey($zones, $listIndex, $zoneId);
         if ($zoneKey === null) {
-            return ['error' => sprintf(
-                'Draft zone %s is not on the original map (%s has %d zones)',
-                $path,
-                $list,
-                count($zones)
-            )];
+            return ['skip' => true];
         }
         $result = self::encodeZoneRange($zones[$zoneKey], $feature, $isLine, $mapRef);
         if ($result['error'] !== null) {

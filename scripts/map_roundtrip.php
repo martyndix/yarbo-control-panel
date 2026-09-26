@@ -264,6 +264,25 @@ if (isset($map['pathways'][0]['range'][0]['x'], $map['areas'][0]['range'][0]['x'
     }
 }
 
+if (isset($map['pathways'][0]['name'], $map['areas']) && is_array($map['areas'])) {
+    $collideMap = $map;
+    $collideMap['areas'][] = [
+        'id' => 'path-as-area',
+        'name' => $map['pathways'][0]['name'],
+        'ref' => $map['pathways'][0]['ref'] ?? ['latitude' => 51.5, 'longitude' => -0.12],
+        'range' => $map['pathways'][0]['range'] ?? [],
+    ];
+    $collisions = YarboMap::crossTypeNameCollisions($collideMap);
+    if ($collisions === [] || ($collisions[0]['name'] ?? '') !== $map['pathways'][0]['name']) {
+        $failures[] = 'same name on area and pathway should be reported as a collision';
+    } else {
+        $note = YarboMap::formatCrossTypeCollisions($collisions);
+        if (!str_contains($note, 'mowing area') || !str_contains($note, 'pathway')) {
+            $failures[] = 'collision note should say mowing area and pathway';
+        }
+    }
+}
+
 $featureCount = count($collection['features'] ?? []);
 echo "source={$source}\n";
 echo "features={$featureCount}\n";

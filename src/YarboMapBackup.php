@@ -316,9 +316,17 @@ final class YarboMapBackup
         $restoreFile = $this->writeRestoreCopy($stored);
         $backupChanges = self::changedZones($stored['map'], $sentMap);
         if ($backupChanges === []) {
+            $collisionNote = YarboMap::formatCrossTypeCollisions(
+                self::draftNameCollisions($collection)
+            );
+            $error = 'No zone vertices or names differ from the loaded backup, so nothing was sent to the robot.';
+            if ($collisionNote !== '') {
+                $error .= ' ' . $collisionNote;
+            }
+
             return [
                 'ok' => false,
-                'error' => 'No zone vertices or names differ from the loaded map, so nothing was sent to the robot.',
+                'error' => $error,
                 'encode_delta_m' => $encodeDelta,
                 'blob_delta_m' => $blobDelta,
             ];
@@ -333,6 +341,9 @@ final class YarboMapBackup
                 'restore_file' => basename($restoreFile),
             ];
         }
+        $collisionNote = YarboMap::formatCrossTypeCollisions(
+            YarboMap::crossTypeNameCollisions($liveBefore)
+        );
 
         $changes = [];
         $patchedLive = $liveBefore;
@@ -356,9 +367,14 @@ final class YarboMapBackup
             $patchedLive = YarboMap::replaceMatchingZone($patchedLive, $change['canonical'], $rebased);
         }
         if ($changes === []) {
+            $error = 'The edited zone was not found on live get_map (id/name). Original is on the Pi: ' . basename($restoreFile);
+            if ($collisionNote !== '') {
+                $error .= ' ' . $collisionNote;
+            }
+
             return [
                 'ok' => false,
-                'error' => 'The edited zone was not found on live get_map (id/name). Original is on the Pi: ' . basename($restoreFile),
+                'error' => $error,
                 'restore_file' => basename($restoreFile),
             ];
         }
@@ -370,12 +386,38 @@ final class YarboMapBackup
             }
         }
         if ($unsupported !== []) {
+            $error = 'Save can write mowing areas and pathways. This edit is '
+                . implode(', ', array_unique($unsupported))
+                . '. Original is on the Pi: ' . basename($restoreFile);
+            if ($collisionNote !== '') {
+                $error .= ' ' . $collisionNote;
+            }
+
             return [
                 'ok' => false,
-                'error' => 'Save can write mowing areas and pathways. This edit is '
-                    . implode(', ', array_unique($unsupported))
-                    . '. Original is on the Pi: ' . basename($restoreFile),
+                'error' => $error,
                 'restore_file' => basename($restoreFile),
+            ];
+        }
+
+        $editedCanonicals = array_values(array_unique(array_map(
+            static fn (array $change): string => (string) $change['canonical'],
+            $changes
+        )));
+        $alreadyOnLive = YarboMap::maxAlignedRangeDelta($patchedLive, $liveBefore, $editedCanonicals) <= self::VERIFY_M;
+        if ($alreadyOnLive) {
+            $message = 'Live map already matches the draft, so nothing was sent.';
+            if ($collisionNote !== '') {
+                $message .= ' ' . $collisionNote;
+            }
+
+            return [
+                'ok' => true,
+                'via' => $preferCloud ? 'cloud' : 'local',
+                'verified' => true,
+                'unchanged' => true,
+                'restore_file' => basename($restoreFile),
+                'message' => $message,
             ];
         }
 
@@ -391,11 +433,16 @@ final class YarboMapBackup
                 $changes
             )));
             $pathway = in_array('pathways', $kinds, true);
+            $error = $pathway
+                ? 'save_pathway did not accept any payload shape. Original is on the Pi: ' . basename($restoreFile)
+                : 'The robot did not accept any save command. Original is on the Pi: ' . basename($restoreFile);
+            if ($collisionNote !== '') {
+                $error .= ' ' . $collisionNote;
+            }
+
             return [
                 'ok' => false,
-                'error' => $pathway
-                    ? 'save_pathway did not accept any payload shape. Original is on the Pi: ' . basename($restoreFile)
-                    : 'The robot did not accept any save command. Original is on the Pi: ' . basename($restoreFile),
+                'error' => $error,
                 'restore_file' => basename($restoreFile),
                 'save_command' => $saveCmd,
                 'save_shape' => $saveShape,
@@ -420,7 +467,7 @@ final class YarboMapBackup
             : null;
         $robotMoved = ($vsOriginal !== null && $vsOriginal > self::VERIFY_M)
             || ($sideEffect !== null && $sideEffect > self::VERIFY_M);
-        if ($delta === null || ($blobDelta > self::VERIFY_M && !$robotMoved)) {
+        if ($delta === null && !is_array($readMap)) {
             sleep(2);
             $retryMap = $this->readCurrentMap($client, $cloud, $serial, $preferCloud);
             if (is_array($retryMap)) {
@@ -490,6 +537,9 @@ final class YarboMapBackup
             $saveCmd,
             $listFromOriginal
         );
+        if ($collisionNote !== '') {
+            $message = rtrim($message) . ' ' . $collisionNote;
+        }
 
         $this->persistProbe([
             'saved_at' => gmdate('c'),
@@ -603,9 +653,9 @@ final class YarboMapBackup
     }
 
     /**
-     * Publish the live-frame zone until get_map moves. Pathway list wraps on
-     * save_clean_area ACK and do nothing; a bare zone is the only payload that
-     * has ever moved vertices.
+     * Publish the live-frame zone until get_map moves. Pathway Save sends one
+     * bare save_pathway zone (list wraps were a no-op; a second shape made the
+     * page hit 90s). A bare zone on save_clean_area created a mowing area.
      *
      * @param list<array{canonical: string, key: string, index: int, zone: array<string, mixed>, original: array<string, mixed>, delta_m: float}> $changes
      * @param array<string, mixed> $sentMap
@@ -848,7 +898,6 @@ final class YarboMapBackup
             $seen[$sig] = true;
             if ($cmd === self::SAVE_PATH_CMD && $canonical === 'pathways') {
                 $shapes[] = ['name' => 'zone', 'payload' => $zone];
-                $shapes[] = ['name' => $key . '-list', 'payload' => [$key => [$zone]]];
                 continue;
             }
             if ($cmd === self::SAVE_AREA_CMD && $canonical === 'areas') {
@@ -1208,6 +1257,39 @@ final class YarboMapBackup
         }
 
         return $parts === [] ? '' : 'lists ' . implode(', ', $parts) . '.';
+    }
+
+    /**
+     * @param array{type?: string, features?: array<int, mixed>} $collection
+     * @return list<array{name: string, types: list<string>}>
+     */
+    private static function draftNameCollisions(array $collection): array
+    {
+        $byName = [];
+        foreach ($collection['features'] ?? [] as $feature) {
+            if (!is_array($feature)) {
+                continue;
+            }
+            $props = is_array($feature['properties'] ?? null) ? $feature['properties'] : [];
+            $name = trim((string) ($props['name'] ?? ''));
+            $type = trim((string) ($props['zone_type'] ?? ''));
+            if ($name === '' || $type === '') {
+                continue;
+            }
+            $byName[$name][$type] = true;
+        }
+        $out = [];
+        foreach ($byName as $name => $types) {
+            if (count($types) < 2) {
+                continue;
+            }
+            $out[] = [
+                'name' => (string) $name,
+                'types' => array_keys($types),
+            ];
+        }
+
+        return $out;
     }
 
     /**

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.55] - 2026-09-26
+
+### Fixed
+- **Save to robot** no longer times out at 90s after an earlier write created a mowing **area** with the same name as a pathway. The zone list labels **area** vs **path**. Save skips that leftover area, sends one `save_pathway`, and tells you to delete the extra area in the Yarbo app. Load map backups is the stored backup; Load saved mowing areas is the live robot map.
+
 ## [2.0.54] - 2026-09-26
 
 ### Fixed
