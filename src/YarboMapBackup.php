@@ -12,7 +12,7 @@ final class YarboMapBackup
     public const RECOVERY_CMD = 'map_recovery';
     public const UPLOAD_CMD = 'upload_cloud_map_backup';
     public const SAVE_AREA_CMD = 'save_clean_area';
-    public const SAVE_PATH_CMDS = ['save_path_area', 'save_pathway', 'save_path'];
+    public const SAVE_PATH_CMD = 'save_pathway';
     private const FETCH_TOPICS = [
         'get_map_buckup_from_id',
         'get_map_backup_from_id',
@@ -25,6 +25,9 @@ final class YarboMapBackup
     ];
     private const SAVE_AREA_TOPICS = [
         'save_clean_area',
+    ];
+    private const SAVE_PATH_TOPICS = [
+        'save_pathway',
     ];
     /** get_map vs backup-file frames are not millimetre-accurate. */
     private const VERIFY_M = 0.25;
@@ -391,7 +394,7 @@ final class YarboMapBackup
             return [
                 'ok' => false,
                 'error' => $pathway
-                    ? 'This edit is a pathway. The official SDK has no map-write command, and save_path_area / save_pathway / save_path got no reply. Click Listen, then rename that pathway in the official app (not a mowing area). Save will use the command it hears. Original is on the Pi: ' . basename($restoreFile)
+                    ? 'save_pathway did not accept any payload shape. Original is on the Pi: ' . basename($restoreFile)
                     : 'The robot did not accept any save command. Original is on the Pi: ' . basename($restoreFile),
                 'restore_file' => basename($restoreFile),
                 'save_command' => $saveCmd,
@@ -645,8 +648,9 @@ final class YarboMapBackup
                     if ($onlyShape !== null && $shape['name'] !== $onlyShape) {
                         continue;
                     }
-                    $lanTimeout = $cmd === self::SAVE_AREA_CMD ? 15.0 : 8.0;
-                    $cloudTimeout = $cmd === self::SAVE_AREA_CMD ? 20.0 : 12.0;
+                    $known = self::isKnownSaveCmd($cmd);
+                    $lanTimeout = $known ? 15.0 : 8.0;
+                    $cloudTimeout = $known ? 20.0 : 12.0;
                     $sent = $this->sendUnpublished(
                         $client,
                         $cloud,
@@ -656,8 +660,9 @@ final class YarboMapBackup
                         $preferCloud,
                         $lanTimeout,
                         $cloudTimeout,
-                        $cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd],
-                        $cmd === self::SAVE_AREA_CMD
+                        $cmd === self::SAVE_PATH_CMD ? self::SAVE_PATH_TOPICS
+                            : ($cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd]),
+                        $known
                     );
                     $tried[] = [
                         'command' => $cmd,
@@ -678,7 +683,7 @@ final class YarboMapBackup
                         $last['envelope'] = $sent['envelope'];
                     }
                     if (!self::ackLooksOk($sent['envelope'])) {
-                        if ($sent['envelope'] === null && $cmd !== self::SAVE_AREA_CMD) {
+                        if ($sent['envelope'] === null && !self::isKnownSaveCmd($cmd)) {
                             break;
                         }
                         continue;
@@ -747,10 +752,11 @@ final class YarboMapBackup
                     $cmd,
                     $shape['payload'],
                     $preferCloud,
-                    $cmd === self::SAVE_AREA_CMD ? 15.0 : 8.0,
-                    $cmd === self::SAVE_AREA_CMD ? 20.0 : 12.0,
-                    $cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd],
-                    $cmd === self::SAVE_AREA_CMD
+                    self::isKnownSaveCmd($cmd) ? 15.0 : 8.0,
+                    self::isKnownSaveCmd($cmd) ? 20.0 : 12.0,
+                    $cmd === self::SAVE_PATH_CMD ? self::SAVE_PATH_TOPICS
+                        : ($cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd]),
+                    self::isKnownSaveCmd($cmd)
                 );
                 sleep(3);
             }
@@ -816,10 +822,10 @@ final class YarboMapBackup
      */
     private function pathwayCommands(): array
     {
+        $cmds = [self::SAVE_PATH_CMD];
         $heard = (new YarboMapCapture($this->projectRoot))->heardWriteCommands();
-        $pathLike = [];
         foreach ($heard as $cmd) {
-            if ($cmd === self::SAVE_AREA_CMD) {
+            if ($cmd === self::SAVE_AREA_CMD || $cmd === self::SAVE_PATH_CMD) {
                 continue;
             }
             if (
@@ -828,14 +834,16 @@ final class YarboMapBackup
                 || str_contains($cmd, 'road')
                 || str_contains($cmd, 'transit')
             ) {
-                $pathLike[] = $cmd;
+                $cmds[] = $cmd;
             }
         }
-        if ($pathLike !== []) {
-            return array_values(array_unique($pathLike));
-        }
 
-        return [self::SAVE_AREA_CMD];
+        return array_values(array_unique($cmds));
+    }
+
+    private static function isKnownSaveCmd(string $cmd): bool
+    {
+        return $cmd === self::SAVE_AREA_CMD || $cmd === self::SAVE_PATH_CMD;
     }
 
     /**
@@ -856,6 +864,13 @@ final class YarboMapBackup
                 continue;
             }
             $seen[$sig] = true;
+            if ($cmd === self::SAVE_PATH_CMD && $canonical === 'pathways') {
+                $shapes[] = ['name' => 'zone', 'payload' => $zone];
+                foreach (array_values(array_unique([$key, 'pathways', 'pathway', 'path_area_list'])) as $alias) {
+                    $shapes[] = ['name' => $alias . '-list', 'payload' => [$alias => [$zone]]];
+                }
+                continue;
+            }
             if ($cmd === self::SAVE_AREA_CMD && $canonical === 'pathways') {
                 foreach (['path_area_list', 'pathway'] as $alias) {
                     $shapes[] = ['name' => $alias . '-list', 'payload' => [$alias => [$zone]]];
@@ -1168,7 +1183,7 @@ final class YarboMapBackup
             return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
         if ($unchanged) {
-            return 'Robot map did not change. The official SDK has no pathway write; save_clean_area only writes mowing areas. Click Listen, then rename that pathway in the official app. Original left in place ('
+            return 'Robot map did not change. save_pathway was heard when renaming a path; this save sent a live-frame zone. Original left in place ('
                 . $restoreFile . ').' . $detail;
         }
         if (!$readMap) {

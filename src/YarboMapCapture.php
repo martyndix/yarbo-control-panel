@@ -41,11 +41,16 @@ final class YarboMapCapture
         'set_auto_mapping_state',
         'get_controller',
         'save_clean_area',
+        'save_pathway',
         'upload_cloud_map_backup',
         'map_recovery',
         'get_all_map_backup',
         'get_map_buckup_from_id',
         'get_map_backup_from_id',
+        'cmd_roller',
+        'mower_head_sensor_switch',
+        'read_global_params',
+        'read_tow_params',
     ];
 
     public function __construct(private readonly string $projectRoot)

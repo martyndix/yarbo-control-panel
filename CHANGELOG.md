@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.53] - 2026-09-26
+
+### Fixed
+- **Save to robot** writes pathways with `save_pathway` (captured when renaming a path in the official app). Earlier builds skipped remaining payload shapes after the first timeout, so the real command never got a matching payload. Status still reports per-list metres so a path write is not confused with a mowing-area move.
+
 ## [2.0.52] - 2026-09-26
 
 ### Fixed
