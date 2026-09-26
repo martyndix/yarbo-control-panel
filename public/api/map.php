@@ -8,6 +8,7 @@ use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
 use Yarbo\YarboCodec;
 use Yarbo\YarboMap;
+use Yarbo\YarboMapBackup;
 
 $commands = [
     'get_map',
@@ -142,6 +143,10 @@ function persist_last_map(string $projectRoot, array $responses): void
         return;
     }
     rename($tmp, $dir . '/map-last.json');
+    try {
+        (new YarboMapBackup($projectRoot))->persistLiveMap($data);
+    } catch (Throwable) {
+    }
 }
 
 try {

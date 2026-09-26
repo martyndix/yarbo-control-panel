@@ -184,7 +184,6 @@ const els = {
     mapExportDraft: document.getElementById('map-export-draft'),
     mapSaveRobot: document.getElementById('map-save-robot'),
     mapLoadAreas: document.getElementById('map-load-areas'),
-    mapListenSave: document.getElementById('map-listen-save'),
     mapListenStatus: document.getElementById('map-listen-status'),
     mapLoadBackups: document.getElementById('map-load-backups'),
     mapLoading: document.getElementById('map-loading'),
@@ -346,8 +345,6 @@ let mapEditMode = false;
 let mapViewSaveTimer = null;
 let mapLoadingTimer = null;
 let mapLoadingStartedAt = 0;
-let mapListenTimer = null;
-let mapListenShowResult = false;
 let mapBackupCompatible = false;
 let lightsOn = false;
 let holdController = false;
@@ -1294,6 +1291,7 @@ function restoreMapCache() {
             loaded_at: cache.loaded_at,
             meta: cache.meta || {},
         });
+        setMapSaveEnabled(true);
     } catch {
         localStorage.removeItem(MAP_CACHE_KEY);
     }
@@ -1329,7 +1327,7 @@ function mapNameCollisionWarning(features) {
         const labels = [...types].map(zoneTypeLabel);
         return `${name} is both ${labels[0]} and ${labels[1]}`;
     });
-    return `${parts.join('. ')}. An earlier save created the extra mowing area. Delete that area in the Yarbo app (Edit Map). Load map backups is the stored backup; Load saved mowing areas is the live robot map.`;
+    return `${parts.join('. ')}. Delete the extra area in the Yarbo app.`;
 }
 
 function dedupeMapFeatures(features) {
@@ -1368,6 +1366,7 @@ function applyLoadedMapFeatures(features, context = {}) {
     }
 
     renderMapInspector();
+    setMapSaveEnabled(unique.length > 0);
     const collisionText = mapNameCollisionWarning(unique);
     if (collisionText) {
         updateMapAreasStatus(collisionText);
@@ -1709,8 +1708,8 @@ function setMapSaveEnabled(enabled) {
     if (!els.mapSaveRobot) return;
     els.mapSaveRobot.disabled = !mapBackupCompatible;
     els.mapSaveRobot.title = mapBackupCompatible
-        ? 'Restore the edited backup to the robot (must be docked)'
-        : 'Load map backups first';
+        ? 'Save the edited zones to the robot (must be docked)'
+        : 'Load the map first';
 }
 
 function formatBackupCounts(summary) {
@@ -1733,14 +1732,9 @@ async function loadMapBackups() {
         if (!data.ok) {
             setMapSaveEnabled(false);
             showToast(data.error || 'Could not load map backups', 'error');
-            if (els.mapListenStatus) els.mapListenStatus.textContent = data.error || 'Could not load map backups';
+            updateMapAreasStatus(data.error || 'Could not load map backups');
             return;
         }
-        setMapSaveEnabled(Boolean(data.compatible));
-        const counts = data.summary ? formatBackupCounts(data.summary) : '';
-        const extra = [counts, data.map_source ? `source ${data.map_source}` : ''].filter(Boolean).join('. ');
-        const message = data.message || 'Backup read finished.';
-        if (els.mapListenStatus) els.mapListenStatus.textContent = extra ? `${message} ${extra}` : message;
         const featureCollection = data.geojson || { type: 'FeatureCollection', features: [] };
         const features = Array.isArray(featureCollection.features) ? featureCollection.features : [];
         if (features.length > 0 && map && areasLayer) {
@@ -1757,10 +1751,10 @@ async function loadMapBackups() {
             }
             const collisionText = mapNameCollisionWarning(features);
             updateMapAreasStatus(
-                collisionText || `Map backup loaded (${features.length} feature${features.length === 1 ? '' : 's'}).`
+                collisionText || `Backup loaded (${features.length} zone${features.length === 1 ? '' : 's'}).`
             );
         }
-        showToast(data.compatible ? 'Backup file extracted. Edit these zones, then Save to robot while docked.' : (data.message || 'Backup file was not in the list'), data.compatible ? 'success' : 'error');
+        showToast(data.compatible ? 'Backup loaded' : (data.message || 'Could not extract a backup'), data.compatible ? 'success' : 'error');
     } catch (err) {
         setMapSaveEnabled(false);
         showToast(err.message || 'Could not load map backups', 'error');
@@ -1771,19 +1765,19 @@ async function loadMapBackups() {
 
 async function restoreMapBackupDraft() {
     if (!mapBackupCompatible) {
-        showToast('Load map backups first', 'error');
+        showToast('Load the map first', 'error');
         return;
     }
     const collection = currentMapDraftCollection();
     if (!collection.features.length) {
-        showToast('Load saved mowing areas (or edit a draft) first', 'error');
+        showToast('Load or edit a map first', 'error');
         return;
     }
     if (!onChargePad) {
         showToast('Dock the robot before restoring a map', 'error');
         return;
     }
-    if (!window.confirm('Replace the map on the robot with this draft? Keep it docked. A copy of the original is saved on the Pi. It is put back only if the robot map is read and does not match the draft.')) {
+    if (!window.confirm('Save these edits to the robot? Keep it docked.')) {
         return;
     }
     if (els.mapSaveRobot) els.mapSaveRobot.disabled = true;
@@ -1799,15 +1793,15 @@ async function restoreMapBackupDraft() {
             }),
         }, 50000);
         const data = await parseJsonResponse(res);
-        const text = data.message || data.error || 'Restore finished';
-        if (els.mapListenStatus) els.mapListenStatus.textContent = text;
+        const text = data.message || data.error || 'Save finished';
+        updateMapAreasStatus(text);
         showToast(text, data.ok ? 'success' : 'error');
         if (data.ok && mapEditMode) {
             setMapEditMode(false);
         }
     } catch (err) {
         const aborted = isAbortError(err);
-        showToast(aborted ? 'Save timed out. The robot may still be applying an app edit — wait until it is idle, then try again.' : (err.message || 'Restore failed'), 'error');
+        showToast(aborted ? 'Save timed out. Wait until the robot is idle, then try again.' : (err.message || 'Save failed'), 'error');
     } finally {
         setMapLoading(false);
         setMapSaveEnabled(mapBackupCompatible);
@@ -2125,8 +2119,8 @@ async function loadSavedAreas(button = null) {
             if (collisionText) {
                 updateMapAreasStatus(collisionText);
             } else {
-                updateMapAreasStatus(`Saved areas loaded (${features.length} feature${features.length === 1 ? '' : 's'})${via}.`);
-                showToast(data.note || 'Saved mowing areas loaded', 'success');
+                updateMapAreasStatus(`Live map loaded (${features.length} zone${features.length === 1 ? '' : 's'})${via}.`);
+                showToast(data.note || 'Live map loaded', 'success');
             }
             if (mapEditMode) {
                 copyFeaturesToDraft();
@@ -2161,93 +2155,6 @@ async function loadSavedAreas(button = null) {
         showToast(text, 'error');
     } finally {
         setMapLoading(false);
-    }
-}
-
-function renderMapListenStatus(data) {
-    const el = els.mapListenStatus;
-    const btn = els.mapListenSave;
-    if (!el || !data) return;
-    const state = data.state || 'idle';
-    const unknown = Array.isArray(data.unknown_commands) ? data.unknown_commands : [];
-    const commands = data.app_commands && typeof data.app_commands === 'object'
-        ? Object.keys(data.app_commands)
-        : [];
-    if (state === 'listening') {
-        el.textContent = data.message || `Listening… ${data.remaining_s || 0}s left. Save a map in the Yarbo app now.`;
-        if (btn) btn.textContent = 'Stop listening';
-        return;
-    }
-    if (btn) btn.textContent = 'Listen for map save';
-    if (state === 'done') {
-        if (!mapListenShowResult) {
-            return;
-        }
-        let text = data.message || 'Listen finished.';
-        if (unknown.length) {
-            text = `Heard unpublished command: ${unknown.join(', ')}. Leave this on screen.`;
-        } else if (commands.length) {
-            text = `${data.message || 'Listen finished.'} Commands: ${commands.join(', ')}.`;
-        }
-        el.textContent = text;
-        return;
-    }
-    if (state === 'error') {
-        el.textContent = data.error || data.message || 'Listen failed.';
-        return;
-    }
-}
-
-function scheduleMapListenPoll(state) {
-    clearTimeout(mapListenTimer);
-    mapListenTimer = null;
-    if (state === 'listening') {
-        mapListenTimer = setTimeout(() => {
-            pollMapListen();
-        }, 1000);
-    }
-}
-
-async function pollMapListen() {
-    if (!els.mapListenSave) return;
-    try {
-        const res = await fetch('/api/map_capture.php', { cache: 'no-store' });
-        const data = await parseJsonResponse(res);
-        renderMapListenStatus(data);
-        scheduleMapListenPoll(data.state);
-    } catch (err) {
-        if (els.mapListenStatus) {
-            els.mapListenStatus.textContent = err.message || 'Could not check listen status.';
-        }
-        if (els.mapListenSave?.textContent === 'Stop listening') {
-            scheduleMapListenPoll('listening');
-        }
-    }
-}
-
-async function toggleMapListen() {
-    const btn = els.mapListenSave;
-    if (btn) btn.disabled = true;
-    try {
-        const res = await fetch('/api/map_capture.php', { cache: 'no-store' });
-        const current = await parseJsonResponse(res);
-        const action = current.state === 'listening' ? 'stop' : 'start';
-        mapListenShowResult = true;
-        const start = await fetch('/api/map_capture.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action }),
-        });
-        const data = await parseJsonResponse(start);
-        renderMapListenStatus(data);
-        scheduleMapListenPoll(data.state);
-        if (action === 'start' && data.state === 'listening') {
-            showToast('Listening for 2 minutes. Save a map in the Yarbo app or Yardstick now.', 'success');
-        }
-    } catch (err) {
-        showToast(err.message || 'Could not start listen', 'error');
-    } finally {
-        if (btn) btn.disabled = false;
     }
 }
 
@@ -6011,22 +5918,15 @@ document.getElementById('camera-recheck')?.addEventListener('click', async (e) =
 document.getElementById('map-load-areas')?.addEventListener('click', (e) => {
     loadSavedAreas(e.currentTarget);
 });
-document.getElementById('map-listen-save')?.addEventListener('click', () => {
-    toggleMapListen();
-});
 document.getElementById('map-load-backups')?.addEventListener('click', () => {
     loadMapBackups();
 });
-if (document.getElementById('map-listen-save')) {
-    pollMapListen();
-}
 if (document.getElementById('map-load-backups')) {
     fetch('/api/map_backup.php', { cache: 'no-store' })
         .then((res) => parseJsonResponse(res))
         .then((data) => {
-            setMapSaveEnabled(Boolean(data.compatible));
-            if (data.loaded && els.mapListenStatus && data.summary) {
-                els.mapListenStatus.textContent = `Last extracted backup (${formatBackupCounts(data.summary)}). Edit, then Save to robot while docked.`;
+            if (data.compatible) {
+                setMapSaveEnabled(true);
             }
         })
         .catch(() => {});

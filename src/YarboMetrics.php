@@ -235,12 +235,17 @@ final class YarboMetrics
     private function due(): bool
     {
         $path = $this->lastPath();
+        $version = YarboChangelog::currentVersion($this->projectRoot) ?: 'unknown';
         if (!is_file($path)) {
             return true;
         }
         $raw = file_get_contents($path);
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
         $at = is_array($decoded) ? (int) ($decoded['sent_at'] ?? 0) : 0;
+        $lastVersion = is_array($decoded) ? (string) ($decoded['version'] ?? '') : '';
+        if ($lastVersion !== $version) {
+            return true;
+        }
 
         return $at <= 0 || (time() - $at) >= self::MIN_INTERVAL_S;
     }
@@ -252,7 +257,10 @@ final class YarboMetrics
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
-        file_put_contents($path, json_encode(['sent_at' => time()], JSON_UNESCAPED_SLASHES) . "\n");
+        file_put_contents($path, json_encode([
+            'sent_at' => time(),
+            'version' => YarboChangelog::currentVersion($this->projectRoot) ?: 'unknown',
+        ], JSON_UNESCAPED_SLASHES) . "\n");
     }
 
     private function newId(): string

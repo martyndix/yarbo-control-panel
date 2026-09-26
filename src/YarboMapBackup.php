@@ -269,7 +269,17 @@ final class YarboMapBackup
 
         $stored = $this->loadPersisted();
         if ($stored === null || !YarboMap::isAppMap($stored['map'] ?? [])) {
-            return ['ok' => false, 'error' => 'Load map backups first (the extracted blob must match get_map).'];
+            $live = $this->loadLiveMap();
+            if (is_array($live)) {
+                $stored = [
+                    'map' => $live,
+                    'map_source' => 'get_map',
+                    'backup_id' => null,
+                ];
+            }
+        }
+        if ($stored === null || !YarboMap::isAppMap($stored['map'] ?? [])) {
+            return ['ok' => false, 'error' => 'Load the map first.'];
         }
         $safety = $this->safetyCheck($client);
         if (($safety['ok'] ?? false) !== true) {
@@ -307,7 +317,7 @@ final class YarboMapBackup
         if ($encodeDelta > self::VERIFY_M && $blobDelta <= self::VERIFY_M) {
             return [
                 'ok' => false,
-                'error' => 'The draft still includes the original line for a zone you moved, so the backup file was not actually changed. Stop editing, Load map backups again, then click one zone and drag its vertices — do not draw a new polygon on top.',
+                'error' => 'The original line is still in the draft. Click the zone and drag its vertices — do not draw a new shape on top.',
                 'encode_delta_m' => $encodeDelta,
                 'blob_delta_m' => $blobDelta,
             ];
@@ -319,7 +329,7 @@ final class YarboMapBackup
             $collisionNote = YarboMap::formatCrossTypeCollisions(
                 self::draftNameCollisions($collection)
             );
-            $error = 'No zone vertices or names differ from the loaded backup, so nothing was sent to the robot.';
+            $error = 'Nothing changed on the loaded map.';
             if ($collisionNote !== '') {
                 $error .= ' ' . $collisionNote;
             }
@@ -342,19 +352,15 @@ final class YarboMapBackup
         if (!is_array($liveBefore)) {
             return [
                 'ok' => false,
-                'error' => 'Live get_map timed out. The robot may still be applying the app edit. Wait until it is idle, then try Load saved mowing areas. Original is on the Pi: ' . basename($restoreFile),
-                'restore_file' => basename($restoreFile),
+                'error' => 'Live get_map timed out. Wait until the robot is idle, then load the map again.',
             ];
+        }
+        if ($liveFromCache) {
+            $preferCloud = false;
         }
         $collisionNote = YarboMap::formatCrossTypeCollisions(
             YarboMap::crossTypeNameCollisions($liveBefore)
         );
-        if ($liveFromCache) {
-            $collisionNote = trim(
-                'Used the last loaded live map because get_map timed out. '
-                . $collisionNote
-            );
-        }
 
         $changes = [];
         $patchedLive = $liveBefore;
@@ -417,7 +423,7 @@ final class YarboMapBackup
         )));
         $alreadyOnLive = YarboMap::maxAlignedRangeDelta($patchedLive, $liveBefore, $editedCanonicals) <= self::VERIFY_M;
         if ($alreadyOnLive) {
-            $message = 'Live map already matches the draft, so nothing was sent.';
+            $message = 'The robot already has this draft.';
             if ($collisionNote !== '') {
                 $message .= ' ' . $collisionNote;
             }
@@ -445,11 +451,8 @@ final class YarboMapBackup
             )));
             $pathway = in_array('pathways', $kinds, true);
             $error = $pathway
-                ? 'save_pathway did not accept any payload shape. Original is on the Pi: ' . basename($restoreFile)
-                : 'The robot did not accept any save command. Original is on the Pi: ' . basename($restoreFile);
-            if ($collisionNote !== '') {
-                $error .= ' ' . $collisionNote;
-            }
+                ? 'The robot did not accept the path save. Wait until it is idle, then try again.'
+                : 'The robot did not accept the save. Wait until it is idle, then try again.';
 
             return [
                 'ok' => false,
@@ -611,7 +614,7 @@ final class YarboMapBackup
         return [
             'ok' => true,
             'loaded' => true,
-            'compatible' => YarboMap::isAppMap($stored['map'] ?? []) && ($stored['map_source'] ?? '') !== 'get_map',
+            'compatible' => YarboMap::isAppMap($stored['map'] ?? []),
             'backup_id' => $stored['backup_id'] ?? null,
             'saved_at' => $stored['saved_at'] ?? null,
             'map_source' => $stored['map_source'] ?? null,
@@ -701,10 +704,10 @@ final class YarboMapBackup
                         $shape['payload'],
                         $preferCloud,
                         8.0,
-                        12.0,
+                        8.0,
                         $cmd === self::SAVE_PATH_CMD ? self::SAVE_PATH_TOPICS
                             : ($cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd]),
-                        false
+                        true
                     );
                     $tried[] = [
                         'command' => $cmd,
@@ -795,10 +798,10 @@ final class YarboMapBackup
                     $shape['payload'],
                     $preferCloud,
                     8.0,
-                    12.0,
+                    8.0,
                     $cmd === self::SAVE_PATH_CMD ? self::SAVE_PATH_TOPICS
                         : ($cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd]),
-                    false
+                    true
                 );
                 sleep(3);
             }
@@ -1191,50 +1194,20 @@ final class YarboMapBackup
         ?string $saveCmd = null,
         array $listDeltas = [],
     ): string {
-        $detail = sprintf(
-            ' via %s%s, encode %.2f m, read-back %s, vs original %s.',
-            $via,
-            $mapSource !== '' ? ', source ' . $mapSource : '',
-            $encodeDelta,
-            $delta === null ? 'unavailable' : sprintf('%.2f m', $delta),
-            $vsOriginal === null ? 'unavailable' : sprintf('%.2f m', $vsOriginal)
-        );
-        $listDetail = self::formatListDeltas($listDeltas);
-        if ($listDetail !== '') {
-            $detail .= ' ' . $listDetail;
-        }
-        if ($saveCmd !== null && $saveCmd !== '') {
-            $detail .= ' ' . $saveCmd;
-            if ($saveShape !== null && $saveShape !== '') {
-                $detail .= ' shape ' . $saveShape;
-            }
-            $detail .= '.';
-        } elseif ($saveShape !== null && $saveShape !== '') {
-            $detail .= ' save shape ' . $saveShape . '.';
-        }
-        if ($uploadState !== null && $uploadState !== '') {
-            $detail .= ' upload state ' . (is_scalar($uploadState) ? (string) $uploadState : json_encode($uploadState)) . '.';
-        }
-        if ($state !== null && $state !== '') {
-            $detail .= ' save state ' . (is_scalar($state) ? (string) $state : json_encode($state)) . '.';
-        }
         if ($verified) {
-            return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
+            return 'Saved. Check it in the Yarbo app.';
         }
         if ($unchanged) {
-            return 'Robot map did not change. save_pathway was heard when renaming a path; this save sent a live-frame zone. Original left in place ('
-                . $restoreFile . ').' . $detail;
+            return 'The robot map did not change.';
         }
         if (!$readMap) {
-            return 'Restore was sent, but get_map could not be read to verify. Check the official app. Original is on the Pi as '
-                . $restoreFile . '. Not auto-reverted.' . $detail;
+            return 'Save was sent, but the live map could not be read to verify. Check the Yarbo app.';
         }
         if ($rolledBack) {
-            return 'Read-back did not match the draft. Restored the original backup from the Pi copy ('
-                . $restoreFile . '). If the official app still looks wrong, restore that map from Previous Maps first.' . $detail;
+            return 'Save did not match the draft, so the previous map was put back.';
         }
 
-        return 'Read-back did not match the draft. Original is on the Pi as ' . $restoreFile . '. Not auto-reverted.' . $detail;
+        return 'Save did not match the draft. Check the Yarbo app.';
     }
 
     /**
@@ -1717,6 +1690,26 @@ final class YarboMapBackup
         );
 
         return $path;
+    }
+
+    /**
+     * Store a live get_map as the encode source for Save (no Previous Maps extract needed).
+     *
+     * @param array<string, mixed> $map
+     */
+    public function persistLiveMap(array $map): void
+    {
+        if (!YarboMap::isAppMap($map)) {
+            return;
+        }
+        $this->persist([
+            'saved_at' => gmdate('c'),
+            'backup_id' => null,
+            'map' => $map,
+            'map_source' => 'get_map',
+            'map_path' => null,
+            'recovery_payload' => $map,
+        ]);
     }
 
     /**

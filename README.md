@@ -459,13 +459,9 @@ After a successful load, zones are **cached in the browser** so a page refresh r
 | **Export GeoJSON** | Download the currently loaded zones |
 | **Edit map (draft)** | Click one zone, then drag its vertices. The original line is hidden. Do not edit every path at once |
 | **Export draft** | Download edited draft GeoJSON |
-| **Save to robot** | Writes a live-frame zone. Mowing areas use `save_clean_area`. Pathways use `save_pathway`. One payload, then a cloud `get_map` check. If the same name exists as both an area and a path, delete the extra area in the Yarbo app. Load map backups is the stored backup; Load saved mowing areas is the live robot map. Robot must be docked. |
+| **Save to robot** | Writes a live-frame zone. Mowing areas use `save_clean_area`. Pathways use `save_pathway`. If cloud times out, Save retries on the LAN. If the same name exists as both an area and a path, delete the extra area in the Yarbo app. Robot must be docked. |
 
-To change zones: **Load map backups** (this draws the backup), edit vertices, dock, then **Save to robot**. **Load saved mowing areas** is still the live `get_map` view.
-
-### Discovering map write commands
-
-On the Location Map, **Load map backups** extracts a backup (command names came from Listen while restoring Previous Maps). **Listen for map save** still records unpublished MQTT names. Enable **Settings → cloud fallback** if the phone uses Yarbo’s cloud.
+To change zones: **Load saved mowing areas**, edit vertices, dock, then **Save to robot**. **Load map backups** is optional (a stored Previous Maps file). Enable **Settings → cloud fallback** if the phone uses Yarbo’s cloud.
 
 CLI equivalents (optional):
 
@@ -638,7 +634,7 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 
 ## Anonymous usage ping
 
-While the panel is running it sends a **daily anonymous ping** (and one ping at start, at most about once per 20 hours). This is so the project can see how many installs exist. It is **not** tied to your robot.
+While the panel is running it sends an **anonymous ping** after a version change and about once a day (at most about once per 20 hours otherwise). This is so the project can see how many installs exist. It is **not** tied to your robot.
 
 **Included:** a random install id (not your Yarbo serial), panel version, which modules are on (Yarbo / Powerwall / Lymow / Vestaboard), how many PaperMono and Paper Colour tablets are paired, and `linux` or `darwin`.
 
@@ -695,7 +691,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.56** (2026-09-26).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.57** (2026-09-26).
 
 ---
 

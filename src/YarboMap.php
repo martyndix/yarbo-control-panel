@@ -228,8 +228,7 @@ final class YarboMap
             return '';
         }
 
-        return implode('. ', $parts)
-            . '. An earlier save created the extra mowing area. Delete that area in the Yarbo app (Edit Map). Load map backups is the stored backup; Load saved mowing areas is the live robot map.';
+        return implode('. ', $parts) . '. Delete the extra mowing area in the Yarbo app.';
     }
 
     /**

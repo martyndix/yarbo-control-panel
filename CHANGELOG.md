@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.57] - 2026-09-26
+
+### Fixed
+- **Save to robot** retries the path write on the LAN when cloud `get_map` / `save_pathway` times out, instead of failing with a cache note. Load saved mowing areas is the encode source for Save; Load map backups stays optional for Previous Maps files.
+- **Anonymous usage ping** now sends immediately after a panel version change, so the install stats page shows the version you just installed instead of waiting ~20 hours.
+
+### Changed
+- Location Map no longer has **Listen for map save**. Save confirmations are shorter.
+
 ## [2.0.56] - 2026-09-26
 
 ### Fixed

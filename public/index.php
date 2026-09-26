@@ -262,11 +262,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </select>
                 </label>
                 <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas</button>
-                <button type="button" class="btn btn-secondary" id="map-listen-save">Listen for map save</button>
                 <button type="button" class="btn btn-secondary" id="map-load-backups">Load map backups</button>
             </div>
-            <p id="map-listen-status" class="map-areas-status">Listen captures MQTT command names. Pathway Save uses save_pathway. Load map backups (stored backup), edit the path, then Save while docked. Load saved mowing areas is the live robot map.</p>
-            <p id="map-edit-tip" class="map-edit-tip hidden">Click one zone (or its Edit button), then drag those vertices. The original line should disappear. Do not edit every path at once.</p>
+            <p id="map-listen-status" class="map-areas-status">Load the live map, edit a zone, then Save while docked.</p>
+            <p id="map-edit-tip" class="map-edit-tip hidden">Click a zone, then drag its vertices.</p>
             <div class="map-wrap">
                 <div id="map" class="map"></div>
                 <div id="map-loading" class="map-loading hidden" aria-live="polite" aria-busy="false">
@@ -292,10 +291,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             class="btn btn-secondary"
                             id="map-save-robot"
                             disabled
-                            title="Extract a backup first, then save while docked"
+                            title="Save while docked"
                         >Save to robot</button>
                     </div>
-                    <p class="hint map-editor-hint">Load map backups, edit the pathway vertices, then Save while docked. If the same name appears as both an area and a path, delete the extra mowing area in the Yarbo app first.</p>
+                    <p class="hint map-editor-hint">Load saved mowing areas, edit, dock, then Save. Load map backups is optional if you want a Previous Maps file instead.</p>
                 </details>
             </div>
         </section>
@@ -1308,7 +1307,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn" id="settings-paper-ota-all" disabled>Update all online tablets</button>
                             </div>
                             <h3 class="settings-subtitle">Anonymous usage ping</h3>
-                            <p class="hint">While this panel is running it sends a daily anonymous ping: a random install id, panel version, which modules are on, how many PaperMono / Paper Colour tablets are paired, and Linux or Mac. It does not include your serial, location, names, or secrets. Set <code>YARBO_METRICS=0</code> to turn it off.</p>
+                            <p class="hint">While this panel is running it sends an anonymous ping: a random install id, panel version, which modules are on, how many PaperMono / Paper Colour tablets are paired, and Linux or Mac. It pings after a version change and about once a day. It does not include your serial, location, names, or secrets. Set <code>YARBO_METRICS=0</code> to turn it off.</p>
                         </section>
 
                         <p class="hint settings-trusted-note">Use only on a trusted home network.</p>
