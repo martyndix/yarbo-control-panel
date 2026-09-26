@@ -576,6 +576,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
             <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice.</p>
             <div id="home-devices" class="home-device-grid"></div>
+            <div id="home-hidden-wrap" class="home-hidden-wrap hidden">
+                <h3 class="settings-subtitle">Hidden</h3>
+                <p class="hint">Hidden lights stay paired (Hue Bridge bulbs cannot be unpaired one at a time). Unhide to show them on Home and PaperMono again.</p>
+                <div id="home-hidden-devices" class="home-device-grid"></div>
+            </div>
             <h3 class="settings-subtitle">Scenes</h3>
             <p class="hint">Panel scenes set Matter on/off and brightness. They are not Apple or Hue scenes.</p>
             <div class="home-scene-add">

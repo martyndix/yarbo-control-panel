@@ -27,7 +27,8 @@ final class YarboHome
      *   names: array<string, string>,
      *   rooms: array<string, string>,
      *   scenes: list<array<string, mixed>>,
-     *   paper: array<string, list<string>>
+     *   paper: array<string, list<string>>,
+     *   hidden: list<string>
      * }
      */
     public function load(): array
@@ -37,6 +38,7 @@ final class YarboHome
             'rooms' => [],
             'scenes' => [],
             'paper' => [],
+            'hidden' => [],
         ];
         if (!is_file($this->storePath())) {
             return $defaults;
@@ -79,12 +81,14 @@ final class YarboHome
             }
             $paper[$deviceId] = $this->normalizeIdList($ids);
         }
+        $hidden = $this->normalizeIdList(is_array($decoded['hidden'] ?? null) ? $decoded['hidden'] : []);
 
         return [
             'names' => $names,
             'rooms' => $rooms,
             'scenes' => $scenes,
             'paper' => $paper,
+            'hidden' => $hidden,
         ];
     }
 
@@ -139,6 +143,7 @@ final class YarboHome
                 'enabled' => false,
                 'server' => ['ok' => false, 'error' => 'Home module is off'],
                 'devices' => [],
+                'hidden_devices' => [],
                 'scenes' => [],
                 'paper_devices' => [],
                 'setup' => $setup,
@@ -155,6 +160,7 @@ final class YarboHome
                     'error' => (string) ($setup['error'] ?? $setup['message'] ?? 'Matter server is not running yet'),
                 ],
                 'devices' => [],
+                'hidden_devices' => [],
                 'scenes' => $store['scenes'],
                 'paper_devices' => $this->paperDeviceList($store),
                 'setup' => $setup,
@@ -162,7 +168,9 @@ final class YarboHome
         }
         $live = $this->liveDevices(8.0);
         $store = $this->load();
+        $hidden = array_fill_keys($store['hidden'], true);
         $devices = [];
+        $hiddenDevices = [];
         foreach ($live['devices'] as $device) {
             if (!is_array($device)) {
                 continue;
@@ -172,7 +180,7 @@ final class YarboHome
                 continue;
             }
             $name = $store['names'][$id] ?? (string) ($device['name'] ?? $id);
-            $devices[] = [
+            $row = [
                 'id' => $id,
                 'node_id' => (int) ($device['node_id'] ?? 0),
                 'endpoint' => (int) ($device['endpoint'] ?? 0),
@@ -187,7 +195,13 @@ final class YarboHome
                 'dimmable' => (bool) ($device['dimmable'] ?? false),
                 'available' => (bool) ($device['available'] ?? true),
                 'room' => $store['rooms'][$id] ?? '',
+                'hidden' => isset($hidden[$id]),
             ];
+            if ($row['hidden']) {
+                $hiddenDevices[] = $row;
+            } else {
+                $devices[] = $row;
+            }
         }
         return [
             'ok' => true,
@@ -197,6 +211,7 @@ final class YarboHome
                 'error' => (string) $live['error'],
             ],
             'devices' => $devices,
+            'hidden_devices' => $hiddenDevices,
             'scenes' => $store['scenes'],
             'paper_devices' => $this->paperDeviceList($store),
             'setup' => $this->setupStatus(),
@@ -460,9 +475,85 @@ final class YarboHome
                 unset($store['names'][$id], $store['rooms'][$id]);
             }
         }
+        $store['hidden'] = array_values(array_filter(
+            $store['hidden'],
+            static fn (string $id): bool => !str_starts_with($id, $prefix)
+        ));
         $this->write($store);
 
         return ['ok' => true, 'message' => 'Removed from this panel'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function hideDevice(string $id, bool $hidden = true): array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return ['ok' => false, 'error' => 'Pick a device'];
+        }
+        $store = $this->load();
+        $list = $store['hidden'];
+        if ($hidden) {
+            if (!in_array($id, $list, true)) {
+                $list[] = $id;
+            }
+            foreach ($store['paper'] as $tid => $ids) {
+                $store['paper'][$tid] = array_values(array_filter(
+                    $ids,
+                    static fn (string $item): bool => $item !== $id
+                ));
+            }
+        } else {
+            $list = array_values(array_filter($list, static fn (string $item): bool => $item !== $id));
+        }
+        $store['hidden'] = $this->normalizeIdList($list);
+        $this->write($store);
+
+        return [
+            'ok' => true,
+            'hidden' => $hidden,
+            'message' => $hidden ? 'Hidden on this panel' : 'Shown on the Home dashboard again',
+        ];
+    }
+
+    /**
+     * Unpair a standalone Matter node, or hide one light on a Hue Bridge.
+     *
+     * @return array<string, mixed>
+     */
+    public function removeDevice(string $id, bool $wholeNode = false): array
+    {
+        $id = trim($id);
+        if ($id === '' || !str_contains($id, ':')) {
+            return ['ok' => false, 'error' => 'Pick a device'];
+        }
+        [$nodeS] = explode(':', $id, 2);
+        $nodeId = (int) $nodeS;
+        if ($nodeId <= 0) {
+            return ['ok' => false, 'error' => 'Pick a device'];
+        }
+        $live = $this->liveDevices(8.0);
+        $onNode = 0;
+        foreach ($live['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            if ((int) ($device['node_id'] ?? 0) === $nodeId) {
+                $onNode++;
+            }
+        }
+        if ($wholeNode || $onNode <= 1) {
+            return $this->forgetNode($nodeId);
+        }
+
+        return [
+            'ok' => false,
+            'needs_hide' => true,
+            'node_id' => $nodeId,
+            'error' => 'This light is on a Hue Bridge (or similar). Matter cannot unpair one bulb. Hide it on this panel, or remove the whole bridge.',
+        ];
     }
 
     /**
@@ -644,7 +735,7 @@ final class YarboHome
                 continue;
             }
             $id = (string) ($device['id'] ?? '');
-            if ($id === '') {
+            if ($id === '' || in_array($id, $store['hidden'], true)) {
                 continue;
             }
             $byId[$id] = [

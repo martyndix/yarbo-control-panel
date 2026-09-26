@@ -2555,6 +2555,17 @@ html[data-theme="light"] .plan-activity {
     align-items: center;
 }
 
+.home-device-manage {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+}
+
+.home-hidden-wrap {
+    margin-top: 1rem;
+}
+
 .home-scene-add {
     display: flex;
     flex-wrap: wrap;

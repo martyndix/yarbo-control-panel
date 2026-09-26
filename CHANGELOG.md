@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.4] - 2026-09-26
+
+### Added
+- Home devices can be **hidden** (stay paired, leave the dashboard and PaperMono list) or **removed**. A single Hue light cannot be unpaired from Matter; Hide applies to that light, and Remove on the group heading unpairs the whole bridge.
+
 ## [3.0.3] - 2026-09-26
 
 ### Fixed

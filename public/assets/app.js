@@ -2542,6 +2542,30 @@ async function loadHomeDashboard() {
     }
 }
 
+function homeDeviceCardHtml(d, hidden) {
+    const on = Boolean(d.on);
+    const bright = !hidden && d.dimmable
+        ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
+        : '';
+    const meta = [d.kind, d.room, d.product && d.product !== d.name ? d.product : '']
+        .filter(Boolean)
+        .join(' · ');
+    const manage = hidden
+        ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
+           <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
+        : `<button type="button" class="btn btn-secondary btn-compact" data-home-hide="${escapeHtml(d.id)}">Hide</button>
+           <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`;
+    return `<article class="home-device${on ? ' is-on' : ''}" data-home-id="${escapeHtml(d.id)}">
+        <p class="home-device-name">${escapeHtml(d.name)}</p>
+        <p class="home-device-meta">${escapeHtml(meta)}</p>
+        <div class="home-device-actions">
+            ${hidden ? '' : `<button type="button" class="btn btn-secondary" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>`}
+            ${bright}
+        </div>
+        <div class="home-device-manage">${manage}</div>
+    </article>`;
+}
+
 function renderHomeDashboard(data) {
     applyHomeSetupUi(data);
     const status = document.getElementById('home-server-status');
@@ -2575,30 +2599,21 @@ function renderHomeDashboard(data) {
                 const heading = many
                     ? `<div class="home-node-heading">
                         <h3 class="home-node-title">${escapeHtml(source)} · ${list.length} ${list.length === 1 ? 'item' : 'items'}</h3>
-                        <p class="hint">Each row is one light, plug, or switch on that device. A Hue Bridge is one pairing and many rows. Names come from the device (Hue app names when the bridge was shared).</p>
-                        <button type="button" class="btn btn-secondary btn-compact" data-home-forget="${escapeHtml(String(first.node_id || ''))}">Remove this device</button>
+                        <p class="hint">Each row is one light, plug, or switch on that device. Hide a single Hue light, or remove the whole bridge.</p>
+                        <button type="button" class="btn btn-secondary btn-compact" data-home-forget="${escapeHtml(String(first.node_id || ''))}">Remove all</button>
                     </div>`
                     : '';
-                const cards = list.map((d) => {
-                    const on = Boolean(d.on);
-                    const bright = d.dimmable
-                        ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
-                        : '';
-                    const meta = [d.kind, d.room, d.product && d.product !== d.name ? d.product : '']
-                        .filter(Boolean)
-                        .join(' · ');
-                    return `<article class="home-device${on ? ' is-on' : ''}" data-home-id="${escapeHtml(d.id)}">
-                        <p class="home-device-name">${escapeHtml(d.name)}</p>
-                        <p class="home-device-meta">${escapeHtml(meta)}</p>
-                        <div class="home-device-actions">
-                            <button type="button" class="btn btn-secondary" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
-                            ${bright}
-                        </div>
-                    </article>`;
-                }).join('');
+                const cards = list.map((d) => homeDeviceCardHtml(d, false)).join('');
                 return heading + cards;
             }).join('');
         }
+    }
+    const hiddenWrap = document.getElementById('home-hidden-wrap');
+    const hiddenGrid = document.getElementById('home-hidden-devices');
+    const hiddenDevices = data.hidden_devices || [];
+    if (hiddenWrap && hiddenGrid) {
+        hiddenWrap.classList.toggle('hidden', hiddenDevices.length === 0);
+        hiddenGrid.innerHTML = hiddenDevices.map((d) => homeDeviceCardHtml(d, true)).join('');
     }
     const scenesEl = document.getElementById('home-scenes');
     if (scenesEl) {
@@ -2638,7 +2653,7 @@ function renderHomeDashboard(data) {
 }
 
 function bindHomeDashboard() {
-    document.getElementById('home-devices')?.addEventListener('click', async (event) => {
+    document.getElementById('home-card')?.addEventListener('click', async (event) => {
         const forget = event.target.closest('[data-home-forget]');
         if (forget) {
             const nodeId = forget.getAttribute('data-home-forget') || '';
@@ -2655,6 +2670,56 @@ function bindHomeDashboard() {
             } catch (err) {
                 showToast(err.message || 'Could not remove', 'error');
                 forget.disabled = false;
+            }
+            return;
+        }
+        const hide = event.target.closest('[data-home-hide]');
+        if (hide) {
+            hide.disabled = true;
+            try {
+                const data = await homeApi({ action: 'hide', id: hide.getAttribute('data-home-hide') });
+                if (!data.ok) throw new Error(data.error || 'Could not hide');
+                showToast(data.message || 'Hidden', 'success');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not hide', 'error');
+                hide.disabled = false;
+            }
+            return;
+        }
+        const unhide = event.target.closest('[data-home-unhide]');
+        if (unhide) {
+            unhide.disabled = true;
+            try {
+                const data = await homeApi({ action: 'unhide', id: unhide.getAttribute('data-home-unhide') });
+                if (!data.ok) throw new Error(data.error || 'Could not unhide');
+                showToast(data.message || 'Shown again', 'success');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not unhide', 'error');
+                unhide.disabled = false;
+            }
+            return;
+        }
+        const removeBtn = event.target.closest('[data-home-remove]');
+        if (removeBtn) {
+            const id = removeBtn.getAttribute('data-home-remove') || '';
+            if (!id) return;
+            if (!window.confirm('Remove this from the panel? A Hue Bridge light cannot be unpaired on its own — that hides it. Removing a whole bridge unpairs every light on it.')) {
+                return;
+            }
+            removeBtn.disabled = true;
+            try {
+                let data = await homeApi({ action: 'remove', id }, 30000);
+                if (!data.ok && data.needs_hide) {
+                    data = await homeApi({ action: 'hide', id });
+                }
+                if (!data.ok) throw new Error(data.error || 'Could not remove');
+                showToast(data.message || 'Removed', 'success');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not remove', 'error');
+                removeBtn.disabled = false;
             }
             return;
         }
