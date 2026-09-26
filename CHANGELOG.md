@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.39] - 2026-09-26
+
+### Fixed
+- **Save to robot** waits for the map to apply, verifies with LAN then cloud `get_map`, and only restores the Pi copy when a real backup blob was used and the robot map was read and did not match. A failed read-back no longer undoes a restore that may have worked.
+
 ## [2.0.38] - 2026-09-26
 
 ### Fixed

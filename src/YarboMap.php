@@ -230,8 +230,8 @@ final class YarboMap
     {
         $max = 0.0;
         foreach (['areas', 'nogozones', 'novisionzones', 'elec_fence', 'pathways', 'sidewalks', 'deadends'] as $list) {
-            $left = is_array($a[$list] ?? null) ? $a[$list] : [];
-            $right = is_array($b[$list] ?? null) ? $b[$list] : [];
+            $left = is_array($a[$list] ?? null) ? array_values(array_filter($a[$list], 'is_array')) : [];
+            $right = is_array($b[$list] ?? null) ? array_values(array_filter($b[$list], 'is_array')) : [];
             $n = min(count($left), count($right));
             for ($i = 0; $i < $n; $i++) {
                 $r1 = is_array($left[$i]['range'] ?? null) ? $left[$i]['range'] : [];

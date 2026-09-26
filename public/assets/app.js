@@ -1592,11 +1592,11 @@ async function restoreMapBackupDraft() {
         showToast('Dock the robot before restoring a map', 'error');
         return;
     }
-    if (!window.confirm('Replace the map on the robot with this draft? Keep it docked. The original backup is saved on the Pi and restored automatically if read-back fails.')) {
+    if (!window.confirm('Replace the map on the robot with this draft? Keep it docked. A copy of the original is saved on the Pi. It is put back only if the robot map is read and does not match the draft.')) {
         return;
     }
     if (els.mapSaveRobot) els.mapSaveRobot.disabled = true;
-    setMapLoading(true, 'Restoring map backup');
+    setMapLoading(true, 'Restoring map and verifying');
     try {
         const res = await fetch('/api/map_backup.php', {
             method: 'POST',
