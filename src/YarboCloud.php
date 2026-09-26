@@ -128,6 +128,61 @@ final class YarboCloud
     }
 
     /**
+     * Publish an unpublished MQTT command on Yarbo cloud (backup/restore).
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public function command(string $cmd, string $serial, array $payload, float $timeout = 30.0): array
+    {
+        $config = $this->settings->load();
+        if (!$config['enabled'] || $config['email'] === '' || $config['password'] === '') {
+            return [
+                'ok' => false,
+                'error' => 'Enable Settings → cloud fallback with your Yarbo account. Map backup/restore uses cloud MQTT, not the LAN broker.',
+                'cloud' => true,
+            ];
+        }
+
+        $file = tempnam(sys_get_temp_dir(), 'yarbo-cmd-');
+        if ($file === false) {
+            return ['ok' => false, 'error' => 'Could not write command payload', 'cloud' => true];
+        }
+        $toWrite = $payload === [] ? new \stdClass() : $payload;
+        file_put_contents($file, json_encode($toWrite, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+
+        try {
+            $result = $this->runBridge([
+                'command',
+                '--serial',
+                $serial,
+                '--timeout',
+                (string) $timeout,
+                '--cmd',
+                $cmd,
+                '--payload-file',
+                $file,
+            ], true);
+        } finally {
+            @unlink($file);
+        }
+
+        if (!($result['ok'] ?? false)) {
+            return [
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Cloud command failed'),
+                'cloud' => true,
+            ];
+        }
+
+        $data = is_array($result['data'] ?? null) ? $result['data'] : $result;
+        $data['ok'] = true;
+        $data['cloud'] = true;
+
+        return $data;
+    }
+
+    /**
      * @param array<int, string> $args
      * @return array<string, mixed>
      */

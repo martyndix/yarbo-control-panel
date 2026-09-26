@@ -82,6 +82,52 @@ def _device_serial(device: Any) -> str:
     return ""
 
 
+def run_unpublished_command(client: Any, device: Any, serial: str, cmd: str, payload: dict[str, Any], timeout: float) -> Any:
+    """Publish an unpublished app topic on cloud MQTT and wait for data_feedback.
+
+    Backup/restore commands are not in the official SDK registry, so we publish
+    the raw snowbot/{sn}/app/{cmd} topic the phone app uses.
+    """
+    import threading
+
+    try:
+        from yarbo_robot_sdk.codec import encode_mqtt_payload
+    except ImportError:
+        from yarbo_data_sdk.codec import encode_mqtt_payload  # type: ignore
+
+    if cmd == "":
+        raise ValueError("--cmd is required")
+
+    type_id = getattr(device, "type_id", None) or "yarbo_Y"
+    mqtt_connect = getattr(client, "mqtt_connect", None)
+    if callable(mqtt_connect):
+        mqtt_connect()
+
+    done = threading.Event()
+    box: dict[str, Any] = {}
+
+    def on_feedback(_topic: str, data: Any) -> None:
+        if isinstance(data, dict) and data.get("topic") == cmd:
+            box["data"] = data
+            done.set()
+
+    subscribe_feedback = getattr(client, "subscribe_data_feedback", None)
+    if not callable(subscribe_feedback):
+        raise ValueError("SDK subscribe_data_feedback is not available")
+    subscribe_feedback(serial, type_id, on_feedback)
+    time.sleep(0.45)
+
+    mqtt = client._ensure_mqtt_for(serial)
+    topic = f"snowbot/{serial}/app/{cmd}"
+    mqtt.publish(topic, encode_mqtt_payload(payload if payload else {}))
+    if not done.wait(timeout):
+        raise TimeoutError(
+            f"No cloud reply to {cmd} within {timeout:.0f}s. "
+            "The Core must be online on the Yarbo account used in Settings."
+        )
+    return box.get("data")
+
+
 def run_login_test(config: dict[str, Any]) -> dict[str, Any]:
     email = str(config.get("email", "")).strip()
     password = str(config.get("password", "")).strip()
@@ -125,7 +171,14 @@ def run_device_name(config: dict[str, Any], serial: str) -> dict[str, str]:
     raise ValueError(f"Robot serial {serial} not found in Yarbo account")
 
 
-def run_action_sync(action: str, serial: str, timeout: float, config: dict[str, Any]) -> Any:
+def run_action_sync(
+    action: str,
+    serial: str,
+    timeout: float,
+    config: dict[str, Any],
+    cmd: str = "",
+    payload: dict[str, Any] | None = None,
+) -> Any:
     email = str(config.get("email", "")).strip()
     password = str(config.get("password", "")).strip()
     if not email or not password:
@@ -171,6 +224,8 @@ def run_action_sync(action: str, serial: str, timeout: float, config: dict[str, 
             return core.read_gps_ref(timeout=timeout)
         if action == "get_device_msg":
             return core.get_device_msg(timeout=timeout)
+        if action == "command":
+            return run_unpublished_command(client, device, serial, cmd, payload or {}, timeout)
 
         raise ValueError(f"Unsupported action: {action}")
     finally:
@@ -179,19 +234,39 @@ def run_action_sync(action: str, serial: str, timeout: float, config: dict[str, 
             close()
 
 
-async def login_and_run(action: str, serial: str, timeout: float, config: dict[str, Any]) -> Any:
-    return await asyncio.to_thread(run_action_sync, action, serial, timeout, config)
+async def login_and_run(
+    action: str,
+    serial: str,
+    timeout: float,
+    config: dict[str, Any],
+    cmd: str = "",
+    payload: dict[str, Any] | None = None,
+) -> Any:
+    return await asyncio.to_thread(
+        run_action_sync, action, serial, timeout, config, cmd, payload
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Yarbo cloud bridge")
     parser.add_argument(
         "action",
-        choices=["status", "test-login", "device-name", "read_all_plan", "get_map", "read_gps_ref", "get_device_msg"],
+        choices=[
+            "status",
+            "test-login",
+            "device-name",
+            "read_all_plan",
+            "get_map",
+            "read_gps_ref",
+            "get_device_msg",
+            "command",
+        ],
     )
     parser.add_argument("--serial", default="")
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--config", default="")
+    parser.add_argument("--cmd", default="")
+    parser.add_argument("--payload-file", default="")
     args = parser.parse_args()
 
     if args.action == "status":
@@ -267,7 +342,25 @@ def main() -> int:
 
     try:
         config = load_config(Path(args.config))
-        data = asyncio.run(login_and_run(args.action, args.serial, args.timeout, config))
+        payload: dict[str, Any] = {}
+        if args.payload_file:
+            raw = Path(args.payload_file).read_text(encoding="utf-8")
+            decoded = json.loads(raw) if raw.strip() else {}
+            if isinstance(decoded, dict):
+                payload = decoded
+            else:
+                emit({"ok": False, "error": "payload file must be a JSON object", "cloud": True})
+                return 1
+        data = asyncio.run(
+            login_and_run(
+                args.action,
+                args.serial,
+                args.timeout,
+                config,
+                args.cmd,
+                payload,
+            )
+        )
         emit({"ok": True, "data": data, "cloud": True})
         return 0
     except Exception as exc:  # noqa: BLE001 - bridge returns JSON errors to PHP

@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+use Yarbo\YarboCloud;
+use Yarbo\YarboCloudSettings;
 use Yarbo\YarboMapBackup;
 
-set_time_limit(120);
+set_time_limit(180);
 
 $projectRoot = dirname(__DIR__, 2);
 $backups = new YarboMapBackup($projectRoot);
+$cloudSettings = new YarboCloudSettings($projectRoot . '/data');
+$cloud = new YarboCloud($cloudSettings, $projectRoot);
+$serial = (string) ($config['serial'] ?? '');
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
@@ -39,7 +44,7 @@ try {
     $client->connect();
 
     if ($action === 'list') {
-        $result = $backups->listAndFetch($client, $input['backup_id'] ?? null);
+        $result = $backups->listAndFetch($client, $input['backup_id'] ?? null, $cloud, $serial);
         $client->disconnect();
         json_response($result);
     }
@@ -53,7 +58,9 @@ try {
         $result = $backups->restoreDraft(
             $client,
             $collection,
-            (bool) ($input['confirm'] ?? false)
+            (bool) ($input['confirm'] ?? false),
+            $cloud,
+            $serial
         );
         $client->disconnect();
         json_response($result);

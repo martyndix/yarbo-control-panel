@@ -22,14 +22,25 @@ final class YarboMapBackup
     /**
      * @return array<string, mixed>
      */
-    public function listAndFetch(YarboMqtt $client, mixed $backupId = null): array
+    public function listAndFetch(YarboMqtt $client, mixed $backupId = null, ?YarboCloud $cloud = null, string $serial = ''): array
     {
-        $listEnvelope = $client->requestDataFeedback(self::LIST_CMD, [], 20.0, true);
+        $listEnvelope = $client->requestDataFeedback(self::LIST_CMD, [], 8.0, false);
+        $via = 'local';
+        $cloudError = null;
+        if ($listEnvelope === null && $cloud !== null && $serial !== '') {
+            $raw = $cloud->command(self::LIST_CMD, $serial, [], 25.0);
+            $listEnvelope = $this->envelopeFromCloud($raw, self::LIST_CMD);
+            if ($listEnvelope !== null) {
+                $via = 'cloud';
+            } else {
+                $cloudError = (string) ($raw['error'] ?? '');
+            }
+        }
         if ($listEnvelope === null) {
-            return [
-                'ok' => false,
-                'error' => 'No reply to get_all_map_backup. Is the robot on the LAN broker?',
-            ];
+            $hint = $cloudError !== null && $cloudError !== ''
+                ? $cloudError
+                : 'Map backup/restore uses Yarbo cloud MQTT, not the LAN broker. Enable Settings → cloud fallback with the same account as the app, then try again.';
+            return ['ok' => false, 'error' => $hint];
         }
 
         $listData = self::envelopeData($listEnvelope);
@@ -42,7 +53,9 @@ final class YarboMapBackup
         $fetchPayloadUsed = $fromList['map'] !== null ? [] : null;
         if ($fetched === null && $chosenId !== null) {
             foreach (self::fetchPayloads($chosenId) as $payload) {
-                $fetchEnvelope = $client->requestDataFeedback(self::FETCH_CMD, $payload, 20.0, false);
+                $fetchEnvelope = $via === 'cloud' && $cloud !== null && $serial !== ''
+                    ? $this->envelopeFromCloud($cloud->command(self::FETCH_CMD, $serial, $payload, 25.0), self::FETCH_CMD)
+                    : $client->requestDataFeedback(self::FETCH_CMD, $payload, 20.0, false);
                 if ($fetchEnvelope === null) {
                     continue;
                 }
@@ -55,7 +68,7 @@ final class YarboMapBackup
             }
         }
 
-        $compatible = is_array($fetched['map'] ?? null) && YarboMap::isAppMap($fetched['map']);
+        $compatible = is_array($fetched) && YarboMap::isAppMap($fetched['map'] ?? []);
         if ($compatible) {
             $this->persist([
                 'saved_at' => gmdate('c'),
@@ -76,10 +89,11 @@ final class YarboMapBackup
             'fetch_command' => self::FETCH_CMD,
             'fetch_payload' => $fetchPayloadUsed,
             'fetch_state' => is_array($fetchEnvelope) ? ($fetchEnvelope['state'] ?? null) : null,
+            'via' => $via,
             'compatible' => $compatible,
             'summary' => $compatible ? self::publicSummary($fetched['map']) : null,
             'message' => $compatible
-                ? 'Backup looks like a get_map blob. You can draft-edit and Save to robot while docked.'
+                ? sprintf('Backup looks like a get_map blob via %s. You can draft-edit and Save to robot while docked.', $via)
                 : 'Backup list came back, but the blob is not the same shape as get_map. Save stays off.',
         ];
     }
@@ -88,7 +102,13 @@ final class YarboMapBackup
      * @param array{type?: string, features?: array<int, mixed>} $collection
      * @return array<string, mixed>
      */
-    public function restoreDraft(YarboMqtt $client, array $collection, bool $confirm): array
+    public function restoreDraft(
+        YarboMqtt $client,
+        array $collection,
+        bool $confirm,
+        ?YarboCloud $cloud = null,
+        string $serial = '',
+    ): array
     {
         if (!$confirm) {
             return ['ok' => false, 'error' => 'confirm=true is required'];
@@ -115,11 +135,21 @@ final class YarboMapBackup
         $payload = $this->payloadWithMap($stored, $encoded['map']);
         $restoreFile = $this->writeRestoreCopy($stored);
 
-        $ack = $client->requestDataFeedback(self::RECOVERY_CMD, $payload, 40.0, true);
+        $ack = $client->requestDataFeedback(self::RECOVERY_CMD, $payload, 12.0, false);
+        $via = 'local';
+        if ($ack === null && $cloud !== null && $serial !== '') {
+            $ack = $this->envelopeFromCloud(
+                $cloud->command(self::RECOVERY_CMD, $serial, $payload, 40.0),
+                self::RECOVERY_CMD
+            );
+            if ($ack !== null) {
+                $via = 'cloud';
+            }
+        }
         if ($ack === null) {
             return [
                 'ok' => false,
-                'error' => 'map_recovery did not reply. Original backup is on the Pi: ' . basename($restoreFile),
+                'error' => 'map_recovery did not reply on LAN or cloud. Original backup is on the Pi: ' . basename($restoreFile),
                 'restore_file' => basename($restoreFile),
             ];
         }
@@ -130,11 +160,16 @@ final class YarboMapBackup
         $verified = $delta !== null && $delta <= 0.05;
 
         if (!$verified) {
-            $client->requestDataFeedback(self::RECOVERY_CMD, $stored['recovery_payload'], 40.0, false);
+            if ($via === 'cloud' && $cloud !== null && $serial !== '') {
+                $cloud->command(self::RECOVERY_CMD, $serial, $stored['recovery_payload'], 40.0);
+            } else {
+                $client->requestDataFeedback(self::RECOVERY_CMD, $stored['recovery_payload'], 40.0, false);
+            }
         }
 
         return [
             'ok' => $verified,
+            'via' => $via,
             'recovery_state' => $ack['state'] ?? null,
             'encode_delta_m' => $encoded['max_delta_m'] ?? null,
             'readback_delta_m' => $delta,
@@ -178,6 +213,26 @@ final class YarboMapBackup
         }
 
         return $data;
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     * @return array<string, mixed>|null
+     */
+    private function envelopeFromCloud(array $raw, string $cmd): ?array
+    {
+        if (isset($raw['topic']) || isset($raw['data'])) {
+            return $raw;
+        }
+        if (($raw['ok'] ?? false) === true) {
+            return [
+                'topic' => $cmd,
+                'state' => 0,
+                'data' => $raw,
+            ];
+        }
+
+        return null;
     }
 
     /**

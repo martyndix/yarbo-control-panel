@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.36] - 2026-09-26
+
+### Fixed
+- **Load map backups** uses Yarbo cloud MQTT after the LAN broker times out. Backup/restore is a phone-app cloud path; enable Settings → cloud fallback with the same account.
+
 ## [2.0.35] - 2026-09-26
 
 ### Added
