@@ -563,7 +563,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Home</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps.</p>
+            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. A Hue Bridge is one pairing: every Hue light then appears as its own row. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps.</p>
             <p id="home-server-status" class="updated">Matter server: —</p>
             <p id="home-setup-status" class="hint hidden"></p>
             <button type="button" class="btn btn-secondary hidden" id="home-setup">Set up Matter server</button>

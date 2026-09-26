@@ -2557,19 +2557,46 @@ function renderHomeDashboard(data) {
         if (!devices.length) {
             grid.innerHTML = '<p class="hint">No Matter devices yet. Add the Hue Bridge or another pairing code above.</p>';
         } else {
-            grid.innerHTML = devices.map((d) => {
-                const on = Boolean(d.on);
-                const bright = d.dimmable
-                    ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
+            const groups = [];
+            const byNode = new Map();
+            devices.forEach((d) => {
+                const key = String(d.node_id || d.id);
+                if (!byNode.has(key)) {
+                    byNode.set(key, []);
+                    groups.push(key);
+                }
+                byNode.get(key).push(d);
+            });
+            grid.innerHTML = groups.map((key) => {
+                const list = byNode.get(key) || [];
+                const first = list[0] || {};
+                const source = first.source || first.vendor || first.product || 'Matter device';
+                const many = list.length > 1 || Boolean(first.bridge);
+                const heading = many
+                    ? `<div class="home-node-heading">
+                        <h3 class="home-node-title">${escapeHtml(source)} · ${list.length} ${list.length === 1 ? 'item' : 'items'}</h3>
+                        <p class="hint">Each row is one light, plug, or switch on that device. A Hue Bridge is one pairing and many rows. Names come from the device (Hue app names when the bridge was shared).</p>
+                        <button type="button" class="btn btn-secondary btn-compact" data-home-forget="${escapeHtml(String(first.node_id || ''))}">Remove this device</button>
+                    </div>`
                     : '';
-                return `<article class="home-device${on ? ' is-on' : ''}" data-home-id="${escapeHtml(d.id)}">
-                    <p class="home-device-name">${escapeHtml(d.name)}</p>
-                    <p class="home-device-meta">${escapeHtml(d.kind)}${d.room ? ' · ' + escapeHtml(d.room) : ''}</p>
-                    <div class="home-device-actions">
-                        <button type="button" class="btn btn-secondary" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
-                        ${bright}
-                    </div>
-                </article>`;
+                const cards = list.map((d) => {
+                    const on = Boolean(d.on);
+                    const bright = d.dimmable
+                        ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
+                        : '';
+                    const meta = [d.kind, d.room, d.product && d.product !== d.name ? d.product : '']
+                        .filter(Boolean)
+                        .join(' · ');
+                    return `<article class="home-device${on ? ' is-on' : ''}" data-home-id="${escapeHtml(d.id)}">
+                        <p class="home-device-name">${escapeHtml(d.name)}</p>
+                        <p class="home-device-meta">${escapeHtml(meta)}</p>
+                        <div class="home-device-actions">
+                            <button type="button" class="btn btn-secondary" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
+                            ${bright}
+                        </div>
+                    </article>`;
+                }).join('');
+                return heading + cards;
             }).join('');
         }
     }
@@ -2612,6 +2639,25 @@ function renderHomeDashboard(data) {
 
 function bindHomeDashboard() {
     document.getElementById('home-devices')?.addEventListener('click', async (event) => {
+        const forget = event.target.closest('[data-home-forget]');
+        if (forget) {
+            const nodeId = forget.getAttribute('data-home-forget') || '';
+            if (!nodeId) return;
+            if (!window.confirm('Remove this Matter device from the panel? Lights on a Hue Bridge are all removed together.')) {
+                return;
+            }
+            forget.disabled = true;
+            try {
+                const data = await homeApi({ action: 'forget', node_id: Number(nodeId) }, 30000);
+                if (!data.ok) throw new Error(data.error || 'Could not remove');
+                showToast(data.message || 'Removed', 'success');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not remove', 'error');
+                forget.disabled = false;
+            }
+            return;
+        }
         const btn = event.target.closest('[data-home-toggle]');
         if (!btn) return;
         btn.disabled = true;

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.3] - 2026-09-26
+
+### Fixed
+- Home device list uses each light’s own Matter name (Hue app names on a shared Hue Bridge) instead of repeating the vendor on every row. Lights from one bridge are grouped, with **Remove this device** to forget the whole node.
+
 ## [3.0.2] - 2026-09-26
 
 ### Fixed

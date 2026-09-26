@@ -34,6 +34,7 @@ try {
     $result = match ($action) {
         'setup' => $home->startSetup(),
         'commission' => $home->commission((string) ($input['code'] ?? '')),
+        'forget' => $home->forgetNode((int) ($input['node_id'] ?? 0)),
         'command' => $home->command($input),
         'rename' => $home->saveMeta(['names' => [$input['id'] ?? '' => $input['name'] ?? '']]),
         'room' => $home->saveMeta(['rooms' => [$input['id'] ?? '' => $input['room'] ?? '']]),

@@ -39,9 +39,18 @@ STORAGE = ROOT / "data" / "matter-server"
 ON_OFF = 6
 LEVEL_CONTROL = 8
 DESCRIPTOR = 29
+BASIC_INFO = 40
+BRIDGED_BASIC = 57
+FIXED_LABEL = 64
+USER_LABEL = 65
 ATTR_ON_OFF = 0
 ATTR_CURRENT_LEVEL = 0
 ATTR_DEVICE_TYPES = 0
+ATTR_VENDOR_NAME = 1
+ATTR_PRODUCT_NAME = 3
+ATTR_NODE_LABEL = 5
+DEVTYPE_AGGREGATOR = 0x000E
+DEVTYPE_BRIDGED_NODE = 0x0013
 
 _ws_lock = threading.Lock()
 _ws: socket.socket | None = None
@@ -348,31 +357,72 @@ def endpoint_ids(attributes: dict[str, Any]) -> set[int]:
     return out
 
 
-def device_kind(types: Any) -> str:
+def device_type_ids(types: Any) -> list[int]:
     ids: list[int] = []
     if isinstance(types, list):
         for item in types:
-            if isinstance(item, dict) and "0" in item:
+            if isinstance(item, dict):
+                raw_id = item.get("0", item.get(0, item.get("deviceType")))
                 try:
-                    ids.append(int(item["0"]))
+                    if raw_id is not None:
+                        ids.append(int(raw_id))
                 except (TypeError, ValueError):
                     continue
-            elif isinstance(item, (int, float)):
-                ids.append(int(item))
-            elif isinstance(item, dict) and "deviceType" in item:
-                try:
-                    ids.append(int(item["deviceType"]))
-                except (TypeError, ValueError):
-                    continue
+    return ids
+
+
+def device_kind(types: Any) -> str:
+    ids = device_type_ids(types)
     if any(i in (0x0301,) for i in ids):
         return "heater"
     if any(i in (0x010A, 0x010B) for i in ids):
         return "plug"
     if any(i in (0x0103, 0x010F) for i in ids):
         return "switch"
-    if any(i in (0x0100, 0x0101, 0x010C, 0x010D) for i in ids):
+    if any(i in (0x0100, 0x0101, 0x0102, 0x010C, 0x010D) for i in ids):
         return "light"
     return "other"
+
+
+def attr_str(attributes: dict[str, Any], endpoint: int, cluster: int, attr: int) -> str:
+    val = attributes.get(attr_key(endpoint, cluster, attr))
+    if isinstance(val, str) and val.strip():
+        return val.strip()
+    return ""
+
+
+def label_list_text(val: Any) -> str:
+    if not isinstance(val, list):
+        return ""
+    parts: list[str] = []
+    for item in val:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("1") or item.get("value") or item.get("0") or item.get("label")
+        if isinstance(text, str) and text.strip():
+            parts.append(text.strip())
+    return " · ".join(parts)
+
+
+def endpoint_name(
+    attributes: dict[str, Any],
+    endpoint: int,
+    vendor: str,
+    product: str,
+) -> str:
+    for cluster in (BRIDGED_BASIC, BASIC_INFO):
+        label = attr_str(attributes, endpoint, cluster, ATTR_NODE_LABEL)
+        if label:
+            return label[:48]
+        product_ep = attr_str(attributes, endpoint, cluster, ATTR_PRODUCT_NAME)
+        if product_ep:
+            return product_ep[:48]
+    for cluster in (FIXED_LABEL, USER_LABEL):
+        listed = label_list_text(attributes.get(attr_key(endpoint, cluster, 0)))
+        if listed:
+            return listed[:48]
+    base = product or vendor or "Device"
+    return f"{base} {endpoint}"[:48]
 
 
 def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
@@ -383,28 +433,27 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             continue
         node_id = int(node.get("node_id") or 0)
         available = bool(node.get("available", True))
+        is_bridge = bool(node.get("is_bridge", False))
         attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
-        name_root = ""
-        for key, val in attributes.items():
-            if str(key).endswith("/40/1") and isinstance(val, str) and val.strip():
-                name_root = val.strip()
-                break
-        for endpoint in sorted(endpoint_ids(attributes)):
+        vendor = attr_str(attributes, 0, BASIC_INFO, ATTR_VENDOR_NAME)
+        product = attr_str(attributes, 0, BASIC_INFO, ATTR_PRODUCT_NAME)
+        node_name = attr_str(attributes, 0, BASIC_INFO, ATTR_NODE_LABEL)
+        source = node_name or product or vendor or f"Matter node {node_id}"
+        ep_ids = endpoint_ids(attributes)
+        for endpoint in sorted(ep_ids):
             if endpoint == 0:
                 continue
             on_key = attr_key(endpoint, ON_OFF, ATTR_ON_OFF)
             if on_key not in attributes:
                 continue
             types = attributes.get(attr_key(endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES))
+            type_ids = device_type_ids(types)
             kind = device_kind(types)
+            if DEVTYPE_AGGREGATOR in type_ids and kind == "other":
+                continue
             if kind == "other":
-                kind = "light"
-            label_key = attr_key(endpoint, 40, 1)  # BasicInformation.NodeLabel is node-wide; try endpoint label
-            label = attributes.get(label_key)
-            if not isinstance(label, str) or not label.strip():
-                label = attributes.get(attr_key(endpoint, 5, 1))  # UserLabel
-            if not isinstance(label, str) or not label.strip():
-                label = name_root or f"Node {node_id} ep {endpoint}"
+                continue
+            label = endpoint_name(attributes, endpoint, vendor, product)
             level = attributes.get(attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL))
             brightness = None
             if isinstance(level, (int, float)) and level >= 0:
@@ -414,15 +463,19 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "id": f"{node_id}:{endpoint}",
                     "node_id": node_id,
                     "endpoint": endpoint,
-                    "name": str(label).strip()[:48],
+                    "name": label,
                     "kind": kind,
+                    "vendor": vendor,
+                    "product": product,
+                    "source": source,
+                    "bridge": is_bridge or len(ep_ids) > 3,
                     "on": bool(attributes.get(on_key)),
                     "brightness": brightness,
                     "dimmable": attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) in attributes,
                     "available": available,
                 }
             )
-    devices.sort(key=lambda d: (d["name"].lower(), d["id"]))
+    devices.sort(key=lambda d: (str(d.get("source") or "").lower(), d["name"].lower(), d["id"]))
     return devices
 
 
@@ -470,6 +523,15 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         if not rpc.get("ok"):
             return rpc
         return {"ok": True, "result": rpc.get("result")}
+    if op == "remove_node":
+        try:
+            node_id = int(body.get("node_id") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+        if node_id <= 0:
+            return {"ok": False, "error": "node_id is required"}
+        rpc = matter_rpc("remove_node", {"node_id": node_id}, timeout=20.0)
+        return rpc if not rpc.get("ok") else {"ok": True}
     if op == "command":
         device_id = str(body.get("id") or "")
         try:

@@ -178,6 +178,10 @@ final class YarboHome
                 'endpoint' => (int) ($device['endpoint'] ?? 0),
                 'name' => $name,
                 'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
+                'vendor' => (string) ($device['vendor'] ?? ''),
+                'product' => (string) ($device['product'] ?? ''),
+                'source' => (string) ($device['source'] ?? ''),
+                'bridge' => (bool) ($device['bridge'] ?? false),
                 'on' => (bool) ($device['on'] ?? false),
                 'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
                 'dimmable' => (bool) ($device['dimmable'] ?? false),
@@ -433,6 +437,35 @@ final class YarboHome
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function forgetNode(int $nodeId): array
+    {
+        if ($nodeId <= 0) {
+            return ['ok' => false, 'error' => 'Pick a device to remove'];
+        }
+        $agent = YarboMatterAgentClient::fromEnv();
+        $result = $agent->request(['op' => 'remove_node', 'node_id' => $nodeId], 25.0);
+        @unlink($this->projectRoot . '/data/home-nodes-cache.json');
+        if (!($result['ok'] ?? false)) {
+            return [
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Could not remove that Matter device'),
+            ];
+        }
+        $store = $this->load();
+        $prefix = $nodeId . ':';
+        foreach (array_keys($store['names']) as $id) {
+            if (str_starts_with((string) $id, $prefix)) {
+                unset($store['names'][$id], $store['rooms'][$id]);
+            }
+        }
+        $this->write($store);
+
+        return ['ok' => true, 'message' => 'Removed from this panel'];
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
@@ -558,7 +591,7 @@ final class YarboHome
         $fresh = is_file($cachePath) && (time() - (int) filemtime($cachePath)) < 8;
         if ($fresh) {
             $cached = json_decode((string) file_get_contents($cachePath), true);
-            if (is_array($cached) && is_array($cached['devices'] ?? null)) {
+            if (is_array($cached) && (int) ($cached['v'] ?? 0) >= 2 && is_array($cached['devices'] ?? null)) {
                 return [
                     'ok' => true,
                     'error' => '',
@@ -577,6 +610,7 @@ final class YarboHome
         $devices = is_array($nodes['devices'] ?? null) ? $nodes['devices'] : [];
         if (($nodes['ok'] ?? false) === true) {
             @file_put_contents($cachePath, json_encode([
+                'v' => 2,
                 'saved_at' => time(),
                 'devices' => $devices,
             ], JSON_UNESCAPED_SLASHES));
