@@ -238,6 +238,21 @@ if [[ -n "$PYTHON" ]]; then
   fi
 fi
 
+step "Setting up Matter server for the Home module"
+write_status "composer" "Setting up Matter server"
+chmod +x "${ROOT}/scripts/lib/matter_server.sh" "${ROOT}/scripts/matter_setup.sh" 2>/dev/null || true
+if [[ -f "${ROOT}/scripts/lib/matter_server.sh" ]]; then
+  # shellcheck source=scripts/lib/matter_server.sh
+  source "${ROOT}/scripts/lib/matter_server.sh"
+  if sudo -n /usr/local/sbin/yarbo-matter-setup "${ROOT}" >/dev/null 2>&1; then
+    step "Matter server is running"
+  elif yarbo_matter_setup; then
+    step "Matter server is running"
+  else
+    step "Matter server will finish from Settings → Home if needed"
+  fi
+fi
+
 RESTARTED=false
 # shellcheck source=scripts/lib/mqtt_agent.sh
 source "${ROOT}/scripts/lib/mqtt_agent.sh"

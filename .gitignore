@@ -45,6 +45,8 @@
 /data/home-nodes-cache.json
 /data/matter-server/
 /data/matter-agent.log
+/data/matter-setup.json
+/data/matter-setup.log
 /data/tesla-fleet-private.pem
 /public/.well-known/appspecific/com.tesla.3p.public-key.pem
 /firmware/papermono/.pio/

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-09-26
+
+### Added
+- **Home / Matter setup** is part of Settings → Panel updates and the installer: Docker, IPv6, and python-matter-server start without a terminal. Settings → Home and the Home dashboard have **Set up Matter server** if the first pass is still running.
+
 ## [3.0.0] - 2026-09-26
 
 ### Added

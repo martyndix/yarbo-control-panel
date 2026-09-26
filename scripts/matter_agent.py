@@ -197,6 +197,23 @@ def docker_bin() -> str | None:
     return None
 
 
+def run_docker(args: list[str]) -> subprocess.CompletedProcess:
+    docker = docker_bin()
+    if docker is None:
+        return subprocess.CompletedProcess(args=["docker", *args], returncode=127, stdout="", stderr="docker not found")
+    result = subprocess.run([docker, *args], capture_output=True, text=True)
+    if result.returncode == 0:
+        return result
+    sudo = subprocess.run(["sudo", "-n", docker, *args], capture_output=True, text=True)
+    if sudo.returncode == 0:
+        return sudo
+    if docker != "/usr/bin/docker" and os.access("/usr/bin/docker", os.X_OK):
+        sudo_bin = subprocess.run(["sudo", "-n", "/usr/bin/docker", *args], capture_output=True, text=True)
+        if sudo_bin.returncode == 0:
+            return sudo_bin
+    return result
+
+
 def ensure_matter_server() -> str | None:
     global _started_docker
     sock = socket.socket()
@@ -223,37 +240,32 @@ def ensure_matter_server() -> str | None:
         docker = docker_bin()
         if docker is None:
             return (
-                "Matter server is not running. On the Pi, install Docker and enable the Home module, "
-                "or run python-matter-server on port 5580."
+                "Matter server is not ready. Open Settings → Home and tap Set up Matter server. "
+                "A Raspberry Pi panel update installs Docker and the server automatically."
             )
         STORAGE.mkdir(parents=True, exist_ok=True)
-        inspect = subprocess.run(
-            [docker, "inspect", "-f", "{{.State.Running}}", DOCKER_NAME],
-            capture_output=True,
-            text=True,
-        )
+        inspect = run_docker(["inspect", "-f", "{{.State.Running}}", DOCKER_NAME])
         if inspect.returncode == 0:
             running = (inspect.stdout or "").strip().lower() == "true"
             if not running:
-                subprocess.run([docker, "start", DOCKER_NAME], capture_output=True, text=True)
+                run_docker(["start", DOCKER_NAME])
         else:
-            subprocess.run(
+            run_docker(
                 [
-                    docker,
                     "run",
                     "-d",
                     "--name",
                     DOCKER_NAME,
                     "--restart",
                     "unless-stopped",
+                    "--security-opt",
+                    "apparmor=unconfined",
                     "--network",
                     "host",
                     "-v",
                     f"{STORAGE}:/data",
                     DOCKER_IMAGE,
-                ],
-                capture_output=True,
-                text=True,
+                ]
             )
         _started_docker = True
         deadline = time.time() + 25
@@ -267,7 +279,10 @@ def ensure_matter_server() -> str | None:
                 time.sleep(0.5)
             finally:
                 probe.close()
-        return "Started the Matter Docker container, but port 5580 is not listening yet. Wait and retry."
+        return (
+            "Started the Matter Docker container, but it is not listening yet. "
+            "Wait a minute, or tap Set up Matter server in Settings → Home."
+        )
 
 
 def connected_ws() -> MatterWs:

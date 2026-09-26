@@ -57,7 +57,7 @@ install_apt_deps() {
   echo "==> Installing system packages (apt)"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y php php-cli php-mbstring php-xml php-zlib composer unzip git python3 python3-pip
+  apt-get install -y php php-cli php-mbstring php-xml php-zlib composer unzip git python3 python3-pip docker.io
 }
 
 install_project() {
@@ -88,7 +88,16 @@ install_project() {
 
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
   chmod +x scripts/update.sh 2>/dev/null || true
-    chmod +x scripts/dev.sh scripts/panel.sh scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py 2>/dev/null || true
+  chmod +x scripts/dev.sh scripts/panel.sh scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/matter_setup.sh scripts/lib/matter_server.sh 2>/dev/null || true
+
+  echo "==> Matter server (Home module)"
+  # shellcheck source=scripts/lib/matter_server.sh
+  source "${ROOT}/scripts/lib/matter_server.sh"
+  if yarbo_matter_setup; then
+    echo "    Matter server is ready"
+  else
+    echo "    WARNING: Matter server is not running yet — Settings → Home → Set up Matter server"
+  fi
 
   # shellcheck source=scripts/lib/python_sdk.sh
   source "${ROOT}/scripts/lib/python_sdk.sh"
@@ -186,18 +195,46 @@ EOF
 install_update_sudoers() {
   local owner="$1"
   local sudoers_path="/etc/sudoers.d/yarbo-panel-update"
-  local systemctl_bin
+  local systemctl_bin docker_bin wrapper
   systemctl_bin="$(command -v systemctl)"
+  docker_bin="$(command -v docker || true)"
+  wrapper="/usr/local/sbin/yarbo-matter-setup"
 
   if [[ -z "$systemctl_bin" ]]; then
     return 0
   fi
 
-  echo "==> Allowing ${owner} to restart ${SERVICE_NAME} for one-click UI updates"
-  cat > "${sudoers_path}" <<EOF
-# Yarbo Control Panel — passwordless restart for web UI updates (installed by scripts/install.sh)
-${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} restart ${SERVICE_NAME}
-EOF
+  if [[ -f "${ROOT}/scripts/lib/matter_server.sh" ]]; then
+    cp "${ROOT}/scripts/lib/matter_server.sh" "$wrapper"
+    chmod 755 "$wrapper"
+  fi
+
+  echo "==> Allowing ${owner} to restart ${SERVICE_NAME} and set up Matter without a password"
+  {
+    echo "# Yarbo Control Panel — passwordless helpers for web UI updates (scripts/install.sh)"
+    echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} restart ${SERVICE_NAME}"
+    echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} start docker"
+    echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} enable docker"
+    echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} enable --now docker"
+    echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} restart docker"
+    echo "${owner} ALL=(ALL) NOPASSWD: ${wrapper}"
+    if [[ -x /usr/sbin/sysctl ]]; then
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.all.disable_ipv6=0"
+    fi
+    if [[ -x /usr/sbin/usermod ]]; then
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/usermod -aG docker ${owner}"
+    fi
+    if [[ -n "$docker_bin" ]]; then
+      echo "${owner} ALL=(ALL) NOPASSWD: ${docker_bin}"
+    fi
+    if [[ -x /usr/bin/docker ]]; then
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/docker"
+    fi
+    if [[ -x /usr/bin/apt-get ]]; then
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get update -qq"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get install -y docker.io"
+    fi
+  } > "${sudoers_path}"
   chmod 440 "${sudoers_path}"
   if ! visudo -cf "${sudoers_path}" >/dev/null 2>&1; then
     rm -f "${sudoers_path}"

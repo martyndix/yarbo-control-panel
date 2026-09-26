@@ -133,14 +133,15 @@ final class YarboHome
     {
         $hub = new YarboHub($this->projectRoot);
         if (!$hub->enabled(YarboHub::MODULE_HOME)) {
-            return [
-                'ok' => true,
-                'enabled' => false,
-                'server' => ['ok' => false, 'error' => 'Home module is off'],
-                'devices' => [],
-                'scenes' => [],
-                'paper_devices' => [],
-            ];
+        return [
+            'ok' => true,
+            'enabled' => false,
+            'server' => ['ok' => false, 'error' => 'Home module is off'],
+            'devices' => [],
+            'scenes' => [],
+            'paper_devices' => [],
+            'setup' => $this->setupStatus(),
+        ];
         }
         $live = $this->liveDevices(18.0);
         $store = $this->load();
@@ -193,7 +194,129 @@ final class YarboHome
             'devices' => $devices,
             'scenes' => $store['scenes'],
             'paper_devices' => $paper,
+            'setup' => $this->setupStatus(),
         ];
+    }
+
+    /**
+     * @return array{ok: bool, state: string, message: ?string, error: ?string, ready: bool, updated_at: ?string}
+     */
+    public function setupStatus(): array
+    {
+        $ready = $this->matterPortUp();
+        $path = $this->projectRoot . '/data/matter-setup.json';
+        $state = $ready ? 'done' : 'idle';
+        $message = $ready ? 'Matter server is running' : null;
+        $error = null;
+        $updatedAt = null;
+        if (is_file($path)) {
+            $decoded = json_decode((string) file_get_contents($path), true);
+            if (is_array($decoded)) {
+                $fileState = (string) ($decoded['state'] ?? '');
+                $updatedAt = isset($decoded['updated_at']) ? (string) $decoded['updated_at'] : null;
+                if ($ready) {
+                    $state = 'done';
+                    $message = (string) ($decoded['message'] ?? $message);
+                    $error = null;
+                } else {
+                    $state = $fileState !== '' ? $fileState : 'idle';
+                    $message = isset($decoded['message']) ? (string) $decoded['message'] : null;
+                    $error = isset($decoded['error']) ? (string) $decoded['error'] : null;
+                    if ($state === 'running' && $updatedAt !== '') {
+                        $stamp = strtotime($updatedAt) ?: 0;
+                        if ($stamp > 0 && (time() - $stamp) > 240) {
+                            $state = 'failed';
+                            $error = $error !== null && $error !== ''
+                                ? $error
+                                : 'Matter setup took too long. Tap Set up Matter server to try again.';
+                        }
+                    }
+                }
+            }
+        }
+
+        return [
+            'ok' => $ready || $state !== 'failed',
+            'state' => $state,
+            'message' => $message !== '' ? $message : null,
+            'error' => $error !== '' ? $error : null,
+            'ready' => $ready,
+            'updated_at' => $updatedAt !== '' ? $updatedAt : null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function startSetup(): array
+    {
+        $status = $this->setupStatus();
+        if (($status['ready'] ?? false) === true) {
+            return [
+                'ok' => true,
+                'started' => false,
+                'message' => 'Matter server is already running',
+                'setup' => $status,
+            ];
+        }
+        if (($status['state'] ?? '') === 'running') {
+            return [
+                'ok' => true,
+                'started' => false,
+                'message' => (string) ($status['message'] ?? 'Setup is already running'),
+                'setup' => $status,
+            ];
+        }
+        $script = $this->projectRoot . '/scripts/matter_setup.sh';
+        $fallback = $this->projectRoot . '/scripts/lib/matter_server.sh';
+        if (!is_file($script) && !is_file($fallback)) {
+            return ['ok' => false, 'error' => 'Matter setup script is missing. Update the panel first.'];
+        }
+        $dataDir = $this->projectRoot . '/data';
+        if (!is_dir($dataDir) && !mkdir($dataDir, 0775, true) && !is_dir($dataDir)) {
+            return ['ok' => false, 'error' => 'Could not create data directory'];
+        }
+        @file_put_contents($dataDir . '/matter-setup.json', json_encode([
+            'state' => 'running',
+            'message' => 'Setting up the Matter server',
+            'error' => null,
+            'updated_at' => gmdate('c'),
+        ], JSON_UNESCAPED_SLASHES) . "\n");
+        $log = $dataDir . '/matter-setup.log';
+        $cmd = is_file($script)
+            ? sprintf(
+                'nohup bash %s >> %s 2>&1 &',
+                escapeshellarg($script),
+                escapeshellarg($log)
+            )
+            : sprintf(
+                'nohup bash %s %s >> %s 2>&1 &',
+                escapeshellarg($fallback),
+                escapeshellarg($this->projectRoot),
+                escapeshellarg($log)
+            );
+        exec($cmd);
+        $status = $this->setupStatus();
+        $status['state'] = 'running';
+        $status['message'] = 'Setting up the Matter server. First time can take a few minutes.';
+
+        return [
+            'ok' => true,
+            'started' => true,
+            'message' => $status['message'],
+            'setup' => $status,
+        ];
+    }
+
+    private function matterPortUp(): bool
+    {
+        $fp = @fsockopen('127.0.0.1', 5580, $errno, $errstr, 0.35);
+        if (!is_resource($fp)) {
+            return false;
+        }
+        fclose($fp);
+
+        return true;
     }
 
     /**

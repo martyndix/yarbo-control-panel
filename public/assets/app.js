@@ -2437,8 +2437,9 @@ function updateLymowDashboard(ly) {
     applyDeviceNameSubtitle();
 }
 
-let homeDash = { devices: [], scenes: [], paper_devices: [] };
+let homeDash = { devices: [], scenes: [], paper_devices: [], setup: {} };
 let homeLoadBusy = false;
+let homeSetupPollTimer = 0;
 
 async function homeApi(body, timeoutMs = 20000) {
     const res = await fetchWithTimeout('/api/home.php', {
@@ -2449,11 +2450,69 @@ async function homeApi(body, timeoutMs = 20000) {
     return parseJsonResponse(res);
 }
 
+function applyHomeSetupUi(data) {
+    const setup = data?.setup || {};
+    const ready = Boolean(setup.ready || data?.server?.ok);
+    const running = setup.state === 'running' && !ready;
+    const err = setup.error || (!ready && !running ? (data?.server?.error || '') : '');
+    const message = ready
+        ? (setup.message || 'Matter server is running')
+        : (running ? (setup.message || 'Setting up the Matter server…') : (err || 'Matter server is not running yet'));
+    const dashStatus = document.getElementById('home-setup-status');
+    const dashBtn = document.getElementById('home-setup');
+    if (dashStatus) {
+        dashStatus.textContent = ready ? '' : message;
+        dashStatus.classList.toggle('hidden', ready && !running);
+    }
+    if (dashBtn) {
+        dashBtn.classList.toggle('hidden', ready);
+        dashBtn.disabled = running;
+        dashBtn.textContent = running ? 'Setting up…' : 'Set up Matter server';
+    }
+    const settingsStatus = document.getElementById('settings-home-setup-status');
+    const settingsBtn = document.getElementById('settings-home-setup');
+    if (settingsStatus) settingsStatus.textContent = `Matter server: ${message}`;
+    if (settingsBtn) {
+        settingsBtn.disabled = running;
+        settingsBtn.textContent = running ? 'Setting up…' : (ready ? 'Matter server is ready' : 'Set up Matter server');
+    }
+    if (running) {
+        if (!homeSetupPollTimer) {
+            homeSetupPollTimer = window.setTimeout(() => {
+                homeSetupPollTimer = 0;
+                loadHomeDashboard();
+            }, 3000);
+        }
+    } else if (homeSetupPollTimer) {
+        window.clearTimeout(homeSetupPollTimer);
+        homeSetupPollTimer = 0;
+    }
+}
+
+async function startHomeSetup(button) {
+    if (button) button.disabled = true;
+    try {
+        const data = await homeApi({ action: 'setup' }, 15000);
+        if (!data.ok) throw new Error(data.error || 'Could not start Matter setup');
+        showToast(data.message || 'Setting up Matter server', 'success');
+        if (data.setup) {
+            homeDash = { ...homeDash, setup: data.setup };
+            applyHomeSetupUi(homeDash);
+        }
+        await loadHomeDashboard();
+    } catch (err) {
+        showToast(err.message || 'Matter setup failed', 'error');
+        if (button) button.disabled = false;
+    }
+}
+
 async function loadHomeDashboard() {
     if (homeLoadBusy) return;
     const card = document.getElementById('home-card');
-    if (!card || card.classList.contains('module-pane-hidden')) {
-        if (!document.querySelector('[data-module-id="home"]')) return;
+    const homeEnabled = Boolean(document.querySelector('[data-module-id="home"]'));
+    const settingsHomeOpen = document.getElementById('settings-home-section')?.classList.contains('is-active');
+    if (!homeEnabled && !settingsHomeOpen) {
+        if (!card || card.classList.contains('module-pane-hidden')) return;
     }
     homeLoadBusy = true;
     try {
@@ -2463,12 +2522,14 @@ async function loadHomeDashboard() {
     } catch (err) {
         const status = document.getElementById('home-server-status');
         if (status) status.textContent = err.message || 'Could not load Home';
+        applyHomeSetupUi({ setup: { state: 'failed', error: err.message || 'Could not load Home' } });
     } finally {
         homeLoadBusy = false;
     }
 }
 
 function renderHomeDashboard(data) {
+    applyHomeSetupUi(data);
     const status = document.getElementById('home-server-status');
     if (status) {
         const err = data.server?.error;
@@ -3860,6 +3921,9 @@ function showSettingsPane(pane, { updateHash = true } = {}) {
         if (location.hash !== next) {
             history.replaceState(null, '', `${location.pathname}${location.search}${next}`);
         }
+    }
+    if (id === 'home') {
+        loadHomeDashboard();
     }
 }
 
@@ -6413,6 +6477,12 @@ initAppearance();
 initUpdateConfirmModal();
 loadSettings().catch(() => {});
 bindHomeDashboard();
+document.getElementById('home-setup')?.addEventListener('click', (event) => {
+    startHomeSetup(event.currentTarget);
+});
+document.getElementById('settings-home-setup')?.addEventListener('click', (event) => {
+    startHomeSetup(event.currentTarget);
+});
 document.getElementById('home-pair')?.addEventListener('click', async () => {
     const input = document.getElementById('home-pair-code');
     const code = input?.value.trim() || '';

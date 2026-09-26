@@ -565,6 +565,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
             <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps.</p>
             <p id="home-server-status" class="updated">Matter server: —</p>
+            <p id="home-setup-status" class="hint hidden"></p>
+            <button type="button" class="btn btn-secondary hidden" id="home-setup">Set up Matter server</button>
             <div class="home-add">
                 <label class="settings-field">
                     <span class="label">Pairing code or QR text</span>
@@ -852,7 +854,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section hidden" id="settings-home-section" data-settings-pane="home">
                             <h3 class="settings-subtitle">Home (Matter)</h3>
-                            <p class="hint">This panel is a Matter controller. Add devices from the Home dashboard with a pairing code. It does not read Apple Home or Hue inventories. Pairing works best on the Pi (IPv6 on, Docker for python-matter-server). See <code>docs/home.md</code>.</p>
+                            <p class="hint">This panel is a Matter controller. Add devices from the Home dashboard with a pairing code. It does not read Apple Home or Hue inventories.</p>
+                            <p id="settings-home-setup-status" class="updated">Matter server: —</p>
+                            <button type="button" class="btn" id="settings-home-setup">Set up Matter server</button>
+                            <p class="hint">On a Raspberry Pi, Settings → Panel updates installs Docker and starts the Matter server. Tap the button if pairing is not ready yet. Pairing works on the Pi (IPv6 on). See <code>docs/home.md</code>.</p>
                         </section>
 
                         <section class="settings-section" id="settings-vestaboard-section" data-settings-pane="vestaboard">

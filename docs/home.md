@@ -20,15 +20,15 @@ Not affiliated with Apple, Signify/Philips Hue, or the Connectivity Standards Al
 
 ## Raspberry Pi setup
 
-The panel starts `scripts/matter_agent.py`, which talks to [python-matter-server](https://github.com/home-assistant-libs/python-matter-server) on port **5580**. The easiest way to run that server is Docker **with host networking and IPv6**:
+You do **not** need a terminal. On a Pi panel:
 
-```bash
-docker pull ghcr.io/home-assistant-libs/python-matter-server:stable
-```
+1. Open **Settings → Panel updates** and install the latest version (this pulls Docker and starts python-matter-server).
+2. Turn on **Settings → Modules → Home**.
+3. If the Home dashboard still says the Matter server is not running, tap **Set up Matter server** (also in Settings → Home). The first download can take a few minutes.
 
-The Matter agent will `docker run --network host` a container named `yarbo-matter-server` if Docker is installed. Storage is `data/matter-server/`.
+The panel talks to [python-matter-server](https://github.com/home-assistant-libs/python-matter-server) on port **5580** via `scripts/matter_agent.py`. Storage is `data/matter-server/`. Fresh installs with `sudo ./scripts/install.sh` do the same setup.
 
-Enable **Settings → Modules → Home**, then use the **Home** dashboard to paste a pairing code.
+On a Mac, Matter pairing is optional and needs Docker Desktop; use the Pi for day-to-day Home.
 
 ### Pairing tips
 
@@ -36,7 +36,7 @@ Enable **Settings → Modules → Home**, then use the **Home** dashboard to pas
 - Already in Apple Home: accessory → **Turn On Pairing Mode** → paste the ~5-minute code (the printed QR is not reused).
 - Other Matter devices: code or `MT:…` QR text from the vendor app.
 
-Thread devices keep using Apple’s (or another) border router. Turn on IPv6 on the Pi.
+Thread devices keep using Apple’s (or another) border router. IPv6 is turned on automatically on the Pi when the Matter server is set up.
 
 ## PaperMono
 

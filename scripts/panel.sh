@@ -79,6 +79,17 @@ MATTER_PY="${ROOT}/.venv/bin/python"
 if [[ ! -x "$MATTER_PY" ]]; then
   MATTER_PY="$(command -v python3 || true)"
 fi
+if [[ "$(uname -s)" != "Darwin" && -f "${ROOT}/scripts/lib/matter_server.sh" ]]; then
+  echo "==> Ensuring Matter server is running (Home module)"
+  (
+    set +e
+    # shellcheck source=scripts/lib/matter_server.sh
+    source "${ROOT}/scripts/lib/matter_server.sh" || exit 0
+    sudo -n /usr/local/sbin/yarbo-matter-setup "${ROOT}" >/dev/null 2>&1 && exit 0
+    yarbo_matter_setup >/dev/null 2>&1 || true
+  ) >/dev/null 2>&1 &
+fi
+
 if [[ -n "$MATTER_PY" && -f "${ROOT}/scripts/matter_agent.py" ]]; then
   echo "==> Starting Matter agent on 127.0.0.1:${YARBO_MATTER_AGENT_PORT:-8766}"
   mkdir -p "${ROOT}/data"

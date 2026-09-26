@@ -11,10 +11,6 @@ $projectRoot = dirname(__DIR__, 2);
 $hub = new YarboHub($projectRoot);
 $home = new YarboHome($projectRoot);
 
-if (!$hub->enabled(YarboHub::MODULE_HOME)) {
-    json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
-}
-
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method === 'GET') {
     json_response($home->dashboard());
@@ -27,10 +23,15 @@ if (!is_array($input)) {
 }
 
 $action = (string) ($input['action'] ?? '');
+if (!$hub->enabled(YarboHub::MODULE_HOME) && $action !== 'setup') {
+    json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
+}
+
 set_time_limit($action === 'commission' ? 100 : 40);
 
 try {
     $result = match ($action) {
+        'setup' => $home->startSetup(),
         'commission' => $home->commission((string) ($input['code'] ?? '')),
         'command' => $home->command($input),
         'rename' => $home->saveMeta(['names' => [$input['id'] ?? '' => $input['name'] ?? '']]),

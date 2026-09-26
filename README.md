@@ -149,10 +149,11 @@ cd ~/yarbo && sudo ./scripts/install.sh --deps
 
 This one command:
 
-1. Installs PHP, Composer, Git, and Python (apt)
+1. Installs PHP, Composer, Git, Python, and Docker (apt)
 2. Runs `composer install` and creates `config.php`
-3. Installs and **enables a systemd service** so the panel starts on boot
-4. Starts the panel immediately
+3. Starts the Matter server used by the Home module (turn Home on later in Settings)
+4. Installs and **enables a systemd service** so the panel starts on boot
+5. Starts the panel immediately
 
 Then open the URL printed at the end (e.g. `http://192.168.0.50:8080`), click **Settings**, and enter your **Yarbo broker IP** and **serial number**. No need to edit `config.php` by hand.
 
@@ -188,7 +189,7 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
 | **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
 | **Lymow (unofficial)** | Settings → Modules → Lymow, then app email/password + camera IP. See [docs/lymow.md](docs/lymow.md) |
-| **Home (Matter)** | Settings → Modules → Home. Pair Hue Bridge / Apple share / any Matter code. See [docs/home.md](docs/home.md) |
+| **Home (Matter)** | Settings → Modules → Home. Panel updates install the Matter server on a Pi. Pair Hue Bridge / Apple share / any Matter code. See [docs/home.md](docs/home.md) |
 | **PaperMono / Paper Colour (beta)** | Settings → E-paper companions — pick hardware, USB flash + Wi-Fi. See [PaperMono](#papermono-companion-beta) and [docs/papercolor.md](docs/papercolor.md) |
 | **Vestaboard Note (optional)** | Settings → enable Vestaboard Note — Local or Cloud API. See [Vestaboard Note](#vestaboard-note-optional) |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
@@ -243,7 +244,7 @@ When new commits are published on GitHub, update your panel without losing `conf
 3. Click **Check for updates**
 4. If an update is available, click **Update to latest** and confirm
 
-On a Pi with systemd, the installer configures passwordless `sudo systemctl restart yarbo-panel` so the panel restarts automatically after updating. The browser waits for the panel to come back and reloads the page (a brief outage during restart is normal).
+On a Pi with systemd, the installer configures passwordless `sudo systemctl restart yarbo-panel` so the panel restarts automatically after updating. The browser waits for the panel to come back and reloads the page (a brief outage during restart is normal). The same update also installs Docker and starts the Matter server used by the Home module — no terminal steps.
 
 ### From the command line
 
@@ -682,7 +683,9 @@ yarbo-control-panel/
 │   ├── matter_agent.py   # Matter controller HTTP bridge to python-matter-server
 │   ├── dev.sh            # Local/macOS wrapper around panel.sh
 │   ├── lib/python_sdk.sh # Shared yarbo-data-sdk install helpers
-│   ├── update.sh         # Pull latest from GitHub, composer install, restart panel + MQTT agent
+│   ├── lib/matter_server.sh # Docker + python-matter-server for the Home module
+│   ├── matter_setup.sh   # Settings button / no-terminal Matter setup
+│   ├── update.sh         # Pull latest from GitHub, composer install, Matter server, restart panel + MQTT agent
 │   └── cloud_bridge.py   # Optional Yarbo cloud map/plan reads
 ├── deploy/               # Reference systemd unit (install.sh generates the real one)
 ├── metrics-worker/       # Optional Cloudflare collector for anonymous install counts
@@ -693,7 +696,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **3.0.0** (2026-09-26).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **3.0.1** (2026-09-26).
 
 ---
 
