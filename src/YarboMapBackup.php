@@ -362,7 +362,7 @@ final class YarboMapBackup
 
         $unsupported = [];
         foreach ($changes as $change) {
-            if (self::saveCommandsFor((string) ($change['canonical'] ?? '')) === []) {
+            if ($this->saveCommandsFor((string) ($change['canonical'] ?? '')) === []) {
                 $unsupported[] = (string) $change['canonical'];
             }
         }
@@ -383,9 +383,16 @@ final class YarboMapBackup
         $saveCmd = $write['command'];
         $uploadState = null;
         if ($ack === null) {
+            $kinds = array_values(array_unique(array_map(
+                static fn (array $change): string => (string) $change['canonical'],
+                $changes
+            )));
+            $pathway = in_array('pathways', $kinds, true);
             return [
                 'ok' => false,
-                'error' => 'The robot did not accept any save command. Original is on the Pi: ' . basename($restoreFile),
+                'error' => $pathway
+                    ? 'This edit is a pathway. The official SDK has no map-write command, and save_path_area / save_pathway / save_path got no reply. Click Listen, then rename that pathway in the official app (not a mowing area). Save will use the command it hears. Original is on the Pi: ' . basename($restoreFile)
+                    : 'The robot did not accept any save command. Original is on the Pi: ' . basename($restoreFile),
                 'restore_file' => basename($restoreFile),
                 'save_command' => $saveCmd,
                 'save_shape' => $saveShape,
@@ -630,7 +637,7 @@ final class YarboMapBackup
         ];
         foreach ($changes as $change) {
             $canonical = (string) ($change['canonical'] ?? 'areas');
-            foreach (self::saveCommandsFor($canonical) as $cmd) {
+            foreach ($this->saveCommandsFor($canonical) as $cmd) {
                 if ($onlyCmd !== null && $cmd !== $onlyCmd) {
                     continue;
                 }
@@ -795,13 +802,40 @@ final class YarboMapBackup
     /**
      * @return list<string>
      */
-    private static function saveCommandsFor(string $canonical): array
+    private function saveCommandsFor(string $canonical): array
     {
         return match ($canonical) {
-            'pathways' => self::SAVE_PATH_CMDS,
+            'pathways' => $this->pathwayCommands(),
             'areas' => [self::SAVE_AREA_CMD],
             default => [],
         };
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function pathwayCommands(): array
+    {
+        $heard = (new YarboMapCapture($this->projectRoot))->heardWriteCommands();
+        $pathLike = [];
+        foreach ($heard as $cmd) {
+            if ($cmd === self::SAVE_AREA_CMD) {
+                continue;
+            }
+            if (
+                str_contains($cmd, 'path')
+                || str_contains($cmd, 'channel')
+                || str_contains($cmd, 'road')
+                || str_contains($cmd, 'transit')
+            ) {
+                $pathLike[] = $cmd;
+            }
+        }
+        if ($pathLike !== []) {
+            return array_values(array_unique($pathLike));
+        }
+
+        return [self::SAVE_AREA_CMD];
     }
 
     /**
@@ -822,6 +856,12 @@ final class YarboMapBackup
                 continue;
             }
             $seen[$sig] = true;
+            if ($cmd === self::SAVE_AREA_CMD && $canonical === 'pathways') {
+                foreach (['path_area_list', 'pathway'] as $alias) {
+                    $shapes[] = ['name' => $alias . '-list', 'payload' => [$alias => [$zone]]];
+                }
+                continue;
+            }
             $aliases = match ($canonical) {
                 'pathways' => array_values(array_unique([$key, 'path_area_list'])),
                 'areas' => array_values(array_unique([$key, 'areas', 'area', 'clean_area_list'])),
@@ -1128,8 +1168,8 @@ final class YarboMapBackup
             return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
         if ($unchanged) {
-            return 'Robot map did not change. Pathway edits no longer use save_clean_area (that writes a mowing area, not the path). This save tries save_path_area / save_pathway / save_path. Original left in place ('
-                . $restoreFile . '). If it still does not move, click Listen and rename that pathway in the official app.' . $detail;
+            return 'Robot map did not change. The official SDK has no pathway write; save_clean_area only writes mowing areas. Click Listen, then rename that pathway in the official app. Original left in place ('
+                . $restoreFile . ').' . $detail;
         }
         if (!$readMap) {
             return 'Restore was sent, but get_map could not be read to verify. Check the official app. Original is on the Pi as '

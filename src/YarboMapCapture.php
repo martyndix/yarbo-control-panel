@@ -72,6 +72,34 @@ final class YarboMapCapture
         return $this->projectRoot . '/data/map-capture.log';
     }
 
+    public function heardWritesPath(): string
+    {
+        return $this->projectRoot . '/data/map-heard-writes.json';
+    }
+
+    /**
+     * Unpublished save/path commands heard by Listen, oldest first.
+     *
+     * @return list<string>
+     */
+    public function heardWriteCommands(): array
+    {
+        $path = $this->heardWritesPath();
+        if (!is_file($path)) {
+            return [];
+        }
+        $raw = json_decode((string) file_get_contents($path), true);
+        $commands = is_array($raw['commands'] ?? null) ? $raw['commands'] : [];
+        $out = [];
+        foreach ($commands as $name) {
+            if (is_string($name) && $name !== '') {
+                $out[] = $name;
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -219,6 +247,7 @@ final class YarboMapCapture
         $raw['via'] = $viaList;
         $raw['unknown_commands'] = $this->unknownCommands($app);
         $this->writeStatus($raw);
+        $this->rememberWriteCommand($command);
     }
 
     public function recordFeedbackTopic(string $topic): void
@@ -258,6 +287,11 @@ final class YarboMapCapture
         $raw['via'] = $via;
         $raw['unknown_commands'] = $this->unknownCommands($app);
         $this->writeStatus($raw);
+        foreach (array_keys($app) as $name) {
+            if (is_string($name)) {
+                $this->rememberWriteCommand($name);
+            }
+        }
     }
 
     /**
@@ -380,5 +414,43 @@ final class YarboMapCapture
         if (!is_dir($dir)) {
             mkdir($dir, 0775, true);
         }
+    }
+
+    private function rememberWriteCommand(string $command): void
+    {
+        $command = trim($command);
+        if ($command === '' || str_starts_with($command, 'get_') || str_starts_with($command, 'read_')) {
+            return;
+        }
+        $skip = [
+            'save_global_params',
+            'upload_cloud_map_backup',
+            'set_working_state',
+            'set_sound_param',
+            'set_person_detect',
+            'set_follow_state',
+            'set_child_lock',
+            'set_map_obstacle_switch',
+        ];
+        if (in_array($command, $skip, true)) {
+            return;
+        }
+        $looksWrite = str_starts_with($command, 'save_')
+            || str_contains($command, 'path')
+            || str_contains($command, '_area')
+            || $command === 'map_recovery';
+        if (!$looksWrite) {
+            return;
+        }
+        $existing = $this->heardWriteCommands();
+        if (in_array($command, $existing, true)) {
+            return;
+        }
+        $existing[] = $command;
+        $this->ensureDataDir();
+        file_put_contents(
+            $this->heardWritesPath(),
+            json_encode(['commands' => $existing], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+        );
     }
 }

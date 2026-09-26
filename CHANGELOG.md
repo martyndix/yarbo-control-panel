@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.52] - 2026-09-26
+
+### Fixed
+- **Save to robot** no longer probes `save_path_area` / `save_pathway` / `save_path` (the robot never replies; the official [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK) has no map-write command). Pathway Save uses a Listen-captured command when one exists, otherwise `save_clean_area` with path-only wraps. If that still does not write the path, the panel asks you to Listen while renaming that pathway.
+
 ## [2.0.51] - 2026-09-26
 
 ### Fixed

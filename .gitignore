@@ -27,6 +27,7 @@
 /data/map-capture.stop
 /data/map-capture.log
 /data/map-capture-cloud.json
+/data/map-heard-writes.json
 /data/metrics-ping.log
 /data/powerwall-config.json
 /data/powerwall-cache.json
