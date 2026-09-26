@@ -459,7 +459,7 @@ After a successful load, zones are **cached in the browser** so a page refresh r
 | **Export GeoJSON** | Download the currently loaded zones |
 | **Edit map (draft)** | Click one zone, then drag its vertices. The original line is hidden. Do not edit every path at once |
 | **Export draft** | Download edited draft GeoJSON |
-| **Save to robot** | Restores an edited backup via `map_recovery` after **Load map backups**. Robot must be docked. A Pi copy of the original is restored if read-back fails |
+| **Save to robot** | Uploads the edited backup (`upload_cloud_map_backup`) then restores that slot by id (`map_recovery`). Robot must be docked. A Pi copy of the original is restored if read-back fails |
 
 To change zones: **Load map backups** (this draws the backup), edit vertices, dock, then **Save to robot**. **Load saved mowing areas** is still the live `get_map` view.
 
@@ -695,7 +695,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.44** (2026-09-26).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.45** (2026-09-26).
 
 ---
 

@@ -1743,7 +1743,7 @@ async function restoreMapBackupDraft() {
         return;
     }
     if (els.mapSaveRobot) els.mapSaveRobot.disabled = true;
-    setMapLoading(true, 'Restoring map and verifying');
+    setMapLoading(true, 'Uploading edited backup, then restoring');
     try {
         const res = await fetch('/api/map_backup.php', {
             method: 'POST',

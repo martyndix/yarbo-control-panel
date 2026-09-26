@@ -265,7 +265,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn btn-secondary" id="map-listen-save">Listen for map save</button>
                 <button type="button" class="btn btn-secondary" id="map-load-backups">Load map backups</button>
             </div>
-            <p id="map-listen-status" class="map-areas-status">Listen captures MQTT command names. Load map backups extracts a backup onto this map, then Save to robot restores it (docked, with confirm).</p>
+            <p id="map-listen-status" class="map-areas-status">Listen captures MQTT command names. Load map backups extracts a backup onto this map, then Save to robot uploads it and restores that slot (docked, with confirm).</p>
             <p id="map-edit-tip" class="map-edit-tip hidden">Click one zone (or its Edit button), then drag those vertices. The original line should disappear. Do not edit every path at once.</p>
             <div class="map-wrap">
                 <div id="map" class="map"></div>
@@ -295,7 +295,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             title="Extract a backup first, then save while docked"
                         >Save to robot</button>
                     </div>
-                    <p class="hint map-editor-hint">Load map backups (it draws that backup), edit vertices, then Save to robot while docked. A copy of the original backup is kept on the Pi.</p>
+                    <p class="hint map-editor-hint">Load map backups (it draws that backup), edit vertices, then Save to robot while docked. Save stores the edited file, then restores that backup by id. A copy of the original is kept on the Pi.</p>
                 </details>
             </div>
         </section>

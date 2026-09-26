@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.45] - 2026-09-26
+
+### Fixed
+- **Save to robot** now stores the patched backup with `upload_cloud_map_backup`, then `map_recovery` by id. Sending edited vertices inside `map_recovery` ACKs (`state 0`) and leaves live `get_map` unchanged. If the stored slot is not replaced, Save says so instead of claiming the robot moved.
+
 ## [2.0.44] - 2026-09-26
 
 ### Fixed

@@ -144,6 +144,9 @@ def _feedback_matches_command(cmd: str, data: dict[str, Any]) -> bool:
         cmd.replace("backup", "buckup"),
         "get_map_backup_from_id",
         "get_map_buckup_from_id",
+        "upload_cloud_map_backup",
+        "upload_cloud_map_buckup",
+        "map_recovery",
     }
     return isinstance(topic, str) and topic in aliases
 
