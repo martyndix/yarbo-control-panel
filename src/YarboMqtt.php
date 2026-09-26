@@ -146,22 +146,50 @@ final class YarboMqtt
     /**
      * Publish a command and wait for matching data_feedback response.
      *
+     * @param list<string> $acceptTopics Extra data_feedback topic names to accept
      * @return array<string, mixed>|null Full decoded feedback envelope, or null on timeout.
      */
     public function requestDataFeedback(
         string $cmd,
         array $payload = [],
         float $timeoutSeconds = 5.0,
-        bool $acquireController = true
+        bool $acquireController = true,
+        array $acceptTopics = [],
+        bool $acceptMapShaped = false,
     ): ?array {
         $feedbackTopic = $this->topic('device', 'data_feedback');
         /** @var array<string, mixed>|null $feedbackResponse */
         $feedbackResponse = null;
+        /** @var array<string, mixed>|null $maybe */
+        $maybe = null;
+        $wanted = $acceptTopics !== [] ? $acceptTopics : [$cmd];
+        if (!in_array($cmd, $wanted, true)) {
+            $wanted[] = $cmd;
+        }
+        $gate = ['published' => false];
 
-        $this->client->subscribe($feedbackTopic, function (string $topic, string $message) use ($cmd, &$feedbackResponse): void {
-            $decoded = YarboCodec::decode($message);
-            if (($decoded['topic'] ?? '') === $cmd) {
+        $this->client->subscribe($feedbackTopic, function (string $topic, string $message) use (
+            $wanted,
+            $acceptMapShaped,
+            &$feedbackResponse,
+            &$maybe,
+            &$gate
+        ): void {
+            try {
+                $decoded = YarboCodec::decode($message);
+            } catch (\Throwable) {
+                return;
+            }
+            if (!is_array($decoded)) {
+                return;
+            }
+            $name = (string) ($decoded['topic'] ?? '');
+            if ($name !== '' && in_array($name, $wanted, true)) {
                 $feedbackResponse = $decoded;
+                return;
+            }
+            if ($gate['published'] && $acceptMapShaped && $feedbackResponse === null && self::envelopeLooksLikeAppMap($decoded)) {
+                $maybe = $decoded;
             }
         }, 0);
 
@@ -171,6 +199,7 @@ final class YarboMqtt
             $this->acquireController();
         }
 
+        $gate['published'] = true;
         $this->publish($cmd, $payload);
 
         $loopStarted = microtime(true);
@@ -179,11 +208,24 @@ final class YarboMqtt
             $this->client->loopOnce($loopStarted, true);
         }
 
-        if (!is_array($feedbackResponse)) {
-            return null;
+        if (is_array($feedbackResponse)) {
+            return $feedbackResponse;
         }
 
-        return $feedbackResponse;
+        return is_array($maybe) ? $maybe : null;
+    }
+
+    /**
+     * @param array<string, mixed> $envelope
+     */
+    private static function envelopeLooksLikeAppMap(array $envelope): bool
+    {
+        $data = $envelope['data'] ?? $envelope;
+        if (is_string($data)) {
+            $data = YarboCodec::decodePayloadField($data);
+        }
+
+        return is_array($data) && YarboMap::isAppMap($data);
     }
 
     /**

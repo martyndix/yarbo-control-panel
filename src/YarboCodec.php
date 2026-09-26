@@ -65,14 +65,19 @@ final class YarboCodec
      */
     public static function decode(string $data): array
     {
-        $decoded = @gzuncompress($data);
-        if ($decoded !== false) {
-            return json_decode($decoded, true, 512, JSON_THROW_ON_ERROR);
-        }
-
-        $zlibDecoded = @zlib_decode($data);
-        if ($zlibDecoded !== false) {
-            return json_decode($zlibDecoded, true, 512, JSON_THROW_ON_ERROR);
+        foreach (['gzuncompress', 'zlib_decode', 'gzdecode'] as $fn) {
+            $decoded = @$fn($data);
+            if ($decoded === false) {
+                continue;
+            }
+            try {
+                $json = json_decode($decoded, true, 512, JSON_THROW_ON_ERROR);
+                if (is_array($json)) {
+                    return $json;
+                }
+            } catch (\JsonException) {
+                continue;
+            }
         }
 
         try {

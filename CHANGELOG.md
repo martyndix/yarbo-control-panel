@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.40] - 2026-09-26
+
+### Fixed
+- **Load map backups** fetches the backup *file* (`id` only, 30s, LAN topic aliases) instead of treating the live `get_map` as a writable backup. `map_recovery` of get_map ACKs and does not change vertices. Save stays off until that file is in hand; the live map is still drawn for viewing.
+
 ## [2.0.39] - 2026-09-26
 
 ### Fixed

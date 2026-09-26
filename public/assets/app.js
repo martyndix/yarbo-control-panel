@@ -1569,7 +1569,7 @@ async function loadMapBackups() {
             }
             updateMapAreasStatus(`Map backup loaded (${features.length} feature${features.length === 1 ? '' : 's'}).`);
         }
-        showToast(data.compatible ? 'Backup extracted. Edit these zones, then Save to robot while docked.' : (data.message || 'Backup is not get_map-shaped'), data.compatible ? 'success' : 'error');
+        showToast(data.compatible ? 'Backup file extracted. Edit these zones, then Save to robot while docked.' : (data.message || 'Backup file was not in the list'), data.compatible ? 'success' : 'error');
     } catch (err) {
         setMapSaveEnabled(false);
         showToast(err.message || 'Could not load map backups', 'error');
