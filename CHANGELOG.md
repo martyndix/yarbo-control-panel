@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.35] - 2026-09-26
+
+### Added
+- **Load map backups** on the Location Map: reads `get_all_map_backup` / `get_map_buckup_from_id` (read-only). If the blob matches `get_map`, **Save to robot** restores an edited copy via `map_recovery` while docked. Original backup is saved on the Pi and put back if read-back fails.
+
 ## [2.0.34] - 2026-09-26
 
 ### Added

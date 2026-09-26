@@ -208,6 +208,47 @@ final class YarboMap
     }
 
     /**
+     * Largest vertex move (metres) between two app-format maps. Missing lists count as 0.
+     *
+     * @param array<string, mixed> $a
+     * @param array<string, mixed> $b
+     */
+    public static function maxRangeDelta(array $a, array $b): float
+    {
+        $max = 0.0;
+        foreach (['areas', 'nogozones', 'novisionzones', 'elec_fence', 'pathways', 'sidewalks', 'deadends'] as $list) {
+            $left = is_array($a[$list] ?? null) ? $a[$list] : [];
+            $right = is_array($b[$list] ?? null) ? $b[$list] : [];
+            $n = min(count($left), count($right));
+            for ($i = 0; $i < $n; $i++) {
+                $r1 = is_array($left[$i]['range'] ?? null) ? $left[$i]['range'] : [];
+                $r2 = is_array($right[$i]['range'] ?? null) ? $right[$i]['range'] : [];
+                $p = min(count($r1), count($r2));
+                for ($j = 0; $j < $p; $j++) {
+                    $x1 = is_numeric($r1[$j]['x'] ?? null) ? (float) $r1[$j]['x'] : 0.0;
+                    $y1 = is_numeric($r1[$j]['y'] ?? null) ? (float) $r1[$j]['y'] : 0.0;
+                    $x2 = is_numeric($r2[$j]['x'] ?? null) ? (float) $r2[$j]['x'] : 0.0;
+                    $y2 = is_numeric($r2[$j]['y'] ?? null) ? (float) $r2[$j]['y'] : 0.0;
+                    $max = max($max, hypot($x1 - $x2, $y1 - $y2));
+                }
+            }
+        }
+
+        return $max;
+    }
+
+    public static function isAppMap(array $data): bool
+    {
+        foreach (['areas', 'pathways', 'nogozones', 'novisionzones', 'elec_fence', 'sidewalks', 'deadends'] as $key) {
+            if (isset($data[$key]) && is_array($data[$key])) {
+                return true;
+            }
+        }
+
+        return isset($data['chargingData']) && is_array($data['chargingData']);
+    }
+
+    /**
      * @return array{0: string, 1: int}|null
      */
     private static function parseMapPath(string $path): ?array

@@ -459,13 +459,13 @@ After a successful load, zones are **cached in the browser** so a page refresh r
 | **Export GeoJSON** | Download the currently loaded zones |
 | **Edit map (draft)** | Opens Leaflet.draw tools on a local draft copy — does not change the robot map |
 | **Export draft** | Download edited draft GeoJSON |
-| **Save to robot** | Disabled until map write MQTT commands are verified |
+| **Save to robot** | Restores an edited backup via `map_recovery` after **Load map backups**. Robot must be docked. A Pi copy of the original is restored if read-back fails |
 
-To change zones on the robot today, use the **official Yarbo app**. The panel can load and inspect maps; saving back requires reverse-engineering undocumented MQTT write commands.
+To change zones: **Load saved mowing areas**, **Load map backups**, edit vertices, dock, then **Save to robot**.
 
 ### Discovering map write commands
 
-On the Location Map, click **Listen for map save**, then save a map in the official Yarbo app (or Yardstick) within two minutes. The panel lists command names only — it does not change the robot map. Enable **Settings → cloud fallback** first if the phone app talks to Yarbo’s cloud rather than your LAN broker.
+On the Location Map, **Load map backups** extracts a backup (command names came from Listen while restoring Previous Maps). **Listen for map save** still records unpublished MQTT names. Enable **Settings → cloud fallback** if the phone uses Yarbo’s cloud.
 
 CLI equivalents (optional):
 
@@ -695,7 +695,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.34** (2026-09-26).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.35** (2026-09-26).
 
 ---
 

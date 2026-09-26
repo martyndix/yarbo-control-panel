@@ -37,6 +37,9 @@ final class YarboMapCapture
         'cmd_vel',
         'get_plan_feedback',
         'emergency_unlock',
+        'battery_cell_temp_msg',
+        'set_auto_mapping_state',
+        'get_controller',
     ];
 
     public function __construct(private readonly string $projectRoot)

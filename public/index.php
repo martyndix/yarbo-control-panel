@@ -263,8 +263,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 </label>
                 <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas</button>
                 <button type="button" class="btn btn-secondary" id="map-listen-save">Listen for map save</button>
+                <button type="button" class="btn btn-secondary" id="map-load-backups">Load map backups</button>
             </div>
-            <p id="map-listen-status" class="map-areas-status">To find how Yardstick writes maps, click Listen, then save a map in the official Yarbo app. This does not change the robot map.</p>
+            <p id="map-listen-status" class="map-areas-status">Listen captures MQTT command names. Load map backups extracts a backup to edit locally, then Save to robot restores it (docked, with confirm).</p>
             <p id="map-edit-tip" class="map-edit-tip hidden">Drag vertices to reshape zones.</p>
             <div class="map-wrap">
                 <div id="map" class="map"></div>
@@ -291,10 +292,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             class="btn btn-secondary"
                             id="map-save-robot"
                             disabled
-                            title="Map write MQTT commands are not yet verified — use the Yarbo app or export a draft"
+                            title="Extract a backup first, then save while docked"
                         >Save to robot</button>
                     </div>
-                    <p class="hint map-editor-hint">Drag polygon corners to adjust boundaries. Changes are local until Save to robot is supported.</p>
+                    <p class="hint map-editor-hint">Load map backups, edit vertices, then Save to robot while docked. A copy of the original backup is kept on the Pi.</p>
                 </details>
             </div>
         </section>

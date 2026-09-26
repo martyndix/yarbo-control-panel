@@ -186,6 +186,7 @@ const els = {
     mapLoadAreas: document.getElementById('map-load-areas'),
     mapListenSave: document.getElementById('map-listen-save'),
     mapListenStatus: document.getElementById('map-listen-status'),
+    mapLoadBackups: document.getElementById('map-load-backups'),
     mapLoading: document.getElementById('map-loading'),
     mapLoadingText: document.getElementById('map-loading-text'),
     mapEditTip: document.getElementById('map-edit-tip'),
@@ -335,6 +336,7 @@ let mapViewSaveTimer = null;
 let mapLoadingTimer = null;
 let mapLoadingStartedAt = 0;
 let mapListenTimer = null;
+let mapBackupCompatible = false;
 let lightsOn = false;
 let holdController = false;
 let controlAwake = false;
@@ -1067,6 +1069,7 @@ function setMapLoading(active, message = 'Loading saved map areas') {
         if (els.mapDataSource) els.mapDataSource.disabled = true;
         if (els.mapEditToggle) els.mapEditToggle.disabled = true;
         if (els.mapLoadAreas) els.mapLoadAreas.disabled = true;
+        if (els.mapLoadBackups) els.mapLoadBackups.disabled = true;
         return;
     }
 
@@ -1077,6 +1080,7 @@ function setMapLoading(active, message = 'Loading saved map areas') {
     if (els.mapDataSource) els.mapDataSource.disabled = false;
     if (els.mapEditToggle) els.mapEditToggle.disabled = false;
     if (els.mapLoadAreas) els.mapLoadAreas.disabled = false;
+    if (els.mapLoadBackups) els.mapLoadBackups.disabled = false;
 }
 
 function setAreasLayerVisible(visible) {
@@ -1487,7 +1491,107 @@ function setMapEditMode(enabled) {
 }
 
 function saveMapDraft() {
-    showToast('Map write MQTT commands not yet verified — export draft or use Yarbo app', 'error');
+    restoreMapBackupDraft();
+}
+
+function currentMapDraftCollection() {
+    if (mapEditMode) {
+        const draft = draftLayerToGeoJson();
+        if (draft.features.length) {
+            return draft;
+        }
+    }
+    return { type: 'FeatureCollection', features: loadedMapFeatures };
+}
+
+function setMapSaveEnabled(enabled) {
+    mapBackupCompatible = Boolean(enabled);
+    if (!els.mapSaveRobot) return;
+    els.mapSaveRobot.disabled = !mapBackupCompatible;
+    els.mapSaveRobot.title = mapBackupCompatible
+        ? 'Restore the edited backup to the robot (must be docked)'
+        : 'Load map backups first';
+}
+
+function formatBackupCounts(summary) {
+    const counts = summary?.counts || {};
+    return Object.entries(counts)
+        .filter(([, n]) => n > 0)
+        .map(([key, n]) => `${key} ${n}`)
+        .join(', ') || 'no zones';
+}
+
+async function loadMapBackups() {
+    setMapLoading(true, 'Loading map backups');
+    try {
+        const res = await fetch('/api/map_backup.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'list' }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) {
+            setMapSaveEnabled(false);
+            showToast(data.error || 'Could not load map backups', 'error');
+            if (els.mapListenStatus) els.mapListenStatus.textContent = data.error || 'Could not load map backups';
+            return;
+        }
+        setMapSaveEnabled(Boolean(data.compatible));
+        const counts = data.summary ? formatBackupCounts(data.summary) : '';
+        const ids = Array.isArray(data.backups)
+            ? data.backups.map((row) => row.id).filter((id) => id != null).join(', ')
+            : '';
+        const extra = [counts, ids ? `ids ${ids}` : ''].filter(Boolean).join('. ');
+        const message = `${data.message || 'Backup read finished.'}${extra ? ` ${extra}` : ''}`;
+        if (els.mapListenStatus) els.mapListenStatus.textContent = message;
+        showToast(data.compatible ? 'Backup extracted. Edit, then Save to robot while docked.' : (data.message || 'Backup is not get_map-shaped'), data.compatible ? 'success' : 'error');
+    } catch (err) {
+        setMapSaveEnabled(false);
+        showToast(err.message || 'Could not load map backups', 'error');
+    } finally {
+        setMapLoading(false);
+    }
+}
+
+async function restoreMapBackupDraft() {
+    if (!mapBackupCompatible) {
+        showToast('Load map backups first', 'error');
+        return;
+    }
+    const collection = currentMapDraftCollection();
+    if (!collection.features.length) {
+        showToast('Load saved mowing areas (or edit a draft) first', 'error');
+        return;
+    }
+    if (!onChargePad) {
+        showToast('Dock the robot before restoring a map', 'error');
+        return;
+    }
+    if (!window.confirm('Replace the map on the robot with this draft? Keep it docked. The original backup is saved on the Pi and restored automatically if read-back fails.')) {
+        return;
+    }
+    if (els.mapSaveRobot) els.mapSaveRobot.disabled = true;
+    setMapLoading(true, 'Restoring map backup');
+    try {
+        const res = await fetch('/api/map_backup.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'restore',
+                confirm: true,
+                geojson: collection,
+            }),
+        });
+        const data = await parseJsonResponse(res);
+        const text = data.message || data.error || 'Restore finished';
+        if (els.mapListenStatus) els.mapListenStatus.textContent = text;
+        showToast(text, data.ok ? 'success' : 'error');
+    } catch (err) {
+        showToast(err.message || 'Restore failed', 'error');
+    } finally {
+        setMapLoading(false);
+        setMapSaveEnabled(mapBackupCompatible);
+    }
 }
 
 function setMapLayer(layer) {
@@ -5678,8 +5782,22 @@ document.getElementById('map-load-areas')?.addEventListener('click', (e) => {
 document.getElementById('map-listen-save')?.addEventListener('click', () => {
     toggleMapListen();
 });
+document.getElementById('map-load-backups')?.addEventListener('click', () => {
+    loadMapBackups();
+});
 if (document.getElementById('map-listen-save')) {
     pollMapListen();
+}
+if (document.getElementById('map-load-backups')) {
+    fetch('/api/map_backup.php', { cache: 'no-store' })
+        .then((res) => parseJsonResponse(res))
+        .then((data) => {
+            setMapSaveEnabled(Boolean(data.compatible));
+            if (data.loaded && els.mapListenStatus && data.summary) {
+                els.mapListenStatus.textContent = `Last extracted backup (${formatBackupCounts(data.summary)}). Edit, then Save to robot while docked.`;
+            }
+        })
+        .catch(() => {});
 }
 
 document.getElementById('map-edit-toggle')?.addEventListener('click', () => {

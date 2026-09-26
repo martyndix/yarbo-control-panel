@@ -19,6 +19,8 @@
 /data/install-id.json
 /data/metrics-last.json
 /data/map-last.json
+/data/map-backup-last.json
+/data/map-restore-*.json
 /data/map-capture.json
 /data/map-capture.json.tmp
 /data/map-capture.stop
