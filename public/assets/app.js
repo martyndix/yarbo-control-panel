@@ -184,6 +184,8 @@ const els = {
     mapExportDraft: document.getElementById('map-export-draft'),
     mapSaveRobot: document.getElementById('map-save-robot'),
     mapLoadAreas: document.getElementById('map-load-areas'),
+    mapListenSave: document.getElementById('map-listen-save'),
+    mapListenStatus: document.getElementById('map-listen-status'),
     mapLoading: document.getElementById('map-loading'),
     mapLoadingText: document.getElementById('map-loading-text'),
     mapEditTip: document.getElementById('map-edit-tip'),
@@ -332,6 +334,7 @@ let mapEditMode = false;
 let mapViewSaveTimer = null;
 let mapLoadingTimer = null;
 let mapLoadingStartedAt = 0;
+let mapListenTimer = null;
 let lightsOn = false;
 let holdController = false;
 let controlAwake = false;
@@ -1826,6 +1829,89 @@ async function loadSavedAreas(button = null) {
         showToast(err.message || 'Network error', 'error');
     } finally {
         setMapLoading(false);
+    }
+}
+
+function renderMapListenStatus(data) {
+    const el = els.mapListenStatus;
+    const btn = els.mapListenSave;
+    if (!el || !data) return;
+    const state = data.state || 'idle';
+    const unknown = Array.isArray(data.unknown_commands) ? data.unknown_commands : [];
+    const commands = data.app_commands && typeof data.app_commands === 'object'
+        ? Object.keys(data.app_commands)
+        : [];
+    if (state === 'listening') {
+        el.textContent = data.message || `Listening… ${data.remaining_s || 0}s left. Save a map in the Yarbo app now.`;
+        if (btn) btn.textContent = 'Stop listening';
+        return;
+    }
+    if (btn) btn.textContent = 'Listen for map save';
+    if (state === 'done') {
+        let text = data.message || 'Listen finished.';
+        if (unknown.length) {
+            text = `Heard unpublished command: ${unknown.join(', ')}. Leave this on screen.`;
+        } else if (commands.length) {
+            text = `${data.message || 'Listen finished.'} Commands: ${commands.join(', ')}.`;
+        }
+        el.textContent = text;
+        return;
+    }
+    if (state === 'error') {
+        el.textContent = data.error || data.message || 'Listen failed.';
+        return;
+    }
+}
+
+function scheduleMapListenPoll(state) {
+    clearTimeout(mapListenTimer);
+    mapListenTimer = null;
+    if (state === 'listening') {
+        mapListenTimer = setTimeout(() => {
+            pollMapListen();
+        }, 1000);
+    }
+}
+
+async function pollMapListen() {
+    if (!els.mapListenSave) return;
+    try {
+        const res = await fetch('/api/map_capture.php', { cache: 'no-store' });
+        const data = await parseJsonResponse(res);
+        renderMapListenStatus(data);
+        scheduleMapListenPoll(data.state);
+    } catch (err) {
+        if (els.mapListenStatus) {
+            els.mapListenStatus.textContent = err.message || 'Could not check listen status.';
+        }
+        if (els.mapListenSave?.textContent === 'Stop listening') {
+            scheduleMapListenPoll('listening');
+        }
+    }
+}
+
+async function toggleMapListen() {
+    const btn = els.mapListenSave;
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/map_capture.php', { cache: 'no-store' });
+        const current = await parseJsonResponse(res);
+        const action = current.state === 'listening' ? 'stop' : 'start';
+        const start = await fetch('/api/map_capture.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action }),
+        });
+        const data = await parseJsonResponse(start);
+        renderMapListenStatus(data);
+        scheduleMapListenPoll(data.state);
+        if (action === 'start' && data.state === 'listening') {
+            showToast('Listening for 2 minutes. Save a map in the Yarbo app or Yardstick now.', 'success');
+        }
+    } catch (err) {
+        showToast(err.message || 'Could not start listen', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -5589,6 +5675,12 @@ document.getElementById('camera-recheck')?.addEventListener('click', async (e) =
 document.getElementById('map-load-areas')?.addEventListener('click', (e) => {
     loadSavedAreas(e.currentTarget);
 });
+document.getElementById('map-listen-save')?.addEventListener('click', () => {
+    toggleMapListen();
+});
+if (document.getElementById('map-listen-save')) {
+    pollMapListen();
+}
 
 document.getElementById('map-edit-toggle')?.addEventListener('click', () => {
     setMapEditMode(!mapEditMode);

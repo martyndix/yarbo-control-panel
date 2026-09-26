@@ -18,10 +18,14 @@ $commands = [
 $writeCandidates = [
     'set_map',
     'save_map',
+    'save_current_map',
     'write_clean_area',
     'set_clean_area',
-    'del_map',
     'update_map',
+    'update_clean_area',
+    'write_map',
+    'upload_map',
+    'map_update',
 ];
 
 $probeWrites = in_array('--probe-writes', $argv, true);

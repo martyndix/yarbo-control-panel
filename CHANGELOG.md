@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.34] - 2026-09-26
+
+### Added
+- **Listen for map save** on the Location Map: a 2-minute background listen for the unpublished MQTT command Yardstick uses. Save a map in the official app while it runs. Does not change the robot map. **Save to robot** stays disabled.
+
 ## [2.0.33] - 2026-09-25
 
 ### Fixed

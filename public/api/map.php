@@ -6,6 +6,7 @@ require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
+use Yarbo\YarboCodec;
 use Yarbo\YarboMap;
 
 $commands = [
@@ -96,6 +97,42 @@ function load_map_cloud(YarboCloud $cloud, string $serial): array
     return ['responses' => $responses, 'via' => 'cloud'];
 }
 
+/**
+ * Cache the last decoded get_map payload for encode/round-trip. Never sent to the robot.
+ *
+ * @param array<string, mixed> $responses
+ */
+function persist_last_map(string $projectRoot, array $responses): void
+{
+    $envelope = $responses['get_map'] ?? null;
+    if (!is_array($envelope)) {
+        return;
+    }
+
+    $data = YarboCodec::decodePayloadField($envelope['data'] ?? null);
+    if ($data === []) {
+        $data = YarboCodec::decodePayloadField($envelope);
+    }
+    if ($data === []) {
+        return;
+    }
+
+    $dir = $projectRoot . '/data';
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        return;
+    }
+
+    $payload = json_encode([
+        'saved_at' => gmdate('c'),
+        'data' => $data,
+    ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    $tmp = $dir . '/map-last.json.tmp';
+    if (file_put_contents($tmp, $payload) === false) {
+        return;
+    }
+    rename($tmp, $dir . '/map-last.json');
+}
+
 try {
     $result = null;
     $note = null;
@@ -144,6 +181,13 @@ try {
     $responses = $result['responses'] ?? [];
     $gpsRef = $responses['read_gps_ref'] ?? null;
     $normalized = YarboMap::normalize($responses, is_array($gpsRef) ? $gpsRef : null);
+    if (($normalized['status'] ?? '') === 'ready') {
+        try {
+            persist_last_map($projectRoot, $responses);
+        } catch (Throwable) {
+            // Cache is optional; map load still succeeds.
+        }
+    }
 
     json_response([
         'ok' => true,

@@ -41,8 +41,7 @@ if (!is_dir($dumpDir) && !mkdir($dumpDir, 0775, true) && !is_dir($dumpDir)) {
 }
 
 $topics = [
-    "snowbot/{$sn}/device/data_feedback",
-    "snowbot/{$sn}/app/+",
+    "snowbot/{$sn}/#",
 ];
 
 $timestamp = gmdate('Ymd_His');
@@ -59,12 +58,17 @@ $client->connect(
 );
 
 $count = 0;
-$logLine = static function (array $entry) use ($outPath, &$count): void {
+$appCommands = [];
+$logLine = static function (array $entry) use ($outPath, &$count, &$appCommands): void {
     $count++;
     file_put_contents($outPath, json_encode($entry, JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX);
     $cmd = $entry['command'] ?? $entry['feedback_topic'] ?? $entry['topic'];
     $size = $entry['payload_bytes'] ?? 0;
     echo '[' . $entry['captured_at'] . "] {$cmd} ({$size} bytes)\n";
+    if (($entry['direction'] ?? '') === 'app_publish' && is_string($entry['command'] ?? null)) {
+        $name = (string) $entry['command'];
+        $appCommands[$name] = ($appCommands[$name] ?? 0) + 1;
+    }
 };
 
 foreach ($topics as $topic) {
@@ -85,9 +89,10 @@ foreach ($topics as $topic) {
             $entry['direction'] = 'device_feedback';
             $entry['feedback_topic'] = is_string($decoded['topic'] ?? null) ? $decoded['topic'] : null;
             $entry['state'] = $decoded['state'] ?? null;
-            if (isset($decoded['data']) && is_array($decoded['data'])) {
-                $entry['data_keys'] = array_keys($decoded['data']);
-            }
+        }
+
+        if (isset($decoded['data']) && is_array($decoded['data'])) {
+            $entry['data_keys'] = array_keys($decoded['data']);
         }
 
         if ($payloadBytes <= 4096) {
@@ -112,3 +117,11 @@ while (microtime(true) < $deadline) {
 $client->disconnect();
 
 echo "\nCapture complete. {$count} message(s) written to:\n{$outPath}\n";
+if ($appCommands === []) {
+    echo "No app publishes seen. If you saved from the phone app, it may have used cloud MQTT, not this LAN broker.\n";
+} else {
+    echo "App commands:\n";
+    foreach ($appCommands as $name => $times) {
+        echo " - {$name} x{$times}\n";
+    }
+}

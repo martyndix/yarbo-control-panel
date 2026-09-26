@@ -122,6 +122,243 @@ final class YarboMap
     }
 
     /**
+     * Patch original get_map data with a GeoJSON draft. Keeps every original
+     * zone key and only replaces range / charging points. Does not talk to the robot.
+     *
+     * @param array<string, mixed> $originalMap
+     * @param array{type?: string, features?: array<int, mixed>} $collection
+     * @return array{ok: bool, map?: array<string, mixed>, errors: list<string>, max_delta_m: float}
+     */
+    public static function encodeDraft(array $originalMap, array $collection): array
+    {
+        $errors = [];
+        $encoded = json_decode(json_encode($originalMap, JSON_THROW_ON_ERROR), true);
+        if (!is_array($encoded)) {
+            return ['ok' => false, 'errors' => ['Could not copy the original map'], 'max_delta_m' => 0.0];
+        }
+
+        $features = is_array($collection['features'] ?? null) ? $collection['features'] : [];
+        $maxDelta = 0.0;
+
+        foreach ($features as $index => $feature) {
+            if (!is_array($feature)) {
+                continue;
+            }
+            $path = (string) ($feature['properties']['path'] ?? '');
+            $parsed = self::parseMapPath($path);
+            if ($parsed === null) {
+                $errors[] = sprintf('Feature %d is missing a map path (areas[0], pathways[1], …)', $index);
+                continue;
+            }
+            [$list, $listIndex] = $parsed;
+
+            if ($list === 'chargingData') {
+                $zone = is_array($encoded['chargingData'] ?? null) ? $encoded['chargingData'] : null;
+                if (!is_array($zone)) {
+                    $errors[] = 'Draft charging point has no matching chargingData on the original map';
+                    continue;
+                }
+                $result = self::encodeChargingPoint($zone, $feature);
+                if ($result['error'] !== null) {
+                    $errors[] = $result['error'];
+                    continue;
+                }
+                $encoded['chargingData'] = $result['zone'];
+                $maxDelta = max($maxDelta, $result['delta_m']);
+                continue;
+            }
+
+            if ($list === 'allchargingData') {
+                $zones = is_array($encoded['allchargingData'] ?? null) ? $encoded['allchargingData'] : [];
+                if (!isset($zones[$listIndex]) || !is_array($zones[$listIndex])) {
+                    $errors[] = sprintf('Draft charging station %s is not on the original map', $path);
+                    continue;
+                }
+                $result = self::encodeChargingPoint($zones[$listIndex], $feature);
+                if ($result['error'] !== null) {
+                    $errors[] = $result['error'];
+                    continue;
+                }
+                $encoded['allchargingData'][$listIndex] = $result['zone'];
+                $maxDelta = max($maxDelta, $result['delta_m']);
+                continue;
+            }
+
+            $zones = is_array($encoded[$list] ?? null) ? $encoded[$list] : [];
+            if (!isset($zones[$listIndex]) || !is_array($zones[$listIndex])) {
+                $errors[] = sprintf('Draft zone %s is not on the original map', $path);
+                continue;
+            }
+            $kind = (string) ($feature['properties']['kind'] ?? ($feature['geometry']['type'] ?? ''));
+            $isLine = $kind === 'line' || $kind === 'LineString';
+            $result = self::encodeZoneRange($zones[$listIndex], $feature, $isLine);
+            if ($result['error'] !== null) {
+                $errors[] = $path . ': ' . $result['error'];
+                continue;
+            }
+            $encoded[$list][$listIndex] = $result['zone'];
+            $maxDelta = max($maxDelta, $result['delta_m']);
+        }
+
+        if ($errors !== []) {
+            return ['ok' => false, 'errors' => $errors, 'max_delta_m' => $maxDelta];
+        }
+
+        return ['ok' => true, 'map' => $encoded, 'errors' => [], 'max_delta_m' => $maxDelta];
+    }
+
+    /**
+     * @return array{0: string, 1: int}|null
+     */
+    private static function parseMapPath(string $path): ?array
+    {
+        if ($path === 'chargingData') {
+            return ['chargingData', 0];
+        }
+        if (preg_match('/^(areas|nogozones|novisionzones|elec_fence|pathways|sidewalks|deadends|allchargingData)\[(\d+)\]$/', $path, $matches)) {
+            return [$matches[1], (int) $matches[2]];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $zone
+     * @param array<string, mixed> $feature
+     * @return array{zone: array<string, mixed>, delta_m: float, error: ?string}
+     */
+    private static function encodeZoneRange(array $zone, array $feature, bool $isLine): array
+    {
+        $ref = YarboGeo::extractGpsRef($zone);
+        if ($ref === null) {
+            return ['zone' => $zone, 'delta_m' => 0.0, 'error' => 'zone has no GPS ref'];
+        }
+        $coords = self::featureCoordinates($feature, $isLine);
+        $min = $isLine ? 2 : 3;
+        if (count($coords) < $min) {
+            return ['zone' => $zone, 'delta_m' => 0.0, 'error' => 'not enough vertices'];
+        }
+
+        $original = is_array($zone['range'] ?? null) ? $zone['range'] : [];
+        $range = [];
+        $maxDelta = 0.0;
+        foreach ($coords as $i => $position) {
+            $lon = (float) $position[0];
+            $lat = (float) $position[1];
+            [$x, $y] = YarboGeo::gpsToLocal($lat, $lon, $ref['latitude'], $ref['longitude']);
+            $point = is_array($original[$i] ?? null) ? $original[$i] : [];
+            $oldX = is_numeric($point['x'] ?? null) ? (float) $point['x'] : $x;
+            $oldY = is_numeric($point['y'] ?? null) ? (float) $point['y'] : $y;
+            $maxDelta = max($maxDelta, hypot($x - $oldX, $y - $oldY));
+            $point['x'] = $x;
+            $point['y'] = $y;
+            $range[] = $point;
+        }
+
+        $origClosed = self::rangeIsClosed($original);
+        $newClosed = self::rangeIsClosed($range);
+        if ($origClosed && !$newClosed && $range !== []) {
+            $closing = is_array($original[count($original) - 1] ?? null) ? $original[count($original) - 1] : [];
+            $closing['x'] = $range[0]['x'];
+            $closing['y'] = $range[0]['y'];
+            $range[] = $closing;
+        } elseif (!$origClosed && $newClosed) {
+            array_pop($range);
+        }
+
+        $zone['range'] = $range;
+
+        return ['zone' => $zone, 'delta_m' => $maxDelta, 'error' => null];
+    }
+
+    /**
+     * @param array<int, mixed> $range
+     */
+    private static function rangeIsClosed(array $range): bool
+    {
+        if (count($range) < 2) {
+            return false;
+        }
+        $first = $range[0];
+        $last = $range[count($range) - 1];
+        if (!is_array($first) || !is_array($last)) {
+            return false;
+        }
+        $x1 = $first['x'] ?? null;
+        $y1 = $first['y'] ?? null;
+        $x2 = $last['x'] ?? null;
+        $y2 = $last['y'] ?? null;
+        if (!is_numeric($x1) || !is_numeric($y1) || !is_numeric($x2) || !is_numeric($y2)) {
+            return false;
+        }
+
+        return hypot((float) $x1 - (float) $x2, (float) $y1 - (float) $y2) < 0.001;
+    }
+
+    /**
+     * @param array<string, mixed> $zone
+     * @param array<string, mixed> $feature
+     * @return array{zone: array<string, mixed>, delta_m: float, error: ?string}
+     */
+    private static function encodeChargingPoint(array $zone, array $feature): array
+    {
+        $ref = YarboGeo::extractGpsRef($zone);
+        if ($ref === null) {
+            return ['zone' => $zone, 'delta_m' => 0.0, 'error' => 'charging station has no GPS ref'];
+        }
+        $geometry = is_array($feature['geometry'] ?? null) ? $feature['geometry'] : [];
+        $position = $geometry['coordinates'] ?? null;
+        if (!is_array($position) || count($position) < 2) {
+            return ['zone' => $zone, 'delta_m' => 0.0, 'error' => 'charging point is not a Point'];
+        }
+        $lon = (float) $position[0];
+        $lat = (float) $position[1];
+        [$x, $y] = YarboGeo::gpsToLocal($lat, $lon, $ref['latitude'], $ref['longitude']);
+        $key = isset($zone['chargingPoint']) ? 'chargingPoint' : 'charging_point';
+        $point = is_array($zone[$key] ?? null) ? $zone[$key] : [];
+        $oldX = is_numeric($point['x'] ?? null) ? (float) $point['x'] : $x;
+        $oldY = is_numeric($point['y'] ?? null) ? (float) $point['y'] : $y;
+        $point['x'] = $x;
+        $point['y'] = $y;
+        $zone[$key] = $point;
+
+        return ['zone' => $zone, 'delta_m' => hypot($x - $oldX, $y - $oldY), 'error' => null];
+    }
+
+    /**
+     * @param array<string, mixed> $feature
+     * @return list<array{0: float, 1: float}>
+     */
+    private static function featureCoordinates(array $feature, bool $isLine): array
+    {
+        $geometry = is_array($feature['geometry'] ?? null) ? $feature['geometry'] : [];
+        $coordinates = $geometry['coordinates'] ?? null;
+        if (!is_array($coordinates)) {
+            return [];
+        }
+        $line = $isLine ? $coordinates : (is_array($coordinates[0] ?? null) ? $coordinates[0] : []);
+        if (!is_array($line)) {
+            return [];
+        }
+        $out = [];
+        foreach ($line as $position) {
+            if (!is_array($position) || count($position) < 2) {
+                continue;
+            }
+            $out[] = [(float) $position[0], (float) $position[1]];
+        }
+        if (!$isLine && count($out) >= 2) {
+            $first = $out[0];
+            $last = $out[count($out) - 1];
+            if (abs($first[0] - $last[0]) < 1e-10 && abs($first[1] - $last[1]) < 1e-10) {
+                array_pop($out);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @param array<string, mixed> $geometry
      */
     private static function geometryHasFiniteCoordinates(array $geometry): bool
@@ -230,6 +467,7 @@ final class YarboMap
                         'zone_type' => $zoneType,
                         'zone_id' => $zone['id'] ?? $zone['area_id'] ?? $index,
                         'name' => $zone['name'] ?? null,
+                        'map_list' => $key,
                     ],
                 );
             }
@@ -327,6 +565,7 @@ final class YarboMap
                 'zone_type' => $zoneType,
                 'zone_id' => $zone['id'] ?? $index,
                 'name' => $zone['name'] ?? null,
+                'map_list' => $key,
             ];
             $path = sprintf('%s[%d]', $key, (int) $index);
             $features[] = $geometry === 'line'
@@ -372,6 +611,7 @@ final class YarboMap
                 'zone_type' => 'charging',
                 'zone_id' => $charging['id'] ?? null,
                 'name' => $charging['name'] ?? 'Charging Station',
+                'map_list' => str_starts_with($path, 'allchargingData') ? 'allchargingData' : 'chargingData',
             ],
         );
     }

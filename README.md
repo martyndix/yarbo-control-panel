@@ -465,17 +465,19 @@ To change zones on the robot today, use the **official Yarbo app**. The panel ca
 
 ### Discovering map write commands
 
-While investigating map writes, use these CLI tools (robot on same network):
+On the Location Map, click **Listen for map save**, then save a map in the official Yarbo app (or Yardstick) within two minutes. The panel lists command names only — it does not change the robot map. Enable **Settings → cloud fallback** first if the phone app talks to Yarbo’s cloud rather than your LAN broker.
+
+CLI equivalents (optional):
 
 ```bash
 # Log MQTT while you save/edit a map in the Yarbo app (default 5 minutes)
 php scripts/capture_map_mqtt.php 300
 
+# Cloud listen (Yardstick / official app)
+.venv/bin/python scripts/capture_map_cloud.py 180
+
 # List candidate write commands (dry run)
 php scripts/discover_map.php --probe-writes
-
-# Send empty [] probes only — safe, non-destructive
-php scripts/discover_map.php --probe-writes --send-probes
 ```
 
 Capture output: `debug/map-dumps/mqtt_capture_*.jsonl`  
@@ -693,7 +695,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.33** (2026-09-25).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.34** (2026-09-26).
 
 ---
 

@@ -262,7 +262,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </select>
                 </label>
                 <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas</button>
+                <button type="button" class="btn btn-secondary" id="map-listen-save">Listen for map save</button>
             </div>
+            <p id="map-listen-status" class="map-areas-status">To find how Yardstick writes maps, click Listen, then save a map in the official Yarbo app. This does not change the robot map.</p>
             <p id="map-edit-tip" class="map-edit-tip hidden">Drag vertices to reshape zones.</p>
             <div class="map-wrap">
                 <div id="map" class="map"></div>
