@@ -149,6 +149,7 @@ def _feedback_matches_command(cmd: str, data: dict[str, Any]) -> bool:
         "save_clean_area",
         "save_path_area",
         "save_pathway",
+        "save_path",
         "map_recovery",
     }
     return isinstance(topic, str) and topic in aliases

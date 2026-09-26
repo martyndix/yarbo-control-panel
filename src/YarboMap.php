@@ -464,28 +464,59 @@ final class YarboMap
      *
      * @param array<string, mixed> $a
      * @param array<string, mixed> $b
+     * @param list<string>|null $onlyCanonical
      */
-    public static function maxAlignedRangeDelta(array $a, array $b): float
+    public static function maxAlignedRangeDelta(array $a, array $b, ?array $onlyCanonical = null): float
     {
         $max = 0.0;
+        foreach (self::alignedListDeltas($a, $b) as $canonical => $delta) {
+            if ($onlyCanonical !== null && !in_array($canonical, $onlyCanonical, true)) {
+                continue;
+            }
+            $max = max($max, $delta);
+        }
+
+        return $max;
+    }
+
+    /**
+     * @param array<string, mixed> $a
+     * @param array<string, mixed> $b
+     * @return array<string, float>
+     */
+    public static function alignedListDeltas(array $a, array $b): array
+    {
+        $out = [];
         foreach (array_keys(self::canonicalListNames()) as $canonical) {
-            $left = self::zoneList($a, $canonical);
-            $right = self::zoneList($b, $canonical);
-            foreach ($left as $lz) {
-                $rz = self::findMatchingZone($right, $lz);
-                if ($rz === null) {
-                    continue;
-                }
-                $r1 = is_array($lz['range'] ?? null) ? $lz['range'] : [];
-                $r2 = is_array($rz['range'] ?? null) ? $rz['range'] : [];
-                $p = min(count($r1), count($r2));
-                for ($j = 0; $j < $p; $j++) {
-                    $x1 = is_numeric($r1[$j]['x'] ?? null) ? (float) $r1[$j]['x'] : 0.0;
-                    $y1 = is_numeric($r1[$j]['y'] ?? null) ? (float) $r1[$j]['y'] : 0.0;
-                    $x2 = is_numeric($r2[$j]['x'] ?? null) ? (float) $r2[$j]['x'] : 0.0;
-                    $y2 = is_numeric($r2[$j]['y'] ?? null) ? (float) $r2[$j]['y'] : 0.0;
-                    $max = max($max, hypot($x1 - $x2, $y1 - $y2));
-                }
+            $out[$canonical] = self::alignedListDelta($a, $b, $canonical);
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $a
+     * @param array<string, mixed> $b
+     */
+    public static function alignedListDelta(array $a, array $b, string $canonical): float
+    {
+        $max = 0.0;
+        $left = self::zoneList($a, $canonical);
+        $right = self::zoneList($b, $canonical);
+        foreach ($left as $lz) {
+            $rz = self::findMatchingZone($right, $lz);
+            if ($rz === null) {
+                continue;
+            }
+            $r1 = is_array($lz['range'] ?? null) ? $lz['range'] : [];
+            $r2 = is_array($rz['range'] ?? null) ? $rz['range'] : [];
+            $p = min(count($r1), count($r2));
+            for ($j = 0; $j < $p; $j++) {
+                $x1 = is_numeric($r1[$j]['x'] ?? null) ? (float) $r1[$j]['x'] : 0.0;
+                $y1 = is_numeric($r1[$j]['y'] ?? null) ? (float) $r1[$j]['y'] : 0.0;
+                $x2 = is_numeric($r2[$j]['x'] ?? null) ? (float) $r2[$j]['x'] : 0.0;
+                $y2 = is_numeric($r2[$j]['y'] ?? null) ? (float) $r2[$j]['y'] : 0.0;
+                $max = max($max, hypot($x1 - $x2, $y1 - $y2));
             }
         }
 

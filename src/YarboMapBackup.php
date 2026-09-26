@@ -12,7 +12,7 @@ final class YarboMapBackup
     public const RECOVERY_CMD = 'map_recovery';
     public const UPLOAD_CMD = 'upload_cloud_map_backup';
     public const SAVE_AREA_CMD = 'save_clean_area';
-    public const SAVE_PATH_CMDS = ['save_path_area', 'save_pathway'];
+    public const SAVE_PATH_CMDS = ['save_path_area', 'save_pathway', 'save_path'];
     private const FETCH_TOPICS = [
         'get_map_buckup_from_id',
         'get_map_backup_from_id',
@@ -393,36 +393,56 @@ final class YarboMapBackup
             ];
         }
 
+        $editedCanonicals = array_values(array_unique(array_map(
+            static fn (array $change): string => (string) $change['canonical'],
+            $changes
+        )));
         $readMap = $write['read_map'];
-        $delta = is_array($readMap) ? YarboMap::maxAlignedRangeDelta($patchedLive, $readMap) : null;
-        $vsOriginal = is_array($readMap) ? YarboMap::maxAlignedRangeDelta($liveBefore, $readMap) : null;
-        $robotMoved = $vsOriginal !== null && $vsOriginal > self::VERIFY_M;
+        $listFromOriginal = is_array($readMap) ? YarboMap::alignedListDeltas($liveBefore, $readMap) : [];
+        $delta = is_array($readMap) ? YarboMap::maxAlignedRangeDelta($patchedLive, $readMap, $editedCanonicals) : null;
+        $vsOriginal = is_array($readMap) ? YarboMap::maxAlignedRangeDelta($liveBefore, $readMap, $editedCanonicals) : null;
+        $sideEffect = is_array($readMap)
+            ? YarboMap::maxAlignedRangeDelta(
+                $liveBefore,
+                $readMap,
+                array_values(array_diff(array_keys(YarboMap::canonicalListNames()), $editedCanonicals))
+            )
+            : null;
+        $robotMoved = ($vsOriginal !== null && $vsOriginal > self::VERIFY_M)
+            || ($sideEffect !== null && $sideEffect > self::VERIFY_M);
         if ($delta === null || ($blobDelta > self::VERIFY_M && !$robotMoved)) {
             sleep(5);
             $retryMap = $this->readCurrentMap($client, $cloud, $serial);
             if (is_array($retryMap)) {
                 $readMap = $retryMap;
-                $delta = YarboMap::maxAlignedRangeDelta($patchedLive, $readMap);
-                $vsOriginal = YarboMap::maxAlignedRangeDelta($liveBefore, $readMap);
-                $robotMoved = $vsOriginal !== null && $vsOriginal > self::VERIFY_M;
+                $listFromOriginal = YarboMap::alignedListDeltas($liveBefore, $readMap);
+                $delta = YarboMap::maxAlignedRangeDelta($patchedLive, $readMap, $editedCanonicals);
+                $vsOriginal = YarboMap::maxAlignedRangeDelta($liveBefore, $readMap, $editedCanonicals);
+                $sideEffect = YarboMap::maxAlignedRangeDelta(
+                    $liveBefore,
+                    $readMap,
+                    array_values(array_diff(array_keys(YarboMap::canonicalListNames()), $editedCanonicals))
+                );
+                $robotMoved = $vsOriginal > self::VERIFY_M || $sideEffect > self::VERIFY_M;
             }
         }
 
         $matchesSent = $delta !== null && $delta <= self::VERIFY_M;
-        $verified = $matchesSent && ($blobDelta <= self::VERIFY_M || $robotMoved);
+        $sideOk = $sideEffect === null || $sideEffect <= self::VERIFY_M;
+        $verified = $matchesSent && $sideOk && ($blobDelta <= self::VERIFY_M || ($vsOriginal !== null && $vsOriginal > self::VERIFY_M));
         $unchanged = $blobDelta > self::VERIFY_M && !$robotMoved;
         $rolledBack = false;
-        if (!$verified && $robotMoved) {
+        if (!$verified && $robotMoved && is_array($readMap)) {
             $this->saveChangedZones(
                 $client,
                 $cloud,
                 $serial,
-                self::changedZones($patchedLive, $liveBefore),
+                self::zonesDiffering($readMap, $liveBefore),
                 $liveBefore,
                 $via === 'cloud',
-                $saveShape,
-                $patchedLive,
-                $saveCmd
+                null,
+                $readMap,
+                null
             );
             $rolledBack = true;
         }
@@ -456,7 +476,8 @@ final class YarboMapBackup
             null,
             $uploadState,
             $saveShape,
-            $saveCmd
+            $saveCmd,
+            $listFromOriginal
         );
 
         $this->persistProbe([
@@ -474,6 +495,8 @@ final class YarboMapBackup
             'blob_delta_m' => $blobDelta,
             'readback_delta_m' => $delta,
             'vs_original_m' => $vsOriginal,
+            'side_effect_m' => $sideEffect,
+            'list_deltas_m' => $listFromOriginal,
             'verified' => $verified,
             'unchanged' => $unchanged,
             'rolled_back' => $rolledBack,
@@ -493,6 +516,8 @@ final class YarboMapBackup
             'blob_delta_m' => $blobDelta,
             'readback_delta_m' => $delta,
             'vs_original_m' => $vsOriginal,
+            'side_effect_m' => $sideEffect,
+            'list_deltas_m' => $listFromOriginal,
             'verified' => $verified,
             'unchanged' => $unchanged,
             'rolled_back' => $rolledBack,
@@ -624,7 +649,8 @@ final class YarboMapBackup
                         $preferCloud,
                         $lanTimeout,
                         $cloudTimeout,
-                        $cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd]
+                        $cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd],
+                        $cmd === self::SAVE_AREA_CMD
                     );
                     $tried[] = [
                         'command' => $cmd,
@@ -660,8 +686,17 @@ final class YarboMapBackup
                     $vsOriginal = $originalMap === null
                         ? 0.0
                         : YarboMap::maxAlignedRangeDelta($originalMap, $readMap);
-                    if ($vsOriginal > self::VERIFY_M) {
-                        return $last;
+                    if ($vsOriginal > self::VERIFY_M && is_array($originalMap)) {
+                        $this->rollbackMovedZones(
+                            $client,
+                            $cloud,
+                            $serial,
+                            $cmd,
+                            $shape['name'],
+                            $readMap,
+                            $originalMap,
+                            $preferCloud
+                        );
                     }
                 }
             }
@@ -671,12 +706,96 @@ final class YarboMapBackup
     }
 
     /**
+     * Write live-original zones that actually moved, using the command that moved them.
+     *
+     * @param array<string, mixed> $readMap
+     * @param array<string, mixed> $originalMap
+     */
+    private function rollbackMovedZones(
+        YarboMqtt $client,
+        ?YarboCloud $cloud,
+        string $serial,
+        string $cmd,
+        string $shapeName,
+        array $readMap,
+        array $originalMap,
+        bool $preferCloud,
+    ): void {
+        $restore = self::zonesDiffering($readMap, $originalMap);
+        if ($restore === []) {
+            return;
+        }
+        foreach ($restore as $change) {
+            foreach (self::savePayloadShapes([$change], $originalMap, $cmd) as $shape) {
+                if ($shape['name'] !== $shapeName) {
+                    continue;
+                }
+                $this->sendUnpublished(
+                    $client,
+                    $cloud,
+                    $serial,
+                    $cmd,
+                    $shape['payload'],
+                    $preferCloud,
+                    $cmd === self::SAVE_AREA_CMD ? 15.0 : 8.0,
+                    $cmd === self::SAVE_AREA_CMD ? 20.0 : 12.0,
+                    $cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd],
+                    $cmd === self::SAVE_AREA_CMD
+                );
+                sleep(3);
+            }
+        }
+    }
+
+    /**
+     * Zones on $desired that do not match live $current (by id/name).
+     *
+     * @param array<string, mixed> $current
+     * @param array<string, mixed> $desired
+     * @return list<array{canonical: string, key: string, index: int, zone: array<string, mixed>, original: array<string, mixed>, delta_m: float}>
+     */
+    private static function zonesDiffering(array $current, array $desired): array
+    {
+        $out = [];
+        foreach (YarboMap::canonicalListNames() as $canonical => $aliases) {
+            $haveList = YarboMap::zoneList($current, $canonical);
+            $wantList = YarboMap::zoneList($desired, $canonical);
+            $key = YarboMap::presentListKey($desired, $canonical)
+                ?? YarboMap::presentListKey($current, $canonical)
+                ?? ($aliases[0] ?? $canonical);
+            foreach ($wantList as $i => $want) {
+                if (!is_array($want)) {
+                    continue;
+                }
+                $have = YarboMap::findMatchingZone($haveList, $want);
+                if ($have === null) {
+                    continue;
+                }
+                $delta = YarboMap::maxRangeDelta(['area' => [$have]], ['area' => [$want]]);
+                $nameChanged = (string) ($have['name'] ?? '') !== (string) ($want['name'] ?? '');
+                if ($delta > self::VERIFY_M || $nameChanged) {
+                    $out[] = [
+                        'canonical' => $canonical,
+                        'key' => $key,
+                        'index' => (int) $i,
+                        'zone' => $want,
+                        'original' => $have,
+                        'delta_m' => $delta,
+                    ];
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @return list<string>
      */
     private static function saveCommandsFor(string $canonical): array
     {
         return match ($canonical) {
-            'pathways' => array_merge([self::SAVE_AREA_CMD], self::SAVE_PATH_CMDS),
+            'pathways' => self::SAVE_PATH_CMDS,
             'areas' => [self::SAVE_AREA_CMD],
             default => [],
         };
@@ -700,12 +819,8 @@ final class YarboMapBackup
                 continue;
             }
             $seen[$sig] = true;
-            if ($cmd === self::SAVE_AREA_CMD && $canonical === 'pathways') {
-                $shapes[] = ['name' => 'zone', 'payload' => $zone];
-                continue;
-            }
             $aliases = match ($canonical) {
-                'pathways' => array_values(array_unique([$key, 'pathways', 'pathway', 'path_area_list'])),
+                'pathways' => array_values(array_unique([$key, 'path_area_list'])),
                 'areas' => array_values(array_unique([$key, 'areas', 'area', 'clean_area_list'])),
                 default => [$key],
             };
@@ -775,8 +890,12 @@ final class YarboMapBackup
         float $lanTimeout = 15.0,
         float $cloudTimeout = 45.0,
         array $acceptTopics = [],
+        bool $tryBoth = true,
     ): array {
         $order = $preferCloud ? ['cloud', 'local'] : ['local', 'cloud'];
+        if (!$tryBoth) {
+            $order = [$order[0]];
+        }
         $last = ['envelope' => null, 'via' => $order[0]];
         foreach ($order as $via) {
             if ($via === 'local') {
@@ -965,6 +1084,7 @@ final class YarboMapBackup
         mixed $uploadState = null,
         ?string $saveShape = null,
         ?string $saveCmd = null,
+        array $listDeltas = [],
     ): string {
         $detail = sprintf(
             ' via %s%s, encode %.2f m, read-back %s, vs original %s.',
@@ -974,6 +1094,10 @@ final class YarboMapBackup
             $delta === null ? 'unavailable' : sprintf('%.2f m', $delta),
             $vsOriginal === null ? 'unavailable' : sprintf('%.2f m', $vsOriginal)
         );
+        $listDetail = self::formatListDeltas($listDeltas);
+        if ($listDetail !== '') {
+            $detail .= ' ' . $listDetail;
+        }
         if ($saveCmd !== null && $saveCmd !== '') {
             $detail .= ' ' . $saveCmd;
             if ($saveShape !== null && $saveShape !== '') {
@@ -993,7 +1117,7 @@ final class YarboMapBackup
             return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
         if ($unchanged) {
-            return 'Robot map did not change. Pathway list wraps on save_clean_area are ignored; this save retries a live-frame bare zone, then save_path_area / save_pathway. Original left in place ('
+            return 'Robot map did not change. Pathway edits no longer use save_clean_area (that writes a mowing area, not the path). This save tries save_path_area / save_pathway / save_path. Original left in place ('
                 . $restoreFile . '). If it still does not move, click Listen and rename that pathway in the official app.' . $detail;
         }
         if (!$readMap) {
@@ -1002,10 +1126,26 @@ final class YarboMapBackup
         }
         if ($rolledBack) {
             return 'Read-back did not match the draft. Restored the original backup from the Pi copy ('
-                . $restoreFile . ').' . $detail;
+                . $restoreFile . '). If the official app still looks wrong, restore that map from Previous Maps first.' . $detail;
         }
 
         return 'Read-back did not match the draft. Original is on the Pi as ' . $restoreFile . '. Not auto-reverted.' . $detail;
+    }
+
+    /**
+     * @param array<string, float> $deltas
+     */
+    private static function formatListDeltas(array $deltas): string
+    {
+        $parts = [];
+        foreach ($deltas as $name => $delta) {
+            if (!is_numeric($delta) || (float) $delta <= 0.01) {
+                continue;
+            }
+            $parts[] = $name . ' ' . sprintf('%.2f m', (float) $delta);
+        }
+
+        return $parts === [] ? '' : 'lists ' . implode(', ', $parts) . '.';
     }
 
     /**

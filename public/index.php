@@ -265,7 +265,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn btn-secondary" id="map-listen-save">Listen for map save</button>
                 <button type="button" class="btn btn-secondary" id="map-load-backups">Load map backups</button>
             </div>
-            <p id="map-listen-status" class="map-areas-status">Listen captures MQTT command names. Load map backups, edit vertices, then Save to robot (docked, with confirm). Pathway list wraps are ignored; Save retries a live-frame zone then pathway commands. If a path still does not move, Listen while renaming that pathway in the official app.</p>
+            <p id="map-listen-status" class="map-areas-status">Listen captures MQTT command names. Load map backups, edit vertices, then Save to robot (docked, with confirm). Pathway edits use save_path_area / save_pathway / save_path, not save_clean_area. If a path still does not move, Listen while renaming that pathway in the official app.</p>
             <p id="map-edit-tip" class="map-edit-tip hidden">Click one zone (or its Edit button), then drag those vertices. The original line should disappear. Do not edit every path at once.</p>
             <div class="map-wrap">
                 <div id="map" class="map"></div>
@@ -295,7 +295,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             title="Extract a backup first, then save while docked"
                         >Save to robot</button>
                     </div>
-                    <p class="hint map-editor-hint">Load map backups (it draws that backup), edit vertices, then Save to robot while docked. Mowing areas use save_clean_area. Pathways retry a live-frame bare zone, then save_path_area / save_pathway. A copy of the original is kept on the Pi.</p>
+                    <p class="hint map-editor-hint">Load map backups (it draws that backup), edit vertices, then Save to robot while docked. Mowing areas use save_clean_area. Pathways use save_path_area / save_pathway / save_path — not save_clean_area (that writes a mowing area). A copy of the original is kept on the Pi. If a path still does not move, Listen while renaming that pathway in the official app.</p>
                 </details>
             </div>
         </section>

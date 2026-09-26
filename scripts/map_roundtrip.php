@@ -252,6 +252,18 @@ if (isset($map['areas'][0]['ref']['latitude'], $map['areas'][0]['range'][0]['y']
     }
 }
 
+if (isset($map['pathways'][0]['range'][0]['x'], $map['areas'][0]['range'][0]['x'])) {
+    $movedPath = $map;
+    $movedPath['pathways'][0]['range'][0]['x'] = (float) $map['pathways'][0]['range'][0]['x'] + 4.37;
+    $lists = YarboMap::alignedListDeltas($map, $movedPath);
+    if (abs(($lists['pathways'] ?? 0) - 4.37) > 0.02) {
+        $failures[] = sprintf('pathway-only edit should report pathways 4.37 m, got %.3f', $lists['pathways'] ?? -1);
+    }
+    if (($lists['areas'] ?? 1) > 0.02) {
+        $failures[] = sprintf('pathway-only edit should leave areas at 0 m, got %.3f', $lists['areas'] ?? -1);
+    }
+}
+
 $featureCount = count($collection['features'] ?? []);
 echo "source={$source}\n";
 echo "features={$featureCount}\n";

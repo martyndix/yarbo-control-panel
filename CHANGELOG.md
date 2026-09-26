@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.50] - 2026-09-26
+
+### Fixed
+- **Save to robot** no longer sends a pathway through `save_clean_area`. That command moved 4.37 m, but not onto the pathway draft (it writes a mowing area), then Save stopped without trying pathway commands. Pathways now use `save_path_area` / `save_pathway` / `save_path`. A wrong move is rolled back by whatever list actually changed. Status reports per-list metres.
+
 ## [2.0.49] - 2026-09-26
 
 ### Fixed
