@@ -120,6 +120,7 @@ const els = {
     settingsModuleYarbo: document.getElementById('settings-module-yarbo'),
     settingsModulePowerwall: document.getElementById('settings-module-powerwall'),
     settingsModuleLymow: document.getElementById('settings-module-lymow'),
+    settingsModuleHome: document.getElementById('settings-module-home'),
     settingsVestaboardLive: document.getElementById('settings-vestaboard-live'),
     settingsPowerwallRegion: document.getElementById('settings-powerwall-region'),
     settingsPowerwallPublicUrl: document.getElementById('settings-powerwall-public-url'),
@@ -356,7 +357,7 @@ let themeMediaQuery = null;
 let lastUpdateStatus = null;
 let updateConfirmResolver = null;
 
-const SETTINGS_PANES = ['connection', 'cloud', 'rain', 'modules', 'lymow', 'powerwall', 'vestaboard', 'papermono', 'appearance', 'updates'];
+const SETTINGS_PANES = ['connection', 'cloud', 'rain', 'modules', 'lymow', 'powerwall', 'home', 'vestaboard', 'papermono', 'appearance', 'updates'];
 
 function syncBodyModalClass() {
     const open = [
@@ -2351,6 +2352,9 @@ function applyHubFromStatus(data) {
     }
     updatePowerwallDashboard(data.powerwall);
     updateLymowDashboard(data.lymow);
+    if (ids.includes('home')) {
+        loadHomeDashboard();
+    }
     if (data.vestaboard) {
         applyVestaboardLiveSwitch(data);
     }
@@ -2431,6 +2435,136 @@ function updateLymowDashboard(ly) {
     lymowPageName = String(ly.page_name || ly.display_name || ly.device_name || '').trim();
     applyLymowDeviceName();
     applyDeviceNameSubtitle();
+}
+
+let homeDash = { devices: [], scenes: [], paper_devices: [] };
+let homeLoadBusy = false;
+
+async function homeApi(body, timeoutMs = 20000) {
+    const res = await fetchWithTimeout('/api/home.php', {
+        method: body ? 'POST' : 'GET',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+    }, timeoutMs);
+    return parseJsonResponse(res);
+}
+
+async function loadHomeDashboard() {
+    if (homeLoadBusy) return;
+    const card = document.getElementById('home-card');
+    if (!card || card.classList.contains('module-pane-hidden')) {
+        if (!document.querySelector('[data-module-id="home"]')) return;
+    }
+    homeLoadBusy = true;
+    try {
+        const data = await homeApi(null, 25000);
+        homeDash = data;
+        renderHomeDashboard(data);
+    } catch (err) {
+        const status = document.getElementById('home-server-status');
+        if (status) status.textContent = err.message || 'Could not load Home';
+    } finally {
+        homeLoadBusy = false;
+    }
+}
+
+function renderHomeDashboard(data) {
+    const status = document.getElementById('home-server-status');
+    if (status) {
+        const err = data.server?.error;
+        status.textContent = data.server?.ok
+            ? `Matter server: connected · ${(data.devices || []).length} device${(data.devices || []).length === 1 ? '' : 's'}`
+            : `Matter server: ${err || 'not running'}`;
+    }
+    const grid = document.getElementById('home-devices');
+    if (grid) {
+        const devices = data.devices || [];
+        if (!devices.length) {
+            grid.innerHTML = '<p class="hint">No Matter devices yet. Add the Hue Bridge or another pairing code above.</p>';
+        } else {
+            grid.innerHTML = devices.map((d) => {
+                const on = Boolean(d.on);
+                const bright = d.dimmable
+                    ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
+                    : '';
+                return `<article class="home-device${on ? ' is-on' : ''}" data-home-id="${escapeHtml(d.id)}">
+                    <p class="home-device-name">${escapeHtml(d.name)}</p>
+                    <p class="home-device-meta">${escapeHtml(d.kind)}${d.room ? ' · ' + escapeHtml(d.room) : ''}</p>
+                    <div class="home-device-actions">
+                        <button type="button" class="btn btn-secondary" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
+                        ${bright}
+                    </div>
+                </article>`;
+            }).join('');
+        }
+    }
+    const scenesEl = document.getElementById('home-scenes');
+    if (scenesEl) {
+        const scenes = data.scenes || [];
+        scenesEl.innerHTML = scenes.map((s) => (
+            `<span>
+                <button type="button" class="btn" data-home-scene="${escapeHtml(s.id)}">${escapeHtml(s.name)}</button>
+                <button type="button" class="btn btn-secondary" data-home-scene-del="${escapeHtml(s.id)}" title="Delete">×</button>
+            </span>`
+        )).join('') || '<p class="hint">No panel scenes yet.</p>';
+    }
+    const tablet = document.getElementById('home-paper-tablet');
+    const assign = document.getElementById('home-paper-assign');
+    const saveBtn = document.getElementById('home-paper-save');
+    const papers = data.paper_devices || [];
+    if (tablet) {
+        const current = tablet.value;
+        tablet.innerHTML = papers.map((p) => (
+            `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`
+        )).join('');
+        if (papers.some((p) => p.id === current)) tablet.value = current;
+        if (saveBtn) saveBtn.disabled = papers.length === 0;
+    }
+    if (assign) {
+        const selected = papers.find((p) => p.id === tablet?.value) || papers[0];
+        const assigned = new Set(selected?.assigned || []);
+        const choices = [
+            ...(data.devices || []).map((d) => ({ id: d.id, name: d.name, kind: d.kind })),
+            ...(data.scenes || []).map((s) => ({ id: `scene:${s.id}`, name: s.name, kind: 'scene' })),
+        ];
+        assign.innerHTML = choices.length
+            ? choices.map((c) => (
+                `<label class="settings-checkbox"><input type="checkbox" value="${escapeHtml(c.id)}" ${assigned.has(c.id) ? 'checked' : ''}> ${escapeHtml(c.name)} <span class="hint">(${escapeHtml(c.kind)})</span></label>`
+            )).join('')
+            : '<p class="hint">Add devices first, then assign them here.</p>';
+    }
+}
+
+function bindHomeDashboard() {
+    document.getElementById('home-devices')?.addEventListener('click', async (event) => {
+        const btn = event.target.closest('[data-home-toggle]');
+        if (!btn) return;
+        btn.disabled = true;
+        try {
+            const data = await homeApi({ action: 'command', id: btn.getAttribute('data-home-toggle'), command: 'toggle' });
+            if (!data.ok) throw new Error(data.error || 'Failed');
+            await loadHomeDashboard();
+        } catch (err) {
+            showToast(err.message || 'Home command failed', 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    });
+    document.getElementById('home-devices')?.addEventListener('change', async (event) => {
+        const input = event.target.closest('[data-home-bright]');
+        if (!input) return;
+        try {
+            const data = await homeApi({
+                action: 'command',
+                id: input.getAttribute('data-home-bright'),
+                command: 'brightness',
+                brightness: Number(input.value),
+            });
+            if (!data.ok) throw new Error(data.error || 'Failed');
+        } catch (err) {
+            showToast(err.message || 'Brightness failed', 'error');
+        }
+    });
 }
 
 function lymowCamMode() {
@@ -2582,6 +2716,7 @@ function applyCompanionSettingsVisibility() {
     const yarboOn = Boolean(els.settingsModuleYarbo?.checked);
     const powerwallOn = Boolean(els.settingsModulePowerwall?.checked);
     const lymowOn = Boolean(els.settingsModuleLymow?.checked);
+    const homeOn = Boolean(els.settingsModuleHome?.checked);
     document.getElementById('settings-yarbo-connection-fields')?.classList.toggle('hidden', !yarboOn);
     document.getElementById('settings-cloud-section')?.classList.toggle('hidden', !yarboOn);
     document.getElementById('settings-rain-section')?.classList.toggle('hidden', !yarboOn);
@@ -2597,8 +2732,13 @@ function applyCompanionSettingsVisibility() {
         'hidden',
         !lymowOn,
     );
+    document.getElementById('settings-home-section')?.classList.toggle(
+        'hidden',
+        !homeOn,
+    );
     document.querySelector('[data-settings-nav="powerwall"]')?.classList.toggle('hidden', !powerwallOn);
     document.querySelector('[data-settings-nav="lymow"]')?.classList.toggle('hidden', !lymowOn);
+    document.querySelector('[data-settings-nav="home"]')?.classList.toggle('hidden', !homeOn);
     document.getElementById('papermono-alert-yarbo')?.closest('label')?.classList.toggle('hidden', !yarboOn);
     document.getElementById('papermono-alert-powerwall')?.closest('label')?.classList.toggle('hidden', !powerwallOn);
     document.getElementById('papermono-alert-lymow')?.closest('label')?.classList.toggle('hidden', !lymowOn);
@@ -2618,7 +2758,8 @@ function onModuleCheckboxChange(event) {
     const yarboOn = Boolean(els.settingsModuleYarbo?.checked);
     const powerwallOn = Boolean(els.settingsModulePowerwall?.checked);
     const lymowOn = Boolean(els.settingsModuleLymow?.checked);
-    if (!yarboOn && !powerwallOn && !lymowOn) {
+    const homeOn = Boolean(els.settingsModuleHome?.checked);
+    if (!yarboOn && !powerwallOn && !lymowOn && !homeOn) {
         if (event?.currentTarget) event.currentTarget.checked = true;
         showToast('Keep at least one module on', 'error');
         return;
@@ -3842,6 +3983,9 @@ async function loadSettings() {
         if (els.settingsModuleLymow) {
             els.settingsModuleLymow.checked = Boolean(data.hub?.modules?.lymow);
         }
+        if (els.settingsModuleHome) {
+            els.settingsModuleHome.checked = Boolean(data.hub?.modules?.home);
+        }
         if (els.settingsVestaboardLive) {
             els.settingsVestaboardLive.value = data.hub?.vestaboard_live || 'yarbo';
         }
@@ -4882,6 +5026,7 @@ async function saveSettings(event) {
             module_yarbo: Boolean(els.settingsModuleYarbo?.checked),
             module_powerwall: Boolean(els.settingsModulePowerwall?.checked),
             module_lymow: Boolean(els.settingsModuleLymow?.checked),
+            module_home: Boolean(els.settingsModuleHome?.checked),
             vestaboard_live: els.settingsVestaboardLive?.value || 'yarbo',
             powerwall_transport: powerwallTransport(),
             powerwall_region: els.settingsPowerwallRegion?.value || 'eu',
@@ -6085,6 +6230,7 @@ els.settingsPowerwallOauth?.addEventListener('click', (event) => {
 els.settingsModuleYarbo?.addEventListener('change', onModuleCheckboxChange);
 els.settingsModulePowerwall?.addEventListener('change', onModuleCheckboxChange);
 els.settingsModuleLymow?.addEventListener('change', onModuleCheckboxChange);
+els.settingsModuleHome?.addEventListener('change', onModuleCheckboxChange);
 els.settingsLymowLogin?.addEventListener('click', async (e) => {
     const button = e.currentTarget;
     button.disabled = true;
@@ -6266,6 +6412,74 @@ setupBatteryTempClick();
 initAppearance();
 initUpdateConfirmModal();
 loadSettings().catch(() => {});
+bindHomeDashboard();
+document.getElementById('home-pair')?.addEventListener('click', async () => {
+    const input = document.getElementById('home-pair-code');
+    const code = input?.value.trim() || '';
+    const btn = document.getElementById('home-pair');
+    if (btn) btn.disabled = true;
+    try {
+        const data = await homeApi({ action: 'commission', code }, 95000);
+        if (!data.ok) throw new Error(data.error || 'Pairing failed');
+        if (input) input.value = '';
+        showToast(data.message || 'Device added', 'success');
+        await loadHomeDashboard();
+    } catch (err) {
+        showToast(err.message || 'Pairing failed', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+});
+document.getElementById('home-scene-save')?.addEventListener('click', async () => {
+    const name = document.getElementById('home-scene-name')?.value.trim() || '';
+    const actions = (homeDash.devices || []).map((d) => ({
+        id: d.id,
+        on: Boolean(d.on),
+        brightness: d.dimmable ? Number(d.brightness ?? 0) : null,
+    }));
+    try {
+        const data = await homeApi({ action: 'scene_save', name, actions });
+        if (!data.ok) throw new Error(data.error || 'Could not save scene');
+        document.getElementById('home-scene-name').value = '';
+        showToast('Scene saved', 'success');
+        await loadHomeDashboard();
+    } catch (err) {
+        showToast(err.message || 'Could not save scene', 'error');
+    }
+});
+document.getElementById('home-scenes')?.addEventListener('click', async (event) => {
+    const run = event.target.closest('[data-home-scene]');
+    const del = event.target.closest('[data-home-scene-del]');
+    try {
+        if (run) {
+            const data = await homeApi({ action: 'scene_run', id: run.getAttribute('data-home-scene') });
+            if (!data.ok) throw new Error(data.error || 'Scene failed');
+            showToast('Scene ran', 'success');
+            await loadHomeDashboard();
+        } else if (del) {
+            const data = await homeApi({ action: 'scene_delete', id: del.getAttribute('data-home-scene-del') });
+            if (!data.ok) throw new Error(data.error || 'Could not delete');
+            await loadHomeDashboard();
+        }
+    } catch (err) {
+        showToast(err.message || 'Scene failed', 'error');
+    }
+});
+document.getElementById('home-paper-tablet')?.addEventListener('change', () => renderHomeDashboard(homeDash));
+document.getElementById('home-paper-save')?.addEventListener('click', async () => {
+    const tabletId = document.getElementById('home-paper-tablet')?.value || '';
+    const ids = [...document.querySelectorAll('#home-paper-assign input[type="checkbox"]:checked')]
+        .map((el) => el.value)
+        .slice(0, 8);
+    try {
+        const data = await homeApi({ action: 'paper_assign', tablet_id: tabletId, ids });
+        if (!data.ok) throw new Error(data.error || 'Could not save assignment');
+        showToast('PaperMono assignment saved', 'success');
+        await loadHomeDashboard();
+    } catch (err) {
+        showToast(err.message || 'Could not save assignment', 'error');
+    }
+});
 refreshUpdateBadge();
 if (settingsHashPane()) {
     openSettingsModal();

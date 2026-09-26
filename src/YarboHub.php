@@ -9,6 +9,7 @@ final class YarboHub
     public const MODULE_YARBO = 'yarbo';
     public const MODULE_POWERWALL = 'powerwall';
     public const MODULE_LYMOW = 'lymow';
+    public const MODULE_HOME = 'home';
     public const LIVE_BATTERIES = 'batteries';
 
     public const VESTABOARD_LIVE_CHOICES = [
@@ -23,6 +24,7 @@ final class YarboHub
         self::MODULE_YARBO,
         self::MODULE_POWERWALL,
         self::MODULE_LYMOW,
+        self::MODULE_HOME,
     ];
 
     public function __construct(private readonly string $projectRoot)
@@ -49,6 +51,7 @@ final class YarboHub
                 self::MODULE_YARBO => true,
                 self::MODULE_POWERWALL => false,
                 self::MODULE_LYMOW => false,
+                self::MODULE_HOME => false,
             ],
             'active_module' => self::MODULE_YARBO,
             'vestaboard_live' => self::MODULE_YARBO,
@@ -195,6 +198,7 @@ final class YarboHub
             self::MODULE_YARBO => 'Yarbo',
             self::MODULE_POWERWALL => 'Powerwall',
             self::MODULE_LYMOW => 'Lymow',
+            self::MODULE_HOME => 'Home',
         ];
         $enabled = [];
         foreach (self::MODULES as $id) {

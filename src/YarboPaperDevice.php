@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.14-beta';
+    public const FIRMWARE_VERSION = '0.1.15-beta';
     public const FIRMWARE_VERSION_COLOR = '0.2.11-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -617,6 +617,12 @@ final class YarboPaperDevice
         $yarboEnabled = $hub->enabled(YarboHub::MODULE_YARBO);
         $pwEnabled = $hub->enabled(YarboHub::MODULE_POWERWALL);
         $lyEnabled = $hub->enabled(YarboHub::MODULE_LYMOW);
+        $homeEnabled = $hub->enabled(YarboHub::MODULE_HOME);
+        $homeItems = [];
+        if ($homeEnabled) {
+            $tabletId = is_array($forDevice) ? (string) ($forDevice['id'] ?? '') : '';
+            $homeItems = (new YarboHome($this->projectRoot))->paperItems($tabletId);
+        }
         $errorCode = is_array($parsed) ? ($parsed['error_code'] ?? 0) : 0;
         $powerFault = is_array($parsed) ? (int) ($parsed['power_fault'] ?? 0) : 0;
         $lyWork = isset($ly['work_status']) ? (int) $ly['work_status'] : null;
@@ -628,6 +634,8 @@ final class YarboPaperDevice
             'yarbo_enabled' => $yarboEnabled,
             'powerwall_enabled' => $pwEnabled,
             'lymow_enabled' => $lyEnabled,
+            'home_enabled' => $homeEnabled,
+            'home_items' => $homeItems,
             'powerwall_pct' => isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : -1,
             'powerwall_solar' => (string) ($pw['solar_label'] ?? '—'),
             'powerwall_load' => (string) ($pw['load_label'] ?? '—'),

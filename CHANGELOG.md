@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-26
+
+### Added
+- **Home** module: Matter controller for lights, Hue Bridge endpoints, plugs, and heaters. Pair with a code from Hue, Apple Home, or the device. Panel scenes and PaperMono HOUSE assignment. See [docs/home.md](docs/home.md).
+
 ## [2.0.57] - 2026-09-26
 
 ### Fixed

@@ -88,7 +88,7 @@ install_project() {
 
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
   chmod +x scripts/update.sh 2>/dev/null || true
-    chmod +x scripts/dev.sh scripts/panel.sh scripts/vestaboard_watch.php scripts/metrics_ping.php 2>/dev/null || true
+    chmod +x scripts/dev.sh scripts/panel.sh scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py 2>/dev/null || true
 
   # shellcheck source=scripts/lib/python_sdk.sh
   source "${ROOT}/scripts/lib/python_sdk.sh"

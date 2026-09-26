@@ -30,6 +30,10 @@ cleanup() {
     pkill -P "${METRICS_PID}" 2>/dev/null || true
     kill "${METRICS_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${MATTER_PID:-}" ]]; then
+    kill "${MATTER_PID}" 2>/dev/null || true
+  fi
+  pkill -f '[s]cripts/matter_agent.py' 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -70,6 +74,17 @@ echo "==> Starting Vestaboard Note watcher"
   done
 ) &
 VESTABOARD_PID=$!
+
+MATTER_PY="${ROOT}/.venv/bin/python"
+if [[ ! -x "$MATTER_PY" ]]; then
+  MATTER_PY="$(command -v python3 || true)"
+fi
+if [[ -n "$MATTER_PY" && -f "${ROOT}/scripts/matter_agent.py" ]]; then
+  echo "==> Starting Matter agent on 127.0.0.1:${YARBO_MATTER_AGENT_PORT:-8766}"
+  mkdir -p "${ROOT}/data"
+  "$MATTER_PY" "${ROOT}/scripts/matter_agent.py" >> "${ROOT}/data/matter-agent.log" 2>&1 &
+  MATTER_PID=$!
+fi
 
 echo "==> Starting anonymous usage ping"
 (

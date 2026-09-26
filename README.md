@@ -80,7 +80,7 @@ Open the panel in a browser and you can:
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: Home (Stop / Dock / Pause / Lights), plus Status, Health, and Plans pages. Flash and Wi-Fi from **Settings**. See [PaperMono](#papermono-companion-beta)
 - **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / rain / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
-- **Modules (v2.0)** — header switcher for Yarbo, Tesla Powerwall, and Lymow. Powerwall: [docs/powerwall.md](docs/powerwall.md). Lymow: app login for battery/status plus camera IP ([docs/lymow.md](docs/lymow.md)). Vestaboard live module is chosen in Settings, on the Note card pills, or **Rotate** to cycle views.
+- **Modules (v3.0)** — header switcher for Yarbo, Tesla Powerwall, Lymow, and Home (Matter). Powerwall: [docs/powerwall.md](docs/powerwall.md). Lymow: [docs/lymow.md](docs/lymow.md). Home: [docs/home.md](docs/home.md). Vestaboard live module is chosen in Settings, on the Note card pills, or **Rotate** to cycle views.
 - **Paper Colour companion (beta)** — no-touch M5Stack PaperColor. Same Settings flash path as PaperMono: pick **Paper Colour**, then flash. See [docs/papercolor.md](docs/papercolor.md).
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
@@ -188,6 +188,7 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
 | **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
 | **Lymow (unofficial)** | Settings → Modules → Lymow, then app email/password + camera IP. See [docs/lymow.md](docs/lymow.md) |
+| **Home (Matter)** | Settings → Modules → Home. Pair Hue Bridge / Apple share / any Matter code. See [docs/home.md](docs/home.md) |
 | **PaperMono / Paper Colour (beta)** | Settings → E-paper companions — pick hardware, USB flash + Wi-Fi. See [PaperMono](#papermono-companion-beta) and [docs/papercolor.md](docs/papercolor.md) |
 | **Vestaboard Note (optional)** | Settings → enable Vestaboard Note — Local or Cloud API. See [Vestaboard Note](#vestaboard-note-optional) |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
@@ -636,7 +637,7 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 
 While the panel is running it sends an **anonymous ping** after a version change and about once a day (at most about once per 20 hours otherwise). This is so the project can see how many installs exist. It is **not** tied to your robot.
 
-**Included:** a random install id (not your Yarbo serial), panel version, which modules are on (Yarbo / Powerwall / Lymow / Vestaboard), how many PaperMono and Paper Colour tablets are paired, and `linux` or `darwin`.
+**Included:** a random install id (not your Yarbo serial), panel version, which modules are on (Yarbo / Powerwall / Lymow / Home / Vestaboard), how many PaperMono and Paper Colour tablets are paired, and `linux` or `darwin`.
 
 **Never included:** serial number, broker IP, GPS, emails, Tesla/Lymow secrets, tablet names, or LAN URLs.
 
@@ -677,7 +678,8 @@ yarbo-control-panel/
 ├── src/                  # MQTT client, telemetry, map, cloud helpers
 ├── scripts/
 │   ├── install.sh        # One-command install (+ systemd when run with sudo)
-│   ├── panel.sh          # MQTT agent + PHP panel (systemd and ./scripts/dev.sh)
+│   ├── panel.sh          # MQTT agent + Matter agent + PHP panel (systemd and ./scripts/dev.sh)
+│   ├── matter_agent.py   # Matter controller HTTP bridge to python-matter-server
 │   ├── dev.sh            # Local/macOS wrapper around panel.sh
 │   ├── lib/python_sdk.sh # Shared yarbo-data-sdk install helpers
 │   ├── update.sh         # Pull latest from GitHub, composer install, restart panel + MQTT agent
@@ -691,7 +693,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.57** (2026-09-26).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **3.0.0** (2026-09-26).
 
 ---
 

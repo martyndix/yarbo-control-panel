@@ -46,6 +46,9 @@ function hub_status_extras(): array
         'lymow' => $hub->enabled(YarboHub::MODULE_LYMOW)
             ? (new YarboLymow($root))->dashboardPayload()
             : null,
+        'home' => $hub->enabled(YarboHub::MODULE_HOME)
+            ? ['enabled' => true]
+            : null,
     ];
 }
 

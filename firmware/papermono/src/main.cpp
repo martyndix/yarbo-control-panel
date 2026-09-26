@@ -117,6 +117,13 @@ int planOffset = 0;
 int selectedPlan = -1;
 String plansNote = "";
 bool plansLoaded = false;
+bool homeOn = false;
+String homeIds[PAPERMONO_HOME_MAX];
+String homeNames[PAPERMONO_HOME_MAX];
+String homeKinds[PAPERMONO_HOME_MAX];
+bool homeOnState[PAPERMONO_HOME_MAX];
+int homeCount = 0;
+int homeOffset = 0;
 
 void drawScreen(bool forceFull);
 void enterLock();
@@ -206,6 +213,7 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_LYMOW) return "LYMOW";
     if (page == PAPERMONO_PAGE_RADIO) return "RADIO";
     if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
+    if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
     return "HOME";
 }
 
@@ -223,7 +231,7 @@ String screenKey()
         + lockScreen + "|" + clockLocal + "|" + String(unreadCount) + "|" + vestaboardHash + "|"
         + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
         + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
-        + String(inboxCount);
+        + String(inboxCount) + "|" + String(homeOn ? 1 : 0) + "|" + String(homeCount);
 }
 
 bool pageEnabled(int page)
@@ -236,6 +244,7 @@ bool pageEnabled(int page)
     if (page == PAPERMONO_PAGE_BOARD) return vestaboardOn;
     if (page == PAPERMONO_PAGE_POWERWALL) return powerwallOn;
     if (page == PAPERMONO_PAGE_LYMOW) return lymowOn;
+    if (page == PAPERMONO_PAGE_HOUSE) return homeOn;
     return true;
 }
 
@@ -348,6 +357,7 @@ String headerBrand()
     if (currentPage == PAPERMONO_PAGE_NOTE || currentPage == PAPERMONO_PAGE_BOARD) return "VESTABOARD";
     if (currentPage == PAPERMONO_PAGE_RADIO) return "RADIO";
     if (currentPage == PAPERMONO_PAGE_DEVICE) return "DEVICE";
+    if (currentPage == PAPERMONO_PAGE_HOUSE) return "HOUSE";
     return "YARBO";
 }
 
@@ -380,7 +390,7 @@ void drawPager()
     int H = M5.Display.height();
     int W = M5.Display.width();
     const char *labels[PAPERMONO_PAGE_COUNT] = {
-        "HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "BOARD", "WALL", "LYMOW", "RADIO", "DEVICE"
+        "HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "BOARD", "WALL", "LYMOW", "RADIO", "DEVICE", "HOUSE"
     };
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(1);
@@ -571,7 +581,53 @@ void drawPlansPage(bool forceFull)
     M5.Display.display();
 }
 
-void drawNotePage(bool forceFull)
+void drawHousePage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(1);
+    if (homeCount == 0) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Assign lights in", 16, 180);
+        M5.Display.drawString("the panel Home page.", 16, 214);
+    }
+    int y0 = plansRowY0();
+    int rh = plansRowH();
+    int W = M5.Display.width();
+    for (int i = 0; i < PAPERMONO_HOME_VISIBLE; i++) {
+        int idx = homeOffset + i;
+        if (idx >= homeCount) {
+            break;
+        }
+        bool on = homeOnState[idx];
+        int y = y0 + i * rh;
+        uint16_t bg = on ? TFT_BLACK : TFT_WHITE;
+        uint16_t fg = on ? TFT_WHITE : TFT_BLACK;
+        M5.Display.fillRoundRect(16, y, W - 32, rh - 8, 10, bg);
+        M5.Display.drawRoundRect(16, y, W - 32, rh - 8, 10, TFT_BLACK);
+        M5.Display.setTextColor(fg, bg);
+        M5.Display.setTextDatum(ML_DATUM);
+        M5.Display.setTextSize(2);
+        String label = homeNames[idx];
+        if (homeKinds[idx] == "scene") {
+            label = "*" + label;
+        }
+        if (label.length() > 18) {
+            label = label.substring(0, 18);
+        }
+        M5.Display.drawString(label, 32, y + (rh - 8) / 2);
+    }
+    if (homeCount > PAPERMONO_HOME_VISIBLE) {
+        int bw, bh, gap, ignoreY;
+        layoutButtons(bw, bh, gap, ignoreY);
+        drawButton(16, plansStartY(), bw, 72, "MORE", false);
+    }
+    drawPager();
+    M5.Display.display();
+}
 {
     beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
@@ -973,6 +1029,13 @@ void drawScreen(bool forceFull)
         drawRadioPage(forceFull);
     } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
         drawDevicePage(forceFull);
+    } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
+        if (!pageEnabled(PAPERMONO_PAGE_HOUSE)) {
+            currentPage = firstEnabledPage();
+            drawScreen(forceFull);
+            return;
+        }
+        drawHousePage(forceFull);
     } else {
         drawHome(forceFull);
     }
@@ -1493,6 +1556,32 @@ bool httpGetStatus()
     yarboOn = doc["yarbo_enabled"] | true;
     powerwallOn = doc["powerwall_enabled"] | false;
     lymowOn = doc["lymow_enabled"] | false;
+    homeOn = doc["home_enabled"] | false;
+    homeCount = 0;
+    {
+        JsonArray items = doc["home_items"].as<JsonArray>();
+        if (!items.isNull()) {
+            for (JsonVariant item : items) {
+                if (homeCount >= PAPERMONO_HOME_MAX) {
+                    break;
+                }
+                JsonObject o = item.as<JsonObject>();
+                if (o.isNull()) {
+                    continue;
+                }
+                homeIds[homeCount] = String((const char *) (o["id"] | ""));
+                homeNames[homeCount] = String((const char *) (o["name"] | ""));
+                homeKinds[homeCount] = String((const char *) (o["kind"] | "light"));
+                homeOnState[homeCount] = o["on"] | false;
+                if (homeIds[homeCount].length()) {
+                    homeCount++;
+                }
+            }
+        }
+    }
+    if (homeOffset >= homeCount) {
+        homeOffset = 0;
+    }
     powerwallPct = doc["powerwall_pct"] | powerwallPct;
     powerwallSolar = doc["powerwall_solar"] | powerwallSolar;
     powerwallLoad = doc["powerwall_load"] | powerwallLoad;
@@ -1569,7 +1658,7 @@ bool httpGetPlans(bool refresh)
     return true;
 }
 
-bool httpCommand(const char *cmd, const char *planId = nullptr, const char *live = nullptr)
+bool httpCommand(const char *cmd, const char *planId = nullptr, const char *live = nullptr, const char *homeId = nullptr)
 {
     if (WiFi.status() != WL_CONNECTED) {
         return false;
@@ -1587,6 +1676,9 @@ bool httpCommand(const char *cmd, const char *planId = nullptr, const char *live
     }
     if (live && live[0]) {
         doc["vestaboard_live"] = live;
+    }
+    if (homeId && homeId[0]) {
+        doc["home_id"] = homeId;
     }
     String payload;
     serializeJson(doc, payload);
@@ -1711,6 +1803,39 @@ void handlePlansTouch(int x, int y)
     }
 }
 
+void handleHouseTouch(int x, int y)
+{
+    if (tapOnPager(y)) {
+        nextPage();
+        return;
+    }
+    int y0 = plansRowY0();
+    int rh = plansRowH();
+    int startY = plansStartY();
+    if (homeCount > PAPERMONO_HOME_VISIBLE && y >= startY && y <= startY + 72) {
+        homeOffset += PAPERMONO_HOME_VISIBLE;
+        if (homeOffset >= homeCount) {
+            homeOffset = 0;
+        }
+        drawScreen(true);
+        return;
+    }
+    if (y >= y0 && y < startY) {
+        int row = (y - y0) / rh;
+        int idx = homeOffset + row;
+        if (idx >= 0 && idx < homeCount && row < PAPERMONO_HOME_VISIBLE) {
+            const char *cmd = homeKinds[idx] == "scene" ? "home_scene" : "home_toggle";
+            httpCommand(cmd, nullptr, nullptr, homeIds[idx].c_str());
+            httpGetStatus();
+            drawScreen(true);
+        }
+        return;
+    }
+    if (y < 110) {
+        nextPage();
+    }
+}
+
 void setup()
 {
     Serial.begin(115200);
@@ -1812,6 +1937,8 @@ void loop()
                 }
             } else if (currentPage == PAPERMONO_PAGE_PLANS) {
                 handlePlansTouch(t.x, t.y);
+            } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
+                handleHouseTouch(t.x, t.y);
             } else if (currentPage == PAPERMONO_PAGE_NOTE) {
                 handleNoteTouch(t.x, t.y);
             } else if (currentPage == PAPERMONO_PAGE_RADIO) {

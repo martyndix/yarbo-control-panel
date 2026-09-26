@@ -558,6 +558,39 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </section>
 
+        <section class="card panel-section module-pane-hidden" data-panel-id="home" data-module="home" id="home-card">
+            <div class="section-header section-header--simple">
+                <h2>Home</h2>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
+            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps.</p>
+            <p id="home-server-status" class="updated">Matter server: —</p>
+            <div class="home-add">
+                <label class="settings-field">
+                    <span class="label">Pairing code or QR text</span>
+                    <input type="text" id="home-pair-code" spellcheck="false" autocomplete="off" placeholder="11-digit code or MT:…">
+                </label>
+                <button type="button" class="btn" id="home-pair">Add device</button>
+            </div>
+            <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice.</p>
+            <div id="home-devices" class="home-device-grid"></div>
+            <h3 class="settings-subtitle">Scenes</h3>
+            <p class="hint">Panel scenes set Matter on/off and brightness. They are not Apple or Hue scenes.</p>
+            <div class="home-scene-add">
+                <input type="text" id="home-scene-name" placeholder="Evening" maxlength="32">
+                <button type="button" class="btn btn-secondary" id="home-scene-save">Save from current lights</button>
+            </div>
+            <div id="home-scenes" class="home-scene-list"></div>
+            <h3 class="settings-subtitle">PaperMono</h3>
+            <p class="hint">Assign up to 8 lights or scenes to a PaperMono HOUSE page.</p>
+            <label class="settings-field" id="home-paper-wrap">
+                <span class="label">Tablet</span>
+                <select id="home-paper-tablet"></select>
+            </label>
+            <div id="home-paper-assign" class="home-paper-assign"></div>
+            <button type="button" class="btn btn-secondary" id="home-paper-save" disabled>Save PaperMono assignment</button>
+        </section>
+
         </div>
 
         <div id="settings-page" class="settings-page hidden" role="region" aria-labelledby="settings-title">
@@ -580,6 +613,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <button type="button" class="settings-nav-btn" data-settings-nav="modules">Modules</button>
                         <button type="button" class="settings-nav-btn hidden" data-settings-nav="lymow">Lymow</button>
                         <button type="button" class="settings-nav-btn hidden" data-settings-nav="powerwall">Powerwall</button>
+                        <button type="button" class="settings-nav-btn hidden" data-settings-nav="home">Home</button>
                         <button type="button" class="settings-nav-btn" data-settings-nav="vestaboard">Vestaboard</button>
                         <button type="button" class="settings-nav-btn" data-settings-nav="papermono">E-paper</button>
                         <button type="button" class="settings-nav-btn" data-settings-nav="appearance">Appearance</button>
@@ -693,6 +727,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-lymow" name="module_lymow">
                                 <span>Lymow (account, battery, camera)</span>
+                            </label>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-module-home" name="module_home">
+                                <span>Home (Matter lights, Hue Bridge, heaters, plugs)</span>
                             </label>
                             <p class="hint">Tick a module, then open its section in the sidebar. Lymow uses the same email and password as the Lymow phone app.</p>
                             <label class="settings-field">
@@ -810,6 +848,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <input type="password" id="settings-powerwall-password" name="powerwall_gateway_password" autocomplete="off" placeholder="Leave blank to keep the saved password">
                                 </label>
                             </div>
+                        </section>
+
+                        <section class="settings-section hidden" id="settings-home-section" data-settings-pane="home">
+                            <h3 class="settings-subtitle">Home (Matter)</h3>
+                            <p class="hint">This panel is a Matter controller. Add devices from the Home dashboard with a pairing code. It does not read Apple Home or Hue inventories. Pairing works best on the Pi (IPv6 on, Docker for python-matter-server). See <code>docs/home.md</code>.</p>
                         </section>
 
                         <section class="settings-section" id="settings-vestaboard-section" data-settings-pane="vestaboard">

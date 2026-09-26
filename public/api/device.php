@@ -196,7 +196,18 @@ if ($action === 'command') {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
     $devices->touch((string) $device['id']);
-    $cmd = (string) ($input['command'] ?? '');
+        $cmd = (string) ($input['command'] ?? '');
+    if ($cmd === 'home_toggle' || $cmd === 'home_scene') {
+        $homeId = (string) ($input['home_id'] ?? $input['id'] ?? '');
+        $result = (new \Yarbo\YarboHome(dirname(__DIR__, 2)))->paperCommand($homeId);
+        if (!($result['ok'] ?? false)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Home command failed'),
+            ], 500);
+        }
+        json_response(['ok' => true, 'command' => $cmd]);
+    }
     if ($cmd === 'vestaboard_live') {
         $live = (string) ($input['vestaboard_live'] ?? $input['live'] ?? '');
         $result = (new \Yarbo\YarboVestaboard(dirname(__DIR__, 2)))->setLiveModule($live);

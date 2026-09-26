@@ -1,6 +1,6 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.1.14-beta"
+#define PAPERMONO_FW_VERSION "0.1.15-beta"
 /* Status poll. Do not go much faster: SSD1677 must not stream partial refreshes. */
 #define PAPERMONO_POLL_MS 15000
 #define PAPERMONO_PAGE_HOME 0
@@ -13,9 +13,12 @@
 #define PAPERMONO_PAGE_LYMOW 7
 #define PAPERMONO_PAGE_RADIO 8
 #define PAPERMONO_PAGE_DEVICE 9
-#define PAPERMONO_PAGE_COUNT 10
+#define PAPERMONO_PAGE_HOUSE 10
+#define PAPERMONO_PAGE_COUNT 11
 #define PAPERMONO_PLAN_MAX 20
 #define PAPERMONO_PLAN_VISIBLE 6
+#define PAPERMONO_HOME_MAX 8
+#define PAPERMONO_HOME_VISIBLE 6
 #define PAPERMONO_PEER_MAX 8
 #define PAPERMONO_INBOX_MAX 8
 #define PAPERMONO_MSG_CHARS 180
