@@ -28,6 +28,16 @@ final class YarboMatterAgentClient
     public function request(array $body, float $timeoutSeconds = 12.0): array
     {
         $this->ensureStarted();
+
+        return $this->post($body, $timeoutSeconds);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function post(array $body, float $timeoutSeconds): array
+    {
         $payload = json_encode($body, JSON_UNESCAPED_SLASHES);
         if (!is_string($payload)) {
             return ['ok' => false, 'error' => 'Could not encode Matter request'];
@@ -66,7 +76,7 @@ final class YarboMatterAgentClient
         if (self::$spawnAttempted) {
             return;
         }
-        $probe = $this->request(['op' => 'ping'], 0.8);
+        $probe = $this->post(['op' => 'ping'], 0.4);
         if (($probe['ok'] ?? false) === true) {
             self::$spawnAttempted = true;
 
@@ -97,7 +107,7 @@ final class YarboMatterAgentClient
         $deadline = microtime(true) + 4.0;
         while (microtime(true) < $deadline) {
             usleep(200000);
-            if (($this->request(['op' => 'ping'], 0.6)['ok'] ?? false) === true) {
+            if (($this->post(['op' => 'ping'], 0.4)['ok'] ?? false) === true) {
                 return;
             }
         }

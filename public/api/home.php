@@ -27,7 +27,8 @@ if (!$hub->enabled(YarboHub::MODULE_HOME) && $action !== 'setup') {
     json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
 }
 
-set_time_limit($action === 'commission' ? 100 : 40);
+set_time_limit($action === 'commission' ? 100 : ($action === 'setup' ? 12 : 40));
+ignore_user_abort($action === 'setup');
 
 try {
     $result = match ($action) {

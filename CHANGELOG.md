@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-09-26
+
+### Fixed
+- **Set up Matter server** no longer shows “fetch is aborted”. The panel starts Docker in the background and the page keeps polling instead of waiting for the whole download.
+
 ## [3.0.1] - 2026-09-26
 
 ### Added

@@ -2491,16 +2491,26 @@ function applyHomeSetupUi(data) {
 
 async function startHomeSetup(button) {
     if (button) button.disabled = true;
+    const running = {
+        state: 'running',
+        ready: false,
+        message: 'Setting up the Matter server. First time can take a few minutes.',
+        error: null,
+    };
+    homeDash = { ...homeDash, setup: running, server: { ok: false, error: running.message } };
+    applyHomeSetupUi(homeDash);
     try {
-        const data = await homeApi({ action: 'setup' }, 15000);
+        const data = await homeApi({ action: 'setup' }, 12000);
         if (!data.ok) throw new Error(data.error || 'Could not start Matter setup');
         showToast(data.message || 'Setting up Matter server', 'success');
-        if (data.setup) {
-            homeDash = { ...homeDash, setup: data.setup };
-            applyHomeSetupUi(homeDash);
-        }
-        await loadHomeDashboard();
+        homeDash = { ...homeDash, setup: data.setup || running };
+        applyHomeSetupUi(homeDash);
     } catch (err) {
+        if (isAbortError(err)) {
+            showToast('Setup is running in the background. First time can take a few minutes.', 'success');
+            applyHomeSetupUi(homeDash);
+            return;
+        }
         showToast(err.message || 'Matter setup failed', 'error');
         if (button) button.disabled = false;
     }
@@ -2516,10 +2526,14 @@ async function loadHomeDashboard() {
     }
     homeLoadBusy = true;
     try {
-        const data = await homeApi(null, 25000);
+        const data = await homeApi(null, 12000);
         homeDash = data;
         renderHomeDashboard(data);
     } catch (err) {
+        if (isAbortError(err) && homeDash?.setup?.state === 'running') {
+            applyHomeSetupUi(homeDash);
+            return;
+        }
         const status = document.getElementById('home-server-status');
         if (status) status.textContent = err.message || 'Could not load Home';
         applyHomeSetupUi({ setup: { state: 'failed', error: err.message || 'Could not load Home' } });

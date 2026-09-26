@@ -132,18 +132,35 @@ final class YarboHome
     public function dashboard(): array
     {
         $hub = new YarboHub($this->projectRoot);
+        $setup = $this->setupStatus();
         if (!$hub->enabled(YarboHub::MODULE_HOME)) {
-        return [
-            'ok' => true,
-            'enabled' => false,
-            'server' => ['ok' => false, 'error' => 'Home module is off'],
-            'devices' => [],
-            'scenes' => [],
-            'paper_devices' => [],
-            'setup' => $this->setupStatus(),
-        ];
+            return [
+                'ok' => true,
+                'enabled' => false,
+                'server' => ['ok' => false, 'error' => 'Home module is off'],
+                'devices' => [],
+                'scenes' => [],
+                'paper_devices' => [],
+                'setup' => $setup,
+            ];
         }
-        $live = $this->liveDevices(18.0);
+        if (!($setup['ready'] ?? false)) {
+            $store = $this->load();
+
+            return [
+                'ok' => true,
+                'enabled' => true,
+                'server' => [
+                    'ok' => false,
+                    'error' => (string) ($setup['error'] ?? $setup['message'] ?? 'Matter server is not running yet'),
+                ],
+                'devices' => [],
+                'scenes' => $store['scenes'],
+                'paper_devices' => $this->paperDeviceList($store),
+                'setup' => $setup,
+            ];
+        }
+        $live = $this->liveDevices(8.0);
         $store = $this->load();
         $devices = [];
         foreach ($live['devices'] as $device) {
@@ -168,6 +185,26 @@ final class YarboHome
                 'room' => $store['rooms'][$id] ?? '',
             ];
         }
+        return [
+            'ok' => true,
+            'enabled' => true,
+            'server' => [
+                'ok' => (bool) $live['ok'],
+                'error' => (string) $live['error'],
+            ],
+            'devices' => $devices,
+            'scenes' => $store['scenes'],
+            'paper_devices' => $this->paperDeviceList($store),
+            'setup' => $this->setupStatus(),
+        ];
+    }
+
+    /**
+     * @param array{paper?: array<string, list<string>>} $store
+     * @return list<array{id: string, name: string, assigned: list<string>}>
+     */
+    private function paperDeviceList(array $store): array
+    {
         $paper = [];
         foreach ((new YarboPaperDevice($this->projectRoot))->publicDevices() as $tablet) {
             if (($tablet['kind'] ?? '') !== YarboPaperDevice::KIND_MONO) {
@@ -184,18 +221,7 @@ final class YarboHome
             ];
         }
 
-        return [
-            'ok' => true,
-            'enabled' => true,
-            'server' => [
-                'ok' => (bool) $live['ok'],
-                'error' => (string) $live['error'],
-            ],
-            'devices' => $devices,
-            'scenes' => $store['scenes'],
-            'paper_devices' => $paper,
-            'setup' => $this->setupStatus(),
-        ];
+        return $paper;
     }
 
     /**
@@ -278,26 +304,36 @@ final class YarboHome
         }
         @file_put_contents($dataDir . '/matter-setup.json', json_encode([
             'state' => 'running',
-            'message' => 'Setting up the Matter server',
+            'message' => 'Setting up the Matter server. First time can take a few minutes.',
             'error' => null,
             'updated_at' => gmdate('c'),
         ], JSON_UNESCAPED_SLASHES) . "\n");
         $log = $dataDir . '/matter-setup.log';
         $cmd = is_file($script)
             ? sprintf(
-                'nohup bash %s >> %s 2>&1 &',
+                'nohup bash %s >> %s 2>&1 < /dev/null &',
                 escapeshellarg($script),
                 escapeshellarg($log)
             )
             : sprintf(
-                'nohup bash %s %s >> %s 2>&1 &',
+                'nohup bash %s %s >> %s 2>&1 < /dev/null &',
                 escapeshellarg($fallback),
                 escapeshellarg($this->projectRoot),
                 escapeshellarg($log)
             );
-        exec($cmd);
+        if (!$this->spawnBackground($cmd, $log)) {
+            @file_put_contents($dataDir . '/matter-setup.json', json_encode([
+                'state' => 'failed',
+                'message' => null,
+                'error' => 'Could not start Matter setup',
+                'updated_at' => gmdate('c'),
+            ], JSON_UNESCAPED_SLASHES) . "\n");
+
+            return ['ok' => false, 'error' => 'Could not start Matter setup'];
+        }
         $status = $this->setupStatus();
         $status['state'] = 'running';
+        $status['ready'] = false;
         $status['message'] = 'Setting up the Matter server. First time can take a few minutes.';
 
         return [
@@ -306,6 +342,35 @@ final class YarboHome
             'message' => $status['message'],
             'setup' => $status,
         ];
+    }
+
+    private function spawnBackground(string $command, string $logFile): bool
+    {
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['file', $logFile, 'a'],
+            2 => ['file', $logFile, 'a'],
+        ];
+        $home = getenv('HOME') ?: $this->projectRoot;
+        $process = proc_open(
+            ['bash', '-c', $command],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot,
+            [
+                'HOME' => $home,
+                'PATH' => getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            ]
+        );
+        if (!is_resource($process)) {
+            return false;
+        }
+        if (isset($pipes[0]) && is_resource($pipes[0])) {
+            fclose($pipes[0]);
+        }
+        proc_close($process);
+
+        return true;
     }
 
     private function matterPortUp(): bool
