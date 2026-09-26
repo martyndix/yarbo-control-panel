@@ -1093,7 +1093,17 @@ function setAreasLayerVisible(visible) {
     }
 }
 
-function enableDraftVertexEditing() {
+function hideOriginalMapLayers() {
+    setAreasLayerVisible(false);
+    mapZoneLayers.forEach((entry) => {
+        if (entry?.layer && map.hasLayer(entry.layer)) {
+            map.removeLayer(entry.layer);
+        }
+    });
+    draftLayer?.bringToFront();
+}
+
+function enableDraftVertexEditing(onlyLayer) {
     const editOptions = {
         selectedPathOptions: {
             maintainColor: true,
@@ -1103,8 +1113,16 @@ function enableDraftVertexEditing() {
         },
     };
     draftLayer?.eachLayer((layer) => {
+        const shouldEdit = onlyLayer != null && layer === onlyLayer;
         if (layer.editing) {
-            layer.editing.enable();
+            if (shouldEdit) {
+                layer.editing.enable();
+            } else {
+                layer.editing.disable();
+            }
+            return;
+        }
+        if (!shouldEdit) {
             return;
         }
         if (typeof L.Edit?.Poly === 'function' && typeof layer.getLatLngs === 'function') {
@@ -1162,6 +1180,8 @@ function focusZoneForEditing(index) {
         copyFeaturesToDraft();
     }
 
+    hideOriginalMapLayers();
+
     let target = null;
     draftLayer.eachLayer((layer) => {
         const feature = layer.feature || {};
@@ -1174,7 +1194,7 @@ function focusZoneForEditing(index) {
         }
     });
 
-    enableDraftVertexEditing();
+    enableDraftVertexEditing(target);
 
     if (target) {
         const bounds = target.getBounds?.();
@@ -1432,23 +1452,69 @@ function splitDraftFeatures(features) {
     };
 }
 
+function latLngsToCoords(latlngs, closeRing) {
+    const ring = Array.isArray(latlngs?.[0]) ? latlngs[0] : latlngs;
+    const coords = [];
+    (Array.isArray(ring) ? ring : []).forEach((ll) => {
+        if (ll && Number.isFinite(ll.lng) && Number.isFinite(ll.lat)) {
+            coords.push([ll.lng, ll.lat]);
+        }
+    });
+    if (closeRing && coords.length >= 3) {
+        const first = coords[0];
+        const last = coords[coords.length - 1];
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+            coords.push([first[0], first[1]]);
+        }
+    }
+    return coords;
+}
+
+function layerToDraftFeature(layer) {
+    const props = { ...(layer.feature?.properties || {}) };
+    if (typeof L !== 'undefined' && layer instanceof L.Polygon && typeof layer.getLatLngs === 'function') {
+        const coords = latLngsToCoords(layer.getLatLngs(), true);
+        if (coords.length >= 4) {
+            return {
+                type: 'Feature',
+                properties: props,
+                geometry: { type: 'Polygon', coordinates: [coords] },
+            };
+        }
+    }
+    if (typeof L !== 'undefined' && layer instanceof L.Polyline && typeof layer.getLatLngs === 'function') {
+        const coords = latLngsToCoords(layer.getLatLngs(), false);
+        if (coords.length >= 2) {
+            return {
+                type: 'Feature',
+                properties: props,
+                geometry: { type: 'LineString', coordinates: coords },
+            };
+        }
+    }
+    if (typeof layer.getLatLng === 'function' && typeof L !== 'undefined' && layer instanceof L.CircleMarker) {
+        const ll = layer.getLatLng();
+        return {
+            type: 'Feature',
+            properties: props,
+            geometry: { type: 'Point', coordinates: [ll.lng, ll.lat] },
+        };
+    }
+    if (typeof layer.toGeoJSON !== 'function') return null;
+    const geo = layer.toGeoJSON();
+    const feature = geo?.type === 'FeatureCollection' ? geo.features?.[0] : geo;
+    if (!feature || feature.type !== 'Feature') return null;
+    feature.properties = { ...props, ...(feature.properties || {}) };
+    return feature;
+}
+
 function rawDraftFeatures() {
     const features = [];
     draftLayer?.eachLayer((layer) => {
-        if (typeof layer.toGeoJSON !== 'function') return;
-        const geo = layer.toGeoJSON();
-        const list = geo?.type === 'FeatureCollection' ? (geo.features || []) : [geo];
-        list.forEach((feature) => {
-            if (!feature || feature.type !== 'Feature') return;
-            const props = {
-                ...(layer.feature?.properties || {}),
-                ...(feature.properties || {}),
-            };
-            if (Object.keys(props).length) {
-                feature.properties = props;
-            }
+        const feature = layerToDraftFeature(layer);
+        if (feature) {
             features.push(feature);
-        });
+        }
     });
     return features;
 }
@@ -1483,6 +1549,10 @@ function copyFeaturesToDraft() {
         },
     }).eachLayer((layer) => {
         draftLayer.addLayer(layer);
+        layer.on('click', (event) => {
+            L.DomEvent.stopPropagation(event);
+            focusZoneForEditing(layer._yarboZoneIndex);
+        });
     });
 }
 
@@ -1495,7 +1565,7 @@ function updateMapEditToggleStyle(editing) {
 }
 
 function setMapEditMode(enabled) {
-    if (!map || typeof L.Control?.Draw === 'undefined') {
+    if (!map || typeof L.Edit?.Poly === 'undefined') {
         if (enabled) {
             showToast('Map editor requires Leaflet.draw to load', 'error');
         }
@@ -1538,25 +1608,12 @@ function setMapEditMode(enabled) {
         copyFeaturesToDraft();
     }
 
-    setAreasLayerVisible(false);
+    hideOriginalMapLayers();
 
-    if (!drawControl) {
-        drawControl = new L.Control.Draw({
-            position: 'topright',
-            edit: {
-                featureGroup: draftLayer,
-                edit: false,
-                remove: true,
-            },
-            draw: false,
-        });
-        map.on(L.Draw.Event.DELETED, () => {
-            enableDraftVertexEditing();
-        });
+    if (drawControl) {
+        map.removeControl(drawControl);
+        drawControl = null;
     }
-
-    map.addControl(drawControl);
-    enableDraftVertexEditing();
 }
 
 function saveMapDraft() {
@@ -1624,8 +1681,7 @@ async function loadMapBackups() {
             saveMapCache({ data_via: data.via || 'backup' }, features);
             if (mapEditMode) {
                 copyFeaturesToDraft();
-                setAreasLayerVisible(false);
-                enableDraftVertexEditing();
+                hideOriginalMapLayers();
             }
             updateMapAreasStatus(`Map backup loaded (${features.length} feature${features.length === 1 ? '' : 's'}).`);
         }
@@ -1993,8 +2049,7 @@ async function loadSavedAreas(button = null) {
             showToast(data.note || 'Saved mowing areas loaded', 'success');
             if (mapEditMode) {
                 copyFeaturesToDraft();
-                setAreasLayerVisible(false);
-                enableDraftVertexEditing();
+                hideOriginalMapLayers();
             }
             return;
         }

@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.43] - 2026-09-26
+
+### Fixed
+- Save no longer reports success when the live map is unchanged (`vs original 0`). LAN `map_recovery` can ACK and do nothing; the panel now retries over cloud and only treats the write as done if the robot vertices actually moved.
+- Restore sends the patched backup file only (it was merging the original fetch envelope back in).
+- Edit one zone at a time so the original line is not left on the map under a second set of vertex handles.
+
 ## [2.0.42] - 2026-09-26
 
 ### Fixed

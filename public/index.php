@@ -266,7 +266,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn btn-secondary" id="map-load-backups">Load map backups</button>
             </div>
             <p id="map-listen-status" class="map-areas-status">Listen captures MQTT command names. Load map backups extracts a backup onto this map, then Save to robot restores it (docked, with confirm).</p>
-            <p id="map-edit-tip" class="map-edit-tip hidden">Drag the existing vertices. Do not draw a new polygon — the old line would stay and Save would keep the original.</p>
+            <p id="map-edit-tip" class="map-edit-tip hidden">Click one zone (or its Edit button), then drag those vertices. The original line should disappear. Do not edit every path at once.</p>
             <div class="map-wrap">
                 <div id="map" class="map"></div>
                 <div id="map-loading" class="map-loading hidden" aria-live="polite" aria-busy="false">

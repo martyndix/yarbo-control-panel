@@ -17,7 +17,18 @@ final class YarboMapBackup
         'map_backup',
     ];
     /** get_map vs backup-file frames are not millimetre-accurate. */
+    /** get_map vs backup-file frames are not millimetre-accurate. */
     private const VERIFY_M = 0.25;
+    /** Metadata copied onto a patched backup; never merge original zone lists. */
+    private const RECOVERY_META_KEYS = [
+        'id',
+        'timestamp',
+        'name',
+        'is_auto_backup',
+        'create_time',
+        'update_time',
+        'backup_id',
+    ];
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -281,24 +292,25 @@ final class YarboMapBackup
             ];
         }
 
+        $payload = $this->payloadWithMap($stored, $encoded['map']);
+        if (isset($stored['backup_id']) && $stored['backup_id'] !== null && $stored['backup_id'] !== '') {
+            $payload['id'] = is_numeric($stored['backup_id']) ? (int) $stored['backup_id'] : $stored['backup_id'];
+        }
+        $sentMap = self::locateMap($payload)['map'] ?? $encoded['map'];
         $encodeDelta = (float) ($encoded['max_delta_m'] ?? 0);
-        $blobDelta = YarboMap::maxRangeDelta($stored['map'], $encoded['map']);
+        $blobDelta = YarboMap::maxRangeDelta($stored['map'], $sentMap);
         if ($encodeDelta > self::VERIFY_M && $blobDelta <= self::VERIFY_M) {
             return [
                 'ok' => false,
-                'error' => 'The draft still includes the original line for a zone you moved, so the backup file was not actually changed. Stop editing, Load map backups again, then drag the existing vertices — do not draw a new polygon on top.',
+                'error' => 'The draft still includes the original line for a zone you moved, so the backup file was not actually changed. Stop editing, Load map backups again, then click one zone and drag its vertices — do not draw a new polygon on top.',
                 'encode_delta_m' => $encodeDelta,
                 'blob_delta_m' => $blobDelta,
             ];
         }
 
-        $payload = $this->payloadWithMap($stored, $encoded['map']);
-        if (isset($stored['backup_id']) && $stored['backup_id'] !== null && $stored['backup_id'] !== '') {
-            $payload['id'] = is_numeric($stored['backup_id']) ? (int) $stored['backup_id'] : $stored['backup_id'];
-        }
         $restoreFile = $this->writeRestoreCopy($stored);
 
-        $sent = $this->sendRecovery($client, $cloud, $serial, $payload);
+        $sent = $this->sendRecovery($client, $cloud, $serial, $payload, false);
         $ack = $sent['envelope'];
         $via = $sent['via'];
         if ($ack === null) {
@@ -311,26 +323,47 @@ final class YarboMapBackup
 
         sleep(4);
         $readMap = $this->readCurrentMap($client, $cloud, $serial);
-        $delta = is_array($readMap) ? YarboMap::maxRangeDelta($encoded['map'], $readMap) : null;
-        if ($delta === null || ($delta > self::VERIFY_M && $blobDelta > self::VERIFY_M)) {
+        $delta = is_array($readMap) ? YarboMap::maxRangeDelta($sentMap, $readMap) : null;
+        $vsOriginal = is_array($readMap) ? YarboMap::maxRangeDelta($stored['map'], $readMap) : null;
+        $robotMoved = $vsOriginal !== null && $vsOriginal > self::VERIFY_M;
+        if ($blobDelta > self::VERIFY_M && !$robotMoved && $cloud !== null && $serial !== '') {
+            $cloudSent = $this->sendRecovery($client, $cloud, $serial, $payload, true);
+            if ($cloudSent['envelope'] !== null) {
+                $ack = $cloudSent['envelope'];
+                $via = 'cloud';
+                sleep(5);
+                $retryMap = $this->readCurrentMap($client, $cloud, $serial);
+                if (is_array($retryMap)) {
+                    $readMap = $retryMap;
+                    $delta = YarboMap::maxRangeDelta($sentMap, $readMap);
+                    $vsOriginal = YarboMap::maxRangeDelta($stored['map'], $readMap);
+                    $robotMoved = $vsOriginal > self::VERIFY_M;
+                }
+            }
+        } elseif ($delta === null || ($delta > self::VERIFY_M && $blobDelta > self::VERIFY_M)) {
             sleep(4);
             $retryMap = $this->readCurrentMap($client, $cloud, $serial);
             if (is_array($retryMap)) {
                 $readMap = $retryMap;
-                $delta = YarboMap::maxRangeDelta($encoded['map'], $readMap);
+                $delta = YarboMap::maxRangeDelta($sentMap, $readMap);
+                $vsOriginal = YarboMap::maxRangeDelta($stored['map'], $readMap);
+                $robotMoved = $vsOriginal !== null && $vsOriginal > self::VERIFY_M;
             }
         }
 
-        $vsOriginal = is_array($readMap) ? YarboMap::maxRangeDelta($stored['map'], $readMap) : null;
-        $verified = $delta !== null && $delta <= self::VERIFY_M;
-        $unchanged = $vsOriginal !== null
-            && $vsOriginal <= self::VERIFY_M
-            && $blobDelta > self::VERIFY_M
-            && ($delta === null || $delta > self::VERIFY_M);
+        $matchesSent = $delta !== null && $delta <= self::VERIFY_M;
+        $verified = $matchesSent && ($blobDelta <= self::VERIFY_M || $robotMoved);
+        $unchanged = $blobDelta > self::VERIFY_M && !$robotMoved;
         $hasBackupBlob = ($stored['map_source'] ?? '') !== 'get_map';
         $rolledBack = false;
-        if (!$verified && $hasBackupBlob && is_array($readMap) && !$unchanged) {
-            $this->sendRecovery($client, $cloud, $serial, is_array($stored['recovery_payload'] ?? null) ? $stored['recovery_payload'] : $stored['map']);
+        if (!$verified && $hasBackupBlob && $robotMoved) {
+            $this->sendRecovery(
+                $client,
+                $cloud,
+                $serial,
+                is_array($stored['recovery_payload'] ?? null) ? $stored['recovery_payload'] : $stored['map'],
+                $via === 'cloud'
+            );
             $rolledBack = true;
         }
 
@@ -454,21 +487,29 @@ final class YarboMapBackup
         ?YarboCloud $cloud,
         string $serial,
         array $payload,
+        bool $forceCloud = false,
     ): array {
-        $ack = $client->requestDataFeedback(self::RECOVERY_CMD, $payload, 15.0, false);
-        $via = 'local';
-        if (!self::ackLooksOk($ack) && $cloud !== null && $serial !== '') {
+        if (!$forceCloud) {
+            $ack = $client->requestDataFeedback(self::RECOVERY_CMD, $payload, 15.0, false);
+            $via = 'local';
+            if (self::ackLooksOk($ack)) {
+                return ['envelope' => $ack, 'via' => $via];
+            }
+        } else {
+            $ack = null;
+            $via = 'cloud';
+        }
+        if ($cloud !== null && $serial !== '') {
             $cloudAck = $this->envelopeFromCloud(
                 $cloud->command(self::RECOVERY_CMD, $serial, $payload, 45.0),
                 self::RECOVERY_CMD
             );
             if ($cloudAck !== null) {
-                $ack = $cloudAck;
-                $via = 'cloud';
+                return ['envelope' => $cloudAck, 'via' => 'cloud'];
             }
         }
 
-        return ['envelope' => $ack, 'via' => $via];
+        return ['envelope' => $ack ?? null, 'via' => $via ?? 'local'];
     }
 
     private static function ackLooksOk(?array $ack): bool
@@ -539,13 +580,13 @@ final class YarboMapBackup
         if ($verified) {
             return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
+        if ($unchanged) {
+            return 'Robot map did not change. map_recovery accepted the command but the live vertices are still the original ones. Original left in place ('
+                . $restoreFile . '). Enable Settings → cloud fallback if this was LAN-only.' . $detail;
+        }
         if (!$readMap) {
             return 'Restore was sent, but get_map could not be read to verify. Check the official app. Original is on the Pi as '
                 . $restoreFile . '. Not auto-reverted.' . $detail;
-        }
-        if ($unchanged) {
-            return 'Robot map did not change. map_recovery accepted the command but the vertices are still the old ones. Original left in place ('
-                . $restoreFile . ').' . $detail;
         }
         if ($rolledBack) {
             return 'Read-back did not match the draft. Restored the original backup from the Pi copy ('
@@ -859,11 +900,24 @@ final class YarboMapBackup
      */
     private function payloadWithMap(array $stored, array $map): array
     {
-        $payload = is_array($stored['recovery_payload'] ?? null) ? $stored['recovery_payload'] : $map;
+        $meta = [];
+        $original = is_array($stored['recovery_payload'] ?? null) ? $stored['recovery_payload'] : [];
+        foreach (self::RECOVERY_META_KEYS as $key) {
+            if (array_key_exists($key, $original)) {
+                $meta[$key] = $original[$key];
+            }
+        }
         $path = $stored['map_path'] ?? null;
         if ($path === null || $path === '' || $path === []) {
-            return $map + (is_array($payload) ? $payload : []);
+            return $map + $meta;
         }
+        $payload = $original !== [] ? $original : [];
+        foreach (YarboMap::canonicalListNames() as $aliases) {
+            foreach ($aliases as $key) {
+                unset($payload[$key]);
+            }
+        }
+        unset($payload['chargingData'], $payload['chargingPoint'], $payload['chargingPoints'], $payload['allchargingData']);
         $keys = is_array($path) ? $path : [$path];
         $ref = &$payload;
         foreach ($keys as $i => $key) {
@@ -878,7 +932,7 @@ final class YarboMapBackup
         }
         unset($ref);
 
-        return $payload;
+        return $payload + $meta;
     }
 
     /**

@@ -457,7 +457,7 @@ After a successful load, zones are **cached in the browser** so a page refresh r
 |---------|-----------|
 | **Map zones** | Collapsed until opened; lists loaded zones with type colours and the draft edit/export tools |
 | **Export GeoJSON** | Download the currently loaded zones |
-| **Edit map (draft)** | Drag vertices of existing zones. Do not draw a new polygon on top — Save would keep the old line |
+| **Edit map (draft)** | Click one zone, then drag its vertices. The original line is hidden. Do not edit every path at once |
 | **Export draft** | Download edited draft GeoJSON |
 | **Save to robot** | Restores an edited backup via `map_recovery` after **Load map backups**. Robot must be docked. A Pi copy of the original is restored if read-back fails |
 
@@ -695,7 +695,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.42** (2026-09-26).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **2.0.43** (2026-09-26).
 
 ---
 

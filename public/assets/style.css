@@ -1276,6 +1276,13 @@ body.map-is-fullscreen {
     color: #7ddea0;
 }
 
+.leaflet-editing-icon {
+    width: 10px !important;
+    height: 10px !important;
+    margin-left: -5px !important;
+    margin-top: -5px !important;
+}
+
 .map-status {
     margin: 0.75rem 0 0;
     font-size: 0.8rem;
