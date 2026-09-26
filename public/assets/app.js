@@ -1788,19 +1788,16 @@ async function restoreMapBackupDraft() {
     }
     if (els.mapSaveRobot) els.mapSaveRobot.disabled = true;
     setMapLoading(true, 'Saving to robot');
-    const saveAbort = new AbortController();
-    const saveTimer = setTimeout(() => saveAbort.abort(), 90000);
     try {
-        const res = await fetch('/api/map_backup.php', {
+        const res = await fetchWithTimeout('/api/map_backup.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            signal: saveAbort.signal,
             body: JSON.stringify({
                 action: 'restore',
                 confirm: true,
                 geojson: collection,
             }),
-        });
+        }, 50000);
         const data = await parseJsonResponse(res);
         const text = data.message || data.error || 'Restore finished';
         if (els.mapListenStatus) els.mapListenStatus.textContent = text;
@@ -1809,10 +1806,9 @@ async function restoreMapBackupDraft() {
             setMapEditMode(false);
         }
     } catch (err) {
-        const aborted = err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')));
-        showToast(aborted ? 'Save timed out after 90s. Try again; the robot may already have the edit.' : (err.message || 'Restore failed'), 'error');
+        const aborted = isAbortError(err);
+        showToast(aborted ? 'Save timed out. The robot may still be applying an app edit — wait until it is idle, then try again.' : (err.message || 'Restore failed'), 'error');
     } finally {
-        clearTimeout(saveTimer);
         setMapLoading(false);
         setMapSaveEnabled(mapBackupCompatible);
     }
@@ -2100,7 +2096,7 @@ async function loadSavedAreas(button = null) {
 
     try {
         const source = els.mapDataSource?.value || defaultDataSource;
-        const res = await fetch(`/api/map.php?source=${encodeURIComponent(source)}`);
+        const res = await fetchWithTimeout(`/api/map.php?source=${encodeURIComponent(source)}`, { cache: 'no-store' }, 45000);
         const data = await parseJsonResponse(res);
         if (!data.ok) {
             updateMapAreasStatus(`Saved areas unavailable: ${data.error || 'request failed'}`);
@@ -2157,8 +2153,12 @@ async function loadSavedAreas(button = null) {
             showToast(warning || 'Saved area extraction not supported yet', 'error');
         }
     } catch (err) {
-        updateMapAreasStatus(`Saved areas request failed: ${err.message || 'network error'}`);
-        showToast(err.message || 'Network error', 'error');
+        const aborted = isAbortError(err);
+        const text = aborted
+            ? 'Map load timed out. Wait until the robot is idle after an app edit, then try again.'
+            : `Saved areas request failed: ${err.message || 'network error'}`;
+        updateMapAreasStatus(text);
+        showToast(text, 'error');
     } finally {
         setMapLoading(false);
     }

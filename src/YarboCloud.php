@@ -27,7 +27,7 @@ final class YarboCloud
         $error = null;
 
         if ($available) {
-            $probe = $this->runBridge(['status'], false);
+            $probe = $this->runBridge(['status'], false, 12.0);
             $sdkInstalled = (bool) ($probe['sdk_installed'] ?? false);
             $pythonVersion = $probe['python_version'] ?? null;
             if (!($probe['ok'] ?? false) && isset($probe['error'])) {
@@ -66,7 +66,7 @@ final class YarboCloud
             ];
         }
 
-        return $this->runBridge(['test-login'], true);
+        return $this->runBridge(['test-login'], true, 25.0);
     }
 
     /**
@@ -83,7 +83,7 @@ final class YarboCloud
             'device-name',
             '--serial',
             $serial,
-        ], true);
+        ], true, 20.0);
 
         if (!($result['ok'] ?? false)) {
             return ['name' => null, 'sn' => $serial];
@@ -114,7 +114,7 @@ final class YarboCloud
             $serial,
             '--timeout',
             (string) $timeout,
-        ], true);
+        ], true, $timeout + 8.0);
 
         if (!($result['ok'] ?? false)) {
             return [
@@ -162,7 +162,7 @@ final class YarboCloud
                 $cmd,
                 '--payload-file',
                 $file,
-            ], true);
+            ], true, $timeout + 8.0);
         } finally {
             @unlink($file);
         }
@@ -186,7 +186,7 @@ final class YarboCloud
      * @param array<int, string> $args
      * @return array<string, mixed>
      */
-    private function runBridge(array $args, bool $requireCredentials): array
+    private function runBridge(array $args, bool $requireCredentials, float $processTimeout = 25.0): array
     {
         $config = $this->settings->load();
         $python = $this->resolvePython($config['python_path']);
@@ -214,22 +214,53 @@ final class YarboCloud
         }
 
         fclose($pipes[0]);
-        $stdout = stream_get_contents($pipes[1]) ?: '';
-        $stderr = stream_get_contents($pipes[2]) ?: '';
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $stdout = '';
+        $stderr = '';
+        $deadline = microtime(true) + max(3.0, $processTimeout);
+        $timedOut = false;
+        while (true) {
+            $stdout .= (string) stream_get_contents($pipes[1]);
+            $stderr .= (string) stream_get_contents($pipes[2]);
+            $status = proc_get_status($process);
+            if (empty($status['running'])) {
+                break;
+            }
+            if (microtime(true) > $deadline) {
+                $timedOut = true;
+                proc_terminate($process, 15);
+                usleep(200000);
+                $status = proc_get_status($process);
+                if (!empty($status['running'])) {
+                    proc_terminate($process, 9);
+                }
+                break;
+            }
+            usleep(100000);
+        }
+        $stdout .= (string) stream_get_contents($pipes[1]);
+        $stderr .= (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
         proc_close($process);
 
         $decoded = json_decode($stdout, true);
-        if (!is_array($decoded)) {
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+        if ($timedOut) {
             return [
                 'ok' => false,
-                'error' => trim($stderr !== '' ? $stderr : 'Invalid JSON from cloud bridge'),
-                'stdout' => $stdout,
+                'error' => 'Cloud map read timed out after ' . (int) $processTimeout . 's. The robot may still be applying an app edit.',
             ];
         }
 
-        return $decoded;
+        return [
+            'ok' => false,
+            'error' => trim($stderr !== '' ? $stderr : 'Invalid JSON from cloud bridge'),
+            'stdout' => $stdout,
+        ];
     }
 
     private function resolvePython(string $configuredPath): string

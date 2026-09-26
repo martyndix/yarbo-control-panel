@@ -334,16 +334,27 @@ final class YarboMapBackup
 
         $preferCloud = $cloud !== null && $serial !== '';
         $liveBefore = $this->readCurrentMap($client, $cloud, $serial, $preferCloud);
+        $liveFromCache = false;
+        if (!is_array($liveBefore)) {
+            $liveBefore = $this->loadLiveMap();
+            $liveFromCache = is_array($liveBefore);
+        }
         if (!is_array($liveBefore)) {
             return [
                 'ok' => false,
-                'error' => 'Could not read live get_map to convert coordinates. Original is on the Pi: ' . basename($restoreFile),
+                'error' => 'Live get_map timed out. The robot may still be applying the app edit. Wait until it is idle, then try Load saved mowing areas. Original is on the Pi: ' . basename($restoreFile),
                 'restore_file' => basename($restoreFile),
             ];
         }
         $collisionNote = YarboMap::formatCrossTypeCollisions(
             YarboMap::crossTypeNameCollisions($liveBefore)
         );
+        if ($liveFromCache) {
+            $collisionNote = trim(
+                'Used the last loaded live map because get_map timed out. '
+                . $collisionNote
+            );
+        }
 
         $changes = [];
         $patchedLive = $liveBefore;
@@ -627,29 +638,12 @@ final class YarboMapBackup
      */
     private function fetchLiveMap(YarboMqtt $client, ?YarboCloud $cloud, string $serial): ?array
     {
-        $envelope = $client->requestDataFeedback('get_map', [], 20.0, false);
-        if ($envelope !== null) {
-            $located = self::locateMap(self::envelopeData($envelope));
-            if ($located['map'] !== null) {
-                return $located['map'];
-            }
+        $map = $this->readCurrentMap($client, $cloud, $serial, $cloud !== null && $serial !== '');
+        if (is_array($map)) {
+            return $map;
         }
 
-        $cached = $this->loadLiveMap();
-        if (is_array($cached)) {
-            return $cached;
-        }
-
-        if ($cloud === null || $serial === '') {
-            return null;
-        }
-        $raw = $cloud->fetch('get_map', $serial, 35.0);
-        if (!is_array($raw) || ($raw['ok'] ?? true) === false) {
-            return null;
-        }
-        $located = self::locateMap($raw);
-
-        return $located['map'];
+        return $this->loadLiveMap();
     }
 
     /**
@@ -1138,7 +1132,7 @@ final class YarboMapBackup
             if ($cloud === null || $serial === '') {
                 return null;
             }
-            $raw = $cloud->fetch('get_map', $serial, 18.0);
+            $raw = $cloud->fetch('get_map', $serial, 8.0);
             if (!is_array($raw) || ($raw['ok'] ?? true) === false) {
                 return null;
             }
@@ -1149,7 +1143,7 @@ final class YarboMapBackup
         $tryLocal = function () use ($client): ?array {
             try {
                 $client->ensureConnected();
-                $envelope = $client->requestDataFeedback('get_map', [], 8.0, false);
+                $envelope = $client->requestDataFeedback('get_map', [], 6.0, false);
             } catch (\Throwable $e) {
                 if (!YarboMqtt::isBrokenSocket($e)) {
                     throw $e;
@@ -1554,14 +1548,39 @@ final class YarboMapBackup
      */
     private static function preferredBackupId(array $entries): mixed
     {
+        $bestId = $entries[0]['id'] ?? null;
+        $bestTime = self::entryTimestamp($entries[0] ?? []);
         foreach ($entries as $entry) {
-            $auto = $entry['fields']['is_auto_backup'] ?? null;
-            if ($auto === false || $auto === 0 || $auto === '0') {
-                return $entry['id'] ?? null;
+            $time = self::entryTimestamp($entry);
+            if ($time >= $bestTime) {
+                $bestTime = $time;
+                $bestId = $entry['id'] ?? null;
             }
         }
 
-        return $entries[0]['id'] ?? null;
+        return $bestId;
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     */
+    private static function entryTimestamp(array $entry): int
+    {
+        $fields = is_array($entry['fields'] ?? null) ? $entry['fields'] : [];
+        foreach (['timestamp', 'update_time', 'create_time', 'created_at', 'time', 'name'] as $key) {
+            $value = $fields[$key] ?? $entry[$key] ?? null;
+            if (is_numeric($value) && (int) $value > 1_000_000_000) {
+                return (int) $value;
+            }
+            if (is_string($value) && $value !== '') {
+                $parsed = strtotime($value);
+                if ($parsed !== false) {
+                    return $parsed;
+                }
+            }
+        }
+
+        return 0;
     }
 
     /**

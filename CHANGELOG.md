@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.56] - 2026-09-26
+
+### Fixed
+- **Load saved mowing areas** and **Save to robot** no longer hang when cloud `get_map` never returns (common right after an app map edit). The cloud Python process is killed on a deadline, live load uses one short attempt plus the last cached map, and Load map backups prefers the newest backup slot (including auto-save).
+
 ## [2.0.55] - 2026-09-26
 
 ### Fixed

@@ -14,7 +14,7 @@ $commands = [
     'read_gps_ref',
 ];
 
-set_time_limit(120);
+set_time_limit(40);
 
 $projectRoot = dirname(__DIR__, 2);
 $cloudSettings = new YarboCloudSettings($projectRoot . '/data');
@@ -45,36 +45,18 @@ function wrap_cloud_feedback(string $cmd, ?array $payload): ?array
 
 function load_map_local(\Yarbo\YarboMqtt $client, array $commands): array
 {
-    $batch = [];
-    foreach ($commands as $cmd) {
-        $batch[$cmd] = $cmd === 'get_map' ? 15.0 : 8.0;
-    }
-
+    $batch = [
+        'get_map' => 10.0,
+        'read_gps_ref' => 5.0,
+    ];
     $responses = $client->requestDataFeedbackBatch($batch, false);
-
-    if ($responses['get_map'] ?? null) {
-        return ['responses' => $responses, 'via' => 'local'];
-    }
-
-    for ($attempt = 1; $attempt <= 3; $attempt++) {
-        $retry = $client->requestDataFeedback('get_map', [], 15.0, false);
-        if ($retry !== null) {
-            $responses['get_map'] = $retry;
-            break;
-        }
-    }
-
-    if (($responses['read_gps_ref'] ?? null) === null) {
-        $responses['read_gps_ref'] = $client->requestDataFeedback('read_gps_ref', [], 8.0, false);
-    }
 
     return ['responses' => $responses, 'via' => 'local'];
 }
 
 function load_map_cloud(YarboCloud $cloud, string $serial): array
 {
-    $gpsRef = $cloud->fetch('read_gps_ref', $serial, 15.0);
-    $mapData = $cloud->fetch('get_map', $serial, 35.0);
+    $mapData = $cloud->fetch('get_map', $serial, 12.0);
 
     if ($mapData !== null && ($mapData['ok'] ?? true) === false) {
         return [
@@ -85,16 +67,45 @@ function load_map_cloud(YarboCloud $cloud, string $serial): array
     }
 
     $responses = [];
-    if (is_array($gpsRef) && ($gpsRef['ok'] ?? true) !== false) {
-        $payload = is_array($gpsRef['data'] ?? null) ? $gpsRef['data'] : $gpsRef;
-        $responses['read_gps_ref'] = wrap_cloud_feedback('read_gps_ref', is_array($payload) ? $payload : null);
-    }
     if (is_array($mapData) && ($mapData['ok'] ?? true) !== false) {
         $payload = is_array($mapData['data'] ?? null) ? $mapData['data'] : $mapData;
         $responses['get_map'] = wrap_cloud_feedback('get_map', is_array($payload) ? $payload : null);
     }
 
     return ['responses' => $responses, 'via' => 'cloud'];
+}
+
+/**
+ * Last successful live get_map, used when the robot does not reply after an app edit.
+ *
+ * @return array<string, mixed>|null
+ */
+function load_map_cache(string $projectRoot): ?array
+{
+    $path = $projectRoot . '/data/map-last.json';
+    if (!is_file($path)) {
+        return null;
+    }
+    $raw = json_decode((string) file_get_contents($path), true);
+    if (!is_array($raw)) {
+        return null;
+    }
+    $map = is_array($raw['data'] ?? null) ? $raw['data'] : $raw;
+    if (!YarboMap::isAppMap($map)) {
+        return null;
+    }
+
+    return [
+        'responses' => [
+            'get_map' => [
+                'topic' => 'get_map',
+                'state' => 0,
+                'data' => $map,
+            ],
+        ],
+        'via' => 'cache',
+        'note' => 'Live get_map did not reply. Showing the last loaded map. Wait until the robot is idle after the app edit, then load again.',
+    ];
 }
 
 /**
@@ -181,12 +192,35 @@ try {
     $responses = $result['responses'] ?? [];
     $gpsRef = $responses['read_gps_ref'] ?? null;
     $normalized = YarboMap::normalize($responses, is_array($gpsRef) ? $gpsRef : null);
-    if (($normalized['status'] ?? '') === 'ready') {
+    if (($normalized['status'] ?? '') !== 'ready') {
+        $cached = load_map_cache($projectRoot);
+        if (is_array($cached)) {
+            $result = $cached;
+            $responses = $cached['responses'];
+            $gpsRef = $responses['read_gps_ref'] ?? null;
+            $normalized = YarboMap::normalize($responses, is_array($gpsRef) ? $gpsRef : null);
+            if (($normalized['status'] ?? '') === 'ready') {
+                $note = (string) ($cached['note'] ?? $note);
+            }
+        }
+    }
+    if (($normalized['status'] ?? '') === 'ready' && ($result['via'] ?? '') !== 'cache') {
         try {
             persist_last_map($projectRoot, $responses);
         } catch (Throwable) {
             // Cache is optional; map load still succeeds.
         }
+    }
+
+    if (($normalized['status'] ?? '') !== 'ready') {
+        json_response([
+            'ok' => false,
+            'error' => ($note !== null && $note !== '')
+                ? $note
+                : 'Live get_map did not reply. The robot may still be applying an app edit. Wait until it is idle, then try again.',
+            'status' => $normalized['status'] ?? 'empty',
+            'data_via' => $result['via'] ?? 'local',
+        ], 504);
     }
 
     json_response([
