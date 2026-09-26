@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.47] - 2026-09-26
+
+### Fixed
+- **Save to robot** writes with `save_clean_area` (captured when renaming an area), not `map_recovery` / a patched backup file. `upload_cloud_map_backup` is sent empty only after live `get_map` actually moves.
+
 ## [2.0.46] - 2026-09-26
 
 ### Fixed

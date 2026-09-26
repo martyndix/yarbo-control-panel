@@ -11,6 +11,7 @@ final class YarboMapBackup
     public const FETCH_CMD_ALIAS = 'get_map_backup_from_id';
     public const RECOVERY_CMD = 'map_recovery';
     public const UPLOAD_CMD = 'upload_cloud_map_backup';
+    public const SAVE_AREA_CMD = 'save_clean_area';
     private const FETCH_TOPICS = [
         'get_map_buckup_from_id',
         'get_map_backup_from_id',
@@ -20,6 +21,9 @@ final class YarboMapBackup
     private const UPLOAD_TOPICS = [
         'upload_cloud_map_backup',
         'upload_cloud_map_buckup',
+    ];
+    private const SAVE_AREA_TOPICS = [
+        'save_clean_area',
     ];
     /** get_map vs backup-file frames are not millimetre-accurate. */
     private const VERIFY_M = 0.25;
@@ -263,13 +267,6 @@ final class YarboMapBackup
         if ($stored === null || !YarboMap::isAppMap($stored['map'] ?? [])) {
             return ['ok' => false, 'error' => 'Load map backups first (the extracted blob must match get_map).'];
         }
-        if (($stored['map_source'] ?? '') === 'get_map') {
-            return [
-                'ok' => false,
-                'error' => 'This copy is the live map, not a backup file. map_recovery ignores it (the robot map does not change). Load map backups again so the backup file can be fetched.',
-            ];
-        }
-
         $safety = $this->safetyCheck($client);
         if (($safety['ok'] ?? false) !== true) {
             return $safety;
@@ -313,69 +310,37 @@ final class YarboMapBackup
         }
 
         $restoreFile = $this->writeRestoreCopy($stored);
-        $originalFile = $this->payloadWithMap($stored, $stored['map']);
-        if (isset($stored['backup_id']) && $stored['backup_id'] !== null && $stored['backup_id'] !== '') {
-            $originalFile['id'] = is_numeric($stored['backup_id']) ? (int) $stored['backup_id'] : $stored['backup_id'];
-        }
-
-        $preferCloud = $cloud !== null && $serial !== '';
-        $apply = $this->uploadThenRecover($client, $cloud, $serial, $payload, $sentMap, $preferCloud);
-        $ack = $apply['envelope'];
-        $via = $apply['via'];
-        $slotDelta = $apply['slot_delta_m'];
-        $slotReplaced = (bool) $apply['slot_replaced'];
-        $uploadState = $apply['upload']['envelope']['state'] ?? null;
-        if ($ack === null) {
-            if ($slotReplaced) {
-                $this->sendUnpublished(
-                    $client,
-                    $cloud,
-                    $serial,
-                    self::UPLOAD_CMD,
-                    self::wrappedBackupPayload(
-                        $originalFile,
-                        YarboCodec::encodePayloadField($stored['map']),
-                        'meta+data'
-                    ),
-                    $preferCloud,
-                    25.0,
-                    60.0,
-                    self::UPLOAD_TOPICS
-                );
-            }
-
+        $changes = self::changedZones($stored['map'], $sentMap);
+        if ($changes === []) {
             return [
                 'ok' => false,
-                'error' => 'upload_cloud_map_backup / map_recovery did not reply. Original backup is on the Pi: ' . basename($restoreFile),
-                'restore_file' => basename($restoreFile),
-                'slot_delta_m' => $slotDelta,
+                'error' => 'No zone vertices or names differ from the loaded map, so save_clean_area was not sent.',
+                'encode_delta_m' => $encodeDelta,
+                'blob_delta_m' => $blobDelta,
             ];
         }
 
-        sleep(8);
-        $readMap = $this->readCurrentMap($client, $cloud, $serial);
+        $preferCloud = $cloud !== null && $serial !== '';
+        $write = $this->saveChangedZones($client, $cloud, $serial, $changes, $sentMap, $preferCloud, null, $stored['map']);
+        $ack = $write['envelope'];
+        $via = $write['via'];
+        $saveShape = $write['shape'];
+        $uploadState = null;
+        if ($ack === null) {
+            return [
+                'ok' => false,
+                'error' => 'save_clean_area did not accept any payload shape. Original is on the Pi: ' . basename($restoreFile),
+                'restore_file' => basename($restoreFile),
+                'save_shape' => $saveShape,
+                'tried_shapes' => $write['tried'],
+            ];
+        }
+
+        $readMap = $write['read_map'];
         $delta = is_array($readMap) ? YarboMap::maxRangeDelta($sentMap, $readMap) : null;
         $vsOriginal = is_array($readMap) ? YarboMap::maxRangeDelta($stored['map'], $readMap) : null;
         $robotMoved = $vsOriginal !== null && $vsOriginal > self::VERIFY_M;
-        if ($blobDelta > self::VERIFY_M && !$robotMoved && $preferCloud && $via !== 'cloud') {
-            $cloudApply = $this->uploadThenRecover($client, $cloud, $serial, $payload, $sentMap, true);
-            if ($cloudApply['envelope'] !== null) {
-                $apply = $cloudApply;
-                $ack = $cloudApply['envelope'];
-                $via = 'cloud';
-                $slotDelta = $cloudApply['slot_delta_m'];
-                $slotReplaced = (bool) $cloudApply['slot_replaced'];
-                $uploadState = $cloudApply['upload']['envelope']['state'] ?? null;
-                sleep(8);
-                $retryMap = $this->readCurrentMap($client, $cloud, $serial);
-                if (is_array($retryMap)) {
-                    $readMap = $retryMap;
-                    $delta = YarboMap::maxRangeDelta($sentMap, $readMap);
-                    $vsOriginal = YarboMap::maxRangeDelta($stored['map'], $readMap);
-                    $robotMoved = $vsOriginal > self::VERIFY_M;
-                }
-            }
-        } elseif ($delta === null || ($delta > self::VERIFY_M && $blobDelta > self::VERIFY_M)) {
+        if ($delta === null || ($blobDelta > self::VERIFY_M && !$robotMoved)) {
             sleep(5);
             $retryMap = $this->readCurrentMap($client, $cloud, $serial);
             if (is_array($retryMap)) {
@@ -389,27 +354,33 @@ final class YarboMapBackup
         $matchesSent = $delta !== null && $delta <= self::VERIFY_M;
         $verified = $matchesSent && ($blobDelta <= self::VERIFY_M || $robotMoved);
         $unchanged = $blobDelta > self::VERIFY_M && !$robotMoved;
-        $hasBackupBlob = ($stored['map_source'] ?? '') !== 'get_map';
         $rolledBack = false;
-        if (!$verified && $hasBackupBlob && $robotMoved) {
-            $this->uploadThenRecover($client, $cloud, $serial, $originalFile, $stored['map'], $via === 'cloud');
+        if (!$verified && $robotMoved) {
+            $this->saveChangedZones(
+                $client,
+                $cloud,
+                $serial,
+                self::changedZones($sentMap, $stored['map']),
+                $stored['map'],
+                $via === 'cloud',
+                $saveShape,
+                $sentMap
+            );
             $rolledBack = true;
-        } elseif (!$verified && $hasBackupBlob && $slotReplaced && !$robotMoved) {
-            $this->sendUnpublished(
+        }
+        if ($verified) {
+            $snap = $this->sendUnpublished(
                 $client,
                 $cloud,
                 $serial,
                 self::UPLOAD_CMD,
-                self::wrappedBackupPayload(
-                    $originalFile,
-                    YarboCodec::encodePayloadField($stored['map']),
-                    'meta+data'
-                ),
-                $via === 'cloud',
-                25.0,
-                60.0,
+                [],
+                $preferCloud,
+                15.0,
+                30.0,
                 self::UPLOAD_TOPICS
             );
+            $uploadState = $snap['envelope']['state'] ?? null;
         }
 
         $message = $this->restoreMessage(
@@ -424,8 +395,9 @@ final class YarboMapBackup
             basename($restoreFile),
             is_array($readMap),
             $vsOriginal,
-            $slotDelta,
-            $uploadState
+            null,
+            $uploadState,
+            $saveShape
         );
 
         $this->persistProbe([
@@ -433,15 +405,14 @@ final class YarboMapBackup
             'action' => 'restore',
             'via' => $via,
             'map_source' => $stored['map_source'] ?? null,
-            'backup_id' => $apply['backup_id'] ?? $stored['backup_id'] ?? null,
-            'upload_shape' => $apply['upload_shape'] ?? null,
-            'recovery_shape' => $apply['recovery_shape'] ?? null,
+            'backup_id' => $stored['backup_id'] ?? null,
+            'save_command' => self::SAVE_AREA_CMD,
+            'save_shape' => $saveShape,
+            'tried_shapes' => $write['tried'],
+            'save_state' => $ack['state'] ?? null,
             'upload_state' => $uploadState,
-            'recovery_state' => $ack['state'] ?? null,
             'encode_delta_m' => $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
             'blob_delta_m' => $blobDelta,
-            'slot_delta_m' => $slotDelta,
-            'slot_replaced' => $slotReplaced,
             'readback_delta_m' => $delta,
             'vs_original_m' => $vsOriginal,
             'verified' => $verified,
@@ -453,15 +424,13 @@ final class YarboMapBackup
             'ok' => $verified,
             'via' => $via,
             'map_source' => $stored['map_source'] ?? null,
-            'backup_id' => $apply['backup_id'] ?? $stored['backup_id'] ?? null,
-            'upload_shape' => $apply['upload_shape'] ?? null,
-            'recovery_shape' => $apply['recovery_shape'] ?? null,
+            'backup_id' => $stored['backup_id'] ?? null,
+            'save_shape' => $saveShape,
+            'tried_shapes' => $write['tried'],
+            'save_state' => $ack['state'] ?? null,
             'upload_state' => $uploadState,
-            'recovery_state' => $ack['state'] ?? null,
             'encode_delta_m' => $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
             'blob_delta_m' => $blobDelta,
-            'slot_delta_m' => $slotDelta,
-            'slot_replaced' => $slotReplaced,
             'readback_delta_m' => $delta,
             'vs_original_m' => $vsOriginal,
             'verified' => $verified,
@@ -538,138 +507,139 @@ final class YarboMapBackup
     }
 
     /**
-     * Store the patched backup as get_map-style compressed data, then recover.
-     * Expanded JSON on upload_cloud_map_backup is rejected (state -1).
-     * map_recovery of {id} only restores the already-stored slot.
+     * Publish save_clean_area with patched zone payloads until live get_map moves.
      *
-     * @param array<string, mixed> $filePayload
+     * @param list<array{canonical: string, key: string, index: int, zone: array<string, mixed>, original: array<string, mixed>, delta_m: float}> $changes
      * @param array<string, mixed> $sentMap
+     * @param array<string, mixed>|null $originalMap
      * @return array{
      *   envelope: ?array<string, mixed>,
      *   via: string,
-     *   upload: array{envelope: ?array<string, mixed>, via: string},
-     *   recovery: array{envelope: ?array<string, mixed>, via: string},
-     *   backup_id: mixed,
-     *   slot_map: ?array<string, mixed>,
-     *   slot_delta_m: ?float,
-     *   slot_replaced: bool,
-     *   upload_shape: ?string,
-     *   recovery_shape: ?string
+     *   shape: ?string,
+     *   tried: list<array<string, mixed>>,
+     *   read_map: ?array<string, mixed>
      * }
      */
-    private function uploadThenRecover(
+    private function saveChangedZones(
         YarboMqtt $client,
         ?YarboCloud $cloud,
         string $serial,
-        array $filePayload,
+        array $changes,
         array $sentMap,
         bool $preferCloud,
+        ?string $onlyShape = null,
+        ?array $originalMap = null,
     ): array {
-        $id = $filePayload['id'] ?? null;
-        $compressed = YarboCodec::encodePayloadField($sentMap);
-        $upload = ['envelope' => null, 'via' => $preferCloud ? 'cloud' : 'local'];
-        $uploadShape = null;
-        foreach (['meta+data', 'id+data'] as $shape) {
-            $try = $this->sendUnpublished(
+        $tried = [];
+        $last = ['envelope' => null, 'via' => $preferCloud ? 'cloud' : 'local', 'shape' => $onlyShape, 'tried' => $tried, 'read_map' => null];
+        foreach (self::savePayloadShapes($changes, $sentMap) as $shape) {
+            if ($onlyShape !== null && $shape['name'] !== $onlyShape) {
+                continue;
+            }
+            $sent = $this->sendUnpublished(
                 $client,
                 $cloud,
                 $serial,
-                self::UPLOAD_CMD,
-                self::wrappedBackupPayload($filePayload, $compressed, $shape),
+                self::SAVE_AREA_CMD,
+                $shape['payload'],
                 $preferCloud,
-                25.0,
-                60.0,
-                self::UPLOAD_TOPICS
+                20.0,
+                40.0,
+                self::SAVE_AREA_TOPICS
             );
-            $upload = $try;
-            $uploadShape = $shape;
-            if (self::ackLooksOk($try['envelope'])) {
-                break;
+            $tried[] = [
+                'shape' => $shape['name'],
+                'via' => $sent['via'],
+                'state' => $sent['envelope']['state'] ?? null,
+            ];
+            $last['tried'] = $tried;
+            $last['via'] = $sent['via'];
+            $last['shape'] = $shape['name'];
+            $last['envelope'] = $sent['envelope'];
+            if (!self::ackLooksOk($sent['envelope'])) {
+                continue;
+            }
+            sleep(5);
+            $readMap = $this->readCurrentMap($client, $cloud, $serial);
+            $last['read_map'] = $readMap;
+            if (!is_array($readMap)) {
+                continue;
+            }
+            if ($originalMap === null) {
+                return $last;
+            }
+            $vsOriginal = YarboMap::maxRangeDelta($originalMap, $readMap);
+            if ($vsOriginal > self::VERIFY_M) {
+                return $last;
             }
         }
 
-        $id = self::backupIdFromAck($upload['envelope'], $id);
-        $slotMap = null;
-        $slotDelta = null;
-        $uploadOk = self::ackLooksOk($upload['envelope']);
-        if ($uploadOk && $id !== null && $id !== '') {
-            sleep(3);
-            $slotMap = $this->fetchBackupMap($client, $cloud, $serial, $id, $sentMap);
-            if (is_array($slotMap)) {
-                $slotDelta = YarboMap::maxRangeDelta($sentMap, $slotMap);
-            }
-        }
-        $slotReplaced = $slotDelta !== null && $slotDelta <= self::VERIFY_M;
-
-        $recovery = ['envelope' => null, 'via' => $upload['via']];
-        $recoveryShape = null;
-        if ($slotReplaced) {
-            $recoveryShape = 'id';
-            $recovery = $this->sendUnpublished(
-                $client,
-                $cloud,
-                $serial,
-                self::RECOVERY_CMD,
-                self::recoveryIdPayload($id, $filePayload),
-                $preferCloud,
-                20.0,
-                45.0
-            );
-        } else {
-            $recoveryShape = 'id+data';
-            $recovery = $this->sendUnpublished(
-                $client,
-                $cloud,
-                $serial,
-                self::RECOVERY_CMD,
-                self::wrappedBackupPayload($filePayload, $compressed, 'id+data'),
-                $preferCloud,
-                20.0,
-                45.0
-            );
-        }
-
-        $via = $recovery['envelope'] !== null ? $recovery['via'] : $upload['via'];
-
-        return [
-            'envelope' => $recovery['envelope'] ?? $upload['envelope'],
-            'via' => $via,
-            'upload' => $upload,
-            'recovery' => $recovery,
-            'backup_id' => $id,
-            'slot_map' => $slotMap,
-            'slot_delta_m' => $slotDelta,
-            'slot_replaced' => $slotReplaced,
-            'upload_shape' => $uploadShape,
-            'recovery_shape' => $recoveryShape,
-        ];
+        return $last;
     }
 
     /**
-     * @param array<string, mixed> $filePayload
-     * @return array<string, mixed>
+     * @param list<array{canonical: string, key: string, index: int, zone: array<string, mixed>, original: array<string, mixed>, delta_m: float}> $changes
+     * @param array<string, mixed> $encodedMap
+     * @return list<array{name: string, payload: array<string, mixed>}>
      */
-    private static function wrappedBackupPayload(array $filePayload, string $compressed, string $shape): array
+    private static function savePayloadShapes(array $changes, array $encodedMap): array
     {
-        $id = $filePayload['id'] ?? null;
-        if ($shape === 'meta+data') {
-            $out = [];
-            foreach (self::RECOVERY_META_KEYS as $key) {
-                if (array_key_exists($key, $filePayload)) {
-                    $out[$key] = $filePayload[$key];
+        $shapes = [];
+        $seen = [];
+        foreach ($changes as $change) {
+            $zone = $change['zone'];
+            $key = $change['key'];
+            $sig = json_encode([$key, $zone['id'] ?? null, $zone['range'] ?? null], JSON_UNESCAPED_SLASHES);
+            if (isset($seen[$sig])) {
+                continue;
+            }
+            $seen[$sig] = true;
+            $shapes[] = ['name' => 'zone', 'payload' => $zone];
+            $shapes[] = ['name' => $key . '-list', 'payload' => [$key => [$zone]]];
+            $shapes[] = ['name' => 'data', 'payload' => ['data' => YarboCodec::encodePayloadField($zone)]];
+        }
+        $shapes[] = ['name' => 'map', 'payload' => $encodedMap];
+
+        return $shapes;
+    }
+
+    /**
+     * @param array<string, mixed> $original
+     * @param array<string, mixed> $encoded
+     * @return list<array{canonical: string, key: string, index: int, zone: array<string, mixed>, original: array<string, mixed>, delta_m: float}>
+     */
+    private static function changedZones(array $original, array $encoded): array
+    {
+        $out = [];
+        foreach (YarboMap::canonicalListNames() as $canonical => $aliases) {
+            $origList = YarboMap::zoneList($original, $canonical);
+            $newList = YarboMap::zoneList($encoded, $canonical);
+            $key = YarboMap::presentListKey($encoded, $canonical)
+                ?? YarboMap::presentListKey($original, $canonical)
+                ?? ($aliases[0] ?? $canonical);
+            $count = max(count($origList), count($newList));
+            for ($i = 0; $i < $count; $i++) {
+                $before = $origList[$i] ?? null;
+                $after = $newList[$i] ?? null;
+                if (!is_array($after)) {
+                    continue;
+                }
+                $delta = is_array($before)
+                    ? YarboMap::maxRangeDelta(['area' => [$before]], ['area' => [$after]])
+                    : self::VERIFY_M + 1;
+                $nameChanged = is_array($before)
+                    && (string) ($before['name'] ?? '') !== (string) ($after['name'] ?? '');
+                if ($delta > self::VERIFY_M || $nameChanged) {
+                    $out[] = [
+                        'canonical' => $canonical,
+                        'key' => $key,
+                        'index' => $i,
+                        'zone' => $after,
+                        'original' => is_array($before) ? $before : [],
+                        'delta_m' => $delta,
+                    ];
                 }
             }
-            $out['data'] = $compressed;
-
-            return $out;
-        }
-
-        $out = ['data' => $compressed];
-        if ($id !== null && $id !== '') {
-            $out['id'] = is_numeric($id) ? (int) $id : $id;
-        }
-        if (array_key_exists('timestamp', $filePayload)) {
-            $out['timestamp'] = $filePayload['timestamp'];
         }
 
         return $out;
@@ -878,6 +848,7 @@ final class YarboMapBackup
         ?float $vsOriginal = null,
         ?float $slotDelta = null,
         mixed $uploadState = null,
+        ?string $saveShape = null,
     ): string {
         $detail = sprintf(
             ' via %s%s, encode %.2f m, read-back %s, vs original %s.',
@@ -887,30 +858,20 @@ final class YarboMapBackup
             $delta === null ? 'unavailable' : sprintf('%.2f m', $delta),
             $vsOriginal === null ? 'unavailable' : sprintf('%.2f m', $vsOriginal)
         );
-        if ($slotDelta !== null) {
-            $detail .= sprintf(' slot %.2f m.', $slotDelta);
+        if ($saveShape !== null && $saveShape !== '') {
+            $detail .= ' save_clean_area shape ' . $saveShape . '.';
         }
         if ($uploadState !== null && $uploadState !== '') {
             $detail .= ' upload state ' . (is_scalar($uploadState) ? (string) $uploadState : json_encode($uploadState)) . '.';
         }
         if ($state !== null && $state !== '') {
-            $detail .= ' recovery state ' . (is_scalar($state) ? (string) $state : json_encode($state)) . '.';
+            $detail .= ' save state ' . (is_scalar($state) ? (string) $state : json_encode($state)) . '.';
         }
         if ($verified) {
             return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
         if ($unchanged) {
-            $slotNote = ((int) $uploadState) !== 0 && $uploadState !== null && $uploadState !== ''
-                ? ' upload_cloud_map_backup rejected the file (state ' . (is_scalar($uploadState) ? (string) $uploadState : json_encode($uploadState)) . ').'
-                : ($slotDelta === null
-                    ? ' Could not re-read the stored backup after upload.'
-                    : ($slotDelta <= self::VERIFY_M
-                        ? ' The stored backup now matches the draft; map_recovery by id did not apply it to live vertices.'
-                        : ' The stored backup slot is still the original.'));
-
-            return 'Robot map did not change. Save sends the patched map as compressed data (the same wrapping as get_map), not expanded vertices.'
-                . $slotNote
-                . ' Original left in place ('
+            return 'Robot map did not change. Save now uses save_clean_area (the command heard when renaming an area), not map_recovery. Original left in place ('
                 . $restoreFile . '). Enable Settings → cloud fallback if this was LAN-only.' . $detail;
         }
         if (!$readMap) {

@@ -40,6 +40,12 @@ final class YarboMapCapture
         'battery_cell_temp_msg',
         'set_auto_mapping_state',
         'get_controller',
+        'save_clean_area',
+        'upload_cloud_map_backup',
+        'map_recovery',
+        'get_all_map_backup',
+        'get_map_buckup_from_id',
+        'get_map_backup_from_id',
     ];
 
     public function __construct(private readonly string $projectRoot)
