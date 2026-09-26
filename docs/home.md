@@ -9,7 +9,7 @@ Not affiliated with Apple, Signify/Philips Hue, or the Connectivity Standards Al
 - Add any Matter device that is already on your LAN (Wi-Fi / Ethernet / Thread via an existing border router such as a HomePod or Apple TV).
 - **Philips Hue:** pair the **Hue Bridge** once (Hue app → Settings → Smart Home → Matter). Zigbee Hue bulbs then appear as Matter light rows (one pairing, many lights). Tap **⚙️** on the Home card to rename a light, **Hide** it on this panel, or **Remove** (unpairs a standalone Matter device, or the whole Hue Bridge). Hidden lights stay off the dashboard until you open ⚙️ again.
 - On/off and brightness, including a whole **room** at once.
-- **Rooms:** tap **⚙️**, add a room, then put lights in it. Rooms are this panel’s grouping — not Apple Home or Hue rooms.
+- **Rooms:** tap **⚙️**, add a room, then put lights in it. The room row controls every light in it; tap **+** to see the individual lights. Rooms are this panel’s grouping — not Apple Home or Hue rooms.
 - **Panel scenes** (sets of those on/off/brightness states). These are not Apple Home scenes or Hue app scenes.
 - Assign up to eight lights or panel scenes to a PaperMono **HOUSE** page.
 

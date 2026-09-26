@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.8] - 2026-09-26
+
+### Changed
+- Home rooms stay collapsed: tap **+** beside the room name to show its lights.
+
 ## [3.0.7] - 2026-09-26
 
 ### Added

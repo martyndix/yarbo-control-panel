@@ -2441,6 +2441,7 @@ let homeDash = { devices: [], scenes: [], paper_devices: [], setup: {} };
 let homeLoadBusy = false;
 let homeSetupPollTimer = 0;
 let homeManageOpen = false;
+const homeExpandedRooms = new Set();
 
 async function homeApi(body, timeoutMs = 20000) {
     const res = await fetchWithTimeout('/api/home.php', {
@@ -2567,16 +2568,21 @@ function homeRoomSelectHtml(d, rooms) {
 
 function homeRoomHeadingHtml(room) {
     const on = Boolean(room.on);
+    const expanded = homeExpandedRooms.has(room.id);
     const bright = room.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(room.brightness ?? (on ? 100 : 0))}" data-home-room-bright="${escapeHtml(room.id)}">`
         : '';
     const name = homeManageOpen
         ? `<input type="text" class="home-device-name-input" data-home-room-name="${escapeHtml(room.id)}" value="${escapeHtml(room.name)}" maxlength="32" aria-label="Room name">`
         : `<h3 class="home-room-title">${escapeHtml(room.name)}</h3>`;
-    return `<div class="home-room${on ? ' is-on' : ''}" data-home-room="${escapeHtml(room.id)}">
+    const count = Number(room.count || 0);
+    return `<div class="home-room-group${expanded ? ' is-open' : ''}" data-home-room-group="${escapeHtml(room.id)}">
+        <div class="home-room${on ? ' is-on' : ''}" data-home-room="${escapeHtml(room.id)}">
+        <button type="button" class="home-room-expand" data-home-room-expand="${escapeHtml(room.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? 'Hide lights in this room' : 'Show lights in this room'}" aria-label="${expanded ? 'Hide lights in this room' : 'Show lights in this room'}">${expanded ? '−' : '+'}</button>
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
             ${name}
+            ${count ? `<span class="home-room-count">${count}</span>` : ''}
         </div>
         <div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-room-toggle="${escapeHtml(room.id)}">${on ? 'Off' : 'On'}</button>
@@ -2676,10 +2682,13 @@ function renderHomeDashboard(data) {
             rooms.forEach((room) => {
                 const list = byRoom.get(room.id) || [];
                 if (!list.length && !homeManageOpen) return;
+                const expanded = homeExpandedRooms.has(room.id);
                 html += homeRoomHeadingHtml(room);
+                html += `<div class="home-room-devices"${expanded ? '' : ' hidden'}>`;
                 html += list.length
                     ? list.map((d) => homeDeviceCardHtml(d, false, rooms)).join('')
                     : (homeManageOpen ? '<p class="hint home-room-empty">No devices in this room yet. Pick it from a light’s room menu.</p>' : '');
+                html += '</div></div>';
             });
             if (ungrouped.length) {
                 if (html) {
@@ -2820,6 +2829,23 @@ function bindHomeDashboard() {
         document.getElementById('home-room-save')?.click();
     });
     document.getElementById('home-card')?.addEventListener('click', async (event) => {
+        const expand = event.target.closest('[data-home-room-expand]');
+        if (expand) {
+            const id = expand.getAttribute('data-home-room-expand') || '';
+            if (!id) return;
+            if (homeExpandedRooms.has(id)) homeExpandedRooms.delete(id);
+            else homeExpandedRooms.add(id);
+            const group = expand.closest('[data-home-room-group]');
+            const open = homeExpandedRooms.has(id);
+            group?.classList.toggle('is-open', open);
+            const devices = group?.querySelector('.home-room-devices');
+            if (devices) devices.hidden = !open;
+            expand.setAttribute('aria-expanded', open ? 'true' : 'false');
+            expand.textContent = open ? '−' : '+';
+            expand.title = open ? 'Hide lights in this room' : 'Show lights in this room';
+            expand.setAttribute('aria-label', expand.title);
+            return;
+        }
         const forget = event.target.closest('[data-home-forget]');
         if (forget) {
             const nodeId = forget.getAttribute('data-home-forget') || '';

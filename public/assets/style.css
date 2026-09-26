@@ -2707,10 +2707,10 @@ html[data-theme="light"] .plan-activity {
 .home-room {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) auto;
+    grid-template-columns: auto minmax(0, 1.2fr) auto;
     align-items: center;
     gap: 0.3rem 0.45rem;
-    margin-top: 0.55rem;
+    margin-top: 0.15rem;
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0.32rem 0.5rem;
@@ -2718,7 +2718,52 @@ html[data-theme="light"] .plan-activity {
 }
 
 .home-card--manage .home-room {
-    grid-template-columns: minmax(0, 1.2fr) auto auto;
+    grid-template-columns: auto minmax(0, 1.2fr) auto auto;
+}
+
+.home-room-group {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 0.3rem;
+    margin-top: 0.45rem;
+}
+
+.home-room-expand {
+    flex-shrink: 0;
+    width: 1.55rem;
+    height: 1.55rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 1.05rem;
+    line-height: 1;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+}
+
+.home-room-expand:hover,
+.home-room-expand[aria-expanded="true"] {
+    border-color: var(--accent);
+}
+
+.home-room-count {
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.home-room-devices {
+    display: grid;
+    gap: 0.3rem;
+    padding-left: 0.85rem;
+}
+
+.home-room-devices[hidden] {
+    display: none;
 }
 
 .home-room.is-on {
@@ -2860,7 +2905,7 @@ html[data-theme="light"] .plan-activity {
     }
 
     .home-card--manage .home-room {
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: auto minmax(0, 1fr) auto;
     }
 
     .home-card--manage .home-room .home-device-actions {
