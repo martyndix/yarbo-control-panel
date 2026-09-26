@@ -26,6 +26,20 @@ final class YarboCodec
     }
 
     /**
+     * Nested map/plan field in the same form get_map returns: base64(zlib(JSON)).
+     */
+    public static function encodePayloadField(array $payload): string
+    {
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $compressed = gzcompress($json);
+        if ($compressed === false) {
+            throw new \RuntimeException('Failed to zlib-compress map field');
+        }
+
+        return base64_encode($compressed);
+    }
+
+    /**
      * Decode map/plan payload fields that may be an array, zlib bytes, or base64+zlib text.
      *
      * @return array<string, mixed>

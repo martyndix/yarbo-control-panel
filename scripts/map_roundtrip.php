@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+use Yarbo\YarboCodec;
 use Yarbo\YarboMap;
 use Yarbo\YarboMapBackup;
 
@@ -55,6 +56,12 @@ $maxDelta = (float) ($encoded['max_delta_m'] ?? 0);
 $roundTripLimit = 0.02;
 if ($maxDelta > $roundTripLimit) {
     $failures[] = sprintf('unchanged map moved by %.4f m (limit %.3f m)', $maxDelta, $roundTripLimit);
+}
+
+$compressedField = YarboCodec::encodePayloadField($encoded['map']);
+$decodedField = YarboCodec::decodePayloadField($compressedField);
+if ($decodedField === [] || YarboMap::maxRangeDelta($encoded['map'], $decodedField) > $roundTripLimit) {
+    $failures[] = 'get_map-style compressed data field did not round-trip';
 }
 
 $out = $encoded['map'];

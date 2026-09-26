@@ -332,7 +332,11 @@ final class YarboMapBackup
                     $cloud,
                     $serial,
                     self::UPLOAD_CMD,
-                    $originalFile,
+                    self::wrappedBackupPayload(
+                        $originalFile,
+                        YarboCodec::encodePayloadField($stored['map']),
+                        'meta+data'
+                    ),
                     $preferCloud,
                     25.0,
                     60.0,
@@ -396,7 +400,11 @@ final class YarboMapBackup
                 $cloud,
                 $serial,
                 self::UPLOAD_CMD,
-                $originalFile,
+                self::wrappedBackupPayload(
+                    $originalFile,
+                    YarboCodec::encodePayloadField($stored['map']),
+                    'meta+data'
+                ),
                 $via === 'cloud',
                 25.0,
                 60.0,
@@ -426,6 +434,8 @@ final class YarboMapBackup
             'via' => $via,
             'map_source' => $stored['map_source'] ?? null,
             'backup_id' => $apply['backup_id'] ?? $stored['backup_id'] ?? null,
+            'upload_shape' => $apply['upload_shape'] ?? null,
+            'recovery_shape' => $apply['recovery_shape'] ?? null,
             'upload_state' => $uploadState,
             'recovery_state' => $ack['state'] ?? null,
             'encode_delta_m' => $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
@@ -444,6 +454,8 @@ final class YarboMapBackup
             'via' => $via,
             'map_source' => $stored['map_source'] ?? null,
             'backup_id' => $apply['backup_id'] ?? $stored['backup_id'] ?? null,
+            'upload_shape' => $apply['upload_shape'] ?? null,
+            'recovery_shape' => $apply['recovery_shape'] ?? null,
             'upload_state' => $uploadState,
             'recovery_state' => $ack['state'] ?? null,
             'encode_delta_m' => $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
@@ -526,8 +538,9 @@ final class YarboMapBackup
     }
 
     /**
-     * Store the patched backup file, then recover that slot by id.
-     * map_recovery of inline vertices ACKs and leaves live get_map unchanged.
+     * Store the patched backup as get_map-style compressed data, then recover.
+     * Expanded JSON on upload_cloud_map_backup is rejected (state -1).
+     * map_recovery of {id} only restores the already-stored slot.
      *
      * @param array<string, mixed> $filePayload
      * @param array<string, mixed> $sentMap
@@ -539,7 +552,9 @@ final class YarboMapBackup
      *   backup_id: mixed,
      *   slot_map: ?array<string, mixed>,
      *   slot_delta_m: ?float,
-     *   slot_replaced: bool
+     *   slot_replaced: bool,
+     *   upload_shape: ?string,
+     *   recovery_shape: ?string
      * }
      */
     private function uploadThenRecover(
@@ -550,36 +565,64 @@ final class YarboMapBackup
         array $sentMap,
         bool $preferCloud,
     ): array {
-        $upload = $this->sendUnpublished(
-            $client,
-            $cloud,
-            $serial,
-            self::UPLOAD_CMD,
-            $filePayload,
-            $preferCloud,
-            25.0,
-            60.0,
-            self::UPLOAD_TOPICS
-        );
-        $id = self::backupIdFromAck($upload['envelope'], $filePayload['id'] ?? null);
+        $id = $filePayload['id'] ?? null;
+        $compressed = YarboCodec::encodePayloadField($sentMap);
+        $upload = ['envelope' => null, 'via' => $preferCloud ? 'cloud' : 'local'];
+        $uploadShape = null;
+        foreach (['meta+data', 'id+data'] as $shape) {
+            $try = $this->sendUnpublished(
+                $client,
+                $cloud,
+                $serial,
+                self::UPLOAD_CMD,
+                self::wrappedBackupPayload($filePayload, $compressed, $shape),
+                $preferCloud,
+                25.0,
+                60.0,
+                self::UPLOAD_TOPICS
+            );
+            $upload = $try;
+            $uploadShape = $shape;
+            if (self::ackLooksOk($try['envelope'])) {
+                break;
+            }
+        }
+
+        $id = self::backupIdFromAck($upload['envelope'], $id);
         $slotMap = null;
         $slotDelta = null;
-        if ($upload['envelope'] !== null && $id !== null && $id !== '') {
+        $uploadOk = self::ackLooksOk($upload['envelope']);
+        if ($uploadOk && $id !== null && $id !== '') {
             sleep(3);
             $slotMap = $this->fetchBackupMap($client, $cloud, $serial, $id, $sentMap);
             if (is_array($slotMap)) {
                 $slotDelta = YarboMap::maxRangeDelta($sentMap, $slotMap);
             }
         }
+        $slotReplaced = $slotDelta !== null && $slotDelta <= self::VERIFY_M;
 
         $recovery = ['envelope' => null, 'via' => $upload['via']];
-        if ($upload['envelope'] !== null) {
+        $recoveryShape = null;
+        if ($slotReplaced) {
+            $recoveryShape = 'id';
             $recovery = $this->sendUnpublished(
                 $client,
                 $cloud,
                 $serial,
                 self::RECOVERY_CMD,
                 self::recoveryIdPayload($id, $filePayload),
+                $preferCloud,
+                20.0,
+                45.0
+            );
+        } else {
+            $recoveryShape = 'id+data';
+            $recovery = $this->sendUnpublished(
+                $client,
+                $cloud,
+                $serial,
+                self::RECOVERY_CMD,
+                self::wrappedBackupPayload($filePayload, $compressed, 'id+data'),
                 $preferCloud,
                 20.0,
                 45.0
@@ -596,8 +639,40 @@ final class YarboMapBackup
             'backup_id' => $id,
             'slot_map' => $slotMap,
             'slot_delta_m' => $slotDelta,
-            'slot_replaced' => $slotDelta !== null && $slotDelta <= self::VERIFY_M,
+            'slot_replaced' => $slotReplaced,
+            'upload_shape' => $uploadShape,
+            'recovery_shape' => $recoveryShape,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $filePayload
+     * @return array<string, mixed>
+     */
+    private static function wrappedBackupPayload(array $filePayload, string $compressed, string $shape): array
+    {
+        $id = $filePayload['id'] ?? null;
+        if ($shape === 'meta+data') {
+            $out = [];
+            foreach (self::RECOVERY_META_KEYS as $key) {
+                if (array_key_exists($key, $filePayload)) {
+                    $out[$key] = $filePayload[$key];
+                }
+            }
+            $out['data'] = $compressed;
+
+            return $out;
+        }
+
+        $out = ['data' => $compressed];
+        if ($id !== null && $id !== '') {
+            $out['id'] = is_numeric($id) ? (int) $id : $id;
+        }
+        if (array_key_exists('timestamp', $filePayload)) {
+            $out['timestamp'] = $filePayload['timestamp'];
+        }
+
+        return $out;
     }
 
     /**
@@ -635,7 +710,7 @@ final class YarboMapBackup
                 $cmd
             );
             $last = ['envelope' => $cloudAck, 'via' => 'cloud'];
-            if ($cloudAck !== null) {
+            if (self::ackLooksOk($cloudAck)) {
                 return $last;
             }
         }
@@ -825,13 +900,15 @@ final class YarboMapBackup
             return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
         if ($unchanged) {
-            $slotNote = $slotDelta === null
-                ? ' Could not re-read the stored backup after upload.'
-                : ($slotDelta <= self::VERIFY_M
-                    ? ' The stored backup now matches the draft; map_recovery by id did not apply it to live vertices.'
-                    : ' upload_cloud_map_backup did not replace the stored backup (slot still original).');
+            $slotNote = ((int) $uploadState) !== 0 && $uploadState !== null && $uploadState !== ''
+                ? ' upload_cloud_map_backup rejected the file (state ' . (is_scalar($uploadState) ? (string) $uploadState : json_encode($uploadState)) . ').'
+                : ($slotDelta === null
+                    ? ' Could not re-read the stored backup after upload.'
+                    : ($slotDelta <= self::VERIFY_M
+                        ? ' The stored backup now matches the draft; map_recovery by id did not apply it to live vertices.'
+                        : ' The stored backup slot is still the original.'));
 
-            return 'Robot map did not change. Save uploads the patched file then map_recovery by id (inline vertices are ignored).'
+            return 'Robot map did not change. Save sends the patched map as compressed data (the same wrapping as get_map), not expanded vertices.'
                 . $slotNote
                 . ' Original left in place ('
                 . $restoreFile . '). Enable Settings → cloud fallback if this was LAN-only.' . $detail;

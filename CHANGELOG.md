@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.46] - 2026-09-26
+
+### Fixed
+- **Save to robot** no longer sends expanded map JSON to `upload_cloud_map_backup` (that was rejected with state `-1`, then `map_recovery` by id restored the original slot). The patched map is now sent as compressed `data` — the same wrapping as `get_map`. Recovery by id only runs if that stored slot actually changed.
+
 ## [2.0.45] - 2026-09-26
 
 ### Fixed
