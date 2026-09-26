@@ -12,6 +12,7 @@ final class YarboMapBackup
     public const RECOVERY_CMD = 'map_recovery';
     public const UPLOAD_CMD = 'upload_cloud_map_backup';
     public const SAVE_AREA_CMD = 'save_clean_area';
+    public const SAVE_PATH_CMDS = ['save_path_area', 'save_pathway'];
     private const FETCH_TOPICS = [
         'get_map_buckup_from_id',
         'get_map_backup_from_id',
@@ -314,7 +315,7 @@ final class YarboMapBackup
         if ($backupChanges === []) {
             return [
                 'ok' => false,
-                'error' => 'No zone vertices or names differ from the loaded map, so save_clean_area was not sent.',
+                'error' => 'No zone vertices or names differ from the loaded map, so nothing was sent to the robot.',
                 'encode_delta_m' => $encodeDelta,
                 'blob_delta_m' => $blobDelta,
             ];
@@ -359,16 +360,34 @@ final class YarboMapBackup
             ];
         }
 
+        $unsupported = [];
+        foreach ($changes as $change) {
+            if (self::saveCommandsFor((string) ($change['canonical'] ?? '')) === []) {
+                $unsupported[] = (string) $change['canonical'];
+            }
+        }
+        if ($unsupported !== []) {
+            return [
+                'ok' => false,
+                'error' => 'Save can write mowing areas and pathways. This edit is '
+                    . implode(', ', array_unique($unsupported))
+                    . '. Original is on the Pi: ' . basename($restoreFile),
+                'restore_file' => basename($restoreFile),
+            ];
+        }
+
         $write = $this->saveChangedZones($client, $cloud, $serial, $changes, $patchedLive, $preferCloud, null, $liveBefore);
         $ack = $write['envelope'];
         $via = $write['via'];
         $saveShape = $write['shape'];
+        $saveCmd = $write['command'];
         $uploadState = null;
         if ($ack === null) {
             return [
                 'ok' => false,
-                'error' => 'save_clean_area did not accept any payload shape. Original is on the Pi: ' . basename($restoreFile),
+                'error' => 'The robot did not accept any save command. Original is on the Pi: ' . basename($restoreFile),
                 'restore_file' => basename($restoreFile),
+                'save_command' => $saveCmd,
                 'save_shape' => $saveShape,
                 'tried_shapes' => $write['tried'],
             ];
@@ -402,7 +421,8 @@ final class YarboMapBackup
                 $liveBefore,
                 $via === 'cloud',
                 $saveShape,
-                $patchedLive
+                $patchedLive,
+                $saveCmd
             );
             $rolledBack = true;
         }
@@ -435,7 +455,8 @@ final class YarboMapBackup
             $vsOriginal,
             null,
             $uploadState,
-            $saveShape
+            $saveShape,
+            $saveCmd
         );
 
         $this->persistProbe([
@@ -444,7 +465,7 @@ final class YarboMapBackup
             'via' => $via,
             'map_source' => $stored['map_source'] ?? null,
             'backup_id' => $stored['backup_id'] ?? null,
-            'save_command' => self::SAVE_AREA_CMD,
+            'save_command' => $saveCmd,
             'save_shape' => $saveShape,
             'tried_shapes' => $write['tried'],
             'save_state' => $ack['state'] ?? null,
@@ -463,6 +484,7 @@ final class YarboMapBackup
             'via' => $via,
             'map_source' => $stored['map_source'] ?? null,
             'backup_id' => $stored['backup_id'] ?? null,
+            'save_command' => $saveCmd,
             'save_shape' => $saveShape,
             'tried_shapes' => $write['tried'],
             'save_state' => $ack['state'] ?? null,
@@ -545,7 +567,9 @@ final class YarboMapBackup
     }
 
     /**
-     * Publish save_clean_area with patched zone payloads until live get_map moves.
+     * Publish the live-frame zone until get_map moves. Pathway list wraps on
+     * save_clean_area ACK and do nothing; a bare zone is the only payload that
+     * has ever moved vertices.
      *
      * @param list<array{canonical: string, key: string, index: int, zone: array<string, mixed>, original: array<string, mixed>, delta_m: float}> $changes
      * @param array<string, mixed> $sentMap
@@ -554,6 +578,7 @@ final class YarboMapBackup
      *   envelope: ?array<string, mixed>,
      *   via: string,
      *   shape: ?string,
+     *   command: ?string,
      *   tried: list<array<string, mixed>>,
      *   read_map: ?array<string, mixed>
      * }
@@ -567,51 +592,78 @@ final class YarboMapBackup
         bool $preferCloud,
         ?string $onlyShape = null,
         ?array $originalMap = null,
+        ?string $onlyCmd = null,
     ): array {
         $tried = [];
-        $last = ['envelope' => null, 'via' => $preferCloud ? 'cloud' : 'local', 'shape' => $onlyShape, 'tried' => $tried, 'read_map' => null];
-        foreach (self::savePayloadShapes($changes, $sentMap) as $shape) {
-            if ($onlyShape !== null && $shape['name'] !== $onlyShape) {
-                continue;
-            }
-            $sent = $this->sendUnpublished(
-                $client,
-                $cloud,
-                $serial,
-                self::SAVE_AREA_CMD,
-                $shape['payload'],
-                $preferCloud,
-                20.0,
-                40.0,
-                self::SAVE_AREA_TOPICS
-            );
-            $tried[] = [
-                'shape' => $shape['name'],
-                'via' => $sent['via'],
-                'state' => $sent['envelope']['state'] ?? null,
-            ];
-            $last['tried'] = $tried;
-            $last['via'] = $sent['via'];
-            $last['shape'] = $shape['name'];
-            $last['envelope'] = $sent['envelope'];
-            if (!self::ackLooksOk($sent['envelope'])) {
-                continue;
-            }
-            sleep(5);
-            $readMap = $this->readCurrentMap($client, $cloud, $serial);
-            $last['read_map'] = $readMap;
-            if (!is_array($readMap)) {
-                continue;
-            }
-            $vsPatch = YarboMap::maxAlignedRangeDelta($sentMap, $readMap);
-            if ($vsPatch <= self::VERIFY_M) {
-                return $last;
-            }
-            $vsOriginal = $originalMap === null
-                ? 0.0
-                : YarboMap::maxAlignedRangeDelta($originalMap, $readMap);
-            if ($vsOriginal > self::VERIFY_M) {
-                return $last;
+        $last = [
+            'envelope' => null,
+            'via' => $preferCloud ? 'cloud' : 'local',
+            'shape' => $onlyShape,
+            'command' => $onlyCmd,
+            'tried' => $tried,
+            'read_map' => null,
+        ];
+        foreach ($changes as $change) {
+            $canonical = (string) ($change['canonical'] ?? 'areas');
+            foreach (self::saveCommandsFor($canonical) as $cmd) {
+                if ($onlyCmd !== null && $cmd !== $onlyCmd) {
+                    continue;
+                }
+                foreach (self::savePayloadShapes([$change], $sentMap, $cmd) as $shape) {
+                    if ($onlyShape !== null && $shape['name'] !== $onlyShape) {
+                        continue;
+                    }
+                    $lanTimeout = $cmd === self::SAVE_AREA_CMD ? 15.0 : 8.0;
+                    $cloudTimeout = $cmd === self::SAVE_AREA_CMD ? 20.0 : 12.0;
+                    $sent = $this->sendUnpublished(
+                        $client,
+                        $cloud,
+                        $serial,
+                        $cmd,
+                        $shape['payload'],
+                        $preferCloud,
+                        $lanTimeout,
+                        $cloudTimeout,
+                        $cmd === self::SAVE_AREA_CMD ? self::SAVE_AREA_TOPICS : [$cmd]
+                    );
+                    $tried[] = [
+                        'command' => $cmd,
+                        'shape' => $shape['name'],
+                        'via' => $sent['via'],
+                        'state' => $sent['envelope']['state'] ?? null,
+                    ];
+                    $last['tried'] = $tried;
+                    if (self::ackLooksOk($sent['envelope'])) {
+                        $last['via'] = $sent['via'];
+                        $last['shape'] = $shape['name'];
+                        $last['command'] = $cmd;
+                        $last['envelope'] = $sent['envelope'];
+                    } elseif ($last['envelope'] === null) {
+                        $last['via'] = $sent['via'];
+                        $last['shape'] = $shape['name'];
+                        $last['command'] = $cmd;
+                        $last['envelope'] = $sent['envelope'];
+                    }
+                    if (!self::ackLooksOk($sent['envelope'])) {
+                        continue;
+                    }
+                    sleep(5);
+                    $readMap = $this->readCurrentMap($client, $cloud, $serial);
+                    $last['read_map'] = $readMap;
+                    if (!is_array($readMap)) {
+                        continue;
+                    }
+                    $vsPatch = YarboMap::maxAlignedRangeDelta($sentMap, $readMap);
+                    if ($vsPatch <= self::VERIFY_M) {
+                        return $last;
+                    }
+                    $vsOriginal = $originalMap === null
+                        ? 0.0
+                        : YarboMap::maxAlignedRangeDelta($originalMap, $readMap);
+                    if ($vsOriginal > self::VERIFY_M) {
+                        return $last;
+                    }
+                }
             }
         }
 
@@ -619,23 +671,48 @@ final class YarboMapBackup
     }
 
     /**
+     * @return list<string>
+     */
+    private static function saveCommandsFor(string $canonical): array
+    {
+        return match ($canonical) {
+            'pathways' => array_merge([self::SAVE_AREA_CMD], self::SAVE_PATH_CMDS),
+            'areas' => [self::SAVE_AREA_CMD],
+            default => [],
+        };
+    }
+
+    /**
      * @param list<array{canonical: string, key: string, index: int, zone: array<string, mixed>, original: array<string, mixed>, delta_m: float}> $changes
      * @param array<string, mixed> $encodedMap
      * @return list<array{name: string, payload: array<string, mixed>}>
      */
-    private static function savePayloadShapes(array $changes, array $encodedMap): array
+    private static function savePayloadShapes(array $changes, array $encodedMap, string $cmd = self::SAVE_AREA_CMD): array
     {
         $shapes = [];
         $seen = [];
         foreach ($changes as $change) {
             $zone = $change['zone'];
             $key = $change['key'];
-            $sig = json_encode([$key, $zone['id'] ?? null, $zone['range'] ?? null], JSON_UNESCAPED_SLASHES);
+            $canonical = (string) ($change['canonical'] ?? 'areas');
+            $sig = json_encode([$cmd, $key, $zone['id'] ?? null, $zone['range'] ?? null], JSON_UNESCAPED_SLASHES);
             if (isset($seen[$sig])) {
                 continue;
             }
             $seen[$sig] = true;
-            $shapes[] = ['name' => $key . '-list', 'payload' => [$key => [$zone]]];
+            if ($cmd === self::SAVE_AREA_CMD && $canonical === 'pathways') {
+                $shapes[] = ['name' => 'zone', 'payload' => $zone];
+                continue;
+            }
+            $aliases = match ($canonical) {
+                'pathways' => array_values(array_unique([$key, 'pathways', 'pathway', 'path_area_list'])),
+                'areas' => array_values(array_unique([$key, 'areas', 'area', 'clean_area_list'])),
+                default => [$key],
+            };
+            foreach ($aliases as $alias) {
+                $shapes[] = ['name' => $alias . '-list', 'payload' => [$alias => [$zone]]];
+            }
+            $shapes[] = ['name' => 'zone', 'payload' => $zone];
         }
 
         return $shapes;
@@ -887,6 +964,7 @@ final class YarboMapBackup
         ?float $slotDelta = null,
         mixed $uploadState = null,
         ?string $saveShape = null,
+        ?string $saveCmd = null,
     ): string {
         $detail = sprintf(
             ' via %s%s, encode %.2f m, read-back %s, vs original %s.',
@@ -896,8 +974,14 @@ final class YarboMapBackup
             $delta === null ? 'unavailable' : sprintf('%.2f m', $delta),
             $vsOriginal === null ? 'unavailable' : sprintf('%.2f m', $vsOriginal)
         );
-        if ($saveShape !== null && $saveShape !== '') {
-            $detail .= ' save_clean_area shape ' . $saveShape . '.';
+        if ($saveCmd !== null && $saveCmd !== '') {
+            $detail .= ' ' . $saveCmd;
+            if ($saveShape !== null && $saveShape !== '') {
+                $detail .= ' shape ' . $saveShape;
+            }
+            $detail .= '.';
+        } elseif ($saveShape !== null && $saveShape !== '') {
+            $detail .= ' save shape ' . $saveShape . '.';
         }
         if ($uploadState !== null && $uploadState !== '') {
             $detail .= ' upload state ' . (is_scalar($uploadState) ? (string) $uploadState : json_encode($uploadState)) . '.';
@@ -909,8 +993,8 @@ final class YarboMapBackup
             return 'Robot map matches the draft (within 25 cm). Check it in the official app.' . $detail;
         }
         if ($unchanged) {
-            return 'Robot map did not change. Save now uses save_clean_area in the live get_map frame. Original left in place ('
-                . $restoreFile . '). Enable Settings → cloud fallback if this was LAN-only.' . $detail;
+            return 'Robot map did not change. Pathway list wraps on save_clean_area are ignored; this save retries a live-frame bare zone, then save_path_area / save_pathway. Original left in place ('
+                . $restoreFile . '). If it still does not move, click Listen and rename that pathway in the official app.' . $detail;
         }
         if (!$readMap) {
             return 'Restore was sent, but get_map could not be read to verify. Check the official app. Original is on the Pi as '

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [2.0.49] - 2026-09-26
+
+### Fixed
+- **Save to robot** no longer sends a pathway as `{pathways:[zone]}` on `save_clean_area` (that ACKs and leaves live vertices unchanged). Pathway edits retry a live-frame bare zone (the payload that moved ~86 m before rebase), then `save_path_area` / `save_pathway`. If none of those move `get_map`, the panel asks you to Listen while renaming that pathway.
+
 ## [2.0.48] - 2026-09-26
 
 ### Fixed
