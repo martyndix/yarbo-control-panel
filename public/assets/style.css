@@ -2599,7 +2599,8 @@ html[data-theme="light"] .plan-activity {
     background: var(--muted);
 }
 
-.home-device.is-on .home-device-dot {
+.home-device.is-on .home-device-dot,
+.home-room.is-on .home-device-dot {
     background: var(--accent);
     box-shadow: 0 0 0.35rem color-mix(in srgb, var(--accent) 70%, transparent);
 }

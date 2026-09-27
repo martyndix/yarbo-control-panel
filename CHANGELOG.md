@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.10] - 2026-09-27
+
+### Fixed
+- Home room status dot turns green when any light in the room is on.
+
 ## [3.0.9] - 2026-09-27
 
 ### Fixed
