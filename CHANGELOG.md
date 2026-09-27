@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.30] - 2026-09-28
+
+### Changed
+- PaperMono unlocked pages no longer show the device name or firmware version. The name stays on the lock screen and the powered-off card.
+- Battery sits at the top of the header, Wi-Fi underneath, so the page title is not covered.
+- Lock screen no longer draws a padlock in the top-right. Unlock uses a solid U-shaped shackle.
+- Vestaboard 3×15 boxes stay on the lock screen until the panel says the module is off. USB flash stores that flag with Wi-Fi.
+- Settings no longer labels e-paper as Beta. Firmware **0.1.28** / **0.2.12-colour**.
+
 ## [3.0.29] - 2026-09-27
 
 ### Changed

@@ -136,6 +136,8 @@ def extras_from_args(args) -> dict:
         extras["clock_offset"] = args.clock_offset
     if getattr(args, "timezone", None):
         extras["clock_tz"] = args.timezone
+    if getattr(args, "vestaboard", None) is not None:
+        extras["vestaboard_enabled"] = bool(args.vestaboard)
     return extras
 
 
@@ -253,6 +255,7 @@ def main() -> int:
         p.add_argument("--lock-screen", default=None)
         p.add_argument("--clock-offset", type=int, default=None)
         p.add_argument("--timezone", default=None)
+        p.add_argument("--vestaboard", type=int, default=None)
     args = parser.parse_args()
 
     if args.cmd == "ports":

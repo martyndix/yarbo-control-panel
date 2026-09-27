@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * Paper companion devices (beta): pairing tokens, compact status, USB flash.
+ * Paper companion devices: pairing tokens, compact status, USB flash.
  * Hardware: M5Stack PaperMono SKU C153, or PaperColor (Spectra 6, no touch).
  */
 final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.27-beta';
-    public const FIRMWARE_VERSION_COLOR = '0.2.11-colour';
+    public const FIRMWARE_VERSION = '0.1.28';
+    public const FIRMWARE_VERSION_COLOR = '0.2.12-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
@@ -73,7 +73,7 @@ final class YarboPaperDevice
     public function dashboard(): array
     {
         return [
-            'beta' => true,
+            'beta' => false,
             'firmware_version' => self::FIRMWARE_VERSION,
             'firmware_built' => $this->firmwareAvailable(self::KIND_MONO),
             'firmware_path' => self::FIRMWARE_RELATIVE,
@@ -827,9 +827,11 @@ final class YarboPaperDevice
     {
         $prefs = $this->publicPrefs();
         $clock = $this->clockCompact(new YarboVestaboard($this->projectRoot));
+        $vb = (new YarboVestaboard($this->projectRoot))->load();
         $out = [
             'brightness' => (int) $prefs['brightness'],
             'lock_screen' => (string) $prefs['lock_screen'],
+            'vestaboard_enabled' => !empty($vb['enabled']),
         ];
         if (isset($clock['clock_offset'])) {
             $out['clock_offset'] = (int) $clock['clock_offset'];
@@ -850,6 +852,8 @@ final class YarboPaperDevice
             (string) $fields['brightness'],
             '--lock-screen',
             (string) $fields['lock_screen'],
+            '--vestaboard',
+            !empty($fields['vestaboard_enabled']) ? '1' : '0',
         ];
         if (isset($fields['clock_offset'])) {
             $args[] = '--clock-offset';

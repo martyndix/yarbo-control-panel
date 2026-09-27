@@ -965,7 +965,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         </section>
 
                         <section class="settings-section" id="settings-papermono-section" data-settings-pane="papermono">
-                            <h3 class="settings-subtitle">E-paper companions <span class="settings-beta-badge">Beta</span></h3>
+                            <h3 class="settings-subtitle">E-paper companions <span class="settings-beta-badge">Optional</span></h3>
                             <p class="hint" id="papermono-kind-hint">Choose the tablet you plugged in. That choice is what gets flashed — Paper Colour is a different binary and a different on-screen UI (no touch, A/B/C keys).</p>
                             <div class="papermono-kind-switch" role="radiogroup" aria-label="E-paper hardware">
                                 <label class="papermono-kind-card is-active">
@@ -979,7 +979,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.11-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.12-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -1085,7 +1085,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span class="label">Frontlight brightness (0–100)</span>
                                 <input type="number" id="papermono-brightness" min="0" max="100" step="5" value="80">
                             </label>
-                            <p class="hint">PaperMono frontlight. Needs firmware 0.1.25-beta (earlier builds ignored this because LoRa init reset the light PWM).</p>
+                            <p class="hint">PaperMono frontlight. Needs firmware 0.1.28 (earlier builds ignored this because LoRa init reset the light PWM).</p>
                             <fieldset class="settings-theme-fieldset">
                                 <legend class="label">Alerts</legend>
                                 <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer + RGB)</span></label>
@@ -1111,8 +1111,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.14-beta</text>
-                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOME</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOME</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">87%</text>
                                         <text x="24" y="240" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging  No</text>
                                         <text x="24" y="280" font-family="ui-monospace, monospace" font-size="22" fill="#111">State     idle</text>
@@ -1142,8 +1141,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.14-beta</text>
-                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">STATUS</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">STATUS</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">100%</text>
                                         <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">State      idle</text>
                                         <text x="24" y="288" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging   Full</text>
@@ -1167,8 +1165,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.14-beta</text>
-                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HEALTH</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HEALTH</text>
                                         <text x="24" y="140" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn type  HaLow</text>
                                         <text x="24" y="176" font-family="ui-monospace, monospace" font-size="20" fill="#111">Conn stat  Connected</text>
                                         <text x="24" y="212" font-family="ui-monospace, monospace" font-size="20" fill="#111">WiFi       BarnNet</text>
@@ -1197,8 +1194,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lawnbot  0.1.14-beta</text>
-                                        <text x="24" y="92" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PLANS</text>
+                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PLANS</text>
                                         <text x="24" y="124" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">idle</text>
                                         <rect x="24" y="150" width="432" height="44" rx="10" fill="#111"/>
                                         <text x="40" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" fill="#f4f1e8">Front lawn</text>
@@ -1234,7 +1230,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LYMOW</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">Lymow  0.1.14-beta</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">64%</text>
                                         <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">State      Mowing</text>
                                         <text x="24" y="288" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging   No</text>
@@ -1248,7 +1243,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">POWERWALL</text>
                                         <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#333">PaperMono  0.1.14-beta</text>
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">81%</text>
                                         <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">Solar      1.2 kW</text>
                                         <text x="24" y="288" font-family="ui-monospace, monospace" font-size="22" fill="#111">Draw       0.4 kW</text>
@@ -1281,8 +1275,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="6" y="6" width="388" height="588" fill="none" stroke="#111" stroke-width="2"/>
                                         <text x="20" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">YARBO  ·  COLOUR</text>
                                         <image class="paper-logo-preview" href="" x="244" y="12" width="140" height="140" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#333">Lawnbot  0.2.11-colour</text>
-                                        <text x="20" y="86" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">HOME</text>
+                                        <text x="20" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#0b6b3a">HOME</text>
                                         <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">87%</text>
                                         <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">Charging  No</text>
                                         <text x="20" y="238" font-family="ui-monospace, monospace" font-size="16" fill="#111">State     idle</text>

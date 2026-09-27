@@ -1,4 +1,4 @@
-# Paper Colour companion (beta)
+# Paper Colour companion
 
 Firmware for **[M5Stack PaperColor](https://docs.m5stack.com/en/core/PaperColor)** (shop: M5Paper Color, 4″ Spectra 6, **400×600**, ESP32-S3). **No touchscreen.**
 

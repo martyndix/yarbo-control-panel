@@ -78,10 +78,10 @@ Open the panel in a browser and you can:
 - **Head-specific controls** — mower blade height/speed or snow chute angle when the attached head is detected
 - **Navigate to waypoints** — send the robot to a stored waypoint by index
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
-- **PaperMono companion (beta)** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: Home (Stop / Dock / Pause / Lights), plus Status, Health, and Plans pages. Flash from **Settings**, or download a USB setup kit for a laptop. See [PaperMono](#papermono-companion-beta)
+- **PaperMono companion** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: Home (Stop / Dock / Pause / Lights), plus Status, Health, and Plans pages. Flash from **Settings**, or download a USB setup kit for a laptop. See [PaperMono](#papermono-companion)
 - **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / rain / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
 - **Modules (v3.0)** — header switcher for Yarbo, Tesla Powerwall, Lymow, and Home (Matter). Powerwall: [docs/powerwall.md](docs/powerwall.md). Lymow: [docs/lymow.md](docs/lymow.md). Home: [docs/home.md](docs/home.md). Vestaboard live module is chosen in Settings, on the Note card pills, or **Rotate** to cycle views.
-- **Paper Colour companion (beta)** — no-touch M5Stack PaperColor. Same Settings flash path as PaperMono: pick **Paper Colour**, then flash or download a USB setup kit. See [docs/papercolor.md](docs/papercolor.md).
+- **Paper Colour companion** — no-touch M5Stack PaperColor. Same Settings flash path as PaperMono: pick **Paper Colour**, then flash or download a USB setup kit. See [docs/papercolor.md](docs/papercolor.md).
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
 Opening the panel only watches live telemetry. It does **not** take the MQTT controller role, so a job already running in the official app should keep going. Starting a plan, going to a waypoint, or turning **Controller On** (needed for lights/drive) does take that role — only one app can command at a time.
@@ -94,7 +94,7 @@ Opening the panel only watches live telemetry. It does **not** take the MQTT con
 Browser  →  PHP web server  →  Local MQTT (port 1883)  →  Yarbo robot
            (this project)         on your LAN              (controls + live status)
 
-PaperMono / Paper Colour (beta, optional):
+PaperMono / Paper Colour (optional):
 E-ink tablet  →  HTTP JSON  →  this panel  →  MQTT  →  robot
 (pick hardware in Settings, flash/Wi-Fi over USB)
 
@@ -190,7 +190,7 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
 | **Lymow (unofficial)** | Settings → Modules → Lymow, then app email/password + camera IP. See [docs/lymow.md](docs/lymow.md) |
 | **Home (Matter)** | Settings → Modules → Home. Panel updates install the Matter server on a Pi. Pair Hue Bridge / Apple share / any Matter code. See [docs/home.md](docs/home.md) |
-| **PaperMono / Paper Colour (beta)** | Settings → E-paper companions — pick hardware, USB flash + Wi-Fi, or download a USB setup kit for a laptop. See [PaperMono](#papermono-companion-beta) and [docs/papercolor.md](docs/papercolor.md) |
+| **PaperMono / Paper Colour** | Settings → E-paper companions — pick hardware, USB flash + Wi-Fi, or download a USB setup kit for a laptop. See [PaperMono](#papermono-companion) and [docs/papercolor.md](docs/papercolor.md) |
 | **Vestaboard Note (optional)** | Settings → enable Vestaboard Note — Local or Cloud API. See [Vestaboard Note](#vestaboard-note-optional) |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
 | **Update panel** | Settings → **Panel updates**, or `./scripts/update.sh` (see [Updating](#updating-an-existing-install)) |
@@ -206,7 +206,7 @@ Push a 3×15 status line to a Vestaboard Note via the [Local API](https://docs.v
 </p>
 <p align="center"><em>Note mockup from the panel — idle, battery, ready. The physical board is 3×15.</em></p>
 
-## PaperMono companion (beta)
+## PaperMono companion
 
 Built for **[M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono)** ([shop listing](https://shop.m5stack.com/products/m5papermono-with-lora-nfc-800x480-3-97-eink-display)): 3.97″ **480×800** portrait 4-level grayscale e-paper (ESP32-S3R8, SSD1677, FT6336G touch, NFC + LoRa on the board). Not [PaperMono-Lite (C153-Lite)](https://docs.m5stack.com/en/core/PaperMono-Lite). It has **no web browser**, so this panel flashes a small native firmware over USB. After that, the tablet polls the panel over Wi-Fi (HTTP JSON). The panel remains the MQTT brain.
 
@@ -523,7 +523,7 @@ Credentials are stored in `data/cloud-config.json` (gitignored), not in `config.
 
 ---
 
-### Saved mowing areas (beta)
+### Saved mowing areas
 
 The Location Map card includes **Load saved mowing areas**. It calls `/api/map.php`, decodes compressed `get_map` payloads when needed, and draws mowing zones and pathways when the robot returns them.
 
@@ -696,7 +696,7 @@ yarbo-control-panel/
 
 ## Changelog
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **3.0.29** (2026-09-27).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md) — latest release **3.0.30** (2026-09-28).
 
 ---
 

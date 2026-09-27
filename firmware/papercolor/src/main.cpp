@@ -242,17 +242,6 @@ void layoutButtons(int &bw, int &bh, int &gap, int &y0)
     y0 = H - (bh * 2) - gap - 36;
 }
 
-String headerDeviceName()
-{
-    if (currentPage == PAPERMONO_PAGE_LYMOW) {
-        return lymowName.length() ? lymowName : String("Lymow");
-    }
-    if (currentPage == PAPERMONO_PAGE_POWERWALL || currentPage == PAPERMONO_PAGE_BOARD) {
-        return deviceName;
-    }
-    return robotName.length() ? robotName : deviceName;
-}
-
 String headerBrand()
 {
     if (currentPage == PAPERMONO_PAGE_POWERWALL) return "POWERWALL";
@@ -267,12 +256,10 @@ void drawHeader()
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(2);
     M5.Display.drawString(headerBrand(), 16, 16);
-    M5.Display.setTextSize(1);
-    M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
     String page = pageName(currentPage);
     if (page != headerBrand()) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString(page, 16, 72);
+        M5.Display.drawString(page, 16, 48);
     }
     int logoSize = 140;
     if (SPIFFS.exists("/logo.png")) {

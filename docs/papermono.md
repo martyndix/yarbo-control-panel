@@ -1,4 +1,4 @@
-# PaperMono companion (beta)
+# PaperMono companion
 
 This firmware and Settings flash path are built for **M5Stack PaperMono, SKU C153** (the full unit with NFC and LoRa). That is the board whose datasheet you pasted: ESP32-S3R8, 3.97″ SSD1677 480×800 e-paper, FT6336G touch. Paper Colour (Spectra 6, no touch) uses the same Settings page: pick **Paper Colour** so the panel flashes `firmware/papercolor/` instead. See `docs/papercolor.md`.
 
@@ -17,11 +17,11 @@ Hardware we compile for:
 - FT6336G touch, built-in frontlight
 - Two user buttons + power (ON / OFF / RESET / BOOT)
 - 1150mAh battery, USB-C
-- Onboard NFC (ST25R3916) and LoRa (SX1262). Firmware **0.1.14-beta** uses LoRa for RADIO (868 MHz, house sync word) with Wi-Fi fallback.
+- Onboard NFC (ST25R3916) and LoRa (SX1262). RADIO uses LoRa (868 MHz, house sync word) with Wi-Fi fallback.
 
 It has **no browser**. This panel flashes native firmware over USB from **Settings**, then the tablet talks HTTP JSON to the panel. The panel stays the MQTT brain.
 
-This is **beta**. Treat it as a companion, not a replacement for the web UI or the official app.
+Treat it as a companion, not a replacement for the web UI or the official app.
 
 Home and extra-page mocks (not photos of a flashed unit):
 
@@ -38,18 +38,18 @@ Home and extra-page mocks (not photos of a flashed unit):
 ## What it shows
 
 - **Home / Status / Health / Plans:** Yarbo robot tiles (Stop / Dock on Home). Hidden when the Yarbo module is off in Settings.
-- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.14-beta**.
-- Top line is the current module (**YARBO**, **POWERWALL**, **LYMOW**, **VESTABOARD**, **RADIO**, **DEVICE**), not a fixed YARBO brand. Single-page modules do not repeat that name as a second title.
+- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG.
+- Top line is the current module (**YARBO**, **POWERWALL**, **LYMOW**, **VESTABOARD**, **RADIO**, **DEVICE**). Unlocked pages do not show the device name or firmware version; those stay on the lock screen and the powered-off card.
 - **Note:** Vestaboard live view picker (**YARBO**, **POWER**, **LYMOW**, **ALL**). Writes the Note when it is enabled; the lock screen still previews the same grid if you chose Vestaboard there.
 - **Board:** live 3×15 preview of the current Vestaboard view.
 - **Powerwall:** house battery, solar, and draw.
 - **Lymow:** Lymow battery, state, and charging.
-- **Radio:** house messages (~180 characters) to **ALL** or a named peer. Large Latin keyboard and large typed text. Tries LoRa first, then Wi-Fi via the panel. Needs firmware **0.1.22-beta**.
-- **Device:** this tablet’s battery, clock, and a large **OFF** control. Power off writes the device name, a huge **OFF**, and **TAP RED BUTTON TO BEGIN**, then kills the frontlight and LED; the e-paper keeps that card with the device shut down. A **short press** of the side (red) button also powers off. Holding the power button for about 2 seconds is still **download/flash mode**. Brightness, mute, and timers are Settings only. Needs firmware **0.1.26-beta**.
-- **Lock screen:** tap the **padlock** on any page (top right, boxed). **Logo and Vestaboard** draws the 3×15 grid only when the Vestaboard module is on. Unlock with **Unlock**. **OFF** on the lock screen shuts the tablet down. Clock uses CEST until you save a timezone, then USB flash stores that offset. Needs firmware **0.1.27-beta**.
+- **Radio:** house messages (~180 characters) to **ALL** or a named peer. Large Latin keyboard and large typed text. Tries LoRa first, then Wi-Fi via the panel.
+- **Device:** this tablet’s battery, clock, and a large **OFF** control. Power off writes the device name, a huge **OFF**, and **TAP RED BUTTON TO BEGIN**, then kills the frontlight and LED; the e-paper keeps that card with the device shut down. A **short press** of the side (red) button also powers off. Holding the power button for about 2 seconds is still **download/flash mode**. Brightness, mute, and timers are Settings only.
+- **Lock screen:** tap the **padlock** on any unlocked page (top right, boxed). The lock screen itself has no padlock icon. **Logo and Vestaboard** draws the 3×15 grid when Vestaboard is on (or until the tablet has heard from the panel). Unlock with **Unlock**. **OFF** on the lock screen shuts the tablet down. Clock uses CEST until you save a timezone, then USB flash stores that offset. Battery is top-right, Wi-Fi underneath.
 - **A** next page, **B** previous; both wrap around the list. Presses still count while the e-paper is refreshing. Every companion page is in that loop (Yarbo Home/Status/Health/Plans, Note, Board, Powerwall, Lymow, Radio, Device, House). Stop / Dock are Home buttons only.
 
-It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, mic, IMU, and the SD slot are unused in this firmware. Sleep timers, brightness, buzzer, and RGB alerts are set in **Settings → E-paper companions**, not on the tablet. The side LED is **off** in normal use (the hardware turns red on at boot until firmware clears it). A Yarbo error blinks red. Needs firmware **0.1.23-beta**.
+It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, mic, IMU, and the SD slot are unused in this firmware. Sleep timers, brightness, buzzer, and RGB alerts are set in **Settings → E-paper companions**, not on the tablet. The side LED is **off** in normal use (the hardware turns red on at boot until firmware clears it). A Yarbo error blinks red.
 
 ## E-paper care (manufacturer)
 
@@ -129,7 +129,7 @@ Later firmware still goes over Wi-Fi: Settings → paired device **Update**. You
 
 The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. Compact status includes `vestaboard_enabled`, `vestaboard_live`, `powerwall_enabled`, `lymow_enabled`, `home_enabled`, and `home_items`. The Plans page also calls `GET /api/device.php?action=plans` (cached on the Pi for about five minutes). Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`, `start_plan` with `plan_id`, `vestaboard_live`, and Home `home_toggle` / `home_scene` with `home_id`).
 
-Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. After the first USB flash of **0.1.21-beta** or later, later firmware is pushed over Wi-Fi: Settings → paired device **Update**, or Settings → Updates. The tablet must have polled recently. Compact status includes `ota_pending`; the tablet downloads `GET /api/device.php?action=firmware`, stays on Wi-Fi, then reboots. PaperMono beeps and lights green. The header logo is `GET /api/device.php?action=logo` when compact status includes `logo_hash`. The **HOUSE** page (Home module) lists assigned Matter lights and panel scenes.
+Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. After the first USB flash, later firmware is pushed over Wi-Fi: Settings → paired device **Update**, or Settings → Updates. The tablet must have polled recently. Compact status includes `ota_pending`; the tablet downloads `GET /api/device.php?action=firmware`, stays on Wi-Fi, then reboots. PaperMono beeps and lights green. The header logo is `GET /api/device.php?action=logo` when compact status includes `logo_hash`. The **HOUSE** page (Home module) lists assigned Matter lights and panel scenes.
 
 ## Limits
 

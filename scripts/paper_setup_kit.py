@@ -225,6 +225,8 @@ def send_config(port: str, cfg: dict) -> None:
         body["clock_offset"] = int(cfg["clock_offset"])
     if cfg.get("clock_tz"):
         body["clock_tz"] = cfg["clock_tz"]
+    if "vestaboard_enabled" in cfg:
+        body["vestaboard_enabled"] = bool(cfg["vestaboard_enabled"])
     payload = ("CFG:" + json.dumps(body, ensure_ascii=False) + "\n").encode("utf-8")
     print("Sending Wi-Fi and panel URL over USB …")
     last_ack = ""

@@ -57,7 +57,8 @@ String netModule = "—";
 String planActivity = "idle";
 bool lightsOn = false;
 String vestaboardLive = "yarbo";
-bool vestaboardOn = false;
+bool vestaboardOn = true;
+bool vestaboardKnown = false;
 bool yarboOn = true;
 bool powerwallOn = false;
 bool lymowOn = false;
@@ -167,6 +168,8 @@ void saveConfig()
     prefs.putString("lock", lockScreen);
     prefs.putInt("tzoff", clockOffset);
     prefs.putBool("tzset", clockOffsetSet);
+    prefs.putBool("vboard", vestaboardOn);
+    prefs.putBool("vknown", vestaboardKnown);
     prefs.end();
 }
 
@@ -185,6 +188,8 @@ void loadConfig()
     }
     clockOffset = prefs.getInt("tzoff", clockOffset);
     clockOffsetSet = prefs.getBool("tzset", clockOffsetSet);
+    vestaboardOn = prefs.getBool("vboard", vestaboardOn);
+    vestaboardKnown = prefs.getBool("vknown", vestaboardKnown);
     prefs.end();
 }
 
@@ -201,6 +206,13 @@ void applyCompanionFields(JsonDocument &doc, bool persist)
         clockOffset = (int) doc["clock_offset"];
         clockOffsetSet = true;
         ntpStarted = false;
+    }
+    if (doc["vestaboard_enabled"].is<bool>()) {
+        vestaboardOn = doc["vestaboard_enabled"].as<bool>();
+        vestaboardKnown = true;
+    } else if (doc["vestaboard_enabled"].is<int>()) {
+        vestaboardOn = ((int) doc["vestaboard_enabled"]) != 0;
+        vestaboardKnown = true;
     }
     if (persist) {
         saveConfig();
@@ -376,21 +388,6 @@ void layoutButtons(int &bw, int &bh, int &gap, int &y0)
     y0 = H - (bh * 2) - gap - 36;
 }
 
-String headerDeviceName()
-{
-    if (currentPage == PAPERMONO_PAGE_LYMOW) {
-        return lymowName.length() ? lymowName : String("Lymow");
-    }
-    if (currentPage == PAPERMONO_PAGE_NOTE) {
-        return deviceName;
-    }
-    if (currentPage == PAPERMONO_PAGE_BOARD || currentPage == PAPERMONO_PAGE_POWERWALL
-        || currentPage == PAPERMONO_PAGE_RADIO || currentPage == PAPERMONO_PAGE_DEVICE) {
-        return deviceName;
-    }
-    return robotName.length() ? robotName : deviceName;
-}
-
 String headerBrand()
 {
     if (currentPage == PAPERMONO_PAGE_POWERWALL) return "POWERWALL";
@@ -408,21 +405,21 @@ void drawHeader()
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(3);
     M5.Display.drawString(headerBrand(), 16, 12);
-    M5.Display.setTextSize(2);
-    M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 52);
     String page = pageName(currentPage);
     if (page != headerBrand()) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString(page, 16, 80);
+        M5.Display.drawString(page, 16, 52);
     }
     int W = M5.Display.width();
-    int batRight = W - 96;
+    int lockX = W - 88;
+    M5.Display.drawRoundRect(lockX, 4, 82, 82, 14, TFT_BLACK);
+    drawPadlockIcon(lockX + 8, 10, 70, true);
+    int batRight = lockX - 8;
+    int batCy = 22;
+    drawBatteryBadge(batRight, batCy, tabletBat, true);
     int batLeft = batRight - 92 - 8;
-    int wifiCx = batLeft / 2;
-    drawWifiIcon(wifiCx, 28, 34, WiFi.status() == WL_CONNECTED);
-    M5.Display.drawRoundRect(W - 88, 4, 82, 82, 14, TFT_BLACK);
-    drawPadlockIcon(W - 80, 10, 70, true);
-    drawBatteryBadge(batRight, 48, tabletBat, true);
+    int batCx = batLeft + 46;
+    drawWifiIcon(batCx, 64, 32, WiFi.status() == WL_CONNECTED);
     M5.Display.setTextDatum(TL_DATUM);
 }
 
@@ -890,24 +887,24 @@ void refreshLocalClock()
 
 void drawPadlockIcon(int x, int y, int size, bool locked)
 {
-    int bodyW = (size * 3) / 5;
-    int bodyH = size / 2;
+    int thick = max(5, size / 8);
+    int bodyW = (size * 5) / 8;
+    int bodyH = (size * 11) / 24;
     int bx = x + (size - bodyW) / 2;
-    int by = y + size / 2;
-    int shackle = max(8, bodyW / 3);
-    int thick = max(4, size / 10);
-    int sx = locked ? (x + size / 2) : (x + size / 2 + shackle / 2);
-    int cy = by - 2;
-    M5.Display.fillCircle(sx, cy, shackle, TFT_BLACK);
-    int inner = shackle - thick;
-    if (inner > 2) {
-        M5.Display.fillCircle(sx, cy, inner, TFT_WHITE);
+    int by = y + size - bodyH - 1;
+    int hoopW = max(bodyW - thick, thick * 3);
+    int hoopX = locked ? (bx + (bodyW - hoopW) / 2) : (bx + thick);
+    int hoopY = y + 1;
+    int hoopH = by - hoopY + thick;
+    int rad = hoopW / 2;
+    M5.Display.fillRoundRect(hoopX, hoopY, hoopW, hoopH, rad, TFT_BLACK);
+    int innerW = hoopW - thick * 2;
+    int innerH = hoopH - thick;
+    if (innerW > 4 && innerH > 4) {
+        M5.Display.fillRoundRect(hoopX + thick, hoopY + thick, innerW, innerH, max(2, rad - thick), TFT_WHITE);
     }
-    M5.Display.fillRect(sx - shackle - 2, cy, shackle * 2 + 4, shackle + thick + 2, TFT_WHITE);
-    int post = thick;
-    M5.Display.fillRect(sx - shackle, cy - 2, post, shackle + 4, TFT_BLACK);
-    M5.Display.fillRect(sx + shackle - post, cy - 2, post, shackle + 4, TFT_BLACK);
-    M5.Display.fillRoundRect(bx, by, bodyW, bodyH, 4, TFT_BLACK);
+    M5.Display.fillRect(hoopX - 2, by, hoopW + 4, hoopH, TFT_WHITE);
+    M5.Display.fillRoundRect(bx, by, bodyW, bodyH, max(4, thick / 2), TFT_BLACK);
 }
 
 void drawWifiIcon(int cx, int cy, int size, bool connected)
@@ -1023,7 +1020,7 @@ void drawLockScreen(bool forceFull)
     bool wantLogo = lockScreen == "logo" || lockScreen == "both";
     bool haveLogo = SPIFFS.exists("/logo.png");
     bool showLogo = wantLogo && haveLogo;
-    bool showBoard = wantBoard && vestaboardOn;
+    bool showBoard = wantBoard && (!vestaboardKnown || vestaboardOn);
     if (showLogo) {
         int logoSize = showBoard ? 120 : 160;
         M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 250 : 280, logoSize, logoSize);
@@ -1039,7 +1036,6 @@ void drawLockScreen(bool forceFull)
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
     }
 
-    drawPadlockIcon(W - 64, 10, 52, false);
     int unlockW = 280;
     int offW = 140;
     int btnH = 110;
@@ -1047,7 +1043,7 @@ void drawLockScreen(bool forceFull)
     int bx = (W - (unlockW + gap + offW)) / 2;
     int by = H - 156;
     M5.Display.drawRoundRect(bx, by, unlockW, btnH, 18, TFT_BLACK);
-    drawPadlockIcon(bx + 20, by + 20, 70, false);
+    drawPadlockIcon(bx + 16, by + 18, 74, false);
     M5.Display.setTextDatum(ML_DATUM);
     M5.Display.setTextSize(3);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1180,7 +1176,6 @@ void drawDevicePage(bool forceFull)
     M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), 16, 200);
     M5.Display.setTextSize(2);
     M5.Display.drawString(clockDate, 16, 268);
-    M5.Display.drawString(deviceName, 16, 304);
     int H = M5.Display.height();
     int offY = H - 200;
     int offH = 120;
@@ -1329,9 +1324,8 @@ bool tapOnUnlock(int x, int y)
     int gap = 16;
     int bx = (W - (unlockW + gap + offW)) / 2;
     int by = H - 156;
-    bool icon = x >= W - 100 && y >= 0 && y <= 110;
     bool btn = x >= bx && x < bx + unlockW && y >= by && y <= by + btnH;
-    return icon || btn;
+    return btn;
 }
 
 bool tapOnLockOff(int x, int y)
@@ -1450,11 +1444,14 @@ void applyCompactExtras(JsonDocument &doc)
     String prevLock = lockScreen;
     int prevOff = clockOffset;
     bool prevSet = clockOffsetSet;
+    bool prevBoard = vestaboardOn;
+    bool prevKnown = vestaboardKnown;
     applyCompanionFields(doc, false);
     if (brightnessPct != prevBright && lightOn) {
         applyFrontlight(true);
     }
-    if (brightnessPct != prevBright || prevLock != lockScreen || prevOff != clockOffset || prevSet != clockOffsetSet) {
+    if (brightnessPct != prevBright || prevLock != lockScreen || prevOff != clockOffset || prevSet != clockOffsetSet
+        || prevBoard != vestaboardOn || prevKnown != vestaboardKnown) {
         saveConfig();
     }
     if (clockOffsetSet && (prevOff != clockOffset || !prevSet) && WiFi.status() == WL_CONNECTED) {
@@ -1826,7 +1823,6 @@ bool httpGetStatus()
     netModule = doc["net_module"] | netModule;
     planActivity = doc["plan_activity"] | planActivity;
     vestaboardLive = doc["vestaboard_live"] | vestaboardLive;
-    vestaboardOn = doc["vestaboard_enabled"] | false;
     yarboOn = doc["yarbo_enabled"] | true;
     powerwallOn = doc["powerwall_enabled"] | false;
     lymowOn = doc["lymow_enabled"] | false;
