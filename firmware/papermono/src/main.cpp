@@ -117,6 +117,9 @@ String lastInboxId = "";
 uint8_t radioSync = 0xA5;
 volatile int pendingPageSteps = 0;
 volatile uint8_t pwrOffEvent = 0;
+volatile int touchQX = 0;
+volatile int touchQY = 0;
+volatile uint8_t touchQ = 0;
 
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
@@ -423,8 +426,8 @@ void drawHeader()
     }
     int W = M5.Display.width();
     int lockX = W - 88;
-    M5.Display.drawRoundRect(lockX, 4, 82, 82, 14, TFT_BLACK);
     drawPadlockIcon(lockX + 8, 10, 70, true);
+    M5.Display.drawRoundRect(lockX, 4, 82, 82, 14, TFT_BLACK);
     int batRight = lockX - 8;
     int batCy = 22;
     drawBatteryBadge(batRight, batCy, tabletBat, true);
@@ -436,12 +439,6 @@ void drawHeader()
 
 void drawPager()
 {
-    int H = M5.Display.height();
-    int W = M5.Display.width();
-    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Display.setTextDatum(BC_DATUM);
-    M5.Display.setTextSize(3);
-    M5.Display.drawString("A next     B prev", W / 2, H - 14);
 }
 
 void drawKv(const char *label, const String &value, int y)
@@ -912,9 +909,17 @@ void drawPadlockIcon(int x, int y, int size, bool locked)
     int innerW = hoopW - thick * 2;
     int innerH = hoopH - thick;
     if (innerW > 4 && innerH > 4) {
-        M5.Display.fillRoundRect(hoopX + thick, hoopY + thick, innerW, innerH, max(2, rad - thick), TFT_WHITE);
+        int holeH = innerH;
+        int maxHole = by - (hoopY + thick);
+        if (maxHole < 4) {
+            maxHole = 4;
+        }
+        if (holeH > maxHole) {
+            holeH = maxHole;
+        }
+        M5.Display.fillRoundRect(hoopX + thick, hoopY + thick, innerW, holeH, max(2, rad - thick), TFT_WHITE);
     }
-    M5.Display.fillRect(hoopX - 2, by, hoopW + 4, hoopH, TFT_WHITE);
+    M5.Display.fillRect(hoopX + thick, by - 1, max(1, hoopW - thick * 2), thick + 1, TFT_WHITE);
     M5.Display.fillRoundRect(bx, by, bodyW, bodyH, max(4, thick / 2), TFT_BLACK);
 }
 
@@ -1053,8 +1058,8 @@ void drawLockScreen(bool forceFull)
     int gap = 16;
     int bx = (W - (unlockW + gap + offW)) / 2;
     int by = H - 156;
-    M5.Display.drawRoundRect(bx, by, unlockW, btnH, 18, TFT_BLACK);
     drawPadlockIcon(bx + 16, by + 18, 74, false);
+    M5.Display.drawRoundRect(bx, by, unlockW, btnH, 18, TFT_BLACK);
     M5.Display.setTextDatum(ML_DATUM);
     M5.Display.setTextSize(3);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1074,7 +1079,7 @@ void enterLock()
     offConfirm = false;
     lastLight = millis();
     applyFrontlight(true);
-    drawLockScreen(false);
+    drawLockScreen(true);
     lastDrawnKey = screenKey();
 }
 
@@ -1083,7 +1088,7 @@ void exitLock()
     screenLocked = false;
     noteActivity();
     applyFrontlight(true);
-    drawScreen(false);
+    drawScreen(true);
 }
 
 void drawBoardPage(bool forceFull)
@@ -1322,7 +1327,7 @@ bool tapOnPager(int y)
 bool tapOnPadlock(int x, int y)
 {
     int W = M5.Display.width();
-    return x >= W - 96 && y >= 0 && y <= 96;
+    return x >= W - 120 && y >= 0 && y <= 120;
 }
 
 bool tapOnUnlock(int x, int y)
@@ -2005,7 +2010,7 @@ void showPage(int page, bool loadPlansIfNeeded)
     if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
         httpGetPlans(false);
     }
-    drawScreen(false);
+    drawScreen(true);
 }
 
 void nextPage()
@@ -2046,9 +2051,9 @@ bool applyPendingPages()
 void flushPageButtons()
 {
     if (applyPendingPages()) {
-        drawScreen(false);
+        drawScreen(true);
         if (applyPendingPages()) {
-            drawScreen(false);
+            drawScreen(true);
         }
     }
 }
@@ -2078,6 +2083,13 @@ void inputTask(void *arg)
         }
         if (M5.BtnPWR.wasReleased() && !M5.BtnPWR.wasHold()) {
             pwrOffEvent = 1;
+        }
+        int tx = 0;
+        int ty = 0;
+        if (takeTouchPress(tx, ty)) {
+            touchQX = tx;
+            touchQY = ty;
+            touchQ = 1;
         }
         vTaskDelay(pdMS_TO_TICKS(8));
     }
@@ -2236,7 +2248,10 @@ void loop()
 
     int tx = 0;
     int ty = 0;
-    if (takeTouchPress(tx, ty)) {
+    if (touchQ) {
+        tx = touchQX;
+        ty = touchQY;
+        touchQ = 0;
         if (screenLocked) {
             handleLockTouch(tx, ty);
         } else {

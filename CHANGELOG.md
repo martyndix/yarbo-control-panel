@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.32] - 2026-09-28
+
+### Changed
+- PaperMono no longer draws **A next / B prev** on the glass. The hardware keys still change page.
+- Lock and unlock use a full refresh so the previous screen does not ghost through.
+
+### Fixed
+- The header padlock tap is read while the e-paper is refreshing, and the hit area is larger.
+- Padlock frames are drawn after the icon so the shackle no longer breaks the box. Firmware **0.1.30**.
+
 ## [3.0.31] - 2026-09-28
 
 ### Fixed
