@@ -77,7 +77,15 @@ def list_ports() -> dict:
     return {"ok": True, "ports": ports}
 
 
-def send_config(port: str, ssid: str, password: str, panel_url: str, token: str, name: str) -> dict:
+def send_config(
+    port: str,
+    ssid: str,
+    password: str,
+    panel_url: str,
+    token: str,
+    name: str,
+    extras: dict | None = None,
+) -> dict:
     try:
         import serial
     except ImportError:
@@ -87,16 +95,16 @@ def send_config(port: str, ssid: str, password: str, panel_url: str, token: str,
             "error": "pyserial is not installed on this host.",
         }
 
-    line = json.dumps(
-        {
+    payload = {
             "ssid": ssid,
             "password": password,
             "panel_url": panel_url.rstrip("/"),
             "token": token,
             "name": name,
-        },
-        ensure_ascii=False,
-    )
+        }
+    if extras:
+        payload.update({k: v for k, v in extras.items() if v is not None and v != ""})
+    line = json.dumps(payload, ensure_ascii=False)
     payload = ("CFG:" + line + "\n").encode("utf-8")
 
     try:
@@ -116,6 +124,19 @@ def send_config(port: str, ssid: str, password: str, panel_url: str, token: str,
         "error": None if ok else f"Device did not acknowledge config ({ack.strip()[:200]})",
         "ack": ack.strip()[:400],
     }
+
+
+def extras_from_args(args) -> dict:
+    extras = {}
+    if getattr(args, "brightness", None) is not None:
+        extras["brightness"] = args.brightness
+    if getattr(args, "lock_screen", None):
+        extras["lock_screen"] = args.lock_screen
+    if getattr(args, "clock_offset", None) is not None:
+        extras["clock_offset"] = args.clock_offset
+    if getattr(args, "timezone", None):
+        extras["clock_tz"] = args.timezone
+    return extras
 
 
 def factory_bin(kind: str) -> Path:
@@ -228,6 +249,10 @@ def main() -> int:
         p.add_argument("--token", required=True)
         p.add_argument("--name", default="PaperMono")
         p.add_argument("--kind", default=KIND_MONO)
+        p.add_argument("--brightness", type=int, default=None)
+        p.add_argument("--lock-screen", default=None)
+        p.add_argument("--clock-offset", type=int, default=None)
+        p.add_argument("--timezone", default=None)
     args = parser.parse_args()
 
     if args.cmd == "ports":
@@ -246,7 +271,13 @@ def main() -> int:
             return 1
         time.sleep(2.5)
         configured = send_config(
-            args.port, args.ssid, args.password, args.panel_url, args.token, args.name
+            args.port,
+            args.ssid,
+            args.password,
+            args.panel_url,
+            args.token,
+            args.name,
+            extras_from_args(args),
         )
         emit(
             {
@@ -260,7 +291,15 @@ def main() -> int:
         )
         return 0 if configured.get("ok") else 1
 
-    result = send_config(args.port, args.ssid, args.password, args.panel_url, args.token, args.name)
+    result = send_config(
+        args.port,
+        args.ssid,
+        args.password,
+        args.panel_url,
+        args.token,
+        args.name,
+        extras_from_args(args),
+    )
     emit(result)
     return 0 if result.get("ok") else 1
 

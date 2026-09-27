@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 bool paperHwBegin();
+void paperSetFrontlight(uint8_t brightness);
 bool loraReady();
 bool loraSetSyncWord(uint8_t word);
 bool loraSendText(const String &payload);

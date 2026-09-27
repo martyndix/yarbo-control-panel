@@ -5316,7 +5316,7 @@ async function downloadPaperSetupKit() {
 
 function applyPaperMonoPrefs(prefs) {
     if (!prefs || typeof prefs !== 'object') return;
-    if (els.papermonoLockScreen) els.papermonoLockScreen.value = prefs.lock_screen || 'logo';
+    if (els.papermonoLockScreen) els.papermonoLockScreen.value = prefs.lock_screen || 'both';
     applyPaperMonoTimezone(prefs.timezone || '');
     if (els.papermonoLockAfter) els.papermonoLockAfter.value = String(prefs.lock_after_s ?? 60);
     if (els.papermonoLightOff) els.papermonoLightOff.value = String(prefs.light_off_s ?? 15);
@@ -5344,7 +5344,7 @@ function applyPaperMonoTimezone(zone) {
 function paperMonoPrefsPayload() {
     return {
         action: 'prefs',
-        lock_screen: els.papermonoLockScreen?.value || 'logo',
+        lock_screen: els.papermonoLockScreen?.value || 'both',
         timezone: els.papermonoTimezone?.value || clientTimezone() || '',
         lock_after_s: Number(els.papermonoLockAfter?.value || 60),
         light_off_s: Number(els.papermonoLightOff?.value || 15),

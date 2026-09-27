@@ -55,6 +55,9 @@ bool enableLoRaHardware()
     pm1Ok = true;
     /* LED_EN_PP (red) defaults to on after boot. Turn it off until we need an alert. */
     pm1.setLedEnLevel(false);
+    /* M5GFX already set PM1 GPIO3 PWM for the frontlight. begin() resets it. */
+    pm1.gpioSetFunc(M5PM1_GPIO_NUM_3, M5PM1_GPIO_FUNC_OTHER);
+    pm1.setPwmFrequency(5000);
     if (pm1.gpioSetFunc(M5PM1_GPIO_NUM_2, M5PM1_GPIO_FUNC_GPIO) != M5PM1_OK ||
         pm1.gpioSet(M5PM1_GPIO_NUM_2, M5PM1_GPIO_MODE_OUTPUT, HIGH,
                     M5PM1_GPIO_PULL_NONE, M5PM1_GPIO_DRIVE_PUSHPULL) != M5PM1_OK) {
@@ -118,6 +121,19 @@ void beep(int freq, int ms)
 }
 
 } // namespace
+
+void paperSetFrontlight(uint8_t brightness)
+{
+    if (!pm1Ok) {
+        M5.Display.setBrightness(brightness);
+        return;
+    }
+    if (brightness == 0) {
+        pm1.setPwmDuty(M5PM1_PWM_CH_0, 0, false, false);
+        return;
+    }
+    pm1.analogWrite(M5PM1_PWM_CH_0, brightness);
+}
 
 bool paperHwBegin()
 {

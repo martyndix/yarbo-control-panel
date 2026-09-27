@@ -210,20 +210,22 @@ def open_app_serial(port: str):
 def send_config(port: str, cfg: dict) -> None:
     import serial
 
-    payload = (
-        "CFG:"
-        + json.dumps(
-            {
+    body = {
                 "ssid": cfg["ssid"],
                 "password": cfg.get("password") or "",
                 "panel_url": str(cfg["panel_url"]).rstrip("/"),
                 "token": cfg["token"],
                 "name": cfg["name"],
-            },
-            ensure_ascii=False,
-        )
-        + "\n"
-    ).encode("utf-8")
+            }
+    if cfg.get("brightness") is not None:
+        body["brightness"] = int(cfg["brightness"])
+    if cfg.get("lock_screen"):
+        body["lock_screen"] = cfg["lock_screen"]
+    if cfg.get("clock_offset") is not None:
+        body["clock_offset"] = int(cfg["clock_offset"])
+    if cfg.get("clock_tz"):
+        body["clock_tz"] = cfg["clock_tz"]
+    payload = ("CFG:" + json.dumps(body, ensure_ascii=False) + "\n").encode("utf-8")
     print("Sending Wi-Fi and panel URL over USB …")
     last_ack = ""
     last_error = ""

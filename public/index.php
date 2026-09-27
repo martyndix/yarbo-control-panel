@@ -1020,13 +1020,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             <p id="papermono-logo-result" class="settings-cloud-result hidden" role="status"></p>
                             <h4 class="settings-subtitle">Companion settings</h4>
-                            <p class="hint">These apply to every paired tablet. PaperMono also uses them for pocket lock, frontlight, buzzer, and RGB. Paper Colour uses lock layout and the Vestaboard preview page. Sleep timers and alerts are not set on the glass.</p>
+                            <p class="hint">These apply to every paired tablet. PaperMono also uses them for pocket lock, frontlight, buzzer, and RGB. Paper Colour uses lock layout and the Vestaboard preview page. Sleep timers and alerts are not set on the glass. Brightness, timezone, and lock layout are written onto the tablet at USB flash, so they still work before it can reach the Pi.</p>
                             <label class="settings-field">
                                 <span class="label">Lock screen</span>
                                 <select id="papermono-lock-screen">
                                     <option value="logo">Logo</option>
                                     <option value="vestaboard">Vestaboard</option>
-                                    <option value="both">Logo and Vestaboard</option>
+                                    <option value="both" selected>Logo and Vestaboard</option>
                                 </select>
                             </label>
                             <label class="settings-field">
@@ -1072,7 +1072,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </optgroup>
                                 </select>
                             </label>
-                            <p class="hint">Used for the clock on PaperMono. The Raspberry Pi often stays on UTC, which makes the tablet two hours behind in summer. Auto uses this browser’s zone when you save. Pick Amsterdam, Brussels, or Berlin for UTC+2 / CEST.</p>
+                            <p class="hint">Used for the clock on PaperMono. Until a zone is saved, the tablet uses Central European time (CET/CEST) so it is not two hours behind in summer. Auto uses this browser’s zone when you save. Pick Amsterdam, Brussels, or Berlin for UTC+2 / CEST. NTP can use any internet Wi-Fi; it does not need the Pi.</p>
                             <label class="settings-field">
                                 <span class="label">Lock after (seconds)</span>
                                 <input type="number" id="papermono-lock-after" min="10" max="600" step="5" value="60">
@@ -1085,6 +1085,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span class="label">Frontlight brightness (0–100)</span>
                                 <input type="number" id="papermono-brightness" min="0" max="100" step="5" value="80">
                             </label>
+                            <p class="hint">PaperMono frontlight. Needs firmware 0.1.25-beta (earlier builds ignored this because LoRa init reset the light PWM).</p>
                             <fieldset class="settings-theme-fieldset">
                                 <legend class="label">Alerts</legend>
                                 <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer + RGB)</span></label>

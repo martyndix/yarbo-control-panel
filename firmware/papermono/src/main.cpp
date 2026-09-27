@@ -77,7 +77,7 @@ bool lightOn = true;
 int lockAfterS = 60;
 int lightOffS = 15;
 int brightnessPct = 80;
-String lockScreen = "logo";
+String lockScreen = "both";
 bool alertMessageOn = true;
 bool alertYarboOn = true;
 bool alertLymowOn = true;
@@ -90,6 +90,7 @@ int tabletBat = -1;
 String clockLocal = "--:--";
 String clockDate = "";
 int clockOffset = 0;
+bool clockOffsetSet = false;
 uint32_t lastPanelClockMs = 0;
 String deviceId = "";
 int vestaboardCodes[3][15];
@@ -158,6 +159,10 @@ void saveConfig()
     prefs.putString("url", panelUrl);
     prefs.putString("token", token);
     prefs.putString("name", deviceName);
+    prefs.putInt("bright", brightnessPct);
+    prefs.putString("lock", lockScreen);
+    prefs.putInt("tzoff", clockOffset);
+    prefs.putBool("tzset", clockOffsetSet);
     prefs.end();
 }
 
@@ -169,7 +174,33 @@ void loadConfig()
     panelUrl = prefs.getString("url", "");
     token = prefs.getString("token", "");
     deviceName = prefs.getString("name", "PaperMono");
+    brightnessPct = constrain(prefs.getInt("bright", brightnessPct), 0, 100);
+    String lock = prefs.getString("lock", lockScreen);
+    if (lock == "logo" || lock == "vestaboard" || lock == "both") {
+        lockScreen = lock;
+    }
+    clockOffset = prefs.getInt("tzoff", clockOffset);
+    clockOffsetSet = prefs.getBool("tzset", clockOffsetSet);
     prefs.end();
+}
+
+void applyCompanionFields(JsonDocument &doc, bool persist)
+{
+    if (doc["brightness"].is<int>()) {
+        brightnessPct = constrain((int) doc["brightness"], 0, 100);
+    }
+    String lock = doc["lock_screen"] | "";
+    if (lock == "logo" || lock == "vestaboard" || lock == "both") {
+        lockScreen = lock;
+    }
+    if (doc["clock_offset"].is<int>()) {
+        clockOffset = (int) doc["clock_offset"];
+        clockOffsetSet = true;
+        ntpStarted = false;
+    }
+    if (persist) {
+        saveConfig();
+    }
 }
 
 void applyConfigJson(const String &json)
@@ -184,6 +215,7 @@ void applyConfigJson(const String &json)
     panelUrl = doc["panel_url"] | panelUrl;
     token = doc["token"] | token;
     deviceName = doc["name"] | deviceName;
+    applyCompanionFields(doc, false);
     panelUrl.replace(" ", "");
     while (panelUrl.endsWith("/")) {
         panelUrl.remove(panelUrl.length() - 1);
@@ -205,9 +237,10 @@ void pollSerialConfig()
                     WiFi.disconnect(true, false);
                     WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
                 }
+                applyFrontlight(lightOn);
             }
             line = "";
-        } else if (c != '\r' && line.length() < 800) {
+        } else if (c != '\r' && line.length() < 1600) {
             line += c;
         }
     }
@@ -743,7 +776,7 @@ int brightnessValue()
 void applyFrontlight(bool on)
 {
     lightOn = on;
-    M5.Display.setBrightness(on ? brightnessValue() : 0);
+    paperSetFrontlight(on ? (uint8_t) brightnessValue() : 0);
 }
 
 void powerOffTablet()
@@ -755,9 +788,16 @@ void powerOffTablet()
     M5.Display.startWrite();
     M5.Display.fillScreen(TFT_WHITE);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    M5.Display.setTextDatum(TC_DATUM);
+    M5.Display.setTextSize(3);
+    M5.Display.drawString(deviceName.length() ? deviceName : String("PaperMono"), W / 2, 64);
     M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextSize(12);
-    M5.Display.drawString("OFF", M5.Display.width() / 2, M5.Display.height() / 2);
+    M5.Display.drawString("OFF", W / 2, H / 2);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("TAP SCREEN TO BEGIN", W / 2, H - 72);
     M5.Display.endWrite();
     M5.Display.display();
     M5.Display.waitDisplay();
@@ -809,7 +849,13 @@ void ensureNtp()
     if (ntpStarted && millis() - lastNtpTry < 3600000UL) {
         return;
     }
-    configTime(clockOffset, 0, "pool.ntp.org", "time.google.com");
+    if (clockOffsetSet) {
+        configTime(clockOffset, 0, "pool.ntp.org", "time.google.com");
+    } else {
+        configTime(0, 0, "pool.ntp.org", "time.google.com");
+        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+        tzset();
+    }
     ntpStarted = true;
     lastNtpTry = millis();
 }
@@ -1369,14 +1415,22 @@ void applyCompactExtras(JsonDocument &doc)
     deviceId = doc["device_id"] | deviceId;
     lockAfterS = doc["lock_after_s"] | lockAfterS;
     lightOffS = doc["light_off_s"] | lightOffS;
-    int b = doc["brightness"] | brightnessPct;
-    if (b != brightnessPct) {
-        brightnessPct = b;
-        if (lightOn && !screenLocked) {
-            applyFrontlight(true);
-        }
+    int prevBright = brightnessPct;
+    String prevLock = lockScreen;
+    int prevOff = clockOffset;
+    bool prevSet = clockOffsetSet;
+    applyCompanionFields(doc, false);
+    if (brightnessPct != prevBright && lightOn) {
+        applyFrontlight(true);
     }
-    lockScreen = doc["lock_screen"] | lockScreen;
+    if (brightnessPct != prevBright || prevLock != lockScreen || prevOff != clockOffset || prevSet != clockOffsetSet) {
+        saveConfig();
+    }
+    if (clockOffsetSet && (prevOff != clockOffset || !prevSet) && WiFi.status() == WL_CONNECTED) {
+        configTime(clockOffset, 0, "pool.ntp.org", "time.google.com");
+        ntpStarted = true;
+        lastNtpTry = millis();
+    }
     alertMessageOn = doc["alert_message"] | alertMessageOn;
     alertYarboOn = doc["alert_yarbo"] | alertYarboOn;
     alertLymowOn = doc["alert_lymow"] | alertLymowOn;
@@ -1384,16 +1438,6 @@ void applyCompactExtras(JsonDocument &doc)
     yarboError = doc["yarbo_error"] | false;
     lymowError = doc["lymow_error"] | false;
     powerwallError = doc["powerwall_error"] | false;
-    int newOff = doc["clock_offset"] | clockOffset;
-    if (newOff != clockOffset) {
-        clockOffset = newOff;
-        ntpStarted = false;
-        if (WiFi.status() == WL_CONNECTED) {
-            configTime(clockOffset, 0, "pool.ntp.org", "time.google.com");
-            ntpStarted = true;
-            lastNtpTry = millis();
-        }
-    }
     String panelClock = doc["clock_local"] | "";
     if (panelClock.length() >= 4) {
         clockLocal = panelClock;

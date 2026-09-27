@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.27] - 2026-09-27
+
+### Fixed
+- PaperMono frontlight brightness actually changes. LoRa setup was resetting the power-chip PWM that drives the light.
+- Companion timezone, brightness, and lock layout are stored on the tablet at USB flash, so they work before the Pi is reachable. Until a zone is saved, the clock uses CET/CEST instead of UTC.
+
+### Changed
+- Lock screen defaults to **Logo and Vestaboard** and draws empty 3×15 boxes offline.
+- The powered-off e-paper card shows the device name, **OFF**, and **TAP SCREEN TO BEGIN**. Firmware **0.1.25-beta**.
+
 ## [3.0.26] - 2026-09-27
 
 ### Changed

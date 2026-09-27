@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.24-beta';
+    public const FIRMWARE_VERSION = '0.1.25-beta';
     public const FIRMWARE_VERSION_COLOR = '0.2.11-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -786,10 +786,7 @@ final class YarboPaperDevice
         $prefs = $this->normalizePrefs($this->load()['prefs']);
         $zoneName = YarboVestaboard::normalizeTimezone((string) ($prefs['timezone'] ?? ''));
         if ($zoneName === '') {
-            $zoneName = $vbObj->resolveQuietTimezone();
-        }
-        if ($zoneName === '') {
-            $zoneName = date_default_timezone_get() ?: 'UTC';
+            return [];
         }
         try {
             $tz = new \DateTimeZone($zoneName);
@@ -822,6 +819,51 @@ final class YarboPaperDevice
     }
 
     /**
+     * Prefs copied into USB CFG so the tablet works before it can reach the Pi.
+     *
+     * @return array<string, mixed>
+     */
+    private function usbCompanionFields(): array
+    {
+        $prefs = $this->publicPrefs();
+        $clock = $this->clockCompact(new YarboVestaboard($this->projectRoot));
+        $out = [
+            'brightness' => (int) $prefs['brightness'],
+            'lock_screen' => (string) $prefs['lock_screen'],
+        ];
+        if (isset($clock['clock_offset'])) {
+            $out['clock_offset'] = (int) $clock['clock_offset'];
+            $out['clock_tz'] = (string) ($clock['clock_tz'] ?? '');
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function usbCompanionCliArgs(): array
+    {
+        $fields = $this->usbCompanionFields();
+        $args = [
+            '--brightness',
+            (string) $fields['brightness'],
+            '--lock-screen',
+            (string) $fields['lock_screen'],
+        ];
+        if (isset($fields['clock_offset'])) {
+            $args[] = '--clock-offset';
+            $args[] = (string) $fields['clock_offset'];
+            if (($fields['clock_tz'] ?? '') !== '') {
+                $args[] = '--timezone';
+                $args[] = (string) $fields['clock_tz'];
+            }
+        }
+
+        return $args;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function defaultPrefs(): array
@@ -830,7 +872,7 @@ final class YarboPaperDevice
             'lock_after_s' => 60,
             'light_off_s' => 15,
             'brightness' => 80,
-            'lock_screen' => 'logo',
+            'lock_screen' => 'both',
             'timezone' => '',
             'alert_message' => true,
             'alert_yarbo' => true,
@@ -1090,7 +1132,7 @@ final class YarboPaperDevice
         }
 
         $registered = $this->register(['name' => $name, 'kind' => $kind]);
-        $result = $this->runPython([
+        $result = $this->runPython(array_merge([
             'flash',
             '--port', $port,
             '--ssid', $ssid,
@@ -1099,7 +1141,7 @@ final class YarboPaperDevice
             '--token', (string) $registered['token'],
             '--name', $name,
             '--kind', $kind,
-        ], 180.0);
+        ], $this->usbCompanionCliArgs()), 180.0);
         $result['device'] = $registered;
         $result['built'] = $builtNow;
         if (!($result['ok'] ?? false)) {
@@ -1141,7 +1183,7 @@ final class YarboPaperDevice
             $device = $this->publicDevice($device, true);
         }
 
-        $result = $this->runPython([
+        $result = $this->runPython(array_merge([
             'config',
             '--port', $port,
             '--ssid', $ssid,
@@ -1150,7 +1192,7 @@ final class YarboPaperDevice
             '--token', $token,
             '--name', $name,
             '--kind', $kind,
-        ], 45.0);
+        ], $this->usbCompanionCliArgs()), 45.0);
         $result['device'] = $device;
 
         return $result;
@@ -1222,7 +1264,7 @@ final class YarboPaperDevice
             'name' => $name,
             'kind' => $kind,
             'version' => $this->firmwareVersionForKind($kind),
-        ];
+        ] + $this->usbCompanionFields();
         $packed = $this->writeSetupKitArchive($kitDir, $kind, $config, $script);
         if (!($packed['ok'] ?? false)) {
             $this->revoke((string) $registered['id']);
