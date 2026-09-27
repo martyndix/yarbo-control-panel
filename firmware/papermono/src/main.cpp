@@ -96,6 +96,7 @@ String vestaboardHash = "";
 int unreadCount = 0;
 int unlockStep = 0;
 uint32_t unlockStepAt = 0;
+int lockAxisMap = -1;
 bool offConfirm = false;
 bool kbNumbers = false;
 String radioDraft = "";
@@ -131,6 +132,8 @@ void exitLock();
 void noteActivity();
 void nextPage();
 void prevPage();
+void drawBatteryBadge(int right, int cy, int pct, bool compact);
+bool takeTouchPress(int &x, int &y);
 
 void saveConfig()
 {
@@ -231,7 +234,8 @@ String screenKey()
         + lockScreen + "|" + clockLocal + "|" + String(unreadCount) + "|" + vestaboardHash + "|"
         + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
         + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
-        + String(inboxCount) + "|" + String(homeOn ? 1 : 0) + "|" + String(homeCount);
+        + String(inboxCount) + "|" + String(homeOn ? 1 : 0) + "|" + String(homeCount) + "|"
+        + String(unlockStep);
 }
 
 bool pageEnabled(int page)
@@ -374,13 +378,12 @@ void drawHeader()
         M5.Display.setTextSize(2);
         M5.Display.drawString(page, 16, 72);
     }
-    M5.Display.setTextSize(1);
-    M5.Display.setTextDatum(TR_DATUM);
-    String bat = tabletBat >= 0 ? (String(tabletBat) + "%") : String("--");
-    M5.Display.drawString("TAB " + bat, M5.Display.width() - 16, 48);
-    M5.Display.setTextDatum(TL_DATUM);
     int logoSize = 180;
-    if (SPIFFS.exists("/logo.png")) {
+    bool hasLogo = SPIFFS.exists("/logo.png");
+    int batRight = hasLogo ? (M5.Display.width() - logoSize - 24) : (M5.Display.width() - 16);
+    drawBatteryBadge(batRight, 40, tabletBat, true);
+    M5.Display.setTextDatum(TL_DATUM);
+    if (hasLogo) {
         M5.Display.drawPngFile(SPIFFS, "/logo.png", M5.Display.width() - logoSize - 16, 16, logoSize, logoSize);
     }
 }
@@ -766,10 +769,146 @@ int brightnessValue()
     return map(constrain(brightnessPct, 0, 100), 0, 100, 0, 255);
 }
 
-void applyFrontlight(bool on)
+void drawBatteryBadge(int right, int cy, int pct, bool compact)
 {
-    lightOn = on;
-    M5.Display.setBrightness(on ? brightnessValue() : 0);
+    const int w = compact ? 72 : 160;
+    const int h = compact ? 28 : 72;
+    const int cap = compact ? 6 : 12;
+    const int radius = compact ? 5 : 12;
+    int x = right - w - cap;
+    int y = cy - h / 2;
+    int level = constrain(pct, 0, 100);
+    int inner = w - 6;
+    int fillw = pct >= 0 ? (inner * level / 100) : 0;
+    M5.Display.drawRoundRect(x, y, w, h, radius, TFT_BLACK);
+    M5.Display.fillRect(x + w, y + (h - (compact ? 12 : 28)) / 2, cap, compact ? 12 : 28, TFT_BLACK);
+    if (fillw > 0) {
+        M5.Display.fillRect(x + 3, y + 3, fillw, h - 6, TFT_BLACK);
+    }
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextSize(compact ? 1 : 3);
+    bool invert = fillw > (w / 2);
+    M5.Display.setTextColor(invert ? TFT_WHITE : TFT_BLACK, invert ? TFT_BLACK : TFT_WHITE);
+    String s = pct >= 0 ? (String(pct) + "%") : String("--");
+    M5.Display.drawString(s, x + w / 2, y + h / 2);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+}
+
+bool takeTouchPress(int &x, int &y)
+{
+    static bool held = false;
+    m5::touch_point_t pts[2];
+    pts[0].x = 0;
+    pts[0].y = 0;
+    pts[1].x = 0;
+    pts[1].y = 0;
+    uint8_t n = M5.Display.getTouch(pts, 2);
+    if (n == 0) {
+        n = M5.Display.getTouchRaw(pts, 2);
+    }
+    auto t = M5.Touch.getDetail();
+    bool down = (n > 0) || t.isPressed() || t.wasPressed();
+    if (down && !held) {
+        if (n > 0 && (pts[0].x != 0 || pts[0].y != 0)) {
+            x = (int) pts[0].x;
+            y = (int) pts[0].y;
+        } else if (t.x != 0 || t.y != 0) {
+            x = t.x;
+            y = t.y;
+        } else if (n > 0) {
+            x = (int) pts[0].x;
+            y = (int) pts[0].y;
+        } else {
+            x = t.x;
+            y = t.y;
+        }
+        held = true;
+        return true;
+    }
+    if (!down) {
+        held = false;
+    }
+    return false;
+}
+
+void lockApplyMap(int map, int x, int y, int &ox, int &oy)
+{
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    int family = map / 8;
+    int kind = map % 8;
+    int sx = x;
+    int sy = y;
+    if (family == 1) {
+        sx = x * (W - 1) / 229;
+        sy = y * (H - 1) / 229;
+    } else if (family == 2) {
+        sx = x * (W - 1) / 799;
+        sy = y * (H - 1) / 479;
+    } else if (family == 3) {
+        sx = x * (W - 1) / 479;
+        sy = y * (H - 1) / 799;
+    }
+    switch (kind) {
+        case 1:
+            ox = sy;
+            oy = sx;
+            break;
+        case 2:
+            ox = W - 1 - sx;
+            oy = sy;
+            break;
+        case 3:
+            ox = sx;
+            oy = H - 1 - sy;
+            break;
+        case 4:
+            ox = W - 1 - sx;
+            oy = H - 1 - sy;
+            break;
+        case 5:
+            ox = sy;
+            oy = H - 1 - sx;
+            break;
+        case 6:
+            ox = H - 1 - sy;
+            oy = sx;
+            break;
+        case 7:
+            ox = H - 1 - sy;
+            oy = W - 1 - sx;
+            break;
+        default:
+            ox = sx;
+            oy = sy;
+            break;
+    }
+}
+
+bool lockInCorner1(int x, int y)
+{
+    return x <= 200 && y <= 200;
+}
+
+bool lockInCorner2(int x, int y)
+{
+    return x >= M5.Display.width() - 200 && y >= M5.Display.height() - 200;
+}
+
+bool lockMappedCorner1(int map, int x, int y)
+{
+    int ox = 0;
+    int oy = 0;
+    lockApplyMap(map, x, y, ox, oy);
+    return lockInCorner1(ox, oy);
+}
+
+bool lockMappedCorner2(int map, int x, int y)
+{
+    int ox = 0;
+    int oy = 0;
+    lockApplyMap(map, x, y, ox, oy);
+    return lockInCorner2(ox, oy);
 }
 
 void noteActivity()
@@ -794,12 +933,11 @@ void drawLockScreen(bool forceFull)
     M5.Display.drawString(deviceName.length() ? deviceName : String("PaperMono"), W / 2, 36);
     M5.Display.setTextSize(6);
     M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), W / 2, 110);
-    M5.Display.setTextSize(3);
-    String bat = tabletBat >= 0 ? (String("TAB ") + tabletBat + "%") : String("TAB --");
     if (unreadCount > 0) {
-        bat += "  " + String(unreadCount) + " MSG";
+        M5.Display.setTextSize(2);
+        M5.Display.drawString(String(unreadCount) + " MSG", W / 2, 188);
     }
-    M5.Display.drawString(bat, W / 2, 210);
+    drawBatteryBadge(W / 2 + 86, 220, tabletBat, false);
 
     bool showLogo = lockScreen != "vestaboard" || !vestaboardOn;
     bool showBoard = vestaboardOn && (lockScreen == "vestaboard" || lockScreen == "both");
@@ -822,15 +960,22 @@ void drawLockScreen(bool forceFull)
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
     }
 
-    M5.Display.drawRoundRect(8, 8, 132, 132, 16, TFT_BLACK);
+    if (unlockStep == 1) {
+        M5.Display.fillRoundRect(8, 8, 132, 132, 16, TFT_BLACK);
+        M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+    } else {
+        M5.Display.drawRoundRect(8, 8, 132, 132, 16, TFT_BLACK);
+        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    }
     M5.Display.drawRoundRect(W - 140, H - 140, 132, 132, 16, TFT_BLACK);
     M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextSize(5);
     M5.Display.drawString("1", 74, 74);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.drawString("2", W - 74, H - 74);
     M5.Display.setTextDatum(BC_DATUM);
     M5.Display.setTextSize(2);
-    M5.Display.drawString("Tap 1, then tap 2", W / 2, H - 8);
+    M5.Display.drawString(unlockStep == 1 ? "Now tap 2" : "Tap 1, then tap 2", W / 2, H - 8);
     M5.Display.display();
 }
 
@@ -838,6 +983,7 @@ void enterLock()
 {
     screenLocked = true;
     unlockStep = 0;
+    lockAxisMap = -1;
     offConfirm = false;
     applyFrontlight(false);
     drawLockScreen(true);
@@ -848,6 +994,7 @@ void exitLock()
 {
     screenLocked = false;
     unlockStep = 0;
+    lockAxisMap = -1;
     noteActivity();
     applyFrontlight(true);
     drawScreen(true);
@@ -1451,25 +1598,58 @@ void handleLockTouch(int x, int y)
     if (!lightOn) {
         applyFrontlight(true);
     }
-    int W = M5.Display.width();
-    int H = M5.Display.height();
-    bool c1 = x <= 140 && y <= 140;
-    bool c2 = x >= W - 140 && y >= H - 140;
     uint32_t now = millis();
-    if (unlockStep == 1 && now - unlockStepAt > 6000) {
+    if (unlockStep == 1 && now - unlockStepAt > 10000) {
         unlockStep = 0;
+        lockAxisMap = -1;
+        drawLockScreen(true);
+        lastDrawnKey = screenKey();
     }
-    if (unlockStep == 0 && c1) {
-        unlockStep = 1;
-        unlockStepAt = now;
+    if (unlockStep == 0) {
+        int order[32];
+        int n = 0;
+        bool small = (x <= 240 && y <= 240 && x >= 0 && y >= 0);
+        if (small) {
+            for (int map = 8; map < 16; map++) {
+                order[n++] = map;
+            }
+        }
+        for (int map = 0; map < 8; map++) {
+            order[n++] = map;
+        }
+        if (!small) {
+            for (int map = 8; map < 16; map++) {
+                order[n++] = map;
+            }
+        }
+        for (int map = 16; map < 32; map++) {
+            order[n++] = map;
+        }
+        for (int i = 0; i < n; i++) {
+            if (lockMappedCorner1(order[i], x, y)) {
+                lockAxisMap = order[i];
+                unlockStep = 1;
+                unlockStepAt = now;
+                drawLockScreen(true);
+                lastDrawnKey = screenKey();
+                return;
+            }
+        }
         return;
     }
-    if (unlockStep == 1 && c2) {
+    if (lockAxisMap >= 0 && lockMappedCorner2(lockAxisMap, x, y)) {
         unreadCount = 0;
         exitLock();
         return;
     }
+    if (lockAxisMap >= 0 && lockMappedCorner1(lockAxisMap, x, y)) {
+        unlockStepAt = now;
+        return;
+    }
     unlockStep = 0;
+    lockAxisMap = -1;
+    drawLockScreen(true);
+    lastDrawnKey = screenKey();
 }
 
 void drawOtaScreen()
@@ -1901,14 +2081,15 @@ void loop()
         applyFrontlight(false);
     }
 
-    auto t = M5.Touch.getDetail();
-    if (t.wasPressed()) {
+    int tx = 0;
+    int ty = 0;
+    if (takeTouchPress(tx, ty)) {
         if (screenLocked) {
-            handleLockTouch(t.x, t.y);
+            handleLockTouch(tx, ty);
         } else if (WiFi.status() == WL_CONNECTED) {
             noteActivity();
             if (currentPage == PAPERMONO_PAGE_HOME) {
-                int which = homeButtonAt(t.x, t.y);
+                int which = homeButtonAt(tx, ty);
                 if (which == 0) {
                     nextPage();
                 } else if (which == 1) {
@@ -1922,16 +2103,16 @@ void loop()
                     runCommand(lightsOn ? "lights_on" : "lights_off");
                 }
             } else if (currentPage == PAPERMONO_PAGE_PLANS) {
-                handlePlansTouch(t.x, t.y);
+                handlePlansTouch(tx, ty);
             } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
-                handleHouseTouch(t.x, t.y);
+                handleHouseTouch(tx, ty);
             } else if (currentPage == PAPERMONO_PAGE_NOTE) {
-                handleNoteTouch(t.x, t.y);
+                handleNoteTouch(tx, ty);
             } else if (currentPage == PAPERMONO_PAGE_RADIO) {
-                handleRadioTouch(t.x, t.y);
+                handleRadioTouch(tx, ty);
             } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
-                handleDeviceTouch(t.x, t.y);
-            } else if (tapOnPager(t.y) || t.y < 110) {
+                handleDeviceTouch(tx, ty);
+            } else if (tapOnPager(ty) || ty < 110) {
                 nextPage();
             }
         }

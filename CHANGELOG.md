@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.19] - 2026-09-27
+
+### Fixed
+- PaperMono lock: tapping **1** then **2** unlocks even when the touch chip reports flipped or swapped coordinates (the frontlight was coming on, but the corner hit-test missed). Box **1** fills after the first tap.
+- PaperMono battery is a battery outline with the percentage inside (no more **TAB** prefix). Needs a USB reflash of firmware **0.1.18-beta**.
+
 ## [3.0.18] - 2026-09-27
 
 ### Fixed
