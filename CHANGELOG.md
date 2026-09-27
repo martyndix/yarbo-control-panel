@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.26] - 2026-09-27
+
+### Changed
+- Vestaboard live views always include **Powerwall**, **Lymow**, and **ALL** (not only when those dashboards are ticked). PaperMono **NOTE** has the same four buttons.
+- PaperMono lock screen **Logo and Vestaboard** draws the 3×15 grid even when the Note is off in Settings.
+- PaperMono clock timezone is set in Settings → E-paper companions (the Pi often stays on UTC, which left the tablet two hours behind). Firmware **0.1.24-beta**.
+
 ## [3.0.25] - 2026-09-27
 
 ### Fixed

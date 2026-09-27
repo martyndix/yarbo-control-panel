@@ -294,19 +294,9 @@ final class YarboHub
             $id = self::LIVE_BATTERIES;
         }
         if ($id === self::LIVE_BATTERIES) {
-            if (self::allViewAvailable($modules)) {
-                return self::LIVE_BATTERIES;
-            }
-
-            return self::firstEnabledId($modules);
+            return self::LIVE_BATTERIES;
         }
-        if ($id === self::MODULE_POWERWALL && !empty($modules[self::MODULE_POWERWALL])) {
-            return $id;
-        }
-        if ($id === self::MODULE_LYMOW && !empty($modules[self::MODULE_LYMOW])) {
-            return $id;
-        }
-        if ($id === self::MODULE_YARBO && !empty($modules[self::MODULE_YARBO])) {
+        if ($id === self::MODULE_POWERWALL || $id === self::MODULE_LYMOW || $id === self::MODULE_YARBO) {
             return $id;
         }
 

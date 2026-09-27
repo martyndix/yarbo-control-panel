@@ -90,6 +90,7 @@ int tabletBat = -1;
 String clockLocal = "--:--";
 String clockDate = "";
 int clockOffset = 0;
+uint32_t lastPanelClockMs = 0;
 String deviceId = "";
 int vestaboardCodes[3][15];
 String vestaboardLines[3];
@@ -296,38 +297,23 @@ int stepEnabledPage(int from, int dir)
 
 int noteChoiceCount()
 {
-    int n = 0;
-    if (yarboOn) n++;
-    if (powerwallOn) n++;
-    if (lymowOn) n++;
-    if ((int) yarboOn + (int) powerwallOn + (int) lymowOn >= 2) n++;
-    return n > 0 ? n : 1;
+    return 4;
 }
 
 const char *noteChoiceId(int i)
 {
-    const char *ids[4];
-    int n = 0;
-    if (yarboOn) ids[n++] = "yarbo";
-    if (powerwallOn) ids[n++] = "powerwall";
-    if (lymowOn) ids[n++] = "lymow";
-    if ((int) yarboOn + (int) powerwallOn + (int) lymowOn >= 2) ids[n++] = "batteries";
-    if (n == 0) return "yarbo";
-    if (i < 0 || i >= n) return ids[0];
-    return ids[i];
+    if (i == 1) return "powerwall";
+    if (i == 2) return "lymow";
+    if (i == 3) return "batteries";
+    return "yarbo";
 }
 
 const char *noteChoiceLabel(int i)
 {
-    const char *labels[4];
-    int n = 0;
-    if (yarboOn) labels[n++] = "YARBO";
-    if (powerwallOn) labels[n++] = "WALL";
-    if (lymowOn) labels[n++] = "LYMOW";
-    if ((int) yarboOn + (int) powerwallOn + (int) lymowOn >= 2) labels[n++] = "ALL";
-    if (n == 0) return "YARBO";
-    if (i < 0 || i >= n) return labels[0];
-    return labels[i];
+    if (i == 1) return "POWER";
+    if (i == 2) return "LYMOW";
+    if (i == 3) return "ALL";
+    return "YARBO";
 }
 
 void drawButton(int x, int y, int w, int h, const char *label, bool invert)
@@ -628,13 +614,12 @@ void drawNotePage(bool forceFull)
     M5.Display.setTextSize(2);
     M5.Display.drawString("Vestaboard view", 16, 118);
     M5.Display.setTextSize(2);
+    M5.Display.drawString("Tap a view.", 16, 160);
     if (!vestaboardOn) {
-        M5.Display.drawString("Enable the Note in panel Settings.", 16, 160);
-    } else {
-        M5.Display.drawString("Tap a view.", 16, 160);
+        M5.Display.drawString("Note off: lock screen still previews.", 16, 190);
     }
     if (lastError.length()) {
-        M5.Display.drawString(lastError.substring(0, 28), 16, 196);
+        M5.Display.drawString(lastError.substring(0, 28), 16, vestaboardOn ? 196 : 222);
     }
     int bw, bh, gap, y0;
     layoutButtons(bw, bh, gap, y0);
@@ -835,6 +820,9 @@ void refreshLocalClock()
     if (now < 1700000000) {
         return;
     }
+    if (lastPanelClockMs && millis() - lastPanelClockMs < 120000UL) {
+        return;
+    }
     struct tm t;
     localtime_r(&now, &t);
     char tbuf[8];
@@ -954,16 +942,15 @@ void drawLockScreen(bool forceFull)
     drawWifiIcon(W / 2 - 120, 220, 56, WiFi.status() == WL_CONNECTED);
     drawBatteryBadge(W / 2 + 86, 220, tabletBat, false);
 
-    bool showLogo = lockScreen != "vestaboard" || !vestaboardOn;
-    bool showBoard = vestaboardOn && (lockScreen == "vestaboard" || lockScreen == "both");
-    if (lockScreen == "logo" || !vestaboardOn) {
-        showLogo = true;
-        showBoard = false;
-    }
-    if (showLogo && SPIFFS.exists("/logo.png")) {
+    bool wantBoard = lockScreen == "vestaboard" || lockScreen == "both";
+    bool wantLogo = lockScreen == "logo" || lockScreen == "both";
+    bool haveLogo = SPIFFS.exists("/logo.png");
+    bool showLogo = wantLogo && haveLogo;
+    bool showBoard = wantBoard;
+    if (showLogo) {
         int logoSize = showBoard ? 120 : 160;
         M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 250 : 280, logoSize, logoSize);
-    } else if (showLogo && !showBoard) {
+    } else if (wantLogo && !showBoard) {
         M5.Display.setTextSize(2);
         M5.Display.drawString("Logo after site Wi-Fi", W / 2, 300);
     }
@@ -1401,12 +1388,27 @@ void applyCompactExtras(JsonDocument &doc)
     if (newOff != clockOffset) {
         clockOffset = newOff;
         ntpStarted = false;
+        if (WiFi.status() == WL_CONNECTED) {
+            configTime(clockOffset, 0, "pool.ntp.org", "time.google.com");
+            ntpStarted = true;
+            lastNtpTry = millis();
+        }
     }
-    if (time(nullptr) < 1700000000) {
+    String panelClock = doc["clock_local"] | "";
+    if (panelClock.length() >= 4) {
+        clockLocal = panelClock;
+        String panelDate = doc["clock_date"] | "";
+        if (panelDate.length()) {
+            clockDate = panelDate;
+        }
+        lastPanelClockMs = millis();
+    } else if (time(nullptr) < 1700000000) {
         clockLocal = doc["clock_local"] | clockLocal;
         clockDate = doc["clock_date"] | clockDate;
+        refreshLocalClock();
+    } else {
+        refreshLocalClock();
     }
-    refreshLocalClock();
     uint8_t sync = (uint8_t) ((int) (doc["radio_sync"] | (int) radioSync));
     if (sync != radioSync) {
         radioSync = sync;

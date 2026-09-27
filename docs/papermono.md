@@ -40,13 +40,13 @@ Home and extra-page mocks (not photos of a flashed unit):
 - **Home / Status / Health / Plans:** Yarbo robot tiles (Stop / Dock on Home). Hidden when the Yarbo module is off in Settings.
 - Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG. Needs firmware **0.1.14-beta**.
 - Top line is the current module (**YARBO**, **POWERWALL**, **LYMOW**, **VESTABOARD**, **RADIO**, **DEVICE**), not a fixed YARBO brand. Single-page modules do not repeat that name as a second title.
-- **Note:** Vestaboard live view picker. Only lists modules that are on. Hidden when Vestaboard is off.
-- **Board:** live 3×15 preview of what the Vestaboard Note is showing. Hidden when Vestaboard is off.
-- **Powerwall:** house battery, solar, and draw. Hidden when the Powerwall module is off.
-- **Lymow:** Lymow battery, state, and charging. Hidden when the Lymow module is off.
+- **Note:** Vestaboard live view picker (**YARBO**, **POWER**, **LYMOW**, **ALL**). Writes the Note when it is enabled; the lock screen still previews the same grid if you chose Vestaboard there.
+- **Board:** live 3×15 preview of the current Vestaboard view.
+- **Powerwall:** house battery, solar, and draw.
+- **Lymow:** Lymow battery, state, and charging.
 - **Radio:** house messages (~180 characters) to **ALL** or a named peer. Large Latin keyboard and large typed text. Tries LoRa first, then Wi-Fi via the panel. Needs firmware **0.1.22-beta**.
 - **Device:** this tablet’s battery, clock, and a large **OFF** control. Power off writes a huge **OFF** on the glass, then kills the frontlight and LED; the e-paper keeps **OFF** with the device shut down. A **short press** of the side button also powers off. Holding the power button for about 2 seconds is still **download/flash mode**. Brightness, mute, and timers are Settings only.
-- **Lock screen:** tap the **padlock** on any page (top right, boxed). Idle auto-lock from Settings only runs while Wi-Fi is connected. Unlock with **Unlock**. **OFF** on the lock screen shuts the tablet down (same giant **OFF**). Needs firmware **0.1.22-beta**.
+- **Lock screen:** tap the **padlock** on any page (top right, boxed). **Logo and Vestaboard** shows the 3×15 grid even if the Note is off in Settings. Unlock with **Unlock**. **OFF** on the lock screen shuts the tablet down. Clock timezone is **Settings → E-paper companions**. Needs firmware **0.1.24-beta**.
 - **A** next page, **B** previous. Every companion page is in that loop (Yarbo Home/Status/Health/Plans, Note, Board, Powerwall, Lymow, Radio, Device, House). Stop / Dock are Home buttons only.
 
 It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, mic, IMU, and the SD slot are unused in this firmware. Sleep timers, brightness, buzzer, and RGB alerts are set in **Settings → E-paper companions**, not on the tablet. The side LED is **off** in normal use (the hardware turns red on at boot until firmware clears it). A Yarbo error blinks red. Needs firmware **0.1.23-beta**.

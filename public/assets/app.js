@@ -213,6 +213,7 @@ const els = {
     papermonoLogoClear: document.getElementById('papermono-logo-clear'),
     papermonoLogoResult: document.getElementById('papermono-logo-result'),
     papermonoLockScreen: document.getElementById('papermono-lock-screen'),
+    papermonoTimezone: document.getElementById('papermono-timezone'),
     papermonoLockAfter: document.getElementById('papermono-lock-after'),
     papermonoLightOff: document.getElementById('papermono-light-off'),
     papermonoBrightness: document.getElementById('papermono-brightness'),
@@ -3741,22 +3742,9 @@ function rotateViewCheckboxes() {
     return [...document.querySelectorAll('[data-rotate-view]')];
 }
 
-function applyRotateViewChoices(extras) {
-    const yarbo = extras?.yarbo !== false;
-    const pw = Boolean(extras?.powerwall);
-    const ly = Boolean(extras?.lymow);
-    const enabledCount = [yarbo, pw, ly].filter(Boolean).length;
-    const show = {
-        yarbo,
-        powerwall: pw,
-        lymow: ly,
-        batteries: enabledCount >= 2,
-    };
+function applyRotateViewChoices() {
     document.querySelectorAll('[data-rotate-choice]').forEach((label) => {
-        const id = label.getAttribute('data-rotate-choice') || '';
-        label.classList.toggle('hidden', !show[id]);
-        const box = label.querySelector('[data-rotate-view]');
-        if (box && !show[id]) box.checked = false;
+        label.classList.remove('hidden');
     });
 }
 
@@ -3857,41 +3845,22 @@ function vestaboardExtraModules(hub) {
     };
 }
 
-function firstShownVestaboardLive(show) {
-    return ['yarbo', 'powerwall', 'lymow', 'batteries'].find((id) => show[id]) || 'yarbo';
-}
-
 function applyVestaboardLiveChoices(extras, live) {
-    const yarbo = extras?.yarbo !== false;
-    const pw = Boolean(extras?.powerwall);
-    const ly = Boolean(extras?.lymow);
-    const enabledCount = [yarbo, pw, ly].filter(Boolean).length;
-    const show = {
-        yarbo,
-        powerwall: pw,
-        lymow: ly,
-        batteries: enabledCount >= 2,
-    };
-    let chosen = live || firstShownVestaboardLive(show);
-    if (!show[chosen]) chosen = firstShownVestaboardLive(show);
+    const chosen = live || 'yarbo';
     els.vestaboardLiveSwitch?.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
         const id = btn.getAttribute('data-vestaboard-live') || '';
-        btn.classList.toggle('hidden', !show[id]);
-        btn.classList.toggle('is-active', show[id] && id === chosen);
+        btn.classList.remove('hidden');
+        btn.classList.toggle('is-active', id === chosen);
     });
     if (els.settingsVestaboardLive) {
         [...els.settingsVestaboardLive.options].forEach((opt) => {
-            const hide = !show[opt.value];
-            opt.hidden = hide;
-            opt.disabled = hide;
+            opt.hidden = false;
+            opt.disabled = false;
         });
-        if ([...els.settingsVestaboardLive.options].some((o) => o.value === chosen && !o.hidden)) {
-            els.settingsVestaboardLive.value = chosen;
-        } else {
-            els.settingsVestaboardLive.value = firstShownVestaboardLive(show);
-        }
+        const values = [...els.settingsVestaboardLive.options].map((o) => o.value);
+        els.settingsVestaboardLive.value = values.includes(chosen) ? chosen : 'yarbo';
     }
-    applyRotateViewChoices(extras);
+    applyRotateViewChoices();
 }
 
 async function setVestaboardLiveView(id, button) {
@@ -5348,6 +5317,7 @@ async function downloadPaperSetupKit() {
 function applyPaperMonoPrefs(prefs) {
     if (!prefs || typeof prefs !== 'object') return;
     if (els.papermonoLockScreen) els.papermonoLockScreen.value = prefs.lock_screen || 'logo';
+    applyPaperMonoTimezone(prefs.timezone || '');
     if (els.papermonoLockAfter) els.papermonoLockAfter.value = String(prefs.lock_after_s ?? 60);
     if (els.papermonoLightOff) els.papermonoLightOff.value = String(prefs.light_off_s ?? 15);
     if (els.papermonoBrightness) els.papermonoBrightness.value = String(prefs.brightness ?? 80);
@@ -5358,10 +5328,24 @@ function applyPaperMonoPrefs(prefs) {
     applyPaperPreviewModules();
 }
 
+function applyPaperMonoTimezone(zone) {
+    const sel = els.papermonoTimezone;
+    if (!sel) return;
+    const value = String(zone || '');
+    if (value && ![...sel.options].some((opt) => opt.value === value)) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value.replace(/_/g, ' ');
+        sel.appendChild(opt);
+    }
+    sel.value = value;
+}
+
 function paperMonoPrefsPayload() {
     return {
         action: 'prefs',
         lock_screen: els.papermonoLockScreen?.value || 'logo',
+        timezone: els.papermonoTimezone?.value || clientTimezone() || '',
         lock_after_s: Number(els.papermonoLockAfter?.value || 60),
         light_off_s: Number(els.papermonoLightOff?.value || 15),
         brightness: Number(els.papermonoBrightness?.value || 80),

@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.23-beta';
+    public const FIRMWARE_VERSION = '0.1.24-beta';
     public const FIRMWARE_VERSION_COLOR = '0.2.11-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -752,16 +752,19 @@ final class YarboPaperDevice
      */
     private function vestaboardCompact(YarboVestaboard $vbObj, array $vb, ?array $parsed, bool $online): array
     {
-        $codes = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
+        $codes = null;
+        if (!empty($vb['enabled'])) {
+            $codes = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
+        }
         $lines = null;
         if ($codes === null) {
-            $dash = $vbObj->dashboardPayload($parsed, $online);
-            $codes = YarboVestaboard::normalizeLiveCodes($dash['codes'] ?? null) ?? [
+            $layout = $vbObj->layoutForLiveModule($parsed, $online);
+            $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null) ?? [
                 array_fill(0, 15, 0),
                 array_fill(0, 15, 0),
                 array_fill(0, 15, 0),
             ];
-            $lines = is_array($dash['lines'] ?? null) ? $dash['lines'] : YarboVestaboard::linesFromCodes($codes);
+            $lines = is_array($layout['lines'] ?? null) ? $layout['lines'] : YarboVestaboard::linesFromCodes($codes);
         }
         if (!is_array($lines)) {
             $lines = YarboVestaboard::linesFromCodes($codes);
@@ -780,7 +783,11 @@ final class YarboPaperDevice
      */
     private function clockCompact(YarboVestaboard $vbObj): array
     {
-        $zoneName = $vbObj->resolveQuietTimezone();
+        $prefs = $this->normalizePrefs($this->load()['prefs']);
+        $zoneName = YarboVestaboard::normalizeTimezone((string) ($prefs['timezone'] ?? ''));
+        if ($zoneName === '') {
+            $zoneName = $vbObj->resolveQuietTimezone();
+        }
         if ($zoneName === '') {
             $zoneName = date_default_timezone_get() ?: 'UTC';
         }
@@ -824,6 +831,7 @@ final class YarboPaperDevice
             'light_off_s' => 15,
             'brightness' => 80,
             'lock_screen' => 'logo',
+            'timezone' => '',
             'alert_message' => true,
             'alert_yarbo' => true,
             'alert_lymow' => true,
@@ -842,6 +850,7 @@ final class YarboPaperDevice
         if (!in_array($lockScreen, ['logo', 'vestaboard', 'both'], true)) {
             $lockScreen = 'logo';
         }
+        $timezone = YarboVestaboard::normalizeTimezone((string) ($input['timezone'] ?? $defaults['timezone']));
         $bool = static function (mixed $value, bool $fallback): bool {
             if ($value === null) {
                 return $fallback;
@@ -859,6 +868,7 @@ final class YarboPaperDevice
             'light_off_s' => max(5, min(300, (int) ($input['light_off_s'] ?? $defaults['light_off_s']))),
             'brightness' => max(0, min(100, (int) ($input['brightness'] ?? $defaults['brightness']))),
             'lock_screen' => $lockScreen,
+            'timezone' => $timezone,
             'alert_message' => $bool($input['alert_message'] ?? null, $defaults['alert_message']),
             'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),
             'alert_lymow' => $bool($input['alert_lymow'] ?? null, $defaults['alert_lymow']),

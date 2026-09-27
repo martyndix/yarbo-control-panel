@@ -731,7 +731,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-modules-section" data-settings-pane="modules">
                             <h3 class="settings-subtitle">Modules</h3>
-                            <p class="hint">Turn dashboards on or off. Keep at least one. The header switcher jumps between enabled modules. Vestaboard live buttons only list modules that are on (Quiet hours and Vestaboard-app hold still apply).</p>
+                            <p class="hint">Turn dashboards on or off. Keep at least one. The header switcher jumps between enabled modules. Vestaboard live buttons (Yarbo, Powerwall, Lymow, ALL) are always listed so you can put any of them on the Note. Quiet hours and Vestaboard-app hold still apply.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-yarbo" name="module_yarbo" checked>
                                 <span>Yarbo (mower / snow, local MQTT)</span>
@@ -1029,6 +1029,50 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="both">Logo and Vestaboard</option>
                                 </select>
                             </label>
+                            <label class="settings-field">
+                                <span class="label">Timezone</span>
+                                <select id="papermono-timezone">
+                                    <option value="">Auto (this browser)</option>
+                                    <optgroup label="Europe">
+                                        <option value="Europe/Amsterdam">Amsterdam</option>
+                                        <option value="Europe/Brussels">Brussels</option>
+                                        <option value="Europe/Berlin">Berlin</option>
+                                        <option value="Europe/Paris">Paris</option>
+                                        <option value="Europe/London">London</option>
+                                        <option value="Europe/Dublin">Dublin</option>
+                                        <option value="Europe/Rome">Rome</option>
+                                        <option value="Europe/Madrid">Madrid</option>
+                                        <option value="Europe/Lisbon">Lisbon</option>
+                                        <option value="Europe/Stockholm">Stockholm</option>
+                                        <option value="Europe/Copenhagen">Copenhagen</option>
+                                        <option value="Europe/Oslo">Oslo</option>
+                                        <option value="Europe/Vienna">Vienna</option>
+                                        <option value="Europe/Zurich">Zurich</option>
+                                        <option value="Europe/Warsaw">Warsaw</option>
+                                        <option value="Europe/Prague">Prague</option>
+                                        <option value="Europe/Athens">Athens</option>
+                                        <option value="Europe/Helsinki">Helsinki</option>
+                                    </optgroup>
+                                    <optgroup label="Americas">
+                                        <option value="America/New_York">New York</option>
+                                        <option value="America/Chicago">Chicago</option>
+                                        <option value="America/Denver">Denver</option>
+                                        <option value="America/Los_Angeles">Los Angeles</option>
+                                        <option value="America/Toronto">Toronto</option>
+                                        <option value="America/Vancouver">Vancouver</option>
+                                    </optgroup>
+                                    <optgroup label="Other">
+                                        <option value="UTC">UTC</option>
+                                        <option value="Pacific/Auckland">Auckland</option>
+                                        <option value="Australia/Sydney">Sydney</option>
+                                        <option value="Australia/Perth">Perth</option>
+                                        <option value="Asia/Tokyo">Tokyo</option>
+                                        <option value="Asia/Singapore">Singapore</option>
+                                        <option value="Asia/Dubai">Dubai</option>
+                                    </optgroup>
+                                </select>
+                            </label>
+                            <p class="hint">Used for the clock on PaperMono. The Raspberry Pi often stays on UTC, which makes the tablet two hours behind in summer. Auto uses this browser’s zone when you save. Pick Amsterdam, Brussels, or Berlin for UTC+2 / CEST.</p>
                             <label class="settings-field">
                                 <span class="label">Lock after (seconds)</span>
                                 <input type="number" id="papermono-lock-after" min="10" max="600" step="5" value="60">
