@@ -15,10 +15,10 @@
 // M5Stack PaperMono SKU C153 (https://docs.m5stack.com/en/core/PaperMono)
 // ESP32-S3R8, SSD1677 480x800 4-level gray, FT6336G touch. Not PaperMono-Lite.
 // Manufacturer e-paper rules we follow:
-// - After ~10 partial (fast) refreshes, run one full-screen refresh to clear ghosting.
+// - After a few fast refreshes, run one full-screen refresh to clear ghosting.
 // - Do not stream uninterrupted partial refreshes (DC imbalance can damage the panel).
 // - Skip redraws when status has not changed.
-// - Use the panel's OTP waveforms (M5GFX epd_quality / epd_fastest); no custom LUTs.
+// - Use the panel's OTP waveforms (M5GFX epd_quality / epd_fast); no custom LUTs.
 
 Preferences prefs;
 String wifiSsid;
@@ -94,9 +94,9 @@ int vestaboardCodes[3][15];
 String vestaboardLines[3];
 String vestaboardHash = "";
 int unreadCount = 0;
-int unlockStep = 0;
-uint32_t unlockStepAt = 0;
 int lockAxisMap = -1;
+bool ntpStarted = false;
+uint32_t lastNtpTry = 0;
 bool offConfirm = false;
 bool kbNumbers = false;
 String radioDraft = "";
@@ -132,13 +132,16 @@ void exitLock();
 void noteActivity();
 void nextPage();
 void prevPage();
-void drawPadlockIcon(int x, int y, int size);
+void drawPadlockIcon(int x, int y, int size, bool locked);
 void drawWifiIcon(int cx, int cy, int size, bool connected);
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
 bool takeTouchPress(int &x, int &y);
 void applyFrontlight(bool on);
+void ensureNtp();
+void refreshLocalClock();
 void lockApplyMap(int map, int x, int y, int &ox, int &oy);
 bool tapOnPadlock(int x, int y);
+bool tapOnUnlock(int x, int y);
 
 void saveConfig()
 {
@@ -205,8 +208,8 @@ void pollSerialConfig()
 
 void beginEpdFrame(bool forceQuality)
 {
-    bool full = forceQuality || partialRefreshCount >= 10;
-    M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fastest);
+    bool full = forceQuality || partialRefreshCount >= 4;
+    M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fast);
     partialRefreshCount = full ? 0 : (partialRefreshCount + 1);
 }
 
@@ -239,21 +242,12 @@ String screenKey()
         + lockScreen + "|" + clockLocal + "|" + String(unreadCount) + "|" + vestaboardHash + "|"
         + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
         + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
-        + String(inboxCount) + "|" + String(homeOn ? 1 : 0) + "|" + String(homeCount) + "|"
-        + String(unlockStep);
+        + String(inboxCount) + "|" + String(homeOn ? 1 : 0) + "|" + String(homeCount);
 }
 
 bool pageEnabled(int page)
 {
-    if (page == PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_STATUS
-        || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS) {
-        return yarboOn;
-    }
-    if (page == PAPERMONO_PAGE_NOTE) return vestaboardOn;
-    if (page == PAPERMONO_PAGE_BOARD) return vestaboardOn;
-    if (page == PAPERMONO_PAGE_POWERWALL) return powerwallOn;
-    if (page == PAPERMONO_PAGE_LYMOW) return lymowOn;
-    if (page == PAPERMONO_PAGE_HOUSE) return homeOn;
+    (void) page;
     return true;
 }
 
@@ -381,51 +375,22 @@ void drawHeader()
     String page = pageName(currentPage);
     if (page != headerBrand()) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString(page, 16, 72);
+        M5.Display.drawString(page, 16, 68);
     }
-    int logoSize = 180;
     int W = M5.Display.width();
-    bool hasLogo = SPIFFS.exists("/logo.png");
-    drawPadlockIcon(W - 64, 10, 52);
-    int batRight = hasLogo ? (W - logoSize - 24) : (W - 80);
-    drawBatteryBadge(batRight, 40, tabletBat, true);
+    drawPadlockIcon(W - 64, 10, 52, true);
+    drawBatteryBadge(W - 80, 40, tabletBat, true);
     M5.Display.setTextDatum(TL_DATUM);
-    if (hasLogo) {
-        M5.Display.drawPngFile(SPIFFS, "/logo.png", W - logoSize - 16, 16, logoSize, logoSize);
-        drawPadlockIcon(W - 64, 10, 52);
-    }
 }
 
 void drawPager()
 {
     int H = M5.Display.height();
     int W = M5.Display.width();
-    const char *labels[PAPERMONO_PAGE_COUNT] = {
-        "HOME", "STATUS", "HEALTH", "PLANS", "NOTE", "BOARD", "WALL", "LYMOW", "RADIO", "DEVICE", "HOUSE"
-    };
-    M5.Display.setTextDatum(TC_DATUM);
-    M5.Display.setTextSize(1);
-    int n = visiblePageCount();
-    int slot = W / n;
-    int drawn = 0;
-    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
-        if (!pageEnabled(i)) continue;
-        int x = slot * drawn + slot / 2;
-        if (i == currentPage) {
-            M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-            M5.Display.fillRect(slot * drawn + 8, H - 36, slot - 16, 18, TFT_BLACK);
-        } else {
-            M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-        }
-        M5.Display.drawString(labels[i], x, H - 33);
-        drawn++;
-    }
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Display.setTextDatum(BL_DATUM);
-    String wifi = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Wi-Fi: waiting";
-    M5.Display.drawString(wifi, 16, H - 8);
-    M5.Display.setTextDatum(BR_DATUM);
-    M5.Display.drawString("keys · pages", W - 16, H - 8);
+    M5.Display.setTextDatum(BC_DATUM);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("A next     B prev", W / 2, H - 12);
 }
 
 void drawKv(const char *label, const String &value, int y)
@@ -446,7 +411,7 @@ void drawKv(const char *label, const String &value, int y)
 
 void drawHome(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
 
@@ -478,7 +443,7 @@ void drawHome(bool forceFull)
 
 void drawStatusPage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -502,7 +467,7 @@ void drawStatusPage(bool forceFull)
 
 void drawHealthPage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     int y = 112;
@@ -540,7 +505,7 @@ int plansStartY()
 
 void drawPlansPage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -594,7 +559,7 @@ void drawPlansPage(bool forceFull)
 
 void drawHousePage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -642,7 +607,7 @@ void drawHousePage(bool forceFull)
 
 void drawNotePage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -674,7 +639,7 @@ void drawNotePage(bool forceFull)
 
 void drawLymowPage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -694,7 +659,7 @@ void drawLymowPage(bool forceFull)
 
 void drawPowerwallPage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -783,14 +748,43 @@ void applyFrontlight(bool on)
     M5.Display.setBrightness(on ? brightnessValue() : 0);
 }
 
-void drawPadlockIcon(int x, int y, int size)
+void ensureNtp()
+{
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+    if (ntpStarted && millis() - lastNtpTry < 3600000UL) {
+        return;
+    }
+    configTime(clockOffset, 0, "pool.ntp.org", "time.google.com");
+    ntpStarted = true;
+    lastNtpTry = millis();
+}
+
+void refreshLocalClock()
+{
+    time_t now = time(nullptr);
+    if (now < 1700000000) {
+        return;
+    }
+    struct tm t;
+    localtime_r(&now, &t);
+    char tbuf[8];
+    char dbuf[20];
+    snprintf(tbuf, sizeof(tbuf), "%02d:%02d", t.tm_hour, t.tm_min);
+    strftime(dbuf, sizeof(dbuf), "%a %d %b", &t);
+    clockLocal = tbuf;
+    clockDate = dbuf;
+}
+
+void drawPadlockIcon(int x, int y, int size, bool locked)
 {
     int bodyW = (size * 3) / 5;
     int bodyH = size / 2;
     int bx = x + (size - bodyW) / 2;
     int by = y + size / 2;
-    int sx = x + size / 2;
     int shackle = bodyW / 3;
+    int sx = locked ? (x + size / 2) : (x + size / 2 + shackle);
     M5.Display.drawCircle(sx, by - 2, shackle, TFT_BLACK);
     M5.Display.fillRect(sx - shackle - 1, by - 2, shackle * 2 + 2, shackle + 4, TFT_WHITE);
     M5.Display.drawLine(sx - shackle, by - 2, sx - shackle, by, TFT_BLACK);
@@ -967,7 +961,7 @@ void noteActivity()
 
 void drawLockScreen(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     int W = M5.Display.width();
@@ -992,8 +986,8 @@ void drawLockScreen(bool forceFull)
         showBoard = false;
     }
     if (showLogo && SPIFFS.exists("/logo.png")) {
-        int logoSize = showBoard ? 160 : 280;
-        M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 250 : 270, logoSize, logoSize);
+        int logoSize = showBoard ? 120 : 160;
+        M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 250 : 280, logoSize, logoSize);
     } else if (showLogo && !showBoard) {
         M5.Display.setTextSize(2);
         M5.Display.drawString("Logo after site Wi-Fi", W / 2, 300);
@@ -1006,47 +1000,40 @@ void drawLockScreen(bool forceFull)
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
     }
 
-    if (unlockStep == 1) {
-        M5.Display.fillRoundRect(8, 8, 132, 132, 16, TFT_BLACK);
-        M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    } else {
-        M5.Display.drawRoundRect(8, 8, 132, 132, 16, TFT_BLACK);
-        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    }
-    M5.Display.drawRoundRect(W - 140, H - 140, 132, 132, 16, TFT_BLACK);
-    M5.Display.setTextDatum(MC_DATUM);
-    M5.Display.setTextSize(5);
-    M5.Display.drawString("1", 74, 74);
+    drawPadlockIcon(W - 64, 10, 52, false);
+    int btnW = 340;
+    int btnH = 120;
+    int bx = (W - btnW) / 2;
+    int by = H - 168;
+    M5.Display.drawRoundRect(bx, by, btnW, btnH, 18, TFT_BLACK);
+    drawPadlockIcon(bx + 28, by + 24, 72, false);
+    M5.Display.setTextDatum(ML_DATUM);
+    M5.Display.setTextSize(3);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Display.drawString("2", W - 74, H - 74);
-    M5.Display.setTextDatum(BC_DATUM);
-    M5.Display.setTextSize(2);
-    M5.Display.drawString(unlockStep == 1 ? "Now tap 2" : "Tap 1, then tap 2", W / 2, H - 8);
+    M5.Display.drawString("Unlock", bx + 130, by + btnH / 2);
     M5.Display.display();
 }
 
 void enterLock()
 {
     screenLocked = true;
-    unlockStep = 0;
     offConfirm = false;
     applyFrontlight(false);
-    drawLockScreen(false);
+    drawLockScreen(true);
     lastDrawnKey = screenKey();
 }
 
 void exitLock()
 {
     screenLocked = false;
-    unlockStep = 0;
     noteActivity();
     applyFrontlight(true);
-    drawScreen(false);
+    drawScreen(true);
 }
 
 void drawBoardPage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     int cell = 26;
@@ -1099,7 +1086,7 @@ void drawKeyboard(int y0)
 
 void drawRadioPage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1142,7 +1129,7 @@ void drawRadioPage(bool forceFull)
 
 void drawDevicePage(bool forceFull)
 {
-    beginEpdFrame(false);
+    beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1269,7 +1256,7 @@ int homeButtonAt(int x, int y)
     int bw, bh, gap, y0;
     layoutButtons(bw, bh, gap, y0);
     if (y < y0) {
-        return 0;
+        return -1;
     }
     bool left = x < 16 + bw + gap / 2;
     bool top = y < y0 + bh + gap / 2;
@@ -1281,23 +1268,28 @@ int homeButtonAt(int x, int y)
 
 bool tapOnPager(int y)
 {
-    return y >= M5.Display.height() - 48;
+    (void) y;
+    return false;
 }
 
 bool tapOnPadlock(int x, int y)
 {
+    return x >= M5.Display.width() - 88 && y >= 0 && y <= 96;
+}
+
+bool tapOnUnlock(int x, int y)
+{
     int W = M5.Display.width();
-    if (x >= W - 88 && y >= 0 && y <= 96) {
-        return true;
-    }
-    if (lockAxisMap >= 0) {
-        return false;
-    }
-    for (int map = 0; map < 16; map++) {
-        int ox = 0;
-        int oy = 0;
+    int H = M5.Display.height();
+    int maps = lockAxisMap >= 0 ? 1 : 16;
+    for (int i = 0; i < maps; i++) {
+        int map = lockAxisMap >= 0 ? lockAxisMap : i;
+        int ox = x;
+        int oy = y;
         lockApplyMap(map, x, y, ox, oy);
-        if (ox >= W - 88 && oy >= 0 && oy <= 96) {
+        bool icon = ox >= W - 100 && oy >= 0 && oy <= 110;
+        bool btn = ox >= 60 && ox <= W - 60 && oy >= H - 220 && oy <= H - 36;
+        if (icon || btn) {
             lockAxisMap = map;
             return true;
         }
@@ -1418,9 +1410,16 @@ void applyCompactExtras(JsonDocument &doc)
     yarboError = doc["yarbo_error"] | false;
     lymowError = doc["lymow_error"] | false;
     powerwallError = doc["powerwall_error"] | false;
-    clockLocal = doc["clock_local"] | clockLocal;
-    clockDate = doc["clock_date"] | clockDate;
-    clockOffset = doc["clock_offset"] | clockOffset;
+    int newOff = doc["clock_offset"] | clockOffset;
+    if (newOff != clockOffset) {
+        clockOffset = newOff;
+        ntpStarted = false;
+    }
+    if (time(nullptr) < 1700000000) {
+        clockLocal = doc["clock_local"] | clockLocal;
+        clockDate = doc["clock_date"] | clockDate;
+    }
+    refreshLocalClock();
     uint8_t sync = (uint8_t) ((int) (doc["radio_sync"] | (int) radioSync));
     if (sync != radioSync) {
         radioSync = sync;
@@ -1588,10 +1587,6 @@ int keyboardHit(int x, int y)
 
 void handleRadioTouch(int x, int y)
 {
-    if (tapOnPager(y)) {
-        nextPage();
-        return;
-    }
     int n = min(4, peerCount + 1);
     int pw = (M5.Display.width() - 24) / n;
     if (y >= 258 && y <= 298) {
@@ -1604,7 +1599,6 @@ void handleRadioTouch(int x, int y)
     }
     int hit = keyboardHit(x, y);
     if (hit < 0) {
-        if (y < 110) nextPage();
         return;
     }
     if (hit == 100) {
@@ -1637,10 +1631,6 @@ void handleRadioTouch(int x, int y)
 
 void handleDeviceTouch(int x, int y)
 {
-    if (tapOnPager(y)) {
-        nextPage();
-        return;
-    }
     if (y >= 360 && y <= 448) {
         if (offConfirm) {
             if (x < 240) {
@@ -1655,7 +1645,6 @@ void handleDeviceTouch(int x, int y)
         }
         return;
     }
-    if (y < 110) nextPage();
 }
 
 void handleLockTouch(int x, int y)
@@ -1664,56 +1653,10 @@ void handleLockTouch(int x, int y)
     if (!lightOn) {
         applyFrontlight(true);
     }
-    uint32_t now = millis();
-    if (unlockStep == 1 && now - unlockStepAt > 10000) {
-        unlockStep = 0;
-        drawLockScreen(false);
-        lastDrawnKey = screenKey();
-    }
-    if (unlockStep == 0) {
-        int order[32];
-        int n = 0;
-        bool small = (x <= 240 && y <= 240 && x >= 0 && y >= 0);
-        if (small) {
-            for (int map = 8; map < 16; map++) {
-                order[n++] = map;
-            }
-        }
-        for (int map = 0; map < 8; map++) {
-            order[n++] = map;
-        }
-        if (!small) {
-            for (int map = 8; map < 16; map++) {
-                order[n++] = map;
-            }
-        }
-        for (int map = 16; map < 32; map++) {
-            order[n++] = map;
-        }
-        for (int i = 0; i < n; i++) {
-            if (lockMappedCorner1(order[i], x, y)) {
-                lockAxisMap = order[i];
-                unlockStep = 1;
-                unlockStepAt = now;
-                drawLockScreen(false);
-                lastDrawnKey = screenKey();
-                return;
-            }
-        }
-        return;
-    }
-    if (lockAxisMap >= 0 && lockMappedCorner2(lockAxisMap, x, y)) {
+    if (tapOnUnlock(x, y)) {
         unreadCount = 0;
         exitLock();
-        return;
     }
-    if (lockAxisMap >= 0 && lockMappedCorner1(lockAxisMap, x, y)) {
-        unlockStepAt = now;
-        return;
-    }
-    unlockStep = 0;
-    drawLockScreen(false);
-    lastDrawnKey = screenKey();
 }
 
 void drawOtaScreen()
@@ -2005,17 +1948,10 @@ void handleNoteTouch(int x, int y)
         }
         return;
     }
-    if (tapOnPager(y) || y < 110) {
-        nextPage();
-    }
 }
 
 void handlePlansTouch(int x, int y)
 {
-    if (tapOnPager(y)) {
-        nextPage();
-        return;
-    }
     int y0 = plansRowY0();
     int rh = plansRowH();
     int startY = plansStartY();
@@ -2049,17 +1985,10 @@ void handlePlansTouch(int x, int y)
         }
         return;
     }
-    if (y < 110) {
-        nextPage();
-    }
 }
 
 void handleHouseTouch(int x, int y)
 {
-    if (tapOnPager(y)) {
-        nextPage();
-        return;
-    }
     int y0 = plansRowY0();
     int rh = plansRowH();
     int startY = plansStartY();
@@ -2081,9 +2010,6 @@ void handleHouseTouch(int x, int y)
             drawScreen(true);
         }
         return;
-    }
-    if (y < 110) {
-        nextPage();
     }
 }
 
@@ -2117,6 +2043,11 @@ void loop()
     loraService();
     rgbTick();
     tabletBat = M5.Power.getBatteryLevel();
+    if (WiFi.status() == WL_CONNECTED) {
+        ensureNtp();
+    }
+    String prevClock = clockLocal;
+    refreshLocalClock();
 
     String loraIn;
     if (loraTakeRx(loraIn)) {
@@ -2164,9 +2095,7 @@ void loop()
                 enterLock();
             } else if (currentPage == PAPERMONO_PAGE_HOME) {
                 int which = homeButtonAt(tx, ty);
-                if (which == 0) {
-                    nextPage();
-                } else if (which == 1) {
+                if (which == 1) {
                     runCommand("stop");
                 } else if (which == 2) {
                     runCommand("return_to_dock");
@@ -2186,8 +2115,6 @@ void loop()
                 handleRadioTouch(tx, ty);
             } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
                 handleDeviceTouch(tx, ty);
-            } else if (tapOnPager(ty) || ty < 110) {
-                nextPage();
             }
         }
     }
@@ -2202,13 +2129,11 @@ void loop()
         }
     }
 
+    if (prevClock != clockLocal) {
+        drawScreen(false);
+    }
+
     if (WiFi.status() != WL_CONNECTED) {
-        static uint32_t lastJoinDraw = 0;
-        if (!screenLocked && now - lastJoinDraw > 20000) {
-            lastError = "joining " + wifiSsid;
-            drawScreen(false);
-            lastJoinDraw = now;
-        }
         delay(30);
         return;
     }
@@ -2216,15 +2141,10 @@ void loop()
     if (now - lastPoll > PAPERMONO_POLL_MS) {
         lastPoll = now;
         httpGetStatus();
-        if (!pageEnabled(currentPage)) {
-            currentPage = stepEnabledPage(currentPage, 1);
-            drawScreen(true);
-        } else if (currentPage == PAPERMONO_PAGE_PLANS) {
+        if (currentPage == PAPERMONO_PAGE_PLANS) {
             httpGetPlans(false);
-            drawScreen(false);
-        } else {
-            drawScreen(false);
         }
+        drawScreen(false);
     }
     delay(20);
 }

@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.22] - 2026-09-27
+
+### Changed
+- PaperMono **page changes use a full refresh** so the previous screen does not ghost; live updates use the faster waveform.
+- Unlock is a large **Unlock** padlock (same idea as the lock icon). The 1 then 2 corner taps are gone.
+- Tiny page tabs are gone. Cycle screens with the **A** (next) and **B** (prev) keys. All pages stay in the loop (Yarbo, Powerwall, Lymow, Home, Radio, Device, …) even before the panel has sent module flags.
+- Clock uses **NTP** when the tablet has internet, so the time is not stuck on `--:--` waiting for the Pi. Firmware **0.1.20-beta**.
+
 ## [3.0.21] - 2026-09-27
 
 ### Changed
