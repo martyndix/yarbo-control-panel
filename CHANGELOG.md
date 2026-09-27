@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.23] - 2026-09-27
+
+### Changed
+- PaperMono draws a whole page in memory, then **one** e-paper update (the keyboard no longer paints letter by letter). Fast waveform for those updates; full quality only every **10** changes, as the panel docs recommend.
+- Typing on Radio only refreshes the message line, not the whole keyboard.
+- Power off writes a huge **OFF** on the glass, then turns off the frontlight and LED. E-paper keeps **OFF** after shutdown. Lock screen has **OFF** next to Unlock. Firmware **0.1.21-beta**.
+
 ## [3.0.22] - 2026-09-27
 
 ### Changed

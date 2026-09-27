@@ -15,10 +15,11 @@
 // M5Stack PaperMono SKU C153 (https://docs.m5stack.com/en/core/PaperMono)
 // ESP32-S3R8, SSD1677 480x800 4-level gray, FT6336G touch. Not PaperMono-Lite.
 // Manufacturer e-paper rules we follow:
-// - After a few fast refreshes, run one full-screen refresh to clear ghosting.
+// - After ~10 fast refreshes, run one full-screen refresh to clear ghosting.
 // - Do not stream uninterrupted partial refreshes (DC imbalance can damage the panel).
 // - Skip redraws when status has not changed.
-// - Use the panel's OTP waveforms (M5GFX epd_quality / epd_fast); no custom LUTs.
+// - Draw the whole frame in RAM, then one display() (M5GFX auto-display off).
+// - Use the panel's OTP waveforms (M5GFX epd_quality / epd_fastest); no custom LUTs.
 
 Preferences prefs;
 String wifiSsid;
@@ -142,6 +143,10 @@ void refreshLocalClock();
 void lockApplyMap(int map, int x, int y, int &ox, int &oy);
 bool tapOnPadlock(int x, int y);
 bool tapOnUnlock(int x, int y);
+bool tapOnLockOff(int x, int y);
+void powerOffTablet();
+void finishEpdFrame();
+void updateRadioDraft();
 
 void saveConfig()
 {
@@ -208,9 +213,17 @@ void pollSerialConfig()
 
 void beginEpdFrame(bool forceQuality)
 {
-    bool full = forceQuality || partialRefreshCount >= 4;
-    M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fast);
+    M5.Display.waitDisplay();
+    bool full = forceQuality || partialRefreshCount >= 10;
+    M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fastest);
     partialRefreshCount = full ? 0 : (partialRefreshCount + 1);
+    M5.Display.startWrite();
+}
+
+void finishEpdFrame()
+{
+    M5.Display.endWrite();
+    M5.Display.display();
 }
 
 String pageName(int page)
@@ -438,7 +451,7 @@ void drawHome(bool forceFull)
     drawButton(16, y0 + bh + gap, bw, bh, state == "active" ? "PAUSE" : "RESUME", false);
     drawButton(16 + bw + gap, y0 + bh + gap, bw, bh, lightsOn ? "LIGHTS OFF" : "LIGHTS", false);
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawStatusPage(bool forceFull)
@@ -462,7 +475,7 @@ void drawStatusPage(bool forceFull)
         M5.Display.drawString(lastError.substring(0, 40), 16, 468);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawHealthPage(bool forceFull)
@@ -485,7 +498,7 @@ void drawHealthPage(bool forceFull)
     drawKv("Rain sns", rainSensor, y); y += step;
     drawKv("Net mod", netModule, y);
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 int plansRowY0()
@@ -554,7 +567,7 @@ void drawPlansPage(bool forceFull)
         drawButton(16 + bw + gap, startY, bw, 72, "MORE", false);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawHousePage(bool forceFull)
@@ -602,7 +615,7 @@ void drawHousePage(bool forceFull)
         drawButton(16, plansStartY(), bw, 72, "MORE", false);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawNotePage(bool forceFull)
@@ -634,7 +647,7 @@ void drawNotePage(bool forceFull)
         drawButton(x, y, bw, bh, noteChoiceLabel(i), vestaboardLive == noteChoiceId(i));
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawLymowPage(bool forceFull)
@@ -654,7 +667,7 @@ void drawLymowPage(bool forceFull)
         M5.Display.drawString(lastError.substring(0, 40), 16, 320);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawPowerwallPage(bool forceFull)
@@ -674,7 +687,7 @@ void drawPowerwallPage(bool forceFull)
         M5.Display.drawString(lastError.substring(0, 40), 16, 320);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 char vestaboardGlyph(int code)
@@ -746,6 +759,53 @@ void applyFrontlight(bool on)
 {
     lightOn = on;
     M5.Display.setBrightness(on ? brightnessValue() : 0);
+}
+
+void powerOffTablet()
+{
+    rgbOff();
+    applyFrontlight(false);
+    M5.Display.waitDisplay();
+    M5.Display.setEpdMode(epd_mode_t::epd_quality);
+    M5.Display.startWrite();
+    M5.Display.fillScreen(TFT_WHITE);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextSize(12);
+    M5.Display.drawString("OFF", M5.Display.width() / 2, M5.Display.height() / 2);
+    M5.Display.endWrite();
+    M5.Display.display();
+    M5.Display.waitDisplay();
+    delay(400);
+    M5.Power.powerOff();
+}
+
+void updateRadioDraft()
+{
+    const int x = 16;
+    const int y = 214;
+    const int w = M5.Display.width() - 32;
+    const int h = 44;
+    M5.Display.waitDisplay();
+    if (partialRefreshCount >= 10) {
+        drawScreen(false);
+        return;
+    }
+    M5.Display.setEpdMode(epd_mode_t::epd_fastest);
+    M5.Display.startWrite();
+    M5.Display.fillRect(x, y, w, h, TFT_WHITE);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(1);
+    String draft = radioDraft.length() ? radioDraft : String("(type a message)");
+    if (draft.length() > 42) {
+        draft = draft.substring(draft.length() - 42);
+    }
+    M5.Display.drawString(draft, x, y);
+    M5.Display.drawString(String(radioDraft.length()) + "/" + String(PAPERMONO_MSG_CHARS), x, y + 18);
+    M5.Display.endWrite();
+    M5.Display.display(x, y, w, h);
+    partialRefreshCount++;
 }
 
 void ensureNtp()
@@ -1001,17 +1061,25 @@ void drawLockScreen(bool forceFull)
     }
 
     drawPadlockIcon(W - 64, 10, 52, false);
-    int btnW = 340;
-    int btnH = 120;
-    int bx = (W - btnW) / 2;
-    int by = H - 168;
-    M5.Display.drawRoundRect(bx, by, btnW, btnH, 18, TFT_BLACK);
-    drawPadlockIcon(bx + 28, by + 24, 72, false);
+    int unlockW = 280;
+    int offW = 140;
+    int btnH = 110;
+    int gap = 16;
+    int bx = (W - (unlockW + gap + offW)) / 2;
+    int by = H - 156;
+    M5.Display.drawRoundRect(bx, by, unlockW, btnH, 18, TFT_BLACK);
+    drawPadlockIcon(bx + 20, by + 20, 70, false);
     M5.Display.setTextDatum(ML_DATUM);
     M5.Display.setTextSize(3);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Display.drawString("Unlock", bx + 130, by + btnH / 2);
-    M5.Display.display();
+    M5.Display.drawString("Unlock", bx + 110, by + btnH / 2);
+    M5.Display.fillRoundRect(bx + unlockW + gap, by, offW, btnH, 18, TFT_BLACK);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+    M5.Display.setTextSize(3);
+    M5.Display.drawString("OFF", bx + unlockW + gap + offW / 2, by + btnH / 2);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    finishEpdFrame();
 }
 
 void enterLock()
@@ -1019,7 +1087,7 @@ void enterLock()
     screenLocked = true;
     offConfirm = false;
     applyFrontlight(false);
-    drawLockScreen(true);
+    drawLockScreen(false);
     lastDrawnKey = screenKey();
 }
 
@@ -1028,7 +1096,7 @@ void exitLock()
     screenLocked = false;
     noteActivity();
     applyFrontlight(true);
-    drawScreen(true);
+    drawScreen(false);
 }
 
 void drawBoardPage(bool forceFull)
@@ -1044,7 +1112,7 @@ void drawBoardPage(bool forceFull)
     M5.Display.setTextSize(1);
     M5.Display.drawString("live Vestaboard", M5.Display.width() / 2, 250);
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 const char *kbRow(int row)
@@ -1124,7 +1192,7 @@ void drawRadioPage(bool forceFull)
     }
     drawKeyboard(310);
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawDevicePage(bool forceFull)
@@ -1156,7 +1224,7 @@ void drawDevicePage(bool forceFull)
         M5.Display.drawString("Hold power 2s is flash mode, not off.", 16, 348);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawScreen(bool forceFull)
@@ -1247,7 +1315,7 @@ void drawSetup()
     M5.Display.drawString("   2.4 GHz Wi-Fi from that page.", 16, 278);
     M5.Display.drawString("Keep this cable connected", 16, 330);
     M5.Display.drawString("until CFG_OK.", 16, 352);
-    M5.Display.display();
+    finishEpdFrame();
     lastDrawnKey = "setup";
 }
 
@@ -1281,6 +1349,12 @@ bool tapOnUnlock(int x, int y)
 {
     int W = M5.Display.width();
     int H = M5.Display.height();
+    int unlockW = 280;
+    int offW = 140;
+    int btnH = 110;
+    int gap = 16;
+    int bx = (W - (unlockW + gap + offW)) / 2;
+    int by = H - 156;
     int maps = lockAxisMap >= 0 ? 1 : 16;
     for (int i = 0; i < maps; i++) {
         int map = lockAxisMap >= 0 ? lockAxisMap : i;
@@ -1288,8 +1362,33 @@ bool tapOnUnlock(int x, int y)
         int oy = y;
         lockApplyMap(map, x, y, ox, oy);
         bool icon = ox >= W - 100 && oy >= 0 && oy <= 110;
-        bool btn = ox >= 60 && ox <= W - 60 && oy >= H - 220 && oy <= H - 36;
+        bool btn = ox >= bx && ox < bx + unlockW && oy >= by && oy <= by + btnH;
         if (icon || btn) {
+            lockAxisMap = map;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool tapOnLockOff(int x, int y)
+{
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    int unlockW = 280;
+    int offW = 140;
+    int btnH = 110;
+    int gap = 16;
+    int bx = (W - (unlockW + gap + offW)) / 2;
+    int by = H - 156;
+    int ox0 = bx + unlockW + gap;
+    int maps = lockAxisMap >= 0 ? 1 : 16;
+    for (int i = 0; i < maps; i++) {
+        int map = lockAxisMap >= 0 ? lockAxisMap : i;
+        int ox = x;
+        int oy = y;
+        lockApplyMap(map, x, y, ox, oy);
+        if (ox >= ox0 && ox <= ox0 + offW && oy >= by && oy <= by + btnH) {
             lockAxisMap = map;
             return true;
         }
@@ -1560,7 +1659,7 @@ bool sendRadioMessage()
     } else {
         lastError = "send failed";
     }
-    drawScreen(true);
+    drawScreen(false);
     return ok;
 }
 
@@ -1593,7 +1692,7 @@ void handleRadioTouch(int x, int y)
         int i = (x - 12) / pw;
         if (i >= 0 && i < n) {
             radioToIndex = i;
-            drawScreen(true);
+            drawScreen(false);
         }
         return;
     }
@@ -1603,17 +1702,17 @@ void handleRadioTouch(int x, int y)
     }
     if (hit == 100) {
         kbNumbers = !kbNumbers;
-        drawScreen(true);
+        drawScreen(false);
         return;
     }
     if (hit == 101) {
         if (radioDraft.length() < PAPERMONO_MSG_CHARS) radioDraft += ' ';
-        drawScreen(false);
+        updateRadioDraft();
         return;
     }
     if (hit == 102) {
         if (radioDraft.length()) radioDraft.remove(radioDraft.length() - 1);
-        drawScreen(false);
+        updateRadioDraft();
         return;
     }
     if (hit == 103) {
@@ -1625,7 +1724,7 @@ void handleRadioTouch(int x, int y)
     const char *keys = kbRow(row);
     if (col < (int) strlen(keys) && radioDraft.length() < PAPERMONO_MSG_CHARS) {
         radioDraft += keys[col];
-        drawScreen(false);
+        updateRadioDraft();
     }
 }
 
@@ -1635,13 +1734,13 @@ void handleDeviceTouch(int x, int y)
         if (offConfirm) {
             if (x < 240) {
                 offConfirm = false;
-                drawScreen(true);
+                drawScreen(false);
             } else {
-                M5.Power.powerOff();
+                powerOffTablet();
             }
         } else {
             offConfirm = true;
-            drawScreen(true);
+            drawScreen(false);
         }
         return;
     }
@@ -1652,6 +1751,10 @@ void handleLockTouch(int x, int y)
     lastLight = millis();
     if (!lightOn) {
         applyFrontlight(true);
+    }
+    if (tapOnLockOff(x, y)) {
+        powerOffTablet();
+        return;
     }
     if (tapOnUnlock(x, y)) {
         unreadCount = 0;
@@ -1669,7 +1772,7 @@ void drawOtaScreen()
     M5.Display.drawString("UPDATING", M5.Display.width() / 2, M5.Display.height() / 2 - 40);
     M5.Display.setTextSize(1);
     M5.Display.drawString("Stay on Wi-Fi. Do not power off.", M5.Display.width() / 2, M5.Display.height() / 2 + 16);
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void runOtaUpdate()
@@ -1693,7 +1796,7 @@ void runOtaUpdate()
     rgbOff();
     if (ret != HTTP_UPDATE_OK) {
         lastError = "update failed";
-        drawScreen(true);
+        drawScreen(false);
     }
 }
 
@@ -1918,7 +2021,7 @@ void showPage(int page, bool loadPlansIfNeeded)
     if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
         httpGetPlans(false);
     }
-    drawScreen(true);
+    drawScreen(false);
 }
 
 void nextPage()
@@ -1963,7 +2066,7 @@ void handlePlansTouch(int x, int y)
             if (selectedPlan >= 0 && selectedPlan < planCount) {
                 httpCommand("start_plan", planIds[selectedPlan].c_str());
                 httpGetStatus();
-                drawScreen(true);
+                drawScreen(false);
             }
             return;
         }
@@ -1972,7 +2075,7 @@ void handlePlansTouch(int x, int y)
             if (planOffset >= planCount) {
                 planOffset = 0;
             }
-            drawScreen(true);
+            drawScreen(false);
         }
         return;
     }
@@ -1981,7 +2084,7 @@ void handlePlansTouch(int x, int y)
         int idx = planOffset + row;
         if (idx >= 0 && idx < planCount && row < PAPERMONO_PLAN_VISIBLE) {
             selectedPlan = idx;
-            drawScreen(true);
+            drawScreen(false);
         }
         return;
     }
@@ -1997,7 +2100,7 @@ void handleHouseTouch(int x, int y)
         if (homeOffset >= homeCount) {
             homeOffset = 0;
         }
-        drawScreen(true);
+        drawScreen(false);
         return;
     }
     if (y >= y0 && y < startY) {
@@ -2007,7 +2110,7 @@ void handleHouseTouch(int x, int y)
             const char *cmd = homeKinds[idx] == "scene" ? "home_scene" : "home_toggle";
             httpCommand(cmd, nullptr, nullptr, homeIds[idx].c_str());
             httpGetStatus();
-            drawScreen(true);
+            drawScreen(false);
         }
         return;
     }
@@ -2020,6 +2123,7 @@ void setup()
     cfg.clear_display = false;
     M5.begin(cfg);
     M5.Display.setRotation(0);
+    M5.Display.setAutoDisplay(false);
     M5.Speaker.begin();
     SPIFFS.begin(true);
     loadConfig();
@@ -2030,7 +2134,7 @@ void setup()
     if (wifiSsid.length()) {
         WiFi.mode(WIFI_STA);
         WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
-        drawScreen(true);
+        drawScreen(false);
     } else {
         drawSetup();
     }

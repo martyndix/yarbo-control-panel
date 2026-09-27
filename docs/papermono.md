@@ -45,8 +45,8 @@ Home and extra-page mocks (not photos of a flashed unit):
 - **Powerwall:** house battery, solar, and draw. Hidden when the Powerwall module is off.
 - **Lymow:** Lymow battery, state, and charging. Hidden when the Lymow module is off.
 - **Radio:** house messages (~180 characters) to **ALL** or a named peer. Tries LoRa first, then Wi-Fi via the panel.
-- **Device:** this tablet’s battery, clock, and **OFF** (full power-off). Holding the power button for about 2 seconds is **download/flash mode**, not off. Brightness, mute, and timers are Settings only.
-- **Lock screen:** tap the **padlock** on any page (top right), or short-press the side button. Idle auto-lock from Settings only runs while Wi-Fi is connected, so you can browse pages while joining. Layout is logo, Vestaboard, or both. Tablet name, a Wi-Fi icon (slashed when offline), and battery **%** are on the lock screen. Unlock is the **Unlock** padlock (top right or the large button). Incoming messages stay locked and badge + beep/flash if alerts are on. Needs firmware **0.1.20-beta**.
+- **Device:** this tablet’s battery, clock, and **OFF**. Power off writes a huge **OFF** on the glass, then kills the frontlight and LED; the e-paper keeps **OFF** with the device shut down. Holding the power button for about 2 seconds is **download/flash mode**, not off. Brightness, mute, and timers are Settings only.
+- **Lock screen:** tap the **padlock** on any page (top right), or short-press the side button. Idle auto-lock from Settings only runs while Wi-Fi is connected. Unlock with **Unlock**. **OFF** on the lock screen shuts the tablet down (same giant **OFF**). Needs firmware **0.1.21-beta**.
 - **A** next page, **B** previous. Every companion page is in that loop (Yarbo Home/Status/Health/Plans, Note, Board, Powerwall, Lymow, Radio, Device, House). Stop / Dock are Home buttons only.
 
 It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, mic, IMU, and the SD slot are unused in this firmware. Sleep timers, brightness, buzzer, and RGB alerts are set in **Settings → E-paper companions**, not on the tablet.
@@ -55,7 +55,7 @@ It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is 
 
 The SSD1677 panel is easy to damage if driven badly. Firmware follows these rules:
 
-- After about **4 fast refreshes**, run **one full-screen refresh** to clear ghosting. Page changes also use a full refresh so the last screen does not linger.
+- After about **10 fast refreshes**, run **one full-screen refresh** to clear ghosting. Draw the whole frame, then one `display()` — do not refresh per letter or widget.
 - **Do not** stream uninterrupted partial refreshes (DC imbalance can permanently damage the panel).
 - Skip a redraw when status has not changed.
 - Use the panel’s built-in OTP waveforms (M5GFX `epd_quality` / `epd_fastest`). Do not load custom LUTs unless you know DC balance.
@@ -129,7 +129,7 @@ Later firmware still goes over Wi-Fi: Settings → paired device **Update**. You
 
 The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. Compact status includes `vestaboard_enabled`, `vestaboard_live`, `powerwall_enabled`, `lymow_enabled`, `home_enabled`, and `home_items`. The Plans page also calls `GET /api/device.php?action=plans` (cached on the Pi for about five minutes). Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`, `start_plan` with `plan_id`, `vestaboard_live`, and Home `home_toggle` / `home_scene` with `home_id`).
 
-Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. After the first USB flash of **0.1.20-beta**, later firmware is pushed over Wi-Fi: Settings → paired device **Update**, or Settings → Updates. The tablet must have polled recently. Compact status includes `ota_pending`; the tablet downloads `GET /api/device.php?action=firmware`, stays on Wi-Fi, then reboots. PaperMono beeps and lights green. The header logo is `GET /api/device.php?action=logo` when compact status includes `logo_hash`. The **HOUSE** page (Home module) lists assigned Matter lights and panel scenes.
+Stop / Dock / Pause / Lights / start plan use the same MQTT agent as the web Controls. Stop is immediate (no confirm). Starting a plan takes the controller, same as the web **Start** button. Changing the Vestaboard view does not take the robot controller. After the first USB flash of **0.1.21-beta**, later firmware is pushed over Wi-Fi: Settings → paired device **Update**, or Settings → Updates. The tablet must have polled recently. Compact status includes `ota_pending`; the tablet downloads `GET /api/device.php?action=firmware`, stays on Wi-Fi, then reboots. PaperMono beeps and lights green. The header logo is `GET /api/device.php?action=logo` when compact status includes `logo_hash`. The **HOUSE** page (Home module) lists assigned Matter lights and panel scenes.
 
 ## Limits
 
