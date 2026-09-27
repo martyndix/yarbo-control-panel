@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.20] - 2026-09-27
+
+### Fixed
+- PaperMono firmware builds again: `applyFrontlight` was dropped while adding the battery badge, so **Build firmware** failed.
+
 ## [3.0.19] - 2026-09-27
 
 ### Fixed

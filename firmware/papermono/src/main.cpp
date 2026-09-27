@@ -134,6 +134,7 @@ void nextPage();
 void prevPage();
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
 bool takeTouchPress(int &x, int &y);
+void applyFrontlight(bool on);
 
 void saveConfig()
 {
@@ -767,6 +768,12 @@ void drawVestaboardGrid(int x, int y, int cell, int gap)
 int brightnessValue()
 {
     return map(constrain(brightnessPct, 0, 100), 0, 100, 0, 255);
+}
+
+void applyFrontlight(bool on)
+{
+    lightOn = on;
+    M5.Display.setBrightness(on ? brightnessValue() : 0);
 }
 
 void drawBatteryBadge(int right, int cy, int pct, bool compact)
