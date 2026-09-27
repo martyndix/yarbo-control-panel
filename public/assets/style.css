@@ -2508,12 +2508,16 @@ html[data-theme="light"] .plan-activity {
     flex-wrap: wrap;
     gap: 0.75rem;
     align-items: flex-end;
-    margin: 0.75rem 0 1rem;
+    margin: 0.75rem 0 0.35rem;
 }
 
 .home-add .settings-field {
     flex: 1 1 16rem;
     margin: 0;
+}
+
+#home-card:not(.home-card--manage) .home-add-wrap {
+    display: none;
 }
 
 .home-manage-toggle {
@@ -2575,7 +2579,7 @@ html[data-theme="light"] .plan-activity {
 }
 
 .home-card--manage .home-device:not(.home-device--hidden) {
-    grid-template-columns: minmax(0, 1.1fr) auto auto auto;
+    grid-template-columns: minmax(0, 1fr) minmax(5.5rem, auto) minmax(5.5rem, auto) auto auto;
 }
 
 .home-device.is-on {
@@ -2600,7 +2604,8 @@ html[data-theme="light"] .plan-activity {
 }
 
 .home-device.is-on .home-device-dot,
-.home-room.is-on .home-device-dot {
+.home-room.is-on .home-device-dot,
+.home-group-heading.is-on .home-device-dot {
     background: var(--accent);
     box-shadow: 0 0 0.35rem color-mix(in srgb, var(--accent) 70%, transparent);
 }
@@ -2767,6 +2772,44 @@ html[data-theme="light"] .plan-activity {
     display: none;
 }
 
+.home-group {
+    display: grid;
+    gap: 0.25rem;
+}
+
+.home-group-heading {
+    background: var(--surface);
+}
+
+.home-group-devices {
+    display: grid;
+    gap: 0.25rem;
+    padding-left: 0.75rem;
+}
+
+.home-group-devices[hidden] {
+    display: none;
+}
+
+.home-group-add {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+    margin: 0.15rem 0 0.1rem;
+}
+
+.home-group-add input {
+    flex: 1 1 8rem;
+    min-width: 0;
+    padding: 0.3rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+
 .home-room.is-on {
     background: color-mix(in srgb, var(--accent) 22%, var(--bg));
     border-color: var(--accent);
@@ -2795,7 +2838,8 @@ html[data-theme="light"] .plan-activity {
     font-size: 0.8rem;
 }
 
-.home-device-room-select {
+.home-device-room-select,
+.home-device-group-select {
     max-width: 8.75rem;
     padding: 0.12rem 0.3rem;
     border: 1px solid var(--border);
@@ -2803,7 +2847,7 @@ html[data-theme="light"] .plan-activity {
     background: var(--bg);
     color: var(--text);
     font: inherit;
-    font-size: 0.75rem;
+    font-size: 0.78rem;
 }
 
 .home-device--hidden {
@@ -2901,7 +2945,8 @@ html[data-theme="light"] .plan-activity {
     }
 
     .home-card--manage .home-device:not(.home-device--hidden) .home-device-actions,
-    .home-card--manage .home-device:not(.home-device--hidden) .home-device-room-select {
+    .home-card--manage .home-device:not(.home-device--hidden) .home-device-room-select,
+    .home-card--manage .home-device:not(.home-device--hidden) .home-device-group-select {
         grid-column: 1 / -1;
     }
 

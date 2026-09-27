@@ -27,7 +27,7 @@ if (!$hub->enabled(YarboHub::MODULE_HOME) && $action !== 'setup') {
     json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
 }
 
-set_time_limit($action === 'commission' ? 100 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'scene_run' ? 90 : 40)));
+set_time_limit($action === 'commission' ? 100 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'group_command' || $action === 'scene_run' ? 90 : 40)));
 ignore_user_abort($action === 'setup');
 
 try {
@@ -44,6 +44,10 @@ try {
         'room_save' => $home->saveRoom($input),
         'room_delete' => $home->deleteRoom((string) ($input['id'] ?? '')),
         'room_command' => $home->commandRoom($input),
+        'group' => $home->assignDeviceGroup((string) ($input['id'] ?? ''), (string) ($input['group_id'] ?? $input['group'] ?? '')),
+        'group_save' => $home->saveGroup($input),
+        'group_delete' => $home->deleteGroup((string) ($input['id'] ?? '')),
+        'group_command' => $home->commandGroup($input),
         'scene_save' => $home->saveScene($input),
         'scene_delete' => $home->deleteScene((string) ($input['id'] ?? '')),
         'scene_run' => $home->runScene((string) ($input['id'] ?? '')),
@@ -54,7 +58,7 @@ try {
     json_response(['ok' => false, 'error' => friendly_error($e)], 500);
 }
 
-if ($action === 'rename' || $action === 'room') {
+if ($action === 'rename') {
     json_response(['ok' => (bool) $result, 'error' => $result ? null : 'Could not save']);
 }
 

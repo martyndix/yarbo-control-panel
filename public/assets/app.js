@@ -2456,6 +2456,7 @@ let homeLoadBusy = false;
 let homeSetupPollTimer = 0;
 let homeManageOpen = false;
 const homeExpandedRooms = new Set();
+const homeExpandedGroups = new Set();
 
 async function homeApi(body, timeoutMs = 20000) {
     const res = await fetchWithTimeout('/api/home.php', {
@@ -2565,7 +2566,7 @@ function applyHomeManageUi() {
     if (btn) {
         btn.setAttribute('aria-pressed', homeManageOpen ? 'true' : 'false');
         btn.setAttribute('aria-label', homeManageOpen ? 'Hide device settings' : 'Show device settings');
-        btn.title = homeManageOpen ? 'Done with names, rooms, hide, and remove' : 'Rename, rooms, hide, and remove devices';
+        btn.title = homeManageOpen ? 'Done with names, rooms, groups, and pairing' : 'Rename, rooms, groups, hide, remove, and add devices';
     }
 }
 
@@ -2578,6 +2579,19 @@ function homeRoomSelectHtml(d, rooms) {
         ))
     );
     return `<select class="home-device-room-select" data-home-room-assign="${escapeHtml(d.id)}" aria-label="Room">${opts.join('')}</select>`;
+}
+
+function homeGroupSelectHtml(d, rooms) {
+    if (!homeManageOpen || !d.room_id) return '';
+    const room = (rooms || []).find((r) => r.id === d.room_id);
+    const groups = room?.groups || [];
+    const current = d.group_id || '';
+    const opts = ['<option value="">No group</option>'].concat(
+        groups.map((g) => (
+            `<option value="${escapeHtml(g.id)}"${g.id === current ? ' selected' : ''}>${escapeHtml(g.name)}</option>`
+        ))
+    );
+    return `<select class="home-device-group-select" data-home-group-assign="${escapeHtml(d.id)}" aria-label="Group">${opts.join('')}</select>`;
 }
 
 function homeRoomHeadingHtml(room) {
@@ -2605,6 +2619,42 @@ function homeRoomHeadingHtml(room) {
         <div class="home-device-manage">
             <button type="button" class="btn btn-secondary btn-compact" data-home-room-del="${escapeHtml(room.id)}">Delete room</button>
         </div>
+    </div>`;
+}
+
+function homeGroupHeadingHtml(group) {
+    const on = Boolean(group.on);
+    const expanded = homeExpandedGroups.has(group.id);
+    const bright = group.dimmable
+        ? `<input type="range" min="0" max="100" value="${Number(group.brightness ?? (on ? 100 : 0))}" data-home-group-bright="${escapeHtml(group.id)}">`
+        : '';
+    const name = homeManageOpen
+        ? `<input type="text" class="home-device-name-input" data-home-group-name="${escapeHtml(group.id)}" value="${escapeHtml(group.name)}" maxlength="32" aria-label="Group name">`
+        : `<h3 class="home-room-title">${escapeHtml(group.name)}</h3>`;
+    const count = Number(group.count || 0);
+    return `<div class="home-group${expanded ? ' is-open' : ''}" data-home-group="${escapeHtml(group.id)}">
+        <div class="home-room home-group-heading${on ? ' is-on' : ''}">
+        <button type="button" class="home-room-expand" data-home-group-expand="${escapeHtml(group.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? 'Hide lights in this group' : 'Show lights in this group'}" aria-label="${expanded ? 'Hide lights in this group' : 'Show lights in this group'}">${expanded ? '−' : '+'}</button>
+        <div class="home-device-label">
+            <span class="home-device-dot" aria-hidden="true"></span>
+            ${name}
+            ${count ? `<span class="home-room-count">${count}</span>` : ''}
+        </div>
+        <div class="home-device-actions">
+            <button type="button" class="btn btn-secondary btn-compact" data-home-group-toggle="${escapeHtml(group.id)}">${on ? 'Off' : 'On'}</button>
+            ${bright}
+        </div>
+        <div class="home-device-manage">
+            <button type="button" class="btn btn-secondary btn-compact" data-home-group-del="${escapeHtml(group.id)}">Delete group</button>
+        </div>
+    </div>`;
+}
+
+function homeGroupAddHtml(roomId) {
+    if (!homeManageOpen) return '';
+    return `<div class="home-group-add">
+        <input type="text" maxlength="32" placeholder="Spots" data-home-group-new="${escapeHtml(roomId)}" aria-label="New group name">
+        <button type="button" class="btn btn-secondary btn-compact" data-home-group-add="${escapeHtml(roomId)}">Add group</button>
     </div>`;
 }
 
@@ -2654,12 +2704,14 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? `<input type="text" class="home-device-name-input" data-home-name="${escapeHtml(d.id)}" value="${escapeHtml(d.name)}" placeholder="${escapeHtml(defaultName)}" maxlength="48" aria-label="Device name">`
         : `<p class="home-device-name">${escapeHtml(d.name)}</p>`;
     const roomSelect = hidden ? '' : homeRoomSelectHtml(d, rooms || homeDash.rooms || []);
+    const groupSelect = hidden ? '' : homeGroupSelectHtml(d, rooms || homeDash.rooms || []);
     return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
             ${label}
         </div>
         ${roomSelect}
+        ${groupSelect}
         ${hidden ? '' : `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             ${bright}
@@ -2671,7 +2723,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
 function renderHomeDashboard(data) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
-    const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-room-assign]');
+    const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new]');
     const status = document.getElementById('home-server-status');
     if (status) {
         const err = data.server?.error;
@@ -2697,11 +2749,25 @@ function renderHomeDashboard(data) {
                 const list = byRoom.get(room.id) || [];
                 if (!list.length && !homeManageOpen) return;
                 const expanded = homeExpandedRooms.has(room.id);
+                const groups = room.groups || [];
                 html += homeRoomHeadingHtml(room);
                 html += `<div class="home-room-devices"${expanded ? '' : ' hidden'}>`;
-                html += list.length
-                    ? list.map((d) => homeDeviceCardHtml(d, false, rooms)).join('')
-                    : (homeManageOpen ? '<p class="hint home-room-empty">No devices in this room yet. Pick it from a light’s room menu.</p>' : '');
+                groups.forEach((group) => {
+                    const members = list.filter((d) => d.group_id === group.id);
+                    if (!members.length && !homeManageOpen) return;
+                    const groupOpen = homeExpandedGroups.has(group.id);
+                    html += homeGroupHeadingHtml(group);
+                    html += `<div class="home-group-devices"${groupOpen ? '' : ' hidden'}>`;
+                    html += members.length
+                        ? members.map((d) => homeDeviceCardHtml(d, false, rooms)).join('')
+                        : (homeManageOpen ? '<p class="hint home-room-empty">No devices in this group yet. Pick it from a light’s group menu.</p>' : '');
+                    html += '</div></div>';
+                });
+                const loose = list.filter((d) => !d.group_id || !groups.some((g) => g.id === d.group_id));
+                html += loose.length
+                    ? loose.map((d) => homeDeviceCardHtml(d, false, rooms)).join('')
+                    : ((!groups.length && homeManageOpen) ? '<p class="hint home-room-empty">No devices in this room yet. Pick it from a light’s room menu.</p>' : '');
+                html += homeGroupAddHtml(room.id);
                 html += '</div></div>';
             });
             if (ungrouped.length) {
@@ -2800,6 +2866,26 @@ async function saveHomeRoomName(input) {
     }
 }
 
+async function saveHomeGroupName(input) {
+    const id = input.getAttribute('data-home-group-name') || '';
+    if (!id || input.dataset.homeNameSaving === '1') return;
+    const name = String(input.value || '').trim();
+    const current = (homeDash.rooms || []).flatMap((r) => r.groups || []).find((g) => g.id === id);
+    if (current && String(current.name || '') === name) return;
+    input.dataset.homeNameSaving = '1';
+    try {
+        const data = await homeApi({ action: 'group_save', id, name });
+        if (!data.ok) throw new Error(data.error || 'Could not rename group');
+        if (current && data.group?.name) current.name = data.group.name;
+        showToast('Group name saved', 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not rename group', 'error');
+        if (current) input.value = current.name || '';
+    } finally {
+        delete input.dataset.homeNameSaving;
+    }
+}
+
 function bindHomeDashboard() {
     document.getElementById('home-manage-toggle')?.addEventListener('click', () => {
         homeManageOpen = !homeManageOpen;
@@ -2811,10 +2897,18 @@ function bindHomeDashboard() {
         if (deviceName) saveHomeDeviceName(deviceName);
         const roomName = event.target.closest?.('[data-home-room-name]');
         if (roomName) saveHomeRoomName(roomName);
+        const groupName = event.target.closest?.('[data-home-group-name]');
+        if (groupName) saveHomeGroupName(groupName);
     });
     document.getElementById('home-card')?.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
-        const input = event.target.closest?.('[data-home-name], [data-home-room-name]');
+        const groupNew = event.target.closest?.('[data-home-group-new]');
+        if (groupNew) {
+            event.preventDefault();
+            groupNew.closest('.home-group-add')?.querySelector('[data-home-group-add]')?.click();
+            return;
+        }
+        const input = event.target.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name]');
         if (!input) return;
         event.preventDefault();
         input.blur();
@@ -2843,6 +2937,23 @@ function bindHomeDashboard() {
         document.getElementById('home-room-save')?.click();
     });
     document.getElementById('home-card')?.addEventListener('click', async (event) => {
+        const groupExpand = event.target.closest('[data-home-group-expand]');
+        if (groupExpand) {
+            const id = groupExpand.getAttribute('data-home-group-expand') || '';
+            if (!id) return;
+            if (homeExpandedGroups.has(id)) homeExpandedGroups.delete(id);
+            else homeExpandedGroups.add(id);
+            const wrap = groupExpand.closest('[data-home-group]');
+            const open = homeExpandedGroups.has(id);
+            wrap?.classList.toggle('is-open', open);
+            const devices = wrap?.querySelector(':scope > .home-group-devices');
+            if (devices) devices.hidden = !open;
+            groupExpand.setAttribute('aria-expanded', open ? 'true' : 'false');
+            groupExpand.textContent = open ? '−' : '+';
+            groupExpand.title = open ? 'Hide lights in this group' : 'Show lights in this group';
+            groupExpand.setAttribute('aria-label', groupExpand.title);
+            return;
+        }
         const expand = event.target.closest('[data-home-room-expand]');
         if (expand) {
             const id = expand.getAttribute('data-home-room-expand') || '';
@@ -2852,7 +2963,7 @@ function bindHomeDashboard() {
             const group = expand.closest('[data-home-room-group]');
             const open = homeExpandedRooms.has(id);
             group?.classList.toggle('is-open', open);
-            const devices = group?.querySelector('.home-room-devices');
+            const devices = group?.querySelector(':scope > .home-room-devices');
             if (devices) devices.hidden = !open;
             expand.setAttribute('aria-expanded', open ? 'true' : 'false');
             expand.textContent = open ? '−' : '+';
@@ -2948,6 +3059,66 @@ function bindHomeDashboard() {
             }
             return;
         }
+        const groupDel = event.target.closest('[data-home-group-del]');
+        if (groupDel) {
+            const id = groupDel.getAttribute('data-home-group-del') || '';
+            if (!id) return;
+            if (!window.confirm('Delete this group? Lights stay in the room.')) {
+                return;
+            }
+            groupDel.disabled = true;
+            try {
+                const data = await homeApi({ action: 'group_delete', id });
+                if (!data.ok) throw new Error(data.error || 'Could not delete group');
+                showToast('Group deleted', 'success');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not delete group', 'error');
+                groupDel.disabled = false;
+            }
+            return;
+        }
+        const groupAdd = event.target.closest('[data-home-group-add]');
+        if (groupAdd) {
+            const roomId = groupAdd.getAttribute('data-home-group-add') || '';
+            const input = groupAdd.closest('.home-group-add')?.querySelector('[data-home-group-new]');
+            const name = input?.value.trim() || '';
+            groupAdd.disabled = true;
+            try {
+                const data = await homeApi({ action: 'group_save', room_id: roomId, name });
+                if (!data.ok) throw new Error(data.error || 'Could not add group');
+                if (input) input.value = '';
+                if (data.group?.id) homeExpandedGroups.add(data.group.id);
+                homeExpandedRooms.add(roomId);
+                showToast('Group added', 'success');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not add group', 'error');
+            } finally {
+                groupAdd.disabled = false;
+            }
+            return;
+        }
+        const groupToggle = event.target.closest('[data-home-group-toggle]');
+        if (groupToggle) {
+            const id = groupToggle.getAttribute('data-home-group-toggle') || '';
+            const group = (homeDash.rooms || []).flatMap((r) => r.groups || []).find((g) => g.id === id);
+            groupToggle.disabled = true;
+            try {
+                const data = await homeApi({
+                    action: 'group_command',
+                    group_id: id,
+                    command: group?.on ? 'off' : 'on',
+                }, 90000);
+                if (!data.ok) throw new Error(data.error || 'Failed');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Group command failed', 'error');
+            } finally {
+                groupToggle.disabled = false;
+            }
+            return;
+        }
         const roomToggle = event.target.closest('[data-home-room-toggle]');
         if (roomToggle) {
             const id = roomToggle.getAttribute('data-home-room-toggle') || '';
@@ -2994,6 +3165,36 @@ function bindHomeDashboard() {
                 await loadHomeDashboard();
             } catch (err) {
                 showToast(err.message || 'Could not assign room', 'error');
+            }
+            return;
+        }
+        const groupAssign = event.target.closest('[data-home-group-assign]');
+        if (groupAssign) {
+            try {
+                const data = await homeApi({
+                    action: 'group',
+                    id: groupAssign.getAttribute('data-home-group-assign'),
+                    group_id: groupAssign.value,
+                });
+                if (!data.ok) throw new Error(data.error || 'Could not assign group');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Could not assign group', 'error');
+            }
+            return;
+        }
+        const groupBright = event.target.closest('[data-home-group-bright]');
+        if (groupBright) {
+            try {
+                const data = await homeApi({
+                    action: 'group_command',
+                    group_id: groupBright.getAttribute('data-home-group-bright'),
+                    command: 'brightness',
+                    brightness: Number(groupBright.value),
+                }, 90000);
+                if (!data.ok) throw new Error(data.error || 'Failed');
+            } catch (err) {
+                showToast(err.message || 'Group brightness failed', 'error');
             }
             return;
         }

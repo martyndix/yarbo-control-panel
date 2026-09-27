@@ -27,6 +27,8 @@ final class YarboHome
      *   names: array<string, string>,
      *   room_defs: list<array{id: string, name: string}>,
      *   rooms: array<string, string>,
+     *   group_defs: list<array{id: string, name: string, room_id: string}>,
+     *   groups: array<string, string>,
      *   scenes: list<array<string, mixed>>,
      *   paper: array<string, list<string>>,
      *   hidden: list<string>
@@ -38,6 +40,8 @@ final class YarboHome
             'names' => [],
             'room_defs' => [],
             'rooms' => [],
+            'group_defs' => [],
+            'groups' => [],
             'scenes' => [],
             'paper' => [],
             'hidden' => [],
@@ -121,11 +125,38 @@ final class YarboHome
             $paper[$deviceId] = $this->normalizeIdList($ids);
         }
         $hidden = $this->normalizeIdList(is_array($decoded['hidden'] ?? null) ? $decoded['hidden'] : []);
+        $groupDefs = [];
+        $groupIds = [];
+        foreach (is_array($decoded['group_defs'] ?? null) ? $decoded['group_defs'] : [] as $def) {
+            if (!is_array($def)) {
+                continue;
+            }
+            $id = trim((string) ($def['id'] ?? ''));
+            $name = YarboHub::normalizeDisplayName((string) ($def['name'] ?? ''), 32);
+            $roomId = trim((string) ($def['room_id'] ?? ''));
+            if ($id === '' || $name === '' || $roomId === '' || !isset($defIds[$roomId]) || isset($groupIds[$id])) {
+                continue;
+            }
+            $groupDefs[] = ['id' => $id, 'name' => $name, 'room_id' => $roomId];
+            $groupIds[$id] = $roomId;
+        }
+        $groups = [];
+        foreach (is_array($decoded['groups'] ?? null) ? $decoded['groups'] : [] as $deviceId => $groupId) {
+            $deviceId = trim((string) $deviceId);
+            $groupId = trim((string) $groupId);
+            if ($deviceId === '' || $groupId === '' || !isset($groupIds[$groupId])) {
+                continue;
+            }
+            $groups[$deviceId] = $groupId;
+            $rooms[$deviceId] = $groupIds[$groupId];
+        }
 
         $store = [
             'names' => $names,
             'room_defs' => $roomDefs,
             'rooms' => $rooms,
+            'group_defs' => $groupDefs,
+            'groups' => $groups,
             'scenes' => $scenes,
             'paper' => $paper,
             'hidden' => $hidden,
@@ -170,8 +201,13 @@ final class YarboHome
                 }
                 if ($room === '' || !isset($known[$room])) {
                     unset($store['rooms'][$id]);
+                    unset($store['groups'][$id]);
                 } else {
                     $store['rooms'][$id] = $room;
+                    $gid = (string) ($store['groups'][$id] ?? '');
+                    if ($gid !== '' && ($this->groupRoomId($store, $gid) !== $room)) {
+                        unset($store['groups'][$id]);
+                    }
                 }
             }
         }
@@ -259,6 +295,7 @@ final class YarboHome
                 'available' => (bool) ($device['available'] ?? true),
                 'room_id' => $roomName !== '' ? $roomId : '',
                 'room' => $roomName,
+                'group_id' => $this->deviceGroupId($store, $id, $roomId),
                 'hidden' => isset($hidden[$id]),
             ];
             if ($row['hidden']) {
@@ -771,8 +808,13 @@ final class YarboHome
         foreach ($store['rooms'] as $deviceId => $roomId) {
             if ($roomId === $id) {
                 unset($store['rooms'][$deviceId]);
+                unset($store['groups'][$deviceId]);
             }
         }
+        $store['group_defs'] = array_values(array_filter(
+            $store['group_defs'],
+            static fn (array $def): bool => ($def['room_id'] ?? '') !== $id
+        ));
         $this->write($store);
 
         return ['ok' => true];
@@ -791,6 +833,7 @@ final class YarboHome
         $store = $this->load();
         if ($roomId === '') {
             unset($store['rooms'][$deviceId]);
+            unset($store['groups'][$deviceId]);
         } else {
             $known = false;
             foreach ($store['room_defs'] as $def) {
@@ -803,6 +846,10 @@ final class YarboHome
                 return ['ok' => false, 'error' => 'Unknown room'];
             }
             $store['rooms'][$deviceId] = $roomId;
+            $gid = (string) ($store['groups'][$deviceId] ?? '');
+            if ($gid !== '' && $this->groupRoomId($store, $gid) !== $roomId) {
+                unset($store['groups'][$deviceId]);
+            }
         }
         $this->write($store);
 
@@ -832,21 +879,139 @@ final class YarboHome
         }
         $ids = $this->visibleDeviceIdsInRoom($roomId);
         if ($action === 'brightness') {
-            $dimmable = [];
-            $live = $this->liveDevices(6.0);
-            foreach ($live['devices'] as $device) {
-                if (!is_array($device)) {
-                    continue;
-                }
-                $id = (string) ($device['id'] ?? '');
-                if ($id !== '' && in_array($id, $ids, true) && !empty($device['dimmable'])) {
-                    $dimmable[] = $id;
+            $ids = $this->dimmableIdsAmong($ids);
+        }
+        return $this->commandIdList($ids, $action, $input, 'No devices in that room', 'Room partly failed: ');
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function saveGroup(array $input): array
+    {
+        $store = $this->load();
+        $id = trim((string) ($input['id'] ?? ''));
+        $roomId = trim((string) ($input['room_id'] ?? ''));
+        $name = YarboHub::normalizeDisplayName((string) ($input['name'] ?? ''), 32);
+        if ($name === '') {
+            return ['ok' => false, 'error' => 'Group needs a name'];
+        }
+        if ($id === '') {
+            $knownRoom = false;
+            foreach ($store['room_defs'] as $def) {
+                if (($def['id'] ?? '') === $roomId) {
+                    $knownRoom = true;
+                    break;
                 }
             }
-            $ids = $dimmable;
+            if (!$knownRoom) {
+                return ['ok' => false, 'error' => 'Pick a room first'];
+            }
+            $id = 'g' . bin2hex(random_bytes(3));
+            $store['group_defs'][] = ['id' => $id, 'name' => $name, 'room_id' => $roomId];
+        } else {
+            $found = false;
+            foreach ($store['group_defs'] as $i => $def) {
+                if (($def['id'] ?? '') === $id) {
+                    $store['group_defs'][$i]['name'] = $name;
+                    $found = true;
+                    $roomId = (string) ($def['room_id'] ?? $roomId);
+                    break;
+                }
+            }
+            if (!$found) {
+                return ['ok' => false, 'error' => 'Unknown group'];
+            }
         }
+        $this->write($store);
+
+        return ['ok' => true, 'group' => ['id' => $id, 'name' => $name, 'room_id' => $roomId]];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function deleteGroup(string $id): array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return ['ok' => false, 'error' => 'Pick a group'];
+        }
+        $store = $this->load();
+        $store['group_defs'] = array_values(array_filter(
+            $store['group_defs'],
+            static fn (array $def): bool => ($def['id'] ?? '') !== $id
+        ));
+        foreach ($store['groups'] as $deviceId => $groupId) {
+            if ($groupId === $id) {
+                unset($store['groups'][$deviceId]);
+            }
+        }
+        $this->write($store);
+
+        return ['ok' => true];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function assignDeviceGroup(string $deviceId, string $groupId): array
+    {
+        $deviceId = trim($deviceId);
+        $groupId = trim($groupId);
+        if ($deviceId === '') {
+            return ['ok' => false, 'error' => 'Pick a device'];
+        }
+        $store = $this->load();
+        if ($groupId === '') {
+            unset($store['groups'][$deviceId]);
+            $this->write($store);
+
+            return ['ok' => true];
+        }
+        $roomId = $this->groupRoomId($store, $groupId);
+        if ($roomId === '') {
+            return ['ok' => false, 'error' => 'Unknown group'];
+        }
+        $store['groups'][$deviceId] = $groupId;
+        $store['rooms'][$deviceId] = $roomId;
+        $this->write($store);
+
+        return ['ok' => true];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function commandGroup(array $input): array
+    {
+        $groupId = trim((string) ($input['group_id'] ?? $input['id'] ?? ''));
+        $action = strtolower(trim((string) ($input['command'] ?? $input['home_action'] ?? '')));
+        if ($groupId === '' || $action === '') {
+            return ['ok' => false, 'error' => 'Group and action are required'];
+        }
+        if ($this->groupRoomId($this->load(), $groupId) === '') {
+            return ['ok' => false, 'error' => 'Unknown group'];
+        }
+        $ids = $this->visibleDeviceIdsInGroup($groupId);
+        if ($action === 'brightness') {
+            $ids = $this->dimmableIdsAmong($ids);
+        }
+
+        return $this->commandIdList($ids, $action, $input, 'No devices in that group', 'Group partly failed: ');
+    }
+
+    /**
+     * @param list<string> $ids
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    private function commandIdList(array $ids, string $action, array $input, string $emptyError, string $partialPrefix): array
+    {
         if ($ids === []) {
-            return ['ok' => false, 'error' => 'No devices in that room'];
+            return ['ok' => false, 'error' => $emptyError];
         }
         $errors = [];
         foreach ($ids as $id) {
@@ -860,7 +1025,7 @@ final class YarboHome
             }
         }
         if ($errors !== []) {
-            return ['ok' => false, 'error' => 'Room partly failed: ' . $errors[0]];
+            return ['ok' => false, 'error' => $partialPrefix . $errors[0]];
         }
 
         return ['ok' => true];
@@ -1049,9 +1214,9 @@ final class YarboHome
     }
 
     /**
-     * @param array{room_defs?: list<array{id: string, name: string}>} $store
+     * @param array{room_defs?: list<array{id: string, name: string}>, group_defs?: list<array{id: string, name: string, room_id: string}>} $store
      * @param list<array<string, mixed>> $visibleDevices
-     * @return list<array{id: string, name: string, on: bool, brightness: ?int, dimmable: bool, count: int}>
+     * @return list<array{id: string, name: string, on: bool, brightness: ?int, dimmable: bool, count: int, groups: list<array<string, mixed>>}>
      */
     private function roomsPayload(array $store, array $visibleDevices): array
     {
@@ -1062,40 +1227,152 @@ final class YarboHome
             if ($id === '' || $name === '') {
                 continue;
             }
-            $rooms[$id] = [
+            $inRoom = array_values(array_filter(
+                $visibleDevices,
+                static fn (array $device): bool => (string) ($device['room_id'] ?? '') === $id
+            ));
+            $stats = $this->aggregateDeviceStats($inRoom);
+            $rooms[] = [
                 'id' => $id,
                 'name' => $name,
-                'on' => false,
-                'brightness' => null,
-                'dimmable' => false,
-                'count' => 0,
+                'on' => $stats['on'],
+                'brightness' => $stats['brightness'],
+                'dimmable' => $stats['dimmable'],
+                'count' => $stats['count'],
+                'groups' => $this->groupsPayload($store, $id, $inRoom),
             ];
         }
-        $brightSum = [];
-        $brightN = [];
-        foreach ($visibleDevices as $device) {
-            $roomId = (string) ($device['room_id'] ?? '');
-            if ($roomId === '' || !isset($rooms[$roomId])) {
+
+        return $rooms;
+    }
+
+    /**
+     * @param array{group_defs?: list<array{id: string, name: string, room_id: string}>} $store
+     * @param list<array<string, mixed>> $inRoom
+     * @return list<array{id: string, name: string, room_id: string, on: bool, brightness: ?int, dimmable: bool, count: int}>
+     */
+    private function groupsPayload(array $store, string $roomId, array $inRoom): array
+    {
+        $out = [];
+        foreach ($store['group_defs'] ?? [] as $def) {
+            $id = (string) ($def['id'] ?? '');
+            $name = (string) ($def['name'] ?? '');
+            if ($id === '' || $name === '' || (string) ($def['room_id'] ?? '') !== $roomId) {
                 continue;
             }
-            $rooms[$roomId]['count']++;
+            $members = array_values(array_filter(
+                $inRoom,
+                static fn (array $device): bool => (string) ($device['group_id'] ?? '') === $id
+            ));
+            $stats = $this->aggregateDeviceStats($members);
+            $out[] = [
+                'id' => $id,
+                'name' => $name,
+                'room_id' => $roomId,
+                'on' => $stats['on'],
+                'brightness' => $stats['brightness'],
+                'dimmable' => $stats['dimmable'],
+                'count' => $stats['count'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $devices
+     * @return array{on: bool, dimmable: bool, brightness: ?int, count: int}
+     */
+    private function aggregateDeviceStats(array $devices): array
+    {
+        $on = false;
+        $dimmable = false;
+        $brightSum = 0;
+        $brightN = 0;
+        foreach ($devices as $device) {
             if (!empty($device['on'])) {
-                $rooms[$roomId]['on'] = true;
+                $on = true;
             }
             if (!empty($device['dimmable'])) {
-                $rooms[$roomId]['dimmable'] = true;
-                $value = isset($device['brightness']) ? (int) $device['brightness'] : (( !empty($device['on'])) ? 100 : 0);
-                $brightSum[$roomId] = ($brightSum[$roomId] ?? 0) + $value;
-                $brightN[$roomId] = ($brightN[$roomId] ?? 0) + 1;
-            }
-        }
-        foreach ($rooms as $id => $room) {
-            if (($brightN[$id] ?? 0) > 0) {
-                $rooms[$id]['brightness'] = (int) round($brightSum[$id] / $brightN[$id]);
+                $dimmable = true;
+                $value = isset($device['brightness']) ? (int) $device['brightness'] : (!empty($device['on']) ? 100 : 0);
+                $brightSum += $value;
+                $brightN++;
             }
         }
 
-        return array_values($rooms);
+        return [
+            'on' => $on,
+            'dimmable' => $dimmable,
+            'brightness' => $brightN > 0 ? (int) round($brightSum / $brightN) : null,
+            'count' => count($devices),
+        ];
+    }
+
+    /**
+     * @param array{groups?: array<string, string>, group_defs?: list<array{id: string, room_id: string}>} $store
+     */
+    private function deviceGroupId(array $store, string $deviceId, string $roomId): string
+    {
+        $groupId = (string) ($store['groups'][$deviceId] ?? '');
+        if ($groupId === '' || $roomId === '') {
+            return '';
+        }
+
+        return $this->groupRoomId($store, $groupId) === $roomId ? $groupId : '';
+    }
+
+    /**
+     * @param array{group_defs?: list<array{id: string, room_id: string}>} $store
+     */
+    private function groupRoomId(array $store, string $groupId): string
+    {
+        foreach ($store['group_defs'] ?? [] as $def) {
+            if ((string) ($def['id'] ?? '') === $groupId) {
+                return (string) ($def['room_id'] ?? '');
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param list<string> $ids
+     * @return list<string>
+     */
+    private function dimmableIdsAmong(array $ids): array
+    {
+        $dimmable = [];
+        $live = $this->liveDevices(6.0);
+        foreach ($live['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = (string) ($device['id'] ?? '');
+            if ($id !== '' && in_array($id, $ids, true) && !empty($device['dimmable'])) {
+                $dimmable[] = $id;
+            }
+        }
+
+        return $dimmable;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function visibleDeviceIdsInGroup(string $groupId): array
+    {
+        $store = $this->load();
+        $hidden = array_fill_keys($store['hidden'], true);
+        $ids = [];
+        foreach ($store['groups'] as $deviceId => $assigned) {
+            if ($assigned !== $groupId || isset($hidden[$deviceId])) {
+                continue;
+            }
+            $ids[] = (string) $deviceId;
+        }
+
+        return $ids;
     }
 
     /**

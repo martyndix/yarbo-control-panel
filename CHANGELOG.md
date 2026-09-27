@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.12] - 2026-09-27
+
+### Added
+- Home rooms can contain named **groups** (for example Living Room → Spots) with their own on/off and brightness. Add and assign them from **⚙️**.
+
+### Changed
+- **Add device** pairing stays hidden until you tap **⚙️** on Home.
+
 ## [3.0.11] - 2026-09-27
 
 ### Fixed

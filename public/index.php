@@ -570,14 +570,16 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p id="home-server-status" class="updated">Matter server: —</p>
             <p id="home-setup-status" class="hint hidden"></p>
             <button type="button" class="btn btn-secondary hidden" id="home-setup">Set up Matter server</button>
-            <div class="home-add">
-                <label class="settings-field">
-                    <span class="label">Pairing code or QR text</span>
-                    <input type="text" id="home-pair-code" spellcheck="false" autocomplete="off" placeholder="11-digit code or MT:…">
-                </label>
-                <button type="button" class="btn" id="home-pair">Add device</button>
+            <div class="home-add-wrap">
+                <div class="home-add">
+                    <label class="settings-field">
+                        <span class="label">Pairing code or QR text</span>
+                        <input type="text" id="home-pair-code" spellcheck="false" autocomplete="off" placeholder="11-digit code or MT:…">
+                    </label>
+                    <button type="button" class="btn" id="home-pair">Add device</button>
+                </div>
+                <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice.</p>
             </div>
-            <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice.</p>
             <div id="home-room-add" class="home-room-add">
                 <input type="text" id="home-room-name" placeholder="Kitchen" maxlength="32" aria-label="New room name">
                 <button type="button" class="btn btn-secondary btn-compact" id="home-room-save">Add room</button>
