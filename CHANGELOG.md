@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.14] - 2026-09-27
+
+### Fixed
+- PaperMono firmware builds again: the Vestaboard Note page function name was dropped when HOUSE was added, so **Build firmware** failed on `drawNotePage`.
+
 ## [3.0.13] - 2026-09-27
 
 ### Added

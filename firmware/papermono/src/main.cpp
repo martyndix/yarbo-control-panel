@@ -628,6 +628,8 @@ void drawHousePage(bool forceFull)
     drawPager();
     M5.Display.display();
 }
+
+void drawNotePage(bool forceFull)
 {
     beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);

@@ -42,4 +42,4 @@ Thread devices keep using Apple’s (or another) border router. IPv6 is turned o
 
 ## PaperMono
 
-Flash firmware **0.1.15-beta** (USB first, then Wi-Fi OTA). On the Home dashboard, pick a tablet and tick lights/scenes, then **Save PaperMono assignment**. The HOUSE page appears when the Home module is on.
+Flash firmware **0.1.16-beta** (USB first, then Wi-Fi OTA). On the Home dashboard, pick a tablet and tick lights/scenes, then **Save PaperMono assignment**. The HOUSE page appears when the Home module is on.
