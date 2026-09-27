@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.11] - 2026-09-27
+
+### Fixed
+- Vestaboard rotate still lists Powerwall, Lymow, and ALL when the robot is offline. Home is not a Note view yet.
+
 ## [3.0.10] - 2026-09-27
 
 ### Fixed

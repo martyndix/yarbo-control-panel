@@ -335,6 +335,7 @@ let defaultDataSource = 'auto';
 let areasLayer = null;
 let loadedPlans = [];
 let lastStatusData = null;
+let lastHub = null;
 let pendingPlanDeleteId = null;
 let lastRobotFix = null;
 let mapZoneLayers = [];
@@ -2339,8 +2340,15 @@ function applyRobotNameSubtitle(name) {
     applyDeviceNameSubtitle();
 }
 
+function rememberHub(hub) {
+    if (hub && hub.modules && typeof hub.modules === 'object') {
+        lastHub = hub;
+    }
+}
+
 function applyModuleSwitcher(hub) {
     if (!hub) return [];
+    rememberHub(hub);
     const enabled = Array.isArray(hub.enabled) ? hub.enabled : [];
     const ids = enabled.map((m) => m.id);
     if (els.moduleSwitcher) {
@@ -3551,7 +3559,7 @@ function applyRotateViewChoices(extras) {
 }
 
 function fillVestaboardRotateForm() {
-    applyRotateViewChoices(vestaboardExtraModules(lastStatusData?.hub || {}));
+    applyRotateViewChoices(vestaboardExtraModules(lastHub));
     if (els.vestaboardRotateEnabled) {
         els.vestaboardRotateEnabled.checked = lastVestaboardRotate.rotate_enabled;
     }
@@ -3639,10 +3647,11 @@ async function saveVestaboardRotate(button) {
 }
 
 function vestaboardExtraModules(hub) {
+    const h = (hub && hub.modules) ? hub : lastHub;
     return {
-        yarbo: hub?.modules?.yarbo !== false,
-        powerwall: Boolean(hub?.modules?.powerwall),
-        lymow: Boolean(hub?.modules?.lymow),
+        yarbo: h?.modules?.yarbo !== false,
+        powerwall: Boolean(h?.modules?.powerwall),
+        lymow: Boolean(h?.modules?.lymow),
     };
 }
 
@@ -3680,6 +3689,7 @@ function applyVestaboardLiveChoices(extras, live) {
             els.settingsVestaboardLive.value = firstShownVestaboardLive(show);
         }
     }
+    applyRotateViewChoices(extras);
 }
 
 async function setVestaboardLiveView(id, button) {

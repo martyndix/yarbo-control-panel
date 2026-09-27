@@ -12,6 +12,7 @@ final class YarboHub
     public const MODULE_HOME = 'home';
     public const LIVE_BATTERIES = 'batteries';
 
+    /** Vestaboard pages. Home is not included until Matter has a Note layout. */
     public const VESTABOARD_LIVE_CHOICES = [
         self::MODULE_YARBO,
         self::MODULE_POWERWALL,
