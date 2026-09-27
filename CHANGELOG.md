@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.25] - 2026-09-27
+
+### Fixed
+- PaperMono touch uses the panel’s native coordinates, so taps land on the buttons (the extra remap was shifting every press).
+- The side **red LED** stays off in normal use. It is the power chip’s default after boot, not a Wi-Fi or device-error light. A real Yarbo error still blinks red. Firmware **0.1.23-beta**.
+
 ## [3.0.24] - 2026-09-27
 
 ### Changed

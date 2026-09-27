@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.22-beta';
+    public const FIRMWARE_VERSION = '0.1.23-beta';
     public const FIRMWARE_VERSION_COLOR = '0.2.11-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -664,8 +664,8 @@ final class YarboPaperDevice
             'lymow_charging' => (string) ($ly['charging_label'] ?? '—'),
             'lymow_name' => (string) ($ly['page_name'] ?? ''),
             'yarbo_error' => $yarboEnabled && $online && ((int) $errorCode !== 0 || $powerFault > 0),
-            'powerwall_error' => $pwEnabled && empty($pw['online']) && empty($pw['ok']),
-            'lymow_error' => $lyEnabled && ($lyWork === 7 || (empty($ly['ok']) && empty($ly['online']))),
+            'powerwall_error' => false,
+            'lymow_error' => $lyEnabled && $lyWork === 7,
             'ota_pending' => !empty($forDevice['ota_pending']),
         ] + $this->logoPublicView()
             + $this->prefsCompact($forDevice)

@@ -28,6 +28,7 @@ M5PM1 pm1;
 M5IOE1 ioe1;
 
 bool hwReady = false;
+bool pm1Ok = false;
 bool radioOk = false;
 uint8_t syncWord = 0xA5;
 volatile bool rxFlag = false;
@@ -51,6 +52,9 @@ bool enableLoRaHardware()
         Serial.printf("M5PM1 init failed, code: %d\n", (int) pm1Error);
         return false;
     }
+    pm1Ok = true;
+    /* LED_EN_PP (red) defaults to on after boot. Turn it off until we need an alert. */
+    pm1.setLedEnLevel(false);
     if (pm1.gpioSetFunc(M5PM1_GPIO_NUM_2, M5PM1_GPIO_FUNC_GPIO) != M5PM1_OK ||
         pm1.gpioSet(M5PM1_GPIO_NUM_2, M5PM1_GPIO_MODE_OUTPUT, HIGH,
                     M5PM1_GPIO_PULL_NONE, M5PM1_GPIO_DRIVE_PUSHPULL) != M5PM1_OK) {
@@ -96,8 +100,11 @@ void startRx()
     radio.startReceive();
 }
 
-void writeRgb(bool g, bool b)
+void writeRgb(bool r, bool g, bool b)
 {
+    if (pm1Ok) {
+        pm1.setLedEnLevel(r);
+    }
     if (!hwReady) {
         return;
     }
@@ -194,7 +201,7 @@ void rgbOff()
     rgbUntil = 0;
     rgbError = false;
     rgbOn = false;
-    writeRgb(false, false);
+    writeRgb(false, false, false);
 }
 
 void rgbTick()
@@ -204,7 +211,7 @@ void rgbTick()
         if (now - rgbLastToggle >= 400) {
             rgbLastToggle = now;
             rgbOn = !rgbOn;
-            writeRgb(false, rgbOn);
+            writeRgb(rgbOn, false, false);
         }
         return;
     }
@@ -213,13 +220,13 @@ void rgbTick()
     }
     if (now >= rgbUntil) {
         rgbUntil = 0;
-        writeRgb(false, false);
+        writeRgb(false, false, false);
         return;
     }
     if (now - rgbLastToggle >= 180) {
         rgbLastToggle = now;
         rgbOn = !rgbOn;
-        writeRgb(rgbOn && !rgbIsError, rgbOn);
+        writeRgb(false, rgbOn && !rgbIsError, rgbOn);
     }
 }
 
@@ -230,7 +237,7 @@ void alertMessage()
     rgbUntil = millis() + 1400;
     rgbLastToggle = 0;
     rgbOn = true;
-    writeRgb(true, true);
+    writeRgb(false, true, true);
     beep(1800, 140);
     delay(80);
     beep(2200, 140);
@@ -242,7 +249,7 @@ void alertError()
     rgbIsError = true;
     rgbLastToggle = 0;
     rgbOn = true;
-    writeRgb(false, false);
+    writeRgb(true, false, false);
     beep(900, 220);
     delay(90);
     beep(700, 280);
@@ -254,7 +261,7 @@ void alertOta()
     rgbIsError = false;
     rgbUntil = 0;
     rgbOn = true;
-    writeRgb(true, false);
+    writeRgb(false, true, false);
     beep(1600, 220);
     delay(90);
     beep(2000, 280);
@@ -269,7 +276,7 @@ void alertsSetErrorActive(bool on)
     } else if (rgbError) {
         rgbError = false;
         if (rgbUntil == 0) {
-            writeRgb(false, false);
+            writeRgb(false, false, false);
         }
     }
 }

@@ -95,7 +95,6 @@ int vestaboardCodes[3][15];
 String vestaboardLines[3];
 String vestaboardHash = "";
 int unreadCount = 0;
-int lockAxisMap = -1;
 bool ntpStarted = false;
 uint32_t lastNtpTry = 0;
 bool offConfirm = false;
@@ -140,7 +139,6 @@ bool takeTouchPress(int &x, int &y);
 void applyFrontlight(bool on);
 void ensureNtp();
 void refreshLocalClock();
-void lockApplyMap(int map, int x, int y, int &ox, int &oy);
 bool tapOnPadlock(int x, int y);
 bool tapOnUnlock(int x, int y);
 bool tapOnLockOff(int x, int y);
@@ -911,26 +909,13 @@ bool takeTouchPress(int &x, int &y)
     pts[0].y = 0;
     pts[1].x = 0;
     pts[1].y = 0;
-    uint8_t n = M5.Display.getTouch(pts, 2);
-    if (n == 0) {
-        n = M5.Display.getTouchRaw(pts, 2);
-    }
-    auto t = M5.Touch.getDetail();
-    bool down = (n > 0) || t.isPressed() || t.wasPressed();
+    /* PaperMono: getTouchRaw is already in display pixels (official M5 example).
+     * getTouch() applies a second affine and throws taps off the drawn buttons. */
+    uint8_t n = M5.Display.getTouchRaw(pts, 2);
+    bool down = n > 0;
     if (down && !held) {
-        if (n > 0 && (pts[0].x != 0 || pts[0].y != 0)) {
-            x = (int) pts[0].x;
-            y = (int) pts[0].y;
-        } else if (t.x != 0 || t.y != 0) {
-            x = t.x;
-            y = t.y;
-        } else if (n > 0) {
-            x = (int) pts[0].x;
-            y = (int) pts[0].y;
-        } else {
-            x = t.x;
-            y = t.y;
-        }
+        x = (int) pts[0].x;
+        y = (int) pts[0].y;
         held = true;
         return true;
     }
@@ -938,86 +923,6 @@ bool takeTouchPress(int &x, int &y)
         held = false;
     }
     return false;
-}
-
-void lockApplyMap(int map, int x, int y, int &ox, int &oy)
-{
-    int W = M5.Display.width();
-    int H = M5.Display.height();
-    int family = map / 8;
-    int kind = map % 8;
-    int sx = x;
-    int sy = y;
-    if (family == 1) {
-        sx = x * (W - 1) / 229;
-        sy = y * (H - 1) / 229;
-    } else if (family == 2) {
-        sx = x * (W - 1) / 799;
-        sy = y * (H - 1) / 479;
-    } else if (family == 3) {
-        sx = x * (W - 1) / 479;
-        sy = y * (H - 1) / 799;
-    }
-    switch (kind) {
-        case 1:
-            ox = sy;
-            oy = sx;
-            break;
-        case 2:
-            ox = W - 1 - sx;
-            oy = sy;
-            break;
-        case 3:
-            ox = sx;
-            oy = H - 1 - sy;
-            break;
-        case 4:
-            ox = W - 1 - sx;
-            oy = H - 1 - sy;
-            break;
-        case 5:
-            ox = sy;
-            oy = H - 1 - sx;
-            break;
-        case 6:
-            ox = H - 1 - sy;
-            oy = sx;
-            break;
-        case 7:
-            ox = H - 1 - sy;
-            oy = W - 1 - sx;
-            break;
-        default:
-            ox = sx;
-            oy = sy;
-            break;
-    }
-}
-
-bool lockInCorner1(int x, int y)
-{
-    return x <= 200 && y <= 200;
-}
-
-bool lockInCorner2(int x, int y)
-{
-    return x >= M5.Display.width() - 200 && y >= M5.Display.height() - 200;
-}
-
-bool lockMappedCorner1(int map, int x, int y)
-{
-    int ox = 0;
-    int oy = 0;
-    lockApplyMap(map, x, y, ox, oy);
-    return lockInCorner1(ox, oy);
-}
-
-bool lockMappedCorner2(int map, int x, int y)
-{
-    int ox = 0;
-    int oy = 0;
-    lockApplyMap(map, x, y, ox, oy);
-    return lockInCorner2(ox, oy);
 }
 
 void noteActivity()
@@ -1347,18 +1252,7 @@ bool tapOnPager(int y)
 bool tapOnPadlock(int x, int y)
 {
     int W = M5.Display.width();
-    int maps = lockAxisMap >= 0 ? 1 : 32;
-    for (int i = 0; i < maps; i++) {
-        int map = lockAxisMap >= 0 ? lockAxisMap : i;
-        int ox = x;
-        int oy = y;
-        lockApplyMap(map, x, y, ox, oy);
-        if (ox >= W - 140 && oy >= 0 && oy <= 140) {
-            lockAxisMap = map;
-            return true;
-        }
-    }
-    return false;
+    return x >= W - 96 && y >= 0 && y <= 96;
 }
 
 bool tapOnUnlock(int x, int y)
@@ -1371,20 +1265,9 @@ bool tapOnUnlock(int x, int y)
     int gap = 16;
     int bx = (W - (unlockW + gap + offW)) / 2;
     int by = H - 156;
-    int maps = lockAxisMap >= 0 ? 1 : 16;
-    for (int i = 0; i < maps; i++) {
-        int map = lockAxisMap >= 0 ? lockAxisMap : i;
-        int ox = x;
-        int oy = y;
-        lockApplyMap(map, x, y, ox, oy);
-        bool icon = ox >= W - 100 && oy >= 0 && oy <= 110;
-        bool btn = ox >= bx && ox < bx + unlockW && oy >= by && oy <= by + btnH;
-        if (icon || btn) {
-            lockAxisMap = map;
-            return true;
-        }
-    }
-    return false;
+    bool icon = x >= W - 100 && y >= 0 && y <= 110;
+    bool btn = x >= bx && x < bx + unlockW && y >= by && y <= by + btnH;
+    return icon || btn;
 }
 
 bool tapOnLockOff(int x, int y)
@@ -1398,18 +1281,7 @@ bool tapOnLockOff(int x, int y)
     int bx = (W - (unlockW + gap + offW)) / 2;
     int by = H - 156;
     int ox0 = bx + unlockW + gap;
-    int maps = lockAxisMap >= 0 ? 1 : 16;
-    for (int i = 0; i < maps; i++) {
-        int map = lockAxisMap >= 0 ? lockAxisMap : i;
-        int ox = x;
-        int oy = y;
-        lockApplyMap(map, x, y, ox, oy);
-        if (ox >= ox0 && ox <= ox0 + offW && oy >= by && oy <= by + btnH) {
-            lockAxisMap = map;
-            return true;
-        }
-    }
-    return false;
+    return x >= ox0 && x <= ox0 + offW && y >= by && y <= by + btnH;
 }
 
 bool syncPaperLogo(const String &hash)
@@ -1734,34 +1606,19 @@ void applyRadioHit(int hit)
 
 void handleRadioTouch(int x, int y)
 {
-    int maps = lockAxisMap >= 0 ? 1 : 32;
-    for (int i = 0; i < maps; i++) {
-        int map = lockAxisMap >= 0 ? lockAxisMap : i;
-        int ox = x;
-        int oy = y;
-        if (lockAxisMap < 0) {
-            lockApplyMap(map, x, y, ox, oy);
-        } else {
-            ox = x;
-            oy = y;
+    int n = min(4, peerCount + 1);
+    int pw = (M5.Display.width() - 24) / n;
+    if (y >= PAPERMONO_PEER_Y && y <= PAPERMONO_PEER_Y + 56) {
+        int i = (x - 12) / pw;
+        if (i >= 0 && i < n) {
+            radioToIndex = i;
+            drawScreen(false);
         }
-        int n = min(4, peerCount + 1);
-        int pw = (M5.Display.width() - 24) / n;
-        if (oy >= PAPERMONO_PEER_Y && oy <= PAPERMONO_PEER_Y + 56) {
-            int idx = (ox - 12) / pw;
-            if (idx >= 0 && idx < n) {
-                lockAxisMap = map;
-                radioToIndex = idx;
-                drawScreen(false);
-                return;
-            }
-        }
-        int hit = keyboardHit(ox, oy);
-        if (hit >= 0) {
-            lockAxisMap = map;
-            applyRadioHit(hit);
-            return;
-        }
+        return;
+    }
+    int hit = keyboardHit(x, y);
+    if (hit >= 0) {
+        applyRadioHit(hit);
     }
 }
 
@@ -1784,21 +1641,8 @@ void handleDeviceTouch(int x, int y)
 {
     int H = M5.Display.height();
     int offY = H - 200;
-    if (lockAxisMap >= 0) {
-        if (y >= offY - 10 && y <= H - 40) {
-            applyDeviceOffTap(x);
-        }
-        return;
-    }
-    for (int map = 0; map < 32; map++) {
-        int ox = 0;
-        int oy = 0;
-        lockApplyMap(map, x, y, ox, oy);
-        if (oy >= offY - 10 && oy <= H - 40) {
-            lockAxisMap = map;
-            applyDeviceOffTap(ox);
-            return;
-        }
+    if (y >= offY - 10 && y <= H - 40) {
+        applyDeviceOffTap(x);
     }
 }
 
@@ -2243,13 +2087,6 @@ void loop()
             if (tapOnPadlock(tx, ty)) {
                 enterLock();
             } else {
-                if (lockAxisMap >= 0) {
-                    int ox = 0;
-                    int oy = 0;
-                    lockApplyMap(lockAxisMap, tx, ty, ox, oy);
-                    tx = ox;
-                    ty = oy;
-                }
                 if (currentPage == PAPERMONO_PAGE_HOME) {
                     int which = homeButtonAt(tx, ty);
                     if (which == 1) {

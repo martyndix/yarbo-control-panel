@@ -49,7 +49,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 - **Lock screen:** tap the **padlock** on any page (top right, boxed). Idle auto-lock from Settings only runs while Wi-Fi is connected. Unlock with **Unlock**. **OFF** on the lock screen shuts the tablet down (same giant **OFF**). Needs firmware **0.1.22-beta**.
 - **A** next page, **B** previous. Every companion page is in that loop (Yarbo Home/Status/Health/Plans, Note, Board, Powerwall, Lymow, Radio, Device, House). Stop / Dock are Home buttons only.
 
-It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, mic, IMU, and the SD slot are unused in this firmware. Sleep timers, brightness, buzzer, and RGB alerts are set in **Settings → E-paper companions**, not on the tablet.
+It does **not** include map, cameras, plan delete, or hold-to-drive. E-paper is too slow for those. NFC, mic, IMU, and the SD slot are unused in this firmware. Sleep timers, brightness, buzzer, and RGB alerts are set in **Settings → E-paper companions**, not on the tablet. The side LED is **off** in normal use (the hardware turns red on at boot until firmware clears it). A Yarbo error blinks red. Needs firmware **0.1.23-beta**.
 
 ## E-paper care (manufacturer)
 
