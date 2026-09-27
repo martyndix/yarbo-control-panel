@@ -183,19 +183,28 @@ def send_config(port: str, cfg: dict) -> None:
         + "\n"
     ).encode("utf-8")
     print("Sending Wi-Fi and panel URL over USB …")
-    try:
-        with serial.Serial(port, 115200, timeout=2) as ser:
-            time.sleep(1.6)
-            ser.reset_input_buffer()
-            ser.write(payload)
-            ser.flush()
-            time.sleep(0.4)
-            ack = ser.read(512).decode("utf-8", errors="replace")
-    except Exception as exc:
-        die(f"USB serial failed after flash: {exc}")
-    ok = "CFG_OK" in ack or ack.strip() == ""
-    if not ok:
-        die(f"Tablet did not acknowledge config ({ack.strip()[:200]})")
+    last_ack = ""
+    for attempt in range(1, 6):
+        try:
+            with serial.Serial(port, 115200, timeout=2) as ser:
+                time.sleep(1.8)
+                ser.reset_input_buffer()
+                ser.write(payload)
+                ser.flush()
+                time.sleep(0.6)
+                last_ack = ser.read(512).decode("utf-8", errors="replace")
+        except Exception as exc:
+            die(f"USB serial failed after flash: {exc}")
+        if "CFG_OK" in last_ack:
+            return
+        print(f"No CFG_OK yet (try {attempt}/5). Waiting for the tablet to leave download mode …")
+        time.sleep(2.0)
+    die(
+        "Tablet did not acknowledge config. Unplug USB, short-press power to boot our firmware "
+        "(wait for the PaperMono setup screen, not the factory demo), plug in again without "
+        "holding power, then re-run flash.py. Last reply: "
+        + (last_ack.strip()[:200] or "(empty)")
+    )
 
 
 def main() -> int:
@@ -222,7 +231,8 @@ def main() -> int:
     print(f"Put the tablet in download mode (hold power {hold}), USB-C plugged in.")
     port = pick_port(args.port.strip() or None)
     flash_firmware(port)
-    time.sleep(2.5)
+    print("Waiting for the tablet to boot our firmware (e-paper is slow) …")
+    time.sleep(6.0)
     send_config(port, cfg)
     print("Done. Keep USB in until the setup screen clears, then ship the tablet to the site Wi-Fi.")
     return 0

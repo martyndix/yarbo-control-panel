@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.16] - 2026-09-27
+
+### Fixed
+- USB setup kit waits for the tablet to boot after esptool, then retries Wi-Fi config until it sees `CFG_OK` (an empty serial reply is no longer treated as success).
+
 ## [3.0.15] - 2026-09-27
 
 ### Fixed

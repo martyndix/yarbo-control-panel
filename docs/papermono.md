@@ -111,7 +111,7 @@ The kit is the same firmware at `0x0` plus the same `CFG:` serial line. A lone `
    .venv/bin/pip install esptool pyserial
    .venv/bin/python flash.py
    ```
-3. Plug the PaperMono in by USB-C. Hold power about **2 seconds** for download mode (red LED blinks).
+3. Plug the PaperMono in by USB-C. Hold power about **2 seconds** for download mode (red LED blinks). The factory demo can stay on the glass until our firmware boots and does a slow full refresh — unplug, short-press power, and wait. A blinking red LED means it is still in download mode.
 4. If more than one serial device is listed: `python3 flash.py --port /dev/cu.usbmodemXXXX` (`python3 flash.py --list-ports` to list them).
 5. Keep USB in until the setup screen clears, then ship the tablet to the site Wi-Fi.
 
