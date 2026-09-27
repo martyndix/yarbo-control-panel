@@ -105,20 +105,23 @@ The kit is the same firmware at `0x0` plus the same `CFG:` serial line. A lone `
 **On a Mac:**
 
 1. Unzip the kit. Keep `firmware.bin`, `config.json`, `flash.py`, and `README.txt` in the same folder.
-2. Install Python 3 if needed, then: `python3 -m pip install esptool pyserial`
+2. `cd` into that folder and run `python3 flash.py`. The script makes a `.venv` next to the kit and installs `esptool` there. Homebrew Python will reject `python3 -m pip install esptool` (`externally-managed-environment`) — do not use that. If you already have this zip, run:
+   ```
+   python3 -m venv .venv
+   .venv/bin/pip install esptool pyserial
+   .venv/bin/python flash.py
+   ```
 3. Plug the PaperMono in by USB-C. Hold power about **2 seconds** for download mode (red LED blinks).
-4. `cd` into the unzipped folder and run `python3 flash.py`
-5. If more than one serial device is listed: `python3 flash.py --port /dev/cu.usbmodemXXXX` (`python3 flash.py --list-ports` to list them).
-6. Keep USB in until the setup screen clears, then ship the tablet to the site Wi-Fi.
+4. If more than one serial device is listed: `python3 flash.py --port /dev/cu.usbmodemXXXX` (`python3 flash.py --list-ports` to list them).
+5. Keep USB in until the setup screen clears, then ship the tablet to the site Wi-Fi.
 
 **On Windows:**
 
 1. Unzip the kit into one folder (same four files as above).
-2. Install Python from python.org and tick **Add python.exe to PATH**, then: `py -m pip install esptool pyserial`
+2. Install Python from python.org and tick **Add python.exe to PATH**, then in the unzipped folder run `py flash.py` (it creates `.venv` and installs `esptool`). Or `py flash.py --port COM3`.
 3. If no COM port appears, install the Espressif USB JTAG/serial driver (ESP32-S3 native USB).
 4. Plug USB-C and hold power about **2 seconds** for download mode.
-5. In the unzipped folder run `py flash.py` (or `py flash.py --port COM3`).
-6. Keep USB in until the setup screen clears, then ship the tablet to the site 2.4 GHz Wi-Fi.
+5. Keep USB in until the setup screen clears, then ship the tablet to the site 2.4 GHz Wi-Fi.
 
 Later firmware still goes over Wi-Fi: Settings → paired device **Update**. You do not need this kit again unless you wipe the tablet.
 

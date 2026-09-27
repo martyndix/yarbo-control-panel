@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.15] - 2026-09-27
+
+### Fixed
+- USB setup kit on a Mac no longer asks for `python3 -m pip install` (Homebrew Python blocks that). `flash.py` creates a `.venv` in the unzipped folder and installs esptool there.
+
 ## [3.0.14] - 2026-09-27
 
 ### Fixed

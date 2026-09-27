@@ -32,7 +32,7 @@ Do not flash with PlatformIO env `papermono` — that is the grayscale touch UI.
 
 Same USB setup kit as PaperMono. On **Settings → E-paper companions** pick **Paper Colour**, enter the **site** 2.4 GHz Wi-Fi and the panel URL the tablet will use (not `localhost`), then **Download Paper Colour USB setup kit**.
 
-On the laptop, unzip and install `esptool` + `pyserial` once (`python3 -m pip install esptool pyserial` on a Mac, `py -m pip install esptool pyserial` on Windows). Hold power about **3 seconds** for download mode, then run `python3 flash.py` or `py flash.py`. Windows may need the Espressif USB JTAG/serial driver if no COM port appears.
+On the laptop, unzip and run `python3 flash.py` (Mac) or `py flash.py` (Windows). The script creates a local `.venv` and installs `esptool` there — Homebrew Python will reject a system-wide `pip install`. Hold power about **3 seconds** for download mode. Windows may need the Espressif USB JTAG/serial driver if no COM port appears.
 
 The zip contains the Wi-Fi password and pairing token — keep it private. Full Mac/Windows steps: [`docs/papermono.md`](papermono.md#set-up-away-from-the-panel). Later updates stay Settings → **Update** over Wi-Fi.
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -12,11 +14,68 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 FIRMWARE = HERE / "firmware.bin"
 CONFIG = HERE / "config.json"
+VENV = HERE / ".venv"
 
 
 def die(message: str, code: int = 1) -> None:
     print(message, file=sys.stderr)
     raise SystemExit(code)
+
+
+def venv_python() -> Path:
+    if os.name == "nt":
+        return VENV / "Scripts" / "python.exe"
+    return VENV / "bin" / "python"
+
+
+def in_kit_venv() -> bool:
+    try:
+        return Path(sys.prefix).resolve() == VENV.resolve()
+    except OSError:
+        return False
+
+
+def deps_ok() -> bool:
+    try:
+        import esptool  # noqa: F401
+        import serial  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def pip_install(python: str) -> None:
+    cmd = [python, "-m", "pip", "install", "--disable-pip-version-check", "esptool", "pyserial"]
+    completed = subprocess.run(cmd, check=False)
+    if completed.returncode != 0:
+        die("Could not install esptool and pyserial into the kit virtualenv.")
+
+
+def ensure_deps() -> None:
+    if deps_ok():
+        return
+    py = venv_python()
+    if not py.is_file():
+        print("Creating a local Python environment in .venv …")
+        print("(Homebrew Python blocks system-wide pip, so the kit uses its own folder.)")
+        created = subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=False)
+        if created.returncode != 0 or not py.is_file():
+            die(
+                "Could not create .venv. From this unzipped folder run:\n"
+                "  python3 -m venv .venv\n"
+                "  .venv/bin/pip install esptool pyserial\n"
+                "  .venv/bin/python flash.py\n"
+                "Windows: py -m venv .venv then .venv\\Scripts\\python.exe -m pip install esptool pyserial"
+            )
+    print("Installing esptool and pyserial into .venv …")
+    pip_install(str(py) if py.is_file() else sys.executable)
+    if in_kit_venv():
+        if not deps_ok():
+            die("esptool/pyserial still missing after install.")
+        return
+    if not py.is_file():
+        die("Kit virtualenv Python is missing after install.")
+    os.execv(str(py), [str(py), str(Path(__file__).resolve()), *sys.argv[1:]])
 
 
 def load_config() -> dict:
@@ -45,14 +104,8 @@ def skip_port(info) -> bool:
 
 
 def list_ports() -> list[dict]:
-    try:
-        from serial.tools import list_ports
-    except ImportError:
-        die(
-            "pyserial is not installed.\n"
-            "Mac:     python3 -m pip install esptool pyserial\n"
-            "Windows: py -m pip install esptool pyserial"
-        )
+    from serial.tools import list_ports
+
     ports = []
     for info in list_ports.comports():
         if skip_port(info):
@@ -87,14 +140,8 @@ def pick_port(requested: str | None) -> str:
 def flash_firmware(port: str) -> None:
     if not FIRMWARE.is_file() or FIRMWARE.stat().st_size < 1024:
         die("firmware.bin is missing or too small. Unzip the whole kit and download a new one if needed.")
-    try:
-        import esptool
-    except ImportError:
-        die(
-            "esptool is not installed.\n"
-            "Mac:     python3 -m pip install esptool pyserial\n"
-            "Windows: py -m pip install esptool pyserial"
-        )
+    import esptool
+
     argv = [
         "--chip",
         "esp32s3",
@@ -119,10 +166,8 @@ def flash_firmware(port: str) -> None:
 
 
 def send_config(port: str, cfg: dict) -> None:
-    try:
-        import serial
-    except ImportError:
-        die("pyserial is not installed. See README.txt in this folder.")
+    import serial
+
     payload = (
         "CFG:"
         + json.dumps(
@@ -158,6 +203,7 @@ def main() -> int:
     parser.add_argument("--port", default="", help="Serial port (optional if only one USB device is present)")
     parser.add_argument("--list-ports", action="store_true", help="List USB serial ports and exit")
     args = parser.parse_args()
+    ensure_deps()
 
     if args.list_ports:
         ports = list_ports()

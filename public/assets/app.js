@@ -4775,7 +4775,7 @@ function applyPaperMonoKindUi(dashboard) {
         const docs = kind === 'papercolor'
             ? 'https://github.com/martyndix/yarbo-control-panel/blob/main/docs/papercolor.md#set-up-away-from-the-panel'
             : 'https://github.com/martyndix/yarbo-control-panel/blob/main/docs/papermono.md#set-up-away-from-the-panel';
-        kitHint.innerHTML = `To prepare a ${label} away from this host: enter the <strong>site</strong> 2.4 GHz Wi-Fi and the panel URL the tablet will use (not localhost), then download the USB setup kit. Unzip on a Mac or Windows PC, install Python plus esptool, plug the tablet in there (hold power ${hold} for download mode), and run <code>flash.py</code>. The zip contains the Wi-Fi password and pairing token — keep it private. Mac and Windows steps: <a href="${docs}" target="_blank" rel="noopener">docs</a>.`;
+        kitHint.innerHTML = `To prepare a ${label} away from this host: enter the <strong>site</strong> 2.4 GHz Wi-Fi and the panel URL the tablet will use (not localhost), then download the USB setup kit. Unzip on a Mac or Windows PC, plug the tablet in (hold power ${hold} for download mode), and run <code>python3 flash.py</code> (or <code>py flash.py</code>). The script installs esptool in a local <code>.venv</code> — Homebrew <code>pip install</code> is blocked. The zip contains the Wi-Fi password and pairing token — keep it private. Mac and Windows steps: <a href="${docs}" target="_blank" rel="noopener">docs</a>.`;
     }
     if (els.papermonoBuild) {
         els.papermonoBuild.textContent = `Build ${label} firmware`;
