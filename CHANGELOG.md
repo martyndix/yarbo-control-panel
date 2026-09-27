@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.28] - 2026-09-27
+
+### Changed
+- PaperMono off card says **TAP RED BUTTON TO BEGIN**. Firmware **0.1.26-beta**.
+
 ## [3.0.27] - 2026-09-27
 
 ### Fixed

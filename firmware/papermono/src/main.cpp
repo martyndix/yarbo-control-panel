@@ -797,7 +797,7 @@ void powerOffTablet()
     M5.Display.setTextSize(12);
     M5.Display.drawString("OFF", W / 2, H / 2);
     M5.Display.setTextSize(2);
-    M5.Display.drawString("TAP SCREEN TO BEGIN", W / 2, H - 72);
+    M5.Display.drawString("TAP RED BUTTON TO BEGIN", W / 2, H - 72);
     M5.Display.endWrite();
     M5.Display.display();
     M5.Display.waitDisplay();
