@@ -93,7 +93,7 @@ On the **same machine that runs the panel**:
 
 The first flash still has to be USB. It does not have to be USB into the Pi. If you are away from the site, download a **USB setup kit** from the panel, flash the tablet on a laptop, then ship it.
 
-The kit is the same firmware at `0x0` plus the same `CFG:` serial line. A lone `.bin` is not enough: Wi-Fi, panel URL, and the pairing token are not baked into the image.
+The kit is a **factory flash image** at `0x0` (bootloader, partitions, and app) plus the same `CFG:` serial line. PlatformIO’s app-only `firmware.bin` must not be written at `0x0`.
 
 **On the panel (any browser that can reach Settings):**
 

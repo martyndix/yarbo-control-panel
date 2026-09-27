@@ -118,18 +118,23 @@ def send_config(port: str, ssid: str, password: str, panel_url: str, token: str,
     }
 
 
+def factory_bin(kind: str) -> Path:
+    return firmware_bin(kind).parent / "firmware-factory.bin"
+
+
 def flash_firmware(port: str, kind: str = KIND_MONO) -> dict:
     kind = normalize_kind(kind)
-    path = firmware_bin(kind)
+    app = firmware_bin(kind)
+    path = factory_bin(kind)
     label = "Paper Colour" if kind == KIND_COLOR else "PaperMono"
     if not path.is_file() or path.stat().st_size < 1024:
         return {
             "ok": False,
             "error": (
-                f"{label} firmware is not built yet. In Settings → E-paper companions click Build firmware, "
+                f"{label} USB factory image is not built yet. In Settings → E-paper companions click Build firmware, "
                 f"or from the project root run: {PIO_HINTS[kind]}"
             ),
-            "firmware_path": str(path),
+            "firmware_path": str(app),
             "kind": kind,
         }
 
@@ -151,6 +156,12 @@ def flash_firmware(port: str, kind: str = KIND_MONO) -> dict:
         "460800",
         "write_flash",
         "-z",
+        "--flash_mode",
+        "dio",
+        "--flash_freq",
+        "80m",
+        "--flash_size",
+        "16MB",
         "0x0",
         str(path),
     ]

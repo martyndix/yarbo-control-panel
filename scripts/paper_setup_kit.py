@@ -151,10 +151,16 @@ def flash_firmware(port: str) -> None:
         "460800",
         "write_flash",
         "-z",
+        "--flash_mode",
+        "dio",
+        "--flash_freq",
+        "80m",
+        "--flash_size",
+        "16MB",
         "0x0",
         str(FIRMWARE),
     ]
-    print("Flashing firmware.bin at 0x0 …")
+    print("Flashing factory image at 0x0 (bootloader + partitions + app) …")
     try:
         esptool.main(argv)
     except SystemExit as exc:
@@ -163,6 +169,42 @@ def flash_firmware(port: str) -> None:
             die(f"esptool exited with status {code}")
     except Exception as exc:
         die(f"esptool failed: {exc}")
+
+
+def wait_for_serial_port(preferred: str) -> str:
+    last = preferred
+    for _ in range(16):
+        found = [row["device"] for row in list_ports()]
+        if preferred in found:
+            return preferred
+        if len(found) == 1:
+            if found[0] != last:
+                print(f"USB port is now {found[0]}")
+            return found[0]
+        time.sleep(0.4)
+    die(
+        "USB serial port disappeared. Unplug, wait 3 seconds, plug back in, "
+        "then: python3 flash.py --list-ports"
+    )
+
+
+def open_app_serial(port: str):
+    import serial
+
+    ser = serial.Serial()
+    ser.port = port
+    ser.baudrate = 115200
+    ser.timeout = 2
+    ser.write_timeout = 2
+    ser.dsrdtr = False
+    ser.rtscts = False
+    try:
+        ser.dtr = False
+        ser.rts = False
+    except Exception:
+        pass
+    ser.open()
+    return ser
 
 
 def send_config(port: str, cfg: dict) -> None:
@@ -184,26 +226,42 @@ def send_config(port: str, cfg: dict) -> None:
     ).encode("utf-8")
     print("Sending Wi-Fi and panel URL over USB …")
     last_ack = ""
-    for attempt in range(1, 6):
+    last_error = ""
+    current = port
+    for attempt in range(1, 8):
+        current = wait_for_serial_port(current)
+        ser = None
         try:
-            with serial.Serial(port, 115200, timeout=2) as ser:
-                time.sleep(1.8)
+            ser = open_app_serial(current)
+            time.sleep(0.4)
+            try:
                 ser.reset_input_buffer()
-                ser.write(payload)
-                ser.flush()
-                time.sleep(0.6)
-                last_ack = ser.read(512).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            ser.write(payload)
+            ser.flush()
+            time.sleep(0.8)
+            last_ack = ser.read(512).decode("utf-8", errors="replace")
         except Exception as exc:
-            die(f"USB serial failed after flash: {exc}")
+            last_error = str(exc)
+            last_ack = ""
+            print(f"USB dropped ({exc}). Waiting for the tablet to reappear …")
+        finally:
+            if ser is not None:
+                try:
+                    ser.close()
+                except Exception:
+                    pass
         if "CFG_OK" in last_ack:
             return
-        print(f"No CFG_OK yet (try {attempt}/5). Waiting for the tablet to leave download mode …")
-        time.sleep(2.0)
+        print(f"No CFG_OK yet (try {attempt}/7).")
+        time.sleep(1.5)
+    detail = last_ack.strip()[:200] if last_ack.strip() else (last_error or "(empty)")
     die(
-        "Tablet did not acknowledge config. Unplug USB, short-press power to boot our firmware "
-        "(wait for the PaperMono setup screen, not the factory demo), plug in again without "
-        "holding power, then re-run flash.py. Last reply: "
-        + (last_ack.strip()[:200] or "(empty)")
+        "Tablet did not acknowledge config. Unplug USB, short-press power so it shows "
+        "PaperMono setup (not the factory demo, not a blinking red LED), plug in again "
+        "without holding power, wait 5 seconds, then re-run flash.py. Last reply: "
+        + detail
     )
 
 

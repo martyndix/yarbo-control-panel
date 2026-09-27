@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.17] - 2026-09-27
+
+### Fixed
+- USB flash writes a **factory image** (bootloader + partitions + app). The previous kit put PlatformIO’s app-only `firmware.bin` at `0x0`, which overwrote the bootloader. The tablet then watchdog-looped and kept the factory e-paper demo.
+
 ## [3.0.16] - 2026-09-27
 
 ### Fixed

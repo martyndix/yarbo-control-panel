@@ -23,6 +23,8 @@ final class YarboPaperDevice
     private const PLANS_CACHE_TTL_S = 300;
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
     public const FIRMWARE_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware.bin';
+    public const FIRMWARE_FACTORY_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware-factory.bin';
+    public const FIRMWARE_FACTORY_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware-factory.bin';
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -42,9 +44,25 @@ final class YarboPaperDevice
         return $this->projectRoot . '/' . $relative;
     }
 
+    public function firmwareFlashPath(?string $kind = null): string
+    {
+        $relative = $this->normalizeKind($kind) === self::KIND_COLOR
+            ? self::FIRMWARE_FACTORY_RELATIVE_COLOR
+            : self::FIRMWARE_FACTORY_RELATIVE;
+
+        return $this->projectRoot . '/' . $relative;
+    }
+
     public function firmwareAvailable(?string $kind = null): bool
     {
         $path = $this->firmwarePath($kind);
+
+        return is_file($path) && filesize($path) > 1024;
+    }
+
+    public function firmwareFlashAvailable(?string $kind = null): bool
+    {
+        $path = $this->firmwareFlashPath($kind);
 
         return is_file($path) && filesize($path) > 1024;
     }
@@ -973,10 +991,10 @@ final class YarboPaperDevice
         }
         $result = $this->runProcess($cmd, 900.0, $this->pioEnv());
         $log = (string) ($result['log'] ?? '');
-        if (!($result['ok'] ?? false) || !$this->firmwareAvailable($kind)) {
+        if (!($result['ok'] ?? false) || !$this->firmwareAvailable($kind) || !$this->firmwareFlashAvailable($kind)) {
             $detail = trim((string) ($result['error'] ?? ''));
             if ($detail === '') {
-                $detail = 'PlatformIO did not produce a firmware binary.';
+                $detail = 'PlatformIO did not produce a USB factory image (firmware-factory.bin).';
             }
 
             return [
@@ -999,7 +1017,7 @@ final class YarboPaperDevice
 
     public function firmwareNeedsBuild(?string $kind = null): bool
     {
-        if (!$this->firmwareAvailable($kind)) {
+        if (!$this->firmwareAvailable($kind) || !$this->firmwareFlashAvailable($kind)) {
             return true;
         }
         $binMtime = (int) filemtime($this->firmwarePath($kind));
@@ -1168,7 +1186,7 @@ final class YarboPaperDevice
             $builtNow = true;
         }
 
-        if (!$this->firmwareAvailable($kind)) {
+        if (!$this->firmwareAvailable($kind) || !$this->firmwareFlashAvailable($kind)) {
             return ['ok' => false, 'error' => $label . ' firmware is not built yet. Click Build firmware first.'];
         }
 
@@ -1225,10 +1243,10 @@ final class YarboPaperDevice
     private function writeSetupKitArchive(string $kitDir, string $kind, array $config, string $script): array
     {
         $label = $this->kindLabel($kind);
-        $firmwareSrc = $this->firmwarePath($kind);
+        $firmwareSrc = $this->firmwareFlashPath($kind);
         $firmwareDst = $kitDir . '/firmware.bin';
         if (!@copy($firmwareSrc, $firmwareDst) || !is_file($firmwareDst)) {
-            return ['ok' => false, 'error' => 'Could not copy firmware.bin into the setup kit.'];
+            return ['ok' => false, 'error' => 'Could not copy the USB factory image into the setup kit. Click Build firmware first.'];
         }
         $configJson = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if (!is_string($configJson) || @file_put_contents($kitDir . '/config.json', $configJson . "\n") === false) {
