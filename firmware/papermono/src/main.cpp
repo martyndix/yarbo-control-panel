@@ -219,6 +219,8 @@ void applyCompanionFields(JsonDocument &doc, bool persist)
     }
 }
 
+bool cfgLeaveSetup = false;
+
 void applyConfigJson(const String &json)
 {
     JsonDocument doc;
@@ -238,6 +240,10 @@ void applyConfigJson(const String &json)
     }
     saveConfig();
     Serial.println("CFG_OK");
+    Serial.flush();
+    if (wifiSsid.length()) {
+        cfgLeaveSetup = true;
+    }
 }
 
 void pollSerialConfig()
@@ -265,6 +271,7 @@ void pollSerialConfig()
 void beginEpdFrame(bool forceQuality)
 {
     while (M5.Display.displayBusy()) {
+        pollSerialConfig();
         delay(5);
     }
     bool full = forceQuality || partialRefreshCount >= 10;
@@ -277,6 +284,10 @@ void finishEpdFrame()
 {
     M5.Display.endWrite();
     M5.Display.display();
+    while (M5.Display.displayBusy()) {
+        pollSerialConfig();
+        delay(5);
+    }
 }
 
 String pageName(int page)
@@ -2156,6 +2167,7 @@ void handleHouseTouch(int x, int y)
 
 void setup()
 {
+    Serial.setRxBufferSize(4096);
     Serial.begin(115200);
     auto cfg = M5.config();
     cfg.clear_display = false;
@@ -2183,6 +2195,12 @@ void setup()
 void loop()
 {
     pollSerialConfig();
+    if (cfgLeaveSetup && wifiSsid.length()) {
+        cfgLeaveSetup = false;
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+        drawScreen(true);
+    }
     loraService();
     rgbTick();
     tabletBat = M5.Power.getBatteryLevel();

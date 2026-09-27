@@ -12,8 +12,8 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.28';
-    public const FIRMWARE_VERSION_COLOR = '0.2.12-colour';
+    public const FIRMWARE_VERSION = '0.1.29';
+    public const FIRMWARE_VERSION_COLOR = '0.2.13-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
@@ -1196,7 +1196,7 @@ final class YarboPaperDevice
             '--token', $token,
             '--name', $name,
             '--kind', $kind,
-        ], $this->usbCompanionCliArgs()), 45.0);
+        ], $this->usbCompanionCliArgs()), 90.0);
         $result['device'] = $device;
 
         return $result;

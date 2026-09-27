@@ -77,6 +77,38 @@ def list_ports() -> dict:
     return {"ok": True, "ports": ports}
 
 
+def wait_for_serial_port(preferred: str, timeout_s: float = 25.0) -> str:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        listed = list_ports()
+        devices = [row["device"] for row in listed.get("ports") or []]
+        if preferred in devices:
+            return preferred
+        if len(devices) == 1:
+            return devices[0]
+        time.sleep(0.4)
+    return preferred
+
+
+def open_app_serial(port: str):
+    import serial
+
+    ser = serial.Serial()
+    ser.port = port
+    ser.baudrate = 115200
+    ser.timeout = 2
+    ser.write_timeout = 2
+    ser.dsrdtr = False
+    ser.rtscts = False
+    try:
+        ser.dtr = False
+        ser.rts = False
+    except Exception:
+        pass
+    ser.open()
+    return ser
+
+
 def send_config(
     port: str,
     ssid: str,
@@ -95,34 +127,61 @@ def send_config(
             "error": "pyserial is not installed on this host.",
         }
 
-    payload = {
-            "ssid": ssid,
-            "password": password,
-            "panel_url": panel_url.rstrip("/"),
-            "token": token,
-            "name": name,
-        }
+    body = {
+        "ssid": ssid,
+        "password": password,
+        "panel_url": panel_url.rstrip("/"),
+        "token": token,
+        "name": name,
+    }
     if extras:
-        payload.update({k: v for k, v in extras.items() if v is not None and v != ""})
-    line = json.dumps(payload, ensure_ascii=False)
-    payload = ("CFG:" + line + "\n").encode("utf-8")
+        body.update({k: v for k, v in extras.items() if v is not None and v != ""})
+    payload = ("CFG:" + json.dumps(body, ensure_ascii=False) + "\n").encode("utf-8")
 
-    try:
-        with serial.Serial(port, 115200, timeout=2) as ser:
-            time.sleep(1.6)
-            ser.reset_input_buffer()
+    last_ack = ""
+    last_error = ""
+    current = port
+    for attempt in range(1, 9):
+        current = wait_for_serial_port(current)
+        ser = None
+        try:
+            ser = open_app_serial(current)
+            time.sleep(0.6)
+            try:
+                ser.reset_input_buffer()
+            except Exception:
+                pass
             ser.write(payload)
             ser.flush()
-            time.sleep(0.4)
-            ack = ser.read(512).decode("utf-8", errors="replace")
-    except Exception as exc:
-        return {"ok": False, "error": f"USB serial failed: {exc}"}
+            time.sleep(1.2)
+            last_ack = ser.read(1024).decode("utf-8", errors="replace")
+        except Exception as exc:
+            last_error = str(exc)
+            last_ack = ""
+        finally:
+            if ser is not None:
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+        if "CFG_OK" in last_ack:
+            return {
+                "ok": True,
+                "error": None,
+                "ack": last_ack.strip()[:400],
+                "port": current,
+            }
+        time.sleep(1.5)
 
-    ok = "CFG_OK" in ack or ack.strip() == ""
+    detail = last_ack.strip()[:200] if last_ack.strip() else (last_error or "empty reply")
     return {
-        "ok": True if ok else False,
-        "error": None if ok else f"Device did not acknowledge config ({ack.strip()[:200]})",
-        "ack": ack.strip()[:400],
+        "ok": False,
+        "error": (
+            "Tablet did not acknowledge Wi-Fi config (CFG_OK). "
+            "Leave it on the setup screen, USB plugged in, then try Send Wi-Fi only. "
+            "Last reply: " + detail
+        ),
+        "ack": last_ack.strip()[:400],
     }
 
 
@@ -272,7 +331,7 @@ def main() -> int:
         if not flashed.get("ok"):
             emit(flashed)
             return 1
-        time.sleep(2.5)
+        time.sleep(6.0)
         configured = send_config(
             args.port,
             args.ssid,

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.31] - 2026-09-28
+
+### Fixed
+- USB Wi-Fi config is retried until the tablet replies **CFG_OK**. Opening serial no longer resets the ESP32, and an empty reply is no longer treated as success (that left PaperMono on the setup screen). Firmware **0.1.29** / **0.2.13-colour**.
+
 ## [3.0.30] - 2026-09-28
 
 ### Changed

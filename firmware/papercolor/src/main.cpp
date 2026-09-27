@@ -123,6 +123,7 @@ void applyConfigJson(const String &json)
     }
     saveConfig();
     Serial.println("CFG_OK");
+    Serial.flush();
 }
 
 void pollSerialConfig()
@@ -140,7 +141,7 @@ void pollSerialConfig()
                 }
             }
             line = "";
-        } else if (c != '\r' && line.length() < 800) {
+        } else if (c != '\r' && line.length() < 1600) {
             line += c;
         }
     }
@@ -1058,6 +1059,7 @@ void handlePlansTouch(int x, int y)
 
 void setup()
 {
+    Serial.setRxBufferSize(4096);
     Serial.begin(115200);
     auto cfg = M5.config();
     cfg.clear_display = true;
