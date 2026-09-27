@@ -146,7 +146,10 @@ bool tapOnUnlock(int x, int y);
 bool tapOnLockOff(int x, int y);
 void powerOffTablet();
 void finishEpdFrame();
+void paintRadioDraft(int x, int y);
 void updateRadioDraft();
+void applyDeviceOffTap(int x);
+void applyRadioHit(int hit);
 
 void saveConfig()
 {
@@ -337,7 +340,7 @@ void drawButton(int x, int y, int w, int h, const char *label, bool invert)
     M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
     M5.Display.setTextColor(fg, bg);
     M5.Display.setTextDatum(MC_DATUM);
-    M5.Display.setTextSize(2);
+    M5.Display.setTextSize(3);
     M5.Display.drawString(label, x + w / 2, y + h / 2);
 }
 
@@ -381,18 +384,19 @@ void drawHeader()
 {
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(3);
+    M5.Display.drawString(headerBrand(), 16, 12);
     M5.Display.setTextSize(2);
-    M5.Display.drawString(headerBrand(), 16, 16);
-    M5.Display.setTextSize(1);
-    M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 48);
+    M5.Display.drawString(headerDeviceName() + "  " + String(PAPERMONO_FW_VERSION), 16, 52);
     String page = pageName(currentPage);
     if (page != headerBrand()) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString(page, 16, 68);
+        M5.Display.drawString(page, 16, 80);
     }
     int W = M5.Display.width();
-    drawPadlockIcon(W - 64, 10, 52, true);
-    drawBatteryBadge(W - 80, 40, tabletBat, true);
+    M5.Display.drawRoundRect(W - 88, 4, 82, 82, 14, TFT_BLACK);
+    drawPadlockIcon(W - 80, 10, 70, true);
+    drawBatteryBadge(W - 96, 48, tabletBat, true);
     M5.Display.setTextDatum(TL_DATUM);
 }
 
@@ -402,15 +406,15 @@ void drawPager()
     int W = M5.Display.width();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(BC_DATUM);
-    M5.Display.setTextSize(2);
-    M5.Display.drawString("A next     B prev", W / 2, H - 12);
+    M5.Display.setTextSize(3);
+    M5.Display.drawString("A next     B prev", W / 2, H - 14);
 }
 
 void drawKv(const char *label, const String &value, int y)
 {
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(2);
+    M5.Display.setTextSize(3);
     String left = String(label);
     while (left.length() < 11) {
         left += " ";
@@ -434,14 +438,14 @@ void drawHome(bool forceFull)
     String bat = battery >= 0 ? (String(battery) + "%") : String("--");
     M5.Display.drawString(bat, 16, 110);
 
-    M5.Display.setTextSize(2);
+    M5.Display.setTextSize(3);
     M5.Display.drawString("Charging  " + charging, 16, 210);
-    M5.Display.drawString("State     " + state, 16, 250);
-    M5.Display.drawString("Head      " + head, 16, 290);
-    M5.Display.drawString("Error     " + String(errorCode), 16, 330);
+    M5.Display.drawString("State     " + state, 16, 258);
+    M5.Display.drawString("Head      " + head, 16, 306);
+    M5.Display.drawString("Error     " + String(errorCode), 16, 354);
     if (lastError.length()) {
-        M5.Display.setTextSize(1);
-        M5.Display.drawString(lastError.substring(0, 40), 16, 372);
+        M5.Display.setTextSize(2);
+        M5.Display.drawString(lastError.substring(0, 28), 16, 400);
     }
 
     int bw, bh, gap, y0;
@@ -471,8 +475,8 @@ void drawStatusPage(bool forceFull)
     drawKv("Error", errorLabel, 380);
     drawKv("Rain", rainLabel, 420);
     if (lastError.length()) {
-        M5.Display.setTextSize(1);
-        M5.Display.drawString(lastError.substring(0, 40), 16, 468);
+        M5.Display.setTextSize(2);
+        M5.Display.drawString(lastError.substring(0, 28), 16, 468);
     }
     drawPager();
     finishEpdFrame();
@@ -484,7 +488,7 @@ void drawHealthPage(bool forceFull)
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     int y = 112;
-    const int step = 42;
+    const int step = 48;
     drawKv("Conn type", connectionType, y); y += step;
     drawKv("Conn stat", connectionStatus, y); y += step;
     drawKv("WiFi", wifiNetwork, y); y += step;
@@ -523,14 +527,13 @@ void drawPlansPage(bool forceFull)
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(1);
+    M5.Display.setTextSize(2);
     M5.Display.drawString(planActivity.length() ? planActivity : "idle", 16, 108);
     if (plansNote.length() && planCount == 0) {
         M5.Display.setTextSize(2);
         M5.Display.drawString(plansNote.substring(0, 22), 16, 180);
-        M5.Display.setTextSize(1);
         if (plansNote.length() > 22) {
-            M5.Display.drawString(plansNote.substring(22, 48), 16, 214);
+            M5.Display.drawString(plansNote.substring(22, 44), 16, 214);
         }
     }
 
@@ -577,7 +580,6 @@ void drawHousePage(bool forceFull)
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(1);
     if (homeCount == 0) {
         M5.Display.setTextSize(2);
         M5.Display.drawString("Assign lights in", 16, 180);
@@ -627,14 +629,14 @@ void drawNotePage(bool forceFull)
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(2);
     M5.Display.drawString("Vestaboard view", 16, 118);
-    M5.Display.setTextSize(1);
+    M5.Display.setTextSize(2);
     if (!vestaboardOn) {
-        M5.Display.drawString("Enable the Note in panel Settings.", 16, 156);
+        M5.Display.drawString("Enable the Note in panel Settings.", 16, 160);
     } else {
-        M5.Display.drawString("Tap a view.", 16, 156);
+        M5.Display.drawString("Tap a view.", 16, 160);
     }
     if (lastError.length()) {
-        M5.Display.drawString(lastError.substring(0, 40), 16, 188);
+        M5.Display.drawString(lastError.substring(0, 28), 16, 196);
     }
     int bw, bh, gap, y0;
     layoutButtons(bw, bh, gap, y0);
@@ -663,8 +665,8 @@ void drawLymowPage(bool forceFull)
     drawKv("State", lymowState, 220);
     drawKv("Charging", lymowCharging, 260);
     if (lastError.length()) {
-        M5.Display.setTextSize(1);
-        M5.Display.drawString(lastError.substring(0, 40), 16, 320);
+        M5.Display.setTextSize(2);
+        M5.Display.drawString(lastError.substring(0, 28), 16, 320);
     }
     drawPager();
     finishEpdFrame();
@@ -683,8 +685,8 @@ void drawPowerwallPage(bool forceFull)
     drawKv("Solar", powerwallSolar, 220);
     drawKv("Draw", powerwallLoad, 260);
     if (lastError.length()) {
-        M5.Display.setTextSize(1);
-        M5.Display.drawString(lastError.substring(0, 40), 16, 320);
+        M5.Display.setTextSize(2);
+        M5.Display.drawString(lastError.substring(0, 28), 16, 320);
     }
     drawPager();
     finishEpdFrame();
@@ -780,12 +782,28 @@ void powerOffTablet()
     M5.Power.powerOff();
 }
 
+void paintRadioDraft(int x, int y)
+{
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setFont(&fonts::Font2);
+    M5.Display.setTextSize(3);
+    String draft = radioDraft.length() ? radioDraft : String("Type here");
+    if (draft.length() > 14) {
+        draft = draft.substring(draft.length() - 14);
+    }
+    M5.Display.drawString(draft, x, y + 4);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(String(radioDraft.length()) + "/" + String(PAPERMONO_MSG_CHARS), x, y + 64);
+    M5.Display.setFont(&fonts::Font0);
+}
+
 void updateRadioDraft()
 {
     const int x = 16;
-    const int y = 214;
+    const int y = PAPERMONO_DRAFT_Y;
     const int w = M5.Display.width() - 32;
-    const int h = 44;
+    const int h = PAPERMONO_DRAFT_H;
     M5.Display.waitDisplay();
     if (partialRefreshCount >= 10) {
         drawScreen(false);
@@ -794,15 +812,7 @@ void updateRadioDraft()
     M5.Display.setEpdMode(epd_mode_t::epd_fastest);
     M5.Display.startWrite();
     M5.Display.fillRect(x, y, w, h, TFT_WHITE);
-    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(1);
-    String draft = radioDraft.length() ? radioDraft : String("(type a message)");
-    if (draft.length() > 42) {
-        draft = draft.substring(draft.length() - 42);
-    }
-    M5.Display.drawString(draft, x, y);
-    M5.Display.drawString(String(radioDraft.length()) + "/" + String(PAPERMONO_MSG_CHARS), x, y + 18);
+    paintRadioDraft(x, y);
     M5.Display.endWrite();
     M5.Display.display(x, y, w, h);
     partialRefreshCount++;
@@ -870,10 +880,10 @@ void drawWifiIcon(int cx, int cy, int size, bool connected)
 
 void drawBatteryBadge(int right, int cy, int pct, bool compact)
 {
-    const int w = compact ? 72 : 160;
-    const int h = compact ? 28 : 72;
-    const int cap = compact ? 6 : 12;
-    const int radius = compact ? 5 : 12;
+    const int w = compact ? 92 : 160;
+    const int h = compact ? 36 : 72;
+    const int cap = compact ? 8 : 12;
+    const int radius = compact ? 6 : 12;
     int x = right - w - cap;
     int y = cy - h / 2;
     int level = constrain(pct, 0, 100);
@@ -885,7 +895,7 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
         M5.Display.fillRect(x + 3, y + 3, fillw, h - 6, TFT_BLACK);
     }
     M5.Display.setTextDatum(MC_DATUM);
-    M5.Display.setTextSize(compact ? 1 : 3);
+    M5.Display.setTextSize(compact ? 2 : 3);
     bool invert = fillw > (w / 2);
     M5.Display.setTextColor(invert ? TFT_WHITE : TFT_BLACK, invert ? TFT_BLACK : TFT_WHITE);
     String s = pct >= 0 ? (String(pct) + "%") : String("--");
@@ -1086,7 +1096,8 @@ void enterLock()
 {
     screenLocked = true;
     offConfirm = false;
-    applyFrontlight(false);
+    lastLight = millis();
+    applyFrontlight(true);
     drawLockScreen(false);
     lastDrawnKey = screenKey();
 }
@@ -1109,7 +1120,7 @@ void drawBoardPage(bool forceFull)
     int gridW = 15 * cell + 14 * gap;
     drawVestaboardGrid((M5.Display.width() - gridW) / 2, 130, cell, gap);
     M5.Display.setTextDatum(TC_DATUM);
-    M5.Display.setTextSize(1);
+    M5.Display.setTextSize(2);
     M5.Display.drawString("live Vestaboard", M5.Display.width() / 2, 250);
     drawPager();
     finishEpdFrame();
@@ -1130,26 +1141,31 @@ const char *kbRow(int row)
 void drawKeyboard(int y0)
 {
     int W = M5.Display.width();
+    M5.Display.setFont(&fonts::Font2);
     for (int r = 0; r < 3; r++) {
         const char *row = kbRow(r);
         int n = strlen(row);
-        int keyW = (W - 20) / n;
-        int y = y0 + r * 42;
+        int keyW = (W - 16) / n;
+        int y = y0 + r * PAPERMONO_KB_ROW;
         for (int i = 0; i < n; i++) {
-            int x = 10 + i * keyW;
-            M5.Display.drawRect(x, y, keyW - 4, 38, TFT_BLACK);
+            int x = 8 + i * keyW;
+            M5.Display.fillRoundRect(x, y, keyW - 6, PAPERMONO_KB_ROW - 10, 8, TFT_WHITE);
+            M5.Display.drawRoundRect(x, y, keyW - 6, PAPERMONO_KB_ROW - 10, 8, TFT_BLACK);
             M5.Display.setTextDatum(MC_DATUM);
-            M5.Display.setTextSize(1);
+            M5.Display.setTextSize(3);
+            M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
             String s;
             s += row[i];
-            M5.Display.drawString(s, x + (keyW - 4) / 2, y + 19);
+            M5.Display.drawString(s, x + (keyW - 6) / 2, y + (PAPERMONO_KB_ROW - 10) / 2);
         }
     }
-    int y = y0 + 3 * 42;
-    drawButton(16, y, 90, 44, kbNumbers ? "ABC" : "123", false);
-    drawButton(114, y, 180, 44, "SPACE", false);
-    drawButton(302, y, 70, 44, "DEL", false);
-    drawButton(380, y, 84, 44, "SEND", true);
+    M5.Display.setFont(&fonts::Font0);
+    int y = y0 + 3 * PAPERMONO_KB_ROW;
+    int ah = PAPERMONO_KB_ACTION;
+    drawButton(8, y, 100, ah, kbNumbers ? "ABC" : "123", false);
+    drawButton(116, y, 160, ah, "SPACE", false);
+    drawButton(284, y, 90, ah, "DEL", false);
+    drawButton(382, y, 90, ah, "SEND", true);
 }
 
 void drawRadioPage(bool forceFull)
@@ -1159,38 +1175,24 @@ void drawRadioPage(bool forceFull)
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(1);
-    String path = loraReady() ? "LoRa + Wi-Fi fallback" : "Wi-Fi only";
-    M5.Display.drawString(path, 16, 108);
     M5.Display.setTextSize(2);
+    String path = loraReady() ? "LoRa + Wi-Fi" : "Wi-Fi only";
+    M5.Display.drawString(path, 16, 100);
+    M5.Display.setTextSize(3);
     String toLabel = "ALL";
     if (radioToIndex > 0 && radioToIndex <= peerCount) {
         toLabel = peerNames[radioToIndex - 1];
     }
-    M5.Display.drawString("To  " + toLabel, 16, 128);
-    M5.Display.setTextSize(1);
-    int y = 158;
-    int shown = min(3, inboxCount);
-    for (int i = inboxCount - shown; i < inboxCount; i++) {
-        if (i < 0) continue;
-        String line = inboxFrom[i] + ": " + inboxText[i];
-        if (line.length() > 42) line = line.substring(0, 42);
-        M5.Display.drawString(line, 16, y);
-        y += 18;
-    }
-    M5.Display.setTextSize(1);
-    String draft = radioDraft.length() ? radioDraft : String("(type a message)");
-    if (draft.length() > 42) draft = draft.substring(draft.length() - 42);
-    M5.Display.drawString(draft, 16, 220);
-    M5.Display.drawString(String(radioDraft.length()) + "/" + String(PAPERMONO_MSG_CHARS), 16, 238);
+    M5.Display.drawString("To  " + toLabel, 16, 126);
+    paintRadioDraft(16, PAPERMONO_DRAFT_Y);
     int n = min(4, peerCount + 1);
     int pw = (M5.Display.width() - 24) / n;
     for (int i = 0; i < n; i++) {
         const char *lab = i == 0 ? "ALL" : peerNames[i - 1].c_str();
         bool on = radioToIndex == i;
-        drawButton(12 + i * pw, 258, pw - 8, 40, lab, on);
+        drawButton(12 + i * pw, PAPERMONO_PEER_Y, pw - 8, 56, lab, on);
     }
-    drawKeyboard(310);
+    drawKeyboard(PAPERMONO_KB_Y0);
     drawPager();
     finishEpdFrame();
 }
@@ -1205,23 +1207,25 @@ void drawDevicePage(bool forceFull)
     M5.Display.setTextSize(5);
     String bat = tabletBat >= 0 ? (String(tabletBat) + "%") : String("--");
     M5.Display.drawString(bat, 16, 110);
+    M5.Display.setTextSize(5);
+    M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), 16, 200);
     M5.Display.setTextSize(2);
-    M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), 16, 210);
-    M5.Display.setTextSize(1);
-    M5.Display.drawString(clockDate, 16, 250);
-    M5.Display.drawString("Tablet battery  ·  " + deviceName, 16, 280);
+    M5.Display.drawString(clockDate, 16, 268);
+    M5.Display.drawString(deviceName, 16, 304);
+    int H = M5.Display.height();
+    int offY = H - 200;
+    int offH = 120;
     if (offConfirm) {
-        drawButton(16, 360, 208, 88, "CANCEL", false);
-        drawButton(248, 360, 208, 88, "OFF NOW", true);
+        drawButton(16, offY, 208, offH, "CANCEL", false);
+        drawButton(248, offY, 208, offH, "OFF NOW", true);
         M5.Display.setTextDatum(TL_DATUM);
-        M5.Display.setTextSize(1);
-        M5.Display.drawString("Power off this tablet?", 16, 330);
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Power off this tablet?", 16, offY - 36);
     } else {
-        drawButton(16, 360, 440, 88, "OFF", true);
+        drawButton(16, offY, 448, offH, "OFF", true);
         M5.Display.setTextDatum(TL_DATUM);
-        M5.Display.setTextSize(1);
-        M5.Display.drawString("Full power off. Side button turns it on.", 16, 330);
-        M5.Display.drawString("Hold power 2s is flash mode, not off.", 16, 348);
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Side button also turns the tablet off.", 16, offY - 36);
     }
     drawPager();
     finishEpdFrame();
@@ -1306,15 +1310,15 @@ void drawSetup()
     M5.Display.drawString("PaperMono", 16, 28);
     M5.Display.setTextSize(2);
     M5.Display.drawString("setup", 16, 78);
-    M5.Display.setTextSize(1);
+    M5.Display.setTextSize(2);
     M5.Display.drawString("1. Plug USB into the computer", 16, 140);
-    M5.Display.drawString("   running this Yarbo panel.", 16, 162);
-    M5.Display.drawString("2. Open Settings, then", 16, 198);
-    M5.Display.drawString("   PaperMono companion.", 16, 220);
-    M5.Display.drawString("3. Flash firmware and send", 16, 256);
-    M5.Display.drawString("   2.4 GHz Wi-Fi from that page.", 16, 278);
-    M5.Display.drawString("Keep this cable connected", 16, 330);
-    M5.Display.drawString("until CFG_OK.", 16, 352);
+    M5.Display.drawString("   running this Yarbo panel.", 16, 172);
+    M5.Display.drawString("2. Open Settings, then", 16, 216);
+    M5.Display.drawString("   PaperMono companion.", 16, 248);
+    M5.Display.drawString("3. Flash firmware and send", 16, 292);
+    M5.Display.drawString("   2.4 GHz Wi-Fi from that page.", 16, 324);
+    M5.Display.drawString("Keep this cable connected", 16, 380);
+    M5.Display.drawString("until CFG_OK.", 16, 412);
     finishEpdFrame();
     lastDrawnKey = "setup";
 }
@@ -1342,7 +1346,19 @@ bool tapOnPager(int y)
 
 bool tapOnPadlock(int x, int y)
 {
-    return x >= M5.Display.width() - 88 && y >= 0 && y <= 96;
+    int W = M5.Display.width();
+    int maps = lockAxisMap >= 0 ? 1 : 32;
+    for (int i = 0; i < maps; i++) {
+        int map = lockAxisMap >= 0 ? lockAxisMap : i;
+        int ox = x;
+        int oy = y;
+        lockApplyMap(map, x, y, ox, oy);
+        if (ox >= W - 140 && oy >= 0 && oy <= 140) {
+            lockAxisMap = map;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool tapOnUnlock(int x, int y)
@@ -1665,41 +1681,29 @@ bool sendRadioMessage()
 
 int keyboardHit(int x, int y)
 {
-    int y0 = 310;
-    if (y < y0 || y > y0 + 3 * 42 + 44) {
+    int y0 = PAPERMONO_KB_Y0;
+    int rowH = PAPERMONO_KB_ROW;
+    int actionH = PAPERMONO_KB_ACTION;
+    if (y < y0 || y > y0 + 3 * rowH + actionH) {
         return -1;
     }
-    if (y >= y0 + 3 * 42) {
-        if (x < 110) return 100;
-        if (x < 300) return 101;
-        if (x < 372) return 102;
+    if (y >= y0 + 3 * rowH) {
+        if (x < 114) return 100;
+        if (x < 280) return 101;
+        if (x < 378) return 102;
         return 103;
     }
-    int row = (y - y0) / 42;
+    int row = (y - y0) / rowH;
     const char *keys = kbRow(row);
     int n = strlen(keys);
-    int keyW = (M5.Display.width() - 20) / n;
-    int i = (x - 10) / keyW;
+    int keyW = (M5.Display.width() - 16) / n;
+    int i = (x - 8) / keyW;
     if (i < 0 || i >= n) return -1;
     return (row * 32) + i;
 }
 
-void handleRadioTouch(int x, int y)
+void applyRadioHit(int hit)
 {
-    int n = min(4, peerCount + 1);
-    int pw = (M5.Display.width() - 24) / n;
-    if (y >= 258 && y <= 298) {
-        int i = (x - 12) / pw;
-        if (i >= 0 && i < n) {
-            radioToIndex = i;
-            drawScreen(false);
-        }
-        return;
-    }
-    int hit = keyboardHit(x, y);
-    if (hit < 0) {
-        return;
-    }
     if (hit == 100) {
         kbNumbers = !kbNumbers;
         drawScreen(false);
@@ -1728,21 +1732,73 @@ void handleRadioTouch(int x, int y)
     }
 }
 
+void handleRadioTouch(int x, int y)
+{
+    int maps = lockAxisMap >= 0 ? 1 : 32;
+    for (int i = 0; i < maps; i++) {
+        int map = lockAxisMap >= 0 ? lockAxisMap : i;
+        int ox = x;
+        int oy = y;
+        if (lockAxisMap < 0) {
+            lockApplyMap(map, x, y, ox, oy);
+        } else {
+            ox = x;
+            oy = y;
+        }
+        int n = min(4, peerCount + 1);
+        int pw = (M5.Display.width() - 24) / n;
+        if (oy >= PAPERMONO_PEER_Y && oy <= PAPERMONO_PEER_Y + 56) {
+            int idx = (ox - 12) / pw;
+            if (idx >= 0 && idx < n) {
+                lockAxisMap = map;
+                radioToIndex = idx;
+                drawScreen(false);
+                return;
+            }
+        }
+        int hit = keyboardHit(ox, oy);
+        if (hit >= 0) {
+            lockAxisMap = map;
+            applyRadioHit(hit);
+            return;
+        }
+    }
+}
+
+void applyDeviceOffTap(int x)
+{
+    if (offConfirm) {
+        if (x < 240) {
+            offConfirm = false;
+            drawScreen(false);
+        } else {
+            powerOffTablet();
+        }
+    } else {
+        offConfirm = true;
+        drawScreen(false);
+    }
+}
+
 void handleDeviceTouch(int x, int y)
 {
-    if (y >= 360 && y <= 448) {
-        if (offConfirm) {
-            if (x < 240) {
-                offConfirm = false;
-                drawScreen(false);
-            } else {
-                powerOffTablet();
-            }
-        } else {
-            offConfirm = true;
-            drawScreen(false);
+    int H = M5.Display.height();
+    int offY = H - 200;
+    if (lockAxisMap >= 0) {
+        if (y >= offY - 10 && y <= H - 40) {
+            applyDeviceOffTap(x);
         }
         return;
+    }
+    for (int map = 0; map < 32; map++) {
+        int ox = 0;
+        int oy = 0;
+        lockApplyMap(map, x, y, ox, oy);
+        if (oy >= offY - 10 && oy <= H - 40) {
+            lockAxisMap = map;
+            applyDeviceOffTap(ox);
+            return;
+        }
     }
 }
 
@@ -1770,7 +1826,7 @@ void drawOtaScreen()
     M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextSize(3);
     M5.Display.drawString("UPDATING", M5.Display.width() / 2, M5.Display.height() / 2 - 40);
-    M5.Display.setTextSize(1);
+    M5.Display.setTextSize(2);
     M5.Display.drawString("Stay on Wi-Fi. Do not power off.", M5.Display.width() / 2, M5.Display.height() / 2 + 16);
     finishEpdFrame();
 }
@@ -2124,6 +2180,7 @@ void setup()
     M5.begin(cfg);
     M5.Display.setRotation(0);
     M5.Display.setAutoDisplay(false);
+    M5.BtnPWR.setHoldThresh(1500);
     M5.Speaker.begin();
     SPIFFS.begin(true);
     loadConfig();
@@ -2163,13 +2220,8 @@ void loop()
         return;
     }
 
-    if (M5.BtnPWR.wasClicked()) {
-        if (!screenLocked) {
-            enterLock();
-        } else {
-            lastLight = millis();
-            applyFrontlight(true);
-        }
+    if (M5.BtnPWR.wasReleased() && !M5.BtnPWR.wasHold()) {
+        powerOffTablet();
     }
 
     uint32_t now = millis();
@@ -2187,38 +2239,40 @@ void loop()
         if (screenLocked) {
             handleLockTouch(tx, ty);
         } else {
-            if (lockAxisMap >= 0) {
-                int ox = 0;
-                int oy = 0;
-                lockApplyMap(lockAxisMap, tx, ty, ox, oy);
-                tx = ox;
-                ty = oy;
-            }
             noteActivity();
             if (tapOnPadlock(tx, ty)) {
                 enterLock();
-            } else if (currentPage == PAPERMONO_PAGE_HOME) {
-                int which = homeButtonAt(tx, ty);
-                if (which == 1) {
-                    runCommand("stop");
-                } else if (which == 2) {
-                    runCommand("return_to_dock");
-                } else if (which == 3) {
-                    runCommand(state == "active" ? "pause" : "resume");
-                } else if (which == 4) {
-                    lightsOn = !lightsOn;
-                    runCommand(lightsOn ? "lights_on" : "lights_off");
+            } else {
+                if (lockAxisMap >= 0) {
+                    int ox = 0;
+                    int oy = 0;
+                    lockApplyMap(lockAxisMap, tx, ty, ox, oy);
+                    tx = ox;
+                    ty = oy;
                 }
-            } else if (currentPage == PAPERMONO_PAGE_PLANS) {
-                handlePlansTouch(tx, ty);
-            } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
-                handleHouseTouch(tx, ty);
-            } else if (currentPage == PAPERMONO_PAGE_NOTE) {
-                handleNoteTouch(tx, ty);
-            } else if (currentPage == PAPERMONO_PAGE_RADIO) {
-                handleRadioTouch(tx, ty);
-            } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
-                handleDeviceTouch(tx, ty);
+                if (currentPage == PAPERMONO_PAGE_HOME) {
+                    int which = homeButtonAt(tx, ty);
+                    if (which == 1) {
+                        runCommand("stop");
+                    } else if (which == 2) {
+                        runCommand("return_to_dock");
+                    } else if (which == 3) {
+                        runCommand(state == "active" ? "pause" : "resume");
+                    } else if (which == 4) {
+                        lightsOn = !lightsOn;
+                        runCommand(lightsOn ? "lights_on" : "lights_off");
+                    }
+                } else if (currentPage == PAPERMONO_PAGE_PLANS) {
+                    handlePlansTouch(tx, ty);
+                } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
+                    handleHouseTouch(tx, ty);
+                } else if (currentPage == PAPERMONO_PAGE_NOTE) {
+                    handleNoteTouch(tx, ty);
+                } else if (currentPage == PAPERMONO_PAGE_RADIO) {
+                    handleRadioTouch(tx, ty);
+                } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
+                    handleDeviceTouch(tx, ty);
+                }
             }
         }
     }

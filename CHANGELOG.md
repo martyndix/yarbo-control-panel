@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.24] - 2026-09-27
+
+### Changed
+- PaperMono Radio keyboard uses a real Latin font at readable size; typed text is much larger. Labels on other pages are enlarged the same way.
+- The header **padlock** is a boxed button and actually locks (touch mapping is applied on unlocked pages). The lock screen stays lit so you can see it change.
+- Short-press the **side button** to power off. **DEVICE → OFF** hit area matches the large button. Hold ~2 seconds is still hardware flash mode. Firmware **0.1.22-beta**.
+
 ## [3.0.23] - 2026-09-27
 
 ### Changed
