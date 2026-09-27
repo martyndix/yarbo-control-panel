@@ -132,9 +132,13 @@ void exitLock();
 void noteActivity();
 void nextPage();
 void prevPage();
+void drawPadlockIcon(int x, int y, int size);
+void drawWifiIcon(int cx, int cy, int size, bool connected);
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
 bool takeTouchPress(int &x, int &y);
 void applyFrontlight(bool on);
+void lockApplyMap(int map, int x, int y, int &ox, int &oy);
+bool tapOnPadlock(int x, int y);
 
 void saveConfig()
 {
@@ -199,9 +203,9 @@ void pollSerialConfig()
     }
 }
 
-void beginEpdFrame(bool forceFull)
+void beginEpdFrame(bool forceQuality)
 {
-    bool full = forceFull || partialRefreshCount >= 10;
+    bool full = forceQuality || partialRefreshCount >= 10;
     M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fastest);
     partialRefreshCount = full ? 0 : (partialRefreshCount + 1);
 }
@@ -380,12 +384,15 @@ void drawHeader()
         M5.Display.drawString(page, 16, 72);
     }
     int logoSize = 180;
+    int W = M5.Display.width();
     bool hasLogo = SPIFFS.exists("/logo.png");
-    int batRight = hasLogo ? (M5.Display.width() - logoSize - 24) : (M5.Display.width() - 16);
+    drawPadlockIcon(W - 64, 10, 52);
+    int batRight = hasLogo ? (W - logoSize - 24) : (W - 80);
     drawBatteryBadge(batRight, 40, tabletBat, true);
     M5.Display.setTextDatum(TL_DATUM);
     if (hasLogo) {
-        M5.Display.drawPngFile(SPIFFS, "/logo.png", M5.Display.width() - logoSize - 16, 16, logoSize, logoSize);
+        M5.Display.drawPngFile(SPIFFS, "/logo.png", W - logoSize - 16, 16, logoSize, logoSize);
+        drawPadlockIcon(W - 64, 10, 52);
     }
 }
 
@@ -439,7 +446,7 @@ void drawKv(const char *label, const String &value, int y)
 
 void drawHome(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
 
@@ -471,7 +478,7 @@ void drawHome(bool forceFull)
 
 void drawStatusPage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -495,7 +502,7 @@ void drawStatusPage(bool forceFull)
 
 void drawHealthPage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     int y = 112;
@@ -533,7 +540,7 @@ int plansStartY()
 
 void drawPlansPage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -587,7 +594,7 @@ void drawPlansPage(bool forceFull)
 
 void drawHousePage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -635,7 +642,7 @@ void drawHousePage(bool forceFull)
 
 void drawNotePage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -667,7 +674,7 @@ void drawNotePage(bool forceFull)
 
 void drawLymowPage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -687,7 +694,7 @@ void drawLymowPage(bool forceFull)
 
 void drawPowerwallPage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -774,6 +781,37 @@ void applyFrontlight(bool on)
 {
     lightOn = on;
     M5.Display.setBrightness(on ? brightnessValue() : 0);
+}
+
+void drawPadlockIcon(int x, int y, int size)
+{
+    int bodyW = (size * 3) / 5;
+    int bodyH = size / 2;
+    int bx = x + (size - bodyW) / 2;
+    int by = y + size / 2;
+    int sx = x + size / 2;
+    int shackle = bodyW / 3;
+    M5.Display.drawCircle(sx, by - 2, shackle, TFT_BLACK);
+    M5.Display.fillRect(sx - shackle - 1, by - 2, shackle * 2 + 2, shackle + 4, TFT_WHITE);
+    M5.Display.drawLine(sx - shackle, by - 2, sx - shackle, by, TFT_BLACK);
+    M5.Display.drawLine(sx + shackle, by - 2, sx + shackle, by, TFT_BLACK);
+    M5.Display.fillRoundRect(bx, by, bodyW, bodyH, 4, TFT_BLACK);
+}
+
+void drawWifiIcon(int cx, int cy, int size, bool connected)
+{
+    int yDot = cy + size / 4;
+    int dot = max(2, size / 10);
+    M5.Display.fillCircle(cx, yDot, dot, TFT_BLACK);
+    for (int i = 1; i <= 3; i++) {
+        int r = (size * i) / 5;
+        M5.Display.drawCircle(cx, yDot, r, TFT_BLACK);
+    }
+    M5.Display.fillRect(cx - size, yDot + 1, size * 2, size, TFT_WHITE);
+    if (!connected) {
+        M5.Display.drawLine(cx - size / 2, cy - size / 3, cx + size / 2, cy + size / 2, TFT_BLACK);
+        M5.Display.drawLine(cx - size / 2 + 2, cy - size / 3, cx + size / 2 + 2, cy + size / 2, TFT_BLACK);
+    }
 }
 
 void drawBatteryBadge(int right, int cy, int pct, bool compact)
@@ -929,7 +967,7 @@ void noteActivity()
 
 void drawLockScreen(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     int W = M5.Display.width();
@@ -944,6 +982,7 @@ void drawLockScreen(bool forceFull)
         M5.Display.setTextSize(2);
         M5.Display.drawString(String(unreadCount) + " MSG", W / 2, 188);
     }
+    drawWifiIcon(W / 2 - 120, 220, 56, WiFi.status() == WL_CONNECTED);
     drawBatteryBadge(W / 2 + 86, 220, tabletBat, false);
 
     bool showLogo = lockScreen != "vestaboard" || !vestaboardOn;
@@ -990,10 +1029,9 @@ void enterLock()
 {
     screenLocked = true;
     unlockStep = 0;
-    lockAxisMap = -1;
     offConfirm = false;
     applyFrontlight(false);
-    drawLockScreen(true);
+    drawLockScreen(false);
     lastDrawnKey = screenKey();
 }
 
@@ -1001,15 +1039,14 @@ void exitLock()
 {
     screenLocked = false;
     unlockStep = 0;
-    lockAxisMap = -1;
     noteActivity();
     applyFrontlight(true);
-    drawScreen(true);
+    drawScreen(false);
 }
 
 void drawBoardPage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     int cell = 26;
@@ -1062,7 +1099,7 @@ void drawKeyboard(int y0)
 
 void drawRadioPage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1105,7 +1142,7 @@ void drawRadioPage(bool forceFull)
 
 void drawDevicePage(bool forceFull)
 {
-    beginEpdFrame(forceFull);
+    beginEpdFrame(false);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1129,6 +1166,7 @@ void drawDevicePage(bool forceFull)
         M5.Display.setTextDatum(TL_DATUM);
         M5.Display.setTextSize(1);
         M5.Display.drawString("Full power off. Side button turns it on.", 16, 330);
+        M5.Display.drawString("Hold power 2s is flash mode, not off.", 16, 348);
     }
     drawPager();
     M5.Display.display();
@@ -1244,6 +1282,27 @@ int homeButtonAt(int x, int y)
 bool tapOnPager(int y)
 {
     return y >= M5.Display.height() - 48;
+}
+
+bool tapOnPadlock(int x, int y)
+{
+    int W = M5.Display.width();
+    if (x >= W - 88 && y >= 0 && y <= 96) {
+        return true;
+    }
+    if (lockAxisMap >= 0) {
+        return false;
+    }
+    for (int map = 0; map < 16; map++) {
+        int ox = 0;
+        int oy = 0;
+        lockApplyMap(map, x, y, ox, oy);
+        if (ox >= W - 88 && oy >= 0 && oy <= 96) {
+            lockAxisMap = map;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool syncPaperLogo(const String &hash)
@@ -1608,8 +1667,7 @@ void handleLockTouch(int x, int y)
     uint32_t now = millis();
     if (unlockStep == 1 && now - unlockStepAt > 10000) {
         unlockStep = 0;
-        lockAxisMap = -1;
-        drawLockScreen(true);
+        drawLockScreen(false);
         lastDrawnKey = screenKey();
     }
     if (unlockStep == 0) {
@@ -1637,7 +1695,7 @@ void handleLockTouch(int x, int y)
                 lockAxisMap = order[i];
                 unlockStep = 1;
                 unlockStepAt = now;
-                drawLockScreen(true);
+                drawLockScreen(false);
                 lastDrawnKey = screenKey();
                 return;
             }
@@ -1654,8 +1712,7 @@ void handleLockTouch(int x, int y)
         return;
     }
     unlockStep = 0;
-    lockAxisMap = -1;
-    drawLockScreen(true);
+    drawLockScreen(false);
     lastDrawnKey = screenKey();
 }
 
@@ -2034,7 +2091,7 @@ void setup()
 {
     Serial.begin(115200);
     auto cfg = M5.config();
-    cfg.clear_display = true;
+    cfg.clear_display = false;
     M5.begin(cfg);
     M5.Display.setRotation(0);
     M5.Speaker.begin();
@@ -2071,7 +2128,7 @@ void loop()
         return;
     }
 
-    if (M5.BtnPWR.wasClicked() || M5.BtnPWR.wasHold()) {
+    if (M5.BtnPWR.wasClicked()) {
         if (!screenLocked) {
             enterLock();
         } else {
@@ -2081,7 +2138,8 @@ void loop()
     }
 
     uint32_t now = millis();
-    if (!otaBusy && !screenLocked && wifiSsid.length() && now - lastActivity > (uint32_t) lockAfterS * 1000) {
+    if (!otaBusy && !screenLocked && WiFi.status() == WL_CONNECTED
+        && now - lastActivity > (uint32_t) lockAfterS * 1000) {
         enterLock();
     }
     if (screenLocked && lightOn && now - lastLight > (uint32_t) lightOffS * 1000) {
@@ -2093,9 +2151,18 @@ void loop()
     if (takeTouchPress(tx, ty)) {
         if (screenLocked) {
             handleLockTouch(tx, ty);
-        } else if (WiFi.status() == WL_CONNECTED) {
+        } else {
+            if (lockAxisMap >= 0) {
+                int ox = 0;
+                int oy = 0;
+                lockApplyMap(lockAxisMap, tx, ty, ox, oy);
+                tx = ox;
+                ty = oy;
+            }
             noteActivity();
-            if (currentPage == PAPERMONO_PAGE_HOME) {
+            if (tapOnPadlock(tx, ty)) {
+                enterLock();
+            } else if (currentPage == PAPERMONO_PAGE_HOME) {
                 int which = homeButtonAt(tx, ty);
                 if (which == 0) {
                     nextPage();
@@ -2125,6 +2192,16 @@ void loop()
         }
     }
 
+    if (!screenLocked) {
+        if (M5.BtnA.wasPressed()) {
+            noteActivity();
+            nextPage();
+        } else if (M5.BtnB.wasPressed()) {
+            noteActivity();
+            prevPage();
+        }
+    }
+
     if (WiFi.status() != WL_CONNECTED) {
         static uint32_t lastJoinDraw = 0;
         if (!screenLocked && now - lastJoinDraw > 20000) {
@@ -2134,16 +2211,6 @@ void loop()
         }
         delay(30);
         return;
-    }
-
-    if (!screenLocked) {
-        if (M5.BtnA.wasPressed()) {
-            noteActivity();
-            nextPage();
-        } else if (M5.BtnB.wasPressed()) {
-            noteActivity();
-            prevPage();
-        }
     }
 
     if (now - lastPoll > PAPERMONO_POLL_MS) {

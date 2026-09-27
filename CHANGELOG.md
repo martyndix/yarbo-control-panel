@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.21] - 2026-09-27
+
+### Changed
+- PaperMono uses the **fast** e-paper waveform for page changes (full quality refresh only every 10 updates). The factory demo felt quick for the same reason.
+- PaperMono no longer auto-locks while Wi-Fi is down. Pages stay usable offline; Stop/Dock and other panel commands still need the server.
+- Lock screen is a **padlock** on every page (top right). Short-press the side button also locks. Hold 2 seconds is still hardware flash mode — power off is **DEVICE → OFF**.
+- Lock screen shows a Wi-Fi icon, or the same icon with a slash when it is not connected. Firmware **0.1.19-beta**.
+
 ## [3.0.20] - 2026-09-27
 
 ### Fixed
