@@ -33,23 +33,79 @@ function vestaboard_status_payload(?array $parsed, bool $online): array
 
 vestaboard_board()->rememberClientTimezoneFromRequest();
 
-function hub_status_extras(): array
+/**
+ * Companion tiles that must still load when the robot is unreachable.
+ *
+ * @return array<string, mixed>
+ */
+function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVestaboard = false): array
 {
     $root = dirname(__DIR__, 2);
     $hub = new YarboHub($root);
+    $powerwall = null;
+    $lymow = null;
+    $home = null;
+    $vestaboard = null;
 
-    return [
-        'hub' => $hub->publicView(),
-        'powerwall' => $hub->enabled(YarboHub::MODULE_POWERWALL)
-            ? (new YarboPowerwall($root))->dashboardPayload()
-            : null,
-        'lymow' => $hub->enabled(YarboHub::MODULE_LYMOW)
+    try {
+        $powerwall = $hub->enabled(YarboHub::MODULE_POWERWALL)
+            ? (new YarboPowerwall($root))->dashboardPayload($allowPowerwallRefresh)
+            : null;
+    } catch (Throwable $e) {
+        $powerwall = ['ok' => false, 'online' => false, 'error' => $e->getMessage()];
+    }
+
+    try {
+        $lymow = $hub->enabled(YarboHub::MODULE_LYMOW)
             ? (new YarboLymow($root))->dashboardPayload()
-            : null,
-        'home' => $hub->enabled(YarboHub::MODULE_HOME)
+            : null;
+    } catch (Throwable $e) {
+        $lymow = ['ok' => false, 'online' => false, 'error' => $e->getMessage()];
+    }
+
+    try {
+        $home = $hub->enabled(YarboHub::MODULE_HOME)
             ? ['enabled' => true]
-            : null,
+            : null;
+    } catch (Throwable) {
+        $home = null;
+    }
+
+    if ($includeVestaboard) {
+        try {
+            $vestaboard = vestaboard_status_payload(null, false);
+        } catch (Throwable) {
+            $vestaboard = ['enabled' => false];
+        }
+    }
+
+    $extras = [
+        'hub' => $hub->publicView(),
+        'powerwall' => $powerwall,
+        'lymow' => $lymow,
+        'home' => $home,
     ];
+    if ($includeVestaboard) {
+        $extras['vestaboard'] = $vestaboard;
+    }
+
+    return $extras;
+}
+
+/**
+ * @param array<string, mixed> $extra
+ */
+function status_failure(string $error, string $stage, int $http = 500, array $extra = []): never
+{
+    json_response(array_merge(
+        [
+            'ok' => false,
+            'stage' => $stage,
+            'error' => $error,
+        ],
+        hub_status_extras(false, true),
+        $extra,
+    ), $http);
 }
 
 function attach_robot_name(array $parsed): array
@@ -105,6 +161,15 @@ function status_from_agent(array $result): void
     ));
 }
 
+$projectRoot = dirname(__DIR__, 2);
+$hub = new YarboHub($projectRoot);
+if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
+    json_response(array_merge(
+        ['ok' => true, 'via' => 'modules', 'yarbo_enabled' => false],
+        hub_status_extras(true, true),
+    ));
+}
+
 // Prefer persistent Python agent so status does not open a competing MQTT session.
 $agent = YarboMqttAgentClient::fromEnv();
 $ping = $agent->ping();
@@ -131,24 +196,23 @@ if ($agentTelemetry) {
         if ($unknown || $disconnected) {
             // PHP fallback agent, or Python still connecting — use a direct read.
         } else {
-            json_response([
-                'ok' => false,
-                'via' => 'agent',
-                'stage' => 'telemetry',
-                'transient' => (bool) ($result['transient'] ?? false),
-                'error' => YarboErrors::friendly($error),
-            ], 504);
+            status_failure(
+                YarboErrors::friendly($error),
+                'telemetry',
+                504,
+                [
+                    'via' => 'agent',
+                    'transient' => (bool) ($result['transient'] ?? false),
+                ],
+            );
         }
     } catch (Throwable $e) {
         $message = $e->getMessage();
         if (!str_contains(strtolower($message), 'mqtt agent is not running')) {
-            json_response([
-                'ok' => false,
+            status_failure(friendly_error($e), 'telemetry', 504, [
                 'via' => 'agent',
-                'stage' => 'telemetry',
                 'transient' => false,
-                'error' => friendly_error($e),
-            ], 504);
+            ]);
         }
     }
 }
@@ -170,22 +234,14 @@ if (!$tcp['ok']) {
         $message = YarboErrors::friendly((string) ($tcp['error'] ?? 'TCP connection failed'));
     }
 
-    json_response([
-        'ok' => false,
-        'stage' => 'tcp',
-        'error' => $message,
-    ] + hub_status_extras(), 500);
+    status_failure($message, 'tcp');
 }
 
 try {
     $client = yarbo_client($config);
     $client->connect();
 } catch (Throwable $e) {
-    json_response([
-        'ok' => false,
-        'stage' => 'connect',
-        'error' => friendly_error($e),
-    ] + hub_status_extras(), 500);
+    status_failure(friendly_error($e), 'connect');
 }
 
 try {
@@ -203,11 +259,11 @@ try {
     $client->disconnect();
 
     if ($raw === null) {
-        json_response([
-            'ok' => false,
-            'stage' => 'telemetry',
-            'error' => friendly_message('telemetry_timeout: No telemetry received within timeout. Check serial number.'),
-        ], 504);
+        status_failure(
+            friendly_message('telemetry_timeout: No telemetry received within timeout. Check serial number.'),
+            'telemetry',
+            504,
+        );
     }
 
     $parsed = attach_robot_name(YarboTelemetry::parseForPanel($raw, $cellTemps, dirname(__DIR__, 2)));
@@ -215,16 +271,12 @@ try {
         ['ok' => true, 'via' => 'direct'],
         $parsed,
         [
-            'wifi' => YarboWifi::parse($wifiEnvelope),
+            'wifi' => YarboWifi::parse(is_array($wifiResponse) ? $wifiResponse : null),
             'vestaboard' => vestaboard_status_payload($parsed, true),
         ],
         hub_status_extras(),
     ));
 } catch (Throwable $e) {
     $client->disconnect();
-    json_response([
-        'ok' => false,
-        'stage' => 'telemetry',
-        'error' => friendly_error($e),
-    ], 500);
+    status_failure(friendly_error($e), 'telemetry');
 }

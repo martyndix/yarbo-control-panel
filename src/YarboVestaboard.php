@@ -742,11 +742,12 @@ final class YarboVestaboard
     {
         $hub = new YarboHub($this->projectRoot);
         $live = $hub->vestaboardLive();
+        $allowRefresh = $online !== false;
         if ($live === YarboHub::LIVE_BATTERIES) {
             return $this->batteriesLayout($parsed, $online);
         }
         if ($live === YarboHub::MODULE_POWERWALL) {
-            return (new YarboPowerwall($this->projectRoot))->vestaboardLayout();
+            return (new YarboPowerwall($this->projectRoot))->vestaboardLayout($allowRefresh);
         }
         if ($live === YarboHub::MODULE_LYMOW) {
             return (new YarboLymow($this->projectRoot))->vestaboardLayout();
@@ -792,7 +793,7 @@ final class YarboVestaboard
         $yarboOnline = $yarboOn && (bool) $online && is_array($parsed);
         $yarboPct = $this->batteryPercentValue($yarboOnline ? $parsed : null);
 
-        $pw = $pwOn ? (new YarboPowerwall($this->projectRoot))->dashboardPayload() : [];
+        $pw = $pwOn ? (new YarboPowerwall($this->projectRoot))->dashboardPayload($online !== false) : [];
         $pwPct = YarboPowerwall::normalizeBatteryPercent($pw['battery_percent'] ?? null);
         $pwOnline = $pwOn && ($pwPct !== null || !empty($pw['online']));
 

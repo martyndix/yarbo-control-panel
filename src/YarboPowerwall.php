@@ -214,11 +214,26 @@ final class YarboPowerwall
      *
      * @return array<string, mixed>
      */
-    public function dashboardPayload(): array
+    public function dashboardPayload(bool $allowRefresh = true): array
     {
         $fresh = $this->readCache(true);
         if ($fresh !== null) {
             return $fresh;
+        }
+        if (!$allowRefresh) {
+            $stale = $this->readCache(false);
+            if ($stale !== null) {
+                return $stale;
+            }
+            $config = $this->load();
+            $error = (string) ($config['last_error'] ?? '');
+
+            return [
+                'ok' => false,
+                'online' => false,
+                'source' => $config['transport'] ?? 'cloud',
+                'error' => $error !== '' ? $error : 'No cached Powerwall reading',
+            ];
         }
 
         return $this->refresh();
@@ -274,9 +289,9 @@ final class YarboPowerwall
     /**
      * @return array{ok: bool, online: bool, lines: list<string>, codes: list<list<int>>, verb: string}
      */
-    public function vestaboardLayout(): array
+    public function vestaboardLayout(bool $allowRefresh = true): array
     {
-        $data = $this->dashboardPayload();
+        $data = $this->dashboardPayload($allowRefresh);
         $online = !empty($data['online']) && (isset($data['battery_percent']) || isset($data['load_w']));
         $batt = self::normalizeBatteryPercent($data['battery_percent'] ?? null);
         $solarW = isset($data['solar_w']) ? (int) round((float) $data['solar_w']) : null;

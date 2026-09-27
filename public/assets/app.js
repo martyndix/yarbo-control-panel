@@ -2339,9 +2339,8 @@ function applyRobotNameSubtitle(name) {
     applyDeviceNameSubtitle();
 }
 
-function applyHubFromStatus(data) {
-    const hub = data?.hub;
-    if (!hub) return;
+function applyModuleSwitcher(hub) {
+    if (!hub) return [];
     const enabled = Array.isArray(hub.enabled) ? hub.enabled : [];
     const ids = enabled.map((m) => m.id);
     if (els.moduleSwitcher) {
@@ -2350,6 +2349,17 @@ function applyHubFromStatus(data) {
             `<button type="button" class="module-switcher-btn" data-module-id="${m.id}">${m.label}</button>`
         )).join('');
     }
+    applyPanelTitle(hub);
+    let active = localStorage.getItem(ACTIVE_MODULE_KEY) || hub.active_module || ids[0] || 'yarbo';
+    if (!ids.includes(active)) active = ids[0] || 'yarbo';
+    setActiveModule(active, false);
+    return ids;
+}
+
+function applyHubFromStatus(data) {
+    const hub = data?.hub;
+    if (!hub) return;
+    const ids = applyModuleSwitcher(hub);
     updatePowerwallDashboard(data.powerwall);
     updateLymowDashboard(data.lymow);
     if (ids.includes('home')) {
@@ -2358,10 +2368,6 @@ function applyHubFromStatus(data) {
     if (data.vestaboard) {
         applyVestaboardLiveSwitch(data);
     }
-    applyPanelTitle(hub);
-    let active = localStorage.getItem(ACTIVE_MODULE_KEY) || hub.active_module || ids[0] || 'yarbo';
-    if (!ids.includes(active)) active = ids[0] || 'yarbo';
-    setActiveModule(active, false);
 }
 
 function setActiveModule(id, persist = true) {
@@ -4389,7 +4395,15 @@ async function loadSettings() {
         if (els.settingsHost) els.settingsHost.value = data.broker_host || '';
         if (els.settingsSerial) els.settingsSerial.value = data.serial || '';
         if (els.settingsHouseName) els.settingsHouseName.value = data.hub?.house_name || '';
-        applyPanelTitle(data.hub);
+        if (data.hub) {
+            applyModuleSwitcher(data.hub);
+            if (data.hub.modules?.home) {
+                loadHomeDashboard();
+            }
+        }
+        if (data.vestaboard) {
+            updateVestaboardDashboard({ vestaboard: data.vestaboard, hub: data.hub });
+        }
         if (els.settingsRobotName) els.settingsRobotName.value = data.robot_name || '';
         if (els.settingsCloudEnabled) els.settingsCloudEnabled.checked = Boolean(data.cloud?.cloud_enabled);
         if (els.settingsCloudEmail) els.settingsCloudEmail.value = data.cloud?.cloud_email || '';
@@ -6109,26 +6123,38 @@ async function fetchStatus() {
     }
     statusAbort = new AbortController();
     const { signal } = statusAbort;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+        timedOut = true;
+        statusAbort.abort();
+    }, 15000);
     try {
         const res = await fetch('/api/status.php', { signal, headers: clientTimezoneHeaders() });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (settingsModalOpen || driveActive) return;
         if (data.ok) {
             hasStatusSnapshot = true;
             setError(null);
             updateStatus(data);
             updateCameraStatus(data.camera_state);
-        } else if (data.transient && hasStatusSnapshot) {
-            applyHubFromStatus(data);
-            return;
         } else {
             applyHubFromStatus(data);
-            setError(data.error || 'Failed to fetch status');
+            updateVestaboardDashboard(data);
+            if (!(data.transient && hasStatusSnapshot)) {
+                setError(data.error || 'Failed to fetch status');
+            }
         }
     } catch (err) {
-        if (err?.name === 'AbortError' || settingsModalOpen || driveActive) return;
+        if (settingsModalOpen || driveActive) return;
+        if (err?.name === 'AbortError') {
+            if (timedOut) {
+                setError('Yarbo status timed out. Other modules should still work.');
+            }
+            return;
+        }
         setError(err.message || 'Network error');
     } finally {
+        clearTimeout(timer);
         polling = false;
     }
 }
@@ -6861,7 +6887,12 @@ setupDrivePad();
 setupBatteryTempClick();
 initAppearance();
 initUpdateConfirmModal();
-loadSettings().catch(() => {});
+loadSettings()
+    .catch(() => {})
+    .finally(() => {
+        fetchStatus();
+        setInterval(fetchStatus, POLL_INTERVAL_MS);
+    });
 bindHomeDashboard();
 document.getElementById('home-setup')?.addEventListener('click', (event) => {
     startHomeSetup(event.currentTarget);
@@ -6940,5 +6971,3 @@ refreshUpdateBadge();
 if (settingsHashPane()) {
     openSettingsModal();
 }
-fetchStatus();
-setInterval(fetchStatus, POLL_INTERVAL_MS);

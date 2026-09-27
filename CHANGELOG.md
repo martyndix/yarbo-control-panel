@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.9] - 2026-09-27
+
+### Fixed
+- An offline Yarbo no longer blocks the rest of the panel: module tabs, Vestaboard Note, Home, Powerwall, and Lymow still load. The robot error stays on the Yarbo screen.
+
 ## [3.0.8] - 2026-09-26
 
 ### Changed
