@@ -11,6 +11,8 @@
 #include <time.h>
 #include "version.h"
 #include "paper_hw.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 // M5Stack PaperMono SKU C153 (https://docs.m5stack.com/en/core/PaperMono)
 // ESP32-S3R8, SSD1677 480x800 4-level gray, FT6336G touch. Not PaperMono-Lite.
@@ -112,6 +114,8 @@ String inboxIds[PAPERMONO_INBOX_MAX];
 int inboxCount = 0;
 String lastInboxId = "";
 uint8_t radioSync = 0xA5;
+volatile int pendingPageSteps = 0;
+volatile uint8_t pwrOffEvent = 0;
 
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
@@ -248,7 +252,9 @@ void pollSerialConfig()
 
 void beginEpdFrame(bool forceQuality)
 {
-    M5.Display.waitDisplay();
+    while (M5.Display.displayBusy()) {
+        delay(5);
+    }
     bool full = forceQuality || partialRefreshCount >= 10;
     M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fastest);
     partialRefreshCount = full ? 0 : (partialRefreshCount + 1);
@@ -318,11 +324,10 @@ int firstEnabledPage()
 
 int stepEnabledPage(int from, int dir)
 {
+    int count = PAPERMONO_PAGE_COUNT;
     int p = from;
-    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
-        p += dir;
-        if (p < 0) p = PAPERMONO_PAGE_COUNT - 1;
-        p = p % PAPERMONO_PAGE_COUNT;
+    for (int i = 0; i < count; i++) {
+        p = (p + dir + count) % count;
         if (pageEnabled(p)) return p;
     }
     return firstEnabledPage();
@@ -411,9 +416,13 @@ void drawHeader()
         M5.Display.drawString(page, 16, 80);
     }
     int W = M5.Display.width();
+    int batRight = W - 96;
+    int batLeft = batRight - 92 - 8;
+    int wifiCx = batLeft / 2;
+    drawWifiIcon(wifiCx, 28, 34, WiFi.status() == WL_CONNECTED);
     M5.Display.drawRoundRect(W - 88, 4, 82, 82, 14, TFT_BLACK);
     drawPadlockIcon(W - 80, 10, 70, true);
-    drawBatteryBadge(W - 96, 48, tabletBat, true);
+    drawBatteryBadge(batRight, 48, tabletBat, true);
     M5.Display.setTextDatum(TL_DATUM);
 }
 
@@ -885,28 +894,47 @@ void drawPadlockIcon(int x, int y, int size, bool locked)
     int bodyH = size / 2;
     int bx = x + (size - bodyW) / 2;
     int by = y + size / 2;
-    int shackle = bodyW / 3;
-    int sx = locked ? (x + size / 2) : (x + size / 2 + shackle);
-    M5.Display.drawCircle(sx, by - 2, shackle, TFT_BLACK);
-    M5.Display.fillRect(sx - shackle - 1, by - 2, shackle * 2 + 2, shackle + 4, TFT_WHITE);
-    M5.Display.drawLine(sx - shackle, by - 2, sx - shackle, by, TFT_BLACK);
-    M5.Display.drawLine(sx + shackle, by - 2, sx + shackle, by, TFT_BLACK);
+    int shackle = max(8, bodyW / 3);
+    int thick = max(4, size / 10);
+    int sx = locked ? (x + size / 2) : (x + size / 2 + shackle / 2);
+    int cy = by - 2;
+    M5.Display.fillCircle(sx, cy, shackle, TFT_BLACK);
+    int inner = shackle - thick;
+    if (inner > 2) {
+        M5.Display.fillCircle(sx, cy, inner, TFT_WHITE);
+    }
+    M5.Display.fillRect(sx - shackle - 2, cy, shackle * 2 + 4, shackle + thick + 2, TFT_WHITE);
+    int post = thick;
+    M5.Display.fillRect(sx - shackle, cy - 2, post, shackle + 4, TFT_BLACK);
+    M5.Display.fillRect(sx + shackle - post, cy - 2, post, shackle + 4, TFT_BLACK);
     M5.Display.fillRoundRect(bx, by, bodyW, bodyH, 4, TFT_BLACK);
 }
 
 void drawWifiIcon(int cx, int cy, int size, bool connected)
 {
     int yDot = cy + size / 4;
-    int dot = max(2, size / 10);
+    int dot = max(4, size / 8);
+    int thick = max(3, size / 10);
     M5.Display.fillCircle(cx, yDot, dot, TFT_BLACK);
     for (int i = 1; i <= 3; i++) {
         int r = (size * i) / 5;
-        M5.Display.drawCircle(cx, yDot, r, TFT_BLACK);
+        for (int t = 0; t < thick; t++) {
+            if (r - t > dot) {
+                M5.Display.drawCircle(cx, yDot, r - t, TFT_BLACK);
+            }
+        }
     }
-    M5.Display.fillRect(cx - size, yDot + 1, size * 2, size, TFT_WHITE);
+    M5.Display.fillRect(cx - size - 6, yDot + 1, size * 2 + 12, size + 10, TFT_WHITE);
     if (!connected) {
-        M5.Display.drawLine(cx - size / 2, cy - size / 3, cx + size / 2, cy + size / 2, TFT_BLACK);
-        M5.Display.drawLine(cx - size / 2 + 2, cy - size / 3, cx + size / 2 + 2, cy + size / 2, TFT_BLACK);
+        int x1 = cx - size / 2;
+        int y1 = cy - size / 3;
+        int x2 = cx + size / 2;
+        int y2 = cy + size / 2;
+        int bar = max(4, thick + 1);
+        for (int t = -bar; t <= bar; t++) {
+            M5.Display.drawLine(x1 + t, y1, x2 + t, y2, TFT_BLACK);
+            M5.Display.drawLine(x1, y1 + t, x2, y2 + t, TFT_BLACK);
+        }
     }
 }
 
@@ -985,14 +1013,17 @@ void drawLockScreen(bool forceFull)
         M5.Display.setTextSize(2);
         M5.Display.drawString(String(unreadCount) + " MSG", W / 2, 188);
     }
-    drawWifiIcon(W / 2 - 120, 220, 56, WiFi.status() == WL_CONNECTED);
-    drawBatteryBadge(W / 2 + 86, 220, tabletBat, false);
+    int batRight = W / 2 + 86;
+    int batLeft = batRight - 160 - 12;
+    int wifiCx = batLeft / 2;
+    drawWifiIcon(wifiCx, 220, 56, WiFi.status() == WL_CONNECTED);
+    drawBatteryBadge(batRight, 220, tabletBat, false);
 
     bool wantBoard = lockScreen == "vestaboard" || lockScreen == "both";
     bool wantLogo = lockScreen == "logo" || lockScreen == "both";
     bool haveLogo = SPIFFS.exists("/logo.png");
     bool showLogo = wantLogo && haveLogo;
-    bool showBoard = wantBoard;
+    bool showBoard = wantBoard && vestaboardOn;
     if (showLogo) {
         int logoSize = showBoard ? 120 : 160;
         M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 250 : 280, logoSize, logoSize);
@@ -1980,6 +2011,71 @@ void prevPage()
     showPage(stepEnabledPage(currentPage, -1), true);
 }
 
+bool applyPendingPages()
+{
+    int steps = pendingPageSteps;
+    if (steps == 0) {
+        return false;
+    }
+    pendingPageSteps = 0;
+    int dir = steps > 0 ? 1 : -1;
+    int n = steps > 0 ? steps : -steps;
+    if (n > PAPERMONO_PAGE_COUNT) {
+        n = n % PAPERMONO_PAGE_COUNT;
+        if (n == 0) {
+            n = 1;
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        currentPage = stepEnabledPage(currentPage, dir);
+    }
+    offConfirm = false;
+    if (currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {
+        httpGetPlans(false);
+    }
+    return true;
+}
+
+void flushPageButtons()
+{
+    if (applyPendingPages()) {
+        drawScreen(false);
+        if (applyPendingPages()) {
+            drawScreen(false);
+        }
+    }
+}
+
+void inputTask(void *arg)
+{
+    (void) arg;
+    for (;;) {
+        M5.update();
+        if (!screenLocked) {
+            if (M5.BtnA.wasPressed()) {
+                pendingPageSteps++;
+                lastActivity = millis();
+                lastLight = millis();
+                if (!lightOn) {
+                    applyFrontlight(true);
+                }
+            }
+            if (M5.BtnB.wasPressed()) {
+                pendingPageSteps--;
+                lastActivity = millis();
+                lastLight = millis();
+                if (!lightOn) {
+                    applyFrontlight(true);
+                }
+            }
+        }
+        if (M5.BtnPWR.wasReleased() && !M5.BtnPWR.wasHold()) {
+            pwrOffEvent = 1;
+        }
+        vTaskDelay(pdMS_TO_TICKS(8));
+    }
+}
+
 void handleNoteTouch(int x, int y)
 {
     int bw, bh, gap, y0;
@@ -2085,11 +2181,11 @@ void setup()
     } else {
         drawSetup();
     }
+    xTaskCreate(inputTask, "btns", 4096, nullptr, 4, nullptr);
 }
 
 void loop()
 {
-    M5.update();
     pollSerialConfig();
     loraService();
     rgbTick();
@@ -2110,7 +2206,8 @@ void loop()
         return;
     }
 
-    if (M5.BtnPWR.wasReleased() && !M5.BtnPWR.wasHold()) {
+    if (pwrOffEvent) {
+        pwrOffEvent = 0;
         powerOffTablet();
     }
 
@@ -2160,18 +2257,11 @@ void loop()
         }
     }
 
-    if (!screenLocked) {
-        if (M5.BtnA.wasPressed()) {
-            noteActivity();
-            nextPage();
-        } else if (M5.BtnB.wasPressed()) {
-            noteActivity();
-            prevPage();
-        }
-    }
+    flushPageButtons();
 
     if (prevClock != clockLocal) {
         drawScreen(false);
+        flushPageButtons();
     }
 
     if (WiFi.status() != WL_CONNECTED) {
@@ -2186,6 +2276,7 @@ void loop()
             httpGetPlans(false);
         }
         drawScreen(false);
+        flushPageButtons();
     }
     delay(20);
 }

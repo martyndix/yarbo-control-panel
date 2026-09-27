@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.29] - 2026-09-27
+
+### Changed
+- PaperMono **A** and **B** keep working during an e-paper refresh (presses queue and both wrap around the page list).
+- Lock-screen Vestaboard grid is hidden when the Vestaboard module is off.
+- Home/lock Wi-Fi icon sits halfway between the battery and the left edge, with thicker arcs and a thicker “offline” slash. Padlock shackles are thicker. Firmware **0.1.27-beta**.
+
 ## [3.0.28] - 2026-09-27
 
 ### Changed
