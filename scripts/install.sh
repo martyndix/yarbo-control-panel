@@ -57,7 +57,7 @@ install_apt_deps() {
   echo "==> Installing system packages (apt)"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y php php-cli php-mbstring php-xml php-zlib composer unzip git python3 python3-pip docker.io
+  apt-get install -y php php-cli php-mbstring php-xml php-zlib php-zip composer unzip git python3 python3-pip docker.io
 }
 
 install_project() {

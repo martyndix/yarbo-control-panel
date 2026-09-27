@@ -233,6 +233,7 @@ const els = {
     papermonoBuild: document.getElementById('papermono-build'),
     papermonoFlash: document.getElementById('papermono-flash'),
     papermonoConfig: document.getElementById('papermono-config'),
+    papermonoSetupKit: document.getElementById('papermono-setup-kit'),
     headControlsCard: document.getElementById('head-controls-card'),
     headMowerControls: document.getElementById('head-mower-controls'),
     headSnowControls: document.getElementById('head-snow-controls'),
@@ -4763,6 +4764,19 @@ function applyPaperMonoKindUi(dashboard) {
             ? 'Flash Paper Colour firmware & send Wi-Fi'
             : 'Flash PaperMono firmware & send Wi-Fi';
     }
+    if (els.papermonoSetupKit) {
+        els.papermonoSetupKit.textContent = kind === 'papercolor'
+            ? 'Download Paper Colour USB setup kit'
+            : 'Download PaperMono USB setup kit';
+    }
+    const kitHint = document.getElementById('papermono-kit-hint');
+    if (kitHint) {
+        const hold = kind === 'papercolor' ? 'about 3 seconds' : 'about 2 seconds';
+        const docs = kind === 'papercolor'
+            ? 'https://github.com/martyndix/yarbo-control-panel/blob/main/docs/papercolor.md#set-up-away-from-the-panel'
+            : 'https://github.com/martyndix/yarbo-control-panel/blob/main/docs/papermono.md#set-up-away-from-the-panel';
+        kitHint.innerHTML = `To prepare a ${label} away from this host: enter the <strong>site</strong> 2.4 GHz Wi-Fi and the panel URL the tablet will use (not localhost), then download the USB setup kit. Unzip on a Mac or Windows PC, install Python plus esptool, plug the tablet in there (hold power ${hold} for download mode), and run <code>flash.py</code>. The zip contains the Wi-Fi password and pairing token — keep it private. Mac and Windows steps: <a href="${docs}" target="_blank" rel="noopener">docs</a>.`;
+    }
     if (els.papermonoBuild) {
         els.papermonoBuild.textContent = `Build ${label} firmware`;
     }
@@ -4995,7 +5009,7 @@ function renderPaperOtaPanel(devices) {
 function renderPaperMonoDevices(devices) {
     if (!els.papermonoDevices) return;
     if (!Array.isArray(devices) || devices.length === 0) {
-        els.papermonoDevices.innerHTML = '<p class="hint">None yet. Flash a tablet to pair it.</p>';
+        els.papermonoDevices.innerHTML = '<p class="hint">None yet. Flash a tablet over USB, or download a USB setup kit.</p>';
         renderPaperOtaPanel(devices);
         return;
     }
@@ -5173,8 +5187,7 @@ async function installPaperMonoUsbTools(button) {
 async function buildPaperMonoFirmware(button) {
     const kind = paperMonoSelectedKind();
     const label = paperMonoLabel(kind);
-    if (button) button.disabled = true;
-    if (els.papermonoFlash) els.papermonoFlash.disabled = true;
+    setPaperMonoUsbBusy(true);
     setPaperMonoResult(`Building ${label} firmware on this host. First time can take several minutes (PlatformIO and the ESP32 toolchain)…`);
     try {
         const res = await fetch('/api/device.php', {
@@ -5196,8 +5209,7 @@ async function buildPaperMonoFirmware(button) {
     } catch (err) {
         setPaperMonoResult(err.message || 'Could not build firmware', 'error');
     } finally {
-        if (button) button.disabled = false;
-        if (els.papermonoFlash) els.papermonoFlash.disabled = false;
+        setPaperMonoUsbBusy(false);
     }
 }
 
@@ -5216,8 +5228,7 @@ async function runPaperMonoUsb(action, button) {
         setPaperMonoResult(`Panel URL is required so the ${label} can reach this server.`, 'error');
         return;
     }
-    if (button) button.disabled = true;
-    if (els.papermonoBuild) els.papermonoBuild.disabled = true;
+    setPaperMonoUsbBusy(true);
     setPaperMonoResult(
         action === 'flash'
             ? `Building if needed, then flashing ${label} over USB and sending Wi-Fi. Leave this page open…`
@@ -5253,8 +5264,84 @@ async function runPaperMonoUsb(action, button) {
     } catch (err) {
         setPaperMonoResult(err.message || 'USB step failed', 'error');
     } finally {
-        if (button) button.disabled = false;
-        if (els.papermonoBuild) els.papermonoBuild.disabled = false;
+        setPaperMonoUsbBusy(false);
+    }
+}
+
+function setPaperMonoUsbBusy(busy) {
+    [els.papermonoFlash, els.papermonoConfig, els.papermonoSetupKit, els.papermonoBuild].forEach((el) => {
+        if (el) el.disabled = busy;
+    });
+}
+
+function paperPanelUrlLooksLocal(url) {
+    try {
+        const hostname = new URL(url).hostname.toLowerCase();
+        return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+    } catch {
+        return /^(https?:\/\/)?(localhost|127\.0\.0\.1)\b/i.test(String(url || ''));
+    }
+}
+
+async function downloadPaperSetupKit() {
+    const payload = paperMonoFormPayload();
+    const label = paperMonoLabel(payload.kind);
+    if (!payload.wifi_ssid) {
+        setPaperMonoResult(`Wi-Fi name (SSID) is required. ${label} is 2.4 GHz only.`, 'error');
+        return;
+    }
+    if (!payload.panel_url) {
+        setPaperMonoResult(`Panel URL is required so the ${label} can reach this server at the site.`, 'error');
+        return;
+    }
+    if (paperPanelUrlLooksLocal(payload.panel_url)) {
+        setPaperMonoResult('Use the URL the tablet will use at the site (not localhost).', 'error');
+        return;
+    }
+    setPaperMonoUsbBusy(true);
+    setPaperMonoResult(`Building if needed, then packing a ${label} USB setup kit. Leave this page open…`);
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'setup_kit', ...payload }),
+        });
+        const type = (res.headers.get('content-type') || '').toLowerCase();
+        const isZip = type.includes('application/zip')
+            || type.includes('application/x-zip')
+            || res.headers.get('x-papermono-kit') === '1';
+        if (!isZip) {
+            const data = await parseJsonResponse(res);
+            const extra = typeof data.log === 'string' && data.log.trim() !== ''
+                ? `\n${data.log.trim().slice(-600)}`
+                : '';
+            throw new Error((data.error || 'Could not download the setup kit') + extra);
+        }
+        const blob = await res.blob();
+        if (!blob || blob.size < 1024) {
+            throw new Error('Setup kit download was empty.');
+        }
+        const disposition = res.headers.get('content-disposition') || '';
+        const match = disposition.match(/filename="?([^";]+)"?/i);
+        const filename = (match?.[1] || `${payload.kind}-setup.zip`).trim();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        setPaperMonoResult(
+            `${label} USB setup kit downloaded (${filename}). It is already listed as paired; it comes online after you flash it on a laptop and it joins the site Wi-Fi. If you never flash it, revoke it from the list.`,
+            'success',
+        );
+        showToast(`${label} setup kit downloaded`, 'success');
+        loadPaperMonoDashboard();
+    } catch (err) {
+        setPaperMonoResult(err.message || 'Could not download the setup kit', 'error');
+    } finally {
+        setPaperMonoUsbBusy(false);
     }
 }
 
@@ -7026,6 +7113,7 @@ els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbT
 els.papermonoBuild?.addEventListener('click', (e) => buildPaperMonoFirmware(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));
 els.papermonoConfig?.addEventListener('click', (e) => runPaperMonoUsb('configure_usb', e.currentTarget));
+els.papermonoSetupKit?.addEventListener('click', () => downloadPaperSetupKit());
 els.papermonoLogo?.addEventListener('change', (e) => {
     const file = e.currentTarget?.files?.[0];
     if (!file) return;

@@ -1129,6 +1129,286 @@ final class YarboPaperDevice
     }
 
     /**
+     * Build a laptop USB setup zip (firmware + CFG JSON + flash.py). No USB on this host.
+     *
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function setupKit(array $input): array
+    {
+        $kind = $this->normalizeKind($input['kind'] ?? null);
+        $ssid = trim((string) ($input['wifi_ssid'] ?? ''));
+        $password = (string) ($input['wifi_password'] ?? '');
+        $panelUrl = rtrim(trim((string) ($input['panel_url'] ?? '')), '/');
+        $name = trim((string) ($input['name'] ?? ''));
+        if ($name === '') {
+            $name = $kind === self::KIND_COLOR ? 'Paper Colour' : 'PaperMono';
+        }
+        $label = $this->kindLabel($kind);
+
+        if ($ssid === '') {
+            return ['ok' => false, 'error' => 'Wi-Fi name (SSID) is required.'];
+        }
+        if ($panelUrl === '' || !preg_match('#^https?://#i', $panelUrl)) {
+            return ['ok' => false, 'error' => 'Panel URL must start with http:// or https://'];
+        }
+        if (preg_match('#^https?://(localhost|127\.0\.0\.1)(:|/|$)#i', $panelUrl)) {
+            return [
+                'ok' => false,
+                'error' => 'Panel URL must be how the tablet will reach this server at the site, not localhost.',
+            ];
+        }
+
+        $builtNow = false;
+        if ($this->firmwareNeedsBuild($kind)) {
+            $build = $this->buildFirmware($kind, true);
+            if (!($build['ok'] ?? false)) {
+                return $build;
+            }
+            $builtNow = true;
+        }
+
+        if (!$this->firmwareAvailable($kind)) {
+            return ['ok' => false, 'error' => $label . ' firmware is not built yet. Click Build firmware first.'];
+        }
+
+        $script = $this->projectRoot . '/scripts/paper_setup_kit.py';
+        if (!is_file($script)) {
+            return ['ok' => false, 'error' => 'scripts/paper_setup_kit.py is missing.'];
+        }
+
+        $registered = $this->register(['name' => $name, 'kind' => $kind]);
+        $stamp = bin2hex(random_bytes(4));
+        $kitDir = sys_get_temp_dir() . '/yarbo-paper-kit-' . $stamp;
+        if (!mkdir($kitDir, 0700, true) && !is_dir($kitDir)) {
+            $this->revoke((string) $registered['id']);
+
+            return ['ok' => false, 'error' => 'Could not create a temporary folder for the setup kit.'];
+        }
+
+        $config = [
+            'ssid' => $ssid,
+            'password' => $password,
+            'panel_url' => $panelUrl,
+            'token' => (string) $registered['token'],
+            'name' => $name,
+            'kind' => $kind,
+            'version' => $this->firmwareVersionForKind($kind),
+        ];
+        $packed = $this->writeSetupKitArchive($kitDir, $kind, $config, $script);
+        if (!($packed['ok'] ?? false)) {
+            $this->revoke((string) $registered['id']);
+            $this->removeTree($kitDir);
+            if (isset($packed['zip_path']) && is_string($packed['zip_path']) && is_file($packed['zip_path'])) {
+                @unlink($packed['zip_path']);
+            }
+
+            return $packed;
+        }
+
+        $this->removeTree($kitDir);
+
+        return [
+            'ok' => true,
+            'zip_path' => $packed['zip_path'],
+            'filename' => $packed['filename'],
+            'device' => $registered,
+            'built' => $builtNow,
+            'kind' => $kind,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array<string, mixed>
+     */
+    private function writeSetupKitArchive(string $kitDir, string $kind, array $config, string $script): array
+    {
+        $label = $this->kindLabel($kind);
+        $firmwareSrc = $this->firmwarePath($kind);
+        $firmwareDst = $kitDir . '/firmware.bin';
+        if (!@copy($firmwareSrc, $firmwareDst) || !is_file($firmwareDst)) {
+            return ['ok' => false, 'error' => 'Could not copy firmware.bin into the setup kit.'];
+        }
+        $configJson = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($configJson) || @file_put_contents($kitDir . '/config.json', $configJson . "\n") === false) {
+            return ['ok' => false, 'error' => 'Could not write config.json for the setup kit.'];
+        }
+        if (!@copy($script, $kitDir . '/flash.py')) {
+            return ['ok' => false, 'error' => 'Could not copy flash.py into the setup kit.'];
+        }
+        $readme = $this->setupKitReadme($kind, $config);
+        if (@file_put_contents($kitDir . '/README.txt', $readme) === false) {
+            return ['ok' => false, 'error' => 'Could not write README.txt for the setup kit.'];
+        }
+
+        $filename = $this->setupKitFilename($kind, (string) $config['name'], (string) $config['version']);
+        $zipPath = $kitDir . '.zip';
+        $files = [
+            $kitDir . '/firmware.bin',
+            $kitDir . '/config.json',
+            $kitDir . '/flash.py',
+            $kitDir . '/README.txt',
+        ];
+        $zipped = $this->writeZipArchive($zipPath, $files);
+        if (!($zipped['ok'] ?? false)) {
+            return $zipped + ['zip_path' => $zipPath];
+        }
+
+        return [
+            'ok' => true,
+            'zip_path' => $zipPath,
+            'filename' => $filename,
+            'kind' => $kind,
+            'label' => $label,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function setupKitReadme(string $kind, array $config): string
+    {
+        $label = $this->kindLabel($kind);
+        $hold = $kind === self::KIND_COLOR ? 'about 3 seconds' : 'about 2 seconds';
+        $name = (string) ($config['name'] ?? $label);
+        $url = (string) ($config['panel_url'] ?? '');
+        $ssid = (string) ($config['ssid'] ?? '');
+
+        return $label . " USB setup kit\n"
+            . "Tablet: {$name}\n"
+            . "Site Wi-Fi: {$ssid}\n"
+            . "Panel URL: {$url}\n"
+            . "\n"
+            . "This zip holds the firmware, the site Wi-Fi password, and the pairing token.\n"
+            . "Keep it private. Do not email it.\n"
+            . "\n"
+            . "Unzip the whole folder (firmware.bin, config.json, flash.py, and this file must stay together).\n"
+            . "\n"
+            . "Mac\n"
+            . "1. Install Python 3 from python.org if Terminal says python3 is missing.\n"
+            . "2. python3 -m pip install esptool pyserial\n"
+            . "3. Plug the tablet in by USB-C. Hold power {$hold} for download mode (red LED blinks).\n"
+            . "4. cd into the unzipped folder, then: python3 flash.py\n"
+            . "   If more than one serial device: python3 flash.py --port /dev/cu.usbmodemXXXX\n"
+            . "   List ports: python3 flash.py --list-ports\n"
+            . "\n"
+            . "Windows\n"
+            . "1. Install Python from python.org and tick Add python.exe to PATH.\n"
+            . "2. py -m pip install esptool pyserial\n"
+            . "3. If no COM port appears, install Espressif USB JTAG/serial (ESP32-S3 native USB).\n"
+            . "4. Plug USB-C, hold power {$hold} for download mode.\n"
+            . "5. In the unzipped folder: py flash.py\n"
+            . "   Or: py flash.py --port COM3\n"
+            . "\n"
+            . "Keep USB in until the setup screen clears, then ship the tablet to the site 2.4 GHz Wi-Fi.\n"
+            . "Later firmware updates go over Wi-Fi from the panel (Settings → paired device Update).\n";
+    }
+
+    private function setupKitFilename(string $kind, string $name, string $version): string
+    {
+        $prefix = $kind === self::KIND_COLOR ? 'papercolor' : 'papermono';
+        $slug = strtolower((string) preg_replace('/[^a-zA-Z0-9]+/', '-', $name));
+        $slug = trim($slug, '-');
+        if ($slug === '') {
+            $slug = $prefix;
+        }
+        $ver = strtolower((string) preg_replace('/[^a-zA-Z0-9._-]+/', '-', $version));
+        $ver = trim($ver, '-');
+        if ($ver === '') {
+            $ver = 'kit';
+        }
+
+        return $prefix . '-setup-' . $slug . '-' . $ver . '.zip';
+    }
+
+    /**
+     * @param list<string> $files
+     * @return array<string, mixed>
+     */
+    private function writeZipArchive(string $zipPath, array $files): array
+    {
+        if (is_file($zipPath)) {
+            @unlink($zipPath);
+        }
+        if (class_exists('ZipArchive')) {
+            $zip = new \ZipArchive();
+            if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+                return ['ok' => false, 'error' => 'Could not create the setup kit zip.'];
+            }
+            foreach ($files as $path) {
+                if (!is_file($path) || !$zip->addFile($path, basename($path))) {
+                    $zip->close();
+                    @unlink($zipPath);
+
+                    return ['ok' => false, 'error' => 'Could not add ' . basename($path) . ' to the setup kit.'];
+                }
+            }
+            if ($zip->close() !== true || !is_file($zipPath) || filesize($zipPath) < 1024) {
+                @unlink($zipPath);
+
+                return ['ok' => false, 'error' => 'Setup kit zip is empty.'];
+            }
+
+            return ['ok' => true];
+        }
+
+        $python = $this->pythonBin();
+        $code = 'import os,sys,zipfile; z=sys.argv[1]; a=zipfile.ZipFile(z,"w",compression=zipfile.ZIP_DEFLATED);'
+            . ' [a.write(p, os.path.basename(p)) for p in sys.argv[2:]]; a.close()';
+        $cmd = array_merge([$python, '-c', $code, $zipPath], $files);
+        $escaped = implode(' ', array_map('escapeshellarg', $cmd));
+        $spec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $proc = proc_open($escaped, $spec, $pipes, $this->projectRoot);
+        if (!is_resource($proc)) {
+            return ['ok' => false, 'error' => 'Could not start Python to zip the setup kit. Install php-zip.'];
+        }
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exit = proc_close($proc);
+        if ($exit !== 0 || !is_file($zipPath) || filesize($zipPath) < 1024) {
+            @unlink($zipPath);
+            $detail = trim((string) ((is_string($stderr) && $stderr !== '') ? $stderr : $stdout));
+
+            return [
+                'ok' => false,
+                'error' => 'Could not zip the setup kit. Install php-zip, or Python 3.'
+                    . ($detail !== '' ? ' ' . $detail : ''),
+            ];
+        }
+
+        return ['ok' => true];
+    }
+
+    private function removeTree(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        $items = scandir($dir);
+        if ($items === false) {
+            @rmdir($dir);
+
+            return;
+        }
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $path = $dir . '/' . $item;
+            if (is_dir($path)) {
+                $this->removeTree($path);
+            } else {
+                @unlink($path);
+            }
+        }
+        @rmdir($dir);
+    }
+
+    /**
      * @param list<string> $args
      * @return array<string, mixed>
      */

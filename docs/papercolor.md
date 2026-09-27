@@ -28,6 +28,14 @@ Rebuild after panel updates that bump Colour firmware (`0.2.11-colour` and later
 
 Do not flash with PlatformIO env `papermono` — that is the grayscale touch UI.
 
+## Set up away from the panel
+
+Same USB setup kit as PaperMono. On **Settings → E-paper companions** pick **Paper Colour**, enter the **site** 2.4 GHz Wi-Fi and the panel URL the tablet will use (not `localhost`), then **Download Paper Colour USB setup kit**.
+
+On the laptop, unzip and install `esptool` + `pyserial` once (`python3 -m pip install esptool pyserial` on a Mac, `py -m pip install esptool pyserial` on Windows). Hold power about **3 seconds** for download mode, then run `python3 flash.py` or `py flash.py`. Windows may need the Espressif USB JTAG/serial driver if no COM port appears.
+
+The zip contains the Wi-Fi password and pairing token — keep it private. Full Mac/Windows steps: [`docs/papermono.md`](papermono.md#set-up-away-from-the-panel). Later updates stay Settings → **Update** over Wi-Fi.
+
 ## Pages
 
 Yarbo Home / Status / Health / Plans when the Yarbo module is on. Extra pages for Powerwall and Lymow only when those modules are enabled. **BOARD** is a live 3×15 Vestaboard preview when the Note is enabled. The top line is **YARBO · COLOUR**, **POWERWALL**, **LYMOW**, or **VESTABOARD** for that page (Lymow and Powerwall do not repeat the name). **C** shows the lock screensaver (logo, Vestaboard, or both — chosen in Settings). Optional **header logo** is the same Settings upload as PaperMono (reflash **0.2.11-colour**). Do not expect 15-second redraws — Spectra 6 is a set-and-leave sign.

@@ -169,6 +169,32 @@ if ($action === 'flash') {
     json_response($devices->flash($input));
 }
 
+if ($action === 'setup_kit') {
+    set_time_limit(1200);
+    $result = $devices->setupKit($input);
+    if (!($result['ok'] ?? false)) {
+        json_response($result);
+    }
+    $path = (string) ($result['zip_path'] ?? '');
+    $filename = (string) ($result['filename'] ?? 'paper-setup.zip');
+    $filename = basename($filename);
+    $filename = str_replace(['"', "\r", "\n"], '', $filename);
+    if ($filename === '' || $path === '' || !is_file($path)) {
+        json_response(['ok' => false, 'error' => 'Setup kit zip was not created.']);
+    }
+    $size = filesize($path);
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('X-PaperMono-Kit: 1');
+    header('Cache-Control: no-store');
+    if (is_int($size) && $size > 0) {
+        header('Content-Length: ' . (string) $size);
+    }
+    readfile($path);
+    @unlink($path);
+    exit;
+}
+
 if ($action === 'build_firmware') {
     set_time_limit(1200);
     json_response($devices->buildFirmware($input['kind'] ?? null, true));

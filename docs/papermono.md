@@ -89,6 +89,39 @@ On the **same machine that runs the panel**:
 
 **Send Wi-Fi only** reuses already-flashed firmware and pushes a new `CFG:` line over serial (SSID, password, panel URL, token).
 
+## Set up away from the panel
+
+The first flash still has to be USB. It does not have to be USB into the Pi. If you are away from the site, download a **USB setup kit** from the panel, flash the tablet on a laptop, then ship it.
+
+The kit is the same firmware at `0x0` plus the same `CFG:` serial line. A lone `.bin` is not enough: Wi-Fi, panel URL, and the pairing token are not baked into the image.
+
+**On the panel (any browser that can reach Settings):**
+
+1. Open **Settings → E-paper companions** and leave **PaperMono** selected.
+2. Enter the **site** 2.4 GHz SSID and password, the panel URL as the tablet will reach the Pi (for example `http://192.168.1.50:8080`, not `localhost`), and a device name.
+3. Click **Download PaperMono USB setup kit**. The panel builds firmware if needed and registers a pairing token. Treat the zip as a secret (Wi-Fi password + token).
+4. If you never flash that zip, revoke the new row in the paired list.
+
+**On a Mac:**
+
+1. Unzip the kit. Keep `firmware.bin`, `config.json`, `flash.py`, and `README.txt` in the same folder.
+2. Install Python 3 if needed, then: `python3 -m pip install esptool pyserial`
+3. Plug the PaperMono in by USB-C. Hold power about **2 seconds** for download mode (red LED blinks).
+4. `cd` into the unzipped folder and run `python3 flash.py`
+5. If more than one serial device is listed: `python3 flash.py --port /dev/cu.usbmodemXXXX` (`python3 flash.py --list-ports` to list them).
+6. Keep USB in until the setup screen clears, then ship the tablet to the site Wi-Fi.
+
+**On Windows:**
+
+1. Unzip the kit into one folder (same four files as above).
+2. Install Python from python.org and tick **Add python.exe to PATH**, then: `py -m pip install esptool pyserial`
+3. If no COM port appears, install the Espressif USB JTAG/serial driver (ESP32-S3 native USB).
+4. Plug USB-C and hold power about **2 seconds** for download mode.
+5. In the unzipped folder run `py flash.py` (or `py flash.py --port COM3`).
+6. Keep USB in until the setup screen clears, then ship the tablet to the site 2.4 GHz Wi-Fi.
+
+Later firmware still goes over Wi-Fi: Settings → paired device **Update**. You do not need this kit again unless you wipe the tablet.
+
 ## Runtime
 
 The tablet polls `GET /api/device.php?action=compact` about every 15 seconds with header `X-PaperMono-Token`. Compact status includes `vestaboard_enabled`, `vestaboard_live`, `powerwall_enabled`, `lymow_enabled`, `home_enabled`, and `home_items`. The Plans page also calls `GET /api/device.php?action=plans` (cached on the Pi for about five minutes). Commands POST JSON `{ "action": "command", "command": "stop" }` (also `return_to_dock`, `pause`, `resume`, `lights_on`, `lights_off`, `start_plan` with `plan_id`, `vestaboard_live`, and Home `home_toggle` / `home_scene` with `home_id`).

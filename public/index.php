@@ -1055,8 +1055,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <div class="papermono-actions">
                                 <button type="button" class="btn" id="papermono-flash">Flash PaperMono firmware &amp; send Wi-Fi</button>
                                 <button type="button" class="btn btn-secondary" id="papermono-config">Send Wi-Fi only (already flashed)</button>
+                                <button type="button" class="btn btn-secondary" id="papermono-setup-kit">Download USB setup kit</button>
                             </div>
                             <p class="hint" id="papermono-flash-hint">Leave this Settings page open. Click <strong>Build firmware</strong> for the tablet you selected (first build can take several minutes). If the port list fails, click <strong>Install USB tools</strong>. The first flash is USB. Later firmware can go over Wi-Fi from the paired list or Settings → Updates. Keep the tablet out of direct sun.</p>
+                            <p class="hint" id="papermono-kit-hint">To prepare a tablet away from this host: enter the <strong>site</strong> 2.4 GHz Wi-Fi and the panel URL the tablet will use (not localhost), then <strong>Download USB setup kit</strong>. Unzip on a Mac or Windows PC, install Python plus esptool, plug the tablet in there, and run <code>flash.py</code>. The zip contains the Wi-Fi password and pairing token — keep it private. Mac and Windows steps: <a href="https://github.com/martyndix/yarbo-control-panel/blob/main/docs/papermono.md#set-up-away-from-the-panel" target="_blank" rel="noopener">docs/papermono.md</a>.</p>
                             <div class="papermono-preview-grid" id="papermono-preview-grid" aria-hidden="true">
                                 <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">

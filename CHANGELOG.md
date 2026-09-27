@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.13] - 2026-09-27
+
+### Added
+- **USB setup kit** for PaperMono and Paper Colour: Settings → **Download USB setup kit** packs firmware, site Wi-Fi, and a laptop `flash.py` so the first USB flash can happen on a Mac or Windows PC instead of the panel host.
+
 ## [3.0.12] - 2026-09-27
 
 ### Added
