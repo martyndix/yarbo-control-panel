@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.18] - 2026-09-27
+
+### Fixed
+- PaperMono lock screen **unlock works without Wi-Fi** (touch was ignored while joining). Type is larger, with bigger 1 / 2 tap targets. Logo still loads from the panel after the tablet is on site Wi-Fi.
+
 ## [3.0.17] - 2026-09-27
 
 ### Fixed

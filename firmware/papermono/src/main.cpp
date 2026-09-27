@@ -786,17 +786,20 @@ void drawLockScreen(bool forceFull)
     beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+
     M5.Display.setTextDatum(TC_DATUM);
-    M5.Display.setTextSize(2);
-    M5.Display.drawString(deviceName.length() ? deviceName : String("PaperMono"), M5.Display.width() / 2, 18);
+    M5.Display.setTextSize(4);
+    M5.Display.drawString(deviceName.length() ? deviceName : String("PaperMono"), W / 2, 36);
+    M5.Display.setTextSize(6);
+    M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), W / 2, 110);
     M5.Display.setTextSize(3);
-    M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), M5.Display.width() / 2, 52);
-    M5.Display.setTextSize(1);
     String bat = tabletBat >= 0 ? (String("TAB ") + tabletBat + "%") : String("TAB --");
     if (unreadCount > 0) {
-        bat += "  ·  " + String(unreadCount) + " msg";
+        bat += "  " + String(unreadCount) + " MSG";
     }
-    M5.Display.drawString(bat, M5.Display.width() / 2, 92);
+    M5.Display.drawString(bat, W / 2, 210);
 
     bool showLogo = lockScreen != "vestaboard" || !vestaboardOn;
     bool showBoard = vestaboardOn && (lockScreen == "vestaboard" || lockScreen == "both");
@@ -804,28 +807,30 @@ void drawLockScreen(bool forceFull)
         showLogo = true;
         showBoard = false;
     }
-    int W = M5.Display.width();
-    int H = M5.Display.height();
     if (showLogo && SPIFFS.exists("/logo.png")) {
         int logoSize = showBoard ? 160 : 280;
-        M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 118 : 150, logoSize, logoSize);
+        M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 250 : 270, logoSize, logoSize);
+    } else if (showLogo && !showBoard) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Logo after site Wi-Fi", W / 2, 300);
     }
     if (showBoard) {
         int cell = showLogo ? 22 : 28;
         int gap = 3;
         int gridW = 15 * cell + 14 * gap;
-        int gridY = showLogo ? 300 : 180;
+        int gridY = showLogo ? 430 : 280;
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
     }
 
-    M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(2);
-    M5.Display.drawString("1", 18, 18);
-    M5.Display.setTextDatum(BR_DATUM);
-    M5.Display.drawString("2", W - 18, H - 18);
+    M5.Display.drawRoundRect(8, 8, 132, 132, 16, TFT_BLACK);
+    M5.Display.drawRoundRect(W - 140, H - 140, 132, 132, 16, TFT_BLACK);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextSize(5);
+    M5.Display.drawString("1", 74, 74);
+    M5.Display.drawString("2", W - 74, H - 74);
     M5.Display.setTextDatum(BC_DATUM);
-    M5.Display.setTextSize(1);
-    M5.Display.drawString("opposite corners to unlock", W / 2, H - 8);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("Tap 1, then tap 2", W / 2, H - 8);
     M5.Display.display();
 }
 
@@ -1448,10 +1453,10 @@ void handleLockTouch(int x, int y)
     }
     int W = M5.Display.width();
     int H = M5.Display.height();
-    bool c1 = x <= 80 && y <= 80;
-    bool c2 = x >= W - 80 && y >= H - 80;
+    bool c1 = x <= 140 && y <= 140;
+    bool c2 = x >= W - 140 && y >= H - 140;
     uint32_t now = millis();
-    if (unlockStep == 1 && now - unlockStepAt > 4000) {
+    if (unlockStep == 1 && now - unlockStepAt > 6000) {
         unlockStep = 0;
     }
     if (unlockStep == 0 && c1) {
@@ -1896,32 +1901,11 @@ void loop()
         applyFrontlight(false);
     }
 
-    if (WiFi.status() != WL_CONNECTED) {
-        static uint32_t lastJoinDraw = 0;
-        if (now - lastJoinDraw > 20000) {
-            lastError = "joining " + wifiSsid;
-            drawScreen(false);
-            lastJoinDraw = now;
-        }
-        delay(30);
-        return;
-    }
-
-    if (!screenLocked) {
-        if (M5.BtnA.wasPressed()) {
-            noteActivity();
-            nextPage();
-        } else if (M5.BtnB.wasPressed()) {
-            noteActivity();
-            prevPage();
-        }
-    }
-
     auto t = M5.Touch.getDetail();
     if (t.wasPressed()) {
         if (screenLocked) {
             handleLockTouch(t.x, t.y);
-        } else {
+        } else if (WiFi.status() == WL_CONNECTED) {
             noteActivity();
             if (currentPage == PAPERMONO_PAGE_HOME) {
                 int which = homeButtonAt(t.x, t.y);
@@ -1950,6 +1934,27 @@ void loop()
             } else if (tapOnPager(t.y) || t.y < 110) {
                 nextPage();
             }
+        }
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        static uint32_t lastJoinDraw = 0;
+        if (!screenLocked && now - lastJoinDraw > 20000) {
+            lastError = "joining " + wifiSsid;
+            drawScreen(false);
+            lastJoinDraw = now;
+        }
+        delay(30);
+        return;
+    }
+
+    if (!screenLocked) {
+        if (M5.BtnA.wasPressed()) {
+            noteActivity();
+            nextPage();
+        } else if (M5.BtnB.wasPressed()) {
+            noteActivity();
+            prevPage();
         }
     }
 
