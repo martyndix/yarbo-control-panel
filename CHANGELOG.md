@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.40] - 2026-09-29
+
+### Fixed
+- PaperMono **HOUSE** buttons show the full light or scene name across the button, instead of cutting it at 18 characters. Firmware **0.1.38**.
+
 ## [3.0.39] - 2026-09-29
 
 ### Added

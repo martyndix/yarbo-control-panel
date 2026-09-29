@@ -12,6 +12,8 @@ final class YarboHome
     public const KIND_HEATER = 'heater';
     public const KIND_SCENE = 'scene';
     public const PAPER_MAX = 8;
+    /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
+    public const PAPER_NAME_MAX = 40;
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -1140,7 +1142,7 @@ final class YarboHome
             $item = $byId[$id];
             $out[] = [
                 'id' => (string) $item['id'],
-                'name' => YarboHub::normalizeDisplayName((string) $item['name'], 18) ?: (string) $item['id'],
+                'name' => YarboHub::normalizeDisplayName((string) $item['name'], self::PAPER_NAME_MAX) ?: (string) $item['id'],
                 'kind' => (string) ($item['kind'] ?? self::KIND_LIGHT),
                 'on' => (bool) ($item['on'] ?? false),
             ];

@@ -415,6 +415,18 @@ const char *noteChoiceLabel(int i)
     return "YARBO";
 }
 
+String clipLabelToWidth(const String &text, int maxPx)
+{
+    if (maxPx <= 0 || M5.Display.textWidth(text) <= maxPx) {
+        return text;
+    }
+    String s = text;
+    while (s.length() > 0 && M5.Display.textWidth(s) > maxPx) {
+        s.remove(s.length() - 1);
+    }
+    return s;
+}
+
 void drawButton(int x, int y, int w, int h, const char *label, bool invert)
 {
     uint16_t bg = invert ? TFT_BLACK : TFT_WHITE;
@@ -672,9 +684,8 @@ void drawHousePage(bool forceFull)
         if (homeKinds[idx] == "scene") {
             label = "*" + label;
         }
-        if (label.length() > 18) {
-            label = label.substring(0, 18);
-        }
+        /* Button is 16..(W-16); 16px inset each side so the name uses the full row. */
+        label = clipLabelToWidth(label, W - 64);
         M5.Display.drawString(label, 32, y + (rh - 8) / 2);
     }
     if (homeCount > PAPERMONO_HOME_VISIBLE) {
