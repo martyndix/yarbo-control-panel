@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.32';
+    public const FIRMWARE_VERSION = '0.1.33';
     public const FIRMWARE_VERSION_COLOR = '0.2.13-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -534,6 +534,52 @@ final class YarboPaperDevice
         unset($device);
     }
 
+    /**
+     * @param array<string, mixed> $device
+     */
+    private function shouldDropOtaPending(array $device): bool
+    {
+        if (empty($device['ota_pending'])) {
+            return false;
+        }
+        $reported = (string) ($device['fw_reported'] ?? '');
+        $latest = $this->firmwareVersionForKind($this->deviceKind($device));
+        if ($reported !== '' && $reported === $latest) {
+            return true;
+        }
+        if (!empty($device['ota_served_at'])) {
+            return true;
+        }
+        $requestedAt = strtotime((string) ($device['ota_requested_at'] ?? '')) ?: 0;
+
+        return $requestedAt > 0 && (time() - $requestedAt) >= 180;
+    }
+
+    /**
+     * Settings UI and compact ota_pending: keep showing Updating until the
+     * tablet has polled after a binary was served, or it is already on latest.
+     *
+     * @param array<string, mixed>|null $device
+     */
+    private function otaPendingActive(?array $device): bool
+    {
+        if (!is_array($device) || empty($device['ota_pending'])) {
+            return false;
+        }
+        $reported = (string) ($device['fw_reported'] ?? '');
+        $latest = $this->firmwareVersionForKind($this->deviceKind($device));
+        if ($reported !== '' && $reported === $latest) {
+            return false;
+        }
+        $servedAt = strtotime((string) ($device['ota_served_at'] ?? '')) ?: 0;
+        $seenAt = strtotime((string) ($device['last_seen_at'] ?? '')) ?: 0;
+        if ($servedAt > 0 && $seenAt >= $servedAt) {
+            return false;
+        }
+
+        return true;
+    }
+
     public function touch(string $id, ?string $fwReported = null): void
     {
         $store = $this->load();
@@ -543,25 +589,16 @@ final class YarboPaperDevice
             }
             $device['last_seen_at'] = gmdate('c');
             if ($fwReported !== null && $fwReported !== '') {
-                $prevFw = (string) ($device['fw_reported'] ?? '');
                 $device['fw_reported'] = $fwReported;
                 $inferred = $this->kindFromFirmware($fwReported);
                 if ($inferred !== null) {
                     $device['kind'] = $inferred;
                 }
-                $latest = $this->firmwareVersionForKind($this->deviceKind($device));
-                if (!empty($device['ota_pending'])) {
-                    $requestedAt = strtotime((string) ($device['ota_requested_at'] ?? '')) ?: 0;
-                    $servedAt = strtotime((string) ($device['ota_served_at'] ?? '')) ?: 0;
-                    $sameVersionStuck = $prevFw !== '' && $prevFw === $fwReported
-                        && $requestedAt > 0 && (time() - $requestedAt) >= 90;
-                    $servedButUnchanged = $servedAt > 0 && $fwReported !== $latest;
-                    if ($fwReported === $latest || $servedButUnchanged || $sameVersionStuck) {
-                        $device['ota_pending'] = false;
-                        $device['ota_requested_at'] = null;
-                        $device['ota_served_at'] = null;
-                    }
-                }
+            }
+            if ($this->shouldDropOtaPending($device)) {
+                $device['ota_pending'] = false;
+                $device['ota_requested_at'] = null;
+                $device['ota_served_at'] = null;
             }
         }
         unset($device);
@@ -704,7 +741,7 @@ final class YarboPaperDevice
             'yarbo_error' => $yarboEnabled && $online && ((int) $errorCode !== 0 || $powerFault > 0),
             'powerwall_error' => false,
             'lymow_error' => $lyEnabled && $lyWork === 7,
-            'ota_pending' => !empty($forDevice['ota_pending']),
+            'ota_pending' => $this->otaPendingActive($forDevice),
         ] + $this->logoPublicView()
             + $this->prefsCompact($forDevice)
             + $this->vestaboardCompact($vbObj, $vb, $parsed, $online)
@@ -1902,7 +1939,7 @@ final class YarboPaperDevice
             'firmware_latest' => $this->firmwareVersionForKind($kind),
             'firmware_built' => $this->firmwareAvailable($kind),
             'online' => $this->deviceIsOnline($device),
-            'ota_pending' => !empty($device['ota_pending']),
+            'ota_pending' => $this->otaPendingActive($device),
             'ota_available' => $this->firmwareAvailable($kind)
                 && (string) ($device['fw_reported'] ?? '') !== $this->firmwareVersionForKind($kind),
         ];

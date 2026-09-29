@@ -432,7 +432,7 @@ void drawHeader()
     int batRight = lockX - 8;
     int batCy = 22;
     drawBatteryBadge(batRight, batCy, tabletBat, true);
-    int batLeft = batRight - 92 - 8;
+    int batLeft = batRight - 92 - 10;
     int batCx = batLeft + 46;
     drawWifiIcon(batCx, 64, 32, WiFi.status() == WL_CONNECTED);
     M5.Display.setTextDatum(TL_DATUM);
@@ -761,7 +761,8 @@ uint16_t vestaboardFill(int code)
 void drawVestaboardGrid(int x, int y, int cell, int gap)
 {
     M5.Display.setTextDatum(MC_DATUM);
-    M5.Display.setTextSize(1);
+    int ts = cell >= 24 ? 3 : (cell >= 16 ? 2 : 1);
+    M5.Display.setTextSize(ts);
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < 15; c++) {
             int code = vestaboardCodes[r][c];
@@ -956,28 +957,50 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
 {
     const int w = compact ? 92 : 160;
     const int h = compact ? 36 : 72;
-    const int cap = compact ? 8 : 12;
-    const int radius = compact ? 6 : 12;
+    const int cap = compact ? 10 : 16;
+    const int radius = compact ? 8 : 14;
+    const int stroke = compact ? 3 : 6;
+    const int gap = compact ? 2 : 3;
     int x = right - w - cap;
     int y = cy - h / 2;
     int level = constrain(pct, 0, 100);
-    int inner = w - 6;
-    int fillw = pct >= 0 ? (inner * level / 100) : 0;
-    M5.Display.drawRoundRect(x, y, w, h, radius, TFT_BLACK);
-    M5.Display.fillRect(x + w, y + (h - (compact ? 12 : 28)) / 2, cap, compact ? 12 : 28, TFT_BLACK);
+    int capH = compact ? 14 : 28;
+    M5.Display.fillRoundRect(x, y, w, h, radius, TFT_BLACK);
+    M5.Display.fillRoundRect(
+        x + stroke,
+        y + stroke,
+        w - 2 * stroke,
+        h - 2 * stroke,
+        max(2, radius - stroke),
+        TFT_WHITE
+    );
+    M5.Display.fillRoundRect(x + w - 1, y + (h - capH) / 2, cap + 1, capH, compact ? 2 : 4, TFT_BLACK);
+    int ix = x + stroke + gap;
+    int iy = y + stroke + gap;
+    int iw = w - 2 * (stroke + gap);
+    int ih = h - 2 * (stroke + gap);
+    int fillw = pct >= 0 ? (iw * level / 100) : 0;
     if (fillw > 0) {
-        M5.Display.fillRect(x + 3, y + 3, fillw, h - 6, TFT_BLACK);
+        M5.Display.fillRect(ix, iy, fillw, ih, TFT_BLACK);
     }
     M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextSize(compact ? 2 : 3);
     String s = pct >= 0 ? (String(pct) + "%") : String("--");
     int tw = M5.Display.textWidth(s);
-    int th = compact ? 18 : 28;
-    int padX = compact ? 4 : 8;
-    int padY = compact ? 2 : 4;
-    int bx = x + w / 2 - tw / 2 - padX;
-    int by = y + h / 2 - th / 2 - padY;
-    M5.Display.fillRoundRect(bx, by, tw + padX * 2, th + padY * 2, compact ? 3 : 6, TFT_WHITE);
+    int th = compact ? 16 : 26;
+    int padX = compact ? 3 : 6;
+    int padY = compact ? 1 : 3;
+    int plateW = tw + padX * 2;
+    int plateH = th + padY * 2;
+    int bx = x + (w - plateW) / 2;
+    int by = y + (h - plateH) / 2;
+    if (bx < ix) {
+        bx = ix;
+    }
+    if (bx + plateW > ix + iw) {
+        plateW = max(0, ix + iw - bx);
+    }
+    M5.Display.fillRoundRect(bx, by, plateW, plateH, compact ? 3 : 5, TFT_WHITE);
     M5.Display.setTextColor(TFT_BLACK);
     M5.Display.drawString(s, x + w / 2, y + h / 2);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1033,8 +1056,8 @@ void drawLockScreen(bool forceFull)
         M5.Display.setTextSize(2);
         M5.Display.drawString(String(unreadCount) + " MSG", W / 2, 188);
     }
-    int batRight = W / 2 + 86;
-    int batLeft = batRight - 160 - 12;
+    int batRight = W / 2 + 90;
+    int batLeft = batRight - 160 - 16;
     int wifiCx = batLeft / 2;
     drawWifiIcon(wifiCx, 220, 56, WiFi.status() == WL_CONNECTED);
     drawBatteryBadge(batRight, 220, tabletBat, false);
@@ -1052,8 +1075,8 @@ void drawLockScreen(bool forceFull)
         M5.Display.drawString("Logo after site Wi-Fi", W / 2, 300);
     }
     if (showBoard) {
-        int cell = showLogo ? 22 : 28;
-        int gap = 3;
+        int cell = showLogo ? 24 : 30;
+        int gap = 2;
         int gridW = 15 * cell + 14 * gap;
         int gridY = showLogo ? 430 : 280;
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
@@ -1103,8 +1126,8 @@ void drawBoardPage(bool forceFull)
     beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
-    int cell = 26;
-    int gap = 4;
+    int cell = 28;
+    int gap = 3;
     int gridW = 15 * cell + 14 * gap;
     drawVestaboardGrid((M5.Display.width() - gridW) / 2, 130, cell, gap);
     M5.Display.setTextDatum(TC_DATUM);

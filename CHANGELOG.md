@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.35] - 2026-09-29
+
+### Fixed
+- Settings no longer stays on **Updating…** after a wireless flash: the queue clears once the tablet polls after a binary was served, even if it still reports the previous version.
+- PaperMono battery outline is a thick complete shape with a white gutter so the fill does not erase the body. Vestaboard letters on the lock screen and BOARD page are larger. Firmware **0.1.33**.
+
 ## [3.0.34] - 2026-09-29
 
 ### Fixed
