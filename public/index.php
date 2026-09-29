@@ -1128,19 +1128,29 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             <p class="hint" id="papermono-flash-hint">Leave this Settings page open. Click <strong>Build firmware</strong> for the tablet you selected (first build can take several minutes). If the port list fails, click <strong>Install USB tools</strong>. The first flash is USB. After esptool resets the tablet, USB serial drops and comes back — wait for the setup screen. If Wi-Fi is not acknowledged, keep USB in and click <strong>Send Wi-Fi only</strong> — do not hold the power button. Later firmware can go over Wi-Fi from the paired list or Settings → Updates. Keep the tablet out of direct sun.</p>
                             <p class="hint" id="papermono-kit-hint">To prepare a tablet away from this host: enter the <strong>site</strong> 2.4 GHz Wi-Fi and the panel URL the tablet will use (not localhost), then <strong>Download USB setup kit</strong>. Unzip on a Mac or Windows PC, plug the tablet in, and run <code>python3 flash.py</code> (or <code>py flash.py</code>). The script installs esptool in a local <code>.venv</code> — do not use Homebrew <code>pip install</code>. The zip contains the Wi-Fi password and pairing token — keep it private. Mac and Windows steps: <a href="https://github.com/martyndix/yarbo-control-panel/blob/main/docs/papermono.md#set-up-away-from-the-panel" target="_blank" rel="noopener">docs/papermono.md</a>.</p>
-                            <div class="papermono-preview-grid" id="papermono-preview-grid" aria-hidden="true">
+                            <details class="papermono-preview-fold">
+                                <summary>Screen previews</summary>
+                                <p class="hint">Mocks of the current tablet pages. They follow the modules you have switched on.</p>
+                            <div class="papermono-preview-grid" id="papermono-preview-grid">
                                 <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-                                        <text x="24" y="40" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
-                                        <image class="paper-logo-preview" href="" x="284" y="16" width="180" height="180" preserveAspectRatio="xMaxYMin meet"/>
-                                        <text x="24" y="64" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOME</text>
-                                        <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">87%</text>
-                                        <text x="24" y="240" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging  No</text>
-                                        <text x="24" y="280" font-family="ui-monospace, monospace" font-size="22" fill="#111">State     idle</text>
-                                        <text x="24" y="320" font-family="ui-monospace, monospace" font-size="22" fill="#111">Head      Mower</text>
-                                        <text x="24" y="360" font-family="ui-monospace, monospace" font-size="22" fill="#111">Error     0</text>
+                                        <text x="24" y="52" font-family="ui-sans-serif, system-ui, sans-serif" font-size="28" font-weight="700" fill="#111">YARBO</text>
+                                        <rect x="252" y="18" width="100" height="40" rx="10" fill="none" stroke="#111" stroke-width="5"/>
+                                        <rect x="262" y="28" width="62" height="20" fill="#111"/>
+                                        <rect x="324" y="32" width="8" height="12" fill="#111"/>
+                                        <path d="M370 58 a22 22 0 0 1 44 0" fill="none" stroke="#111" stroke-width="5"/>
+                                        <path d="M382 58 a10 10 0 0 1 20 0" fill="none" stroke="#111" stroke-width="5"/>
+                                        <rect x="392" y="62" width="8" height="8" fill="#111"/>
+                                        <rect x="378" y="16" width="82" height="82" rx="14" fill="none" stroke="#111" stroke-width="3"/>
+                                        <rect x="400" y="50" width="38" height="32" rx="5" fill="#111"/>
+                                        <path d="M409 50 v-10 a10 10 0 0 1 20 0 v10" fill="none" stroke="#111" stroke-width="6"/>
+                                        <text x="24" y="188" font-family="ui-sans-serif, system-ui, sans-serif" font-size="84" font-weight="700" fill="#111">87%</text>
+                                        <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">Charging  No</text>
+                                        <text x="24" y="288" font-family="ui-monospace, monospace" font-size="22" fill="#111">State     idle</text>
+                                        <text x="24" y="328" font-family="ui-monospace, monospace" font-size="22" fill="#111">Head      Mower</text>
+                                        <text x="24" y="368" font-family="ui-monospace, monospace" font-size="22" fill="#111">Error     0</text>
                                         <rect x="24" y="500" width="208" height="88" rx="12" fill="#111"/>
                                         <text x="128" y="554" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700" fill="#f4f1e8">STOP</text>
                                         <rect x="248" y="500" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
@@ -1149,15 +1159,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <text x="128" y="654" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PAUSE</text>
                                         <rect x="248" y="600" width="208" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
                                         <text x="352" y="654" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LIGHTS</text>
-                                        <rect x="16" y="760" width="100" height="18" fill="#111"/>
-                                        <text x="66" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#f4f1e8">HOME</text>
-                                        <text x="180" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">STATUS</text>
-                                        <text x="300" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">HEALTH</text>
-                                        <text x="414" y="773" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#111">PLANS</text>
-                                        <text x="24" y="792" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">192.168.1.50</text>
-                                        <text x="456" y="792" text-anchor="end" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">keys · pages</text>
                                     </svg>
-                                    <figcaption>Home — battery and Stop / Dock / Pause / Lights</figcaption>
+                                    <figcaption>Home — battery, padlock, Stop / Dock / Pause / Lights (A/B change pages)</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono status screen mock">
@@ -1238,15 +1241,80 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </svg>
                                     <figcaption>Plans — tap a row, then START</figcaption>
                                 </figure>
+                                <figure class="papermono-preview" data-preview-for="pages">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono HOUSE page mock with twelve buttons">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="52" font-family="ui-sans-serif, system-ui, sans-serif" font-size="28" font-weight="700" fill="#111">HOUSE</text>
+                                        <rect x="378" y="16" width="82" height="82" rx="14" fill="none" stroke="#111" stroke-width="3"/>
+                                        <rect x="400" y="50" width="38" height="32" rx="5" fill="#111"/>
+                                        <path d="M409 50 v-10 a10 10 0 0 1 20 0 v10" fill="none" stroke="#111" stroke-width="6"/>
+                                        <rect x="24" y="118" width="208" height="88" rx="14" fill="#111"/>
+                                        <text x="128" y="172" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#f4f1e8">*ALL OFF</text>
+                                        <rect x="248" y="118" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="352" y="172" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">Fountain</text>
+                                        <rect x="24" y="218" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="128" y="272" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#111">Kitchen</text>
+                                        <rect x="248" y="218" width="208" height="88" rx="14" fill="#111"/>
+                                        <text x="352" y="272" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#f4f1e8">Evening</text>
+                                        <rect x="24" y="318" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="128" y="372" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Hall lamp</text>
+                                        <rect x="248" y="318" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="352" y="372" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Porch</text>
+                                        <rect x="24" y="418" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="128" y="472" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Study</text>
+                                        <rect x="248" y="418" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="352" y="472" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Landing</text>
+                                        <rect x="24" y="518" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="128" y="572" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Bedroom</text>
+                                        <rect x="248" y="518" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="352" y="572" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Garage</text>
+                                        <rect x="24" y="618" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="128" y="672" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Drive</text>
+                                        <rect x="248" y="618" width="208" height="88" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="352" y="672" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Utility</text>
+                                    </svg>
+                                    <figcaption>HOUSE — up to 12 lights or scenes on one screen, no MORE pager</figcaption>
+                                </figure>
+                                <figure class="papermono-preview" data-preview-for="pages">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="52" font-family="ui-sans-serif, system-ui, sans-serif" font-size="28" font-weight="700" fill="#111">MAIL</text>
+                                        <rect x="378" y="16" width="82" height="82" rx="14" fill="none" stroke="#111" stroke-width="3"/>
+                                        <rect x="400" y="50" width="38" height="32" rx="5" fill="#111"/>
+                                        <path d="M409 50 v-10 a10 10 0 0 1 20 0 v10" fill="none" stroke="#111" stroke-width="6"/>
+                                        <text x="24" y="108" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" fill="#111">Inbox</text>
+                                        <rect x="24" y="126" width="432" height="84" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="40" y="154" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#111">Kitchen</text>
+                                        <text x="40" y="176" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#333">Can you pick up milk</text>
+                                        <text x="40" y="198" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#555">20:14 · Tue 29 Sep</text>
+                                        <rect x="24" y="222" width="432" height="84" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="40" y="250" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#111">To Study</text>
+                                        <text x="40" y="272" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#333">On my way</text>
+                                        <text x="40" y="294" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#555">Sent · 20:11</text>
+                                        <rect x="248" y="680" width="208" height="72" rx="12" fill="#111"/>
+                                        <text x="352" y="724" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#f4f1e8">WRITE</text>
+                                    </svg>
+                                    <figcaption>MAIL — inbox with time stamps, read receipts, and WRITE</figcaption>
+                                </figure>
                                 <figure class="papermono-preview" data-preview-for="lock">
                                     <div class="paper-lock-mock paper-lock-mock--mono" aria-label="PaperMono lock screen from current settings">
+                                        <div class="paper-lock-top">
+                                            <span class="paper-lock-envelope" title="Unread mail"></span>
+                                            <span class="paper-lock-batt" title="Battery"></span>
+                                        </div>
                                         <p class="paper-lock-name" data-lock-name>PaperMono</p>
                                         <p class="paper-lock-clock">14:32</p>
+                                        <p class="paper-lock-date">Tue 29 Sep</p>
                                         <img class="paper-logo-preview paper-lock-logo" alt="">
                                         <div class="paper-lock-board vestaboard-preview" data-lock-board></div>
-                                        <p class="paper-lock-hint">Opposite corners: tap 1, then 2</p>
+                                        <div class="paper-lock-actions">
+                                            <span class="paper-lock-unlock">Unlock</span>
+                                            <span class="paper-lock-off">OFF</span>
+                                        </div>
                                     </div>
-                                    <figcaption>Lock screen — logo, Vestaboard, or both from companion settings</figcaption>
+                                    <figcaption>Lock screen — envelope when mail is waiting, Unlock, and OFF</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="lymow">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono Lymow page mock">
@@ -1292,7 +1360,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <figcaption>First boot — until Wi-Fi is sent over USB</figcaption>
                                 </figure>
                             </div>
-                            <div class="papermono-preview-grid hidden" id="papercolor-preview-grid" aria-hidden="true">
+                            <div class="papermono-preview-grid hidden" id="papercolor-preview-grid">
                                 <figure class="papermono-preview papercolor-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour home screen mock, 400 by 600 Spectra 6">
                                         <rect width="400" height="600" fill="#fffef6"/>
@@ -1318,10 +1386,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <div class="paper-lock-mock paper-lock-mock--color" aria-label="Paper Colour lock screen from current settings">
                                         <p class="paper-lock-name" data-lock-name>Paper Colour</p>
                                         <p class="paper-lock-clock">14:32</p>
-                                        <p class="paper-lock-date">Fri 25 Sep</p>
+                                        <p class="paper-lock-date">Tue 29 Sep</p>
                                         <img class="paper-logo-preview paper-lock-logo" alt="">
                                         <div class="paper-lock-board vestaboard-preview" data-lock-board></div>
-                                        <p class="paper-lock-hint">C unlocks</p>
+                                        <p class="paper-lock-hint">C unlocks · hold C for OFF</p>
                                     </div>
                                     <figcaption>Lock screen — logo, Vestaboard, or both from companion settings</figcaption>
                                 </figure>
@@ -1367,6 +1435,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <figcaption>First boot — pick Paper Colour in Settings before flashing</figcaption>
                                 </figure>
                             </div>
+                            </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>

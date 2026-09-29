@@ -156,7 +156,8 @@ void drawPadlockIcon(int x, int y, int size, bool locked);
 void drawWifiIcon(int cx, int cy, int size, bool connected);
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
 bool takeTouchPress(int &x, int &y);
-void applyFrontlight(bool on);
+void applyFrontlight(bool on, bool force = false);
+bool unreadFrontlightHold();
 void ensureNtp();
 void refreshLocalClock();
 bool tapOnPadlock(int x, int y);
@@ -848,13 +849,22 @@ void drawVestaboardGrid(int x, int y, int cell, int gap)
     M5.Display.setTextDatum(TL_DATUM);
 }
 
-int brightnessValue()
+bool unreadFrontlightHold()
 {
-    return map(constrain(brightnessPct, 0, 100), 0, 100, 0, 255);
+    return unreadCount > 0 && alertMessageOn;
 }
 
-void applyFrontlight(bool on)
+int brightnessValue()
 {
+    int pct = unreadFrontlightHold() ? 100 : brightnessPct;
+    return map(constrain(pct, 0, 100), 0, 100, 0, 255);
+}
+
+void applyFrontlight(bool on, bool force)
+{
+    if (unreadFrontlightHold() && !force) {
+        on = true;
+    }
     lightOn = on;
     paperSetFrontlight(on ? (uint8_t) brightnessValue() : 0);
 }
@@ -862,7 +872,7 @@ void applyFrontlight(bool on)
 void powerOffTablet()
 {
     rgbOff();
-    applyFrontlight(false);
+    applyFrontlight(false, true);
     M5.Display.waitDisplay();
     M5.Display.setEpdMode(epd_mode_t::epd_quality);
     M5.Display.startWrite();
@@ -1697,10 +1707,14 @@ void refreshUnreadLed()
         }
     }
     unreadCount = n;
-    if (unreadCount > 0 && alertMessageOn) {
+    if (unreadFrontlightHold()) {
         rgbHoldMessage(true);
+        applyFrontlight(true);
     } else {
         rgbHoldMessage(false);
+        if (lightOn) {
+            applyFrontlight(true);
+        }
     }
 }
 
@@ -2583,6 +2597,13 @@ void inputTask(void *arg)
         int tx = 0;
         int ty = 0;
         if (takeTouchPress(tx, ty)) {
+            lastActivity = millis();
+            lastLight = millis();
+            if (!lightOn) {
+                applyFrontlight(true);
+            } else if (unreadFrontlightHold()) {
+                applyFrontlight(true);
+            }
             touchQX = tx;
             touchQY = ty;
             touchQ = 1;
@@ -2742,13 +2763,6 @@ void loop()
     }
 
     uint32_t now = millis();
-    if (!otaBusy && !screenLocked && WiFi.status() == WL_CONNECTED
-        && now - lastActivity > (uint32_t) lockAfterS * 1000) {
-        enterLock();
-    }
-    if (screenLocked && lightOn && now - lastLight > (uint32_t) lightOffS * 1000) {
-        applyFrontlight(false);
-    }
 
     int tx = 0;
     int ty = 0;
@@ -2757,6 +2771,10 @@ void loop()
         ty = touchQY;
         touchQ = 0;
         if (screenLocked) {
+            lastLight = now;
+            if (!lightOn) {
+                applyFrontlight(true);
+            }
             handleLockTouch(tx, ty);
         } else {
             noteActivity();
@@ -2788,6 +2806,16 @@ void loop()
                 }
             }
         }
+    }
+
+    now = millis();
+    if (!otaBusy && !screenLocked && WiFi.status() == WL_CONNECTED
+        && now - lastActivity > (uint32_t) lockAfterS * 1000) {
+        enterLock();
+    }
+    if (screenLocked && lightOn && !unreadFrontlightHold()
+        && now - lastLight > (uint32_t) lightOffS * 1000) {
+        applyFrontlight(false);
     }
 
     flushPageButtons();

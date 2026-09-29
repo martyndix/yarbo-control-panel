@@ -2194,6 +2194,43 @@ html[data-theme="light"] .plan-activity {
     border: 1px solid var(--border);
 }
 
+.papermono-preview-fold {
+    margin: 0.85rem 0 1.1rem;
+    padding: 0.15rem 0.9rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface, transparent);
+}
+
+.papermono-preview-fold > summary {
+    cursor: pointer;
+    list-style: none;
+    font-weight: 650;
+    padding: 0.7rem 0;
+}
+
+.papermono-preview-fold > summary::-webkit-details-marker {
+    display: none;
+}
+
+.papermono-preview-fold > summary::before {
+    content: "▸ ";
+    display: inline-block;
+    color: var(--muted);
+}
+
+.papermono-preview-fold[open] > summary::before {
+    content: "▾ ";
+}
+
+.papermono-preview-fold:not([open]) {
+    padding-bottom: 0.15rem;
+}
+
+.papermono-preview-fold .hint {
+    margin: 0 0 0.75rem;
+}
+
 .papermono-preview-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2242,7 +2279,8 @@ html[data-theme="light"] .plan-activity {
 
 .paper-lock-mock--mono {
     width: min(100%, 15rem);
-    min-height: 22rem;
+    min-height: 24rem;
+    position: relative;
 }
 
 .paper-lock-mock--color {
@@ -2297,6 +2335,81 @@ html[data-theme="light"] .plan-activity {
 .paper-lock-board .vestaboard-cell {
     min-width: 0;
     font-size: 0.48rem;
+}
+
+.paper-lock-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 2.4rem;
+}
+
+.paper-lock-envelope {
+    display: block;
+    width: 2.35rem;
+    height: 1.7rem;
+    margin: 0.1rem 0 0 0.1rem;
+    border: 5px solid #111;
+    border-radius: 6px;
+    box-sizing: border-box;
+    background:
+        linear-gradient(135deg, transparent 49%, #111 49%, #111 56%, transparent 56%) no-repeat,
+        linear-gradient(225deg, transparent 49%, #111 49%, #111 56%, transparent 56%) no-repeat;
+    background-size: 50% 70%, 50% 70%;
+    background-position: left top, right top;
+}
+
+.paper-lock-batt {
+    display: block;
+    width: 2.6rem;
+    height: 1.15rem;
+    margin: 0.15rem 0.1rem 0 0;
+    border: 5px solid #111;
+    border-radius: 6px;
+    box-sizing: border-box;
+    position: relative;
+}
+
+.paper-lock-batt::after {
+    content: "";
+    position: absolute;
+    right: -0.38rem;
+    top: 0.18rem;
+    width: 0.22rem;
+    height: 0.45rem;
+    background: #111;
+    border-radius: 1px;
+}
+
+.paper-lock-actions {
+    display: flex;
+    gap: 0.4rem;
+    width: 100%;
+    margin-top: auto;
+}
+
+.paper-lock-unlock,
+.paper-lock-off {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.4rem;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+
+.paper-lock-unlock {
+    flex: 1 1 auto;
+    background: #111;
+    color: #f4f1e8;
+}
+
+.paper-lock-off {
+    flex: 0 0 3.4rem;
+    border: 2px solid #111;
+    color: #111;
 }
 
 .papermono-actions {

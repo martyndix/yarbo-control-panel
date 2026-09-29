@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.49] - 2026-09-29
+
+### Changed
+- Settings → E-paper companions keeps screen mocks behind a closed **Screen previews** section (HOUSE, MAIL, lock screen with envelope / Unlock / OFF). Open it only when you want the pictures.
+- PaperMono firmware **0.1.44**: every screen tap resets the lock timer (including MAIL typing). An unread message holds the frontlight at 100% while the cyan LED is on, until the note is opened.
+
 ## [3.0.48] - 2026-09-29
 
 ### Added
