@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.34] - 2026-09-29
+
+### Fixed
+- PaperMono lock-screen Vestaboard uses the live Note layout instead of stored empty `board_codes`.
+- Battery percent sits on a white plate so the fill no longer punches glyph boxes through the icon.
+- Wireless Update no longer loops **UPDATING**: the panel drops `ota_pending` after it has served a binary (or if the tablet is still on the same version after 90 seconds), and the tablet only attempts OTA once per boot. The firmware endpoint builds first when the sources are newer. Firmware **0.1.32**.
+
 ## [3.0.33] - 2026-09-29
 
 ### Fixed

@@ -85,12 +85,21 @@ if ($method === 'GET' && $action === 'logo') {
 }
 
 if ($method === 'GET' && $action === 'firmware') {
-    set_time_limit(300);
+    set_time_limit(400);
     $device = $devices->findByToken(device_token_from_request());
     if ($device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
     $kind = $devices->deviceKind($device);
+    if ($devices->firmwareNeedsBuild($kind)) {
+        $build = $devices->buildFirmware($kind, true);
+        if (!($build['ok'] ?? false) && !$devices->firmwareAvailable($kind)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($build['error'] ?? 'Firmware binary is not built yet.'),
+            ], 503);
+        }
+    }
     $path = $devices->firmwarePath($kind);
     if (!$devices->firmwareAvailable($kind)) {
         json_response([
@@ -98,6 +107,7 @@ if ($method === 'GET' && $action === 'firmware') {
             'error' => 'Firmware binary is not built yet. Use Settings → e-paper companions to flash after building.',
         ], 404);
     }
+    $devices->markOtaServed((string) ($device['id'] ?? ''));
     $version = $devices->firmwareVersionForKind($kind);
     $filename = $kind === YarboPaperDevice::KIND_COLOR
         ? 'papercolor-' . $version . '.bin'

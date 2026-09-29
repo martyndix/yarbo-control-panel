@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.31';
+    public const FIRMWARE_VERSION = '0.1.32';
     public const FIRMWARE_VERSION_COLOR = '0.2.13-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -343,6 +343,7 @@ final class YarboPaperDevice
             }
             $device['ota_pending'] = true;
             $device['ota_requested_at'] = gmdate('c');
+            $device['ota_served_at'] = null;
             $this->save($store);
 
             return [
@@ -513,6 +514,26 @@ final class YarboPaperDevice
         return null;
     }
 
+    public function markOtaServed(string $id): void
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return;
+        }
+        $store = $this->load();
+        foreach ($store['devices'] as &$device) {
+            if (!is_array($device) || (string) ($device['id'] ?? '') !== $id) {
+                continue;
+            }
+            $device['ota_served_at'] = gmdate('c');
+            $this->save($store);
+            unset($device);
+
+            return;
+        }
+        unset($device);
+    }
+
     public function touch(string $id, ?string $fwReported = null): void
     {
         $store = $this->load();
@@ -522,15 +543,24 @@ final class YarboPaperDevice
             }
             $device['last_seen_at'] = gmdate('c');
             if ($fwReported !== null && $fwReported !== '') {
+                $prevFw = (string) ($device['fw_reported'] ?? '');
                 $device['fw_reported'] = $fwReported;
                 $inferred = $this->kindFromFirmware($fwReported);
                 if ($inferred !== null) {
                     $device['kind'] = $inferred;
                 }
                 $latest = $this->firmwareVersionForKind($this->deviceKind($device));
-                if (!empty($device['ota_pending']) && $fwReported === $latest) {
-                    $device['ota_pending'] = false;
-                    $device['ota_requested_at'] = null;
+                if (!empty($device['ota_pending'])) {
+                    $requestedAt = strtotime((string) ($device['ota_requested_at'] ?? '')) ?: 0;
+                    $servedAt = strtotime((string) ($device['ota_served_at'] ?? '')) ?: 0;
+                    $sameVersionStuck = $prevFw !== '' && $prevFw === $fwReported
+                        && $requestedAt > 0 && (time() - $requestedAt) >= 90;
+                    $servedButUnchanged = $servedAt > 0 && $fwReported !== $latest;
+                    if ($fwReported === $latest || $servedButUnchanged || $sameVersionStuck) {
+                        $device['ota_pending'] = false;
+                        $device['ota_requested_at'] = null;
+                        $device['ota_served_at'] = null;
+                    }
                 }
             }
         }
@@ -760,30 +790,55 @@ final class YarboPaperDevice
      */
     private function vestaboardCompact(YarboVestaboard $vbObj, array $vb, ?array $parsed, bool $online): array
     {
-        $codes = null;
-        if (!empty($vb['enabled'])) {
-            $codes = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
+        $layout = $vbObj->layoutForLiveModule($parsed, $online);
+        $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null);
+        $lines = is_array($layout['lines'] ?? null) ? array_values($layout['lines']) : null;
+        if ($this->vestaboardCodesBlank($codes)) {
+            $codes = YarboVestaboard::normalizeLiveCodes($vb['last_live_codes'] ?? null);
+            $lines = null;
         }
-        $lines = null;
+        if ($this->vestaboardCodesBlank($codes)) {
+            $codes = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
+            $lines = null;
+        }
         if ($codes === null) {
-            $layout = $vbObj->layoutForLiveModule($parsed, $online);
-            $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null) ?? [
+            $codes = [
                 array_fill(0, 15, 0),
                 array_fill(0, 15, 0),
                 array_fill(0, 15, 0),
             ];
-            $lines = is_array($layout['lines'] ?? null) ? $layout['lines'] : YarboVestaboard::linesFromCodes($codes);
         }
-        if (!is_array($lines)) {
+        if (!is_array($lines) || count($lines) < 3) {
             $lines = YarboVestaboard::linesFromCodes($codes);
         }
-        $hash = hash('sha256', json_encode($codes));
 
         return [
             'vestaboard_codes' => $codes,
             'vestaboard_lines' => $lines,
-            'vestaboard_hash' => $hash,
+            'vestaboard_hash' => hash('sha256', json_encode($codes)),
         ];
+    }
+
+    /**
+     * @param list<list<int>>|null $codes
+     */
+    private function vestaboardCodesBlank(?array $codes): bool
+    {
+        if ($codes === null) {
+            return true;
+        }
+        foreach ($codes as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            foreach ($row as $n) {
+                if ((int) $n !== 0) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /**

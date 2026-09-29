@@ -27,6 +27,7 @@ String robotName = "";
 
 uint32_t lastPoll = 0;
 bool otaBusy = false;
+bool otaTriedThisBoot = false;
 String lastError;
 int battery = -1;
 String charging = "—";
@@ -791,7 +792,7 @@ void runOtaUpdate()
     WiFi.setSleep(false);
     drawOtaScreen();
     delay(1200);
-    HTTPUpdate updater(180000);
+    HTTPUpdate updater(300000);
     updater.rebootOnUpdate(true);
     updater.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     String url = panelUrl + "/api/device.php?action=firmware&token=" + token;
@@ -885,7 +886,8 @@ bool httpGetStatus()
     syncPaperLogo(String((const char *) (doc["logo_hash"] | "")));
     bool otaPending = doc["ota_pending"] | false;
     String latest = doc["firmware_latest"] | "";
-    if (otaPending && latest.length() && latest != PAPERMONO_FW_VERSION) {
+    if (otaPending && latest.length() && latest != PAPERMONO_FW_VERSION && !otaTriedThisBoot) {
+        otaTriedThisBoot = true;
         runOtaUpdate();
     }
     return true;

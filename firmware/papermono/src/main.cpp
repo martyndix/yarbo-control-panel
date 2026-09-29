@@ -33,6 +33,7 @@ String robotName = "";
 
 uint32_t lastPoll = 0;
 bool otaBusy = false;
+bool otaTriedThisBoot = false;
 String lastError;
 int battery = -1;
 String charging = "—";
@@ -969,9 +970,15 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
     }
     M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextSize(compact ? 2 : 3);
-    bool invert = fillw > (w / 2);
-    M5.Display.setTextColor(invert ? TFT_WHITE : TFT_BLACK, invert ? TFT_BLACK : TFT_WHITE);
     String s = pct >= 0 ? (String(pct) + "%") : String("--");
+    int tw = M5.Display.textWidth(s);
+    int th = compact ? 18 : 28;
+    int padX = compact ? 4 : 8;
+    int padY = compact ? 2 : 4;
+    int bx = x + w / 2 - tw / 2 - padX;
+    int by = y + h / 2 - th / 2 - padY;
+    M5.Display.fillRoundRect(bx, by, tw + padX * 2, th + padY * 2, compact ? 3 : 6, TFT_WHITE);
+    M5.Display.setTextColor(TFT_BLACK);
     M5.Display.drawString(s, x + w / 2, y + h / 2);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
 }
@@ -1777,7 +1784,7 @@ void runOtaUpdate()
     drawOtaScreen();
     alertOta();
     delay(1200);
-    HTTPUpdate updater(180000);
+    HTTPUpdate updater(300000);
     updater.rebootOnUpdate(true);
     updater.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     String url = panelUrl + "/api/device.php?action=firmware&token=" + token;
@@ -1889,7 +1896,8 @@ bool httpGetStatus()
     lastError = "";
     bool otaPending = doc["ota_pending"] | false;
     String latest = doc["firmware_latest"] | "";
-    if (otaPending && latest.length() && latest != PAPERMONO_FW_VERSION) {
+    if (otaPending && latest.length() && latest != PAPERMONO_FW_VERSION && !otaTriedThisBoot) {
+        otaTriedThisBoot = true;
         runOtaUpdate();
     }
     return true;
