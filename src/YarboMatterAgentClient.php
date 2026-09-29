@@ -6,6 +6,8 @@ namespace Yarbo;
 
 final class YarboMatterAgentClient
 {
+    public const MIN_VERSION = 2;
+
     private static bool $spawnAttempted = false;
 
     public function __construct(
@@ -71,23 +73,54 @@ final class YarboMatterAgentClient
         return (bool) ($this->ping()['ok'] ?? false);
     }
 
+    public static function agentSupportsColor(array $probe): bool
+    {
+        if (($probe['ok'] ?? false) !== true) {
+            return false;
+        }
+        $features = $probe['features'] ?? null;
+        if (is_array($features) && in_array('color', $features, true)) {
+            return true;
+        }
+
+        return (int) ($probe['version'] ?? 0) >= self::MIN_VERSION;
+    }
+
+    public static function isUnknownCommandError(array $result): bool
+    {
+        $error = strtolower((string) ($result['error'] ?? ''));
+
+        return $error !== '' && str_contains($error, 'unknown matter command');
+    }
+
+    public function forceRestart(): void
+    {
+        self::$spawnAttempted = false;
+        $this->stopAgentProcesses();
+        $this->ensureStarted();
+    }
+
     public function ensureStarted(): void
     {
         if (self::$spawnAttempted) {
             return;
         }
+        self::$spawnAttempted = true;
         $probe = $this->post(['op' => 'ping'], 0.4);
-        if (($probe['ok'] ?? false) === true) {
-            self::$spawnAttempted = true;
-
+        if (self::agentSupportsColor($probe)) {
             return;
         }
-        self::$spawnAttempted = true;
+        $this->spawnAgent();
+    }
+
+    private function spawnAgent(): void
+    {
         $root = dirname(__DIR__);
         $script = $root . '/scripts/matter_agent.py';
         if (!is_file($script)) {
             return;
         }
+        $this->stopAgentProcesses();
         $log = $root . '/data/matter-agent.log';
         if (!is_dir($root . '/data')) {
             @mkdir($root . '/data', 0775, true);
@@ -96,9 +129,14 @@ final class YarboMatterAgentClient
         if (!is_executable($python)) {
             $python = 'python3';
         }
+        $setsid = is_executable('/usr/bin/setsid') ? '/usr/bin/setsid ' : '';
+        $nohup = is_executable('/usr/bin/nohup') || is_executable('/bin/nohup') ? 'nohup ' : '';
         $cmd = sprintf(
-            'cd %s && %s %s >> %s 2>&1 &',
+            'cd %s && YARBO_MATTER_AGENT_PORT=%d %s%s%s %s >> %s 2>&1 < /dev/null & echo $!',
             escapeshellarg($root),
+            $this->port,
+            $nohup,
+            $setsid,
             escapeshellarg($python),
             escapeshellarg($script),
             escapeshellarg($log)
@@ -107,9 +145,19 @@ final class YarboMatterAgentClient
         $deadline = microtime(true) + 4.0;
         while (microtime(true) < $deadline) {
             usleep(200000);
-            if (($this->post(['op' => 'ping'], 0.4)['ok'] ?? false) === true) {
+            $ready = $this->post(['op' => 'ping'], 0.4);
+            if (self::agentSupportsColor($ready)) {
                 return;
             }
         }
+    }
+
+    private function stopAgentProcesses(): void
+    {
+        $port = (int) $this->port;
+        @exec('lsof -ti tcp:' . $port . ' 2>/dev/null | xargs kill -9 2>/dev/null');
+        @exec('fuser -k ' . $port . '/tcp >/dev/null 2>&1');
+        @exec("pkill -f '[s]cripts/matter_agent.py' 2>/dev/null");
+        usleep(250000);
     }
 }

@@ -12,6 +12,8 @@ PHP_BIN="${YARBO_PHP_BIN:-$(command -v php)}"
 
 # shellcheck source=scripts/lib/mqtt_agent.sh
 source "${ROOT}/scripts/lib/mqtt_agent.sh"
+# shellcheck source=scripts/lib/matter_agent.sh
+source "${ROOT}/scripts/lib/matter_agent.sh"
 
 if [[ -z "$PHP_BIN" ]]; then
   echo "ERROR: php not found on PATH" >&2
@@ -34,6 +36,7 @@ cleanup() {
     kill "${MATTER_PID}" 2>/dev/null || true
   fi
   pkill -f '[s]cripts/matter_agent.py' 2>/dev/null || true
+  yarbo_stop_matter_agent 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -93,6 +96,7 @@ fi
 if [[ -n "$MATTER_PY" && -f "${ROOT}/scripts/matter_agent.py" ]]; then
   echo "==> Starting Matter agent on 127.0.0.1:${YARBO_MATTER_AGENT_PORT:-8766}"
   mkdir -p "${ROOT}/data"
+  yarbo_stop_matter_agent
   "$MATTER_PY" "${ROOT}/scripts/matter_agent.py" >> "${ROOT}/data/matter-agent.log" 2>&1 &
   MATTER_PID=$!
 fi

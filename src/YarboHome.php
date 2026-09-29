@@ -551,6 +551,12 @@ final class YarboHome
     {
         $id = trim((string) ($input['id'] ?? ''));
         $action = strtolower(trim((string) ($input['command'] ?? $input['home_action'] ?? '')));
+        if ($action === 'colour' || $action === 'set_color' || $action === 'set_colour') {
+            $action = 'color';
+        }
+        if ($action === 'colour_temp') {
+            $action = 'color_temp';
+        }
         if ($id === '' || $action === '') {
             return ['ok' => false, 'error' => 'Device and action are required'];
         }
@@ -578,6 +584,10 @@ final class YarboHome
             $body['kelvin'] = max(1500, min(8000, (int) $input['kelvin']));
         }
         $result = $agent->request($body, 15.0);
+        if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
+            $agent->forceRestart();
+            $result = $agent->request($body, 15.0);
+        }
         if (!($result['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string) ($result['error'] ?? 'Command failed')];
         }
@@ -1145,6 +1155,17 @@ final class YarboHome
             $payload = ['id' => $id, 'command' => $action];
             if ($action === 'brightness' && array_key_exists('brightness', $input)) {
                 $payload['brightness'] = (int) $input['brightness'];
+            }
+            if ($action === 'color' || $action === 'colour') {
+                if (array_key_exists('hex', $input)) {
+                    $payload['hex'] = $input['hex'];
+                }
+                if (array_key_exists('color_hex', $input)) {
+                    $payload['color_hex'] = $input['color_hex'];
+                }
+            }
+            if (($action === 'color_temp' || $action === 'kelvin') && array_key_exists('kelvin', $input)) {
+                $payload['kelvin'] = (int) $input['kelvin'];
             }
             $result = $this->command($payload);
             if (!($result['ok'] ?? false)) {

@@ -256,10 +256,13 @@ fi
 RESTARTED=false
 # shellcheck source=scripts/lib/mqtt_agent.sh
 source "${ROOT}/scripts/lib/mqtt_agent.sh"
-step "Stopping MQTT agent so the new code can load"
-write_status "restarting" "Restarting MQTT agent"
+# shellcheck source=scripts/lib/matter_agent.sh
+source "${ROOT}/scripts/lib/matter_agent.sh"
+step "Stopping MQTT and Matter agents so the new code can load"
+write_status "restarting" "Restarting MQTT and Matter agents"
 yarbo_stop_mqtt_agent
-step "MQTT agent stopped"
+yarbo_stop_matter_agent
+step "MQTT and Matter agents stopped"
 
 ensure_panel_sh_unit() {
   local unit_path="/etc/systemd/system/${SERVICE_NAME}.service"

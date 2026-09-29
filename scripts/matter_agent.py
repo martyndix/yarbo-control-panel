@@ -35,6 +35,9 @@ DOCKER_IMAGE = os.environ.get(
 )
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 STORAGE = ROOT / "data" / "matter-server"
+AGENT_VERSION = 2
+COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
+COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
 ON_OFF = 6
 LEVEL_CONTROL = 8
@@ -709,6 +712,41 @@ def device_command(node_id: int, endpoint: int, cluster: int, name: str, payload
     return rpc if not rpc.get("ok") else {"ok": True}
 
 
+def is_transport_error(result: dict[str, Any]) -> bool:
+    err = str(result.get("error") or "").lower()
+    return any(
+        token in err
+        for token in (
+            "unavailable",
+            "timed out",
+            "timeout",
+            "not listening",
+            "not running",
+            "connection refused",
+            "websocket",
+        )
+    )
+
+
+def color_transition(execute_if_off: bool = True) -> dict[str, int]:
+    return {
+        "transitionTime": 0,
+        "optionsMask": 1 if execute_if_off else 0,
+        "optionsOverride": 1 if execute_if_off else 0,
+    }
+
+
+def try_color_commands(node_id: int, endpoint: int, attempts: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+    last: dict[str, Any] = {"ok": False, "error": "Colour command failed"}
+    for name, payload in attempts:
+        last = device_command(node_id, endpoint, COLOR_CONTROL, name, payload)
+        if last.get("ok"):
+            return last
+        if is_transport_error(last):
+            return last
+    return last
+
+
 def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, Any]:
     hex_s = str(body.get("hex") or body.get("color_hex") or "").strip()
     hs = hex_to_hs(hex_s) if hex_s else None
@@ -719,46 +757,57 @@ def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, An
         )
     if hs is None:
         return {"ok": False, "error": "Colour needs a hex value"}
-    # ExecuteIfOff: Hue often ignores colour writes unless the light is already on.
-    transition = {
-        "transitionTime": 0,
-        "optionsMask": 1,
-        "optionsOverride": 1,
-    }
-    hs_result = device_command(
-        node_id,
-        endpoint,
-        COLOR_CONTROL,
-        "MoveToHueAndSaturation",
-        {"hue": hs[0], "saturation": hs[1], **transition},
-    )
-    if hs_result.get("ok"):
-        return hs_result
     xy = hex_to_xy(hex_s) if hex_s else None
-    if xy is None:
-        return hs_result
-    return device_command(
-        node_id,
-        endpoint,
-        COLOR_CONTROL,
-        "MoveToColor",
-        {"colorX": xy[0], "colorY": xy[1], **transition},
-    )
+    # Hue often ignores colour writes while off, even with ExecuteIfOff.
+    on_result = device_command(node_id, endpoint, ON_OFF, "On", {})
+    if is_transport_error(on_result):
+        return on_result
+    attempts: list[tuple[str, dict[str, Any]]] = [
+        (
+            "MoveToHueAndSaturation",
+            {"hue": hs[0], "saturation": hs[1], **color_transition(True)},
+        ),
+        (
+            "EnhancedMoveToHueAndSaturation",
+            {
+                "enhancedHue": min(65535, hs[0] * 256),
+                "saturation": hs[1],
+                **color_transition(True),
+            },
+        ),
+    ]
+    if xy is not None:
+        attempts.append(("MoveToColor", {"colorX": xy[0], "colorY": xy[1], **color_transition(True)}))
+    result = try_color_commands(node_id, endpoint, attempts)
+    if result.get("ok") or is_transport_error(result):
+        return result
+    fallback: list[tuple[str, dict[str, Any]]] = [
+        (
+            "MoveToHueAndSaturation",
+            {"hue": hs[0], "saturation": hs[1], **color_transition(False)},
+        ),
+    ]
+    if xy is not None:
+        fallback.append(("MoveToColor", {"colorX": xy[0], "colorY": xy[1], **color_transition(False)}))
+    return try_color_commands(node_id, endpoint, fallback)
 
 
 def set_color_temp(node_id: int, endpoint: int, kelvin: int) -> dict[str, Any]:
-    return device_command(
-        node_id,
-        endpoint,
-        COLOR_CONTROL,
-        "MoveToColorTemperature",
-        {
-            "colorTemperatureMireds": kelvin_to_mireds(kelvin),
-            "transitionTime": 0,
-            "optionsMask": 1,
-            "optionsOverride": 1,
-        },
-    )
+    on_result = device_command(node_id, endpoint, ON_OFF, "On", {})
+    if is_transport_error(on_result):
+        return on_result
+    payload_on = {
+        "colorTemperatureMireds": kelvin_to_mireds(kelvin),
+        **color_transition(True),
+    }
+    result = device_command(node_id, endpoint, COLOR_CONTROL, "MoveToColorTemperature", payload_on)
+    if result.get("ok") or is_transport_error(result):
+        return result
+    payload_off = {
+        "colorTemperatureMireds": kelvin_to_mireds(kelvin),
+        **color_transition(False),
+    }
+    return device_command(node_id, endpoint, COLOR_CONTROL, "MoveToColorTemperature", payload_off)
 
 
 def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
@@ -825,7 +874,12 @@ def parse_id(device_id: str) -> tuple[int, int]:
 def dispatch(body: dict[str, Any]) -> dict[str, Any]:
     op = str(body.get("op") or "")
     if op == "ping":
-        return {"ok": True, "engine": "matter-agent"}
+        return {
+            "ok": True,
+            "engine": "matter-agent",
+            "version": AGENT_VERSION,
+            "features": ["color", "color_temp"],
+        }
     if op == "status":
         probe = socket.socket()
         probe.settimeout(0.4)
@@ -876,7 +930,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             node_id, endpoint = parse_id(device_id)
         except ValueError:
             return {"ok": False, "error": "Invalid device id"}
-        action = str(body.get("action") or "")
+        action = str(body.get("action") or body.get("command") or "").strip().lower()
         if action in ("on", "off", "toggle"):
             name = {"on": "On", "off": "Off", "toggle": "Toggle"}[action]
             rpc = matter_rpc(
@@ -906,9 +960,9 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     "optionsOverride": 0,
                 },
             )
-        if action == "color":
+        if action in COLOR_ACTIONS:
             return set_color(node_id, endpoint, body)
-        if action in ("color_temp", "kelvin"):
+        if action in COLOR_TEMP_ACTIONS:
             try:
                 kelvin = int(body.get("kelvin") or body.get("color_temp") or 0)
             except (TypeError, ValueError):
@@ -916,7 +970,8 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             if kelvin <= 0:
                 return {"ok": False, "error": "Colour temperature needs a kelvin value"}
             return set_color_temp(node_id, endpoint, kelvin)
-        return {"ok": False, "error": "Unknown Matter command"}
+        shown = action or "(empty)"
+        return {"ok": False, "error": f"Unknown Matter command ({shown})"}
     return {"ok": False, "error": f"Unknown op {op}"}
 
 

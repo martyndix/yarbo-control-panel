@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.43] - 2026-09-29
+
+### Fixed
+- Home colour pickers were hitting a leftover Matter agent that did not know the colour command, which showed **Unknown Matter command**. Panel updates now restart that agent, and the running panel replaces an old one so colour and colour-temperature writes reach the lights.
+
 ## [3.0.42] - 2026-09-29
 
 ### Changed
