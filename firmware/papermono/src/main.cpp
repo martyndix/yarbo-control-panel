@@ -117,10 +117,14 @@ String inboxFrom[PAPERMONO_INBOX_MAX];
 String inboxFromId[PAPERMONO_INBOX_MAX];
 String inboxText[PAPERMONO_INBOX_MAX];
 String inboxWhen[PAPERMONO_INBOX_MAX];
+String inboxToName[PAPERMONO_INBOX_MAX];
+String inboxStatus[PAPERMONO_INBOX_MAX];
 String inboxIds[PAPERMONO_INBOX_MAX];
 bool inboxUnread[PAPERMONO_INBOX_MAX];
+bool inboxMine[PAPERMONO_INBOX_MAX];
 int inboxCount = 0;
 String lastInboxId = "";
+String lastPostedMsgId = "";
 uint8_t radioSync = 0xA5;
 volatile int pendingPageSteps = 0;
 volatile uint8_t pwrOffEvent = 0;
@@ -1404,13 +1408,18 @@ void drawRadioInbox(bool forceFull)
             int idx = inboxCount - 1 - i;
             int y = PAPERMONO_INBOX_Y0 + 28 + i * PAPERMONO_INBOX_ROW;
             M5.Display.drawRoundRect(12, y, M5.Display.width() - 24, PAPERMONO_INBOX_ROW - 8, 10, TFT_BLACK);
-            if (inboxUnread[idx]) {
+            if (inboxUnread[idx] && !inboxMine[idx]) {
                 M5.Display.fillCircle(28, y + (PAPERMONO_INBOX_ROW - 8) / 2, 7, TFT_BLACK);
             }
             M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
             M5.Display.setTextDatum(TL_DATUM);
             M5.Display.setTextSize(2);
-            String from = inboxFrom[idx].length() ? inboxFrom[idx] : String("tablet");
+            String from;
+            if (inboxMine[idx]) {
+                from = inboxToName[idx].length() ? ("To " + inboxToName[idx]) : String("To ALL");
+            } else {
+                from = inboxFrom[idx].length() ? inboxFrom[idx] : String("tablet");
+            }
             if (from.length() > 18) {
                 from = from.substring(0, 18);
             }
@@ -1422,7 +1431,7 @@ void drawRadioInbox(bool forceFull)
             if (when.length()) {
                 M5.Display.drawString(when, 44, y + 28);
             }
-            String preview = inboxText[idx];
+            String preview = inboxMine[idx] && inboxStatus[idx].length() ? inboxStatus[idx] : inboxText[idx];
             if (preview.length() > 26) {
                 preview = preview.substring(0, 25) + "...";
             }
@@ -1440,7 +1449,10 @@ void drawRadioView(bool forceFull)
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     drawButton(16, 92, 140, 44, "BACK", false);
-    drawButton(324, 92, 140, 44, "REPLY", true);
+    bool mine = radioViewIndex >= 0 && radioViewIndex < inboxCount && inboxMine[radioViewIndex];
+    if (!mine) {
+        drawButton(324, 92, 140, 44, "REPLY", true);
+    }
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
     if (radioViewIndex < 0 || radioViewIndex >= inboxCount) {
@@ -1451,17 +1463,26 @@ void drawRadioView(bool forceFull)
         return;
     }
     M5.Display.setTextSize(2);
-    M5.Display.drawString("From", 16, 152);
+    M5.Display.drawString(mine ? "To" : "From", 16, 152);
     M5.Display.setTextSize(3);
-    String from = inboxFrom[radioViewIndex].length() ? inboxFrom[radioViewIndex] : String("tablet");
-    M5.Display.drawString(from.substring(0, 18), 16, 184);
+    String who;
+    if (mine) {
+        who = inboxToName[radioViewIndex].length() ? inboxToName[radioViewIndex] : String("ALL");
+    } else {
+        who = inboxFrom[radioViewIndex].length() ? inboxFrom[radioViewIndex] : String("tablet");
+    }
+    M5.Display.drawString(who.substring(0, 18), 16, 184);
     M5.Display.setTextSize(2);
+    int bodyY = 240;
     if (inboxWhen[radioViewIndex].length()) {
         M5.Display.drawString(inboxWhen[radioViewIndex], 16, 228);
-        drawWrappedText(inboxText[radioViewIndex], 16, 268, M5.Display.width() - 32, 36, 10);
-    } else {
-        drawWrappedText(inboxText[radioViewIndex], 16, 240, M5.Display.width() - 32, 36, 10);
+        bodyY = 268;
     }
+    if (mine && inboxStatus[radioViewIndex].length()) {
+        M5.Display.drawString(inboxStatus[radioViewIndex], 16, bodyY);
+        bodyY += 36;
+    }
+    drawWrappedText(inboxText[radioViewIndex], 16, bodyY, M5.Display.width() - 32, 36, 10);
     drawPager();
     finishEpdFrame();
 }
@@ -1671,7 +1692,7 @@ void refreshUnreadLed()
 {
     int n = 0;
     for (int i = 0; i < inboxCount; i++) {
-        if (inboxUnread[i]) {
+        if (inboxUnread[i] && !inboxMine[i]) {
             n++;
         }
     }
@@ -1766,16 +1787,22 @@ bool syncPaperLogo(const String &hash)
     return true;
 }
 
-void pushInbox(const String &id, const String &from, const String &fromId, const String &text, bool alert, const String &when)
+void pushInbox(const String &id, const String &from, const String &fromId, const String &text, bool alert, const String &when, bool mine, const String &toName, const String &status)
 {
-    if (id.length() && lastInboxId == id) {
-        return;
-    }
     for (int i = 0; i < inboxCount; i++) {
         if (id.length() && inboxIds[i] == id) {
             if (when.length() && inboxWhen[i] != when) {
                 inboxWhen[i] = when;
             }
+            inboxMine[i] = mine;
+            if (toName.length()) {
+                inboxToName[i] = toName;
+            }
+            inboxStatus[i] = status;
+            if (mine) {
+                inboxUnread[i] = false;
+            }
+            refreshUnreadLed();
             return;
         }
     }
@@ -1786,7 +1813,10 @@ void pushInbox(const String &id, const String &from, const String &fromId, const
             inboxFromId[i - 1] = inboxFromId[i];
             inboxText[i - 1] = inboxText[i];
             inboxWhen[i - 1] = inboxWhen[i];
+            inboxToName[i - 1] = inboxToName[i];
+            inboxStatus[i - 1] = inboxStatus[i];
             inboxUnread[i - 1] = inboxUnread[i];
+            inboxMine[i - 1] = inboxMine[i];
         }
         inboxCount = PAPERMONO_INBOX_MAX - 1;
     }
@@ -1795,13 +1825,16 @@ void pushInbox(const String &id, const String &from, const String &fromId, const
     inboxFromId[inboxCount] = fromId;
     inboxText[inboxCount] = text;
     inboxWhen[inboxCount] = when.length() ? when : nowStamp();
-    inboxUnread[inboxCount] = alert;
+    inboxToName[inboxCount] = toName;
+    inboxStatus[inboxCount] = status;
+    inboxMine[inboxCount] = mine;
+    inboxUnread[inboxCount] = mine ? false : alert;
     inboxCount++;
     if (id.length()) {
         lastInboxId = id;
     }
     refreshUnreadLed();
-    if (alert && alertMessageOn) {
+    if (alert && !mine && alertMessageOn) {
         alertMessage();
     }
 }
@@ -1903,9 +1936,12 @@ void applyCompactExtras(JsonDocument &doc)
             String fromId = String((const char *) (m["from"] | ""));
             String text = String((const char *) (m["text"] | ""));
             String when = String((const char *) (m["at_local"] | ""));
+            bool mine = m["mine"] | false;
+            String toName = String((const char *) (m["to_name"] | "ALL"));
+            String status = String((const char *) (m["read_label"] | ""));
             if (text.length()) {
                 bool primed = lastInboxId.length() > 0;
-                pushInbox(id, from, fromId, text, primed, when);
+                pushInbox(id, from, fromId, text, primed && !mine, when, mine, toName, status);
             }
         }
     }
@@ -1940,7 +1976,31 @@ bool postPaperMessage(const String &to, const String &text)
     http.end();
     JsonDocument res;
     deserializeJson(res, body);
-    return code == 200 && res["ok"];
+    lastPostedMsgId = "";
+    bool ok = code == 200 && res["ok"];
+    if (ok) {
+        lastPostedMsgId = String((const char *) (res["message"]["id"] | ""));
+    }
+    return ok;
+}
+
+void postPaperRead(const String &id)
+{
+    if (!id.length() || WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
+        return;
+    }
+    HTTPClient http;
+    http.begin(panelUrl + "/api/device.php");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-PaperMono-Token", token);
+    JsonDocument doc;
+    doc["action"] = "paper_read";
+    doc["token"] = token;
+    doc["id"] = id;
+    String payload;
+    serializeJson(doc, payload);
+    http.POST(payload);
+    http.end();
 }
 
 void handleIncomingRadio(const String &raw)
@@ -1961,7 +2021,7 @@ void handleIncomingRadio(const String &raw)
     String text = doc["text"] | "";
     String id = doc["id"] | String(millis());
     if (text.length()) {
-        pushInbox(id, from, fromId, text, true, nowStamp());
+        pushInbox(id, from, fromId, text, true, nowStamp(), false, "", "");
         drawScreen(false);
     }
 }
@@ -1981,21 +2041,23 @@ bool sendRadioMessage()
         to = peerIds[radioToIndex - 1];
         toName = peerNames[radioToIndex - 1];
     }
+    lastPostedMsgId = "";
+    bool panelOk = postPaperMessage(to, radioDraft);
+    String id = lastPostedMsgId.length() ? lastPostedMsgId : String((uint32_t) millis(), HEX);
     JsonDocument doc;
     doc["from"] = deviceId;
     doc["from_name"] = deviceName;
     doc["to"] = to;
     doc["to_name"] = toName;
     doc["text"] = radioDraft;
-    doc["id"] = String((uint32_t) millis(), HEX);
+    doc["id"] = id;
     String payload;
     serializeJson(doc, payload);
-    bool ok = loraReady() && loraSendText(payload);
-    if (!ok) {
-        ok = postPaperMessage(to, radioDraft);
-    }
+    bool loraOk = loraReady() && loraSendText(payload);
+    bool ok = panelOk || loraOk;
     if (ok) {
         lastError = "";
+        pushInbox(id, deviceName, deviceId, radioDraft, false, nowStamp(), true, toName, "Sent");
         radioDraft = "";
         radioUi = PAPERMONO_RADIO_INBOX;
     } else {
@@ -2069,7 +2131,7 @@ void handleRadioTouch(int x, int y)
         if (inboxCount == 0) {
             return;
         }
-        int shown = min(inboxCount, 7);
+        int shown = min(inboxCount, 6);
         int y0 = PAPERMONO_INBOX_Y0 + 28;
         if (y >= y0 && y < y0 + shown * PAPERMONO_INBOX_ROW) {
             int row = (y - y0) / PAPERMONO_INBOX_ROW;
@@ -2078,6 +2140,9 @@ void handleRadioTouch(int x, int y)
                 radioViewIndex = idx;
                 if (idx >= 0 && idx < inboxCount) {
                     inboxUnread[idx] = false;
+                    if (!inboxMine[idx]) {
+                        postPaperRead(inboxIds[idx]);
+                    }
                 }
                 refreshUnreadLed();
                 radioUi = PAPERMONO_RADIO_VIEW;
@@ -2094,6 +2159,9 @@ void handleRadioTouch(int x, int y)
             return;
         }
         if (y >= 88 && y <= 140 && x >= 300) {
+            if (radioViewIndex >= 0 && radioViewIndex < inboxCount && inboxMine[radioViewIndex]) {
+                return;
+            }
             radioToIndex = 0;
             if (radioViewIndex >= 0 && radioViewIndex < inboxCount) {
                 String fromId = inboxFromId[radioViewIndex];

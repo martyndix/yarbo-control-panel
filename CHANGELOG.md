@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.48] - 2026-09-29
+
+### Added
+- PaperMono MAIL read receipts: the sender’s inbox keeps the outgoing note and shows **Sent**, then **Read** (with time) once the other tablet opens it. Broadcasts show **Read by** names. Firmware **0.1.43**.
+
 ## [3.0.47] - 2026-09-29
 
 ### Fixed

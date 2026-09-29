@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.42';
+    public const FIRMWARE_VERSION = '0.1.43';
     public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -485,6 +485,7 @@ final class YarboPaperDevice
             'to_name' => $toName,
             'text' => $text,
             'at' => gmdate('c'),
+            'reads' => [],
         ];
         $store['messages'][] = $message;
         if (count($store['messages']) > self::MESSAGE_MAX) {
@@ -493,6 +494,58 @@ final class YarboPaperDevice
         $this->save($store);
 
         return ['ok' => true, 'message' => $message];
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     * @return array<string, mixed>
+     */
+    public function markPaperRead(array $device, string $messageId): array
+    {
+        $messageId = trim($messageId);
+        $readerId = (string) ($device['id'] ?? '');
+        $readerName = (string) ($device['name'] ?? 'PaperMono');
+        if ($messageId === '' || $readerId === '') {
+            return ['ok' => false, 'error' => 'Message is required'];
+        }
+        $store = $this->load();
+        $found = false;
+        foreach ($store['messages'] as &$message) {
+            if (!is_array($message) || (string) ($message['id'] ?? '') !== $messageId) {
+                continue;
+            }
+            $found = true;
+            $from = (string) ($message['from'] ?? '');
+            $to = (string) ($message['to'] ?? '*');
+            if ($from === $readerId) {
+                break;
+            }
+            if ($to !== '*' && $to !== $readerId) {
+                break;
+            }
+            $reads = is_array($message['reads'] ?? null) ? $message['reads'] : [];
+            foreach ($reads as $read) {
+                if (is_array($read) && (string) ($read['id'] ?? '') === $readerId) {
+                    unset($message);
+
+                    return ['ok' => true, 'already' => true];
+                }
+            }
+            $reads[] = [
+                'id' => $readerId,
+                'name' => $readerName,
+                'at' => gmdate('c'),
+            ];
+            $message['reads'] = $reads;
+            break;
+        }
+        unset($message);
+        if (!$found) {
+            return ['ok' => false, 'error' => 'Unknown message'];
+        }
+        $this->save($store);
+
+        return ['ok' => true];
     }
 
     public function findById(string $id): ?array
@@ -804,23 +857,10 @@ final class YarboPaperDevice
             if (!is_array($message)) {
                 continue;
             }
-            $to = (string) ($message['to'] ?? '*');
-            if ($to !== '*' && $to !== $id) {
-                continue;
+            $row = $this->paperMessageForDevice($message, $id, $tz);
+            if ($row !== null) {
+                $inbox[] = $row;
             }
-            if ((string) ($message['from'] ?? '') === $id) {
-                continue;
-            }
-            $inbox[] = [
-                'id' => (string) ($message['id'] ?? ''),
-                'from' => (string) ($message['from'] ?? ''),
-                'from_name' => (string) ($message['from_name'] ?? ''),
-                'to' => $to,
-                'to_name' => (string) ($message['to_name'] ?? ''),
-                'text' => (string) ($message['text'] ?? ''),
-                'at' => (string) ($message['at'] ?? ''),
-                'at_local' => $this->formatMessageLocal((string) ($message['at'] ?? ''), $tz),
-            ];
         }
         $inbox = array_slice($inbox, -8);
 
@@ -943,6 +983,67 @@ final class YarboPaperDevice
         } catch (\Exception $e) {
             return '';
         }
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     * @return array<string, mixed>|null
+     */
+    private function paperMessageForDevice(array $message, string $deviceId, \DateTimeZone $tz): ?array
+    {
+        $from = (string) ($message['from'] ?? '');
+        $to = (string) ($message['to'] ?? '*');
+        $mine = $from !== '' && $from === $deviceId;
+        $incoming = !$mine && ($to === '*' || $to === $deviceId);
+        if (!$mine && !$incoming) {
+            return null;
+        }
+        $reads = is_array($message['reads'] ?? null) ? $message['reads'] : [];
+        $readNames = [];
+        $firstReadAt = '';
+        foreach ($reads as $read) {
+            if (!is_array($read)) {
+                continue;
+            }
+            $rid = (string) ($read['id'] ?? '');
+            if ($rid === '' || $rid === $from) {
+                continue;
+            }
+            $rname = trim((string) ($read['name'] ?? ''));
+            if ($rname !== '') {
+                $readNames[] = $rname;
+            }
+            if ($firstReadAt === '') {
+                $firstReadAt = (string) ($read['at'] ?? '');
+            }
+        }
+        $readLocal = $this->formatMessageLocal($firstReadAt, $tz);
+        $readLabel = '';
+        if ($mine) {
+            if ($readNames === []) {
+                $readLabel = 'Sent';
+            } elseif ($to === '*') {
+                $readLabel = 'Read by ' . implode(', ', $readNames);
+            } else {
+                $readLabel = $readLocal !== '' ? ('Read  ' . $readLocal) : 'Read';
+            }
+        }
+
+        return [
+            'id' => (string) ($message['id'] ?? ''),
+            'from' => $from,
+            'from_name' => (string) ($message['from_name'] ?? ''),
+            'to' => $to,
+            'to_name' => (string) ($message['to_name'] ?? ''),
+            'text' => (string) ($message['text'] ?? ''),
+            'at' => (string) ($message['at'] ?? ''),
+            'at_local' => $this->formatMessageLocal((string) ($message['at'] ?? ''), $tz),
+            'mine' => $mine,
+            'read' => $readNames !== [],
+            'read_by' => implode(', ', $readNames),
+            'read_local' => $readLocal,
+            'read_label' => $readLabel,
+        ];
     }
 
     public function radioSyncWord(): int

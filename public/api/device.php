@@ -175,6 +175,15 @@ if ($action === 'paper_message') {
     ));
 }
 
+if ($action === 'paper_read') {
+    $device = $devices->findByToken((string) ($input['token'] ?? device_token_from_request()));
+    if ($device === null) {
+        json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
+    }
+    $devices->touch((string) $device['id']);
+    json_response($devices->markPaperRead($device, (string) ($input['id'] ?? '')));
+}
+
 if ($action === 'flash') {
     set_time_limit(1200);
     json_response($devices->flash($input));
