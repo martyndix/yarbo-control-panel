@@ -27,7 +27,7 @@ if (!$hub->enabled(YarboHub::MODULE_HOME) && $action !== 'setup') {
     json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
 }
 
-set_time_limit($action === 'commission' ? 100 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'group_command' || $action === 'scene_run' ? 90 : 40)));
+set_time_limit($action === 'commission' ? 100 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'group_command' || $action === 'scene_run' || $action === 'scene_off' ? 90 : 40)));
 ignore_user_abort($action === 'setup');
 
 try {
@@ -50,7 +50,8 @@ try {
         'group_command' => $home->commandGroup($input),
         'scene_save' => $home->saveScene($input),
         'scene_delete' => $home->deleteScene((string) ($input['id'] ?? '')),
-        'scene_run' => $home->runScene((string) ($input['id'] ?? '')),
+        'scene_run' => $home->toggleScene((string) ($input['id'] ?? '')),
+        'scene_off' => $home->stopScene((string) ($input['id'] ?? '')),
         'paper_assign' => $home->assignPaper((string) ($input['tablet_id'] ?? ''), is_array($input['ids'] ?? null) ? $input['ids'] : []),
         default => ['ok' => false, 'error' => 'Unknown action'],
     };

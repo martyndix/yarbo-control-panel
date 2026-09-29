@@ -38,6 +38,7 @@ STORAGE = ROOT / "data" / "matter-server"
 
 ON_OFF = 6
 LEVEL_CONTROL = 8
+COLOR_CONTROL = 0x0300
 DESCRIPTOR = 29
 BASIC_INFO = 40
 BRIDGED_BASIC = 57
@@ -45,12 +46,24 @@ FIXED_LABEL = 64
 USER_LABEL = 65
 ATTR_ON_OFF = 0
 ATTR_CURRENT_LEVEL = 0
+ATTR_CURRENT_HUE = 0
+ATTR_CURRENT_SATURATION = 1
+ATTR_CURRENT_X = 3
+ATTR_CURRENT_Y = 4
+ATTR_COLOR_TEMP_MIREDS = 7
+ATTR_COLOR_MODE = 8
+ATTR_COLOR_CAPABILITIES = 0x400A
+ATTR_CT_PHYSICAL_MIN = 0x400B
+ATTR_CT_PHYSICAL_MAX = 0x400C
 ATTR_DEVICE_TYPES = 0
 ATTR_VENDOR_NAME = 1
 ATTR_PRODUCT_NAME = 3
 ATTR_NODE_LABEL = 5
 DEVTYPE_AGGREGATOR = 0x000E
 DEVTYPE_BRIDGED_NODE = 0x0013
+COLOR_CAP_HS = 1 << 0
+COLOR_CAP_XY = 1 << 3
+COLOR_CAP_CT = 1 << 4
 
 _ws_lock = threading.Lock()
 _ws: socket.socket | None = None
@@ -425,6 +438,261 @@ def endpoint_name(
     return f"{base} {endpoint}"[:48]
 
 
+def attr_num(attributes: dict[str, Any], endpoint: int, cluster: int, attr: int) -> float | None:
+    val = attributes.get(attr_key(endpoint, cluster, attr))
+    if isinstance(val, bool) or val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, dict):
+        inner = val.get("value", val.get("0"))
+        if isinstance(inner, (int, float)):
+            return float(inner)
+    return None
+
+
+def clamp_int(value: float, lo: int, hi: int) -> int:
+    return max(lo, min(hi, int(round(value))))
+
+
+def hs_to_hex(hue_254: float, sat_254: float) -> str:
+    h = (max(0.0, min(254.0, hue_254)) / 254.0) * 6.0
+    s = max(0.0, min(254.0, sat_254)) / 254.0
+    v = 1.0
+    i = int(h)
+    f = h - i
+    p = v * (1.0 - s)
+    q = v * (1.0 - f * s)
+    t = v * (1.0 - (1.0 - f) * s)
+    rgb = {
+        0: (v, t, p),
+        1: (q, v, p),
+        2: (p, v, t),
+        3: (p, q, v),
+        4: (t, p, v),
+    }.get(i % 6, (v, p, q))
+    return "#{:02x}{:02x}{:02x}".format(*(clamp_int(c * 255, 0, 255) for c in rgb))
+
+
+def hex_to_rgb(hex_s: str) -> tuple[int, int, int] | None:
+    raw = hex_s.strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    if len(raw) != 6:
+        return None
+    try:
+        return int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
+    except ValueError:
+        return None
+
+
+def hex_to_hs(hex_s: str) -> tuple[int, int] | None:
+    rgb = hex_to_rgb(hex_s)
+    if rgb is None:
+        return None
+    r, g, b = (c / 255.0 for c in rgb)
+    mx, mn = max(r, g, b), min(r, g, b)
+    df = mx - mn
+    if df == 0:
+        hue = 0.0
+    elif mx == r:
+        hue = (60 * ((g - b) / df) + 360) % 360
+    elif mx == g:
+        hue = (60 * ((b - r) / df) + 120) % 360
+    else:
+        hue = (60 * ((r - g) / df) + 240) % 360
+    sat = 0.0 if mx == 0 else df / mx
+    return clamp_int(hue * 254 / 360, 0, 254), clamp_int(sat * 254, 0, 254)
+
+
+def hex_to_xy(hex_s: str) -> tuple[int, int] | None:
+    rgb = hex_to_rgb(hex_s)
+    if rgb is None:
+        return None
+
+    def linear(channel: int) -> float:
+        c = channel / 255.0
+        return ((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92
+
+    red, green, blue = (linear(c) for c in rgb)
+    x = red * 0.4124 + green * 0.3576 + blue * 0.1805
+    y = red * 0.2126 + green * 0.7152 + blue * 0.0722
+    z = red * 0.0193 + green * 0.1192 + blue * 0.9505
+    total = x + y + z
+    if total <= 0:
+        return 19660, 19660
+    return clamp_int((x / total) * 65536, 0, 65279), clamp_int((y / total) * 65536, 0, 65279)
+
+
+def xy_to_hex(x_raw: float, y_raw: float) -> str:
+    x = max(0.0, min(1.0, x_raw / 65536.0 if x_raw > 1.5 else x_raw))
+    y = max(0.0, min(1.0, y_raw / 65536.0 if y_raw > 1.5 else y_raw))
+    if y <= 0.0001:
+        return "#ffffff"
+    z = 1.0 - x - y
+    Y = 1.0
+    X = (x / y) * Y
+    Z = (z / y) * Y
+    r = X * 3.2406 + Y * -1.5372 + Z * -0.4986
+    g = X * -0.9689 + Y * 1.8758 + Z * 0.0415
+    b = X * 0.0557 + Y * -0.2040 + Z * 1.0570
+
+    def gamma(channel: float) -> int:
+        c = max(0.0, channel)
+        c = 1.055 * (c ** (1 / 2.4)) - 0.055 if c > 0.0031308 else 12.92 * c
+        return clamp_int(c * 255, 0, 255)
+
+    return "#{:02x}{:02x}{:02x}".format(gamma(r), gamma(g), gamma(b))
+
+
+def mireds_to_kelvin(mireds: float) -> int:
+    if mireds <= 0:
+        return 2700
+    return clamp_int(1_000_000 / mireds, 1500, 8000)
+
+
+def kelvin_to_mireds(kelvin: int) -> int:
+    k = max(1500, min(8000, kelvin))
+    return clamp_int(1_000_000 / k, 1, 1000)
+
+
+def kelvin_to_hex(kelvin: int) -> str:
+    # Approximate black-body for the UI swatch; not a photometric conversion.
+    k = max(1000, min(12000, kelvin)) / 100.0
+    if k <= 66:
+        r = 255
+        g = clamp_int(99.4705 * (k ** 0.5) - 161.1196, 0, 255)
+        b = 0 if k <= 19 else clamp_int(138.5177 * ((k - 10) ** 0.5) - 305.0448, 0, 255)
+    else:
+        r = clamp_int(329.6987 * ((k - 60) ** -0.1332), 0, 255)
+        g = clamp_int(288.1222 * ((k - 60) ** -0.0755), 0, 255)
+        b = 255
+    return "#{:02x}{:02x}{:02x}".format(r, g, b)
+
+
+def color_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
+    hue = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CURRENT_HUE)
+    sat = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CURRENT_SATURATION)
+    x = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CURRENT_X)
+    y = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CURRENT_Y)
+    mireds = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_COLOR_TEMP_MIREDS)
+    mode = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_COLOR_MODE)
+    caps = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_COLOR_CAPABILITIES)
+    ct_min = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CT_PHYSICAL_MIN)
+    ct_max = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CT_PHYSICAL_MAX)
+    cap_bits = int(caps) if caps is not None else 0
+    color_hs = bool(cap_bits & COLOR_CAP_HS) or hue is not None
+    color_xy = bool(cap_bits & COLOR_CAP_XY) or x is not None
+    color_ct = bool(cap_bits & COLOR_CAP_CT) or mireds is not None
+    if not (color_hs or color_xy or color_ct):
+        return {
+            "colorable": False,
+            "color_hs": False,
+            "color_xy": False,
+            "color_ct": False,
+            "color_hex": None,
+            "hue": None,
+            "saturation": None,
+            "color_temp": None,
+            "color_temp_min": None,
+            "color_temp_max": None,
+        }
+    hex_s = None
+    hue_deg = clamp_int((hue or 0) * 360 / 254, 0, 360) if hue is not None else None
+    sat_pct = clamp_int((sat or 0) * 100 / 254, 0, 100) if sat is not None else None
+    kelvin = mireds_to_kelvin(mireds) if mireds is not None else None
+    if mode == 0 and hue is not None and sat is not None:
+        hex_s = hs_to_hex(hue, sat)
+    elif mode == 1 and x is not None and y is not None:
+        hex_s = xy_to_hex(x, y)
+    elif mode == 2 and kelvin is not None:
+        hex_s = kelvin_to_hex(kelvin)
+    elif hue is not None and sat is not None:
+        hex_s = hs_to_hex(hue, sat)
+    elif x is not None and y is not None:
+        hex_s = xy_to_hex(x, y)
+    elif kelvin is not None:
+        hex_s = kelvin_to_hex(kelvin)
+    return {
+        "colorable": color_hs or color_xy,
+        "color_hs": color_hs,
+        "color_xy": color_xy,
+        "color_ct": color_ct,
+        "color_hex": hex_s,
+        "hue": hue_deg,
+        "saturation": sat_pct,
+        "color_temp": kelvin,
+        "color_temp_min": mireds_to_kelvin(ct_max) if ct_max else (2000 if color_ct else None),
+        "color_temp_max": mireds_to_kelvin(ct_min) if ct_min else (6500 if color_ct else None),
+    }
+
+
+def device_command(node_id: int, endpoint: int, cluster: int, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    rpc = matter_rpc(
+        "device_command",
+        {
+            "node_id": node_id,
+            "endpoint_id": endpoint,
+            "cluster_id": cluster,
+            "command_name": name,
+            "payload": payload,
+        },
+        timeout=12.0,
+    )
+    return rpc if not rpc.get("ok") else {"ok": True}
+
+
+def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, Any]:
+    hex_s = str(body.get("hex") or body.get("color_hex") or "").strip()
+    hs = hex_to_hs(hex_s) if hex_s else None
+    if hs is None and body.get("hue") is not None and body.get("saturation") is not None:
+        hs = (
+            clamp_int(float(body.get("hue") or 0) * 254 / 360, 0, 254),
+            clamp_int(float(body.get("saturation") or 0) * 254 / 100, 0, 254),
+        )
+    if hs is None:
+        return {"ok": False, "error": "Colour needs a hex value"}
+    transition = {
+        "transitionTime": 0,
+        "optionsMask": 0,
+        "optionsOverride": 0,
+    }
+    hs_result = device_command(
+        node_id,
+        endpoint,
+        COLOR_CONTROL,
+        "MoveToHueAndSaturation",
+        {"hue": hs[0], "saturation": hs[1], **transition},
+    )
+    if hs_result.get("ok"):
+        return hs_result
+    xy = hex_to_xy(hex_s) if hex_s else None
+    if xy is None:
+        return hs_result
+    return device_command(
+        node_id,
+        endpoint,
+        COLOR_CONTROL,
+        "MoveToColor",
+        {"colorX": xy[0], "colorY": xy[1], **transition},
+    )
+
+
+def set_color_temp(node_id: int, endpoint: int, kelvin: int) -> dict[str, Any]:
+    return device_command(
+        node_id,
+        endpoint,
+        COLOR_CONTROL,
+        "MoveToColorTemperature",
+        {
+            "colorTemperatureMireds": kelvin_to_mireds(kelvin),
+            "transitionTime": 0,
+            "optionsMask": 0,
+            "optionsOverride": 0,
+        },
+    )
+
+
 def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
     nodes = raw if isinstance(raw, list) else []
     devices: list[dict[str, Any]] = []
@@ -458,6 +726,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             brightness = None
             if isinstance(level, (int, float)) and level >= 0:
                 brightness = int(round(float(level) * 100 / 254))
+            color = color_payload(attributes, endpoint)
             devices.append(
                 {
                     "id": f"{node_id}:{endpoint}",
@@ -473,6 +742,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "brightness": brightness,
                     "dimmable": attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) in attributes,
                     "available": available,
+                    **color,
                 }
             )
     devices.sort(key=lambda d: (str(d.get("source") or "").lower(), d["name"].lower(), d["id"]))
@@ -556,23 +826,28 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         if action == "brightness":
             pct = max(0, min(100, int(body.get("brightness") or 0)))
             level = int(round(pct * 254 / 100))
-            rpc = matter_rpc(
-                "device_command",
+            return device_command(
+                node_id,
+                endpoint,
+                LEVEL_CONTROL,
+                "MoveToLevelWithOnOff",
                 {
-                    "node_id": node_id,
-                    "endpoint_id": endpoint,
-                    "cluster_id": LEVEL_CONTROL,
-                    "command_name": "MoveToLevelWithOnOff",
-                    "payload": {
-                        "level": level,
-                        "transitionTime": 0,
-                        "optionsMask": 0,
-                        "optionsOverride": 0,
-                    },
+                    "level": level,
+                    "transitionTime": 0,
+                    "optionsMask": 0,
+                    "optionsOverride": 0,
                 },
-                timeout=12.0,
             )
-            return rpc if not rpc.get("ok") else {"ok": True}
+        if action == "color":
+            return set_color(node_id, endpoint, body)
+        if action in ("color_temp", "kelvin"):
+            try:
+                kelvin = int(body.get("kelvin") or body.get("color_temp") or 0)
+            except (TypeError, ValueError):
+                kelvin = 0
+            if kelvin <= 0:
+                return {"ok": False, "error": "Colour temperature needs a kelvin value"}
+            return set_color_temp(node_id, endpoint, kelvin)
         return {"ok": False, "error": "Unknown Matter command"}
     return {"ok": False, "error": f"Unknown op {op}"}
 

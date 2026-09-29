@@ -2461,6 +2461,109 @@ let homeSetupPollTimer = 0;
 let homeManageOpen = false;
 const homeExpandedRooms = new Set();
 const homeExpandedGroups = new Set();
+let homeSceneDraft = { id: '', name: '', included: {}, states: {} };
+
+function homeResetSceneDraft() {
+    homeSceneDraft = { id: '', name: '', included: {}, states: {} };
+}
+
+function homeSceneStateForDevice(d, fallback) {
+    const current = homeSceneDraft.states[d.id] || fallback || {};
+    return {
+        on: current.on !== undefined ? Boolean(current.on) : Boolean(d.on),
+        brightness: current.brightness !== undefined && current.brightness !== null
+            ? Number(current.brightness)
+            : Number(d.brightness ?? (d.on ? 100 : 0)),
+        hex: current.hex || d.color_hex || '#ffd27a',
+        kelvin: current.kelvin || d.color_temp || 2700,
+    };
+}
+
+function homeFillSceneDraftFromOn() {
+    const included = {};
+    const states = {};
+    (homeDash.devices || []).forEach((d) => {
+        if (!d.on) return;
+        included[d.id] = true;
+        states[d.id] = {
+            on: true,
+            brightness: d.dimmable ? Number(d.brightness ?? 100) : null,
+            hex: d.colorable ? (d.color_hex || '#ffd27a') : null,
+            kelvin: d.color_ct && !d.colorable ? Number(d.color_temp || 2700) : null,
+        };
+    });
+    homeSceneDraft.included = included;
+    homeSceneDraft.states = states;
+}
+
+function homeLoadSceneDraft(scene) {
+    const included = {};
+    const states = {};
+    (scene.actions || []).forEach((action) => {
+        if (!action?.id) return;
+        included[action.id] = true;
+        states[action.id] = {
+            on: Boolean(action.on),
+            brightness: action.brightness,
+            hex: action.color_hex || null,
+            kelvin: action.color_temp || null,
+        };
+    });
+    homeSceneDraft = {
+        id: scene.id || '',
+        name: scene.name || '',
+        included,
+        states,
+    };
+}
+
+function readHomeSceneDraftFromDom() {
+    const nameEl = document.getElementById('home-scene-name');
+    if (nameEl) homeSceneDraft.name = String(nameEl.value || '');
+    document.querySelectorAll('#home-scene-members [data-scene-member]').forEach((row) => {
+        const id = row.getAttribute('data-scene-member');
+        if (!id) return;
+        const included = Boolean(row.querySelector('[data-scene-include]')?.checked);
+        homeSceneDraft.included[id] = included;
+        homeSceneDraft.states[id] = {
+            on: Boolean(row.querySelector('[data-scene-on]')?.checked),
+            brightness: Number(row.querySelector('[data-scene-bright]')?.value ?? 100),
+            hex: row.querySelector('[data-scene-color]')?.value || null,
+            kelvin: Number(row.querySelector('[data-scene-kelvin]')?.value || 0) || null,
+        };
+    });
+}
+
+function collectHomeSceneActions() {
+    readHomeSceneDraftFromDom();
+    const actions = [];
+    (homeDash.devices || []).forEach((d) => {
+        if (!homeSceneDraft.included[d.id]) return;
+        const st = homeSceneStateForDevice(d);
+        const on = Boolean(st.on);
+        actions.push({
+            id: d.id,
+            on,
+            brightness: on && d.dimmable ? Number(st.brightness ?? 100) : null,
+            color_hex: on && d.colorable ? (st.hex || null) : null,
+            color_temp: on && d.color_ct && !d.colorable ? Number(st.kelvin || 0) || null : null,
+        });
+    });
+    return actions;
+}
+
+function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
+    if (d.colorable) {
+        return `<input type="color" value="${escapeHtml(hex || d.color_hex || '#ffd27a')}" ${colorAttr} ${on ? '' : 'disabled'} title="Colour" aria-label="Colour">`;
+    }
+    if (d.color_ct) {
+        const min = Number(d.color_temp_min || 2000);
+        const max = Number(d.color_temp_max || 6500);
+        const value = Number(kelvin || d.color_temp || 2700);
+        return `<input type="range" min="${min}" max="${max}" step="50" value="${value}" ${kelvinAttr} ${on ? '' : 'disabled'} title="Colour temperature" aria-label="Colour temperature">`;
+    }
+    return '';
+}
 
 async function homeApi(body, timeoutMs = 20000) {
     const res = await fetchWithTimeout('/api/home.php', {
@@ -2695,6 +2798,14 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const bright = !hidden && d.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
         : '';
+    const color = hidden ? '' : homeColorInputsHtml(
+        d,
+        on,
+        d.color_hex,
+        d.color_temp,
+        `data-home-color="${escapeHtml(d.id)}"`,
+        `data-home-kelvin="${escapeHtml(d.id)}"`
+    );
     const meta = [d.kind, d.room, d.product && d.product !== d.name ? d.product : '']
         .filter(Boolean)
         .join(' · ');
@@ -2709,9 +2820,12 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         : `<p class="home-device-name">${escapeHtml(d.name)}</p>`;
     const roomSelect = hidden ? '' : homeRoomSelectHtml(d, rooms || homeDash.rooms || []);
     const groupSelect = hidden ? '' : homeGroupSelectHtml(d, rooms || homeDash.rooms || []);
+    const dotStyle = on && d.color_hex
+        ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
+        : '';
     return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         <div class="home-device-label">
-            <span class="home-device-dot" aria-hidden="true"></span>
+            <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
             ${label}
         </div>
         ${roomSelect}
@@ -2719,15 +2833,85 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ${hidden ? '' : `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             ${bright}
+            ${color}
         </div>`}
         <div class="home-device-manage">${manage}</div>
     </article>`;
 }
 
+function renderHomeSceneEditor() {
+    const wrap = document.getElementById('home-scene-members');
+    if (!wrap) return;
+    const nameEl = document.getElementById('home-scene-name');
+    if (nameEl && document.activeElement !== nameEl) {
+        nameEl.value = homeSceneDraft.name || '';
+    }
+    const cancel = document.getElementById('home-scene-cancel');
+    cancel?.classList.toggle('hidden', !homeSceneDraft.id);
+    const save = document.getElementById('home-scene-save');
+    if (save) save.textContent = homeSceneDraft.id ? 'Save changes' : 'Save scene';
+    const hint = document.getElementById('home-scene-editor-hint');
+    const selected = Object.values(homeSceneDraft.included).filter(Boolean).length;
+    if (hint) {
+        hint.textContent = homeSceneDraft.id
+            ? `Editing “${homeSceneDraft.name || 'scene'}”. Tick lights this scene should change.`
+            : (selected
+                ? `${selected} light${selected === 1 ? '' : 's'} in this scene. Unticked lights are left alone.`
+                : 'Tick only the lights this scene should change, or use lights that are on.');
+    }
+    const devices = homeDash.devices || [];
+    if (!devices.length) {
+        wrap.innerHTML = '<p class="hint">Add Matter lights first, then pick which ones belong to the scene.</p>';
+        return;
+    }
+    const rooms = homeDash.rooms || [];
+    const byRoom = new Map(rooms.map((r) => [r.id, []]));
+    const ungrouped = [];
+    devices.forEach((d) => {
+        if (d.room_id && byRoom.has(d.room_id)) byRoom.get(d.room_id).push(d);
+        else ungrouped.push(d);
+    });
+    let html = '';
+    rooms.forEach((room) => {
+        const list = byRoom.get(room.id) || [];
+        if (!list.length) return;
+        html += `<p class="home-scene-room">${escapeHtml(room.name)}</p>`;
+        html += list.map((d) => homeSceneMemberRowHtml(d)).join('');
+    });
+    if (ungrouped.length) {
+        if (html) html += '<p class="home-scene-room">Ungrouped</p>';
+        html += ungrouped.map((d) => homeSceneMemberRowHtml(d)).join('');
+    }
+    wrap.innerHTML = html;
+}
+
+function homeSceneMemberRowHtml(d) {
+    const included = Boolean(homeSceneDraft.included[d.id]);
+    const st = homeSceneStateForDevice(d);
+    const on = Boolean(st.on);
+    const bright = d.dimmable
+        ? `<input type="range" min="0" max="100" value="${Number(st.brightness ?? 100)}" data-scene-bright ${included && on ? '' : 'disabled'}>`
+        : '';
+    const color = homeColorInputsHtml(
+        d,
+        included && on,
+        st.hex,
+        st.kelvin,
+        'data-scene-color',
+        'data-scene-kelvin'
+    );
+    return `<div class="home-scene-member${included ? ' is-in' : ''}${included && on ? ' is-on' : ''}" data-scene-member="${escapeHtml(d.id)}">
+        <label class="home-scene-member-pick"><input type="checkbox" data-scene-include ${included ? 'checked' : ''}> <span class="home-scene-member-name">${escapeHtml(d.name)}</span></label>
+        <label class="home-scene-on"><input type="checkbox" data-scene-on ${on ? 'checked' : ''} ${included ? '' : 'disabled'}> On</label>
+        ${bright}
+        ${color}
+    </div>`;
+}
+
 function renderHomeDashboard(data) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
-    const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new]');
+    const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new], [data-home-color], [data-home-kelvin]');
     const status = document.getElementById('home-server-status');
     if (status) {
         const err = data.server?.error;
@@ -2794,11 +2978,19 @@ function renderHomeDashboard(data) {
     if (scenesEl) {
         const scenes = data.scenes || [];
         scenesEl.innerHTML = scenes.map((s) => (
-            `<span>
-                <button type="button" class="btn" data-home-scene="${escapeHtml(s.id)}">${escapeHtml(s.name)}</button>
-                <button type="button" class="btn btn-secondary" data-home-scene-del="${escapeHtml(s.id)}" title="Delete">×</button>
-            </span>`
-        )).join('') || '<p class="hint">No panel scenes yet.</p>';
+            `<article class="home-scene-card${s.on ? ' is-on' : ''}">
+                <button type="button" class="home-scene-edit" data-home-scene-edit="${escapeHtml(s.id)}" title="Edit scene">
+                    <strong>${escapeHtml(s.name)}</strong>
+                    <span class="hint">${Number(s.count || (s.actions || []).length)} light${Number(s.count || (s.actions || []).length) === 1 ? '' : 's'}${s.on ? ' · on' : ''}</span>
+                </button>
+                <button type="button" class="btn btn-compact" data-home-scene="${escapeHtml(s.id)}">${s.on ? 'Off' : 'Run'}</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-home-scene-del="${escapeHtml(s.id)}" title="Delete">×</button>
+            </article>`
+        )).join('') || '<p class="hint">No panel scenes yet. Tick lights below or use lights that are on, then save.</p>';
+    }
+    const sceneEditorBusy = Boolean(document.activeElement?.closest?.('#home-scene-editor'));
+    if (!sceneEditorBusy) {
+        renderHomeSceneEditor();
     }
     const tablet = document.getElementById('home-paper-tablet');
     const assign = document.getElementById('home-paper-assign');
@@ -3222,17 +3414,49 @@ function bindHomeDashboard() {
             return;
         }
         const input = event.target.closest('[data-home-bright]');
-        if (!input) return;
-        try {
-            const data = await homeApi({
-                action: 'command',
-                id: input.getAttribute('data-home-bright'),
-                command: 'brightness',
-                brightness: Number(input.value),
-            });
-            if (!data.ok) throw new Error(data.error || 'Failed');
-        } catch (err) {
-            showToast(err.message || 'Brightness failed', 'error');
+        if (input) {
+            try {
+                const data = await homeApi({
+                    action: 'command',
+                    id: input.getAttribute('data-home-bright'),
+                    command: 'brightness',
+                    brightness: Number(input.value),
+                });
+                if (!data.ok) throw new Error(data.error || 'Failed');
+            } catch (err) {
+                showToast(err.message || 'Brightness failed', 'error');
+            }
+            return;
+        }
+        const color = event.target.closest('[data-home-color]');
+        if (color) {
+            try {
+                const data = await homeApi({
+                    action: 'command',
+                    id: color.getAttribute('data-home-color'),
+                    command: 'color',
+                    hex: color.value,
+                });
+                if (!data.ok) throw new Error(data.error || 'Failed');
+                await loadHomeDashboard();
+            } catch (err) {
+                showToast(err.message || 'Colour failed', 'error');
+            }
+            return;
+        }
+        const kelvin = event.target.closest('[data-home-kelvin]');
+        if (kelvin) {
+            try {
+                const data = await homeApi({
+                    action: 'command',
+                    id: kelvin.getAttribute('data-home-kelvin'),
+                    command: 'color_temp',
+                    kelvin: Number(kelvin.value),
+                });
+                if (!data.ok) throw new Error(data.error || 'Failed');
+            } catch (err) {
+                showToast(err.message || 'Colour temperature failed', 'error');
+            }
         }
     });
 }
@@ -7208,35 +7432,77 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
         if (btn) btn.disabled = false;
     }
 });
+document.getElementById('home-scene-from-on')?.addEventListener('click', () => {
+    const nameEl = document.getElementById('home-scene-name');
+    homeSceneDraft.name = nameEl?.value.trim() || homeSceneDraft.name || '';
+    homeFillSceneDraftFromOn();
+    const count = Object.values(homeSceneDraft.included).filter(Boolean).length;
+    if (!count) {
+        showToast('No lights are on. Turn some on, then try again.', 'error');
+        return;
+    }
+    renderHomeSceneEditor();
+    showToast(`Using ${count} light${count === 1 ? '' : 's'} that ${count === 1 ? 'is' : 'are'} on`, 'success');
+});
+document.getElementById('home-scene-cancel')?.addEventListener('click', () => {
+    homeResetSceneDraft();
+    const nameEl = document.getElementById('home-scene-name');
+    if (nameEl) nameEl.value = '';
+    renderHomeSceneEditor();
+});
 document.getElementById('home-scene-save')?.addEventListener('click', async () => {
-    const name = document.getElementById('home-scene-name')?.value.trim() || '';
-    const actions = (homeDash.devices || []).map((d) => ({
-        id: d.id,
-        on: Boolean(d.on),
-        brightness: d.dimmable ? Number(d.brightness ?? 0) : null,
-    }));
+    const actions = collectHomeSceneActions();
+    const name = (document.getElementById('home-scene-name')?.value.trim() || homeSceneDraft.name || '').trim();
+    if (!name) {
+        showToast('Name the scene first', 'error');
+        return;
+    }
+    if (!actions.length) {
+        showToast('Tick at least one light, or use lights that are on', 'error');
+        return;
+    }
     try {
-        const data = await homeApi({ action: 'scene_save', name, actions });
+        const payload = { action: 'scene_save', name, actions };
+        if (homeSceneDraft.id) payload.id = homeSceneDraft.id;
+        const data = await homeApi(payload);
         if (!data.ok) throw new Error(data.error || 'Could not save scene');
-        document.getElementById('home-scene-name').value = '';
+        homeResetSceneDraft();
+        const nameEl = document.getElementById('home-scene-name');
+        if (nameEl) nameEl.value = '';
         showToast('Scene saved', 'success');
         await loadHomeDashboard();
     } catch (err) {
         showToast(err.message || 'Could not save scene', 'error');
     }
 });
+document.getElementById('home-scene-members')?.addEventListener('change', (event) => {
+    const row = event.target.closest('[data-scene-member]');
+    if (!row) return;
+    readHomeSceneDraftFromDom();
+    renderHomeSceneEditor();
+});
 document.getElementById('home-scenes')?.addEventListener('click', async (event) => {
+    const edit = event.target.closest('[data-home-scene-edit]');
     const run = event.target.closest('[data-home-scene]');
     const del = event.target.closest('[data-home-scene-del]');
     try {
-        if (run) {
+        if (edit) {
+            const scene = (homeDash.scenes || []).find((s) => s.id === edit.getAttribute('data-home-scene-edit'));
+            if (!scene) return;
+            homeLoadSceneDraft(scene);
+            renderHomeSceneEditor();
+            document.getElementById('home-scene-editor')?.scrollIntoView({ block: 'nearest' });
+        } else if (run) {
             const data = await homeApi({ action: 'scene_run', id: run.getAttribute('data-home-scene') });
             if (!data.ok) throw new Error(data.error || 'Scene failed');
-            showToast('Scene ran', 'success');
+            showToast(data.message || (run.textContent === 'Off' ? 'Scene off' : 'Scene ran'), 'success');
             await loadHomeDashboard();
         } else if (del) {
             const data = await homeApi({ action: 'scene_delete', id: del.getAttribute('data-home-scene-del') });
             if (!data.ok) throw new Error(data.error || 'Could not delete');
+            if (homeSceneDraft.id === del.getAttribute('data-home-scene-del')) {
+                homeResetSceneDraft();
+            }
             await loadHomeDashboard();
         }
     } catch (err) {

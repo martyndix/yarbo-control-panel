@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.41] - 2026-09-29
+
+### Added
+- Home scene editor: tick which lights belong to a scene, set on/off, brightness, and colour, or **Use lights that are on**.
+- Colour control on Matter/Hue colour bulbs (colour picker; warm–cool slider for colour-temperature-only lights).
+- PaperMono HOUSE treats a matching scene as on; a second tap turns that scene’s lights off. No extra firmware flash.
+
+### Fixed
+- Saving a scene no longer includes every light (including ones that were off), so running it does not turn the whole house on.
+
 ## [3.0.40] - 2026-09-29
 
 ### Fixed

@@ -591,10 +591,16 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div id="home-hidden-devices" class="home-device-grid"></div>
             </div>
             <h3 class="settings-subtitle">Scenes</h3>
-            <p class="hint">Panel scenes set Matter on/off and brightness. They are not Apple or Hue scenes.</p>
-            <div class="home-scene-add">
-                <input type="text" id="home-scene-name" placeholder="Evening" maxlength="32">
-                <button type="button" class="btn btn-secondary" id="home-scene-save">Save from current lights</button>
+            <p class="hint">Pick which lights belong to a scene and set on/off, brightness, and colour. PaperMono can run a scene and tap again to turn those lights off. These are not Apple or Hue scenes.</p>
+            <div id="home-scene-editor" class="home-scene-editor">
+                <div class="home-scene-add">
+                    <input type="text" id="home-scene-name" placeholder="Evening" maxlength="32" aria-label="Scene name">
+                    <button type="button" class="btn btn-secondary" id="home-scene-from-on">Use lights that are on</button>
+                    <button type="button" class="btn" id="home-scene-save">Save scene</button>
+                    <button type="button" class="btn btn-secondary hidden" id="home-scene-cancel">Cancel edit</button>
+                </div>
+                <p class="hint" id="home-scene-editor-hint">Tick only the lights this scene should change. Unticked lights are left alone.</p>
+                <div id="home-scene-members" class="home-scene-members"></div>
             </div>
             <div id="home-scenes" class="home-scene-list"></div>
             <h3 class="settings-subtitle">PaperMono</h3>

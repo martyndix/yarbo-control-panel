@@ -2892,9 +2892,118 @@ html[data-theme="light"] .plan-activity {
 
 .home-scene-list {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    flex-direction: column;
+    gap: 0.4rem;
     margin-bottom: 1rem;
+}
+
+.home-scene-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.28rem 0.45rem;
+    background: var(--surface);
+}
+
+.home-scene-card.is-on {
+    background: color-mix(in srgb, var(--accent) 26%, var(--surface));
+    border-color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.home-scene-edit {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.05rem;
+    margin: 0;
+    padding: 0.1rem 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.home-scene-edit strong {
+    font-size: 0.9rem;
+}
+
+.home-scene-members {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin: 0 0 0.85rem;
+}
+
+.home-scene-room {
+    margin: 0.45rem 0 0.1rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.home-scene-member {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) auto minmax(5rem, 1fr) auto;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.28rem 0.45rem;
+    background: var(--surface);
+}
+
+.home-scene-member.is-in {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.home-scene-member.is-on {
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+}
+
+.home-scene-member-pick {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.home-scene-member-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 0.88rem;
+}
+
+.home-scene-on {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.home-scene-member input[type="range"] {
+    width: 100%;
+    min-width: 4.5rem;
+}
+
+.home-scene-member input[type="color"],
+.home-device-actions input[type="color"] {
+    width: 2rem;
+    height: 1.6rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
 }
 
 .home-paper-assign {
@@ -2938,6 +3047,15 @@ html[data-theme="light"] .plan-activity {
 
     .papermono-kind-switch {
         grid-template-columns: 1fr;
+    }
+
+    .home-scene-member {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .home-scene-member input[type="range"],
+    .home-scene-member input[type="color"] {
+        grid-column: 1 / -1;
     }
 
     .home-card--manage .home-device:not(.home-device--hidden) {

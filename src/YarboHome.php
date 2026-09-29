@@ -47,6 +47,7 @@ final class YarboHome
             'scenes' => [],
             'paper' => [],
             'hidden' => [],
+            'active_scene_id' => '',
         ];
         if (!is_file($this->storePath())) {
             return $defaults;
@@ -162,6 +163,7 @@ final class YarboHome
             'scenes' => $scenes,
             'paper' => $paper,
             'hidden' => $hidden,
+            'active_scene_id' => trim((string) ($decoded['active_scene_id'] ?? '')),
         ];
         if ($migrated) {
             $this->write($store);
@@ -250,7 +252,7 @@ final class YarboHome
                 'devices' => [],
                 'hidden_devices' => [],
                 'rooms' => $this->roomsPayload($store, []),
-                'scenes' => $store['scenes'],
+                'scenes' => $this->scenesPayload($store['scenes'], []),
                 'paper_devices' => $this->paperDeviceList($store),
                 'setup' => $setup,
             ];
@@ -294,6 +296,16 @@ final class YarboHome
                 'on' => (bool) ($device['on'] ?? false),
                 'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
                 'dimmable' => (bool) ($device['dimmable'] ?? false),
+                'colorable' => (bool) ($device['colorable'] ?? false),
+                'color_hs' => (bool) ($device['color_hs'] ?? false),
+                'color_xy' => (bool) ($device['color_xy'] ?? false),
+                'color_ct' => (bool) ($device['color_ct'] ?? false),
+                'color_hex' => $this->normalizeHex((string) ($device['color_hex'] ?? '')),
+                'hue' => isset($device['hue']) ? (int) $device['hue'] : null,
+                'saturation' => isset($device['saturation']) ? (int) $device['saturation'] : null,
+                'color_temp' => isset($device['color_temp']) ? (int) $device['color_temp'] : null,
+                'color_temp_min' => isset($device['color_temp_min']) ? (int) $device['color_temp_min'] : null,
+                'color_temp_max' => isset($device['color_temp_max']) ? (int) $device['color_temp_max'] : null,
                 'available' => (bool) ($device['available'] ?? true),
                 'room_id' => $roomName !== '' ? $roomId : '',
                 'room' => $roomName,
@@ -316,7 +328,7 @@ final class YarboHome
             'devices' => $devices,
             'hidden_devices' => $hiddenDevices,
             'rooms' => $this->roomsPayload($store, $devices),
-            'scenes' => $store['scenes'],
+            'scenes' => $this->scenesPayload($store['scenes'], $devices),
             'paper_devices' => $this->paperDeviceList($store),
             'setup' => $this->setupStatus(),
         ];
@@ -546,6 +558,24 @@ final class YarboHome
         if ($action === 'brightness' && array_key_exists('brightness', $input)) {
             $body['brightness'] = (int) $input['brightness'];
         }
+        if ($action === 'color') {
+            $hex = $this->normalizeHex((string) ($input['hex'] ?? $input['color_hex'] ?? ''));
+            if ($hex !== null) {
+                $body['hex'] = $hex;
+            }
+            if (array_key_exists('hue', $input) && $input['hue'] !== null && $input['hue'] !== '') {
+                $body['hue'] = max(0, min(360, (int) $input['hue']));
+            }
+            if (array_key_exists('saturation', $input) && $input['saturation'] !== null && $input['saturation'] !== '') {
+                $body['saturation'] = max(0, min(100, (int) $input['saturation']));
+            }
+            if (!isset($body['hex']) && !isset($body['hue'])) {
+                return ['ok' => false, 'error' => 'Colour needs a hex value'];
+            }
+        }
+        if (($action === 'color_temp' || $action === 'kelvin') && array_key_exists('kelvin', $input)) {
+            $body['kelvin'] = max(1500, min(8000, (int) $input['kelvin']));
+        }
         $result = $agent->request($body, 15.0);
         if (!($result['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string) ($result['error'] ?? 'Command failed')];
@@ -709,6 +739,9 @@ final class YarboHome
                 static fn (string $assigned): bool => $assigned !== 'scene:' . $id
             ));
         }
+        if (($store['active_scene_id'] ?? '') === $id) {
+            $store['active_scene_id'] = '';
+        }
         $this->write($store);
 
         return ['ok' => true];
@@ -719,14 +752,7 @@ final class YarboHome
      */
     public function runScene(string $id): array
     {
-        $id = trim($id);
-        $scene = null;
-        foreach ($this->load()['scenes'] as $candidate) {
-            if (($candidate['id'] ?? '') === $id) {
-                $scene = $candidate;
-                break;
-            }
-        }
+        $scene = $this->findScene($id);
         if ($scene === null) {
             return ['ok' => false, 'error' => 'Scene not found'];
         }
@@ -736,18 +762,85 @@ final class YarboHome
             if ($deviceId === '') {
                 continue;
             }
+            if (empty($action['on'])) {
+                $result = $this->command(['id' => $deviceId, 'command' => 'off']);
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+                continue;
+            }
+            $sent = false;
             if (array_key_exists('brightness', $action) && $action['brightness'] !== null) {
                 $result = $this->command([
                     'id' => $deviceId,
                     'command' => 'brightness',
                     'brightness' => (int) $action['brightness'],
                 ]);
-            } else {
+                $sent = true;
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+            }
+            $hex = $this->normalizeHex((string) ($action['color_hex'] ?? ''));
+            $kelvin = !empty($action['color_temp']) ? (int) $action['color_temp'] : null;
+            if (($hex !== null || $kelvin) && !$sent) {
+                $result = $this->command(['id' => $deviceId, 'command' => 'on']);
+                $sent = true;
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+            }
+            if ($hex !== null) {
+                $result = $this->command(['id' => $deviceId, 'command' => 'color', 'hex' => $hex]);
+                $sent = true;
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+            } elseif ($kelvin) {
                 $result = $this->command([
                     'id' => $deviceId,
-                    'command' => !empty($action['on']) ? 'on' : 'off',
+                    'command' => 'color_temp',
+                    'kelvin' => $kelvin,
                 ]);
+                $sent = true;
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
             }
+            if (!$sent) {
+                $result = $this->command(['id' => $deviceId, 'command' => 'on']);
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+            }
+        }
+        if ($errors !== []) {
+            return ['ok' => false, 'error' => 'Scene partly failed: ' . $errors[0]];
+        }
+        @unlink($this->projectRoot . '/data/home-nodes-cache.json');
+        $this->setActiveSceneId($id);
+
+        return ['ok' => true, 'on' => true];
+    }
+
+    /**
+     * Turn off lights this scene turns on. Lights the scene leaves off stay off.
+     *
+     * @return array<string, mixed>
+     */
+    public function stopScene(string $id): array
+    {
+        $scene = $this->findScene($id);
+        if ($scene === null) {
+            return ['ok' => false, 'error' => 'Scene not found'];
+        }
+        $errors = [];
+        foreach ($scene['actions'] as $action) {
+            $deviceId = (string) ($action['id'] ?? '');
+            if ($deviceId === '' || empty($action['on'])) {
+                continue;
+            }
+            $result = $this->command(['id' => $deviceId, 'command' => 'off']);
             if (!($result['ok'] ?? false)) {
                 $errors[] = (string) ($result['error'] ?? 'failed');
             }
@@ -756,8 +849,39 @@ final class YarboHome
             return ['ok' => false, 'error' => 'Scene partly failed: ' . $errors[0]];
         }
         @unlink($this->projectRoot . '/data/home-nodes-cache.json');
+        if ($this->load()['active_scene_id'] === $id) {
+            $this->setActiveSceneId('');
+        }
 
-        return ['ok' => true];
+        return ['ok' => true, 'on' => false];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toggleScene(string $id): array
+    {
+        $scene = $this->findScene($id);
+        if ($scene === null) {
+            return ['ok' => false, 'error' => 'Scene not found'];
+        }
+        $live = $this->liveDevices(6.0);
+        $byId = [];
+        foreach ($live['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $deviceId = (string) ($device['id'] ?? '');
+            if ($deviceId !== '') {
+                $byId[$deviceId] = $device;
+            }
+        }
+        $tracked = ($this->load()['active_scene_id'] ?? '') === $id;
+        if ($this->sceneIsActive($scene, $byId) || $tracked) {
+            return $this->stopScene($id);
+        }
+
+        return $this->runScene($id);
     }
 
     /**
@@ -1061,7 +1185,7 @@ final class YarboHome
         $fresh = is_file($cachePath) && (time() - (int) filemtime($cachePath)) < 8;
         if ($fresh) {
             $cached = json_decode((string) file_get_contents($cachePath), true);
-            if (is_array($cached) && (int) ($cached['v'] ?? 0) >= 2 && is_array($cached['devices'] ?? null)) {
+            if (is_array($cached) && (int) ($cached['v'] ?? 0) >= 3 && is_array($cached['devices'] ?? null)) {
                 return [
                     'ok' => true,
                     'error' => '',
@@ -1080,7 +1204,7 @@ final class YarboHome
         $devices = is_array($nodes['devices'] ?? null) ? $nodes['devices'] : [];
         if (($nodes['ok'] ?? false) === true) {
             @file_put_contents($cachePath, json_encode([
-                'v' => 2,
+                'v' => 3,
                 'saved_at' => time(),
                 'devices' => $devices,
             ], JSON_UNESCAPED_SLASHES));
@@ -1122,15 +1246,19 @@ final class YarboHome
                 'name' => $store['names'][$id] ?? (string) ($device['name'] ?? $id),
                 'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
                 'on' => (bool) ($device['on'] ?? false),
+                'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
             ];
         }
         foreach ($store['scenes'] as $scene) {
+            if (!is_array($scene)) {
+                continue;
+            }
             $sid = 'scene:' . (string) ($scene['id'] ?? '');
             $byId[$sid] = [
                 'id' => $sid,
                 'name' => (string) ($scene['name'] ?? 'Scene'),
                 'kind' => self::KIND_SCENE,
-                'on' => false,
+                'on' => $this->sceneIsActive($scene, $byId) || ($store['active_scene_id'] ?? '') === ($scene['id'] ?? ''),
             ];
         }
         $assigned = $store['paper'][$tabletId] ?? [];
@@ -1161,7 +1289,7 @@ final class YarboHome
     {
         $id = trim($id);
         if (str_starts_with($id, 'scene:')) {
-            return $this->runScene(substr($id, 6));
+            return $this->toggleScene(substr($id, 6));
         }
 
         return $this->command(['id' => $id, 'command' => 'toggle']);
@@ -1169,7 +1297,7 @@ final class YarboHome
 
     /**
      * @param array<string, mixed> $scene
-     * @return array{id: string, name: string, actions: list<array{id: string, on: bool, brightness: ?int}>}|null
+     * @return array{id: string, name: string, actions: list<array{id: string, on: bool, brightness: ?int, color_hex: ?string, color_temp: ?int}>}|null
      */
     private function normalizeScene(array $scene): ?array
     {
@@ -1187,10 +1315,24 @@ final class YarboHome
             $brightness = array_key_exists('brightness', $action) && $action['brightness'] !== null && $action['brightness'] !== ''
                 ? max(0, min(100, (int) $action['brightness']))
                 : null;
+            $on = array_key_exists('on', $action)
+                ? !empty($action['on'])
+                : ($brightness !== null && $brightness > 0);
+            $hex = $this->normalizeHex((string) ($action['color_hex'] ?? $action['hex'] ?? ''));
+            $kelvin = array_key_exists('color_temp', $action) && $action['color_temp'] !== null && $action['color_temp'] !== ''
+                ? max(1500, min(8000, (int) $action['color_temp']))
+                : null;
+            if (!$on) {
+                $brightness = null;
+                $hex = null;
+                $kelvin = null;
+            }
             $actions[] = [
                 'id' => $deviceId,
-                'on' => !empty($action['on']) || ($brightness !== null && $brightness > 0),
+                'on' => $on,
                 'brightness' => $brightness,
+                'color_hex' => $hex,
+                'color_temp' => $kelvin,
             ];
         }
         if ($id === '' || $name === '' || $actions === []) {
@@ -1198,6 +1340,122 @@ final class YarboHome
         }
 
         return ['id' => $id, 'name' => $name, 'actions' => $actions];
+    }
+
+    /**
+     * @param list<mixed> $scenes
+     * @param list<array<string, mixed>> $devices
+     * @return list<array<string, mixed>>
+     */
+    private function scenesPayload(array $scenes, array $devices): array
+    {
+        $byId = [];
+        foreach ($devices as $device) {
+            $id = (string) ($device['id'] ?? '');
+            if ($id !== '') {
+                $byId[$id] = $device;
+            }
+        }
+        $activeId = $this->load()['active_scene_id'] ?? '';
+        $out = [];
+        foreach ($scenes as $scene) {
+            if (!is_array($scene)) {
+                continue;
+            }
+            $normalized = $this->normalizeScene($scene);
+            if ($normalized === null) {
+                continue;
+            }
+            $out[] = [
+                'id' => $normalized['id'],
+                'name' => $normalized['name'],
+                'actions' => $normalized['actions'],
+                'count' => count($normalized['actions']),
+                'on' => $this->sceneIsActive($normalized, $byId) || $activeId === $normalized['id'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array{id: string, name: string, actions: list<array<string, mixed>>}|null
+     */
+    private function findScene(string $id): ?array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return null;
+        }
+        foreach ($this->load()['scenes'] as $candidate) {
+            if (is_array($candidate) && ($candidate['id'] ?? '') === $id) {
+                return $this->normalizeScene($candidate) ?? $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array{actions?: list<array<string, mixed>>} $scene
+     * @param array<string, array<string, mixed>> $liveById
+     */
+    private function sceneIsActive(array $scene, array $liveById): bool
+    {
+        $actions = is_array($scene['actions'] ?? null) ? $scene['actions'] : [];
+        if ($actions === []) {
+            return false;
+        }
+        $anyOn = false;
+        foreach ($actions as $action) {
+            if (!is_array($action)) {
+                continue;
+            }
+            $id = (string) ($action['id'] ?? '');
+            if ($id === '' || !isset($liveById[$id])) {
+                continue;
+            }
+            $live = $liveById[$id];
+            $wantOn = !empty($action['on']);
+            $isOn = !empty($live['on']);
+            if ($wantOn) {
+                $anyOn = true;
+                if (!$isOn) {
+                    return false;
+                }
+                if (isset($action['brightness'], $live['brightness'])
+                    && $action['brightness'] !== null
+                    && $live['brightness'] !== null
+                    && abs((int) $live['brightness'] - (int) $action['brightness']) > 15) {
+                    return false;
+                }
+            } elseif ($isOn) {
+                return false;
+            }
+        }
+
+        return $anyOn;
+    }
+
+    private function normalizeHex(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        if ($value[0] !== '#') {
+            $value = '#' . $value;
+        }
+        if (preg_match('/^#([0-9a-fA-F]{3})$/', $value, $short)) {
+            $hex = $short[1];
+
+            return '#' . strtolower($hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2]);
+        }
+        if (!preg_match('/^#([0-9a-fA-F]{6})$/', $value, $full)) {
+            return null;
+        }
+
+        return '#' . strtolower($full[1]);
     }
 
     /**
@@ -1395,6 +1653,13 @@ final class YarboHome
         }
 
         return $ids;
+    }
+
+    private function setActiveSceneId(string $id): void
+    {
+        $store = $this->load();
+        $store['active_scene_id'] = trim($id);
+        $this->write($store);
     }
 
     /**
