@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.47] - 2026-09-29
+
+### Fixed
+- PaperMono MAIL text was white-on-black (leftover from the inverted WRITE button), so rows were hard to read and **No messages yet** sat off the left edge. Body text is black on white again.
+- Lock-screen envelope outline is as thick as the battery badge.
+
+### Changed
+- MAIL inbox and the open message show the time and date (house timezone). Firmware **0.1.42**.
+
 ## [3.0.46] - 2026-09-29
 
 ### Changed

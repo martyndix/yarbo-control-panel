@@ -116,6 +116,7 @@ int peerCount = 0;
 String inboxFrom[PAPERMONO_INBOX_MAX];
 String inboxFromId[PAPERMONO_INBOX_MAX];
 String inboxText[PAPERMONO_INBOX_MAX];
+String inboxWhen[PAPERMONO_INBOX_MAX];
 String inboxIds[PAPERMONO_INBOX_MAX];
 bool inboxUnread[PAPERMONO_INBOX_MAX];
 int inboxCount = 0;
@@ -444,6 +445,8 @@ void drawButton(int x, int y, int w, int h, const char *label, bool invert)
     M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextSize(3);
     M5.Display.drawString(label, x + w / 2, y + h / 2);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
 }
 
 void layoutButtons(int &bw, int &bh, int &gap, int &y0)
@@ -952,6 +955,17 @@ void refreshLocalClock()
     clockDate = dbuf;
 }
 
+String nowStamp()
+{
+    if (clockDate.length() && clockLocal.length() && clockLocal != "--:--") {
+        return clockDate + "  " + clockLocal;
+    }
+    if (clockLocal.length() && clockLocal != "--:--") {
+        return clockLocal;
+    }
+    return "";
+}
+
 void drawPadlockIcon(int x, int y, int size, bool locked)
 {
     int thick = max(5, size / 8);
@@ -1061,9 +1075,10 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
         compact ? 2 : 4,
         TFT_WHITE
     );
-    M5.Display.setTextColor(TFT_BLACK);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.drawString(s, x + w / 2, y + h / 2);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
 }
 
 bool takeTouchPress(int &x, int &y)
@@ -1121,6 +1136,32 @@ int pngFileWidth(const char *path)
     return w;
 }
 
+void drawMailBadge(int x, int y, int size, int count)
+{
+    int stroke = 5;
+    M5.Display.fillRoundRect(x, y, size, size, 14, TFT_BLACK);
+    M5.Display.fillRoundRect(x + stroke, y + stroke, size - 2 * stroke, size - 2 * stroke, 8, TFT_WHITE);
+    int ex = x + stroke + 8;
+    int ey = y + stroke + 14;
+    int ew = size - 2 * (stroke + 8);
+    int eh = size / 2 - 2;
+    M5.Display.fillRoundRect(ex, ey, ew, eh, 4, TFT_BLACK);
+    int inner = 4;
+    M5.Display.fillRoundRect(ex + inner, ey + inner, ew - 2 * inner, eh - 2 * inner, 2, TFT_WHITE);
+    int midX = ex + ew / 2;
+    int midY = ey + eh / 2;
+    int bar = 4;
+    for (int t = -bar; t <= bar; t++) {
+        M5.Display.drawLine(ex, ey + inner + t, midX, midY + t, TFT_BLACK);
+        M5.Display.drawLine(ex + ew - 1, ey + inner + t, midX, midY + t, TFT_BLACK);
+    }
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(count > 9 ? String("9+") : String(count), x + size / 2, y + size - stroke - 16);
+    M5.Display.setTextDatum(TL_DATUM);
+}
+
 void drawLockScreen(bool forceFull)
 {
     beginEpdFrame(forceFull);
@@ -1135,20 +1176,7 @@ void drawLockScreen(bool forceFull)
     M5.Display.setTextSize(6);
     M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), W / 2, 110);
     if (unreadCount > 0) {
-        int mx = 16;
-        int my = 24;
-        int mw = 92;
-        int mh = 92;
-        M5.Display.drawRoundRect(mx, my, mw, mh, 14, TFT_BLACK);
-        int ex = mx + 12;
-        int ey = my + 22;
-        int ew = mw - 24;
-        int eh = 44;
-        M5.Display.drawRect(ex, ey, ew, eh, TFT_BLACK);
-        M5.Display.drawLine(ex, ey, ex + ew / 2, ey + eh / 2, TFT_BLACK);
-        M5.Display.drawLine(ex + ew, ey, ex + ew / 2, ey + eh / 2, TFT_BLACK);
-        M5.Display.setTextSize(2);
-        M5.Display.drawString(unreadCount > 9 ? String("9+") : String(unreadCount), mx + mw / 2, my + mh - 16);
+        drawMailBadge(16, 24, 96, unreadCount);
     }
     const int batCy = 210;
     const int batH = 72;
@@ -1317,6 +1345,7 @@ void drawRadioCompose(bool forceFull)
 
 void drawWrappedText(const String &text, int x, int y, int maxW, int lineH, int maxLines)
 {
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(2);
     int line = 0;
@@ -1358,19 +1387,19 @@ void drawRadioInbox(bool forceFull)
     beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
+    drawButton(320, 92, 144, 44, "WRITE", true);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(2);
     String title = unreadCount > 0 ? (String(unreadCount) + " new") : String("Inbox");
     M5.Display.drawString(title, 16, PAPERMONO_INBOX_Y0 - 8);
-    drawButton(320, 92, 144, 44, "WRITE", true);
     if (inboxCount == 0) {
         M5.Display.setTextSize(3);
         M5.Display.drawString("No messages yet.", 16, 200);
         M5.Display.setTextSize(2);
         M5.Display.drawString("Tap WRITE to send one.", 16, 260);
     } else {
-        int shown = min(inboxCount, 7);
+        int shown = min(inboxCount, 6);
         for (int i = 0; i < shown; i++) {
             int idx = inboxCount - 1 - i;
             int y = PAPERMONO_INBOX_Y0 + 28 + i * PAPERMONO_INBOX_ROW;
@@ -1378,18 +1407,26 @@ void drawRadioInbox(bool forceFull)
             if (inboxUnread[idx]) {
                 M5.Display.fillCircle(28, y + (PAPERMONO_INBOX_ROW - 8) / 2, 7, TFT_BLACK);
             }
+            M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
             M5.Display.setTextDatum(TL_DATUM);
             M5.Display.setTextSize(2);
             String from = inboxFrom[idx].length() ? inboxFrom[idx] : String("tablet");
-            if (from.length() > 22) {
-                from = from.substring(0, 22);
+            if (from.length() > 18) {
+                from = from.substring(0, 18);
             }
-            M5.Display.drawString(from, 44, y + 8);
+            M5.Display.drawString(from, 44, y + 6);
+            String when = inboxWhen[idx];
+            if (when.length() > 22) {
+                when = when.substring(0, 22);
+            }
+            if (when.length()) {
+                M5.Display.drawString(when, 44, y + 28);
+            }
             String preview = inboxText[idx];
-            if (preview.length() > 28) {
-                preview = preview.substring(0, 27) + "...";
+            if (preview.length() > 26) {
+                preview = preview.substring(0, 25) + "...";
             }
-            M5.Display.drawString(preview, 44, y + 34);
+            M5.Display.drawString(preview, 44, y + (when.length() ? 50 : 32));
         }
     }
     drawPager();
@@ -1404,21 +1441,27 @@ void drawRadioView(bool forceFull)
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     drawButton(16, 92, 140, 44, "BACK", false);
     drawButton(324, 92, 140, 44, "REPLY", true);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
     if (radioViewIndex < 0 || radioViewIndex >= inboxCount) {
-        M5.Display.setTextDatum(TL_DATUM);
         M5.Display.setTextSize(2);
         M5.Display.drawString("Message gone.", 16, 180);
         drawPager();
         finishEpdFrame();
         return;
     }
-    M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(2);
     M5.Display.drawString("From", 16, 152);
     M5.Display.setTextSize(3);
     String from = inboxFrom[radioViewIndex].length() ? inboxFrom[radioViewIndex] : String("tablet");
     M5.Display.drawString(from.substring(0, 18), 16, 184);
-    drawWrappedText(inboxText[radioViewIndex], 16, 240, M5.Display.width() - 32, 36, 10);
+    M5.Display.setTextSize(2);
+    if (inboxWhen[radioViewIndex].length()) {
+        M5.Display.drawString(inboxWhen[radioViewIndex], 16, 228);
+        drawWrappedText(inboxText[radioViewIndex], 16, 268, M5.Display.width() - 32, 36, 10);
+    } else {
+        drawWrappedText(inboxText[radioViewIndex], 16, 240, M5.Display.width() - 32, 36, 10);
+    }
     drawPager();
     finishEpdFrame();
 }
@@ -1621,7 +1664,7 @@ bool tapOnMail(int x, int y)
     if (unreadCount <= 0) {
         return false;
     }
-    return x >= 8 && x <= 120 && y >= 8 && y <= 130;
+    return x >= 8 && x <= 128 && y >= 8 && y <= 136;
 }
 
 void refreshUnreadLed()
@@ -1723,13 +1766,16 @@ bool syncPaperLogo(const String &hash)
     return true;
 }
 
-void pushInbox(const String &id, const String &from, const String &fromId, const String &text, bool alert)
+void pushInbox(const String &id, const String &from, const String &fromId, const String &text, bool alert, const String &when)
 {
     if (id.length() && lastInboxId == id) {
         return;
     }
     for (int i = 0; i < inboxCount; i++) {
         if (id.length() && inboxIds[i] == id) {
+            if (when.length() && inboxWhen[i] != when) {
+                inboxWhen[i] = when;
+            }
             return;
         }
     }
@@ -1739,6 +1785,7 @@ void pushInbox(const String &id, const String &from, const String &fromId, const
             inboxFrom[i - 1] = inboxFrom[i];
             inboxFromId[i - 1] = inboxFromId[i];
             inboxText[i - 1] = inboxText[i];
+            inboxWhen[i - 1] = inboxWhen[i];
             inboxUnread[i - 1] = inboxUnread[i];
         }
         inboxCount = PAPERMONO_INBOX_MAX - 1;
@@ -1747,6 +1794,7 @@ void pushInbox(const String &id, const String &from, const String &fromId, const
     inboxFrom[inboxCount] = from;
     inboxFromId[inboxCount] = fromId;
     inboxText[inboxCount] = text;
+    inboxWhen[inboxCount] = when.length() ? when : nowStamp();
     inboxUnread[inboxCount] = alert;
     inboxCount++;
     if (id.length()) {
@@ -1854,9 +1902,10 @@ void applyCompactExtras(JsonDocument &doc)
             String from = String((const char *) (m["from_name"] | "tablet"));
             String fromId = String((const char *) (m["from"] | ""));
             String text = String((const char *) (m["text"] | ""));
+            String when = String((const char *) (m["at_local"] | ""));
             if (text.length()) {
                 bool primed = lastInboxId.length() > 0;
-                pushInbox(id, from, fromId, text, primed);
+                pushInbox(id, from, fromId, text, primed, when);
             }
         }
     }
@@ -1912,7 +1961,7 @@ void handleIncomingRadio(const String &raw)
     String text = doc["text"] | "";
     String id = doc["id"] | String(millis());
     if (text.length()) {
-        pushInbox(id, from, fromId, text, true);
+        pushInbox(id, from, fromId, text, true, nowStamp());
         drawScreen(false);
     }
 }

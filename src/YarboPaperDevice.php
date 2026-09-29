@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.41';
+    public const FIRMWARE_VERSION = '0.1.42';
     public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -799,6 +799,7 @@ final class YarboPaperDevice
             ];
         }
         $inbox = [];
+        $tz = $this->prefsTimezone();
         foreach ($store['messages'] as $message) {
             if (!is_array($message)) {
                 continue;
@@ -818,6 +819,7 @@ final class YarboPaperDevice
                 'to_name' => (string) ($message['to_name'] ?? ''),
                 'text' => (string) ($message['text'] ?? ''),
                 'at' => (string) ($message['at'] ?? ''),
+                'at_local' => $this->formatMessageLocal((string) ($message['at'] ?? ''), $tz),
             ];
         }
         $inbox = array_slice($inbox, -8);
@@ -914,6 +916,33 @@ final class YarboPaperDevice
             'clock_epoch' => $now->getTimestamp(),
             'clock_offset' => $now->getOffset(),
         ];
+    }
+
+    private function prefsTimezone(): \DateTimeZone
+    {
+        $prefs = $this->normalizePrefs($this->load()['prefs']);
+        $zoneName = YarboVestaboard::normalizeTimezone((string) ($prefs['timezone'] ?? ''));
+        if ($zoneName === '') {
+            $zoneName = 'UTC';
+        }
+        try {
+            return new \DateTimeZone($zoneName);
+        } catch (\Exception $e) {
+            return new \DateTimeZone('UTC');
+        }
+    }
+
+    private function formatMessageLocal(string $iso, \DateTimeZone $tz): string
+    {
+        $iso = trim($iso);
+        if ($iso === '') {
+            return '';
+        }
+        try {
+            return (new \DateTimeImmutable($iso))->setTimezone($tz)->format('D j M H:i');
+        } catch (\Exception $e) {
+            return '';
+        }
     }
 
     public function radioSyncWord(): int
