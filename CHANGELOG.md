@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.38] - 2026-09-29
+
+### Changed
+- PaperMono lock screen uses a larger logo and drops the Vestaboard grid further down so the two do not sit on top of each other. Firmware **0.1.36**.
+
 ## [3.0.37] - 2026-09-29
 
 ### Fixed

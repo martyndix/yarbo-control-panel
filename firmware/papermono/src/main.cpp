@@ -1095,8 +1095,8 @@ void drawLockScreen(bool forceFull)
     bool haveLogo = SPIFFS.exists("/logo.png");
     bool showBoard = wantBoard && (!vestaboardKnown || vestaboardOn);
     bool logoDrawn = false;
-    int logoY = batBottom + 24;
-    int logoSize = showBoard ? 128 : 168;
+    int logoY = batBottom + 20;
+    int logoSize = showBoard ? 200 : 232;
     if (wantLogo && haveLogo) {
         int srcW = pngFileWidth("/logo.png");
         float sc = (float) logoSize / (float) srcW;
@@ -1110,7 +1110,7 @@ void drawLockScreen(bool forceFull)
         int cell = logoDrawn ? 24 : 30;
         int gap = 2;
         int gridW = 15 * cell + 14 * gap;
-        int gridY = logoDrawn ? (logoY + logoSize + 16) : 280;
+        int gridY = logoDrawn ? (logoY + logoSize + 28) : 280;
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
     }
 
