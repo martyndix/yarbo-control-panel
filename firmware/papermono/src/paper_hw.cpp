@@ -38,6 +38,7 @@ bool rgbError = false;
 uint32_t rgbLastToggle = 0;
 bool rgbOn = false;
 bool rgbIsError = false;
+bool rgbMessageHold = false;
 
 void IRAM_ATTR onDio1()
 {
@@ -117,6 +118,7 @@ void writeRgb(bool r, bool g, bool b)
 
 void beep(int freq, int ms)
 {
+    M5.Speaker.setVolume(255);
     M5.Speaker.tone((uint32_t) freq, (uint32_t) ms);
 }
 
@@ -216,8 +218,26 @@ void rgbOff()
 {
     rgbUntil = 0;
     rgbError = false;
+    rgbMessageHold = false;
     rgbOn = false;
     writeRgb(false, false, false);
+}
+
+void rgbHoldMessage(bool on)
+{
+    rgbMessageHold = on;
+    if (on) {
+        rgbUntil = 0;
+        rgbOn = true;
+        if (!rgbError) {
+            writeRgb(false, true, true);
+        }
+        return;
+    }
+    if (!rgbError && rgbUntil == 0) {
+        rgbOn = false;
+        writeRgb(false, false, false);
+    }
 }
 
 void rgbTick()
@@ -229,6 +249,10 @@ void rgbTick()
             rgbOn = !rgbOn;
             writeRgb(rgbOn, false, false);
         }
+        return;
+    }
+    if (rgbMessageHold) {
+        writeRgb(false, true, true);
         return;
     }
     if (rgbUntil == 0) {
@@ -250,13 +274,12 @@ void alertMessage()
 {
     rgbError = false;
     rgbIsError = false;
-    rgbUntil = millis() + 1400;
-    rgbLastToggle = 0;
-    rgbOn = true;
-    writeRgb(false, true, true);
-    beep(1800, 140);
-    delay(80);
-    beep(2200, 140);
+    rgbHoldMessage(true);
+    beep(1100, 280);
+    delay(70);
+    beep(1500, 320);
+    delay(70);
+    beep(1900, 280);
 }
 
 void alertError()
@@ -266,9 +289,9 @@ void alertError()
     rgbLastToggle = 0;
     rgbOn = true;
     writeRgb(true, false, false);
-    beep(900, 220);
-    delay(90);
-    beep(700, 280);
+    beep(700, 320);
+    delay(80);
+    beep(520, 400);
 }
 
 void alertOta()
@@ -278,9 +301,9 @@ void alertOta()
     rgbUntil = 0;
     rgbOn = true;
     writeRgb(false, true, false);
-    beep(1600, 220);
-    delay(90);
-    beep(2000, 280);
+    beep(1200, 280);
+    delay(80);
+    beep(1600, 360);
 }
 
 void alertsSetErrorActive(bool on)
@@ -291,7 +314,9 @@ void alertsSetErrorActive(bool on)
         rgbLastToggle = 0;
     } else if (rgbError) {
         rgbError = false;
-        if (rgbUntil == 0) {
+        if (rgbMessageHold) {
+            writeRgb(false, true, true);
+        } else if (rgbUntil == 0) {
             writeRgb(false, false, false);
         }
     }

@@ -11,7 +11,7 @@ final class YarboHome
     public const KIND_SWITCH = 'switch';
     public const KIND_HEATER = 'heater';
     public const KIND_SCENE = 'scene';
-    public const PAPER_MAX = 8;
+    public const PAPER_MAX = 12;
     /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
     public const PAPER_NAME_MAX = 40;
 
@@ -1208,9 +1208,9 @@ final class YarboHome
      */
     public function reorder(array $input): array
     {
-        $kind = strtolower(trim((string) ($input['kind'] ?? $input['what'] ?? '')));
         $ids = $this->normalizeIdList(is_array($input['ids'] ?? null) ? $input['ids'] : []);
-        if ($ids === []) {
+        $kind = strtolower(trim((string) ($input['kind'] ?? $input['what'] ?? '')));
+        if ($ids === [] && $kind !== 'paper') {
             return ['ok' => false, 'error' => 'Nothing to reorder'];
         }
         $store = $this->load();

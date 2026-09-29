@@ -11,6 +11,7 @@ bool loraTakeRx(String &out);
 void loraService();
 void rgbOff();
 void rgbTick();
+void rgbHoldMessage(bool on);
 void alertMessage();
 void alertError();
 void alertOta();

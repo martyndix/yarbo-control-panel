@@ -108,12 +108,16 @@ bool offConfirm = false;
 bool kbNumbers = false;
 String radioDraft = "";
 int radioToIndex = 0;
+int radioUi = PAPERMONO_RADIO_INBOX;
+int radioViewIndex = -1;
 String peerIds[PAPERMONO_PEER_MAX];
 String peerNames[PAPERMONO_PEER_MAX];
 int peerCount = 0;
 String inboxFrom[PAPERMONO_INBOX_MAX];
+String inboxFromId[PAPERMONO_INBOX_MAX];
 String inboxText[PAPERMONO_INBOX_MAX];
 String inboxIds[PAPERMONO_INBOX_MAX];
+bool inboxUnread[PAPERMONO_INBOX_MAX];
 int inboxCount = 0;
 String lastInboxId = "";
 uint8_t radioSync = 0xA5;
@@ -136,7 +140,6 @@ String homeNames[PAPERMONO_HOME_MAX];
 String homeKinds[PAPERMONO_HOME_MAX];
 bool homeOnState[PAPERMONO_HOME_MAX];
 int homeCount = 0;
-int homeOffset = 0;
 
 void drawScreen(bool forceFull);
 void enterLock();
@@ -154,6 +157,9 @@ void refreshLocalClock();
 bool tapOnPadlock(int x, int y);
 bool tapOnUnlock(int x, int y);
 bool tapOnLockOff(int x, int y);
+bool tapOnMail(int x, int y);
+void openInboxFromLock();
+void refreshUnreadLed();
 void powerOffTablet();
 void finishEpdFrame();
 void paintRadioDraft(int x, int y);
@@ -314,7 +320,7 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_BOARD) return "BOARD";
     if (page == PAPERMONO_PAGE_POWERWALL) return "POWERWALL";
     if (page == PAPERMONO_PAGE_LYMOW) return "LYMOW";
-    if (page == PAPERMONO_PAGE_RADIO) return "RADIO";
+    if (page == PAPERMONO_PAGE_RADIO) return "MAIL";
     if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
     if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
     return "HOME";
@@ -334,7 +340,8 @@ String screenKey()
         + lockScreen + "|" + clockLocal + "|" + String(unreadCount) + "|" + vestaboardHash + "|"
         + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
         + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
-        + String(inboxCount) + "|" + String(homeOn ? 1 : 0) + "|" + String(homeCount);
+        + String(inboxCount) + "|" + String(radioUi) + "|" + String(radioViewIndex) + "|"
+        + String(homeOn ? 1 : 0) + "|" + String(homeCount);
 }
 
 bool pageEnabled(int page)
@@ -454,7 +461,7 @@ String headerBrand()
     if (currentPage == PAPERMONO_PAGE_POWERWALL) return "POWERWALL";
     if (currentPage == PAPERMONO_PAGE_LYMOW) return "LYMOW";
     if (currentPage == PAPERMONO_PAGE_NOTE || currentPage == PAPERMONO_PAGE_BOARD) return "VESTABOARD";
-    if (currentPage == PAPERMONO_PAGE_RADIO) return "RADIO";
+    if (currentPage == PAPERMONO_PAGE_RADIO) return "MAIL";
     if (currentPage == PAPERMONO_PAGE_DEVICE) return "DEVICE";
     if (currentPage == PAPERMONO_PAGE_HOUSE) return "HOUSE";
     return "YARBO";
@@ -598,6 +605,19 @@ int plansStartY()
     return plansRowY0() + PAPERMONO_PLAN_VISIBLE * plansRowH() + 16;
 }
 
+int houseRowY0()
+{
+    return 100;
+}
+
+int houseRowH()
+{
+    int bottom = M5.Display.height() - 12;
+    int n = PAPERMONO_HOME_VISIBLE > 0 ? PAPERMONO_HOME_VISIBLE : 1;
+    int h = (bottom - houseRowY0()) / n;
+    return h < 44 ? 44 : h;
+}
+
 void drawPlansPage(bool forceFull)
 {
     beginEpdFrame(forceFull);
@@ -663,15 +683,12 @@ void drawHousePage(bool forceFull)
         M5.Display.drawString("Assign lights in", 16, 180);
         M5.Display.drawString("the panel Home page.", 16, 214);
     }
-    int y0 = plansRowY0();
-    int rh = plansRowH();
+    int y0 = houseRowY0();
+    int rh = houseRowH();
     int W = M5.Display.width();
-    for (int i = 0; i < PAPERMONO_HOME_VISIBLE; i++) {
-        int idx = homeOffset + i;
-        if (idx >= homeCount) {
-            break;
-        }
-        bool on = homeOnState[idx];
+    int shown = homeCount < PAPERMONO_HOME_VISIBLE ? homeCount : PAPERMONO_HOME_VISIBLE;
+    for (int i = 0; i < shown; i++) {
+        bool on = homeOnState[i];
         int y = y0 + i * rh;
         uint16_t bg = on ? TFT_BLACK : TFT_WHITE;
         uint16_t fg = on ? TFT_WHITE : TFT_BLACK;
@@ -680,18 +697,13 @@ void drawHousePage(bool forceFull)
         M5.Display.setTextColor(fg, bg);
         M5.Display.setTextDatum(ML_DATUM);
         M5.Display.setTextSize(2);
-        String label = homeNames[idx];
-        if (homeKinds[idx] == "scene") {
+        String label = homeNames[i];
+        if (homeKinds[i] == "scene") {
             label = "*" + label;
         }
         /* Button is 16..(W-16); 16px inset each side so the name uses the full row. */
         label = clipLabelToWidth(label, W - 64);
         M5.Display.drawString(label, 32, y + (rh - 8) / 2);
-    }
-    if (homeCount > PAPERMONO_HOME_VISIBLE) {
-        int bw, bh, gap, ignoreY;
-        layoutButtons(bw, bh, gap, ignoreY);
-        drawButton(16, plansStartY(), bw, 72, "MORE", false);
     }
     drawPager();
     finishEpdFrame();
@@ -1123,8 +1135,20 @@ void drawLockScreen(bool forceFull)
     M5.Display.setTextSize(6);
     M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), W / 2, 110);
     if (unreadCount > 0) {
+        int mx = 16;
+        int my = 24;
+        int mw = 92;
+        int mh = 92;
+        M5.Display.drawRoundRect(mx, my, mw, mh, 14, TFT_BLACK);
+        int ex = mx + 12;
+        int ey = my + 22;
+        int ew = mw - 24;
+        int eh = 44;
+        M5.Display.drawRect(ex, ey, ew, eh, TFT_BLACK);
+        M5.Display.drawLine(ex, ey, ex + ew / 2, ey + eh / 2, TFT_BLACK);
+        M5.Display.drawLine(ex + ew, ey, ex + ew / 2, ey + eh / 2, TFT_BLACK);
         M5.Display.setTextSize(2);
-        M5.Display.drawString(String(unreadCount) + " MSG", W / 2, 188);
+        M5.Display.drawString(unreadCount > 9 ? String("9+") : String(unreadCount), mx + mw / 2, my + mh - 16);
     }
     const int batCy = 210;
     const int batH = 72;
@@ -1260,7 +1284,7 @@ void drawKeyboard(int y0)
     drawButton(382, y, 90, ah, "SEND", true);
 }
 
-void drawRadioPage(bool forceFull)
+void drawRadioCompose(bool forceFull)
 {
     beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
@@ -1270,11 +1294,13 @@ void drawRadioPage(bool forceFull)
     M5.Display.setTextSize(2);
     String path = loraReady() ? "LoRa + Wi-Fi" : "Wi-Fi only";
     M5.Display.drawString(path, 16, 100);
+    drawButton(320, 92, 144, 44, "INBOX", false);
     M5.Display.setTextSize(3);
     String toLabel = "ALL";
     if (radioToIndex > 0 && radioToIndex <= peerCount) {
         toLabel = peerNames[radioToIndex - 1];
     }
+    M5.Display.setTextDatum(TL_DATUM);
     M5.Display.drawString("To  " + toLabel, 16, 126);
     paintRadioDraft(16, PAPERMONO_DRAFT_Y);
     int n = min(4, peerCount + 1);
@@ -1287,6 +1313,127 @@ void drawRadioPage(bool forceFull)
     drawKeyboard(PAPERMONO_KB_Y0);
     drawPager();
     finishEpdFrame();
+}
+
+void drawWrappedText(const String &text, int x, int y, int maxW, int lineH, int maxLines)
+{
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(2);
+    int line = 0;
+    int start = 0;
+    int len = text.length();
+    while (start < len && line < maxLines) {
+        int end = start;
+        int lastSpace = -1;
+        while (end < len) {
+            int w = M5.Display.textWidth(text.substring(start, end + 1));
+            if (w > maxW) {
+                break;
+            }
+            if (text[end] == ' ') {
+                lastSpace = end;
+            }
+            end++;
+        }
+        if (end == start) {
+            end = start + 1;
+        } else if (end < len && lastSpace > start) {
+            end = lastSpace + 1;
+        }
+        String piece = text.substring(start, end);
+        piece.trim();
+        if (line == maxLines - 1 && end < len) {
+            if (piece.length() > 3) {
+                piece = piece.substring(0, piece.length() - 1) + "...";
+            }
+        }
+        M5.Display.drawString(piece, x, y + line * lineH);
+        start = end;
+        line++;
+    }
+}
+
+void drawRadioInbox(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(2);
+    String title = unreadCount > 0 ? (String(unreadCount) + " new") : String("Inbox");
+    M5.Display.drawString(title, 16, PAPERMONO_INBOX_Y0 - 8);
+    drawButton(320, 92, 144, 44, "WRITE", true);
+    if (inboxCount == 0) {
+        M5.Display.setTextSize(3);
+        M5.Display.drawString("No messages yet.", 16, 200);
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Tap WRITE to send one.", 16, 260);
+    } else {
+        int shown = min(inboxCount, 7);
+        for (int i = 0; i < shown; i++) {
+            int idx = inboxCount - 1 - i;
+            int y = PAPERMONO_INBOX_Y0 + 28 + i * PAPERMONO_INBOX_ROW;
+            M5.Display.drawRoundRect(12, y, M5.Display.width() - 24, PAPERMONO_INBOX_ROW - 8, 10, TFT_BLACK);
+            if (inboxUnread[idx]) {
+                M5.Display.fillCircle(28, y + (PAPERMONO_INBOX_ROW - 8) / 2, 7, TFT_BLACK);
+            }
+            M5.Display.setTextDatum(TL_DATUM);
+            M5.Display.setTextSize(2);
+            String from = inboxFrom[idx].length() ? inboxFrom[idx] : String("tablet");
+            if (from.length() > 22) {
+                from = from.substring(0, 22);
+            }
+            M5.Display.drawString(from, 44, y + 8);
+            String preview = inboxText[idx];
+            if (preview.length() > 28) {
+                preview = preview.substring(0, 27) + "...";
+            }
+            M5.Display.drawString(preview, 44, y + 34);
+        }
+    }
+    drawPager();
+    finishEpdFrame();
+}
+
+void drawRadioView(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    drawButton(16, 92, 140, 44, "BACK", false);
+    drawButton(324, 92, 140, 44, "REPLY", true);
+    if (radioViewIndex < 0 || radioViewIndex >= inboxCount) {
+        M5.Display.setTextDatum(TL_DATUM);
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Message gone.", 16, 180);
+        drawPager();
+        finishEpdFrame();
+        return;
+    }
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("From", 16, 152);
+    M5.Display.setTextSize(3);
+    String from = inboxFrom[radioViewIndex].length() ? inboxFrom[radioViewIndex] : String("tablet");
+    M5.Display.drawString(from.substring(0, 18), 16, 184);
+    drawWrappedText(inboxText[radioViewIndex], 16, 240, M5.Display.width() - 32, 36, 10);
+    drawPager();
+    finishEpdFrame();
+}
+
+void drawRadioPage(bool forceFull)
+{
+    if (radioUi == PAPERMONO_RADIO_VIEW) {
+        drawRadioView(forceFull);
+        return;
+    }
+    if (radioUi == PAPERMONO_RADIO_COMPOSE) {
+        drawRadioCompose(forceFull);
+        return;
+    }
+    drawRadioInbox(forceFull);
 }
 
 void drawDevicePage(bool forceFull)
@@ -1469,6 +1616,42 @@ bool tapOnLockOff(int x, int y)
     return x >= ox0 && x <= ox0 + offW && y >= by && y <= by + btnH;
 }
 
+bool tapOnMail(int x, int y)
+{
+    if (unreadCount <= 0) {
+        return false;
+    }
+    return x >= 8 && x <= 120 && y >= 8 && y <= 130;
+}
+
+void refreshUnreadLed()
+{
+    int n = 0;
+    for (int i = 0; i < inboxCount; i++) {
+        if (inboxUnread[i]) {
+            n++;
+        }
+    }
+    unreadCount = n;
+    if (unreadCount > 0 && alertMessageOn) {
+        rgbHoldMessage(true);
+    } else {
+        rgbHoldMessage(false);
+    }
+}
+
+void openInboxFromLock()
+{
+    radioUi = PAPERMONO_RADIO_INBOX;
+    radioViewIndex = -1;
+    currentPage = PAPERMONO_PAGE_RADIO;
+    screenLocked = false;
+    noteActivity();
+    applyFrontlight(true);
+    drawScreen(true);
+    lastDrawnKey = screenKey();
+}
+
 bool syncPaperLogo(const String &hash)
 {
     if (hash.length() == 0) {
@@ -1540,7 +1723,7 @@ bool syncPaperLogo(const String &hash)
     return true;
 }
 
-void pushInbox(const String &id, const String &from, const String &text, bool alert)
+void pushInbox(const String &id, const String &from, const String &fromId, const String &text, bool alert)
 {
     if (id.length() && lastInboxId == id) {
         return;
@@ -1554,18 +1737,22 @@ void pushInbox(const String &id, const String &from, const String &text, bool al
         for (int i = 1; i < PAPERMONO_INBOX_MAX; i++) {
             inboxIds[i - 1] = inboxIds[i];
             inboxFrom[i - 1] = inboxFrom[i];
+            inboxFromId[i - 1] = inboxFromId[i];
             inboxText[i - 1] = inboxText[i];
+            inboxUnread[i - 1] = inboxUnread[i];
         }
         inboxCount = PAPERMONO_INBOX_MAX - 1;
     }
     inboxIds[inboxCount] = id;
     inboxFrom[inboxCount] = from;
+    inboxFromId[inboxCount] = fromId;
     inboxText[inboxCount] = text;
+    inboxUnread[inboxCount] = alert;
     inboxCount++;
     if (id.length()) {
         lastInboxId = id;
     }
-    unreadCount++;
+    refreshUnreadLed();
     if (alert && alertMessageOn) {
         alertMessage();
     }
@@ -1665,10 +1852,11 @@ void applyCompactExtras(JsonDocument &doc)
             if (m.isNull()) continue;
             String id = String((const char *) (m["id"] | ""));
             String from = String((const char *) (m["from_name"] | "tablet"));
+            String fromId = String((const char *) (m["from"] | ""));
             String text = String((const char *) (m["text"] | ""));
             if (text.length()) {
                 bool primed = lastInboxId.length() > 0;
-                pushInbox(id, from, text, primed);
+                pushInbox(id, from, fromId, text, primed);
             }
         }
     }
@@ -1724,7 +1912,7 @@ void handleIncomingRadio(const String &raw)
     String text = doc["text"] | "";
     String id = doc["id"] | String(millis());
     if (text.length()) {
-        pushInbox(id, from, text, true);
+        pushInbox(id, from, fromId, text, true);
         drawScreen(false);
     }
 }
@@ -1760,6 +1948,7 @@ bool sendRadioMessage()
     if (ok) {
         lastError = "";
         radioDraft = "";
+        radioUi = PAPERMONO_RADIO_INBOX;
     } else {
         lastError = "send failed";
     }
@@ -1822,6 +2011,61 @@ void applyRadioHit(int hit)
 
 void handleRadioTouch(int x, int y)
 {
+    if (radioUi == PAPERMONO_RADIO_INBOX) {
+        if (y >= 88 && y <= 140 && x >= 300) {
+            radioUi = PAPERMONO_RADIO_COMPOSE;
+            drawScreen(true);
+            return;
+        }
+        if (inboxCount == 0) {
+            return;
+        }
+        int shown = min(inboxCount, 7);
+        int y0 = PAPERMONO_INBOX_Y0 + 28;
+        if (y >= y0 && y < y0 + shown * PAPERMONO_INBOX_ROW) {
+            int row = (y - y0) / PAPERMONO_INBOX_ROW;
+            if (row >= 0 && row < shown) {
+                int idx = inboxCount - 1 - row;
+                radioViewIndex = idx;
+                if (idx >= 0 && idx < inboxCount) {
+                    inboxUnread[idx] = false;
+                }
+                refreshUnreadLed();
+                radioUi = PAPERMONO_RADIO_VIEW;
+                drawScreen(true);
+            }
+        }
+        return;
+    }
+    if (radioUi == PAPERMONO_RADIO_VIEW) {
+        if (y >= 88 && y <= 140 && x < 180) {
+            radioUi = PAPERMONO_RADIO_INBOX;
+            radioViewIndex = -1;
+            drawScreen(true);
+            return;
+        }
+        if (y >= 88 && y <= 140 && x >= 300) {
+            radioToIndex = 0;
+            if (radioViewIndex >= 0 && radioViewIndex < inboxCount) {
+                String fromId = inboxFromId[radioViewIndex];
+                for (int i = 0; i < peerCount; i++) {
+                    if (peerIds[i] == fromId) {
+                        radioToIndex = i + 1;
+                        break;
+                    }
+                }
+            }
+            radioUi = PAPERMONO_RADIO_COMPOSE;
+            drawScreen(true);
+            return;
+        }
+        return;
+    }
+    if (y >= 88 && y <= 140 && x >= 300) {
+        radioUi = PAPERMONO_RADIO_INBOX;
+        drawScreen(true);
+        return;
+    }
     int n = min(4, peerCount + 1);
     int pw = (M5.Display.width() - 24) / n;
     if (y >= PAPERMONO_PEER_Y && y <= PAPERMONO_PEER_Y + 56) {
@@ -1872,8 +2116,11 @@ void handleLockTouch(int x, int y)
         powerOffTablet();
         return;
     }
+    if (tapOnMail(x, y)) {
+        openInboxFromLock();
+        return;
+    }
     if (tapOnUnlock(x, y)) {
-        unreadCount = 0;
         exitLock();
     }
 }
@@ -1965,9 +2212,6 @@ bool httpGetStatus()
                 }
             }
         }
-    }
-    if (homeOffset >= homeCount) {
-        homeOffset = 0;
     }
     powerwallPct = doc["powerwall_pct"] | powerwallPct;
     powerwallSolar = doc["powerwall_solar"] | powerwallSolar;
@@ -2288,23 +2532,15 @@ void handlePlansTouch(int x, int y)
 
 void handleHouseTouch(int x, int y)
 {
-    int y0 = plansRowY0();
-    int rh = plansRowH();
-    int startY = plansStartY();
-    if (homeCount > PAPERMONO_HOME_VISIBLE && y >= startY && y <= startY + 72) {
-        homeOffset += PAPERMONO_HOME_VISIBLE;
-        if (homeOffset >= homeCount) {
-            homeOffset = 0;
-        }
-        drawScreen(false);
-        return;
-    }
-    if (y >= y0 && y < startY) {
+    int y0 = houseRowY0();
+    int rh = houseRowH();
+    int shown = homeCount < PAPERMONO_HOME_VISIBLE ? homeCount : PAPERMONO_HOME_VISIBLE;
+    int listBottom = y0 + shown * rh;
+    if (y >= y0 && y < listBottom) {
         int row = (y - y0) / rh;
-        int idx = homeOffset + row;
-        if (idx >= 0 && idx < homeCount && row < PAPERMONO_HOME_VISIBLE) {
-            const char *cmd = homeKinds[idx] == "scene" ? "home_scene" : "home_toggle";
-            httpCommand(cmd, nullptr, nullptr, homeIds[idx].c_str());
+        if (row >= 0 && row < shown) {
+            const char *cmd = homeKinds[row] == "scene" ? "home_scene" : "home_toggle";
+            httpCommand(cmd, nullptr, nullptr, homeIds[row].c_str());
             httpGetStatus();
             drawScreen(false);
         }
@@ -2333,7 +2569,7 @@ void setup()
     M5.Display.setRotation(0);
     M5.Display.setAutoDisplay(false);
     M5.BtnPWR.setHoldThresh(1500);
-    M5.Speaker.begin();
+    M5.Speaker.setVolume(255);
     SPIFFS.begin(true);
     loadConfig();
     paperHwBegin();

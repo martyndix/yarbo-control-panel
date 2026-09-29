@@ -3044,6 +3044,123 @@ html[data-theme="light"] .plan-activity {
     margin: 0.5rem 0 0.75rem;
 }
 
+.home-paper-tablets {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: 0.45rem;
+    margin: 0.4rem 0 0.65rem;
+}
+
+.home-paper-tab {
+    display: grid;
+    gap: 0.2rem;
+    width: 100%;
+    text-align: left;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+}
+
+.home-paper-tab:hover {
+    border-color: var(--accent);
+}
+
+.home-paper-tab.is-active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.home-paper-tab-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.home-paper-tab-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.home-paper-tab-count {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.home-paper-tab.is-active .home-paper-tab-count {
+    color: var(--text);
+}
+
+.home-paper-tab-preview {
+    font-size: 0.78rem;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.home-paper-selected-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.45rem 0.75rem;
+    margin: 0.15rem 0 0.35rem;
+}
+
+.home-paper-selected-title {
+    margin: 0;
+    font-size: 0.92rem;
+}
+
+.home-paper-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.home-paper-copy select {
+    max-width: 10rem;
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+
+.home-paper-filter {
+    width: 100%;
+    max-width: 22rem;
+    margin: 0 0 0.35rem;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+
+.home-paper-group-label {
+    margin: 0.45rem 0 0.2rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
 .home-drag-handle {
     display: none;
     flex-shrink: 0;

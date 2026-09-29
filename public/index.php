@@ -607,14 +607,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <p class="hint" id="home-scene-editor-hint">Tick only the lights this scene should change. Unticked lights are left alone.</p>
                 <div id="home-scene-members" class="home-scene-members"></div>
             </div>
-            <h3 class="settings-subtitle">PaperMono</h3>
-            <p class="hint">Assign up to 8 lights or scenes to a PaperMono HOUSE page. Drag the ⋮⋮ handle to set button order (top is the first HOUSE button).</p>
-            <label class="settings-field" id="home-paper-wrap">
-                <span class="label">Tablet</span>
-                <select id="home-paper-tablet"></select>
-            </label>
+            <h3 class="settings-subtitle">PaperMono HOUSE</h3>
+            <p class="hint">Each tablet has its own 12 HOUSE buttons. Tap a tablet to see what is on it, then tick lights or scenes. Drag or use ▲/▼ for button order. Changes save as you go.</p>
+            <div id="home-paper-tablets" class="home-paper-tablets" role="tablist" aria-label="PaperMono tablets"></div>
             <div id="home-paper-assign" class="home-paper-assign"></div>
-            <button type="button" class="btn btn-secondary" id="home-paper-save" disabled>Save PaperMono assignment</button>
             </div>
         </section>
 
@@ -1051,7 +1047,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="board">Vestaboard</option>
                                     <option value="powerwall">Powerwall</option>
                                     <option value="lymow">Lymow</option>
-                                    <option value="radio">Radio</option>
+                                    <option value="radio">Messages</option>
                                     <option value="device">Device</option>
                                     <option value="house">House</option>
                                 </select>

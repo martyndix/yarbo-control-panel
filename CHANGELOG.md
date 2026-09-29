@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.46] - 2026-09-29
+
+### Changed
+- Home **⚙️** PaperMono HOUSE assignment lists every tablet as a card (name, button count, and current buttons). Tapping a tablet immediately shows that tablet’s HOUSE list. Add with a filter, drag to order, and copy buttons from another tablet. Changes save as you go.
+- PaperMono HOUSE shows up to **12** buttons on one screen (no MORE pager). Assign up to 12 lights or scenes per tablet. Firmware **0.1.41**.
+- PaperMono **MAIL**: unread messages keep the cyan LED on until you open one. The lock screen shows an envelope; tap it for a newest-first inbox, then view and reply. Beeps are louder.
+
+### Fixed
+- Switching the PaperMono tablet dropdown left the previous tablet’s ticks on screen, so you could not see what that device actually had assigned.
+
 ## [3.0.45] - 2026-09-29
 
 ### Fixed

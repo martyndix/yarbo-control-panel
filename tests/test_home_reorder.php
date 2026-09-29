@@ -85,9 +85,37 @@ if (!($paper['ok'] ?? false)) {
     fwrite(STDERR, "paper failed\n");
     exit(1);
 }
+$paper2 = $home->reorder(['kind' => 'paper', 'tablet_id' => 'tab2', 'ids' => ['1:2']]);
+if (!($paper2['ok'] ?? false)) {
+    fwrite(STDERR, "paper2 failed\n");
+    exit(1);
+}
 $store = $home->load();
 if ($store['paper']['tab1'] !== ['scene:s1', '1:1']) {
     fwrite(STDERR, 'paper order ' . json_encode($store['paper']['tab1']) . "\n");
+    exit(1);
+}
+if ($store['paper']['tab2'] !== ['1:2']) {
+    fwrite(STDERR, 'paper2 order ' . json_encode($store['paper']['tab2']) . "\n");
+    exit(1);
+}
+$clear = $home->reorder(['kind' => 'paper', 'tablet_id' => 'tab2', 'ids' => []]);
+if (!($clear['ok'] ?? false) || ($home->load()['paper']['tab2'] ?? null) !== []) {
+    fwrite(STDERR, "paper clear failed\n");
+    exit(1);
+}
+
+$many = [];
+for ($i = 1; $i <= 15; $i++) {
+    $many[] = '1:' . $i;
+}
+$capped = $home->assignPaper('tab1', $many);
+if (!($capped['ok'] ?? false) || count($capped['assigned']) !== 12) {
+    fwrite(STDERR, 'paper max ' . json_encode($capped) . "\n");
+    exit(1);
+}
+if (Yarbo\YarboHome::PAPER_MAX !== 12) {
+    fwrite(STDERR, 'PAPER_MAX ' . Yarbo\YarboHome::PAPER_MAX . "\n");
     exit(1);
 }
 

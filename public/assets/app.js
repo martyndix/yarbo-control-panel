@@ -4,6 +4,7 @@ const DRIVE_REPEAT_MS = 120;
 const LINEAR_SPEED = 0.35;
 const ANGULAR_SPEED = 0.55;
 const COMMAND_QUIET_MS = 4000;
+const HOME_PAPER_MAX = 12;
 
 function isCommandAckError(msg) {
     if (!msg || typeof msg !== 'string') return false;
@@ -2455,7 +2456,9 @@ function updateLymowDashboard(ly) {
 }
 
 let homeDash = { devices: [], scenes: [], paper_devices: [], setup: {} };
-let homePaperAssignDirty = false;
+let homePaperTabletId = '';
+let homePaperFilter = '';
+let homePaperSavingId = '';
 let homeLoadBusy = false;
 let homeSetupPollTimer = 0;
 let homeManageOpen = false;
@@ -2653,7 +2656,15 @@ async function loadHomeDashboard() {
     homeLoadBusy = true;
     try {
         const data = await homeApi(null, 12000);
+        const savingId = homePaperSavingId;
+        const localAssigned = savingId
+            ? [...(((homeDash.paper_devices || []).find((p) => p.id === savingId) || {}).assigned || [])]
+            : null;
         homeDash = data;
+        if (savingId && localAssigned) {
+            const paper = (homeDash.paper_devices || []).find((p) => p.id === savingId);
+            if (paper) paper.assigned = localAssigned;
+        }
         renderHomeDashboard(data);
     } catch (err) {
         if (isAbortError(err) && homeDash?.setup?.state === 'running') {
@@ -2724,15 +2735,149 @@ function homeReorderKind(item) {
     return '';
 }
 
+function homePaperCatalog(data) {
+    const items = [
+        ...(data.devices || []).map((d) => ({ id: d.id, name: d.name, kind: d.kind || 'light' })),
+        ...(data.scenes || []).map((s) => ({ id: `scene:${s.id}`, name: s.name, kind: 'scene' })),
+    ];
+    return new Map(items.filter((c) => c.id).map((c) => [c.id, c]));
+}
+
+function homePaperAssignedChoices(paper, catalog) {
+    return [...(paper?.assigned || [])].map((id) => catalog.get(id)).filter(Boolean);
+}
+
+function homeSelectedPaper(data) {
+    const papers = data.paper_devices || [];
+    if (!papers.length) return null;
+    return papers.find((p) => p.id === homePaperTabletId) || papers[0];
+}
+
+function homePaperRowHtml(c, index, on) {
+    return `<div class="home-paper-item" data-paper-item="${escapeHtml(c.id)}">
+        ${on ? homeReorderHandleHtml() : ''}
+        ${on ? `<span class="home-paper-index">${index + 1}</span>` : ''}
+        <label class="home-paper-item-pick">
+            <input type="checkbox" value="${escapeHtml(c.id)}" ${on ? 'checked' : ''}>
+            <span class="home-paper-item-name">${escapeHtml(c.name)}</span>
+            <span class="hint">(${escapeHtml(c.kind)})</span>
+        </label>
+    </div>`;
+}
+
+function renderHomePaperAssign(data) {
+    const tabs = document.getElementById('home-paper-tablets');
+    const assign = document.getElementById('home-paper-assign');
+    const papers = data.paper_devices || [];
+    const catalog = homePaperCatalog(data);
+    if (papers.length && !papers.some((p) => p.id === homePaperTabletId)) {
+        homePaperTabletId = papers[0].id;
+    }
+    if (!homePaperTabletId && papers[0]) {
+        homePaperTabletId = papers[0].id;
+    }
+    if (tabs) {
+        tabs.innerHTML = papers.length
+            ? papers.map((p) => {
+                const assigned = homePaperAssignedChoices(p, catalog);
+                const preview = assigned.map((c) => c.name).join(', ') || 'No HOUSE buttons yet';
+                const active = p.id === homePaperTabletId;
+                return `<button type="button" class="home-paper-tab${active ? ' is-active' : ''}" data-paper-tablet="${escapeHtml(p.id)}" role="tab" aria-selected="${active ? 'true' : 'false'}">
+                    <span class="home-paper-tab-top">
+                        <span class="home-paper-tab-name">${escapeHtml(p.name)}</span>
+                        <span class="home-paper-tab-count">${assigned.length}/${HOME_PAPER_MAX}</span>
+                    </span>
+                    <span class="home-paper-tab-preview">${escapeHtml(preview)}</span>
+                </button>`;
+            }).join('')
+            : '<p class="hint">No PaperMono paired yet. Flash one in Settings, then assign HOUSE buttons here.</p>';
+    }
+    if (!assign) return;
+
+    const filterFocused = document.activeElement?.id === 'home-paper-filter';
+    const filterPos = filterFocused ? document.activeElement.selectionStart : null;
+    if (!papers.length) {
+        assign.innerHTML = '';
+        return;
+    }
+    const selected = homeSelectedPaper(data);
+    if (selected && selected.id !== homePaperTabletId) {
+        homePaperTabletId = selected.id;
+    }
+    const assigned = homePaperAssignedChoices(selected, catalog);
+    const assignedIds = assigned.map((c) => c.id);
+    const filter = homePaperFilter.trim().toLowerCase();
+    const available = [...catalog.values()].filter((c) => {
+        if (assignedIds.includes(c.id)) return false;
+        if (!filter) return true;
+        return `${c.name} ${c.kind}`.toLowerCase().includes(filter);
+    });
+    const scenes = available.filter((c) => c.kind === 'scene');
+    const others = available.filter((c) => c.kind !== 'scene');
+    const othersLabel = (c) => homePaperRowHtml(c, 0, false);
+    const copyOptions = papers.filter((p) => p.id !== selected?.id);
+    const copyHtml = copyOptions.length
+        ? `<label class="home-paper-copy">Copy from
+            <select id="home-paper-copy-from" aria-label="Copy HOUSE buttons from another tablet">
+                ${copyOptions.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn btn-secondary btn-compact" id="home-paper-copy">Copy</button>
+        </label>`
+        : '';
+    const availableHtml = (!scenes.length && !others.length)
+        ? `<p class="hint">${filter ? 'No matches.' : 'Everything is assigned.'}</p>`
+        : `${scenes.length ? `<p class="home-paper-group-label">Scenes</p>${scenes.map(othersLabel).join('')}` : ''}
+           ${others.length ? `<p class="home-paper-group-label">Lights and plugs</p>${others.map(othersLabel).join('')}` : ''}`;
+    assign.innerHTML = `
+        <div class="home-paper-selected-head">
+            <p class="home-paper-selected-title"><strong>${escapeHtml(selected?.name || 'PaperMono')}</strong> · ${assigned.length} of ${HOME_PAPER_MAX} HOUSE buttons</p>
+            ${copyHtml}
+        </div>
+        <div id="home-paper-assigned" class="home-paper-list">${assigned.map((c, i) => homePaperRowHtml(c, i, true)).join('') || '<p class="hint">Tick lights or scenes below. Top of this list is the first HOUSE button.</p>'}</div>
+        <p class="home-paper-available-label">Add to this tablet</p>
+        <input type="search" id="home-paper-filter" class="home-paper-filter" placeholder="Filter lights and scenes" value="${escapeHtml(homePaperFilter)}" autocomplete="off">
+        <div id="home-paper-available" class="home-paper-list home-paper-available">${availableHtml}</div>
+    `;
+    const filterEl = document.getElementById('home-paper-filter');
+    if (filterEl) {
+        filterEl.value = homePaperFilter;
+        if (filterFocused) {
+            filterEl.focus();
+            if (typeof filterPos === 'number') {
+                try {
+                    filterEl.setSelectionRange(filterPos, filterPos);
+                } catch (err) {
+                    /* ignore */
+                }
+            }
+        }
+    }
+}
+
 function homePaperAssignedIds() {
     return [...document.querySelectorAll('#home-paper-assigned [data-paper-item]')]
         .map((row) => row.getAttribute('data-paper-item') || '')
         .filter(Boolean)
-        .slice(0, 8);
+        .slice(0, HOME_PAPER_MAX);
+}
+
+async function homeSavePaperAssignment(ids, tabletId = homePaperTabletId) {
+    const paper = (homeDash.paper_devices || []).find((p) => p.id === tabletId);
+    if (paper) paper.assigned = ids;
+    renderHomePaperAssign(homeDash);
+    homePaperSavingId = tabletId;
+    try {
+        await homeCommitReorder('paper', ids, { tablet_id: tabletId });
+        showToast('PaperMono assignment saved', 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not save assignment', 'error');
+    } finally {
+        if (homePaperSavingId === tabletId) homePaperSavingId = '';
+    }
 }
 
 async function homeCommitReorder(kind, ids, extra = {}) {
-    if (!kind || !ids.length) return;
+    if (!kind || (kind !== 'paper' && !ids.length)) return;
     const data = await homeApi({ action: 'reorder', kind, ids, ...extra });
     if (!data.ok) throw new Error(data.error || 'Could not save order');
     if (kind === 'rooms' && Array.isArray(homeDash.rooms)) {
@@ -2748,10 +2893,9 @@ async function homeCommitReorder(kind, ids, extra = {}) {
         homeDash.devices = ids.map((id) => map.get(id)).filter(Boolean)
             .concat(homeDash.devices.filter((d) => !ids.includes(d.id)));
     } else if (kind === 'paper') {
-        const tabletId = extra.tablet_id || document.getElementById('home-paper-tablet')?.value || '';
+        const tabletId = extra.tablet_id || homePaperTabletId;
         const paper = (homeDash.paper_devices || []).find((p) => p.id === tabletId);
         if (paper) paper.assigned = ids;
-        homePaperAssignDirty = false;
     }
 }
 
@@ -2783,7 +2927,7 @@ async function homeCommitItemOrder(item) {
         return;
     }
     if (kind === 'paper') {
-        const tabletId = document.getElementById('home-paper-tablet')?.value || '';
+        const tabletId = homePaperTabletId || '';
         await homeCommitReorder('paper', homePaperAssignedIds(), { tablet_id: tabletId });
     }
 }
@@ -3181,48 +3325,7 @@ function renderHomeDashboard(data) {
     if (homeManageOpen && !sceneEditorBusy) {
         renderHomeSceneEditor();
     }
-    const tablet = document.getElementById('home-paper-tablet');
-    const assign = document.getElementById('home-paper-assign');
-    const saveBtn = document.getElementById('home-paper-save');
-    const papers = data.paper_devices || [];
-    if (tablet) {
-        const current = tablet.value;
-        tablet.innerHTML = papers.map((p) => (
-            `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`
-        )).join('');
-        if (papers.some((p) => p.id === current)) tablet.value = current;
-        if (saveBtn) saveBtn.disabled = papers.length === 0;
-    }
-    if (assign) {
-        const paperBusy = homePaperAssignDirty
-            || Boolean(document.activeElement?.closest?.('#home-paper-assign, #home-paper-tablet, #home-paper-save'));
-        if (!paperBusy) {
-            const selected = papers.find((p) => p.id === tablet?.value) || papers[0];
-            const assignedIds = [...(selected?.assigned || [])];
-            const byId = new Map([
-                ...(data.devices || []).map((d) => [d.id, { id: d.id, name: d.name, kind: d.kind }]),
-                ...(data.scenes || []).map((s) => [`scene:${s.id}`, { id: `scene:${s.id}`, name: s.name, kind: 'scene' }]),
-            ]);
-            const assigned = assignedIds.map((id) => byId.get(id)).filter(Boolean);
-            const available = [...byId.values()].filter((c) => !assignedIds.includes(c.id));
-            const row = (c, index, on) => (
-                `<div class="home-paper-item" data-paper-item="${escapeHtml(c.id)}">
-                    ${on ? homeReorderHandleHtml() : ''}
-                    ${on ? `<span class="home-paper-index">${index + 1}</span>` : ''}
-                    <label class="home-paper-item-pick">
-                        <input type="checkbox" value="${escapeHtml(c.id)}" ${on ? 'checked' : ''}>
-                        <span class="home-paper-item-name">${escapeHtml(c.name)}</span>
-                        <span class="hint">(${escapeHtml(c.kind)})</span>
-                    </label>
-                </div>`
-            );
-            assign.innerHTML = (assigned.length || available.length)
-                ? `<div id="home-paper-assigned" class="home-paper-list">${assigned.map((c, i) => row(c, i, true)).join('') || '<p class="hint">Tick lights or scenes below. Top of this list is the first HOUSE button.</p>'}</div>
-                   <p class="home-paper-available-label">Available</p>
-                   <div id="home-paper-available" class="home-paper-list home-paper-available">${available.map((c) => row(c, 0, false)).join('') || '<p class="hint">Everything is assigned.</p>'}</div>`
-                : '<p class="hint">Add devices first, then assign them here.</p>';
-        }
-    }
+    renderHomePaperAssign(data);
 }
 
 async function saveHomeDeviceName(input) {
@@ -7733,9 +7836,26 @@ document.getElementById('home-scenes')?.addEventListener('click', async (event) 
         showToast(err.message || 'Scene failed', 'error');
     }
 });
-document.getElementById('home-paper-tablet')?.addEventListener('change', () => {
-    homePaperAssignDirty = false;
-    renderHomeDashboard(homeDash);
+document.getElementById('home-paper-tablets')?.addEventListener('click', (event) => {
+    const btn = event.target.closest?.('[data-paper-tablet]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-paper-tablet') || '';
+    if (!id || id === homePaperTabletId) return;
+    homePaperTabletId = id;
+    homePaperFilter = '';
+    renderHomePaperAssign(homeDash);
+});
+document.getElementById('home-paper-assign')?.addEventListener('input', (event) => {
+    if (event.target?.id !== 'home-paper-filter') return;
+    homePaperFilter = String(event.target.value || '');
+    renderHomePaperAssign(homeDash);
+});
+document.getElementById('home-paper-assign')?.addEventListener('click', async (event) => {
+    if (event.target?.id !== 'home-paper-copy') return;
+    const fromId = document.getElementById('home-paper-copy-from')?.value || '';
+    const from = (homeDash.paper_devices || []).find((p) => p.id === fromId);
+    if (!from || !homePaperTabletId) return;
+    await homeSavePaperAssignment([...(from.assigned || [])].slice(0, HOME_PAPER_MAX));
 });
 document.getElementById('home-paper-assign')?.addEventListener('change', async (event) => {
     const input = event.target.closest?.('input[type="checkbox"]');
@@ -7744,39 +7864,16 @@ document.getElementById('home-paper-assign')?.addEventListener('change', async (
     const id = row.getAttribute('data-paper-item') || '';
     let ids = homePaperAssignedIds();
     if (input.checked) {
-        if (!ids.includes(id) && ids.length >= 8) {
+        if (!ids.includes(id) && ids.length >= HOME_PAPER_MAX) {
             input.checked = false;
-            showToast('PaperMono HOUSE holds 8 buttons', 'error');
+            showToast(`PaperMono HOUSE holds ${HOME_PAPER_MAX} buttons`, 'error');
             return;
         }
         if (!ids.includes(id)) ids.push(id);
     } else {
         ids = ids.filter((item) => item !== id);
     }
-    const tabletId = document.getElementById('home-paper-tablet')?.value || '';
-    const paper = (homeDash.paper_devices || []).find((p) => p.id === tabletId);
-    if (paper) paper.assigned = ids;
-    homePaperAssignDirty = false;
-    renderHomeDashboard(homeDash);
-    try {
-        await homeCommitReorder('paper', ids, { tablet_id: tabletId });
-        showToast('PaperMono assignment saved', 'success');
-    } catch (err) {
-        showToast(err.message || 'Could not save assignment', 'error');
-    }
-});
-document.getElementById('home-paper-save')?.addEventListener('click', async () => {
-    const tabletId = document.getElementById('home-paper-tablet')?.value || '';
-    const ids = homePaperAssignedIds();
-    try {
-        const data = await homeApi({ action: 'paper_assign', tablet_id: tabletId, ids });
-        if (!data.ok) throw new Error(data.error || 'Could not save assignment');
-        homePaperAssignDirty = false;
-        showToast('PaperMono assignment saved', 'success');
-        await loadHomeDashboard();
-    } catch (err) {
-        showToast(err.message || 'Could not save assignment', 'error');
-    }
+    await homeSavePaperAssignment(ids);
 });
 refreshUpdateBadge();
 if (settingsHashPane()) {
