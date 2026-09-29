@@ -1089,10 +1089,21 @@ void handlePlansTouch(int x, int y)
     }
 }
 
+void announceUsbReady()
+{
+    Serial.println("PAPER_READY");
+    Serial.flush();
+}
+
 void setup()
 {
     Serial.setRxBufferSize(4096);
     Serial.begin(115200);
+    announceUsbReady();
+    for (int i = 0; i < 25; i++) {
+        pollSerialConfig();
+        delay(20);
+    }
     auto cfg = M5.config();
     cfg.clear_display = true;
     M5.begin(cfg);
@@ -1116,6 +1127,12 @@ void loop()
     tabletBat = M5.Power.getBatteryLevel();
 
     if (wifiSsid.isEmpty()) {
+        static uint32_t lastReady = 0;
+        uint32_t readyNow = millis();
+        if (readyNow - lastReady > 2000) {
+            announceUsbReady();
+            lastReady = readyNow;
+        }
         delay(50);
         return;
     }

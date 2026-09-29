@@ -2312,10 +2312,21 @@ void handleHouseTouch(int x, int y)
     }
 }
 
+void announceUsbReady()
+{
+    Serial.println("PAPER_READY");
+    Serial.flush();
+}
+
 void setup()
 {
     Serial.setRxBufferSize(4096);
     Serial.begin(115200);
+    announceUsbReady();
+    for (int i = 0; i < 25; i++) {
+        pollSerialConfig();
+        delay(20);
+    }
     auto cfg = M5.config();
     cfg.clear_display = false;
     M5.begin(cfg);
@@ -2348,6 +2359,16 @@ void loop()
         WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
         drawScreen(true);
     }
+    if (wifiSsid.isEmpty()) {
+        static uint32_t lastReady = 0;
+        uint32_t readyNow = millis();
+        if (readyNow - lastReady > 2000) {
+            announceUsbReady();
+            lastReady = readyNow;
+        }
+        delay(50);
+        return;
+    }
     loraService();
     rgbTick();
     tabletBat = M5.Power.getBatteryLevel();
@@ -2360,11 +2381,6 @@ void loop()
     String loraIn;
     if (loraTakeRx(loraIn)) {
         handleIncomingRadio(loraIn);
-    }
-
-    if (wifiSsid.isEmpty()) {
-        delay(50);
-        return;
     }
 
     if (pwrOffEvent) {

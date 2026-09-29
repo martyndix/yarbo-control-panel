@@ -24,7 +24,7 @@ On the **same machine that runs the panel**:
 
 Rebuild after panel updates that bump Colour firmware (`0.2.11-colour` and later): **Build firmware**, then either USB flash once or, after this OTA-capable build is on the tablet, Settings → **Update** over Wi-Fi.
 
-**Send Wi-Fi only** reuses already-flashed firmware and pushes the same `CFG:{...}` JSON as PaperMono.
+**Send Wi-Fi only** reuses already-flashed firmware and pushes the same `CFG:{...}` JSON as PaperMono. After esptool resets the ESP32-S3, USB serial drops and the helper waits for `CFG_OK`.
 
 Do not flash with PlatformIO env `papermono` — that is the grayscale touch UI.
 

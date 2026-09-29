@@ -137,18 +137,21 @@ def pick_port(requested: str | None) -> str:
     die("Example: python3 flash.py --port " + str(ports[0]["device"]))
 
 
-def flash_firmware(port: str) -> None:
-    if not FIRMWARE.is_file() or FIRMWARE.stat().st_size < 1024:
-        die("firmware.bin is missing or too small. Unzip the whole kit and download a new one if needed.")
-    import esptool
-
-    argv = [
-        "--chip",
-        "esp32s3",
-        "--port",
-        port,
-        "--baud",
-        "460800",
+def esptool_write_flash_argvs(port: str) -> list[list[str]]:
+    head = ["--chip", "esp32s3", "--port", port, "--baud", "460800"]
+    hyphen = head + [
+        "write-flash",
+        "-z",
+        "--flash-mode",
+        "dio",
+        "--flash-freq",
+        "80m",
+        "--flash-size",
+        "16MB",
+        "0x0",
+        str(FIRMWARE),
+    ]
+    underscore = head + [
         "write_flash",
         "-z",
         "--flash_mode",
@@ -160,21 +163,49 @@ def flash_firmware(port: str) -> None:
         "0x0",
         str(FIRMWARE),
     ]
+    return [hyphen, underscore]
+
+
+def _esptool_usage_error(log: str) -> bool:
+    low = log.lower()
+    return any(
+        token in low
+        for token in ("unrecognized arguments", "invalid choice", "unknown command", "ambiguous option")
+    )
+
+
+def flash_firmware(port: str) -> None:
+    if not FIRMWARE.is_file() or FIRMWARE.stat().st_size < 1024:
+        die("firmware.bin is missing or too small. Unzip the whole kit and download a new one if needed.")
+
     print("Flashing factory image at 0x0 (bootloader + partitions + app) …")
-    try:
-        esptool.main(argv)
-    except SystemExit as exc:
-        code = exc.code if isinstance(exc.code, int) else 1
-        if code not in (0, None):
-            die(f"esptool exited with status {code}")
-    except Exception as exc:
-        die(f"esptool failed: {exc}")
+    for argv in esptool_write_flash_argvs(port):
+        proc = subprocess.run(
+            [sys.executable, "-m", "esptool", *argv],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        log = proc.stdout or ""
+        if log:
+            print(log, end="" if log.endswith("\n") else "\n")
+        if proc.returncode == 0:
+            return
+        if not _esptool_usage_error(log):
+            die(f"esptool exited with status {proc.returncode}")
+    die("esptool did not accept write-flash arguments (tried hyphen and underscore forms).")
 
 
-def wait_for_serial_port(preferred: str) -> str:
+def listed_devices() -> list[str]:
+    return [row["device"] for row in list_ports()]
+
+
+def wait_for_serial_port(preferred: str, timeout_s: float = 40.0) -> str:
     last = preferred
-    for _ in range(16):
-        found = [row["device"] for row in list_ports()]
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        found = listed_devices()
         if preferred in found:
             return preferred
         if len(found) == 1:
@@ -188,14 +219,44 @@ def wait_for_serial_port(preferred: str) -> str:
     )
 
 
+def wait_for_usb_reboot(preferred: str) -> str:
+    deadline = time.time() + 8.0
+    while time.time() < deadline:
+        if preferred not in listed_devices():
+            print("USB serial dropped after reset; waiting for it to come back …")
+            break
+        time.sleep(0.25)
+    port = wait_for_serial_port(preferred, timeout_s=40.0)
+    time.sleep(2.5)
+    return port
+
+
+def idle_modem_lines(ser) -> None:
+    for _ in range(2):
+        try:
+            ser.dtr = False
+            ser.rts = False
+        except Exception:
+            pass
+    try:
+        import termios
+
+        fd = ser.fileno()
+        attrs = termios.tcgetattr(fd)
+        attrs[2] &= ~termios.HUPCL
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+
+
 def open_app_serial(port: str):
     import serial
 
     ser = serial.Serial()
     ser.port = port
     ser.baudrate = 115200
-    ser.timeout = 2
-    ser.write_timeout = 2
+    ser.timeout = 1.0
+    ser.write_timeout = 3
     ser.dsrdtr = False
     ser.rtscts = False
     try:
@@ -204,19 +265,45 @@ def open_app_serial(port: str):
     except Exception:
         pass
     ser.open()
+    idle_modem_lines(ser)
     return ser
 
 
-def send_config(port: str, cfg: dict) -> None:
-    import serial
+def close_serial(ser) -> None:
+    if ser is None:
+        return
+    idle_modem_lines(ser)
+    try:
+        ser.close()
+    except Exception:
+        pass
 
+
+def read_serial_text(ser, timeout_s: float) -> str:
+    buf = ""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            chunk = ser.read(512)
+        except Exception:
+            break
+        if chunk:
+            buf += chunk.decode("utf-8", errors="replace")
+            if "CFG_OK" in buf or "CFG_ERR" in buf:
+                break
+        elif buf:
+            break
+    return buf
+
+
+def send_config(port: str, cfg: dict) -> None:
     body = {
-                "ssid": cfg["ssid"],
-                "password": cfg.get("password") or "",
-                "panel_url": str(cfg["panel_url"]).rstrip("/"),
-                "token": cfg["token"],
-                "name": cfg["name"],
-            }
+        "ssid": cfg["ssid"],
+        "password": cfg.get("password") or "",
+        "panel_url": str(cfg["panel_url"]).rstrip("/"),
+        "token": cfg["token"],
+        "name": cfg["name"],
+    }
     if cfg.get("brightness") is not None:
         body["brightness"] = int(cfg["brightness"])
     if cfg.get("lock_screen"):
@@ -233,35 +320,50 @@ def send_config(port: str, cfg: dict) -> None:
     print("Sending Wi-Fi and panel URL over USB …")
     last_ack = ""
     last_error = ""
-    current = port
-    for attempt in range(1, 8):
-        current = wait_for_serial_port(current)
-        ser = None
-        try:
-            ser = open_app_serial(current)
-            time.sleep(0.4)
-            try:
-                ser.reset_input_buffer()
-            except Exception:
-                pass
-            ser.write(payload)
-            ser.flush()
-            time.sleep(0.8)
-            last_ack = ser.read(512).decode("utf-8", errors="replace")
-        except Exception as exc:
-            last_error = str(exc)
-            last_ack = ""
-            print(f"USB dropped ({exc}). Waiting for the tablet to reappear …")
-        finally:
-            if ser is not None:
+    current = wait_for_serial_port(port, timeout_s=40.0)
+    ser = None
+    deadline = time.time() + 90.0
+    attempt = 0
+    try:
+        while time.time() < deadline:
+            attempt += 1
+            current = wait_for_serial_port(current, timeout_s=12.0)
+            if ser is None or not getattr(ser, "is_open", False):
                 try:
-                    ser.close()
-                except Exception:
-                    pass
-        if "CFG_OK" in last_ack:
-            return
-        print(f"No CFG_OK yet (try {attempt}/7).")
-        time.sleep(1.5)
+                    ser = open_app_serial(current)
+                    boot = read_serial_text(ser, 8.0)
+                    if boot:
+                        last_ack = boot
+                        if "CFG_OK" in boot:
+                            return
+                except Exception as exc:
+                    last_error = str(exc)
+                    print(f"USB dropped ({exc}). Waiting for the tablet to reappear …")
+                    close_serial(ser)
+                    ser = None
+                    time.sleep(1.5)
+                    continue
+            try:
+                ser.write(b"\n")
+                ser.flush()
+                time.sleep(0.15)
+                ser.write(payload)
+                ser.flush()
+                last_ack = read_serial_text(ser, 3.0)
+            except Exception as exc:
+                last_error = str(exc)
+                last_ack = ""
+                print(f"USB dropped ({exc}). Waiting for the tablet to reappear …")
+                close_serial(ser)
+                ser = None
+                time.sleep(1.5)
+                continue
+            if "CFG_OK" in last_ack:
+                return
+            print(f"No CFG_OK yet (try {attempt}).")
+            time.sleep(1.2)
+    finally:
+        close_serial(ser)
     detail = last_ack.strip()[:200] if last_ack.strip() else (last_error or "(empty)")
     die(
         "Tablet did not acknowledge config. Unplug USB, short-press power so it shows "
@@ -295,8 +397,8 @@ def main() -> int:
     print(f"Put the tablet in download mode (hold power {hold}), USB-C plugged in.")
     port = pick_port(args.port.strip() or None)
     flash_firmware(port)
-    print("Waiting for the tablet to boot our firmware (e-paper is slow) …")
-    time.sleep(6.0)
+    print("Waiting for the tablet to reboot on USB (e-paper is slow) …")
+    port = wait_for_usb_reboot(port)
     send_config(port, cfg)
     print("Done. Keep USB in until the setup screen clears, then ship the tablet to the site Wi-Fi.")
     return 0

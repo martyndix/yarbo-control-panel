@@ -12,8 +12,8 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.38';
-    public const FIRMWARE_VERSION_COLOR = '0.2.14-colour';
+    public const FIRMWARE_VERSION = '0.1.39';
+    public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
@@ -1268,7 +1268,7 @@ final class YarboPaperDevice
             '--token', (string) $registered['token'],
             '--name', $name,
             '--kind', $kind,
-        ], $this->usbCompanionCliArgs()), 180.0);
+        ], $this->usbCompanionCliArgs()), 360.0);
         $result['device'] = $registered;
         $result['built'] = $builtNow;
         if (!($result['ok'] ?? false)) {
@@ -1319,7 +1319,7 @@ final class YarboPaperDevice
             '--token', $token,
             '--name', $name,
             '--kind', $kind,
-        ], $this->usbCompanionCliArgs()), 90.0);
+        ], $this->usbCompanionCliArgs()), 180.0);
         $result['device'] = $device;
 
         return $result;
@@ -1636,6 +1636,12 @@ final class YarboPaperDevice
         $code = proc_close($proc);
 
         $decoded = json_decode((string) $stdout, true);
+        if (!is_array($decoded)) {
+            $decoded = $this->decodeLastJsonObject((string) $stdout);
+        }
+        if (!is_array($decoded)) {
+            $decoded = $this->decodeLastJsonObject((string) $stderr);
+        }
         if (is_array($decoded)) {
             if (is_string($stderr) && trim($stderr) !== '') {
                 $decoded['log'] = trim($stderr);
@@ -1649,6 +1655,23 @@ final class YarboPaperDevice
             'error' => 'Flash helper failed (exit ' . $code . '). '
                 . trim((string) ((is_string($stderr) && $stderr !== '') ? $stderr : $stdout)),
         ];
+    }
+
+    private function decodeLastJsonObject(string $text): ?array
+    {
+        $lines = preg_split("/\r\n|\n|\r/", $text) ?: [];
+        for ($i = count($lines) - 1; $i >= 0; $i--) {
+            $line = trim($lines[$i]);
+            if ($line === '' || !str_starts_with($line, '{')) {
+                continue;
+            }
+            $decoded = json_decode($line, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return null;
     }
 
     /**

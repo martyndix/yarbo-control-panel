@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -37,6 +38,7 @@ def firmware_bin(kind: str) -> Path:
 def emit(payload: dict) -> None:
     json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
+    sys.stdout.flush()
 
 
 def _is_host_uart(info) -> bool:
@@ -77,11 +79,14 @@ def list_ports() -> dict:
     return {"ok": True, "ports": ports}
 
 
-def wait_for_serial_port(preferred: str, timeout_s: float = 25.0) -> str:
+def listed_devices() -> list[str]:
+    return [row["device"] for row in list_ports().get("ports") or []]
+
+
+def wait_for_serial_port(preferred: str, timeout_s: float = 35.0) -> str:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        listed = list_ports()
-        devices = [row["device"] for row in listed.get("ports") or []]
+        devices = listed_devices()
         if preferred in devices:
             return preferred
         if len(devices) == 1:
@@ -90,14 +95,45 @@ def wait_for_serial_port(preferred: str, timeout_s: float = 25.0) -> str:
     return preferred
 
 
+def wait_for_usb_reboot(preferred: str) -> str:
+    """ESP32-S3 USB-Serial/JTAG drops off the bus after esptool's RTS reset, then reappears."""
+    deadline = time.time() + 8.0
+    while time.time() < deadline:
+        if preferred not in listed_devices():
+            break
+        time.sleep(0.25)
+    port = wait_for_serial_port(preferred, timeout_s=40.0)
+    time.sleep(2.5)
+    return port
+
+
+def idle_modem_lines(ser) -> None:
+    """Leave USB-Serial/JTAG out of reset, and stop close() from dropping DTR (HUPCL)."""
+    for _ in range(2):
+        try:
+            ser.dtr = False
+            ser.rts = False
+        except Exception:
+            pass
+    try:
+        import termios
+
+        fd = ser.fileno()
+        attrs = termios.tcgetattr(fd)
+        attrs[2] &= ~termios.HUPCL
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+
+
 def open_app_serial(port: str):
     import serial
 
     ser = serial.Serial()
     ser.port = port
     ser.baudrate = 115200
-    ser.timeout = 2
-    ser.write_timeout = 2
+    ser.timeout = 1.0
+    ser.write_timeout = 3
     ser.dsrdtr = False
     ser.rtscts = False
     try:
@@ -106,7 +142,115 @@ def open_app_serial(port: str):
     except Exception:
         pass
     ser.open()
+    idle_modem_lines(ser)
     return ser
+
+
+def close_serial(ser) -> None:
+    if ser is None:
+        return
+    idle_modem_lines(ser)
+    try:
+        ser.close()
+    except Exception:
+        pass
+
+
+def read_serial_text(ser, timeout_s: float) -> str:
+    buf = ""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            chunk = ser.read(512)
+        except Exception:
+            break
+        if chunk:
+            buf += chunk.decode("utf-8", errors="replace")
+            if "CFG_OK" in buf or "CFG_ERR" in buf:
+                break
+        elif buf:
+            break
+    return buf
+
+
+def config_payload_bytes(
+    ssid: str,
+    password: str,
+    panel_url: str,
+    token: str,
+    name: str,
+    extras: dict | None = None,
+) -> bytes:
+    body = {
+        "ssid": ssid,
+        "password": password,
+        "panel_url": panel_url.rstrip("/"),
+        "token": token,
+        "name": name,
+    }
+    if extras:
+        body.update({k: v for k, v in extras.items() if v is not None and v != ""})
+    return ("CFG:" + json.dumps(body, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def esptool_write_flash_argvs(port: str, image: Path) -> list[list[str]]:
+    """esptool 5.x wants hyphens; 4.x still uses underscores. Try hyphenated first."""
+    head = ["--chip", "esp32s3", "--port", port, "--baud", "460800"]
+    hyphen = head + [
+        "write-flash",
+        "-z",
+        "--flash-mode",
+        "dio",
+        "--flash-freq",
+        "80m",
+        "--flash-size",
+        "16MB",
+        "0x0",
+        str(image),
+    ]
+    underscore = head + [
+        "write_flash",
+        "-z",
+        "--flash_mode",
+        "dio",
+        "--flash_freq",
+        "80m",
+        "--flash_size",
+        "16MB",
+        "0x0",
+        str(image),
+    ]
+    return [hyphen, underscore]
+
+
+def _esptool_usage_error(log: str) -> bool:
+    low = log.lower()
+    return any(
+        token in low
+        for token in (
+            "unrecognized arguments",
+            "invalid choice",
+            "unknown command",
+            "ambiguous option",
+        )
+    )
+
+
+def run_esptool(argv: list[str]) -> tuple[int, str]:
+    proc = subprocess.run(
+        [sys.executable, "-m", "esptool", *argv],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    log = proc.stdout or ""
+    if log:
+        sys.stderr.write(log)
+        if not log.endswith("\n"):
+            sys.stderr.write("\n")
+        sys.stderr.flush()
+    return proc.returncode, log
 
 
 def send_config(
@@ -119,7 +263,7 @@ def send_config(
     extras: dict | None = None,
 ) -> dict:
     try:
-        import serial
+        import serial  # noqa: F401
     except ImportError:
         return {
             "ok": False,
@@ -127,51 +271,61 @@ def send_config(
             "error": "pyserial is not installed on this host.",
         }
 
-    body = {
-        "ssid": ssid,
-        "password": password,
-        "panel_url": panel_url.rstrip("/"),
-        "token": token,
-        "name": name,
-    }
-    if extras:
-        body.update({k: v for k, v in extras.items() if v is not None and v != ""})
-    payload = ("CFG:" + json.dumps(body, ensure_ascii=False) + "\n").encode("utf-8")
-
+    payload = config_payload_bytes(ssid, password, panel_url, token, name, extras)
     last_ack = ""
     last_error = ""
-    current = port
-    for attempt in range(1, 9):
-        current = wait_for_serial_port(current)
-        ser = None
-        try:
-            ser = open_app_serial(current)
-            time.sleep(0.6)
-            try:
-                ser.reset_input_buffer()
-            except Exception:
-                pass
-            ser.write(payload)
-            ser.flush()
-            time.sleep(1.2)
-            last_ack = ser.read(1024).decode("utf-8", errors="replace")
-        except Exception as exc:
-            last_error = str(exc)
-            last_ack = ""
-        finally:
-            if ser is not None:
+    current = wait_for_serial_port(port, timeout_s=40.0)
+    ser = None
+    deadline = time.time() + 90.0
+    attempt = 0
+    try:
+        while time.time() < deadline:
+            attempt += 1
+            current = wait_for_serial_port(current, timeout_s=12.0)
+            if ser is None or not getattr(ser, "is_open", False):
                 try:
-                    ser.close()
-                except Exception:
-                    pass
-        if "CFG_OK" in last_ack:
-            return {
-                "ok": True,
-                "error": None,
-                "ack": last_ack.strip()[:400],
-                "port": current,
-            }
-        time.sleep(1.5)
+                    ser = open_app_serial(current)
+                    # Opening ACM often pulses DTR/RTS and reboots USB CDC. Wait for app firmware.
+                    boot = read_serial_text(ser, 8.0)
+                    if boot:
+                        last_ack = boot
+                        if "CFG_OK" in boot:
+                            return {
+                                "ok": True,
+                                "error": None,
+                                "ack": last_ack.strip()[:400],
+                                "port": current,
+                            }
+                except Exception as exc:
+                    last_error = str(exc)
+                    close_serial(ser)
+                    ser = None
+                    time.sleep(1.5)
+                    continue
+            try:
+                ser.write(b"\n")
+                ser.flush()
+                time.sleep(0.15)
+                ser.write(payload)
+                ser.flush()
+                last_ack = read_serial_text(ser, 3.0)
+            except Exception as exc:
+                last_error = str(exc)
+                last_ack = ""
+                close_serial(ser)
+                ser = None
+                time.sleep(1.5)
+                continue
+            if "CFG_OK" in last_ack:
+                return {
+                    "ok": True,
+                    "error": None,
+                    "ack": last_ack.strip()[:400],
+                    "port": current,
+                }
+            time.sleep(1.2)
+    finally:
+        close_serial(ser)
 
     detail = last_ack.strip()[:200] if last_ack.strip() else (last_error or "empty reply")
     return {
@@ -182,6 +336,7 @@ def send_config(
             "Last reply: " + detail
         ),
         "ack": last_ack.strip()[:400],
+        "attempts": attempt,
     }
 
 
@@ -222,48 +377,38 @@ def flash_firmware(port: str, kind: str = KIND_MONO) -> dict:
             "kind": kind,
         }
 
-    try:
-        import esptool
-    except ImportError:
-        return {
-            "ok": False,
-            "needs_usb_tools": True,
-            "error": "esptool is not installed on this host.",
-        }
+    last_log = ""
+    for argv in esptool_write_flash_argvs(port, path):
+        try:
+            code, log = run_esptool(argv)
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "needs_usb_tools": True,
+                "error": "esptool is not installed on this host.",
+            }
+        except Exception as exc:
+            return {"ok": False, "error": f"esptool failed: {exc}"}
+        last_log = log
+        if code == 0:
+            return {"ok": True, "firmware_path": str(path), "kind": kind}
+        if "No module named esptool" in log or "No module named 'esptool'" in log:
+            return {
+                "ok": False,
+                "needs_usb_tools": True,
+                "error": "esptool is not installed on this host.",
+            }
+        if not _esptool_usage_error(log):
+            return {"ok": False, "error": f"esptool exited with status {code}", "log": log[-1200:]}
 
-    argv = [
-        "--chip",
-        "esp32s3",
-        "--port",
-        port,
-        "--baud",
-        "460800",
-        "write_flash",
-        "-z",
-        "--flash_mode",
-        "dio",
-        "--flash_freq",
-        "80m",
-        "--flash_size",
-        "16MB",
-        "0x0",
-        str(path),
-    ]
-    try:
-        esptool.main(argv)
-    except SystemExit as exc:
-        code = exc.code if isinstance(exc.code, int) else 1
-        if code not in (0, None):
-            return {"ok": False, "error": f"esptool exited with status {code}"}
-    except Exception as exc:
-        return {"ok": False, "error": f"esptool failed: {exc}"}
-
-    return {"ok": True, "firmware_path": str(path), "kind": kind}
+    return {
+        "ok": False,
+        "error": "esptool did not accept write-flash arguments (tried hyphen and underscore forms).",
+        "log": last_log[-1200:],
+    }
 
 
 def install_tools() -> dict:
-    import subprocess
-
     cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "pyserial", "esptool"]
     try:
         completed = subprocess.run(
@@ -334,9 +479,9 @@ def main() -> int:
         if not flashed.get("ok"):
             emit(flashed)
             return 1
-        time.sleep(6.0)
+        port = wait_for_usb_reboot(args.port)
         configured = send_config(
-            args.port,
+            port,
             args.ssid,
             args.password,
             args.panel_url,
@@ -352,6 +497,7 @@ def main() -> int:
                 "kind": normalize_kind(args.kind),
                 "error": configured.get("error"),
                 "ack": configured.get("ack"),
+                "port": configured.get("port") or port,
             }
         )
         return 0 if configured.get("ok") else 1

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.45] - 2026-09-29
+
+### Fixed
+- PaperMono USB flash wrote firmware, then failed to send Wi-Fi: esptool’s RTS reset drops the ESP32-S3 USB serial, and opening `/dev/ttyACM0` again was resetting the chip before it could reply **CFG_OK**. The helper now waits for the port to come back, keeps serial open (DTR/RTS idle, no hangup on close), and retries config for longer. **Send Wi-Fi only** uses the same path. esptool 5.x is called with `write-flash` / `--flash-mode` so the deprecation warnings stop. Firmware **0.1.39** / **0.2.15-colour** announces `PAPER_READY` on USB during setup.
+
 ## [3.0.44] - 2026-09-29
 
 ### Added

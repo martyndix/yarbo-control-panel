@@ -87,7 +87,7 @@ On the **same machine that runs the panel**:
    - Optional lock-screen logo (PNG/JPEG). Preview shows on the mocks; the tablet fetches it on the next Wi-Fi poll (no reflash).
 6. Click **Flash firmware & send Wi-Fi**. Leave Settings open. Flash will build first if the binary is missing or stale.
 
-**Send Wi-Fi only** reuses already-flashed firmware and pushes a new `CFG:` line over serial (SSID, password, panel URL, token).
+**Send Wi-Fi only** reuses already-flashed firmware and pushes a new `CFG:` line over serial (SSID, password, panel URL, token). After a successful write, esptool resets the ESP32-S3 and USB serial (`/dev/ttyACM0`) drops for a few seconds; the panel waits for it and retries until the tablet replies `CFG_OK`. If that still fails, leave the tablet on the **setup** screen with USB in and click Send Wi-Fi only — do not hold the power button.
 
 ## Set up away from the panel
 

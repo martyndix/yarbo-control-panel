@@ -24,7 +24,25 @@ def merge_factory(source, target, env):
         if not path.is_file() or path.stat().st_size < 32:
             raise Exception(f"{path.name} is missing after the firmware build.")
     python = env.subst("$PYTHONEXE")
-    args = [
+    args_hyphen = [
+        "-o",
+        str(factory),
+        "--flash-mode",
+        "dio",
+        "--flash-freq",
+        "80m",
+        "--flash-size",
+        "16MB",
+        "0x0",
+        str(bootloader),
+        "0x8000",
+        str(partitions),
+        "0xe000",
+        str(boot_app0),
+        "0x10000",
+        str(app),
+    ]
+    args_underscore = [
         "-o",
         str(factory),
         "--flash_mode",
@@ -44,7 +62,7 @@ def merge_factory(source, target, env):
     ]
     print("Merging USB factory image (bootloader + partitions + app) …")
     last = None
-    for sub in ("merge_bin", "merge-bin"):
+    for sub, args in (("merge-bin", args_hyphen), ("merge_bin", args_underscore)):
         cmd = [python, "-m", "esptool", "--chip", "esp32s3", sub, *args]
         proc = subprocess.run(cmd, check=False)
         if proc.returncode == 0:
