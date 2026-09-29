@@ -1450,6 +1450,7 @@ void pushInbox(const String &id, const String &from, const String &text, bool al
 void applyCompactExtras(JsonDocument &doc)
 {
     String newName = doc["device_name"] | deviceName;
+    bool nameChanged = newName.length() && newName != deviceName;
     if (newName.length()) {
         deviceName = newName;
     }
@@ -1466,8 +1467,8 @@ void applyCompactExtras(JsonDocument &doc)
     if (brightnessPct != prevBright && lightOn) {
         applyFrontlight(true);
     }
-    if (brightnessPct != prevBright || prevLock != lockScreen || prevOff != clockOffset || prevSet != clockOffsetSet
-        || prevBoard != vestaboardOn || prevKnown != vestaboardKnown) {
+    if (nameChanged || brightnessPct != prevBright || prevLock != lockScreen || prevOff != clockOffset
+        || prevSet != clockOffsetSet || prevBoard != vestaboardOn || prevKnown != vestaboardKnown) {
         saveConfig();
     }
     if (clockOffsetSet && (prevOff != clockOffset || !prevSet) && WiFi.status() == WL_CONNECTED) {
@@ -1808,36 +1809,11 @@ bool httpGetStatus()
         return false;
     }
     JsonDocument doc;
-    if (deserializeJson(doc, body) || !doc["ok"]) {
-        lastError = doc["error"] | "bad status";
+    if (deserializeJson(doc, body)) {
+        lastError = "bad status";
         return false;
     }
-    battery = doc["battery"] | battery;
-    charging = doc["charging_label"] | charging;
-    state = doc["state"] | state;
-    head = doc["head_type_name"] | head;
-    robotName = doc["robot_name"] | "";
-    errorCode = doc["error_code"] | 0;
-    errorLabel = doc["error_label"] | String(errorCode);
-    if (doc["heading"].is<float>() || doc["heading"].is<int>() || doc["heading"].is<double>()) {
-        heading = String((float) doc["heading"], 1) + " deg";
-    } else if (!doc["heading"].isNull()) {
-        heading = String((const char *) (doc["heading"] | "—"));
-    }
-    rainLabel = doc["rain_label"] | rainLabel;
-    connectionType = doc["connection_type"] | connectionType;
-    connectionStatus = doc["connection_status"] | connectionStatus;
-    wifiNetwork = doc["wifi_network"] | wifiNetwork;
-    wifiSignal = doc["wifi_signal"] | wifiSignal;
-    wifiSecurity = doc["wifi_security"] | wifiSecurity;
-    batteryTemp = doc["battery_temp"] | batteryTemp;
-    wirelessCharge = doc["wireless_charge"] | wirelessCharge;
-    rtkStatus = doc["rtk_status"] | rtkStatus;
-    rtcmAge = doc["rtcm_age"] | rtcmAge;
-    routePriority = doc["route_priority"] | routePriority;
-    rainSensor = doc["rain_sensor"] | rainSensor;
-    netModule = doc["net_module"] | netModule;
-    planActivity = doc["plan_activity"] | planActivity;
+    applyCompactExtras(doc);
     vestaboardLive = doc["vestaboard_live"] | vestaboardLive;
     yarboOn = doc["yarbo_enabled"] | true;
     powerwallOn = doc["powerwall_enabled"] | false;
@@ -1875,9 +1851,42 @@ bool httpGetStatus()
     lymowBattery = doc["lymow_battery"] | lymowBattery;
     lymowState = doc["lymow_state"] | lymowState;
     lymowCharging = doc["lymow_charging"] | lymowCharging;
-    lastError = "";
-    applyCompactExtras(doc);
     syncPaperLogo(String((const char *) (doc["logo_hash"] | "")));
+    lastError = "";
+    if (!doc["ok"]) {
+        String err = doc["error"] | "bad status";
+        if (err.length()) {
+            connectionStatus = err;
+        }
+        return false;
+    }
+    battery = doc["battery"] | battery;
+    charging = doc["charging_label"] | charging;
+    state = doc["state"] | state;
+    head = doc["head_type_name"] | head;
+    robotName = doc["robot_name"] | "";
+    errorCode = doc["error_code"] | 0;
+    errorLabel = doc["error_label"] | String(errorCode);
+    if (doc["heading"].is<float>() || doc["heading"].is<int>() || doc["heading"].is<double>()) {
+        heading = String((float) doc["heading"], 1) + " deg";
+    } else if (!doc["heading"].isNull()) {
+        heading = String((const char *) (doc["heading"] | "—"));
+    }
+    rainLabel = doc["rain_label"] | rainLabel;
+    connectionType = doc["connection_type"] | connectionType;
+    connectionStatus = doc["connection_status"] | connectionStatus;
+    wifiNetwork = doc["wifi_network"] | wifiNetwork;
+    wifiSignal = doc["wifi_signal"] | wifiSignal;
+    wifiSecurity = doc["wifi_security"] | wifiSecurity;
+    batteryTemp = doc["battery_temp"] | batteryTemp;
+    wirelessCharge = doc["wireless_charge"] | wirelessCharge;
+    rtkStatus = doc["rtk_status"] | rtkStatus;
+    rtcmAge = doc["rtcm_age"] | rtcmAge;
+    routePriority = doc["route_priority"] | routePriority;
+    rainSensor = doc["rain_sensor"] | rainSensor;
+    netModule = doc["net_module"] | netModule;
+    planActivity = doc["plan_activity"] | planActivity;
+    lastError = "";
     bool otaPending = doc["ota_pending"] | false;
     String latest = doc["firmware_latest"] | "";
     if (otaPending && latest.length() && latest != PAPERMONO_FW_VERSION) {

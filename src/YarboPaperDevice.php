@@ -12,7 +12,7 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.30';
+    public const FIRMWARE_VERSION = '0.1.31';
     public const FIRMWARE_VERSION_COLOR = '0.2.13-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -552,9 +552,16 @@ final class YarboPaperDevice
         $result = $agent->telemetry(4.0, false);
         $raw = $result['raw'] ?? null;
         if (!($result['ok'] ?? false) || !is_array($raw) || $raw === []) {
+            $mqttError = trim((string) ($result['error'] ?? 'MQTT not connected'));
+            if ($mqttError === '') {
+                $mqttError = 'MQTT not connected';
+            }
+
             return [
-                'ok' => false,
-                'error' => (string) ($result['error'] ?? 'telemetry unavailable'),
+                'ok' => true,
+                'yarbo_ok' => false,
+                'connection_type' => 'MQTT',
+                'connection_status' => self::clip($mqttError, 28),
                 'firmware_latest' => $latest,
                 'error_code' => 0,
             ] + $this->companionCompact(null, false, $forDevice);
@@ -592,6 +599,7 @@ final class YarboPaperDevice
 
         return [
             'ok' => true,
+            'yarbo_ok' => true,
             'battery' => $parsed['battery'] ?? null,
             'charging_label' => $parsed['charging_label'] ?? 'No',
             'state' => $parsed['state'] ?? 'idle',

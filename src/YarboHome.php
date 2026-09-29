@@ -1043,7 +1043,9 @@ final class YarboHome
         }
         $store = $this->load();
         $store['paper'][$tabletId] = array_slice($this->normalizeIdList($ids), 0, self::PAPER_MAX);
-        $this->write($store);
+        if (!$this->write($store)) {
+            return ['ok' => false, 'error' => 'Could not save assignment'];
+        }
 
         return ['ok' => true, 'assigned' => $store['paper'][$tabletId]];
     }

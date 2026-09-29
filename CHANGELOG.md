@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.33] - 2026-09-29
+
+### Fixed
+- PaperMono still receives Vestaboard, Home lights, and the tablet name when the Pi is not connected to the robot MQTT broker. Health shows that MQTT status; other pages no longer show **MQTT not connected**.
+- Home PaperMono assignment ticks are not wiped by the dashboard refresh before you press Save. Firmware **0.1.31**.
+
 ## [3.0.32] - 2026-09-28
 
 ### Changed

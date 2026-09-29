@@ -2454,6 +2454,7 @@ function updateLymowDashboard(ly) {
 }
 
 let homeDash = { devices: [], scenes: [], paper_devices: [], setup: {} };
+let homePaperAssignDirty = false;
 let homeLoadBusy = false;
 let homeSetupPollTimer = 0;
 let homeManageOpen = false;
@@ -2811,17 +2812,21 @@ function renderHomeDashboard(data) {
         if (saveBtn) saveBtn.disabled = papers.length === 0;
     }
     if (assign) {
-        const selected = papers.find((p) => p.id === tablet?.value) || papers[0];
-        const assigned = new Set(selected?.assigned || []);
-        const choices = [
-            ...(data.devices || []).map((d) => ({ id: d.id, name: d.name, kind: d.kind })),
-            ...(data.scenes || []).map((s) => ({ id: `scene:${s.id}`, name: s.name, kind: 'scene' })),
-        ];
-        assign.innerHTML = choices.length
-            ? choices.map((c) => (
-                `<label class="settings-checkbox"><input type="checkbox" value="${escapeHtml(c.id)}" ${assigned.has(c.id) ? 'checked' : ''}> ${escapeHtml(c.name)} <span class="hint">(${escapeHtml(c.kind)})</span></label>`
-            )).join('')
-            : '<p class="hint">Add devices first, then assign them here.</p>';
+        const paperBusy = homePaperAssignDirty
+            || Boolean(document.activeElement?.closest?.('#home-paper-assign, #home-paper-tablet, #home-paper-save'));
+        if (!paperBusy) {
+            const selected = papers.find((p) => p.id === tablet?.value) || papers[0];
+            const assigned = new Set(selected?.assigned || []);
+            const choices = [
+                ...(data.devices || []).map((d) => ({ id: d.id, name: d.name, kind: d.kind })),
+                ...(data.scenes || []).map((s) => ({ id: `scene:${s.id}`, name: s.name, kind: 'scene' })),
+            ];
+            assign.innerHTML = choices.length
+                ? choices.map((c) => (
+                    `<label class="settings-checkbox"><input type="checkbox" value="${escapeHtml(c.id)}" ${assigned.has(c.id) ? 'checked' : ''}> ${escapeHtml(c.name)} <span class="hint">(${escapeHtml(c.kind)})</span></label>`
+                )).join('')
+                : '<p class="hint">Add devices first, then assign them here.</p>';
+        }
     }
 }
 
@@ -7235,7 +7240,13 @@ document.getElementById('home-scenes')?.addEventListener('click', async (event) 
         showToast(err.message || 'Scene failed', 'error');
     }
 });
-document.getElementById('home-paper-tablet')?.addEventListener('change', () => renderHomeDashboard(homeDash));
+document.getElementById('home-paper-tablet')?.addEventListener('change', () => {
+    homePaperAssignDirty = false;
+    renderHomeDashboard(homeDash);
+});
+document.getElementById('home-paper-assign')?.addEventListener('change', () => {
+    homePaperAssignDirty = true;
+});
 document.getElementById('home-paper-save')?.addEventListener('click', async () => {
     const tabletId = document.getElementById('home-paper-tablet')?.value || '';
     const ids = [...document.querySelectorAll('#home-paper-assign input[type="checkbox"]:checked')]
@@ -7244,6 +7255,7 @@ document.getElementById('home-paper-save')?.addEventListener('click', async () =
     try {
         const data = await homeApi({ action: 'paper_assign', tablet_id: tabletId, ids });
         if (!data.ok) throw new Error(data.error || 'Could not save assignment');
+        homePaperAssignDirty = false;
         showToast('PaperMono assignment saved', 'success');
         await loadHomeDashboard();
     } catch (err) {
