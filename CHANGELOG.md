@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.37] - 2026-09-29
+
+### Fixed
+- PaperMono lock-screen logo is flattened to a 160×160 PNG, scaled to fit, and drawn below the battery so it cannot clip the outline. The firmware no longer clips the top-left of a larger image (that looked like a missing logo and a broken battery). Percent is back inside the icon. Firmware **0.1.35**.
+
 ## [3.0.36] - 2026-09-29
 
 ### Fixed

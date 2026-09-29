@@ -38,7 +38,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 ## What it shows
 
 - **Home / Status / Health / Plans:** Yarbo robot tiles (Stop / Dock on Home). Hidden when the Yarbo module is off in Settings.
-- Optional **header logo** (Settings → E-paper companions). Same image on Paper Colour. Prefer a transparent PNG.
+- Optional **lock-screen logo** (Settings → E-paper companions). Same image on Paper Colour. A PNG or JPEG is flattened onto white and the tablet downloads it on the next poll.
 - Top line is the current module (**YARBO**, **POWERWALL**, **LYMOW**, **VESTABOARD**, **RADIO**, **DEVICE**). Unlocked pages do not show the device name or firmware version; those stay on the lock screen and the powered-off card.
 - **Note:** Vestaboard live view picker (**YARBO**, **POWER**, **LYMOW**, **ALL**). Writes the Note when it is enabled; the lock screen still previews the same grid if you chose Vestaboard there.
 - **Board:** live 3×15 preview of the current Vestaboard view.
@@ -84,7 +84,7 @@ On the **same machine that runs the panel**:
    - Wi-Fi SSID and password (**2.4 GHz only**)
    - Panel URL as the tablet will reach it (for example `http://192.168.1.50:8080`, not `localhost`)
    - A device name
-   - Optional header logo (PNG/JPEG). Preview shows on the mocks; reflash so the glass updates.
+   - Optional lock-screen logo (PNG/JPEG). Preview shows on the mocks; the tablet fetches it on the next Wi-Fi poll (no reflash).
 6. Click **Flash firmware & send Wi-Fi**. Leave Settings open. Flash will build first if the binary is missing or stale.
 
 **Send Wi-Fi only** reuses already-flashed firmware and pushes a new `CFG:` line over serial (SSID, password, panel URL, token).

@@ -12,13 +12,13 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.34';
+    public const FIRMWARE_VERSION = '0.1.35';
     public const FIRMWARE_VERSION_COLOR = '0.2.13-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
     public const MESSAGE_CHARS = 180;
-    public const LOGO_MAX_EDGE = 240;
+    public const LOGO_MAX_EDGE = 160;
     public const LOGO_MAX_UPLOAD_BYTES = 2097152;
     private const PLANS_CACHE_TTL_S = 300;
     public const FIRMWARE_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware.bin';
@@ -161,7 +161,7 @@ final class YarboPaperDevice
             return ['ok' => false, 'error' => $saved];
         }
 
-        return ['ok' => true, 'message' => 'Logo saved. Reflash the tablet so it appears in the header.'] + $this->logoPublicView();
+        return ['ok' => true, 'message' => 'Logo saved. The tablet picks it up on the next poll.'] + $this->logoPublicView();
     }
 
     /**
@@ -197,23 +197,21 @@ final class YarboPaperDevice
             $scale = min(1.0, self::LOGO_MAX_EDGE / max($sw, $sh));
             $dw = max(1, (int) round($sw * $scale));
             $dh = max(1, (int) round($sh * $scale));
-            $dst = imagecreatetruecolor($dw, $dh);
+            $box = self::LOGO_MAX_EDGE;
+            $dst = imagecreatetruecolor($box, $box);
             if ($dst === false) {
                 imagedestroy($src);
 
                 return 'Could not resize the logo.';
             }
-            imagealphablending($dst, false);
-            imagesavealpha($dst, true);
-            $clear = imagecolorallocatealpha($dst, 0, 0, 0, 127);
-            if ($clear !== false) {
-                imagefilledrectangle($dst, 0, 0, $dw, $dh, $clear);
-            }
             imagealphablending($dst, true);
-            imagecopyresampled($dst, $src, 0, 0, 0, 0, $dw, $dh, $sw, $sh);
+            $white = imagecolorallocate($dst, 255, 255, 255);
+            imagefilledrectangle($dst, 0, 0, $box, $box, $white);
+            $ox = (int) floor(($box - $dw) / 2);
+            $oy = (int) floor(($box - $dh) / 2);
+            imagecopyresampled($dst, $src, $ox, $oy, 0, 0, $dw, $dh, $sw, $sh);
             imagedestroy($src);
-            imagealphablending($dst, false);
-            imagesavealpha($dst, true);
+            imagesavealpha($dst, false);
             $ok = imagepng($dst, $this->logoPath(), 6);
             imagedestroy($dst);
 
@@ -227,6 +225,19 @@ final class YarboPaperDevice
         }
 
         return file_put_contents($this->logoPath(), $raw) !== false ? null : 'Could not save the logo.';
+    }
+
+    public function prepareLogoForDevice(): void
+    {
+        $path = $this->logoPath();
+        if (!is_file($path) || filesize($path) < 8) {
+            return;
+        }
+        $raw = file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            return;
+        }
+        $this->writeLogoPng($raw);
     }
 
     /**

@@ -73,6 +73,7 @@ if ($method === 'GET' && $action === 'plans') {
 }
 
 if ($method === 'GET' && $action === 'logo') {
+    $devices->prepareLogoForDevice();
     $path = $devices->logoPath();
     if (!is_file($path)) {
         json_response(['ok' => false, 'error' => 'No logo uploaded'], 404);

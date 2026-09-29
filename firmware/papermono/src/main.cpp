@@ -959,7 +959,7 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
     const int h = compact ? 36 : 72;
     const int cap = compact ? 10 : 16;
     const int radius = compact ? 8 : 14;
-    const int stroke = compact ? 3 : 6;
+    const int stroke = compact ? 3 : 5;
     const int gap = compact ? 2 : 3;
     int x = right - w - cap;
     int y = cy - h / 2;
@@ -967,16 +967,16 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
     int capH = compact ? 14 : 28;
     int capR = compact ? 2 : 4;
 
-    /* Stroke the shell only — do not fill the body black, or inner corners leak. */
-    for (int s = 0; s < stroke; s++) {
-        int rr = radius - s;
-        if (rr < 1) {
-            rr = 1;
-        }
-        M5.Display.drawRoundRect(x + s, y + s, w - 2 * s, h - 2 * s, rr, TFT_BLACK);
-    }
-
-    /* Flatten the right side and overlap the cap so the nub joins the body. */
+    M5.Display.fillRoundRect(x, y, w, h, radius, TFT_BLACK);
+    int ir = max(4, radius - stroke + 2);
+    M5.Display.fillRoundRect(
+        x + stroke,
+        y + stroke,
+        w - 2 * stroke,
+        h - 2 * stroke,
+        ir,
+        TFT_WHITE
+    );
     M5.Display.fillRect(x + w - stroke, y + (h - capH) / 2, stroke, capH, TFT_BLACK);
     M5.Display.fillRoundRect(x + w - 1, y + (h - capH) / 2, cap + 1, capH, capR, TFT_BLACK);
 
@@ -989,18 +989,24 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
         M5.Display.fillRect(ix, iy, fillw, ih, TFT_BLACK);
     }
 
+    M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextSize(compact ? 2 : 3);
-    M5.Display.setTextColor(TFT_BLACK);
     String s = pct >= 0 ? (String(pct) + "%") : String("--");
-    if (compact) {
-        M5.Display.setTextDatum(MR_DATUM);
-        M5.Display.drawString(s, x - 8, cy);
-    } else {
-        M5.Display.setTextDatum(ML_DATUM);
-        M5.Display.drawString(s, x + w + cap + 10, cy);
-    }
+    int tw = M5.Display.textWidth(s);
+    int th = compact ? 14 : 22;
+    int padX = compact ? 3 : 4;
+    int padY = compact ? 1 : 2;
+    M5.Display.fillRoundRect(
+        x + w / 2 - tw / 2 - padX,
+        y + h / 2 - th / 2 - padY,
+        tw + padX * 2,
+        th + padY * 2,
+        compact ? 2 : 4,
+        TFT_WHITE
+    );
+    M5.Display.setTextColor(TFT_BLACK);
+    M5.Display.drawString(s, x + w / 2, y + h / 2);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Display.setTextDatum(TL_DATUM);
 }
 
 bool takeTouchPress(int &x, int &y)
@@ -1036,6 +1042,28 @@ void noteActivity()
     }
 }
 
+int pngFileWidth(const char *path)
+{
+    File f = SPIFFS.open(path, FILE_READ);
+    if (!f || f.size() < 24) {
+        if (f) {
+            f.close();
+        }
+        return PAPERMONO_LOGO_PX;
+    }
+    uint8_t hdr[24];
+    int n = f.read(hdr, 24);
+    f.close();
+    if (n != 24 || hdr[0] != 0x89 || hdr[1] != 'P' || hdr[2] != 'N' || hdr[3] != 'G') {
+        return PAPERMONO_LOGO_PX;
+    }
+    int w = ((int) hdr[16] << 24) | ((int) hdr[17] << 16) | ((int) hdr[18] << 8) | (int) hdr[19];
+    if (w < 8 || w > 1024) {
+        return PAPERMONO_LOGO_PX;
+    }
+    return w;
+}
+
 void drawLockScreen(bool forceFull)
 {
     beginEpdFrame(forceFull);
@@ -1053,29 +1081,36 @@ void drawLockScreen(bool forceFull)
         M5.Display.setTextSize(2);
         M5.Display.drawString(String(unreadCount) + " MSG", W / 2, 188);
     }
+    const int batCy = 210;
+    const int batH = 72;
     int batRight = W / 2 + 90;
     int batLeft = batRight - 160 - 16;
     int wifiCx = batLeft / 2;
-    drawWifiIcon(wifiCx, 220, 56, WiFi.status() == WL_CONNECTED);
-    drawBatteryBadge(batRight, 220, tabletBat, false);
+    drawWifiIcon(wifiCx, batCy, 56, WiFi.status() == WL_CONNECTED);
+    drawBatteryBadge(batRight, batCy, tabletBat, false);
+    int batBottom = batCy + batH / 2;
 
     bool wantBoard = lockScreen == "vestaboard" || lockScreen == "both";
     bool wantLogo = lockScreen == "logo" || lockScreen == "both";
     bool haveLogo = SPIFFS.exists("/logo.png");
-    bool showLogo = wantLogo && haveLogo;
     bool showBoard = wantBoard && (!vestaboardKnown || vestaboardOn);
-    if (showLogo) {
-        int logoSize = showBoard ? 120 : 160;
-        M5.Display.drawPngFile(SPIFFS, "/logo.png", (W - logoSize) / 2, showBoard ? 250 : 280, logoSize, logoSize);
+    bool logoDrawn = false;
+    int logoY = batBottom + 24;
+    int logoSize = showBoard ? 128 : 168;
+    if (wantLogo && haveLogo) {
+        int srcW = pngFileWidth("/logo.png");
+        float sc = (float) logoSize / (float) srcW;
+        int logoX = (W - logoSize) / 2;
+        logoDrawn = M5.Display.drawPngFile(SPIFFS, "/logo.png", logoX, logoY, 0, 0, 0, 0, sc, sc);
     } else if (wantLogo && !showBoard) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString("Logo after site Wi-Fi", W / 2, 300);
+        M5.Display.drawString("Logo after site Wi-Fi", W / 2, logoY + 40);
     }
     if (showBoard) {
-        int cell = showLogo ? 24 : 30;
+        int cell = logoDrawn ? 24 : 30;
         int gap = 2;
         int gridW = 15 * cell + 14 * gap;
-        int gridY = showLogo ? 430 : 280;
+        int gridY = logoDrawn ? (logoY + logoSize + 16) : 280;
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
     }
 
@@ -1391,6 +1426,7 @@ bool syncPaperLogo(const String &hash)
         if (SPIFFS.exists("/logo.png")) {
             SPIFFS.remove("/logo.png");
         }
+        SPIFFS.remove("/logo.tmp");
         logoHash = "";
         return true;
     }
@@ -1400,14 +1436,14 @@ bool syncPaperLogo(const String &hash)
     HTTPClient http;
     http.begin(panelUrl + "/api/device.php?action=logo");
     http.addHeader("X-PaperMono-Token", token);
-    http.setTimeout(12000);
+    http.setTimeout(20000);
     int code = http.GET();
     if (code != 200) {
         http.end();
         return false;
     }
     int len = http.getSize();
-    File f = SPIFFS.open("/logo.png", FILE_WRITE);
+    File f = SPIFFS.open("/logo.tmp", FILE_WRITE);
     if (!f) {
         http.end();
         return false;
@@ -1416,7 +1452,7 @@ bool syncPaperLogo(const String &hash)
     uint8_t buf[1024];
     int written = 0;
     unsigned long start = millis();
-    while (http.connected() && (len < 0 || written < len) && millis() - start < 12000) {
+    while (http.connected() && (len < 0 || written < len) && millis() - start < 20000) {
         int avail = stream->available();
         if (avail <= 0) {
             delay(10);
@@ -1435,10 +1471,22 @@ bool syncPaperLogo(const String &hash)
     }
     f.close();
     http.end();
-    if (written < 8) {
-        SPIFFS.remove("/logo.png");
+    if (written < 24) {
+        SPIFFS.remove("/logo.tmp");
         return false;
     }
+    File chk = SPIFFS.open("/logo.tmp", FILE_READ);
+    uint8_t mag[8] = {0};
+    if (chk) {
+        chk.read(mag, 8);
+        chk.close();
+    }
+    if (mag[0] != 0x89 || mag[1] != 'P' || mag[2] != 'N' || mag[3] != 'G') {
+        SPIFFS.remove("/logo.tmp");
+        return false;
+    }
+    SPIFFS.remove("/logo.png");
+    SPIFFS.rename("/logo.tmp", "/logo.png");
     logoHash = hash;
     return true;
 }
