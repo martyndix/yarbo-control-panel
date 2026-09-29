@@ -2683,7 +2683,11 @@ function applyHomeManageUi() {
 
 function homeReorderHandleHtml() {
     if (!homeManageOpen) return '';
-    return '<button type="button" class="home-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>';
+    return `<span class="home-reorder-controls">
+        <button type="button" class="home-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
+        <button type="button" class="home-move-btn" data-home-move="-1" title="Move up" aria-label="Move up">▲</button>
+        <button type="button" class="home-move-btn" data-home-move="1" title="Move down" aria-label="Move down">▼</button>
+    </span>`;
 }
 
 function homeReorderItemFromHandle(handle) {
@@ -3337,6 +3341,26 @@ function bindHomeDashboard() {
     });
     document.getElementById('home-card')?.addEventListener('click', async (event) => {
         if (event.target.closest('.home-drag-handle')) return;
+        const moveBtn = event.target.closest('[data-home-move]');
+        if (moveBtn) {
+            const item = homeReorderItemFromHandle(moveBtn);
+            if (!item) return;
+            const dir = Number(moveBtn.getAttribute('data-home-move') || 0);
+            const siblings = homeReorderSiblings(item);
+            const index = siblings.indexOf(item);
+            const next = index + dir;
+            if (index < 0 || next < 0 || next >= siblings.length) return;
+            if (dir < 0) siblings[next].before(item);
+            else siblings[next].after(item);
+            try {
+                await homeCommitItemOrder(item);
+                showToast('Order saved', 'success');
+            } catch (err) {
+                showToast(err.message || 'Could not save order', 'error');
+                await loadHomeDashboard();
+            }
+            return;
+        }
         const groupExpand = event.target.closest('[data-home-group-expand]');
         if (groupExpand) {
             const id = groupExpand.getAttribute('data-home-group-expand') || '';

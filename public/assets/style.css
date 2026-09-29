@@ -3063,10 +3063,42 @@ html[data-theme="light"] .plan-activity {
     font-family: inherit;
 }
 
+.home-reorder-controls {
+    display: none;
+    align-items: center;
+    gap: 0.15rem;
+    flex-shrink: 0;
+}
+
+.home-card--manage .home-reorder-controls {
+    display: inline-flex;
+}
+
 .home-card--manage .home-drag-handle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+.home-move-btn {
+    width: 1.35rem;
+    height: 1.35rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.65rem;
+    line-height: 1;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+}
+
+.home-move-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
 }
 
 .home-drag-handle:hover {
