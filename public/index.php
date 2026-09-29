@@ -590,7 +590,12 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <p class="hint">Hidden lights stay paired (Hue Bridge bulbs cannot be unpaired one at a time). Unhide to show them on Home and PaperMono again.</p>
                 <div id="home-hidden-devices" class="home-device-grid"></div>
             </div>
-            <h3 class="settings-subtitle">Scenes</h3>
+            <div id="home-scenes-block" class="home-scenes-block" hidden>
+                <h3 class="settings-subtitle">Scenes</h3>
+                <div id="home-scenes" class="home-scene-list"></div>
+            </div>
+            <div class="home-manage-extras">
+            <h3 class="settings-subtitle">Scene editor</h3>
             <p class="hint">Pick which lights belong to a scene and set on/off, brightness, and colour. PaperMono can run a scene and tap again to turn those lights off. These are not Apple or Hue scenes.</p>
             <div id="home-scene-editor" class="home-scene-editor">
                 <div class="home-scene-add">
@@ -602,7 +607,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <p class="hint" id="home-scene-editor-hint">Tick only the lights this scene should change. Unticked lights are left alone.</p>
                 <div id="home-scene-members" class="home-scene-members"></div>
             </div>
-            <div id="home-scenes" class="home-scene-list"></div>
             <h3 class="settings-subtitle">PaperMono</h3>
             <p class="hint">Assign up to 8 lights or scenes to a PaperMono HOUSE page.</p>
             <label class="settings-field" id="home-paper-wrap">
@@ -611,6 +615,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </label>
             <div id="home-paper-assign" class="home-paper-assign"></div>
             <button type="button" class="btn btn-secondary" id="home-paper-save" disabled>Save PaperMono assignment</button>
+            </div>
         </section>
 
         </div>

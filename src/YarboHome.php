@@ -296,7 +296,8 @@ final class YarboHome
                 'on' => (bool) ($device['on'] ?? false),
                 'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
                 'dimmable' => (bool) ($device['dimmable'] ?? false),
-                'colorable' => (bool) ($device['colorable'] ?? false),
+                'colorable' => (bool) ($device['colorable'] ?? false)
+                    || ((string) ($device['kind'] ?? '') === self::KIND_LIGHT),
                 'color_hs' => (bool) ($device['color_hs'] ?? false),
                 'color_xy' => (bool) ($device['color_xy'] ?? false),
                 'color_ct' => (bool) ($device['color_ct'] ?? false),
@@ -1185,7 +1186,7 @@ final class YarboHome
         $fresh = is_file($cachePath) && (time() - (int) filemtime($cachePath)) < 8;
         if ($fresh) {
             $cached = json_decode((string) file_get_contents($cachePath), true);
-            if (is_array($cached) && (int) ($cached['v'] ?? 0) >= 3 && is_array($cached['devices'] ?? null)) {
+            if (is_array($cached) && (int) ($cached['v'] ?? 0) >= 4 && is_array($cached['devices'] ?? null)) {
                 return [
                     'ok' => true,
                     'error' => '',
@@ -1204,7 +1205,7 @@ final class YarboHome
         $devices = is_array($nodes['devices'] ?? null) ? $nodes['devices'] : [];
         if (($nodes['ok'] ?? false) === true) {
             @file_put_contents($cachePath, json_encode([
-                'v' => 3,
+                'v' => 4,
                 'saved_at' => time(),
                 'devices' => $devices,
             ], JSON_UNESCAPED_SLASHES));

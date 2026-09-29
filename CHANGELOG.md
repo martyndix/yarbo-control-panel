@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.42] - 2026-09-29
+
+### Changed
+- Home **⚙️** hides the scene editor and PaperMono assignment. The dashboard keeps compact scene Run buttons.
+
+### Fixed
+- Colour pickers show on Matter/Hue lights even when the Hue Bridge omits Color Control values until you set a colour.
+
 ## [3.0.41] - 2026-09-29
 
 ### Added

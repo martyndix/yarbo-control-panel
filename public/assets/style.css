@@ -2520,6 +2520,10 @@ html[data-theme="light"] .plan-activity {
     display: none;
 }
 
+#home-card:not(.home-card--manage) .home-manage-extras {
+    display: none;
+}
+
 .home-manage-toggle {
     flex-shrink: 0;
     width: 2rem;
@@ -2643,9 +2647,10 @@ html[data-theme="light"] .plan-activity {
 
 .home-device-actions {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 0.3rem;
     align-items: center;
+    justify-content: flex-end;
 }
 
 .home-device-actions input[type="range"] {
@@ -2892,9 +2897,27 @@ html[data-theme="light"] .plan-activity {
 
 .home-scene-list {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
     gap: 0.4rem;
     margin-bottom: 1rem;
+}
+
+#home-card:not(.home-card--manage) .home-scene-list {
+    margin-bottom: 0.25rem;
+}
+
+#home-card:not(.home-card--manage) .home-scene-card {
+    display: inline-flex;
+    grid-template-columns: none;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+#home-card:not(.home-card--manage) .home-scene-edit,
+#home-card:not(.home-card--manage) [data-home-scene-del] {
+    display: none;
 }
 
 .home-scene-card {

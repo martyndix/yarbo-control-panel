@@ -56,11 +56,18 @@ ATTR_COLOR_CAPABILITIES = 0x400A
 ATTR_CT_PHYSICAL_MIN = 0x400B
 ATTR_CT_PHYSICAL_MAX = 0x400C
 ATTR_DEVICE_TYPES = 0
+ATTR_SERVER_LIST = 1
 ATTR_VENDOR_NAME = 1
 ATTR_PRODUCT_NAME = 3
 ATTR_NODE_LABEL = 5
+ATTR_FEATURE_MAP = 0xFFFC
 DEVTYPE_AGGREGATOR = 0x000E
 DEVTYPE_BRIDGED_NODE = 0x0013
+DEVTYPE_ONOFF_LIGHT = 0x0100
+DEVTYPE_DIMMABLE_LIGHT = 0x0101
+DEVTYPE_COLOR_LIGHT = 0x0102
+DEVTYPE_CT_LIGHT = 0x010C
+DEVTYPE_EXTENDED_COLOR_LIGHT = 0x010D
 COLOR_CAP_HS = 1 << 0
 COLOR_CAP_XY = 1 << 3
 COLOR_CAP_CT = 1 << 4
@@ -374,13 +381,16 @@ def device_type_ids(types: Any) -> list[int]:
     ids: list[int] = []
     if isinstance(types, list):
         for item in types:
+            raw_id: Any = None
             if isinstance(item, dict):
                 raw_id = item.get("0", item.get(0, item.get("deviceType")))
-                try:
-                    if raw_id is not None:
-                        ids.append(int(raw_id))
-                except (TypeError, ValueError):
-                    continue
+            elif isinstance(item, (int, float)):
+                raw_id = item
+            try:
+                if raw_id is not None:
+                    ids.append(int(raw_id))
+            except (TypeError, ValueError):
+                continue
     return ids
 
 
@@ -438,8 +448,54 @@ def endpoint_name(
     return f"{base} {endpoint}"[:48]
 
 
+def parse_attr_path(key: Any) -> tuple[int, int, int] | None:
+    parts = str(key).replace(" ", "").split("/")
+    if len(parts) < 3:
+        return None
+    try:
+        return int(parts[0], 0), int(parts[1], 0), int(parts[2], 0)
+    except ValueError:
+        return None
+
+
+def attr_raw(attributes: dict[str, Any], endpoint: int, cluster: int, attr: int) -> Any:
+    key = attr_key(endpoint, cluster, attr)
+    if key in attributes:
+        return attributes[key]
+    for stored, val in attributes.items():
+        if parse_attr_path(stored) == (endpoint, cluster, attr):
+            return val
+    return None
+
+
+def list_ints(val: Any) -> list[int]:
+    out: list[int] = []
+    if not isinstance(val, list):
+        return out
+    for item in val:
+        raw: Any = None
+        if isinstance(item, (int, float)):
+            raw = item
+        elif isinstance(item, dict):
+            raw = item.get("0", item.get(0, item.get("value", item.get("clusterId"))))
+        try:
+            if raw is not None:
+                out.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def endpoint_has_cluster(attributes: dict[str, Any], endpoint: int, cluster: int) -> bool:
+    for key in attributes:
+        parsed = parse_attr_path(key)
+        if parsed and parsed[0] == endpoint and parsed[1] == cluster:
+            return True
+    return cluster in list_ints(attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_SERVER_LIST))
+
+
 def attr_num(attributes: dict[str, Any], endpoint: int, cluster: int, attr: int) -> float | None:
-    val = attributes.get(attr_key(endpoint, cluster, attr))
+    val = attr_raw(attributes, endpoint, cluster, attr)
     if isinstance(val, bool) or val is None:
         return None
     if isinstance(val, (int, float)):
@@ -570,7 +626,8 @@ def kelvin_to_hex(kelvin: int) -> str:
     return "#{:02x}{:02x}{:02x}".format(r, g, b)
 
 
-def color_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
+def color_payload(attributes: dict[str, Any], endpoint: int, type_ids: list[int] | None = None) -> dict[str, Any]:
+    type_ids = type_ids or []
     hue = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CURRENT_HUE)
     sat = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CURRENT_SATURATION)
     x = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CURRENT_X)
@@ -578,25 +635,35 @@ def color_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     mireds = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_COLOR_TEMP_MIREDS)
     mode = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_COLOR_MODE)
     caps = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_COLOR_CAPABILITIES)
+    if caps is None:
+        caps = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_FEATURE_MAP)
     ct_min = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CT_PHYSICAL_MIN)
     ct_max = attr_num(attributes, endpoint, COLOR_CONTROL, ATTR_CT_PHYSICAL_MAX)
     cap_bits = int(caps) if caps is not None else 0
+    has_cc = endpoint_has_cluster(attributes, endpoint, COLOR_CONTROL)
+    extended = any(i in (DEVTYPE_COLOR_LIGHT, DEVTYPE_EXTENDED_COLOR_LIGHT) for i in type_ids)
+    ct_type = DEVTYPE_CT_LIGHT in type_ids
+    is_light = any(
+        i in (
+            DEVTYPE_ONOFF_LIGHT,
+            DEVTYPE_DIMMABLE_LIGHT,
+            DEVTYPE_COLOR_LIGHT,
+            DEVTYPE_CT_LIGHT,
+            DEVTYPE_EXTENDED_COLOR_LIGHT,
+        )
+        for i in type_ids
+    )
     color_hs = bool(cap_bits & COLOR_CAP_HS) or hue is not None
     color_xy = bool(cap_bits & COLOR_CAP_XY) or x is not None
     color_ct = bool(cap_bits & COLOR_CAP_CT) or mireds is not None
     if not (color_hs or color_xy or color_ct):
-        return {
-            "colorable": False,
-            "color_hs": False,
-            "color_xy": False,
-            "color_ct": False,
-            "color_hex": None,
-            "hue": None,
-            "saturation": None,
-            "color_temp": None,
-            "color_temp_min": None,
-            "color_temp_max": None,
-        }
+        if ct_type and not extended:
+            color_ct = True
+        elif has_cc or extended or is_light:
+            # Hue Bridge often omits Color Control values until you write them.
+            color_hs = not ct_type
+            color_xy = not ct_type
+            color_ct = True
     hex_s = None
     hue_deg = clamp_int((hue or 0) * 360 / 254, 0, 360) if hue is not None else None
     sat_pct = clamp_int((sat or 0) * 100 / 254, 0, 100) if sat is not None else None
@@ -652,10 +719,11 @@ def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, An
         )
     if hs is None:
         return {"ok": False, "error": "Colour needs a hex value"}
+    # ExecuteIfOff: Hue often ignores colour writes unless the light is already on.
     transition = {
         "transitionTime": 0,
-        "optionsMask": 0,
-        "optionsOverride": 0,
+        "optionsMask": 1,
+        "optionsOverride": 1,
     }
     hs_result = device_command(
         node_id,
@@ -687,8 +755,8 @@ def set_color_temp(node_id: int, endpoint: int, kelvin: int) -> dict[str, Any]:
         {
             "colorTemperatureMireds": kelvin_to_mireds(kelvin),
             "transitionTime": 0,
-            "optionsMask": 0,
-            "optionsOverride": 0,
+            "optionsMask": 1,
+            "optionsOverride": 1,
         },
     )
 
@@ -726,7 +794,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             brightness = None
             if isinstance(level, (int, float)) and level >= 0:
                 brightness = int(round(float(level) * 100 / 254))
-            color = color_payload(attributes, endpoint)
+            color = color_payload(attributes, endpoint, type_ids)
             devices.append(
                 {
                     "id": f"{node_id}:{endpoint}",

@@ -2553,8 +2553,8 @@ function collectHomeSceneActions() {
 }
 
 function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
-    if (d.colorable) {
-        return `<input type="color" value="${escapeHtml(hex || d.color_hex || '#ffd27a')}" ${colorAttr} ${on ? '' : 'disabled'} title="Colour" aria-label="Colour">`;
+    if (d.colorable || d.kind === 'light') {
+        return `<input type="color" value="${escapeHtml(hex || d.color_hex || '#ffd27a')}" ${colorAttr} title="Colour" aria-label="Colour">`;
     }
     if (d.color_ct) {
         const min = Number(d.color_temp_min || 2000);
@@ -2672,8 +2672,10 @@ function applyHomeManageUi() {
     card?.classList.toggle('home-card--manage', homeManageOpen);
     if (btn) {
         btn.setAttribute('aria-pressed', homeManageOpen ? 'true' : 'false');
-        btn.setAttribute('aria-label', homeManageOpen ? 'Hide device settings' : 'Show device settings');
-        btn.title = homeManageOpen ? 'Done with names, rooms, groups, and pairing' : 'Rename, rooms, groups, hide, remove, and add devices';
+        btn.setAttribute('aria-label', homeManageOpen ? 'Hide Home settings' : 'Show Home settings');
+        btn.title = homeManageOpen
+            ? 'Done with names, rooms, scenes, and PaperMono assignment'
+            : 'Rename, rooms, scenes, PaperMono assignment, hide, and add devices';
     }
 }
 
@@ -2975,21 +2977,31 @@ function renderHomeDashboard(data) {
         hiddenGrid.innerHTML = hiddenDevices.map((d) => homeDeviceCardHtml(d, true)).join('');
     }
     const scenesEl = document.getElementById('home-scenes');
+    const scenesBlock = document.getElementById('home-scenes-block');
+    const scenes = data.scenes || [];
+    if (scenesBlock) {
+        scenesBlock.hidden = !homeManageOpen && scenes.length === 0;
+    }
     if (scenesEl) {
-        const scenes = data.scenes || [];
-        scenesEl.innerHTML = scenes.map((s) => (
-            `<article class="home-scene-card${s.on ? ' is-on' : ''}">
-                <button type="button" class="home-scene-edit" data-home-scene-edit="${escapeHtml(s.id)}" title="Edit scene">
-                    <strong>${escapeHtml(s.name)}</strong>
-                    <span class="hint">${Number(s.count || (s.actions || []).length)} light${Number(s.count || (s.actions || []).length) === 1 ? '' : 's'}${s.on ? ' · on' : ''}</span>
-                </button>
-                <button type="button" class="btn btn-compact" data-home-scene="${escapeHtml(s.id)}">${s.on ? 'Off' : 'Run'}</button>
-                <button type="button" class="btn btn-secondary btn-compact" data-home-scene-del="${escapeHtml(s.id)}" title="Delete">×</button>
-            </article>`
-        )).join('') || '<p class="hint">No panel scenes yet. Tick lights below or use lights that are on, then save.</p>';
+        if (!homeManageOpen) {
+            scenesEl.innerHTML = scenes.map((s) => (
+                `<button type="button" class="btn${s.on ? '' : ' btn-secondary'}" data-home-scene="${escapeHtml(s.id)}">${escapeHtml(s.name)}</button>`
+            )).join('');
+        } else {
+            scenesEl.innerHTML = scenes.map((s) => (
+                `<article class="home-scene-card${s.on ? ' is-on' : ''}">
+                    <button type="button" class="home-scene-edit" data-home-scene-edit="${escapeHtml(s.id)}" title="Edit scene">
+                        <strong>${escapeHtml(s.name)}</strong>
+                        <span class="hint">${Number(s.count || (s.actions || []).length)} light${Number(s.count || (s.actions || []).length) === 1 ? '' : 's'}${s.on ? ' · on' : ''}</span>
+                    </button>
+                    <button type="button" class="btn btn-compact" data-home-scene="${escapeHtml(s.id)}">${s.on ? 'Off' : 'Run'}</button>
+                    <button type="button" class="btn btn-secondary btn-compact" data-home-scene-del="${escapeHtml(s.id)}" title="Delete">×</button>
+                </article>`
+            )).join('') || '<p class="hint">No panel scenes yet. Tick lights below or use lights that are on, then save.</p>';
+        }
     }
     const sceneEditorBusy = Boolean(document.activeElement?.closest?.('#home-scene-editor'));
-    if (!sceneEditorBusy) {
+    if (homeManageOpen && !sceneEditorBusy) {
         renderHomeSceneEditor();
     }
     const tablet = document.getElementById('home-paper-tablet');
