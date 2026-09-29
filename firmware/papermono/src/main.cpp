@@ -965,16 +965,21 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
     int y = cy - h / 2;
     int level = constrain(pct, 0, 100);
     int capH = compact ? 14 : 28;
-    M5.Display.fillRoundRect(x, y, w, h, radius, TFT_BLACK);
-    M5.Display.fillRoundRect(
-        x + stroke,
-        y + stroke,
-        w - 2 * stroke,
-        h - 2 * stroke,
-        max(2, radius - stroke),
-        TFT_WHITE
-    );
-    M5.Display.fillRoundRect(x + w - 1, y + (h - capH) / 2, cap + 1, capH, compact ? 2 : 4, TFT_BLACK);
+    int capR = compact ? 2 : 4;
+
+    /* Stroke the shell only — do not fill the body black, or inner corners leak. */
+    for (int s = 0; s < stroke; s++) {
+        int rr = radius - s;
+        if (rr < 1) {
+            rr = 1;
+        }
+        M5.Display.drawRoundRect(x + s, y + s, w - 2 * s, h - 2 * s, rr, TFT_BLACK);
+    }
+
+    /* Flatten the right side and overlap the cap so the nub joins the body. */
+    M5.Display.fillRect(x + w - stroke, y + (h - capH) / 2, stroke, capH, TFT_BLACK);
+    M5.Display.fillRoundRect(x + w - 1, y + (h - capH) / 2, cap + 1, capH, capR, TFT_BLACK);
+
     int ix = x + stroke + gap;
     int iy = y + stroke + gap;
     int iw = w - 2 * (stroke + gap);
@@ -983,27 +988,19 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact)
     if (fillw > 0) {
         M5.Display.fillRect(ix, iy, fillw, ih, TFT_BLACK);
     }
-    M5.Display.setTextDatum(MC_DATUM);
+
     M5.Display.setTextSize(compact ? 2 : 3);
-    String s = pct >= 0 ? (String(pct) + "%") : String("--");
-    int tw = M5.Display.textWidth(s);
-    int th = compact ? 16 : 26;
-    int padX = compact ? 3 : 6;
-    int padY = compact ? 1 : 3;
-    int plateW = tw + padX * 2;
-    int plateH = th + padY * 2;
-    int bx = x + (w - plateW) / 2;
-    int by = y + (h - plateH) / 2;
-    if (bx < ix) {
-        bx = ix;
-    }
-    if (bx + plateW > ix + iw) {
-        plateW = max(0, ix + iw - bx);
-    }
-    M5.Display.fillRoundRect(bx, by, plateW, plateH, compact ? 3 : 5, TFT_WHITE);
     M5.Display.setTextColor(TFT_BLACK);
-    M5.Display.drawString(s, x + w / 2, y + h / 2);
+    String s = pct >= 0 ? (String(pct) + "%") : String("--");
+    if (compact) {
+        M5.Display.setTextDatum(MR_DATUM);
+        M5.Display.drawString(s, x - 8, cy);
+    } else {
+        M5.Display.setTextDatum(ML_DATUM);
+        M5.Display.drawString(s, x + w + cap + 10, cy);
+    }
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
 }
 
 bool takeTouchPress(int &x, int &y)

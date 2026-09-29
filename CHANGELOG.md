@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.36] - 2026-09-29
+
+### Fixed
+- PaperMono battery percent sits beside the icon instead of on a white plate that hid the fill. The outline is stroked (no leftover inner-corner blobs) and the cap joins the body. Firmware **0.1.34**.
+
 ## [3.0.35] - 2026-09-29
 
 ### Fixed
