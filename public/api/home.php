@@ -53,6 +53,7 @@ try {
         'scene_run' => $home->toggleScene((string) ($input['id'] ?? '')),
         'scene_off' => $home->stopScene((string) ($input['id'] ?? '')),
         'paper_assign' => $home->assignPaper((string) ($input['tablet_id'] ?? ''), is_array($input['ids'] ?? null) ? $input['ids'] : []),
+        'reorder' => $home->reorder($input),
         default => ['ok' => false, 'error' => 'Unknown action'],
     };
 } catch (Throwable $e) {

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.44] - 2026-09-29
+
+### Added
+- Home **⚙️** drag handles reorder rooms, groups, lights, and scenes. PaperMono HOUSE buttons can be ticked and dragged so the tablet shows them in that order.
+
 ## [3.0.43] - 2026-09-29
 
 ### Fixed

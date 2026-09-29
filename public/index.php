@@ -566,7 +566,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. A Hue Bridge is one pairing: every Hue light then appears as its own row. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps.</p>
+            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. A Hue Bridge is one pairing: every Hue light then appears as its own row. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps. Tap ⚙️ to drag rooms, groups, lights, and scenes into the order you want.</p>
             <p id="home-server-status" class="updated">Matter server: —</p>
             <p id="home-setup-status" class="hint hidden"></p>
             <button type="button" class="btn btn-secondary hidden" id="home-setup">Set up Matter server</button>
@@ -608,7 +608,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div id="home-scene-members" class="home-scene-members"></div>
             </div>
             <h3 class="settings-subtitle">PaperMono</h3>
-            <p class="hint">Assign up to 8 lights or scenes to a PaperMono HOUSE page.</p>
+            <p class="hint">Assign up to 8 lights or scenes to a PaperMono HOUSE page. Drag the ⋮⋮ handle to set button order (top is the first HOUSE button).</p>
             <label class="settings-field" id="home-paper-wrap">
                 <span class="label">Tablet</span>
                 <select id="home-paper-tablet"></select>

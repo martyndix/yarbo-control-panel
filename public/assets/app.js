@@ -2459,6 +2459,7 @@ let homePaperAssignDirty = false;
 let homeLoadBusy = false;
 let homeSetupPollTimer = 0;
 let homeManageOpen = false;
+let homeDrag = null;
 const homeExpandedRooms = new Set();
 const homeExpandedGroups = new Set();
 let homeSceneDraft = { id: '', name: '', included: {}, states: {} };
@@ -2641,6 +2642,7 @@ async function startHomeSetup(button) {
 }
 
 async function loadHomeDashboard() {
+    if (homeDrag) return;
     if (homeLoadBusy) return;
     const card = document.getElementById('home-card');
     const homeEnabled = Boolean(document.querySelector('[data-module-id="home"]'));
@@ -2674,9 +2676,175 @@ function applyHomeManageUi() {
         btn.setAttribute('aria-pressed', homeManageOpen ? 'true' : 'false');
         btn.setAttribute('aria-label', homeManageOpen ? 'Hide Home settings' : 'Show Home settings');
         btn.title = homeManageOpen
-            ? 'Done with names, rooms, scenes, and PaperMono assignment'
-            : 'Rename, rooms, scenes, PaperMono assignment, hide, and add devices';
+            ? 'Done with names, rooms, order, scenes, and PaperMono assignment'
+            : 'Rename, reorder, rooms, scenes, PaperMono assignment, hide, and add devices';
     }
+}
+
+function homeReorderHandleHtml() {
+    if (!homeManageOpen) return '';
+    return '<button type="button" class="home-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>';
+}
+
+function homeReorderItemFromHandle(handle) {
+    return handle.closest('[data-paper-item], [data-home-scene-card], [data-home-id], [data-home-group], [data-home-room-group]');
+}
+
+function homeReorderSiblings(item) {
+    const parent = item.parentElement;
+    if (!parent) return [];
+    if (item.hasAttribute('data-home-room-group')) {
+        return [...parent.querySelectorAll(':scope > [data-home-room-group]')];
+    }
+    if (item.hasAttribute('data-home-group')) {
+        return [...parent.querySelectorAll(':scope > [data-home-group]')];
+    }
+    if (item.hasAttribute('data-home-id')) {
+        return [...parent.querySelectorAll(':scope > [data-home-id]')];
+    }
+    if (item.hasAttribute('data-home-scene-card')) {
+        return [...parent.querySelectorAll(':scope > [data-home-scene-card]')];
+    }
+    if (item.hasAttribute('data-paper-item')) {
+        return [...parent.querySelectorAll(':scope > [data-paper-item]')];
+    }
+    return [];
+}
+
+function homeReorderKind(item) {
+    if (item.hasAttribute('data-paper-item')) return 'paper';
+    if (item.hasAttribute('data-home-scene-card')) return 'scenes';
+    if (item.hasAttribute('data-home-id')) return 'devices';
+    if (item.hasAttribute('data-home-group')) return 'groups';
+    if (item.hasAttribute('data-home-room-group')) return 'rooms';
+    return '';
+}
+
+function homePaperAssignedIds() {
+    return [...document.querySelectorAll('#home-paper-assigned [data-paper-item]')]
+        .map((row) => row.getAttribute('data-paper-item') || '')
+        .filter(Boolean)
+        .slice(0, 8);
+}
+
+async function homeCommitReorder(kind, ids, extra = {}) {
+    if (!kind || !ids.length) return;
+    const data = await homeApi({ action: 'reorder', kind, ids, ...extra });
+    if (!data.ok) throw new Error(data.error || 'Could not save order');
+    if (kind === 'rooms' && Array.isArray(homeDash.rooms)) {
+        const map = new Map(homeDash.rooms.map((r) => [r.id, r]));
+        homeDash.rooms = ids.map((id) => map.get(id)).filter(Boolean)
+            .concat(homeDash.rooms.filter((r) => !ids.includes(r.id)));
+    } else if (kind === 'scenes' && Array.isArray(homeDash.scenes)) {
+        const map = new Map(homeDash.scenes.map((s) => [s.id, s]));
+        homeDash.scenes = ids.map((id) => map.get(id)).filter(Boolean)
+            .concat(homeDash.scenes.filter((s) => !ids.includes(s.id)));
+    } else if (kind === 'devices' && Array.isArray(homeDash.devices)) {
+        const map = new Map(homeDash.devices.map((d) => [d.id, d]));
+        homeDash.devices = ids.map((id) => map.get(id)).filter(Boolean)
+            .concat(homeDash.devices.filter((d) => !ids.includes(d.id)));
+    } else if (kind === 'paper') {
+        const tabletId = extra.tablet_id || document.getElementById('home-paper-tablet')?.value || '';
+        const paper = (homeDash.paper_devices || []).find((p) => p.id === tabletId);
+        if (paper) paper.assigned = ids;
+        homePaperAssignDirty = false;
+    }
+}
+
+async function homeCommitItemOrder(item) {
+    const kind = homeReorderKind(item);
+    if (kind === 'rooms') {
+        const ids = [...document.querySelectorAll('#home-devices [data-home-room-group]')]
+            .map((el) => el.getAttribute('data-home-room-group')).filter(Boolean);
+        await homeCommitReorder('rooms', ids);
+        return;
+    }
+    if (kind === 'groups') {
+        const room = item.closest('[data-home-room-group]');
+        const roomId = room?.getAttribute('data-home-room-group') || '';
+        const ids = homeReorderSiblings(item).map((el) => el.getAttribute('data-home-group')).filter(Boolean);
+        await homeCommitReorder('groups', ids, { room_id: roomId });
+        return;
+    }
+    if (kind === 'devices') {
+        const ids = [...document.querySelectorAll('#home-devices [data-home-id]')]
+            .map((el) => el.getAttribute('data-home-id')).filter(Boolean);
+        await homeCommitReorder('devices', ids);
+        return;
+    }
+    if (kind === 'scenes') {
+        const ids = [...document.querySelectorAll('#home-scenes [data-home-scene-card]')]
+            .map((el) => el.getAttribute('data-home-scene-card')).filter(Boolean);
+        await homeCommitReorder('scenes', ids);
+        return;
+    }
+    if (kind === 'paper') {
+        const tabletId = document.getElementById('home-paper-tablet')?.value || '';
+        await homeCommitReorder('paper', homePaperAssignedIds(), { tablet_id: tabletId });
+    }
+}
+
+function bindHomeReorder() {
+    const card = document.getElementById('home-card');
+    if (!card || card.dataset.homeReorderBound === '1') return;
+    card.dataset.homeReorderBound = '1';
+
+    const onMove = (event) => {
+        if (!homeDrag) return;
+        const y = event.clientY;
+        const siblings = homeReorderSiblings(homeDrag.item);
+        for (const sib of siblings) {
+            if (sib === homeDrag.item) continue;
+            const rect = sib.getBoundingClientRect();
+            const mid = rect.top + rect.height / 2;
+            if (y < mid && (homeDrag.item.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+                sib.parentElement?.insertBefore(homeDrag.item, sib);
+                homeDrag.moved = true;
+                break;
+            }
+            if (y > mid && (homeDrag.item.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_PRECEDING)) {
+                sib.parentElement?.insertBefore(homeDrag.item, sib.nextSibling);
+                homeDrag.moved = true;
+                break;
+            }
+        }
+    };
+
+    const onUp = async () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        if (!homeDrag) return;
+        const item = homeDrag.item;
+        const moved = homeDrag.moved;
+        item.classList.remove('home-item--dragging');
+        document.body.classList.remove('home-is-reordering');
+        homeDrag = null;
+        if (!moved) return;
+        try {
+            await homeCommitItemOrder(item);
+            showToast('Order saved', 'success');
+        } catch (err) {
+            showToast(err.message || 'Could not save order', 'error');
+            await loadHomeDashboard();
+        }
+    };
+
+    card.addEventListener('pointerdown', (event) => {
+        if (!homeManageOpen) return;
+        const handle = event.target.closest?.('.home-drag-handle');
+        if (!handle || event.button) return;
+        const item = homeReorderItemFromHandle(handle);
+        if (!item) return;
+        event.preventDefault();
+        homeDrag = { item, moved: false };
+        item.classList.add('home-item--dragging');
+        document.body.classList.add('home-is-reordering');
+        handle.setPointerCapture?.(event.pointerId);
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+    });
 }
 
 function homeRoomSelectHtml(d, rooms) {
@@ -2715,6 +2883,7 @@ function homeRoomHeadingHtml(room) {
     const count = Number(room.count || 0);
     return `<div class="home-room-group${expanded ? ' is-open' : ''}" data-home-room-group="${escapeHtml(room.id)}">
         <div class="home-room${on ? ' is-on' : ''}" data-home-room="${escapeHtml(room.id)}">
+        ${homeReorderHandleHtml()}
         <button type="button" class="home-room-expand" data-home-room-expand="${escapeHtml(room.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? 'Hide lights in this room' : 'Show lights in this room'}" aria-label="${expanded ? 'Hide lights in this room' : 'Show lights in this room'}">${expanded ? '−' : '+'}</button>
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
@@ -2743,6 +2912,7 @@ function homeGroupHeadingHtml(group) {
     const count = Number(group.count || 0);
     return `<div class="home-group${expanded ? ' is-open' : ''}" data-home-group="${escapeHtml(group.id)}">
         <div class="home-room home-group-heading${on ? ' is-on' : ''}">
+        ${homeReorderHandleHtml()}
         <button type="button" class="home-room-expand" data-home-group-expand="${escapeHtml(group.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? 'Hide lights in this group' : 'Show lights in this group'}" aria-label="${expanded ? 'Hide lights in this group' : 'Show lights in this group'}">${expanded ? '−' : '+'}</button>
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
@@ -2826,6 +2996,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
     return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
+        ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
             ${label}
@@ -2914,6 +3085,7 @@ function renderHomeDashboard(data) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
     const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new], [data-home-color], [data-home-kelvin]');
+    if (homeDrag) return;
     const status = document.getElementById('home-server-status');
     if (status) {
         const err = data.server?.error;
@@ -2989,7 +3161,8 @@ function renderHomeDashboard(data) {
             )).join('');
         } else {
             scenesEl.innerHTML = scenes.map((s) => (
-                `<article class="home-scene-card${s.on ? ' is-on' : ''}">
+                `<article class="home-scene-card${s.on ? ' is-on' : ''}" data-home-scene-card="${escapeHtml(s.id)}">
+                    ${homeReorderHandleHtml()}
                     <button type="button" class="home-scene-edit" data-home-scene-edit="${escapeHtml(s.id)}" title="Edit scene">
                         <strong>${escapeHtml(s.name)}</strong>
                         <span class="hint">${Number(s.count || (s.actions || []).length)} light${Number(s.count || (s.actions || []).length) === 1 ? '' : 's'}${s.on ? ' · on' : ''}</span>
@@ -3021,15 +3194,28 @@ function renderHomeDashboard(data) {
             || Boolean(document.activeElement?.closest?.('#home-paper-assign, #home-paper-tablet, #home-paper-save'));
         if (!paperBusy) {
             const selected = papers.find((p) => p.id === tablet?.value) || papers[0];
-            const assigned = new Set(selected?.assigned || []);
-            const choices = [
-                ...(data.devices || []).map((d) => ({ id: d.id, name: d.name, kind: d.kind })),
-                ...(data.scenes || []).map((s) => ({ id: `scene:${s.id}`, name: s.name, kind: 'scene' })),
-            ];
-            assign.innerHTML = choices.length
-                ? choices.map((c) => (
-                    `<label class="settings-checkbox"><input type="checkbox" value="${escapeHtml(c.id)}" ${assigned.has(c.id) ? 'checked' : ''}> ${escapeHtml(c.name)} <span class="hint">(${escapeHtml(c.kind)})</span></label>`
-                )).join('')
+            const assignedIds = [...(selected?.assigned || [])];
+            const byId = new Map([
+                ...(data.devices || []).map((d) => [d.id, { id: d.id, name: d.name, kind: d.kind }]),
+                ...(data.scenes || []).map((s) => [`scene:${s.id}`, { id: `scene:${s.id}`, name: s.name, kind: 'scene' }]),
+            ]);
+            const assigned = assignedIds.map((id) => byId.get(id)).filter(Boolean);
+            const available = [...byId.values()].filter((c) => !assignedIds.includes(c.id));
+            const row = (c, index, on) => (
+                `<div class="home-paper-item" data-paper-item="${escapeHtml(c.id)}">
+                    ${on ? homeReorderHandleHtml() : ''}
+                    ${on ? `<span class="home-paper-index">${index + 1}</span>` : ''}
+                    <label class="home-paper-item-pick">
+                        <input type="checkbox" value="${escapeHtml(c.id)}" ${on ? 'checked' : ''}>
+                        <span class="home-paper-item-name">${escapeHtml(c.name)}</span>
+                        <span class="hint">(${escapeHtml(c.kind)})</span>
+                    </label>
+                </div>`
+            );
+            assign.innerHTML = (assigned.length || available.length)
+                ? `<div id="home-paper-assigned" class="home-paper-list">${assigned.map((c, i) => row(c, i, true)).join('') || '<p class="hint">Tick lights or scenes below. Top of this list is the first HOUSE button.</p>'}</div>
+                   <p class="home-paper-available-label">Available</p>
+                   <div id="home-paper-available" class="home-paper-list home-paper-available">${available.map((c) => row(c, 0, false)).join('') || '<p class="hint">Everything is assigned.</p>'}</div>`
                 : '<p class="hint">Add devices first, then assign them here.</p>';
         }
     }
@@ -3099,6 +3285,7 @@ async function saveHomeGroupName(input) {
 }
 
 function bindHomeDashboard() {
+    bindHomeReorder();
     document.getElementById('home-manage-toggle')?.addEventListener('click', () => {
         homeManageOpen = !homeManageOpen;
         applyHomeManageUi();
@@ -3149,6 +3336,7 @@ function bindHomeDashboard() {
         document.getElementById('home-room-save')?.click();
     });
     document.getElementById('home-card')?.addEventListener('click', async (event) => {
+        if (event.target.closest('.home-drag-handle')) return;
         const groupExpand = event.target.closest('[data-home-group-expand]');
         if (groupExpand) {
             const id = groupExpand.getAttribute('data-home-group-expand') || '';
@@ -7525,14 +7713,37 @@ document.getElementById('home-paper-tablet')?.addEventListener('change', () => {
     homePaperAssignDirty = false;
     renderHomeDashboard(homeDash);
 });
-document.getElementById('home-paper-assign')?.addEventListener('change', () => {
-    homePaperAssignDirty = true;
+document.getElementById('home-paper-assign')?.addEventListener('change', async (event) => {
+    const input = event.target.closest?.('input[type="checkbox"]');
+    const row = event.target.closest?.('[data-paper-item]');
+    if (!input || !row) return;
+    const id = row.getAttribute('data-paper-item') || '';
+    let ids = homePaperAssignedIds();
+    if (input.checked) {
+        if (!ids.includes(id) && ids.length >= 8) {
+            input.checked = false;
+            showToast('PaperMono HOUSE holds 8 buttons', 'error');
+            return;
+        }
+        if (!ids.includes(id)) ids.push(id);
+    } else {
+        ids = ids.filter((item) => item !== id);
+    }
+    const tabletId = document.getElementById('home-paper-tablet')?.value || '';
+    const paper = (homeDash.paper_devices || []).find((p) => p.id === tabletId);
+    if (paper) paper.assigned = ids;
+    homePaperAssignDirty = false;
+    renderHomeDashboard(homeDash);
+    try {
+        await homeCommitReorder('paper', ids, { tablet_id: tabletId });
+        showToast('PaperMono assignment saved', 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not save assignment', 'error');
+    }
 });
 document.getElementById('home-paper-save')?.addEventListener('click', async () => {
     const tabletId = document.getElementById('home-paper-tablet')?.value || '';
-    const ids = [...document.querySelectorAll('#home-paper-assign input[type="checkbox"]:checked')]
-        .map((el) => el.value)
-        .slice(0, 8);
+    const ids = homePaperAssignedIds();
     try {
         const data = await homeApi({ action: 'paper_assign', tablet_id: tabletId, ids });
         if (!data.ok) throw new Error(data.error || 'Could not save assignment');

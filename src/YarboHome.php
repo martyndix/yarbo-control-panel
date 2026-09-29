@@ -33,7 +33,8 @@ final class YarboHome
      *   groups: array<string, string>,
      *   scenes: list<array<string, mixed>>,
      *   paper: array<string, list<string>>,
-     *   hidden: list<string>
+     *   hidden: list<string>,
+     *   device_order: list<string>
      * }
      */
     public function load(): array
@@ -47,6 +48,7 @@ final class YarboHome
             'scenes' => [],
             'paper' => [],
             'hidden' => [],
+            'device_order' => [],
             'active_scene_id' => '',
         ];
         if (!is_file($this->storePath())) {
@@ -163,6 +165,7 @@ final class YarboHome
             'scenes' => $scenes,
             'paper' => $paper,
             'hidden' => $hidden,
+            'device_order' => $this->normalizeIdList(is_array($decoded['device_order'] ?? null) ? $decoded['device_order'] : []),
             'active_scene_id' => trim((string) ($decoded['active_scene_id'] ?? '')),
         ];
         if ($migrated) {
@@ -319,6 +322,7 @@ final class YarboHome
                 $devices[] = $row;
             }
         }
+        $devices = $this->applyIdOrder($devices, $store['device_order'] ?? []);
         return [
             'ok' => true,
             'enabled' => true,
@@ -1199,6 +1203,42 @@ final class YarboHome
     }
 
     /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function reorder(array $input): array
+    {
+        $kind = strtolower(trim((string) ($input['kind'] ?? $input['what'] ?? '')));
+        $ids = $this->normalizeIdList(is_array($input['ids'] ?? null) ? $input['ids'] : []);
+        if ($ids === []) {
+            return ['ok' => false, 'error' => 'Nothing to reorder'];
+        }
+        $store = $this->load();
+        if ($kind === 'rooms') {
+            $store['room_defs'] = $this->reorderById($store['room_defs'], $ids);
+        } elseif ($kind === 'groups') {
+            $store['group_defs'] = $this->reorderGroupsInRoom(
+                $store['group_defs'],
+                $ids,
+                trim((string) ($input['room_id'] ?? ''))
+            );
+        } elseif ($kind === 'scenes') {
+            $store['scenes'] = $this->reorderById($store['scenes'], $ids);
+        } elseif ($kind === 'devices') {
+            $store['device_order'] = $ids;
+        } elseif ($kind === 'paper') {
+            return $this->assignPaper((string) ($input['tablet_id'] ?? ''), $ids);
+        } else {
+            return ['ok' => false, 'error' => 'Unknown reorder'];
+        }
+        if (!$this->write($store)) {
+            return ['ok' => false, 'error' => 'Could not save order'];
+        }
+
+        return ['ok' => true];
+    }
+
+    /**
      * @return array{ok: bool, error: string, devices: list<array<string, mixed>>}
      */
     private function liveDevices(float $timeout): array
@@ -1491,6 +1531,98 @@ final class YarboHome
             $id = trim((string) $id);
             if ($id !== '' && !in_array($id, $out, true)) {
                 $out[] = $id;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $items
+     * @param list<string> $ids
+     * @return list<array<string, mixed>>
+     */
+    private function applyIdOrder(array $items, array $ids): array
+    {
+        $byId = [];
+        foreach ($items as $item) {
+            $id = (string) ($item['id'] ?? '');
+            if ($id !== '') {
+                $byId[$id] = $item;
+            }
+        }
+        $out = [];
+        $seen = [];
+        foreach ($ids as $id) {
+            if (isset($byId[$id]) && !isset($seen[$id])) {
+                $out[] = $byId[$id];
+                $seen[$id] = true;
+            }
+        }
+        foreach ($items as $item) {
+            $id = (string) ($item['id'] ?? '');
+            if ($id !== '' && !isset($seen[$id])) {
+                $out[] = $item;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $items
+     * @param list<string> $ids
+     * @return list<array<string, mixed>>
+     */
+    private function reorderById(array $items, array $ids): array
+    {
+        return $this->applyIdOrder($items, $ids);
+    }
+
+    /**
+     * @param list<array{id?: string, name?: string, room_id?: string}> $groupDefs
+     * @param list<string> $ids
+     * @return list<array{id?: string, name?: string, room_id?: string}>
+     */
+    private function reorderGroupsInRoom(array $groupDefs, array $ids, string $roomId): array
+    {
+        if ($roomId === '') {
+            return $this->reorderById($groupDefs, $ids);
+        }
+        $byId = [];
+        foreach ($groupDefs as $def) {
+            $id = (string) ($def['id'] ?? '');
+            if ($id !== '') {
+                $byId[$id] = $def;
+            }
+        }
+        $wanted = [];
+        foreach ($ids as $id) {
+            if (isset($byId[$id]) && (string) ($byId[$id]['room_id'] ?? '') === $roomId && !in_array($id, $wanted, true)) {
+                $wanted[] = $id;
+            }
+        }
+        $out = [];
+        $queue = $wanted;
+        $placed = [];
+        foreach ($groupDefs as $def) {
+            if ((string) ($def['room_id'] ?? '') !== $roomId) {
+                $out[] = $def;
+                continue;
+            }
+            while ($queue !== [] && isset($placed[$queue[0]])) {
+                array_shift($queue);
+            }
+            if ($queue === []) {
+                continue;
+            }
+            $next = array_shift($queue);
+            $out[] = $byId[$next];
+            $placed[$next] = true;
+        }
+        foreach ($queue as $id) {
+            if (!isset($placed[$id]) && isset($byId[$id])) {
+                $out[] = $byId[$id];
             }
         }
 
