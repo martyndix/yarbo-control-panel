@@ -82,6 +82,7 @@ int lockAfterS = 60;
 int lightOffS = 15;
 int brightnessPct = 80;
 String lockScreen = "both";
+String unlockPage = "home";
 bool alertMessageOn = true;
 bool alertYarboOn = true;
 bool alertLymowOn = true;
@@ -159,6 +160,7 @@ void paintRadioDraft(int x, int y);
 void updateRadioDraft();
 void applyDeviceOffTap(int x);
 void applyRadioHit(int hit);
+bool httpGetPlans(bool refresh);
 
 void saveConfig()
 {
@@ -170,6 +172,7 @@ void saveConfig()
     prefs.putString("name", deviceName);
     prefs.putInt("bright", brightnessPct);
     prefs.putString("lock", lockScreen);
+    prefs.putString("unlock", unlockPage);
     prefs.putInt("tzoff", clockOffset);
     prefs.putBool("tzset", clockOffsetSet);
     prefs.putBool("vboard", vestaboardOn);
@@ -190,6 +193,10 @@ void loadConfig()
     if (lock == "logo" || lock == "vestaboard" || lock == "both") {
         lockScreen = lock;
     }
+    String unlock = prefs.getString("unlock", unlockPage);
+    if (unlock.length()) {
+        unlockPage = unlock;
+    }
     clockOffset = prefs.getInt("tzoff", clockOffset);
     clockOffsetSet = prefs.getBool("tzset", clockOffsetSet);
     vestaboardOn = prefs.getBool("vboard", vestaboardOn);
@@ -205,6 +212,10 @@ void applyCompanionFields(JsonDocument &doc, bool persist)
     String lock = doc["lock_screen"] | "";
     if (lock == "logo" || lock == "vestaboard" || lock == "both") {
         lockScreen = lock;
+    }
+    String unlock = doc["unlock_page"] | "";
+    if (unlock.length()) {
+        unlockPage = unlock;
     }
     if (doc["clock_offset"].is<int>()) {
         clockOffset = (int) doc["clock_offset"];
@@ -347,6 +358,29 @@ int firstEnabledPage()
         if (pageEnabled(i)) return i;
     }
     return PAPERMONO_PAGE_HOME;
+}
+
+int pageFromUnlockId(const String &id)
+{
+    if (id == "status") return PAPERMONO_PAGE_STATUS;
+    if (id == "health") return PAPERMONO_PAGE_HEALTH;
+    if (id == "plans") return PAPERMONO_PAGE_PLANS;
+    if (id == "note") return PAPERMONO_PAGE_NOTE;
+    if (id == "board") return PAPERMONO_PAGE_BOARD;
+    if (id == "powerwall") return PAPERMONO_PAGE_POWERWALL;
+    if (id == "lymow") return PAPERMONO_PAGE_LYMOW;
+    if (id == "radio") return PAPERMONO_PAGE_RADIO;
+    if (id == "device") return PAPERMONO_PAGE_DEVICE;
+    if (id == "house") return PAPERMONO_PAGE_HOUSE;
+    return PAPERMONO_PAGE_HOME;
+}
+
+void applyUnlockPage()
+{
+    currentPage = pageFromUnlockId(unlockPage);
+    if (!pageEnabled(currentPage)) {
+        currentPage = firstEnabledPage();
+    }
 }
 
 int stepEnabledPage(int from, int dir)
@@ -1148,8 +1182,12 @@ void enterLock()
 void exitLock()
 {
     screenLocked = false;
+    applyUnlockPage();
     noteActivity();
     applyFrontlight(true);
+    if (currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {
+        httpGetPlans(false);
+    }
     drawScreen(true);
 }
 
@@ -1534,6 +1572,7 @@ void applyCompactExtras(JsonDocument &doc)
     lightOffS = doc["light_off_s"] | lightOffS;
     int prevBright = brightnessPct;
     String prevLock = lockScreen;
+    String prevUnlock = unlockPage;
     int prevOff = clockOffset;
     bool prevSet = clockOffsetSet;
     bool prevBoard = vestaboardOn;
@@ -1542,7 +1581,7 @@ void applyCompactExtras(JsonDocument &doc)
     if (brightnessPct != prevBright && lightOn) {
         applyFrontlight(true);
     }
-    if (nameChanged || brightnessPct != prevBright || prevLock != lockScreen || prevOff != clockOffset
+    if (nameChanged || brightnessPct != prevBright || prevLock != lockScreen || prevUnlock != unlockPage || prevOff != clockOffset
         || prevSet != clockOffsetSet || prevBoard != vestaboardOn || prevKnown != vestaboardKnown) {
         saveConfig();
     }

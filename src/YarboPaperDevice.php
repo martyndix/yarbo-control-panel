@@ -12,8 +12,8 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
-    public const FIRMWARE_VERSION = '0.1.36';
-    public const FIRMWARE_VERSION_COLOR = '0.2.13-colour';
+    public const FIRMWARE_VERSION = '0.1.37';
+    public const FIRMWARE_VERSION_COLOR = '0.2.14-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
@@ -942,6 +942,7 @@ final class YarboPaperDevice
         $out = [
             'brightness' => (int) $prefs['brightness'],
             'lock_screen' => (string) $prefs['lock_screen'],
+            'unlock_page' => (string) $prefs['unlock_page'],
             'vestaboard_enabled' => !empty($vb['enabled']),
         ];
         if (isset($clock['clock_offset'])) {
@@ -963,6 +964,8 @@ final class YarboPaperDevice
             (string) $fields['brightness'],
             '--lock-screen',
             (string) $fields['lock_screen'],
+            '--unlock-page',
+            (string) $fields['unlock_page'],
             '--vestaboard',
             !empty($fields['vestaboard_enabled']) ? '1' : '0',
         ];
@@ -988,6 +991,7 @@ final class YarboPaperDevice
             'light_off_s' => 15,
             'brightness' => 80,
             'lock_screen' => 'both',
+            'unlock_page' => 'home',
             'timezone' => '',
             'alert_message' => true,
             'alert_yarbo' => true,
@@ -1007,6 +1011,13 @@ final class YarboPaperDevice
         if (!in_array($lockScreen, ['logo', 'vestaboard', 'both'], true)) {
             $lockScreen = 'logo';
         }
+        $unlockPage = strtolower(trim((string) ($input['unlock_page'] ?? $defaults['unlock_page'])));
+        if (!in_array($unlockPage, [
+            'home', 'status', 'health', 'plans', 'note', 'board',
+            'powerwall', 'lymow', 'radio', 'device', 'house',
+        ], true)) {
+            $unlockPage = 'home';
+        }
         $timezone = YarboVestaboard::normalizeTimezone((string) ($input['timezone'] ?? $defaults['timezone']));
         $bool = static function (mixed $value, bool $fallback): bool {
             if ($value === null) {
@@ -1025,6 +1036,7 @@ final class YarboPaperDevice
             'light_off_s' => max(5, min(300, (int) ($input['light_off_s'] ?? $defaults['light_off_s']))),
             'brightness' => max(0, min(100, (int) ($input['brightness'] ?? $defaults['brightness']))),
             'lock_screen' => $lockScreen,
+            'unlock_page' => $unlockPage,
             'timezone' => $timezone,
             'alert_message' => $bool($input['alert_message'] ?? null, $defaults['alert_message']),
             'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),

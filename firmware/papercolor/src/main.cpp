@@ -69,6 +69,7 @@ bool screenLocked = false;
 uint32_t lastActivity = 0;
 int lockAfterS = 60;
 String lockScreen = "logo";
+String unlockPage = "home";
 bool vestaboardOn = false;
 int vestaboardCodes[3][15];
 String vestaboardHash = "";
@@ -92,6 +93,7 @@ void saveConfig()
     prefs.putString("url", panelUrl);
     prefs.putString("token", token);
     prefs.putString("name", deviceName);
+    prefs.putString("unlock", unlockPage);
     prefs.end();
 }
 
@@ -103,6 +105,10 @@ void loadConfig()
     panelUrl = prefs.getString("url", "");
     token = prefs.getString("token", "");
     deviceName = prefs.getString("name", "Paper Colour");
+    String unlock = prefs.getString("unlock", unlockPage);
+    if (unlock.length()) {
+        unlockPage = unlock;
+    }
     prefs.end();
 }
 
@@ -208,6 +214,25 @@ int firstEnabledPage()
         if (pageEnabled(i)) return i;
     }
     return PAPERMONO_PAGE_HOME;
+}
+
+int pageFromUnlockId(const String &id)
+{
+    if (id == "status") return PAPERMONO_PAGE_STATUS;
+    if (id == "health") return PAPERMONO_PAGE_HEALTH;
+    if (id == "plans") return PAPERMONO_PAGE_PLANS;
+    if (id == "powerwall") return PAPERMONO_PAGE_POWERWALL;
+    if (id == "lymow") return PAPERMONO_PAGE_LYMOW;
+    if (id == "board" || id == "note") return PAPERMONO_PAGE_BOARD;
+    return PAPERMONO_PAGE_HOME;
+}
+
+void applyUnlockPage()
+{
+    currentPage = pageFromUnlockId(unlockPage);
+    if (!pageEnabled(currentPage)) {
+        currentPage = firstEnabledPage();
+    }
 }
 
 int stepEnabledPage(int from, int dir)
@@ -870,6 +895,11 @@ bool httpGetStatus()
     }
     lockAfterS = doc["lock_after_s"] | lockAfterS;
     lockScreen = doc["lock_screen"] | lockScreen;
+    String unlock = doc["unlock_page"] | "";
+    if (unlock.length() && unlock != unlockPage) {
+        unlockPage = unlock;
+        saveConfig();
+    }
     clockLocal = doc["clock_local"] | clockLocal;
     clockDate = doc["clock_date"] | clockDate;
     vestaboardHash = doc["vestaboard_hash"] | vestaboardHash;
@@ -1112,6 +1142,10 @@ void loop()
         lastActivity = millis();
         if (!screenLocked) {
             M5.Display.wakeup();
+            applyUnlockPage();
+            if (currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {
+                httpGetPlans(false);
+            }
         }
         drawScreen(true);
         return;

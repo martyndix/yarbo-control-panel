@@ -6,7 +6,7 @@ Firmware for **[M5Stack PaperColor](https://docs.m5stack.com/en/core/PaperColor)
 | --- | --- |
 | **Model** | M5Stack PaperColor |
 | **Screen** | E Ink Spectra 6 (white, black, red, yellow, green, blue), ~10–20 s full refresh |
-| **Buttons** | **A / B** previous / next page. **C** lock screensaver / unlock |
+| **Buttons** | **A / B** previous / next page. **C** lock screensaver / unlock (opens the **Unlock to** page from companion settings) |
 | **SoC** | ESP32-S3R8, same USB-C flash story as PaperMono |
 
 This is **not** PaperS3 (touch, grayscale) and **not** PaperMono C153.

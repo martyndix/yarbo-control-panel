@@ -221,6 +221,8 @@ def send_config(port: str, cfg: dict) -> None:
         body["brightness"] = int(cfg["brightness"])
     if cfg.get("lock_screen"):
         body["lock_screen"] = cfg["lock_screen"]
+    if cfg.get("unlock_page"):
+        body["unlock_page"] = cfg["unlock_page"]
     if cfg.get("clock_offset") is not None:
         body["clock_offset"] = int(cfg["clock_offset"])
     if cfg.get("clock_tz"):

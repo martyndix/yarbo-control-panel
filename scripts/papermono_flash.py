@@ -191,6 +191,8 @@ def extras_from_args(args) -> dict:
         extras["brightness"] = args.brightness
     if getattr(args, "lock_screen", None):
         extras["lock_screen"] = args.lock_screen
+    if getattr(args, "unlock_page", None):
+        extras["unlock_page"] = args.unlock_page
     if getattr(args, "clock_offset", None) is not None:
         extras["clock_offset"] = args.clock_offset
     if getattr(args, "timezone", None):
@@ -312,6 +314,7 @@ def main() -> int:
         p.add_argument("--kind", default=KIND_MONO)
         p.add_argument("--brightness", type=int, default=None)
         p.add_argument("--lock-screen", default=None)
+        p.add_argument("--unlock-page", default=None)
         p.add_argument("--clock-offset", type=int, default=None)
         p.add_argument("--timezone", default=None)
         p.add_argument("--vestaboard", type=int, default=None)

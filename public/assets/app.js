@@ -213,6 +213,7 @@ const els = {
     papermonoLogoClear: document.getElementById('papermono-logo-clear'),
     papermonoLogoResult: document.getElementById('papermono-logo-result'),
     papermonoLockScreen: document.getElementById('papermono-lock-screen'),
+    papermonoUnlockPage: document.getElementById('papermono-unlock-page'),
     papermonoTimezone: document.getElementById('papermono-timezone'),
     papermonoLockAfter: document.getElementById('papermono-lock-after'),
     papermonoLightOff: document.getElementById('papermono-light-off'),
@@ -5322,6 +5323,7 @@ async function downloadPaperSetupKit() {
 function applyPaperMonoPrefs(prefs) {
     if (!prefs || typeof prefs !== 'object') return;
     if (els.papermonoLockScreen) els.papermonoLockScreen.value = prefs.lock_screen || 'both';
+    if (els.papermonoUnlockPage) els.papermonoUnlockPage.value = prefs.unlock_page || 'home';
     applyPaperMonoTimezone(prefs.timezone || '');
     if (els.papermonoLockAfter) els.papermonoLockAfter.value = String(prefs.lock_after_s ?? 60);
     if (els.papermonoLightOff) els.papermonoLightOff.value = String(prefs.light_off_s ?? 15);
@@ -5350,6 +5352,7 @@ function paperMonoPrefsPayload() {
     return {
         action: 'prefs',
         lock_screen: els.papermonoLockScreen?.value || 'both',
+        unlock_page: els.papermonoUnlockPage?.value || 'home',
         timezone: els.papermonoTimezone?.value || clientTimezone() || '',
         lock_after_s: Number(els.papermonoLockAfter?.value || 60),
         light_off_s: Number(els.papermonoLightOff?.value || 15),

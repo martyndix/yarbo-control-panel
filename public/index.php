@@ -1030,6 +1030,23 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 </select>
                             </label>
                             <label class="settings-field">
+                                <span class="label">Unlock to</span>
+                                <select id="papermono-unlock-page">
+                                    <option value="home" selected>Yarbo (Home)</option>
+                                    <option value="status">Status</option>
+                                    <option value="health">Health</option>
+                                    <option value="plans">Plans</option>
+                                    <option value="note">Note</option>
+                                    <option value="board">Vestaboard</option>
+                                    <option value="powerwall">Powerwall</option>
+                                    <option value="lymow">Lymow</option>
+                                    <option value="radio">Radio</option>
+                                    <option value="device">Device</option>
+                                    <option value="house">House</option>
+                                </select>
+                            </label>
+                            <p class="hint">Page shown after Unlock (PaperMono) or button C (Paper Colour). If that module is off, the tablet uses the first available page. Applies on the next poll after you save — no reflash.</p>
+                            <label class="settings-field">
                                 <span class="label">Timezone</span>
                                 <select id="papermono-timezone">
                                     <option value="">Auto (this browser)</option>

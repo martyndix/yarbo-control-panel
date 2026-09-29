@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.39] - 2026-09-29
+
+### Added
+- Companion setting **Unlock to** picks which page opens after Unlock (PaperMono) or button C (Paper Colour). Firmware **0.1.37** / **0.2.14-colour**.
+
 ## [3.0.38] - 2026-09-29
 
 ### Changed
