@@ -682,11 +682,14 @@ final class YarboVestaboard
 
     private function rotateViewIsAvailable(string $id): bool
     {
+        $modules = (new YarboHub($this->projectRoot))->load()['modules'];
+        if ($id === YarboHub::LIVE_BATTERIES) {
+            return YarboHub::allViewAvailable($modules);
+        }
         if ($id === YarboHub::MODULE_YARBO
             || $id === YarboHub::MODULE_POWERWALL
-            || $id === YarboHub::MODULE_LYMOW
-            || $id === YarboHub::LIVE_BATTERIES) {
-            return true;
+            || $id === YarboHub::MODULE_LYMOW) {
+            return !empty($modules[$id]);
         }
 
         return false;

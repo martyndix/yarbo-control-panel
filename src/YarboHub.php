@@ -70,7 +70,7 @@ final class YarboHub
         if (isset($decoded['modules']) && is_array($decoded['modules'])) {
             foreach (self::MODULES as $id) {
                 if (array_key_exists($id, $decoded['modules'])) {
-                    $modules[$id] = (bool) $decoded['modules'][$id];
+                    $modules[$id] = self::asBool($decoded['modules'][$id]);
                 }
             }
         }
@@ -99,20 +99,7 @@ final class YarboHub
             return false;
         }
         $current = $this->load();
-        $modules = $current['modules'];
-        if (isset($input['modules']) && is_array($input['modules'])) {
-            foreach (self::MODULES as $id) {
-                if (array_key_exists($id, $input['modules'])) {
-                    $modules[$id] = (bool) $input['modules'][$id];
-                }
-            }
-        }
-        foreach (self::MODULES as $id) {
-            $key = 'module_' . $id;
-            if (array_key_exists($key, $input)) {
-                $modules[$id] = (bool) $input[$key];
-            }
-        }
+        $modules = self::modulesFromInput($input, $current['modules']);
         if (!self::anyEnabled($modules)) {
             return false;
         }
@@ -153,14 +140,31 @@ final class YarboHub
     /**
      * @return list<array{id: string, label: string}>
      */
-    public static function vestaboardLiveChoices(): array
+    public static function vestaboardLiveChoices(?array $modules = null): array
     {
-        return [
+        $all = [
             ['id' => self::MODULE_YARBO, 'label' => 'Yarbo'],
             ['id' => self::MODULE_POWERWALL, 'label' => 'Powerwall'],
             ['id' => self::MODULE_LYMOW, 'label' => 'Lymow'],
             ['id' => self::LIVE_BATTERIES, 'label' => 'ALL'],
         ];
+        if ($modules === null) {
+            return $all;
+        }
+        $out = [];
+        foreach ($all as $choice) {
+            if ($choice['id'] === self::LIVE_BATTERIES) {
+                if (self::allViewAvailable($modules)) {
+                    $out[] = $choice;
+                }
+                continue;
+            }
+            if (!empty($modules[$choice['id']])) {
+                $out[] = $choice;
+            }
+        }
+
+        return $out;
     }
 
     public function houseName(): string
@@ -218,8 +222,100 @@ final class YarboHub
             'vestaboard_live' => $config['vestaboard_live'],
             'house_name' => $config['house_name'],
             'panel_title' => self::panelTitle($config['house_name']),
-            'vestaboard_live_choices' => self::vestaboardLiveChoices(),
+            'vestaboard_live_choices' => self::vestaboardLiveChoices($config['modules']),
         ];
+    }
+
+    public static function asBool(mixed $value, bool $default = false): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return $value != 0;
+        }
+        if (is_string($value)) {
+            $s = strtolower(trim($value));
+            if (in_array($s, ['1', 'true', 'yes', 'on'], true)) {
+                return true;
+            }
+            if (in_array($s, ['0', 'false', 'no', 'off', ''], true)) {
+                return false;
+            }
+        }
+        if ($value === null) {
+            return $default;
+        }
+
+        return (bool) $value;
+    }
+
+    /**
+     * HTML omits unchecked boxes, so a settings save that mentions any module
+     * treats missing module keys as off.
+     *
+     * @param array<string, mixed> $input
+     * @param array<string, bool> $current
+     * @return array<string, bool>
+     */
+    public static function modulesFromInput(array $input, array $current): array
+    {
+        $modules = $current;
+        $mentioned = false;
+        if (isset($input['modules']) && is_array($input['modules'])) {
+            foreach (self::MODULES as $id) {
+                if (!array_key_exists($id, $input['modules'])) {
+                    continue;
+                }
+                $mentioned = true;
+                $modules[$id] = self::asBool($input['modules'][$id]);
+            }
+        }
+        foreach (self::MODULES as $id) {
+            $key = 'module_' . $id;
+            if (!array_key_exists($key, $input)) {
+                continue;
+            }
+            $mentioned = true;
+            $modules[$id] = self::asBool($input[$key]);
+        }
+        if (!$mentioned) {
+            return $modules;
+        }
+        foreach (self::MODULES as $id) {
+            $inMap = isset($input['modules']) && is_array($input['modules']) && array_key_exists($id, $input['modules']);
+            $inFlat = array_key_exists('module_' . $id, $input);
+            if (!$inMap && !$inFlat) {
+                $modules[$id] = false;
+            }
+        }
+
+        return $modules;
+    }
+
+    /**
+     * PaperMono menu buttons for disabled dashboards stay off even if the
+     * tablet still has that page ticked in E-paper settings.
+     *
+     * @param array<string, bool> $visible
+     * @param array<string, bool> $modules
+     * @return array<string, bool>
+     */
+    public static function menuVisibleForModules(array $visible, array $modules): array
+    {
+        $map = [
+            'yarbo' => self::MODULE_YARBO,
+            'powerwall' => self::MODULE_POWERWALL,
+            'lymow' => self::MODULE_LYMOW,
+            'house' => self::MODULE_HOME,
+        ];
+        foreach ($map as $menuId => $moduleId) {
+            if (empty($modules[$moduleId])) {
+                $visible[$menuId] = false;
+            }
+        }
+
+        return $visible;
     }
 
     public static function anyEnabled(array $modules): bool
@@ -266,7 +362,14 @@ final class YarboHub
      */
     public static function allViewAvailable(array $modules): bool
     {
-        return self::enabledCount($modules) >= 2;
+        $n = 0;
+        foreach ([self::MODULE_YARBO, self::MODULE_POWERWALL, self::MODULE_LYMOW] as $id) {
+            if (!empty($modules[$id])) {
+                $n++;
+            }
+        }
+
+        return $n >= 2;
     }
 
     /**
@@ -287,6 +390,22 @@ final class YarboHub
      *
      * @param array<string, bool> $modules
      */
+    public static function firstEnabledVestaboardLive(array $modules): string
+    {
+        foreach ([self::MODULE_YARBO, self::MODULE_POWERWALL, self::MODULE_LYMOW] as $id) {
+            if (!empty($modules[$id])) {
+                return $id;
+            }
+        }
+
+        return self::MODULE_YARBO;
+    }
+
+    /**
+     * Combined batteries is a Vestaboard page, not a dashboard module.
+     *
+     * @param array<string, bool> $modules
+     */
     private function normalizeVestaboardLive(string $id, array $modules): string
     {
         $id = strtolower(trim($id));
@@ -294,12 +413,16 @@ final class YarboHub
             $id = self::LIVE_BATTERIES;
         }
         if ($id === self::LIVE_BATTERIES) {
-            return self::LIVE_BATTERIES;
+            return self::allViewAvailable($modules)
+                ? self::LIVE_BATTERIES
+                : self::firstEnabledVestaboardLive($modules);
         }
-        if ($id === self::MODULE_POWERWALL || $id === self::MODULE_LYMOW || $id === self::MODULE_YARBO) {
+        if (($id === self::MODULE_POWERWALL || $id === self::MODULE_LYMOW || $id === self::MODULE_YARBO)
+            && !empty($modules[$id])
+        ) {
             return $id;
         }
 
-        return self::firstEnabledId($modules);
+        return self::firstEnabledVestaboardLive($modules);
     }
 }

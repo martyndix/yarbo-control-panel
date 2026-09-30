@@ -62,18 +62,12 @@ if ($input === []) {
     }
 }
 
-$currentModules = $hub->load()['modules'];
-$modules = $currentModules;
-foreach (YarboHub::MODULES as $id) {
-    $key = 'module_' . $id;
-    if (array_key_exists($key, $input)) {
-        $modules[$id] = (bool) $input[$key];
-    }
-}
+$modules = YarboHub::modulesFromInput($input, $hub->load()['modules']);
 if (!YarboHub::anyEnabled($modules)) {
     json_response(['ok' => false, 'error' => 'Keep at least one module on'], 400);
 }
 $yarboOn = !empty($modules[YarboHub::MODULE_YARBO]);
+$input['modules'] = $modules;
 
 $host = trim((string) ($input['broker_host'] ?? $input['host'] ?? ''));
 $serial = trim((string) ($input['serial'] ?? ''));

@@ -2387,14 +2387,21 @@ function applyHubFromStatus(data) {
 }
 
 function setActiveModule(id, persist = true) {
-    const moduleId = id || 'yarbo';
+    const enabledIds = Array.isArray(lastHub?.enabled)
+        ? lastHub.enabled.map((m) => m.id)
+        : null;
+    let moduleId = id || 'yarbo';
+    if (enabledIds && enabledIds.length && !enabledIds.includes(moduleId)) {
+        moduleId = enabledIds[0];
+    }
     activeModuleId = moduleId;
     if (persist) {
         try { localStorage.setItem(ACTIVE_MODULE_KEY, moduleId); } catch { /* ignore */ }
     }
     document.querySelectorAll('#panel-sections .panel-section[data-module]').forEach((section) => {
         const owner = section.getAttribute('data-module');
-        const show = owner === 'shared' || owner === moduleId;
+        const ownerOn = !enabledIds || owner === 'shared' || enabledIds.includes(owner);
+        const show = owner === 'shared' || (owner === moduleId && ownerOn);
         section.classList.toggle('module-pane-hidden', !show);
     });
     els.moduleSwitcher?.querySelectorAll('[data-module-id]').forEach((btn) => {
@@ -4032,6 +4039,15 @@ function applyCompanionSettingsVisibility() {
     document.getElementById('papermono-alert-yarbo')?.closest('label')?.classList.toggle('hidden', !yarboOn);
     document.getElementById('papermono-alert-powerwall')?.closest('label')?.classList.toggle('hidden', !powerwallOn);
     document.getElementById('papermono-alert-lymow')?.closest('label')?.classList.toggle('hidden', !lymowOn);
+    document.querySelectorAll('#paper-menu-list [data-menu-id]').forEach((row) => {
+        const id = row.getAttribute('data-menu-id') || '';
+        let show = true;
+        if (id === 'yarbo') show = yarboOn;
+        else if (id === 'powerwall') show = powerwallOn;
+        else if (id === 'lymow') show = lymowOn;
+        else if (id === 'house') show = homeOn;
+        row.classList.toggle('hidden', !show);
+    });
     const active = document.querySelector('.settings-section.is-active');
     if (active?.classList.contains('hidden')) {
         showSettingsPane('modules');
@@ -4368,9 +4384,17 @@ function rotateViewCheckboxes() {
     return [...document.querySelectorAll('[data-rotate-view]')];
 }
 
-function applyRotateViewChoices() {
+function applyRotateViewChoices(extras) {
+    const e = extras && typeof extras === 'object' ? extras : vestaboardExtraModules(lastHub);
+    const count = (e.yarbo !== false ? 1 : 0) + (e.powerwall ? 1 : 0) + (e.lymow ? 1 : 0);
     document.querySelectorAll('[data-rotate-choice]').forEach((label) => {
-        label.classList.remove('hidden');
+        const id = label.getAttribute('data-rotate-choice') || '';
+        let show = true;
+        if (id === 'yarbo') show = e.yarbo !== false;
+        else if (id === 'powerwall') show = Boolean(e.powerwall);
+        else if (id === 'lymow') show = Boolean(e.lymow);
+        else if (id === 'batteries') show = count >= 2;
+        label.classList.toggle('hidden', !show);
     });
 }
 
@@ -4472,21 +4496,49 @@ function vestaboardExtraModules(hub) {
 }
 
 function applyVestaboardLiveChoices(extras, live) {
-    const chosen = live || 'yarbo';
+    const e = extras && typeof extras === 'object' ? extras : vestaboardExtraModules(lastHub);
+    const enabled = {
+        yarbo: e.yarbo !== false,
+        powerwall: Boolean(e.powerwall),
+        lymow: Boolean(e.lymow),
+    };
+    const allowAll = (enabled.yarbo ? 1 : 0) + (enabled.powerwall ? 1 : 0) + (enabled.lymow ? 1 : 0) >= 2;
+    const visibleIds = [];
     els.vestaboardLiveSwitch?.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
         const id = btn.getAttribute('data-vestaboard-live') || '';
-        btn.classList.remove('hidden');
+        let show = true;
+        if (id === 'yarbo') show = enabled.yarbo;
+        else if (id === 'powerwall') show = enabled.powerwall;
+        else if (id === 'lymow') show = enabled.lymow;
+        else if (id === 'batteries') show = allowAll;
+        btn.classList.toggle('hidden', !show);
+        if (show) visibleIds.push(id);
+    });
+    let chosen = live || 'yarbo';
+    if (!visibleIds.includes(chosen)) {
+        chosen = visibleIds[0] || 'yarbo';
+    }
+    els.vestaboardLiveSwitch?.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
+        const id = btn.getAttribute('data-vestaboard-live') || '';
         btn.classList.toggle('is-active', id === chosen);
     });
     if (els.settingsVestaboardLive) {
         [...els.settingsVestaboardLive.options].forEach((opt) => {
-            opt.hidden = false;
-            opt.disabled = false;
+            const id = opt.value;
+            let show = true;
+            if (id === 'yarbo') show = enabled.yarbo;
+            else if (id === 'powerwall') show = enabled.powerwall;
+            else if (id === 'lymow') show = enabled.lymow;
+            else if (id === 'batteries') show = allowAll;
+            opt.hidden = !show;
+            opt.disabled = !show;
         });
-        const values = [...els.settingsVestaboardLive.options].map((o) => o.value);
-        els.settingsVestaboardLive.value = values.includes(chosen) ? chosen : 'yarbo';
+        const values = [...els.settingsVestaboardLive.options]
+            .filter((o) => !o.hidden && !o.disabled)
+            .map((o) => o.value);
+        els.settingsVestaboardLive.value = values.includes(chosen) ? chosen : (values[0] || 'yarbo');
     }
-    applyRotateViewChoices();
+    applyRotateViewChoices(e);
 }
 
 async function setVestaboardLiveView(id, button) {
@@ -5181,6 +5233,7 @@ function closeSettingsModal() {
     if ((location.hash || '').startsWith('#settings')) {
         history.replaceState(null, '', `${location.pathname}${location.search}`);
     }
+    fetchStatus().catch(() => {});
 }
 
 function mailHashOpen() {
@@ -6296,6 +6349,7 @@ function paperMenuVisiblePayload() {
     document.querySelectorAll('[data-menu-visible]').forEach((el) => {
         const id = el.getAttribute('data-menu-visible');
         if (!id) return;
+        if (el.closest('[data-menu-id]')?.classList.contains('hidden')) return;
         out[id] = !!el.checked;
     });
     return out;
@@ -6793,6 +6847,12 @@ async function saveSettings(event) {
             module_powerwall: Boolean(els.settingsModulePowerwall?.checked),
             module_lymow: Boolean(els.settingsModuleLymow?.checked),
             module_home: Boolean(els.settingsModuleHome?.checked),
+            modules: {
+                yarbo: Boolean(els.settingsModuleYarbo?.checked),
+                powerwall: Boolean(els.settingsModulePowerwall?.checked),
+                lymow: Boolean(els.settingsModuleLymow?.checked),
+                home: Boolean(els.settingsModuleHome?.checked),
+            },
             vestaboard_live: els.settingsVestaboardLive?.value || 'yarbo',
             powerwall_transport: powerwallTransport(),
             powerwall_region: els.settingsPowerwallRegion?.value || 'eu',
@@ -6847,6 +6907,15 @@ async function saveSettings(event) {
         applyLymowDeviceName();
         applyDeviceNameSubtitle();
         applyPanelTitle(data.hub);
+        if (data.hub) {
+            applyModuleSwitcher(data.hub);
+            applyCompanionSettingsVisibility();
+            if (data.vestaboard) {
+                applyVestaboardLiveSwitch({ hub: data.hub, vestaboard: data.vestaboard });
+            } else {
+                applyVestaboardLiveChoices(vestaboardExtraModules(data.hub), data.hub.vestaboard_live || '');
+            }
+        }
         showToast('Settings saved', 'success');
         // Stay on Settings so Build firmware and other actions still work.
         fetchStatus().catch(() => {});

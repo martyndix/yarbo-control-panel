@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.66] - 2026-09-30
+
+### Fixed
+- Settings → Modules now saves an unticked dashboard and hides it on the website, PaperMono, Paper Colour, and Vestaboard live / rotate lists. PaperMono firmware **0.1.53** also drops POWER, LYMOW, HOUSE, and NOTE view buttons when that module is off. Queue a Wi-Fi update after this panel update so existing tablets match.
+
 ## [3.0.65] - 2026-09-30
 
 ### Added

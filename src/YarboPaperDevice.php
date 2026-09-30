@@ -14,7 +14,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.52';
+    public const FIRMWARE_VERSION = '0.1.53';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.16-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -958,7 +958,7 @@ final class YarboPaperDevice
         $powerFault = is_array($parsed) ? (int) ($parsed['power_fault'] ?? 0) : 0;
         $lyWork = isset($ly['work_status']) ? (int) $ly['work_status'] : null;
 
-        return [
+        $out = [
             'hub' => $hub->publicView(),
             'vestaboard_enabled' => !empty($vb['enabled']),
             'vestaboard_live' => $hub->vestaboardLive(),
@@ -984,6 +984,17 @@ final class YarboPaperDevice
             + $this->prefsCompact($forDevice)
             + $this->vestaboardCompact($vbObj, $vb, $parsed, $online)
             + $this->clockCompact($vbObj);
+        $out['menu_visible'] = YarboHub::menuVisibleForModules(
+            is_array($out['menu_visible'] ?? null) ? $out['menu_visible'] : [],
+            [
+                YarboHub::MODULE_YARBO => $yarboEnabled,
+                YarboHub::MODULE_POWERWALL => $pwEnabled,
+                YarboHub::MODULE_LYMOW => $lyEnabled,
+                YarboHub::MODULE_HOME => $homeEnabled,
+            ],
+        );
+
+        return $out;
     }
 
     /**

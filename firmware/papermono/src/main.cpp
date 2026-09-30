@@ -408,6 +408,15 @@ bool pageEnabled(int page)
     if (isYarboPage(page) && !yarboOn) {
         return false;
     }
+    if (page == PAPERMONO_PAGE_POWERWALL && !powerwallOn) {
+        return false;
+    }
+    if (page == PAPERMONO_PAGE_LYMOW && !lymowOn) {
+        return false;
+    }
+    if (page == PAPERMONO_PAGE_HOUSE && !homeOn) {
+        return false;
+    }
     return menuShow[page];
 }
 
@@ -497,24 +506,49 @@ int stepEnabledPage(int from, int dir)
     return firstEnabledPage();
 }
 
+bool noteChoiceEnabled(int i)
+{
+    if (i == 1) return powerwallOn;
+    if (i == 2) return lymowOn;
+    if (i == 3) return ((yarboOn ? 1 : 0) + (powerwallOn ? 1 : 0) + (lymowOn ? 1 : 0)) >= 2;
+    return yarboOn;
+}
+
 int noteChoiceCount()
 {
-    return 4;
+    int n = 0;
+    for (int i = 0; i < 4; i++) {
+        if (noteChoiceEnabled(i)) n++;
+    }
+    return n;
+}
+
+int noteChoiceRaw(int shown)
+{
+    int seen = 0;
+    for (int i = 0; i < 4; i++) {
+        if (!noteChoiceEnabled(i)) continue;
+        if (seen == shown) return i;
+        seen++;
+    }
+    return 0;
 }
 
 const char *noteChoiceId(int i)
 {
-    if (i == 1) return "powerwall";
-    if (i == 2) return "lymow";
-    if (i == 3) return "batteries";
+    int raw = noteChoiceRaw(i);
+    if (raw == 1) return "powerwall";
+    if (raw == 2) return "lymow";
+    if (raw == 3) return "batteries";
     return "yarbo";
 }
 
 const char *noteChoiceLabel(int i)
 {
-    if (i == 1) return "POWER";
-    if (i == 2) return "LYMOW";
-    if (i == 3) return "ALL";
+    int raw = noteChoiceRaw(i);
+    if (raw == 1) return "POWER";
+    if (raw == 2) return "LYMOW";
+    if (raw == 3) return "ALL";
     return "YARBO";
 }
 

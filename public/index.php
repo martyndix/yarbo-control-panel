@@ -796,7 +796,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-modules-section" data-settings-pane="modules">
                             <h3 class="settings-subtitle">Modules</h3>
-                            <p class="hint">Turn dashboards on or off. Keep at least one. The header switcher jumps between enabled modules. Vestaboard live buttons (Yarbo, Powerwall, Lymow, ALL) are always listed so you can put any of them on the Note. Quiet hours and Vestaboard-app hold still apply.</p>
+                            <p class="hint">Turn dashboards on or off. Keep at least one. The header switcher jumps between enabled modules. Off modules leave the website, PaperMono, Paper Colour, and Vestaboard live / rotate lists. Quiet hours and Vestaboard-app hold still apply.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-yarbo" name="module_yarbo" checked>
                                 <span>Yarbo (mower / snow, local MQTT)</span>
