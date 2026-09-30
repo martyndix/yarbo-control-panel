@@ -115,5 +115,101 @@ echo "--- /api/home.php ---"
 curl -sS -m 4 http://127.0.0.1:8080/api/home.php | php -r '$d=json_decode(stream_get_contents(STDIN), true); echo "devices=".count($d["devices"]??[])." fabric=".json_encode($d["fabric"]??[])." err=".($d["server"]["error"]??"")."\n";'
 ```
 
-After **3.0.60**, Home no longer waits on Docker during page load. **3.0.63** also reads a bare fabric node map and rebuilds lights from saved names/scenes. If that folder is truly empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
+After **3.0.60**, Home no longer waits on Docker during page load. **3.0.63** also reads a bare fabric node map and rebuilds lights from saved names/scenes. **3.0.64** puts node stubs back into the fabric JSON so python-matter-server can interview the existing CHIP fabric and commands work again. If that folder is truly empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
+
+If lights are listed but a room toggle says **Node N is not (yet) available**, the live Matter server has no node records (or they are offline). Do **not** pair the Hue Bridge again. Paste this on the Pi (it does not stop the panel), wait about 30 seconds, then toggle a light:
+
+```bash
+ROOT="$(systemctl show -p WorkingDirectory --value yarbo-panel)"
+export ROOT
+python3 - <<'PY'
+import json, os, shutil, socket, subprocess, time
+from pathlib import Path
+root = Path(os.environ["ROOT"])
+storage = root / "data" / "matter-server"
+home = json.loads((root / "data" / "home.json").read_text())
+ids = set()
+for mapping in (home.get("names") or {}, home.get("rooms") or {}, home.get("groups") or {}):
+    for device_id in mapping:
+        if isinstance(device_id, str) and ":" in device_id:
+            try:
+                ids.add(int(device_id.split(":", 1)[0]))
+            except ValueError:
+                pass
+for row in home.get("last_devices") or []:
+    try:
+        n = int((row or {}).get("node_id") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n > 0:
+        ids.add(n)
+ids = sorted(i for i in ids if i > 0)
+print("node_ids", ids)
+fabric = None
+best = -1
+for p in storage.glob("*.json"):
+    if p.name.startswith("chip.json") or p.name.endswith(".backup"):
+        continue
+    size = p.stat().st_size
+    if size > best:
+        fabric, best = p, size
+print("fabric", fabric)
+if not ids or fabric is None:
+    raise SystemExit("no fabric file or no saved node ids")
+data = json.loads(fabric.read_text())
+nodes = dict(data.get("nodes") or {}) if isinstance(data.get("nodes"), dict) else {}
+now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+for node_id in ids:
+    row = nodes.get(str(node_id))
+    attrs = row.get("attributes") if isinstance(row, dict) else None
+    if isinstance(attrs, dict) and attrs:
+        continue
+    nodes[str(node_id)] = {
+        "node_id": node_id,
+        "date_commissioned": now,
+        "last_interview": now,
+        "interview_version": 0,
+        "available": False,
+        "is_bridge": False,
+        "attributes": {},
+        "attribute_subscriptions": [],
+    }
+data["nodes"] = nodes
+data["last_node_id"] = max(int(data.get("last_node_id") or 0), max(ids))
+backup = Path(str(fabric) + ".nodes-restore")
+if not backup.exists():
+    shutil.copy2(fabric, backup)
+
+def docker(*args):
+    for prefix in ([], ["sudo", "-n"]):
+        try:
+            return subprocess.run(prefix + ["docker", *args], capture_output=True, text=True, timeout=30)
+        except FileNotFoundError:
+            continue
+    raise SystemExit("docker not found")
+
+print("stopping yarbo-matter-server")
+docker("stop", "yarbo-matter-server")
+fabric.write_text(json.dumps(data, separators=(",", ":")))
+os.chmod(fabric, 0o644)
+print("starting yarbo-matter-server")
+docker("start", "yarbo-matter-server")
+deadline = time.time() + 30
+while time.time() < deadline:
+    probe = socket.socket()
+    probe.settimeout(0.4)
+    try:
+        probe.connect(("127.0.0.1", 5580))
+        print("matter port 5580 is up")
+        break
+    except OSError:
+        time.sleep(1)
+    finally:
+        probe.close()
+else:
+    print("port 5580 not up yet; wait and retry a light")
+print("nodes now", list(nodes))
+print("wait ~30s for Hue interview, then toggle a light. Do not pair again.")
+PY
+```
 

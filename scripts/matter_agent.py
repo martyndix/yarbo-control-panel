@@ -6,6 +6,7 @@ Talks JSON HTTP on 127.0.0.1:8766 and forwards to python-matter-server
 
 Usage:
   python3 scripts/matter_agent.py
+  python3 scripts/matter_agent.py --restore-nodes
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -36,7 +38,7 @@ DOCKER_IMAGE = os.environ.get(
 )
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 5
+AGENT_VERSION = 6
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -82,6 +84,8 @@ _start_lock = threading.Lock()
 _started_docker = False
 _recovered_storage = False
 _recover_thread_started = False
+_recover_done = threading.Event()
+_restore_lock = threading.Lock()
 
 
 def attr_key(endpoint: int, cluster: int, attr: int) -> str:
@@ -359,6 +363,265 @@ def nodes_from_disk() -> list[dict[str, Any]]:
     return [found[key] for key in sorted(found)]
 
 
+def node_ids_from_home_store() -> list[int]:
+    ids: set[int] = set()
+    home = ROOT / "data" / "home.json"
+    cache = ROOT / "data" / "home-nodes-cache.json"
+    blobs: list[Any] = []
+    for path in (home, cache):
+        try:
+            blobs.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+    for data in blobs:
+        if not isinstance(data, dict):
+            continue
+        for key in ("names", "rooms", "groups"):
+            mapping = data.get(key)
+            if isinstance(mapping, dict):
+                for device_id in mapping:
+                    if isinstance(device_id, str) and ":" in device_id:
+                        try:
+                            ids.add(int(device_id.split(":", 1)[0]))
+                        except ValueError:
+                            pass
+        for row in data.get("last_devices") or data.get("devices") or []:
+            if isinstance(row, dict):
+                try:
+                    node_id = int(row.get("node_id") or 0)
+                except (TypeError, ValueError):
+                    node_id = 0
+                if node_id > 0:
+                    ids.add(node_id)
+        for scene in data.get("scenes") or []:
+            if not isinstance(scene, dict):
+                continue
+            for action in scene.get("actions") or []:
+                if not isinstance(action, dict):
+                    continue
+                device_id = str(action.get("id") or "")
+                if ":" in device_id:
+                    try:
+                        ids.add(int(device_id.split(":", 1)[0]))
+                    except ValueError:
+                        pass
+        for device_id in data.get("device_order") or []:
+            if isinstance(device_id, str) and ":" in device_id:
+                try:
+                    ids.add(int(device_id.split(":", 1)[0]))
+                except ValueError:
+                    pass
+        paper = data.get("paper")
+        if isinstance(paper, dict):
+            for lst in paper.values():
+                if not isinstance(lst, list):
+                    continue
+                for device_id in lst:
+                    if isinstance(device_id, str) and ":" in device_id:
+                        try:
+                            ids.add(int(device_id.split(":", 1)[0]))
+                        except ValueError:
+                            pass
+    return sorted(i for i in ids if i > 0)
+
+
+def fabric_json_path() -> Path | None:
+    best: Path | None = None
+    best_size = -1
+    for path in storage_json_files():
+        name = path.name.lower()
+        if name.startswith("chip.json") or name.endswith(".backup"):
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size > best_size:
+            best = path
+            best_size = size
+    return best
+
+
+def load_fabric_json() -> tuple[Path | None, dict[str, Any]]:
+    path = fabric_json_path()
+    if path is None:
+        return None, {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return path, {}
+    return path, data if isinstance(data, dict) else {}
+
+
+def fabric_node_map(data: dict[str, Any]) -> dict[str, Any]:
+    existing = data.get("nodes")
+    return dict(existing) if isinstance(existing, dict) else {}
+
+
+def fabric_needs_node_restore(node_ids: list[int] | None = None) -> bool:
+    wanted = node_ids if node_ids is not None else node_ids_from_home_store()
+    if not wanted:
+        return False
+    _path, data = load_fabric_json()
+    nodes = fabric_node_map(data)
+    for node_id in wanted:
+        row = nodes.get(str(node_id))
+        if not isinstance(row, dict):
+            return True
+    return False
+
+
+def restore_nodes_into_fabric() -> list[int]:
+    """Re-insert Matter node stubs so python-matter-server can interview the Hue fabric."""
+    node_ids = node_ids_from_home_store()
+    path, data = load_fabric_json()
+    if not node_ids or path is None or not data:
+        return []
+    nodes = fabric_node_map(data)
+    changed = False
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    written: list[int] = []
+    for node_id in node_ids:
+        key = str(node_id)
+        row = nodes.get(key)
+        attrs = row.get("attributes") if isinstance(row, dict) else None
+        if isinstance(attrs, dict) and attrs:
+            continue
+        nodes[key] = {
+            "node_id": node_id,
+            "date_commissioned": now,
+            "last_interview": now,
+            "interview_version": 0,
+            "available": False,
+            "is_bridge": False,
+            "attributes": {},
+            "attribute_subscriptions": [],
+        }
+        written.append(node_id)
+        changed = True
+    if not changed:
+        return []
+    data["nodes"] = nodes
+    try:
+        current_last = int(data.get("last_node_id") or 0)
+    except (TypeError, ValueError):
+        current_last = 0
+    data["last_node_id"] = max(current_last, max(node_ids))
+    backup = Path(str(path) + ".nodes-restore")
+    try:
+        if not backup.exists():
+            shutil.copy2(path, backup)
+        path.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
+    except OSError:
+        return []
+    ensure_storage_readable()
+    return written
+
+
+def stop_matter_server() -> None:
+    reset_ws()
+    run_docker(["stop", DOCKER_NAME], timeout=25.0)
+
+
+def start_matter_container() -> bool:
+    inspect = run_docker(["inspect", "-f", "{{.Id}}", DOCKER_NAME], timeout=8.0)
+    if inspect.returncode != 0:
+        return False
+    run_docker(["start", DOCKER_NAME], timeout=25.0)
+    return wait_matter_port(30.0)
+
+
+def reload_matter_server() -> bool:
+    stop_matter_server()
+    return start_matter_container()
+
+
+def interview_node_ids(node_ids: list[int]) -> None:
+    for node_id in node_ids:
+        matter_rpc("interview_node", {"node_id": node_id}, timeout=45.0)
+
+
+def live_node_ids() -> list[int]:
+    rpc = matter_rpc("get_nodes", timeout=8.0)
+    if not rpc.get("ok"):
+        return []
+    found: list[int] = []
+    for node in nodes_from_result(rpc.get("result")):
+        if not isinstance(node, dict):
+            continue
+        try:
+            node_id = int(node.get("node_id") or node.get("nodeId") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+        if node_id > 0:
+            found.append(node_id)
+    return found
+
+
+def wait_node_available(node_id: int, timeout: float) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        rpc = matter_rpc("get_node", {"node_id": node_id}, timeout=4.0)
+        node = rpc.get("result") if rpc.get("ok") else None
+        if isinstance(node, dict) and node.get("available"):
+            return True
+        time.sleep(1.0)
+    return False
+
+
+def wait_any_node_available(node_ids: list[int], timeout: float) -> bool:
+    if not node_ids:
+        return False
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        rpc = matter_rpc("get_nodes", timeout=8.0)
+        if rpc.get("ok"):
+            wanted = set(node_ids)
+            for node in nodes_from_result(rpc.get("result")):
+                if not isinstance(node, dict) or not node.get("available"):
+                    continue
+                try:
+                    node_id = int(node.get("node_id") or node.get("nodeId") or 0)
+                except (TypeError, ValueError):
+                    node_id = 0
+                if node_id in wanted:
+                    return True
+        time.sleep(1.5)
+    return False
+
+
+def persist_node_stubs_and_reload() -> list[int]:
+    """Stop the Matter container, write missing node stubs, then start it again."""
+    wanted = node_ids_from_home_store()
+    if not wanted:
+        return []
+    ensure_matter_server()
+    with _restore_lock:
+        live = live_node_ids()
+        need_write = fabric_needs_node_restore(wanted)
+        if not need_write and live:
+            return wanted
+        stop_matter_server()
+        restore_nodes_into_fabric()
+        start_matter_container()
+    return wanted
+
+
+def node_unavailable(result: dict[str, Any]) -> bool:
+    err = str(result.get("error") or "").lower()
+    return "not (yet) available" in err or "is not available" in err
+
+
+def command_with_reconnect(node_id: int, send) -> dict[str, Any]:
+    result = send()
+    if result.get("ok") or not node_unavailable(result):
+        return result
+    start_background_recover()
+    _recover_done.wait(timeout=45.0)
+    wait_node_available(node_id, 5.0)
+    return send()
+
+
 def docker_data_mount() -> str:
     inspect = run_docker(
         [
@@ -455,6 +718,7 @@ def start_background_recover() -> None:
     if _recover_thread_started:
         return
     _recover_thread_started = True
+    _recover_done.clear()
     threading.Thread(target=_background_recover, daemon=True).start()
 
 
@@ -463,18 +727,28 @@ def _background_recover() -> None:
         note = recover_docker_storage()
         if note:
             print(f"matter recover: {note}", flush=True)
-        rpc = matter_rpc("get_nodes", timeout=45.0)
+        restored = persist_node_stubs_and_reload()
+        if restored:
+            print(f"matter recover: node stubs {restored}", flush=True)
+            if not wait_any_node_available(restored, 35.0):
+                interview_node_ids(restored)
+                wait_any_node_available(restored, 20.0)
+        rpc = matter_rpc("get_nodes", timeout=20.0)
         nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
         if nodes and not flatten_nodes(nodes):
+            ids: list[int] = []
             for node in nodes:
                 try:
                     node_id = int(node.get("node_id") or node.get("nodeId") or 0)
                 except (TypeError, ValueError):
                     node_id = 0
                 if node_id > 0:
-                    matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0)
+                    ids.append(node_id)
+            interview_node_ids(ids)
     except Exception as exc:  # noqa: BLE001
         print(f"matter recover failed: {exc}", flush=True)
+    finally:
+        _recover_done.set()
 
 
 def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -1033,18 +1307,21 @@ def color_payload(attributes: dict[str, Any], endpoint: int, type_ids: list[int]
 
 
 def device_command(node_id: int, endpoint: int, cluster: int, name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    rpc = matter_rpc(
-        "device_command",
-        {
-            "node_id": node_id,
-            "endpoint_id": endpoint,
-            "cluster_id": cluster,
-            "command_name": name,
-            "payload": payload,
-        },
-        timeout=12.0,
-    )
-    return rpc if not rpc.get("ok") else {"ok": True}
+    def send() -> dict[str, Any]:
+        rpc = matter_rpc(
+            "device_command",
+            {
+                "node_id": node_id,
+                "endpoint_id": endpoint,
+                "cluster_id": cluster,
+                "command_name": name,
+                "payload": payload,
+            },
+            timeout=12.0,
+        )
+        return rpc if not rpc.get("ok") else {"ok": True}
+
+    return command_with_reconnect(node_id, send)
 
 
 def is_transport_error(result: dict[str, Any]) -> bool:
@@ -1270,6 +1547,21 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "node_count": len(nodes),
             "fabric": fabric,
         }
+    if op == "restore_nodes":
+        restored = persist_node_stubs_and_reload()
+        if restored:
+            threading.Thread(
+                target=lambda: (
+                    wait_any_node_available(restored, 35.0)
+                    or interview_node_ids(restored)
+                ),
+                daemon=True,
+            ).start()
+        return {
+            "ok": True,
+            "restored": restored,
+            "reloaded": bool(restored),
+        }
     if op == "commission":
         code = str(body.get("code") or "").strip()
         if not code:
@@ -1300,17 +1592,21 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         action = str(body.get("action") or body.get("command") or "").strip().lower()
         if action in ("on", "off", "toggle"):
             name = {"on": "On", "off": "Off", "toggle": "Toggle"}[action]
-            rpc = matter_rpc(
-                "device_command",
-                {
-                    "node_id": node_id,
-                    "endpoint_id": endpoint,
-                    "cluster_id": ON_OFF,
-                    "command_name": name,
-                    "payload": {},
-                },
-                timeout=12.0,
-            )
+
+            def send_onoff() -> dict[str, Any]:
+                return matter_rpc(
+                    "device_command",
+                    {
+                        "node_id": node_id,
+                        "endpoint_id": endpoint,
+                        "cluster_id": ON_OFF,
+                        "command_name": name,
+                        "payload": {},
+                    },
+                    timeout=12.0,
+                )
+
+            rpc = command_with_reconnect(node_id, send_onoff)
             return rpc if not rpc.get("ok") else {"ok": True}
         if action == "brightness":
             pct = max(0, min(100, int(body.get("brightness") or 0)))
@@ -1380,5 +1676,17 @@ def main() -> None:
         pass
 
 
+def restore_nodes_cli() -> int:
+    STORAGE.mkdir(parents=True, exist_ok=True)
+    ensure_storage_readable()
+    restored = persist_node_stubs_and_reload()
+    print(f"restored={restored}", flush=True)
+    if restored:
+        wait_any_node_available(restored, 40.0)
+    return 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ("--restore-nodes", "restore_nodes"):
+        raise SystemExit(restore_nodes_cli())
     main()

@@ -6,7 +6,7 @@ namespace Yarbo;
 
 final class YarboMatterAgentClient
 {
-    public const MIN_VERSION = 5;
+    public const MIN_VERSION = 6;
 
     private static bool $spawnAttempted = false;
 
@@ -23,10 +23,6 @@ final class YarboMatterAgentClient
         return new self('127.0.0.1', $port);
     }
 
-    /**
-     * @param array<string, mixed> $body
-     * @return array<string, mixed>
-     */
     /**
      * @param array<string, mixed> $body
      * @return array<string, mixed>

@@ -583,10 +583,10 @@ final class YarboHome
         if (($action === 'color_temp' || $action === 'kelvin') && array_key_exists('kelvin', $input)) {
             $body['kelvin'] = max(1500, min(8000, (int) $input['kelvin']));
         }
-        $result = $agent->request($body, 15.0);
+        $result = $agent->request($body, 60.0);
         if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
             $agent->forceRestart();
-            $result = $agent->request($body, 15.0);
+            $result = $agent->request($body, 60.0);
         }
         if (!($result['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string) ($result['error'] ?? 'Command failed')];
