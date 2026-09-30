@@ -290,7 +290,14 @@ print("refresh Home. Names/rooms/scenes come from data/home.json. Do not pair.")
 PY
 ```
 
-If interview fails with **Failed to interview node 13**, names are still safe. The Hue Bridge did not answer Matter (CASE/mDNS), or `chip.json` no longer has that node’s credentials. Paste this dump (still do not pair):
+If interview fails with **Failed to interview node 13**, names are still safe. The Hue Bridge did not answer Matter (CASE/mDNS), or `chip.json` no longer has that node’s credentials. On the Pi (still do not pair):
+
+```bash
+cd "$(systemctl show -p WorkingDirectory --value yarbo-panel)"
+python3 scripts/matter_check_node.py
+```
+
+That prints CHIP logs, `chip.json` keys, Hue/Matter mDNS, and retries the interview. Or paste this dump:
 
 ```bash
 echo "=== logs ==="
