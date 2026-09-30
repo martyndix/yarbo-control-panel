@@ -116,21 +116,31 @@ def main() -> int:
         raise SystemExit(f"reconnect {retried} calls={calls['n']}")
 
     owned = storage / "root-owned.json"
-    owned.write_text(json.dumps({"vendor_info": {"9": "x"}}), encoding="utf-8")
-    os.chmod(owned, 0o444)
+    secret = json.dumps({"vendor_info": {"9": "x"}, "keep": True})
+    owned.write_text(secret, encoding="utf-8")
+    os.chmod(owned, 0o000)
 
     def fake_docker(args, timeout=12.0):
         if args and args[0] == "cp" and len(args) >= 3:
-            src = Path(args[1])
-            dest = storage / Path(str(args[2]).split("/")[-1])
-            os.chmod(dest, 0o644)
-            dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            src, dest = str(args[1]), str(args[2])
+            if ":/data/" in src:
+                Path(dest).write_text(secret, encoding="utf-8")
+                return __import__("subprocess").CompletedProcess(args=["docker", *args], returncode=0, stdout="", stderr="")
+            target = storage / Path(dest.split("/")[-1])
+            try:
+                os.chmod(target, 0o644)
+            except OSError:
+                pass
+            target.write_text(Path(src).read_text(encoding="utf-8"), encoding="utf-8")
             return __import__("subprocess").CompletedProcess(args=["docker", *args], returncode=0, stdout="", stderr="")
         return __import__("subprocess").CompletedProcess(args=["docker"], returncode=1, stdout="", stderr="no docker")
 
     agent.run_docker = fake_docker  # type: ignore[method-assign]
+    pulled = agent.read_storage_file(owned)
+    if pulled != secret:
+        raise SystemExit(f"docker cp read fallback failed {pulled!r}")
     if not agent.write_storage_file(owned, json.dumps({"nodes": {"13": {"node_id": 13}}})):
-        raise SystemExit("docker cp fallback failed")
+        raise SystemExit("docker cp write fallback failed")
     copied = json.loads(owned.read_text(encoding="utf-8"))
     if "nodes" not in copied:
         raise SystemExit(f"root-owned fabric not replaced {copied}")

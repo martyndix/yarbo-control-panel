@@ -320,6 +320,37 @@ def write_storage_file(path: Path, text: str) -> bool:
             pass
 
 
+def read_storage_file(path: Path) -> str | None:
+    """Read Matter storage even when Docker left the file root:600."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        pass
+    fd, tmp_name = tempfile.mkstemp(prefix="yarbo-matter-read-", suffix=".json")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        copied = run_docker(["cp", f"{DOCKER_NAME}:/data/{path.name}", str(tmp)], timeout=15.0)
+        if copied.returncode == 0:
+            return tmp.read_text(encoding="utf-8")
+        sudo_cat = subprocess.run(
+            ["sudo", "-n", "cat", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if sudo_cat.returncode == 0:
+            return sudo_cat.stdout
+        return None
+    except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
+        return None
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
 def ensure_storage_readable() -> None:
     """Docker bind-mounts are often root:600; the panel user cannot flatten those files."""
     try:
@@ -478,9 +509,12 @@ def load_fabric_json() -> tuple[Path | None, dict[str, Any]]:
     path = fabric_json_path()
     if path is None:
         return None, {}
+    raw = read_storage_file(path)
+    if not raw:
+        return path, {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        data = json.loads(raw)
+    except json.JSONDecodeError:
         return path, {}
     return path, data if isinstance(data, dict) else {}
 
@@ -545,10 +579,9 @@ def restore_nodes_into_fabric() -> list[int]:
         try:
             shutil.copy2(path, backup)
         except OSError:
-            try:
-                write_storage_file(backup, path.read_text(encoding="utf-8"))
-            except OSError:
-                pass
+            raw = read_storage_file(path)
+            if raw:
+                write_storage_file(backup, raw)
     if not write_storage_file(path, payload):
         return []
     ensure_storage_readable()

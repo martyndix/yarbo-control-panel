@@ -117,68 +117,12 @@ curl -sS -m 4 http://127.0.0.1:8080/api/home.php | php -r '$d=json_decode(stream
 
 After **3.0.60**, Home no longer waits on Docker during page load. **3.0.63** also reads a bare fabric node map and rebuilds lights from saved names/scenes. **3.0.64** puts node stubs back into the fabric JSON so python-matter-server can interview the existing CHIP fabric and commands work again. If that folder is truly empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
 
-If lights are listed but a room toggle says **Node N is not (yet) available**, the live Matter server has no node records (or they are offline). Do **not** pair the Hue Bridge again. Paste this on the Pi (it does not stop the panel). The fabric JSON is often root-owned, so this copies it in with Docker rather than writing it as `admin`. Wait about 30 seconds after it prints `matter port 5580 is up`, then toggle a light:
+If lights are listed but a room toggle says **Node N is not (yet) available**, the live Matter server has no node records (or they are offline). Do **not** pair the Hue Bridge again. Paste this on the Pi (it does not stop the panel). After a Docker stop the fabric JSON is often `root:600`, so this copies it out and back with `docker cp` and never reads it as `admin`. Wait about 30 seconds after it prints `matter port 5580 is up`, then toggle a light:
 
 ```bash
-ROOT="$(systemctl show -p WorkingDirectory --value yarbo-panel)"
-export ROOT
 python3 - <<'PY'
-import json, os, socket, subprocess, time
+import json, socket, subprocess, time
 from pathlib import Path
-root = Path(os.environ["ROOT"])
-storage = root / "data" / "matter-server"
-home = json.loads((root / "data" / "home.json").read_text())
-ids = set()
-for mapping in (home.get("names") or {}, home.get("rooms") or {}, home.get("groups") or {}):
-    for device_id in mapping:
-        if isinstance(device_id, str) and ":" in device_id:
-            try:
-                ids.add(int(device_id.split(":", 1)[0]))
-            except ValueError:
-                pass
-for row in home.get("last_devices") or []:
-    try:
-        n = int((row or {}).get("node_id") or 0)
-    except (TypeError, ValueError):
-        n = 0
-    if n > 0:
-        ids.add(n)
-ids = sorted(i for i in ids if i > 0)
-print("node_ids", ids)
-fabric = None
-best = -1
-for p in storage.glob("*.json"):
-    if p.name.startswith("chip.json") or p.name.endswith(".backup"):
-        continue
-    size = p.stat().st_size
-    if size > best:
-        fabric, best = p, size
-print("fabric", fabric)
-if not ids or fabric is None:
-    raise SystemExit("no fabric file or no saved node ids")
-data = json.loads(fabric.read_text())
-nodes = dict(data.get("nodes") or {}) if isinstance(data.get("nodes"), dict) else {}
-now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-for node_id in ids:
-    row = nodes.get(str(node_id))
-    attrs = row.get("attributes") if isinstance(row, dict) else None
-    if isinstance(attrs, dict) and attrs:
-        continue
-    nodes[str(node_id)] = {
-        "node_id": node_id,
-        "date_commissioned": now,
-        "last_interview": now,
-        "interview_version": 0,
-        "available": False,
-        "is_bridge": False,
-        "attributes": {},
-        "attribute_subscriptions": [],
-    }
-data["nodes"] = nodes
-data["last_node_id"] = max(int(data.get("last_node_id") or 0), max(ids))
-tmp = Path("/tmp/yarbo-fabric-nodes.json")
-tmp.write_text(json.dumps(data, separators=(",", ":")))
-print("wrote", tmp, "bytes", tmp.stat().st_size)
 
 def docker(*args, required=True):
     for prefix in ([], ["sudo", "-n"]):
@@ -186,17 +130,39 @@ def docker(*args, required=True):
             r = subprocess.run(prefix + ["docker", *args], capture_output=True, text=True, timeout=40)
         except FileNotFoundError:
             continue
-        print("docker", " ".join(args), "rc", r.returncode, (r.stderr or "")[-200:].strip())
+        print("docker", " ".join(args), "rc", r.returncode, (r.stderr or "")[-180:].strip())
         if r.returncode == 0:
             return r
     if not required:
         return None
-    raise SystemExit("docker command failed: " + " ".join(args))
+    raise SystemExit("docker failed: " + " ".join(args))
 
+name = "1415963636765591517.json"
+incoming = Path("/tmp/yarbo-fabric-in.json")
+outgoing = Path("/tmp/yarbo-fabric-out.json")
 print("stopping yarbo-matter-server (ok if already stopped)")
 docker("stop", "yarbo-matter-server", required=False)
-print("copying fabric into container as root")
-docker("cp", str(tmp), f"yarbo-matter-server:/data/{fabric.name}")
+print("copying fabric out as root")
+docker("cp", f"yarbo-matter-server:/data/{name}", str(incoming))
+data = json.loads(incoming.read_text())
+print("top keys", list(data)[:12] if isinstance(data, dict) else type(data).__name__)
+nodes = dict(data.get("nodes") or {}) if isinstance(data.get("nodes"), dict) else {}
+now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+nodes["13"] = {
+    "node_id": 13,
+    "date_commissioned": now,
+    "last_interview": now,
+    "interview_version": 0,
+    "available": False,
+    "is_bridge": False,
+    "attributes": {},
+    "attribute_subscriptions": [],
+}
+data["nodes"] = nodes
+data["last_node_id"] = max(int(data.get("last_node_id") or 0), 13)
+outgoing.write_text(json.dumps(data, separators=(",", ":")))
+print("copying fabric back")
+docker("cp", str(outgoing), f"yarbo-matter-server:/data/{name}")
 print("starting yarbo-matter-server")
 docker("start", "yarbo-matter-server")
 deadline = time.time() + 30
@@ -212,7 +178,7 @@ while time.time() < deadline:
     finally:
         probe.close()
 else:
-    print("port 5580 not up yet; wait and retry a light")
+    print("port 5580 not up yet")
 docker("exec", "yarbo-matter-server", "sh", "-c", "chmod a+r /data/*.json /data/*.json.backup; chmod a+X /data")
 print("nodes now", list(nodes))
 print("wait ~30s for Hue interview, then toggle a light. Do not pair again.")
