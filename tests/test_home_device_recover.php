@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/YarboHome.php';
 require __DIR__ . '/../src/YarboHub.php';
+require __DIR__ . '/../src/YarboMatterFabric.php';
 
 $root = sys_get_temp_dir() . '/yarbo-home-recover-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);
