@@ -78,5 +78,42 @@ git fetch origin main
 
 Then hard-refresh. **Do not pair the Hue Bridge again** unless that folder is empty — pairing a second time uses another fabric slot.
 
-After **3.0.60**, Home no longer waits on Docker during page load. If Home says **0 devices**, pairing is stored in `data/matter-server/` (not git). Docker often writes those files as `root:600`, which the panel cannot read. **3.0.61** chmod’s them on start. If that folder is truly empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
+If Home still says **0 devices**, paste this dump (do not stop the panel):
+
+```bash
+ROOT="$(systemctl show -p WorkingDirectory --value yarbo-panel)"
+python3 - <<PY
+import json, os, stat
+from pathlib import Path
+root = Path("$ROOT") / "data/matter-server"
+print("dir", root, "readable", os.access(root, os.R_OK))
+for p in sorted(root.glob("*")):
+    if not p.is_file():
+        continue
+    st = p.stat()
+    print(f"{p.name} size={st.st_size} mode={oct(st.st_mode & 0o777)} uid={st.st_uid} readable={os.access(p, os.R_OK)}")
+    if not p.name.endswith(".json") or p.name.startswith("chip"):
+        continue
+    try:
+        data = json.loads(p.read_text())
+    except Exception as e:
+        print("  json error", type(e).__name__, e)
+        continue
+    keys = list(data)[:12] if isinstance(data, dict) else type(data).__name__
+    print("  top", keys)
+    nodes = data.get("nodes") if isinstance(data, dict) else None
+    print("  nodes", type(nodes).__name__, (len(nodes) if hasattr(nodes, "__len__") and not isinstance(nodes, str) else None))
+    if isinstance(nodes, dict) and nodes:
+        first = next(iter(nodes.values()))
+        if isinstance(first, dict):
+            attrs = first.get("attributes") if isinstance(first.get("attributes"), dict) else {}
+            print("  first node keys", list(first)[:12], "attrs", len(attrs), "sample", list(attrs)[:8])
+PY
+echo "--- home.json ---"
+php -r '$j=json_decode(file_get_contents($argv[1]), true); echo "names=".count($j["names"]??[])." last=".count($j["last_devices"]??[])." scenes=".count($j["scenes"]??[])."\n"; $ids=[]; foreach($j["scenes"]??[] as $s){ foreach($s["actions"]??[] as $a){ if(!empty($a["id"])) $ids[$a["id"]]=true; } } echo "scene_device_ids=".count($ids)."\n";' "$ROOT/data/home.json"
+echo "--- /api/home.php ---"
+curl -sS -m 4 http://127.0.0.1:8080/api/home.php | php -r '$d=json_decode(stream_get_contents(STDIN), true); echo "devices=".count($d["devices"]??[])." fabric=".json_encode($d["fabric"]??[])." err=".($d["server"]["error"]??"")."\n";'
+```
+
+After **3.0.60**, Home no longer waits on Docker during page load. **3.0.63** also reads a bare fabric node map and rebuilds lights from saved names/scenes. If that folder is truly empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
 

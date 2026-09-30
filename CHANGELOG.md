@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.63] - 2026-09-30
+
+### Fixed
+- Home reads more Matter fabric JSON shapes (a bare `{"1": node}` map as well as `"nodes": {...}`) and rebuilds light rows from saved names, rooms, and scenes when the live list is empty. Do not pair the Hue Bridge a second time.
+
 ## [3.0.62] - 2026-09-30
 
 ### Fixed

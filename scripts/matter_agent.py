@@ -342,18 +342,7 @@ def nodes_from_disk() -> list[dict[str, Any]]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
-        rows: list[Any] = []
-        if isinstance(data, dict):
-            raw = data.get("nodes", data.get("result"))
-            if isinstance(raw, dict):
-                rows = list(raw.values())
-            elif isinstance(raw, list):
-                rows = raw
-            elif "node_id" in data or "attributes" in data:
-                rows = [data]
-        elif isinstance(data, list):
-            rows = data
-        for row in rows:
+        for row in nodes_from_result(data):
             if not isinstance(row, dict):
                 continue
             try:
@@ -664,19 +653,39 @@ def matter_rpc(command: str, args: dict[str, Any] | None = None, timeout: float 
         return {"ok": False, "error": str(last_err) if last_err else "Matter server unavailable"}
 
 
-def nodes_from_result(raw: Any) -> list[dict[str, Any]]:
+def looks_like_node(row: dict[str, Any]) -> bool:
+    return "node_id" in row or "nodeId" in row or isinstance(row.get("attributes"), dict)
+
+
+def collect_node_dicts(raw: Any, depth: int = 0) -> list[dict[str, Any]]:
+    if depth > 6:
+        return []
     if isinstance(raw, list):
-        return [node for node in raw if isinstance(node, dict)]
-    if isinstance(raw, dict):
-        for key in ("nodes", "result", "data"):
-            nested = raw.get(key)
-            if isinstance(nested, list):
-                return [node for node in nested if isinstance(node, dict)]
-            if isinstance(nested, dict):
-                return [node for node in nested.values() if isinstance(node, dict)]
-        if "node_id" in raw or "attributes" in raw:
-            return [raw]
-    return []
+        out: list[dict[str, Any]] = []
+        for item in raw:
+            out.extend(collect_node_dicts(item, depth + 1))
+        return out
+    if not isinstance(raw, dict):
+        return []
+    if looks_like_node(raw):
+        return [raw]
+    for key in ("nodes", "result", "data"):
+        if key in raw:
+            found = collect_node_dicts(raw[key], depth + 1)
+            if found:
+                return found
+    nodeish = [v for v in raw.values() if isinstance(v, dict) and looks_like_node(v)]
+    if nodeish:
+        return nodeish
+    out: list[dict[str, Any]] = []
+    for value in raw.values():
+        if isinstance(value, (dict, list)):
+            out.extend(collect_node_dicts(value, depth + 1))
+    return out
+
+
+def nodes_from_result(raw: Any) -> list[dict[str, Any]]:
+    return collect_node_dicts(raw)
 
 
 def endpoint_ids(attributes: dict[str, Any]) -> set[int]:

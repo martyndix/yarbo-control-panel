@@ -87,6 +87,13 @@ def main() -> int:
     if len(lights) != 12:
         raise SystemExit(f"disk flatten {len(lights)}")
 
+    tmp2 = Path(tempfile.mkdtemp())
+    agent.STORAGE = tmp2
+    (tmp2 / "1415.json").write_text(json.dumps({"1": hue_bridge(9), "last_node_id": 1}))
+    bare = agent.flatten_nodes(agent.nodes_from_disk())
+    if len(bare) != 9:
+        raise SystemExit(f"bare fabric map flattened to {len(bare)}")
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 

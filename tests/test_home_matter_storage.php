@@ -146,4 +146,37 @@ if (!str_contains((string) ($blocked['error'] ?? ''), 'cannot read')) {
     exit(1);
 }
 
+$bare = YarboMatterFabric::flatten(YarboMatterFabric::nodesFromResult(['1' => hue_bridge(8), 'last_node_id' => 1]));
+if (count($bare) !== 8) {
+    fwrite(STDERR, 'bare fabric map flattened to ' . count($bare) . "\n");
+    exit(1);
+}
+
+$metaRoot = sys_get_temp_dir() . '/yarbo-home-meta-' . bin2hex(random_bytes(3));
+mkdir($metaRoot . '/data', 0775, true);
+file_put_contents($metaRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($metaRoot . '/data/home.json', json_encode([
+    'names' => ['1:10' => 'Porch', '1:11' => 'Garden'],
+    'room_defs' => [],
+    'rooms' => ['1:10' => 'r1'],
+    'group_defs' => [],
+    'groups' => [],
+    'scenes' => [
+        ['id' => 's1', 'name' => 'Outdoor Lights', 'actions' => [['id' => '1:10', 'on' => true], ['id' => '1:12', 'on' => true]]],
+    ],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [],
+], JSON_UNESCAPED_SLASHES));
+$meta = (new YarboHome($metaRoot))->localHomeDevices();
+$metaIds = array_column($meta['devices'], 'id');
+sort($metaIds);
+if ($metaIds !== ['1:10', '1:11', '1:12'] || ($meta['fabric']['source'] ?? '') !== 'meta') {
+    fwrite(STDERR, 'meta fallback failed ' . json_encode($meta) . "\n");
+    exit(1);
+}
+
 echo "ok\n";

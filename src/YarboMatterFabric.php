@@ -77,7 +77,8 @@ final class YarboMatterFabric
             if (!is_string($raw) || $raw === '') {
                 continue;
             }
-            $data = json_decode($raw, true);
+            $flags = defined('JSON_BIGINT_AS_STRING') ? JSON_BIGINT_AS_STRING : 0;
+            $data = json_decode($raw, true, 512, $flags);
             foreach (self::nodesFromResult($data) as $row) {
                 $nodeId = (int) ($row['node_id'] ?? $row['nodeId'] ?? 0);
                 if ($nodeId <= 0) {
@@ -102,12 +103,22 @@ final class YarboMatterFabric
      */
     public static function nodesFromResult(mixed $raw): array
     {
+        return self::collectNodeDicts($raw);
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<array<string, mixed>>
+     */
+    private static function collectNodeDicts(mixed $raw, int $depth = 0): array
+    {
+        if ($depth > 6) {
+            return [];
+        }
         if (is_array($raw) && array_is_list($raw)) {
             $out = [];
-            foreach ($raw as $node) {
-                if (is_array($node)) {
-                    $out[] = $node;
-                }
+            foreach ($raw as $item) {
+                $out = array_merge($out, self::collectNodeDicts($item, $depth + 1));
             }
 
             return $out;
@@ -115,30 +126,46 @@ final class YarboMatterFabric
         if (!is_array($raw)) {
             return [];
         }
-        foreach (['nodes', 'result', 'data'] as $key) {
-            if (!array_key_exists($key, $raw)) {
-                continue;
-            }
-            $nested = $raw[$key];
-            if (is_array($nested) && array_is_list($nested)) {
-                return self::nodesFromResult($nested);
-            }
-            if (is_array($nested)) {
-                $out = [];
-                foreach ($nested as $node) {
-                    if (is_array($node)) {
-                        $out[] = $node;
-                    }
-                }
-
-                return $out;
-            }
-        }
-        if (isset($raw['node_id']) || isset($raw['nodeId']) || isset($raw['attributes'])) {
+        if (self::looksLikeNode($raw)) {
             return [$raw];
         }
+        foreach (['nodes', 'result', 'data'] as $key) {
+            if (array_key_exists($key, $raw)) {
+                $found = self::collectNodeDicts($raw[$key], $depth + 1);
+                if ($found !== []) {
+                    return $found;
+                }
+            }
+        }
+        $nodeish = [];
+        foreach ($raw as $val) {
+            if (is_array($val) && self::looksLikeNode($val)) {
+                $nodeish[] = $val;
+            }
+        }
+        if ($nodeish !== []) {
+            return $nodeish;
+        }
+        $out = [];
+        foreach ($raw as $val) {
+            if (is_array($val)) {
+                $out = array_merge($out, self::collectNodeDicts($val, $depth + 1));
+            }
+        }
 
-        return [];
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private static function looksLikeNode(array $row): bool
+    {
+        if (isset($row['node_id']) || isset($row['nodeId'])) {
+            return true;
+        }
+
+        return isset($row['attributes']) && is_array($row['attributes']);
     }
 
     /**

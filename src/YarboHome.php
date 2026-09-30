@@ -1243,20 +1243,28 @@ final class YarboHome
     {
         $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
         $storageDir = $this->projectRoot . '/data/matter-server';
+        $store = $this->load();
         $nodes = YarboMatterFabric::nodesFromDisk($storageDir);
         $fromDisk = YarboMatterFabric::flatten($nodes);
         $unreadable = YarboMatterFabric::unreadableStorageFiles($storageDir);
         $remembered = $this->rememberedOrCached($cachePath);
+        $fromMeta = $this->devicesFromStoreHints($store);
         $devices = self::preferLiveOrRemembered($fromDisk, $remembered);
+        $devices = self::preferLiveOrRemembered($devices, $fromMeta);
+        $source = $fromDisk !== [] ? 'disk' : ($remembered !== [] ? 'cache' : ($fromMeta !== [] ? 'meta' : ''));
         if ($fromDisk !== []) {
             $this->writeDeviceCache($cachePath, $fromDisk);
             $this->rememberDevices($fromDisk);
+        } elseif ($devices !== []) {
+            $this->rememberDevices($devices);
         }
         $ready = $this->matterPortUp();
         $ok = $devices !== [] || $ready;
         $hint = '';
         if ($devices === [] && $unreadable !== []) {
             $hint = 'Matter lights are saved on this Pi but the panel cannot read them (Docker wrote root-only files). Run: docker exec yarbo-matter-server sh -c \'chmod a+r /data/*.json /data/*.json.backup\' then refresh.';
+        } elseif ($devices === [] && YarboMatterFabric::storageFileNames($storageDir) !== []) {
+            $hint = 'A Matter fabric file is on disk but no lights were found in it. Do not pair the Hue Bridge again — paste the fabric dump from docs/home.md.';
         }
 
         return [
@@ -1264,7 +1272,7 @@ final class YarboHome
             'error' => $hint !== '' ? $hint : ($ok ? '' : 'Matter server is not running yet'),
             'devices' => $devices,
             'fabric' => [
-                'source' => $fromDisk !== [] ? 'disk' : ($remembered !== [] ? 'cache' : ''),
+                'source' => $source,
                 'storage_files' => YarboMatterFabric::storageFileNames($storageDir),
                 'storage_nodes' => count($nodes),
                 'unreadable_files' => $unreadable,
@@ -1395,6 +1403,88 @@ final class YarboHome
             'saved_at' => time(),
             'devices' => $devices,
         ], JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * Rebuild light rows from names, rooms, groups, and scene members when live/disk lists are empty.
+     *
+     * @param array<string, mixed> $store
+     * @return list<array<string, mixed>>
+     */
+    private function devicesFromStoreHints(array $store): array
+    {
+        $ids = [];
+        foreach (array_keys($store['names'] ?? []) as $id) {
+            $ids[(string) $id] = true;
+        }
+        foreach (array_keys($store['rooms'] ?? []) as $id) {
+            $ids[(string) $id] = true;
+        }
+        foreach (array_keys($store['groups'] ?? []) as $id) {
+            $ids[(string) $id] = true;
+        }
+        foreach ($store['device_order'] ?? [] as $id) {
+            $ids[(string) $id] = true;
+        }
+        foreach ($store['scenes'] ?? [] as $scene) {
+            if (!is_array($scene)) {
+                continue;
+            }
+            foreach ($scene['actions'] ?? [] as $action) {
+                if (!is_array($action)) {
+                    continue;
+                }
+                $id = trim((string) ($action['id'] ?? ''));
+                if ($id !== '' && !str_starts_with($id, 'scene:')) {
+                    $ids[$id] = true;
+                }
+            }
+        }
+        foreach ($store['paper'] ?? [] as $list) {
+            if (!is_array($list)) {
+                continue;
+            }
+            foreach ($list as $id) {
+                $id = trim((string) $id);
+                if ($id !== '' && !str_starts_with($id, 'scene:')) {
+                    $ids[$id] = true;
+                }
+            }
+        }
+        $out = [];
+        foreach (array_keys($ids) as $id) {
+            if (!str_contains($id, ':')) {
+                continue;
+            }
+            [$nodeS, $epS] = explode(':', $id, 2);
+            $nodeId = (int) $nodeS;
+            $endpoint = (int) $epS;
+            if ($nodeId <= 0 || $endpoint < 0) {
+                continue;
+            }
+            $out[] = [
+                'id' => $id,
+                'node_id' => $nodeId,
+                'endpoint' => $endpoint,
+                'name' => (string) ($store['names'][$id] ?? $id),
+                'kind' => self::KIND_LIGHT,
+                'vendor' => '',
+                'product' => '',
+                'source' => 'saved',
+                'bridge' => true,
+                'on' => false,
+                'brightness' => null,
+                'dimmable' => true,
+                'colorable' => true,
+                'color_hs' => true,
+                'color_xy' => true,
+                'color_ct' => true,
+                'color_hex' => '',
+                'available' => false,
+            ];
+        }
+
+        return $out;
     }
 
     /**

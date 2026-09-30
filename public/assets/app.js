@@ -3268,10 +3268,13 @@ function renderHomeDashboard(data) {
         let line = data.server?.ok
             ? `Matter server: connected · ${devices.length} device${devices.length === 1 ? '' : 's'}`
             : `Matter server: ${err || 'not running'}`;
-        if (devices.length === 0 && (fabric.unreadable_files || []).length) {
-            line += ' · storage not readable (root-owned files)';
-        } else if (devices.length === 0 && fabric.storage_nodes) {
-            line += ` · ${fabric.storage_nodes} node${fabric.storage_nodes === 1 ? '' : 's'} on disk`;
+        if (devices.length === 0) {
+            const files = fabric.storage_files || [];
+            const unread = fabric.unreadable_files || [];
+            line += ` · disk ${files.length} file${files.length === 1 ? '' : 's'}`;
+            if (unread.length) line += `, ${unread.length} unreadable`;
+            if (fabric.storage_nodes) line += `, ${fabric.storage_nodes} node${fabric.storage_nodes === 1 ? '' : 's'}`;
+            if (fabric.source) line += ` (${fabric.source})`;
         }
         status.textContent = line;
     }
