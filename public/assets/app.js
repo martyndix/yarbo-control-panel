@@ -71,6 +71,10 @@ const els = {
     waypointsNote: document.getElementById('waypoints-note'),
     settingsOpen: document.getElementById('settings-open'),
     settingsUpdateBadge: document.getElementById('settings-update-badge'),
+    mailOpen: document.getElementById('mail-open'),
+    mailOpenWrap: document.getElementById('mail-open-wrap'),
+    mailUnreadBadge: document.getElementById('mail-unread-badge'),
+    mailPage: document.getElementById('mail-page'),
     settingsModal: document.getElementById('settings-page'),
     settingsForm: document.getElementById('settings-form'),
     settingsHost: document.getElementById('settings-host'),
@@ -267,7 +271,7 @@ let yarboDeviceName = '';
 let lymowPageName = '';
 const LIGHTS_ON_KEY = 'yarbo_lights_on';
 const CONTROLLER_HOLD_KEY = 'yarbo_hold_controller';
-const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'mail', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls', 'powerwall', 'lymow'];
+const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls', 'powerwall', 'lymow'];
 const PANEL_LABELS = {
     status: 'Status',
     vestaboard: 'Vestaboard Note',
@@ -318,6 +322,7 @@ let polling = false;
 let hasStatusSnapshot = false;
 let commandQuietUntil = 0;
 let settingsModalOpen = false;
+let mailPageOpen = false;
 let statusAbort = null;
 let cameras = [];
 let cameraMode = 'stream';
@@ -541,10 +546,6 @@ function initPanelDragDrop() {
         if (!order.includes('vestaboard') && document.querySelector('[data-panel-id="vestaboard"]')) {
             const afterStatus = order.indexOf('status');
             order.splice(afterStatus >= 0 ? afterStatus + 1 : 0, 0, 'vestaboard');
-        }
-        if (!order.includes('mail') && document.querySelector('[data-panel-id="mail"]')) {
-            const afterBoard = order.indexOf('vestaboard');
-            order.splice(afterBoard >= 0 ? afterBoard + 1 : 0, 0, 'mail');
         }
         applyPanelOrder(order);
     }
@@ -5062,6 +5063,7 @@ function showSettingsPane(pane, { updateHash = true } = {}) {
 
 function openSettingsModal(pane) {
     if (!els.settingsModal) return;
+    if (mailPageOpen) closeMailPage({ updateHash: false });
     const alreadyOpen = settingsModalOpen;
     settingsModalOpen = true;
     if (statusAbort) {
@@ -5074,6 +5076,7 @@ function openSettingsModal(pane) {
     if (els.settingsOpen) {
         els.settingsOpen.textContent = 'Dashboard';
         els.settingsOpen.setAttribute('aria-expanded', 'true');
+        els.settingsOpen.classList.add('is-active');
     }
     if (!alreadyOpen) {
         setCloudTestResult(null);
@@ -5104,12 +5107,80 @@ function closeSettingsModal() {
     if (els.settingsOpen) {
         els.settingsOpen.textContent = 'Settings';
         els.settingsOpen.setAttribute('aria-expanded', 'false');
+        els.settingsOpen.classList.remove('is-active');
     }
     setSettingsError(null);
     setCloudTestResult(null);
     setConnectionTestResult(null);
     setUpdateResult(null);
     if ((location.hash || '').startsWith('#settings')) {
+        history.replaceState(null, '', `${location.pathname}${location.search}`);
+    }
+}
+
+function mailHashOpen() {
+    return (location.hash || '').replace(/^#/, '') === 'mail';
+}
+
+function setMailCompanionVisible(visible) {
+    const show = Boolean(visible);
+    els.mailOpenWrap?.classList.toggle('hidden', !show);
+    if (!show && mailPageOpen) {
+        closeMailPage();
+    }
+}
+
+function setMailUnreadBadge(count) {
+    const n = Number(count || 0);
+    if (!els.mailUnreadBadge) return;
+    const has = n > 0;
+    els.mailUnreadBadge.classList.toggle('hidden', !has);
+    els.mailUnreadBadge.setAttribute('aria-hidden', has ? 'false' : 'true');
+    els.mailUnreadBadge.title = n === 1 ? '1 unread message' : `${Math.max(0, n)} unread messages`;
+    if (els.mailOpen) {
+        els.mailOpen.setAttribute('aria-label', has
+            ? `Messages, ${n === 1 ? '1 unread' : `${n} unread`}`
+            : 'Messages');
+    }
+}
+
+function openMailPage({ updateHash = true } = {}) {
+    if (!els.mailPage || els.mailOpenWrap?.classList.contains('hidden')) return;
+    if (settingsModalOpen) closeSettingsModal();
+    const alreadyOpen = mailPageOpen;
+    mailPageOpen = true;
+    if (statusAbort) {
+        statusAbort.abort();
+        statusAbort = null;
+        polling = false;
+    }
+    els.mailPage.classList.remove('hidden');
+    document.body.classList.add('mail-page-open');
+    if (els.mailOpen) {
+        els.mailOpen.textContent = 'Dashboard';
+        els.mailOpen.setAttribute('aria-expanded', 'true');
+        els.mailOpen.classList.add('is-active');
+    }
+    if (updateHash && location.hash !== '#mail') {
+        history.replaceState(null, '', `${location.pathname}${location.search}#mail`);
+    }
+    if (!alreadyOpen) {
+        fetchPaperMail();
+        document.getElementById('paper-mail-text')?.focus();
+    }
+}
+
+function closeMailPage({ updateHash = true } = {}) {
+    if (!els.mailPage) return;
+    els.mailPage.classList.add('hidden');
+    document.body.classList.remove('mail-page-open');
+    mailPageOpen = false;
+    if (els.mailOpen) {
+        els.mailOpen.textContent = 'Messages';
+        els.mailOpen.setAttribute('aria-expanded', 'false');
+        els.mailOpen.classList.remove('is-active');
+    }
+    if (updateHash && mailHashOpen()) {
         history.replaceState(null, '', `${location.pathname}${location.search}`);
     }
 }
@@ -5681,15 +5752,14 @@ function renderPaperMailInbox(messages) {
         const who = mine
             ? (msg.to === '*' ? 'To ALL' : `To ${msg.to_name || 'tablet'}`)
             : (msg.from_name || 'tablet');
-        const status = mine ? (msg.read_label || 'Sent') : (msg.at_local || '');
         const preview = String(msg.text || '');
+        const meta = mine ? (msg.read_label || 'Sent') : String(msg.at_local || '');
         return `<button type="button" class="paper-mail-row${unread ? ' is-unread' : ''}${open ? ' is-open' : ''}${mine ? ' is-mine' : ''}" data-mail-id="${escapeHtml(id)}">
             <span class="paper-mail-row-top">
                 <strong>${escapeHtml(who)}</strong>
-                <span class="paper-mail-row-meta">${escapeHtml(status)}</span>
+                <span class="paper-mail-row-meta">${escapeHtml(meta)}</span>
             </span>
             <span class="paper-mail-row-text">${escapeHtml(preview)}</span>
-            ${msg.at_local && !mine ? `<span class="paper-mail-row-when">${escapeHtml(msg.at_local)}</span>` : ''}
         </button>`;
     }).join('');
 }
@@ -5701,10 +5771,13 @@ function renderPaperMail(data) {
     paperMailState.messages = Array.isArray(data.messages) ? data.messages : [];
     paperMailState.unread = Number(data.unread || 0);
     paperMailState.chars = Number(data.message_chars || 180);
-    const unreadEl = document.getElementById('paper-mail-unread');
-    if (unreadEl) {
-        unreadEl.textContent = paperMailState.unread === 1 ? '1 unread' : `${paperMailState.unread} unread`;
-        unreadEl.classList.toggle('hidden', paperMailState.unread <= 0);
+    const hasTablets = data.has_tablets !== undefined
+        ? Boolean(data.has_tablets)
+        : paperMailState.peers.length > 0;
+    setMailCompanionVisible(hasTablets);
+    setMailUnreadBadge(paperMailState.unread);
+    if (hasTablets && mailHashOpen() && !mailPageOpen) {
+        openMailPage({ updateHash: false });
     }
     const toEl = document.getElementById('paper-mail-to');
     if (toEl && document.activeElement !== toEl) {
@@ -5839,6 +5912,7 @@ async function loadPaperMonoDashboard() {
         applyPaperMonoPrefs(data.prefs);
         applyPaperWebClientName(data.web_client);
         renderPaperMonoDevices(data.devices);
+        setMailCompanionVisible(Array.isArray(data.devices) && data.devices.length > 0);
     } catch (err) {
         if (els.papermonoFwStatus) {
             els.papermonoFwStatus.textContent = err.message || 'Could not load e-paper companion status.';
@@ -6243,6 +6317,7 @@ async function revokePaperMono(id, button) {
         if (!data.ok) throw new Error(data.error || 'Revoke failed');
         showToast(`${label} revoked`, 'success');
         loadPaperMonoDashboard();
+        fetchPaperMail();
     } catch (err) {
         setPaperMonoResult(err.message || 'Revoke failed', 'error');
     } finally {
@@ -7208,7 +7283,7 @@ async function runPanelUpdate(button) {
 }
 
 async function fetchStatus() {
-    if (polling || settingsModalOpen || driveActive) return;
+    if (polling || settingsModalOpen || mailPageOpen || driveActive) return;
     if (Date.now() < commandQuietUntil) return;
     polling = true;
     if (statusAbort) {
@@ -7224,7 +7299,7 @@ async function fetchStatus() {
     try {
         const res = await fetch('/api/status.php', { signal, headers: clientTimezoneHeaders() });
         const data = await parseJsonResponse(res);
-        if (settingsModalOpen || driveActive) return;
+        if (settingsModalOpen || mailPageOpen || driveActive) return;
         if (data.ok) {
             hasStatusSnapshot = true;
             setError(null);
@@ -7238,7 +7313,7 @@ async function fetchStatus() {
             }
         }
     } catch (err) {
-        if (settingsModalOpen || driveActive) return;
+        if (settingsModalOpen || mailPageOpen || driveActive) return;
         if (err?.name === 'AbortError') {
             if (timedOut) {
                 setError('Yarbo status timed out. Other modules should still work.');
@@ -7702,6 +7777,10 @@ els.settingsOpen?.addEventListener('click', () => {
     if (settingsModalOpen) closeSettingsModal();
     else openSettingsModal();
 });
+els.mailOpen?.addEventListener('click', () => {
+    if (mailPageOpen) closeMailPage();
+    else openMailPage();
+});
 document.querySelector('.settings-nav')?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-settings-nav]');
     if (!btn) return;
@@ -7710,7 +7789,11 @@ document.querySelector('.settings-nav')?.addEventListener('click', (event) => {
 window.addEventListener('hashchange', () => {
     const pane = settingsHashPane();
     if (pane) openSettingsModal(pane);
-    else if (settingsModalOpen) closeSettingsModal();
+    else if (mailHashOpen()) openMailPage({ updateHash: false });
+    else {
+        if (settingsModalOpen) closeSettingsModal();
+        if (mailPageOpen) closeMailPage({ updateHash: false });
+    }
 });
 els.settingsForm?.addEventListener('submit', saveSettings);
 els.settingsConnectionTest?.addEventListener('click', (e) => testLocalConnection(e.currentTarget));
@@ -7966,6 +8049,10 @@ document.addEventListener('keydown', (event) => {
         closeSettingsModal();
         return;
     }
+    if (els.mailPage && !els.mailPage.classList.contains('hidden')) {
+        closeMailPage();
+        return;
+    }
     if (mapFullscreen) {
         setMapFullscreen(false);
     }
@@ -8131,4 +8218,6 @@ document.getElementById('home-paper-assign')?.addEventListener('change', async (
 refreshUpdateBadge();
 if (settingsHashPane()) {
     openSettingsModal();
+} else if (mailHashOpen()) {
+    fetchPaperMail();
 }

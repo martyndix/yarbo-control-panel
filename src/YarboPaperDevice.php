@@ -14,13 +14,15 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.47';
+    public const FIRMWARE_VERSION = '0.1.48';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
     public const MESSAGE_CHARS = 180;
+    public const MESSAGE_TTL_S = 604800;
+    public const COMPACT_INBOX = 8;
     public const LOGO_MAX_EDGE = 160;
     public const LOGO_MAX_UPLOAD_BYTES = 2097152;
     private const PLANS_CACHE_TTL_S = 300;
@@ -343,9 +345,11 @@ final class YarboPaperDevice
             'ok' => true,
             'web_client' => $this->publicDevice($web),
             'peers' => $peers,
+            'has_tablets' => $peers !== [],
             'messages' => array_slice($inbox, 0, 40),
             'unread' => $unread,
             'message_chars' => self::MESSAGE_CHARS,
+            'message_ttl_s' => self::MESSAGE_TTL_S,
         ];
     }
 
@@ -995,7 +999,7 @@ final class YarboPaperDevice
                 $inbox[] = $row;
             }
         }
-        $inbox = array_slice($inbox, -8);
+        $inbox = $this->compactInboxForDevice($inbox);
 
         return $prefs + [
             'device_id' => $id,
@@ -1182,6 +1186,82 @@ final class YarboPaperDevice
             'read_local' => $readLocal,
             'read_label' => $readLabel,
         ];
+    }
+
+    /**
+     * Keep unread notes (so an offline tablet still receives them) then fill with newest others.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function compactInboxForDevice(array $rows): array
+    {
+        if (count($rows) <= self::COMPACT_INBOX) {
+            return array_values($rows);
+        }
+        $unread = [];
+        $rest = [];
+        foreach ($rows as $row) {
+            if (!empty($row['unread'])) {
+                $unread[] = $row;
+            } else {
+                $rest[] = $row;
+            }
+        }
+        $unread = array_slice($unread, -self::COMPACT_INBOX);
+        $need = self::COMPACT_INBOX - count($unread);
+        $rest = $need > 0 ? array_slice($rest, -$need) : [];
+        $keep = [];
+        foreach (array_merge($unread, $rest) as $row) {
+            $id = (string) ($row['id'] ?? '');
+            if ($id !== '') {
+                $keep[$id] = true;
+            }
+        }
+        $out = [];
+        foreach ($rows as $row) {
+            $id = (string) ($row['id'] ?? '');
+            if ($id !== '' && isset($keep[$id])) {
+                $out[] = $row;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $messages
+     * @return list<array<string, mixed>>
+     */
+    private function messagesWithinTtl(array $messages, ?int $now = null): array
+    {
+        $now ??= time();
+        $kept = [];
+        foreach ($messages as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+            if ($this->messageIsExpired($message, $now)) {
+                continue;
+            }
+            $kept[] = $message;
+        }
+
+        return $kept;
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     */
+    private function messageIsExpired(array $message, int $now): bool
+    {
+        $at = trim((string) ($message['at'] ?? ''));
+        if ($at === '') {
+            return false;
+        }
+        $ts = strtotime($at);
+
+        return $ts !== false && ($now - $ts) > self::MESSAGE_TTL_S;
     }
 
     public function radioSyncWord(): int
@@ -2318,11 +2398,17 @@ final class YarboPaperDevice
             }
         }
 
-        return $this->ensureWebClient([
+        $kept = $this->messagesWithinTtl($messages);
+        $store = $this->ensureWebClient([
             'devices' => array_values($decoded['devices']),
             'prefs' => $this->normalizePrefs(is_array($decoded['prefs'] ?? null) ? $decoded['prefs'] : []),
-            'messages' => $messages,
+            'messages' => $kept,
         ]);
+        if (count($kept) !== count($messages)) {
+            $this->save($store);
+        }
+
+        return $store;
     }
 
     /**
@@ -2358,6 +2444,7 @@ final class YarboPaperDevice
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
+        $store['messages'] = $this->messagesWithinTtl(is_array($store['messages'] ?? null) ? $store['messages'] : []);
         file_put_contents(
             $this->storePath(),
             json_encode($store, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"

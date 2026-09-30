@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.54] - 2026-09-30
+
+### Changed
+- **Messages** is a header button next to Settings (not a dashboard card). It only appears when a PaperMono or Paper Colour is paired, and a blob matches the software-update badge when mail is unread. The To dropdown and message box use the same field styling as Settings.
+- PaperMono firmware **0.1.48**: notes wait on the panel if the destination tablet is off, then show when it next polls. Messages older than **7 days** are deleted from the panel store and from tablet inboxes.
+
 ## [3.0.53] - 2026-09-30
 
 ### Changed

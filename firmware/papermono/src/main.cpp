@@ -2358,6 +2358,18 @@ void applyCompactExtras(JsonDocument &doc)
     }
     JsonArray msgs = doc["paper_messages"].as<JsonArray>();
     if (!msgs.isNull()) {
+        String seenIds[PAPERMONO_INBOX_MAX];
+        int seenCount = inboxCount < PAPERMONO_INBOX_MAX ? inboxCount : PAPERMONO_INBOX_MAX;
+        for (int i = 0; i < seenCount; i++) {
+            seenIds[i] = inboxIds[i];
+        }
+        String viewingId = "";
+        if (radioUi == PAPERMONO_RADIO_VIEW && radioViewIndex >= 0 && radioViewIndex < inboxCount) {
+            viewingId = inboxIds[radioViewIndex];
+        }
+        inboxCount = 0;
+        bool anyNewUnread = false;
+        String newestId = "";
         for (JsonVariant item : msgs) {
             JsonObject m = item.as<JsonObject>();
             if (m.isNull()) continue;
@@ -2367,12 +2379,48 @@ void applyCompactExtras(JsonDocument &doc)
             String text = String((const char *) (m["text"] | ""));
             String when = String((const char *) (m["at_local"] | ""));
             bool mine = m["mine"] | false;
+            bool unread = m["unread"] | false;
             String toName = String((const char *) (m["to_name"] | "ALL"));
             String status = String((const char *) (m["read_label"] | ""));
-            if (text.length()) {
-                bool primed = lastInboxId.length() > 0;
-                pushInbox(id, from, fromId, text, primed && !mine, when, mine, toName, status);
+            if (!text.length()) continue;
+            bool known = false;
+            if (id.length()) {
+                for (int i = 0; i < seenCount; i++) {
+                    if (seenIds[i] == id) {
+                        known = true;
+                        break;
+                    }
+                }
             }
+            pushInbox(id, from, fromId, text, false, when, mine, toName, status);
+            if (!mine && unread && inboxCount > 0) {
+                inboxUnread[inboxCount - 1] = true;
+                if (!known) {
+                    anyNewUnread = true;
+                }
+            }
+            if (id.length()) {
+                newestId = id;
+            }
+        }
+        if (newestId.length()) {
+            lastInboxId = newestId;
+        }
+        radioViewIndex = -1;
+        if (viewingId.length()) {
+            for (int i = 0; i < inboxCount; i++) {
+                if (inboxIds[i] == viewingId) {
+                    radioViewIndex = i;
+                    break;
+                }
+            }
+        }
+        if (radioUi == PAPERMONO_RADIO_VIEW && radioViewIndex < 0) {
+            radioUi = PAPERMONO_RADIO_INBOX;
+        }
+        refreshUnreadLed();
+        if (anyNewUnread && alertMessageOn) {
+            alertMessage();
         }
     }
     bool anyError = (yarboOn && yarboError && alertYarboOn)

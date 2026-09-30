@@ -110,11 +110,15 @@ if ($devices->revoke('web')) {
 }
 
 $html = file_get_contents(__DIR__ . '/../public/index.php');
-foreach (['data-panel-id="mail"', 'id="paper-mail-name"', 'id="papermono-web-name"'] as $needle) {
+foreach (['id="mail-open"', 'id="mail-page"', 'id="paper-mail-name"', 'id="papermono-web-name"'] as $needle) {
     if (!str_contains((string) $html, $needle)) {
         fwrite(STDERR, "missing ui {$needle}\n");
         exit(1);
     }
+}
+if (str_contains((string) $html, 'data-panel-id="mail"')) {
+    fwrite(STDERR, "mail should not be a dashboard card\n");
+    exit(1);
 }
 
 echo "ok: paper web mail\n";

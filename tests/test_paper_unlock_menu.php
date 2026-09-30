@@ -24,14 +24,14 @@ $needles = [
     'void rebuildMenuLayout()',
     'void applyMenuVisible(JsonVariant vis)',
     'i == PAPERMONO_PAGE_HOME || i == PAPERMONO_PAGE_BOARD',
-    '#define PAPERMONO_FW_VERSION "0.1.47"',
-    "public const FIRMWARE_VERSION = '0.1.47';",
+    '#define PAPERMONO_FW_VERSION "0.1.48"',
+    "public const FIRMWARE_VERSION = '0.1.48';",
     'data-menu-label="status"',
     'data-menu-visible="status"',
     'paper-menu-group-title',
     'Yarbo pages sit together',
     'Unlock menu — Yarbo pages grouped. Tick which buttons to show. MAIL blob if unread',
-    'PaperMono firmware **0.1.47**',
+    'PaperMono firmware **0.1.48**',
 ];
 
 $hay = $fw . "\n" . $ver . "\n" . $php . "\n" . $html . "\n" . $log;
