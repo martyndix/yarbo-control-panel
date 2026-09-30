@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.50] - 2026-09-30
+
+### Added
+- The web dashboard is a MAIL device. Set its name on the **Mail** card (or Settings → E-paper). Tablets see that name in To / inbox, same as another PaperMono. Send to one tablet or ALL; opening a note marks it read.
+
 ## [3.0.49] - 2026-09-29
 
 ### Changed

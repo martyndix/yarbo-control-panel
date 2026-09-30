@@ -12,6 +12,8 @@ final class YarboPaperDevice
 {
     public const KIND_MONO = 'papermono';
     public const KIND_COLOR = 'papercolor';
+    public const KIND_WEB = 'web';
+    public const WEB_CLIENT_ID = 'web';
     public const FIRMWARE_VERSION = '0.1.44';
     public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -95,7 +97,8 @@ final class YarboPaperDevice
                     'pio' => 'pio run -e papercolor -d firmware/papercolor',
                 ],
             ],
-            'devices' => $this->publicDevices(),
+            'devices' => $this->publicTablets(),
+            'web_client' => $this->publicDevice($this->webClient()),
             'prefs' => $this->publicPrefs(),
         ] + $this->logoPublicView();
     }
@@ -256,12 +259,110 @@ final class YarboPaperDevice
     }
 
     /**
+     * Hardware tablets only (not the desktop MAIL client).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function publicTablets(): array
+    {
+        $out = [];
+        foreach ($this->publicDevices() as $device) {
+            if ($this->isHardwareKind((string) ($device['kind'] ?? ''))) {
+                $out[] = $device;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function webClient(): array
+    {
+        foreach ($this->load()['devices'] as $device) {
+            if (is_array($device) && $this->deviceKind($device) === self::KIND_WEB) {
+                return $device;
+            }
+        }
+
+        return [
+            'id' => self::WEB_CLIENT_ID,
+            'name' => 'Desktop',
+            'kind' => self::KIND_WEB,
+        ];
+    }
+
+    /**
+     * Dashboard MAIL inbox for the desktop client.
+     *
+     * @return array<string, mixed>
+     */
+    public function mailView(): array
+    {
+        $web = $this->webClient();
+        $id = (string) ($web['id'] ?? self::WEB_CLIENT_ID);
+        $tz = $this->prefsTimezone();
+        $inbox = [];
+        $unread = 0;
+        foreach ($this->load()['messages'] as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+            $row = $this->paperMessageForDevice($message, $id, $tz);
+            if ($row === null) {
+                continue;
+            }
+            if (!empty($row['unread'])) {
+                $unread++;
+            }
+            $inbox[] = $row;
+        }
+        $inbox = array_reverse($inbox);
+        $peers = [];
+        foreach ($this->load()['devices'] as $device) {
+            if (!is_array($device) || $this->deviceKind($device) === self::KIND_WEB) {
+                continue;
+            }
+            $peerId = (string) ($device['id'] ?? '');
+            if ($peerId === '') {
+                continue;
+            }
+            $kind = $this->deviceKind($device);
+            $peers[] = [
+                'id' => $peerId,
+                'name' => (string) ($device['name'] ?? $this->kindLabel($kind)),
+                'kind' => $kind,
+                'kind_label' => $this->kindLabel($kind),
+                'online' => $this->deviceIsOnline($device),
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'web_client' => $this->publicDevice($web),
+            'peers' => $peers,
+            'messages' => array_slice($inbox, 0, 40),
+            'unread' => $unread,
+            'message_chars' => self::MESSAGE_CHARS,
+        ];
+    }
+
+    public function isHardwareKind(string $kind): bool
+    {
+        return $kind === self::KIND_MONO || $kind === self::KIND_COLOR;
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
     public function register(array $input): array
     {
         $kind = $this->normalizeKind($input['kind'] ?? $input['hardware'] ?? null);
+        if ($kind === self::KIND_WEB) {
+            $kind = self::KIND_MONO;
+        }
         $name = trim((string) ($input['name'] ?? ''));
         if ($name === '') {
             $name = $kind === self::KIND_COLOR ? 'Paper Colour' : 'PaperMono';
@@ -285,6 +386,14 @@ final class YarboPaperDevice
 
     public function revoke(string $id): bool
     {
+        $id = trim($id);
+        if ($id === '' || $id === self::WEB_CLIENT_ID) {
+            return false;
+        }
+        $existing = $this->findById($id);
+        if ($existing !== null && $this->deviceKind($existing) === self::KIND_WEB) {
+            return false;
+        }
         $store = $this->load();
         $before = count($store['devices']);
         $store['devices'] = array_values(array_filter(
@@ -325,6 +434,11 @@ final class YarboPaperDevice
      */
     public function requestOta(string $id): array
     {
+        $id = trim($id);
+        $existing = $this->findById($id);
+        if ($existing !== null && $this->deviceKind($existing) === self::KIND_WEB) {
+            return ['ok' => false, 'error' => 'The desktop client does not take firmware updates.'];
+        }
         $store = $this->load();
         foreach ($store['devices'] as &$device) {
             if (!is_array($device) || (string) ($device['id'] ?? '') !== $id) {
@@ -379,6 +493,10 @@ final class YarboPaperDevice
             if (!is_array($device)) {
                 continue;
             }
+            $kind = $this->deviceKind($device);
+            if (!$this->isHardwareKind($kind)) {
+                continue;
+            }
             $id = (string) ($device['id'] ?? '');
             if ($id === '') {
                 continue;
@@ -423,6 +541,9 @@ final class YarboPaperDevice
             return false;
         }
         $kind = $this->deviceKind($device);
+        if ($kind === self::KIND_WEB) {
+            return true;
+        }
         $window = $kind === self::KIND_COLOR ? self::OTA_ONLINE_COLOR_S : self::OTA_ONLINE_MONO_S;
 
         return (time() - $ts) <= $window;
@@ -475,6 +596,9 @@ final class YarboPaperDevice
                 return ['ok' => false, 'error' => 'Unknown recipient'];
             }
             $toName = (string) ($peer['name'] ?? $to);
+        }
+        if ($to !== '*' && $to === $fromId) {
+            return ['ok' => false, 'error' => 'Cannot send a note to yourself'];
         }
         $store = $this->load();
         $message = [
@@ -836,7 +960,8 @@ final class YarboPaperDevice
         $prefs = $this->normalizePrefs($store['prefs']);
         $id = (string) ($forDevice['id'] ?? '');
         $name = (string) ($forDevice['name'] ?? '');
-        $peers = [];
+        $web = [];
+        $others = [];
         foreach ($store['devices'] as $device) {
             if (!is_array($device)) {
                 continue;
@@ -845,12 +970,19 @@ final class YarboPaperDevice
             if ($peerId === '' || $peerId === $id) {
                 continue;
             }
-            $peers[] = [
+            $kind = $this->deviceKind($device);
+            $row = [
                 'id' => $peerId,
-                'name' => (string) ($device['name'] ?? $this->kindLabel($this->deviceKind($device))),
-                'kind' => $this->deviceKind($device),
+                'name' => (string) ($device['name'] ?? $this->kindLabel($kind)),
+                'kind' => $kind,
             ];
+            if ($kind === self::KIND_WEB) {
+                $web[] = $row;
+            } else {
+                $others[] = $row;
+            }
         }
+        $peers = array_merge($web, $others);
         $inbox = [];
         $tz = $this->prefsTimezone();
         foreach ($store['messages'] as $message) {
@@ -1001,6 +1133,7 @@ final class YarboPaperDevice
         $reads = is_array($message['reads'] ?? null) ? $message['reads'] : [];
         $readNames = [];
         $firstReadAt = '';
+        $readerHasRead = false;
         foreach ($reads as $read) {
             if (!is_array($read)) {
                 continue;
@@ -1008,6 +1141,9 @@ final class YarboPaperDevice
             $rid = (string) ($read['id'] ?? '');
             if ($rid === '' || $rid === $from) {
                 continue;
+            }
+            if ($rid === $deviceId) {
+                $readerHasRead = true;
             }
             $rname = trim((string) ($read['name'] ?? ''));
             if ($rname !== '') {
@@ -1039,6 +1175,7 @@ final class YarboPaperDevice
             'at' => (string) ($message['at'] ?? ''),
             'at_local' => $this->formatMessageLocal((string) ($message['at'] ?? ''), $tz),
             'mine' => $mine,
+            'unread' => $incoming && !$readerHasRead,
             'read' => $readNames !== [],
             'read_by' => implode(', ', $readNames),
             'read_local' => $readLocal,
@@ -1995,9 +2132,12 @@ final class YarboPaperDevice
 
     public function normalizeKind(mixed $kind): string
     {
-        $value = strtolower(str_replace([' ', '_'], '', (string) $kind));
+        $value = strtolower(str_replace([' ', '_', '-'], '', (string) $kind));
         if (in_array($value, ['papercolor', 'papercolour', 'color', 'colour'], true)) {
             return self::KIND_COLOR;
+        }
+        if (in_array($value, ['web', 'desktop', 'browser', 'panel'], true)) {
+            return self::KIND_WEB;
         }
 
         return self::KIND_MONO;
@@ -2005,11 +2145,23 @@ final class YarboPaperDevice
 
     public function kindLabel(string $kind): string
     {
-        return $this->normalizeKind($kind) === self::KIND_COLOR ? 'Paper Colour' : 'PaperMono';
+        $kind = $this->normalizeKind($kind);
+        if ($kind === self::KIND_COLOR) {
+            return 'Paper Colour';
+        }
+        if ($kind === self::KIND_WEB) {
+            return 'Desktop';
+        }
+
+        return 'PaperMono';
     }
 
     public function firmwareVersionForKind(?string $kind): string
     {
+        if ($this->normalizeKind($kind) === self::KIND_WEB) {
+            return '';
+        }
+
         return $this->normalizeKind($kind) === self::KIND_COLOR
             ? self::FIRMWARE_VERSION_COLOR
             : self::FIRMWARE_VERSION;
@@ -2020,6 +2172,11 @@ final class YarboPaperDevice
      */
     public function deviceKind(array $device): string
     {
+        $id = (string) ($device['id'] ?? '');
+        $raw = strtolower(trim((string) ($device['kind'] ?? '')));
+        if ($id === self::WEB_CLIENT_ID || in_array($raw, ['web', 'desktop', 'browser', 'panel'], true)) {
+            return self::KIND_WEB;
+        }
         $inferred = $this->kindFromFirmware((string) ($device['fw_reported'] ?? ''));
         if ($inferred !== null) {
             return $inferred;
@@ -2059,12 +2216,12 @@ final class YarboPaperDevice
         ];
         $path = $this->storePath();
         if (!is_file($path)) {
-            return $empty;
+            return $this->ensureWebClient($empty);
         }
         $raw = file_get_contents($path);
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
         if (!is_array($decoded) || !isset($decoded['devices']) || !is_array($decoded['devices'])) {
-            return $empty;
+            return $this->ensureWebClient($empty);
         }
         $messages = [];
         if (isset($decoded['messages']) && is_array($decoded['messages'])) {
@@ -2075,11 +2232,35 @@ final class YarboPaperDevice
             }
         }
 
-        return [
+        return $this->ensureWebClient([
             'devices' => array_values($decoded['devices']),
             'prefs' => $this->normalizePrefs(is_array($decoded['prefs'] ?? null) ? $decoded['prefs'] : []),
             'messages' => $messages,
+        ]);
+    }
+
+    /**
+     * @param array{devices: list<array<string, mixed>>, prefs: array<string, mixed>, messages: list<array<string, mixed>>} $store
+     * @return array{devices: list<array<string, mixed>>, prefs: array<string, mixed>, messages: list<array<string, mixed>>}
+     */
+    private function ensureWebClient(array $store): array
+    {
+        foreach ($store['devices'] as $device) {
+            if (is_array($device) && $this->deviceKind($device) === self::KIND_WEB) {
+                return $store;
+            }
+        }
+        $store['devices'][] = [
+            'id' => self::WEB_CLIENT_ID,
+            'name' => 'Desktop',
+            'kind' => self::KIND_WEB,
+            'token' => '',
+            'created_at' => gmdate('c'),
+            'last_seen_at' => gmdate('c'),
         ];
+        $this->save($store);
+
+        return $store;
     }
 
     /**
@@ -2104,6 +2285,27 @@ final class YarboPaperDevice
     private function publicDevice(array $device, bool $includeToken = false): array
     {
         $kind = $this->deviceKind($device);
+        if ($kind === self::KIND_WEB) {
+            $row = [
+                'id' => (string) ($device['id'] ?? self::WEB_CLIENT_ID),
+                'name' => (string) ($device['name'] ?? 'Desktop'),
+                'kind' => self::KIND_WEB,
+                'kind_label' => $this->kindLabel(self::KIND_WEB),
+                'created_at' => $device['created_at'] ?? null,
+                'last_seen_at' => $device['last_seen_at'] ?? null,
+                'fw_reported' => null,
+                'firmware_latest' => '',
+                'firmware_built' => false,
+                'online' => true,
+                'ota_pending' => false,
+                'ota_available' => false,
+            ];
+            if ($includeToken) {
+                $row['token'] = '';
+            }
+
+            return $row;
+        }
         $row = [
             'id' => (string) ($device['id'] ?? ''),
             'name' => (string) ($device['name'] ?? $this->kindLabel($kind)),

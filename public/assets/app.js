@@ -268,7 +268,7 @@ let yarboDeviceName = '';
 let lymowPageName = '';
 const LIGHTS_ON_KEY = 'yarbo_lights_on';
 const CONTROLLER_HOLD_KEY = 'yarbo_hold_controller';
-const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls', 'powerwall', 'lymow'];
+const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'mail', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls', 'powerwall', 'lymow'];
 const PANEL_LABELS = {
     status: 'Status',
     vestaboard: 'Vestaboard Note',
@@ -542,6 +542,10 @@ function initPanelDragDrop() {
         if (!order.includes('vestaboard') && document.querySelector('[data-panel-id="vestaboard"]')) {
             const afterStatus = order.indexOf('status');
             order.splice(afterStatus >= 0 ? afterStatus + 1 : 0, 0, 'vestaboard');
+        }
+        if (!order.includes('mail') && document.querySelector('[data-panel-id="mail"]')) {
+            const afterBoard = order.indexOf('vestaboard');
+            order.splice(afterBoard >= 0 ? afterBoard + 1 : 0, 0, 'mail');
         }
         applyPanelOrder(order);
     }
@@ -5612,6 +5616,215 @@ async function queuePaperOta(id, button) {
     }
 }
 
+let paperMailState = {
+    webId: 'web',
+    name: 'Desktop',
+    peers: [],
+    messages: [],
+    unread: 0,
+    selectedId: '',
+    chars: 180,
+};
+
+function applyPaperWebClientName(client) {
+    const name = String(client?.name || 'Desktop');
+    paperMailState.name = name;
+    paperMailState.webId = String(client?.id || 'web');
+    const dash = document.getElementById('paper-mail-name');
+    const settings = document.getElementById('papermono-web-name');
+    if (dash && document.activeElement !== dash) dash.value = name;
+    if (settings && document.activeElement !== settings) settings.value = name;
+}
+
+async function savePaperWebClientName(raw) {
+    const name = String(raw || '').trim();
+    if (name === '') {
+        throw new Error('Give the desktop client a name');
+    }
+    const id = paperMailState.webId || 'web';
+    const res = await fetch('/api/device.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename', id, name }),
+    });
+    const data = await parseJsonResponse(res);
+    if (!data.ok) throw new Error(data.error || 'Could not save the desktop name');
+    applyPaperWebClientName(data.device);
+    return data.device;
+}
+
+function paperMailPeerOptions(peers, selected) {
+    const rows = Array.isArray(peers) ? peers : [];
+    const opts = ['<option value="*">ALL</option>'];
+    rows.forEach((peer) => {
+        const id = String(peer.id || '');
+        if (!id) return;
+        const name = escapeHtml(peer.name || peer.kind_label || 'Tablet');
+        const sel = selected === id ? ' selected' : '';
+        opts.push(`<option value="${escapeHtml(id)}"${sel}>${name}</option>`);
+    });
+    return opts.join('');
+}
+
+function renderPaperMailInbox(messages) {
+    const box = document.getElementById('paper-mail-inbox');
+    if (!box) return;
+    const rows = Array.isArray(messages) ? messages : [];
+    if (rows.length === 0) {
+        box.innerHTML = '<p class="hint">No messages yet.</p>';
+        return;
+    }
+    box.innerHTML = rows.map((msg) => {
+        const id = String(msg.id || '');
+        const mine = Boolean(msg.mine);
+        const unread = Boolean(msg.unread);
+        const open = paperMailState.selectedId === id;
+        const who = mine
+            ? (msg.to === '*' ? 'To ALL' : `To ${msg.to_name || 'tablet'}`)
+            : (msg.from_name || 'tablet');
+        const status = mine ? (msg.read_label || 'Sent') : (msg.at_local || '');
+        const preview = String(msg.text || '');
+        return `<button type="button" class="paper-mail-row${unread ? ' is-unread' : ''}${open ? ' is-open' : ''}${mine ? ' is-mine' : ''}" data-mail-id="${escapeHtml(id)}">
+            <span class="paper-mail-row-top">
+                <strong>${escapeHtml(who)}</strong>
+                <span class="paper-mail-row-meta">${escapeHtml(status)}</span>
+            </span>
+            <span class="paper-mail-row-text">${escapeHtml(preview)}</span>
+            ${msg.at_local && !mine ? `<span class="paper-mail-row-when">${escapeHtml(msg.at_local)}</span>` : ''}
+        </button>`;
+    }).join('');
+}
+
+function renderPaperMail(data) {
+    if (!data || typeof data !== 'object') return;
+    applyPaperWebClientName(data.web_client);
+    paperMailState.peers = Array.isArray(data.peers) ? data.peers : [];
+    paperMailState.messages = Array.isArray(data.messages) ? data.messages : [];
+    paperMailState.unread = Number(data.unread || 0);
+    paperMailState.chars = Number(data.message_chars || 180);
+    const unreadEl = document.getElementById('paper-mail-unread');
+    if (unreadEl) {
+        unreadEl.textContent = paperMailState.unread === 1 ? '1 unread' : `${paperMailState.unread} unread`;
+        unreadEl.classList.toggle('hidden', paperMailState.unread <= 0);
+    }
+    const toEl = document.getElementById('paper-mail-to');
+    if (toEl && document.activeElement !== toEl) {
+        const current = toEl.value || '*';
+        toEl.innerHTML = paperMailPeerOptions(paperMailState.peers, current);
+        if (![...toEl.options].some((opt) => opt.value === current)) {
+            toEl.value = '*';
+        }
+    }
+    const textEl = document.getElementById('paper-mail-text');
+    if (textEl) {
+        textEl.maxLength = paperMailState.chars;
+        updatePaperMailCount();
+    }
+    renderPaperMailInbox(paperMailState.messages);
+}
+
+function updatePaperMailCount() {
+    const textEl = document.getElementById('paper-mail-text');
+    const countEl = document.getElementById('paper-mail-count');
+    if (!textEl || !countEl) return;
+    countEl.textContent = `${textEl.value.length}/${paperMailState.chars}`;
+}
+
+async function fetchPaperMail() {
+    try {
+        const res = await fetch('/api/device.php?action=mail', { cache: 'no-store' });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) return;
+        renderPaperMail(data);
+    } catch {
+        // Mail is optional; keep the last inbox on a poll miss.
+    }
+}
+
+async function sendPaperMail(event) {
+    event.preventDefault();
+    const textEl = document.getElementById('paper-mail-text');
+    const toEl = document.getElementById('paper-mail-to');
+    const sendBtn = document.getElementById('paper-mail-send');
+    const text = textEl?.value.trim() || '';
+    if (text === '') {
+        showToast('Write a note first', 'error');
+        return;
+    }
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'paper_message',
+                to: toEl?.value || '*',
+                text,
+            }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not send');
+        if (textEl) textEl.value = '';
+        updatePaperMailCount();
+        showToast('Sent', 'success');
+        await fetchPaperMail();
+    } catch (err) {
+        showToast(err.message || 'Could not send', 'error');
+    } finally {
+        if (sendBtn) sendBtn.disabled = false;
+    }
+}
+
+async function openPaperMailRow(id) {
+    const msg = paperMailState.messages.find((row) => row.id === id);
+    if (!msg) return;
+    paperMailState.selectedId = paperMailState.selectedId === id ? '' : id;
+    renderPaperMailInbox(paperMailState.messages);
+    if (msg.unread) {
+        try {
+            await fetch('/api/device.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'paper_read', id }),
+            });
+            await fetchPaperMail();
+        } catch {
+            // keep local open state
+        }
+    }
+    if (!msg.mine) {
+        const toEl = document.getElementById('paper-mail-to');
+        if (toEl && msg.from && [...toEl.options].some((opt) => opt.value === msg.from)) {
+            toEl.value = msg.from;
+        }
+    }
+}
+
+function initPaperMail() {
+    document.getElementById('paper-mail-compose')?.addEventListener('submit', sendPaperMail);
+    document.getElementById('paper-mail-text')?.addEventListener('input', updatePaperMailCount);
+    document.getElementById('paper-mail-inbox')?.addEventListener('click', (event) => {
+        const row = event.target.closest?.('[data-mail-id]');
+        if (!row) return;
+        openPaperMailRow(row.getAttribute('data-mail-id') || '');
+    });
+    document.getElementById('paper-mail-name-save')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await savePaperWebClientName(document.getElementById('paper-mail-name')?.value);
+            showToast('Desktop name saved', 'success');
+            await fetchPaperMail();
+        } catch (err) {
+            showToast(err.message || 'Could not save the name', 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+    fetchPaperMail();
+    setInterval(fetchPaperMail, POLL_INTERVAL_MS);
+}
+
 let paperMonoDashboardCache = null;
 
 async function loadPaperMonoDashboard() {
@@ -5625,6 +5838,7 @@ async function loadPaperMonoDashboard() {
         applyPaperMonoKindUi(data);
         applyPaperLogoPreview(data.logo_url || null);
         applyPaperMonoPrefs(data.prefs);
+        applyPaperWebClientName(data.web_client);
         renderPaperMonoDevices(data.devices);
     } catch (err) {
         if (els.papermonoFwStatus) {
@@ -5939,6 +6153,7 @@ async function savePaperMonoPrefs(button) {
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Could not save companion settings');
         applyPaperMonoPrefs(data.prefs);
+        await savePaperWebClientName(document.getElementById('papermono-web-name')?.value);
         setPaperMonoPrefsResult('Companion settings saved. Tablets pick them up on the next poll.', 'success');
         showToast('Companion settings saved', 'success');
     } catch (err) {
@@ -7728,6 +7943,7 @@ if (document.getElementById('map')) {
 setupDrivePad();
 setupBatteryTempClick();
 initAppearance();
+initPaperMail();
 initUpdateConfirmModal();
 loadSettings()
     .catch(() => {})

@@ -122,6 +122,132 @@ header h1 {
     flex: 1;
 }
 
+.paper-mail-header {
+    align-items: flex-start;
+}
+
+.paper-mail-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.paper-mail-unread {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 650;
+    background: var(--accent);
+    color: #fff;
+}
+
+.paper-mail-name-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.35rem 0 0.85rem;
+}
+
+.paper-mail-name-row .label {
+    flex: 0 0 auto;
+}
+
+.paper-mail-name-row input {
+    flex: 1 1 10rem;
+    min-width: 8rem;
+}
+
+.paper-mail-inbox {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0 0 0.9rem;
+    max-height: 22rem;
+    overflow: auto;
+}
+
+.paper-mail-row {
+    display: grid;
+    gap: 0.2rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.65rem 0.75rem;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+}
+
+.paper-mail-row:hover {
+    border-color: var(--accent);
+}
+
+.paper-mail-row.is-unread {
+    box-shadow: inset 3px 0 0 var(--accent);
+    font-weight: 600;
+}
+
+.paper-mail-row.is-open {
+    background: var(--surface);
+}
+
+.paper-mail-row-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: baseline;
+}
+
+.paper-mail-row-meta,
+.paper-mail-row-when {
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-weight: 500;
+}
+
+.paper-mail-row-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.95rem;
+}
+
+.paper-mail-row:not(.is-open) .paper-mail-row-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.paper-mail-compose {
+    display: grid;
+    gap: 0.65rem;
+}
+
+.paper-mail-to-field,
+.paper-mail-text-field {
+    display: grid;
+    gap: 0.3rem;
+}
+
+.paper-mail-text-field textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 4.5rem;
+}
+
+.paper-mail-count {
+    justify-self: end;
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
 .vestaboard-live-switch {
     display: flex;
     flex-wrap: wrap;

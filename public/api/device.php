@@ -46,6 +46,10 @@ if ($method === 'GET' && ($action === 'dashboard' || $action === '')) {
     json_response(['ok' => true] + $devices->dashboard());
 }
 
+if ($method === 'GET' && $action === 'mail') {
+    json_response($devices->mailView());
+}
+
 if ($method === 'GET' && $action === 'ports') {
     json_response($devices->listSerialPorts());
 }
@@ -163,11 +167,17 @@ if ($action === 'prefs') {
 }
 
 if ($action === 'paper_message') {
-    $device = $devices->findByToken((string) ($input['token'] ?? device_token_from_request()));
-    if ($device === null) {
+    $token = trim((string) ($input['token'] ?? device_token_from_request()));
+    $device = $token !== '' ? $devices->findByToken($token) : $devices->webClient();
+    if ($token !== '' && $device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
-    $devices->touch((string) $device['id']);
+    if ($device === null || ($token === '' && $devices->deviceKind($device) !== YarboPaperDevice::KIND_WEB)) {
+        json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
+    }
+    if ($token !== '') {
+        $devices->touch((string) $device['id']);
+    }
     json_response($devices->postPaperMessage(
         $device,
         (string) ($input['to'] ?? '*'),
@@ -176,11 +186,17 @@ if ($action === 'paper_message') {
 }
 
 if ($action === 'paper_read') {
-    $device = $devices->findByToken((string) ($input['token'] ?? device_token_from_request()));
-    if ($device === null) {
+    $token = trim((string) ($input['token'] ?? device_token_from_request()));
+    $device = $token !== '' ? $devices->findByToken($token) : $devices->webClient();
+    if ($token !== '' && $device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
-    $devices->touch((string) $device['id']);
+    if ($device === null || ($token === '' && $devices->deviceKind($device) !== YarboPaperDevice::KIND_WEB)) {
+        json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
+    }
+    if ($token !== '') {
+        $devices->touch((string) $device['id']);
+    }
     json_response($devices->markPaperRead($device, (string) ($input['id'] ?? '')));
 }
 

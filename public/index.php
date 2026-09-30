@@ -158,6 +158,39 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <button type="button" class="btn btn-secondary vestaboard-resume hidden" id="vestaboard-resume">Resume previous status</button>
         </section>
 
+        <section class="card panel-section paper-mail-card" data-panel-id="mail" data-module="shared">
+            <div class="section-header section-header--simple paper-mail-header">
+                <div class="paper-mail-heading">
+                    <h2>Mail</h2>
+                    <span id="paper-mail-unread" class="paper-mail-unread hidden" aria-live="polite">0 unread</span>
+                </div>
+                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+            </div>
+            <p class="hint">This computer is a MAIL device. Tablets see it by name, same as another PaperMono. Send to one tablet or ALL.</p>
+            <label class="paper-mail-name-row">
+                <span class="label">Desktop name</span>
+                <input type="text" id="paper-mail-name" maxlength="40" autocomplete="off" spellcheck="false" value="Desktop">
+                <button type="button" class="btn btn-secondary btn-compact" id="paper-mail-name-save">Save name</button>
+            </label>
+            <div id="paper-mail-inbox" class="paper-mail-inbox" aria-live="polite">
+                <p class="hint">No messages yet.</p>
+            </div>
+            <form id="paper-mail-compose" class="paper-mail-compose">
+                <label class="paper-mail-to-field">
+                    <span class="label">To</span>
+                    <select id="paper-mail-to" aria-label="Send to">
+                        <option value="*">ALL</option>
+                    </select>
+                </label>
+                <label class="paper-mail-text-field">
+                    <span class="label">Message</span>
+                    <textarea id="paper-mail-text" maxlength="180" rows="3" placeholder="Write a note"></textarea>
+                    <span id="paper-mail-count" class="paper-mail-count">0/180</span>
+                </label>
+                <button type="submit" class="btn" id="paper-mail-send">Send</button>
+            </form>
+        </section>
+
         <section class="card panel-section diagnostics-card" data-panel-id="diagnostics" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Connection &amp; Health</h2>
@@ -1026,6 +1059,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="papermono-logo-clear">Remove logo</button>
                             </div>
                             <p id="papermono-logo-result" class="settings-cloud-result hidden" role="status"></p>
+                            <h4 class="settings-subtitle">Desktop MAIL client</h4>
+                            <p class="hint">This computer shows up on tablets as another MAIL device. They can send to it by this name.</p>
+                            <label class="settings-field">
+                                <span class="label">Desktop name</span>
+                                <input type="text" id="papermono-web-name" maxlength="40" autocomplete="off" spellcheck="false" value="Desktop">
+                            </label>
+                            <p class="hint">Saved with companion settings, or from the Mail card on the dashboard.</p>
                             <h4 class="settings-subtitle">Companion settings</h4>
                             <p class="hint">These apply to every paired tablet. PaperMono also uses them for pocket lock, frontlight, buzzer, and RGB. Paper Colour uses lock layout and the Vestaboard preview page. Sleep timers and alerts are not set on the glass. Brightness, timezone, and lock layout are written onto the tablet at USB flash, so they still work before it can reach the Pi.</p>
                             <label class="settings-field">
@@ -1464,6 +1504,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <div class="settings-panel-visibility-grid">
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="status" checked><span>Status</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="vestaboard" checked><span>Vestaboard Note</span></label>
+                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="mail" checked><span>Mail</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="diagnostics" checked><span>Diagnostics</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="map" checked><span>Location map</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="cameras" checked><span>Cameras</span></label>
