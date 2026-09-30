@@ -42,8 +42,24 @@ if (($labels['radio'] ?? '') !== $defaults['radio']) {
     fwrite(STDERR, 'radio default ' . json_encode($labels['radio'] ?? null) . "\n");
     exit(1);
 }
-if (array_key_exists('unknown', $labels) || array_key_exists('home', $labels)) {
+if (array_key_exists('unknown', $labels) || array_key_exists('home', $labels) || array_key_exists('board', $labels)) {
     fwrite(STDERR, "unexpected keys " . json_encode($labels) . "\n");
+    exit(1);
+}
+
+$hidden = $devices->savePrefs([
+    'menu_visible' => [
+        'health' => false,
+        'note' => '0',
+    ],
+]);
+$vis = $hidden['prefs']['menu_visible'] ?? [];
+if (($vis['health'] ?? true) !== false || ($vis['note'] ?? true) !== false || ($vis['status'] ?? false) !== true) {
+    fwrite(STDERR, 'visible ' . json_encode($vis) . "\n");
+    exit(1);
+}
+if (array_key_exists('board', $vis)) {
+    fwrite(STDERR, "board still visible pref\n");
     exit(1);
 }
 foreach ($defaults as $id => $fallback) {
@@ -66,6 +82,10 @@ if (($extra['menu_labels']['status'] ?? '') !== 'Yarbo') {
 $html = file_get_contents(__DIR__ . '/../public/index.php');
 if ($html === false || str_contains($html, 'id="papermono-unlock-page"') || str_contains($html, 'Unlock to')) {
     fwrite(STDERR, "unlock-to setting still in settings UI\n");
+    exit(1);
+}
+if (str_contains($html, 'data-menu-label="board"') || str_contains($html, 'data-menu-visible="board"')) {
+    fwrite(STDERR, "board still on menu settings\n");
     exit(1);
 }
 

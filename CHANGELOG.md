@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.53] - 2026-09-30
+
+### Changed
+- PaperMono firmware **0.1.47**: Settings → E-paper can show or hide each unlock-menu button. Yarbo Status / Health / Plans sit in a **YARBO** group. Vestaboard is one **NOTE** page (live grid plus YARBO / POWER / LYMOW / ALL). Hidden pages are skipped on A/B.
+
 ## [3.0.52] - 2026-09-30
 
 ### Changed

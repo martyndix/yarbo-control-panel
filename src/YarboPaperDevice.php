@@ -14,7 +14,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.46';
+    public const FIRMWARE_VERSION = '0.1.47';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -1261,6 +1261,7 @@ final class YarboPaperDevice
             'lock_screen' => 'both',
             'unlock_page' => 'home',
             'menu_labels' => self::defaultMenuLabels(),
+            'menu_visible' => self::defaultMenuVisible(),
             'timezone' => '',
             'alert_message' => true,
             'alert_yarbo' => true,
@@ -1279,13 +1280,51 @@ final class YarboPaperDevice
             'health' => 'HEALTH',
             'plans' => 'PLANS',
             'note' => 'NOTE',
-            'board' => 'BOARD',
             'powerwall' => 'POWER',
             'lymow' => 'LYMOW',
             'radio' => 'MAIL',
             'device' => 'DEVICE',
             'house' => 'HOUSE',
         ];
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    public static function defaultMenuVisible(): array
+    {
+        $out = [];
+        foreach (array_keys(self::defaultMenuLabels()) as $id) {
+            $out[$id] = true;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function normalizeMenuVisible(mixed $input): array
+    {
+        $defaults = self::defaultMenuVisible();
+        $src = is_array($input) ? $input : [];
+        $out = [];
+        $bool = static function (mixed $value, bool $fallback): bool {
+            if ($value === null) {
+                return $fallback;
+            }
+            if (is_bool($value)) {
+                return $value;
+            }
+            $s = strtolower(trim((string) $value));
+
+            return in_array($s, ['1', 'true', 'yes', 'on'], true);
+        };
+        foreach ($defaults as $id => $fallback) {
+            $out[$id] = $bool($src[$id] ?? null, $fallback);
+        }
+
+        return $out;
     }
 
     /**
@@ -1350,6 +1389,7 @@ final class YarboPaperDevice
             'lock_screen' => $lockScreen,
             'unlock_page' => $unlockPage,
             'menu_labels' => $this->normalizeMenuLabels($input['menu_labels'] ?? []),
+            'menu_visible' => $this->normalizeMenuVisible($input['menu_visible'] ?? []),
             'timezone' => $timezone,
             'alert_message' => $bool($input['alert_message'] ?? null, $defaults['alert_message']),
             'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),

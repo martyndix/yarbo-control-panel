@@ -2324,12 +2324,40 @@ html[data-theme="light"] .plan-activity {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.75rem 1rem;
-    margin: 0.35rem 0 1rem;
+    margin: 0.35rem 0 0.25rem;
+}
+
+.paper-menu-group {
+    margin: 0 0 1rem;
+}
+
+.paper-menu-group-title {
+    margin: 0 0 0.45rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+.paper-menu-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.55rem;
+    align-items: end;
+}
+
+.paper-menu-row input[type="checkbox"] {
+    width: 1.15rem;
+    height: 1.15rem;
+    margin: 0 0 0.65rem;
+    accent-color: var(--accent);
 }
 
 .paper-menu-labels .settings-field input {
     font-size: 1rem;
 }
+
+.papermono-preview-fold {
     margin: 0.85rem 0 1.1rem;
     padding: 0.15rem 0.9rem 0.85rem;
     border: 1px solid var(--border);

@@ -6088,6 +6088,7 @@ function applyPaperMonoPrefs(prefs) {
     if (!prefs || typeof prefs !== 'object') return;
     if (els.papermonoLockScreen) els.papermonoLockScreen.value = prefs.lock_screen || 'both';
     applyPaperMenuLabels(prefs.menu_labels);
+    applyPaperMenuVisible(prefs.menu_visible);
     applyPaperMonoTimezone(prefs.timezone || '');
     if (els.papermonoLockAfter) els.papermonoLockAfter.value = String(prefs.lock_after_s ?? 60);
     if (els.papermonoLightOff) els.papermonoLightOff.value = String(prefs.light_off_s ?? 15);
@@ -6117,6 +6118,24 @@ function paperMenuLabelsPayload() {
     return out;
 }
 
+function applyPaperMenuVisible(vis) {
+    const map = vis && typeof vis === 'object' ? vis : {};
+    document.querySelectorAll('[data-menu-visible]').forEach((el) => {
+        const id = el.getAttribute('data-menu-visible') || '';
+        el.checked = map[id] !== false;
+    });
+}
+
+function paperMenuVisiblePayload() {
+    const out = {};
+    document.querySelectorAll('[data-menu-visible]').forEach((el) => {
+        const id = el.getAttribute('data-menu-visible');
+        if (!id) return;
+        out[id] = !!el.checked;
+    });
+    return out;
+}
+
 function applyPaperMonoTimezone(zone) {
     const sel = els.papermonoTimezone;
     if (!sel) return;
@@ -6135,6 +6154,7 @@ function paperMonoPrefsPayload() {
         action: 'prefs',
         lock_screen: els.papermonoLockScreen?.value || 'both',
         menu_labels: paperMenuLabelsPayload(),
+        menu_visible: paperMenuVisiblePayload(),
         timezone: els.papermonoTimezone?.value || clientTimezone() || '',
         lock_after_s: Number(els.papermonoLockAfter?.value || 60),
         light_off_s: Number(els.papermonoLightOff?.value || 15),

@@ -1078,18 +1078,52 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                             <p class="hint">PaperMono Unlock always opens the page menu. Side buttons A/B still step through pages, including Home. Names below apply on the next poll — no reflash.</p>
                             <h3 class="settings-subtitle">Menu buttons</h3>
-                            <p class="hint">Leave a field blank to use the default name. Long names wrap on the tablet.</p>
-                            <div class="paper-menu-labels" id="paper-menu-labels">
-                                <label class="settings-field"><span class="label">Status</span><input type="text" data-menu-label="status" maxlength="20" placeholder="STATUS" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">Health</span><input type="text" data-menu-label="health" maxlength="20" placeholder="HEALTH" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">Plans</span><input type="text" data-menu-label="plans" maxlength="20" placeholder="PLANS" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">Note</span><input type="text" data-menu-label="note" maxlength="20" placeholder="NOTE" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">Board</span><input type="text" data-menu-label="board" maxlength="20" placeholder="BOARD" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">Powerwall</span><input type="text" data-menu-label="powerwall" maxlength="20" placeholder="POWER" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">Lymow</span><input type="text" data-menu-label="lymow" maxlength="20" placeholder="LYMOW" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">Mail</span><input type="text" data-menu-label="radio" maxlength="20" placeholder="MAIL" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">Device</span><input type="text" data-menu-label="device" maxlength="20" placeholder="DEVICE" autocomplete="off"></label>
-                                <label class="settings-field"><span class="label">House</span><input type="text" data-menu-label="house" maxlength="20" placeholder="HOUSE" autocomplete="off"></label>
+                            <p class="hint">Tick a page to show it on the unlock menu. Names wrap on the tablet. Yarbo pages sit together. NOTE is the live Vestaboard plus the view buttons.</p>
+                            <div class="paper-menu-group">
+                                <h4 class="paper-menu-group-title">Yarbo</h4>
+                                <div class="paper-menu-labels">
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="status" checked aria-label="Show Status">
+                                        <label class="settings-field"><span class="label">Status</span><input type="text" data-menu-label="status" maxlength="20" placeholder="STATUS" autocomplete="off"></label>
+                                    </div>
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="health" checked aria-label="Show Health">
+                                        <label class="settings-field"><span class="label">Health</span><input type="text" data-menu-label="health" maxlength="20" placeholder="HEALTH" autocomplete="off"></label>
+                                    </div>
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="plans" checked aria-label="Show Plans">
+                                        <label class="settings-field"><span class="label">Plans</span><input type="text" data-menu-label="plans" maxlength="20" placeholder="PLANS" autocomplete="off"></label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="paper-menu-group">
+                                <h4 class="paper-menu-group-title">Other</h4>
+                                <div class="paper-menu-labels">
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="note" checked aria-label="Show Note">
+                                        <label class="settings-field"><span class="label">Note</span><input type="text" data-menu-label="note" maxlength="20" placeholder="NOTE" autocomplete="off"></label>
+                                    </div>
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="powerwall" checked aria-label="Show Powerwall">
+                                        <label class="settings-field"><span class="label">Powerwall</span><input type="text" data-menu-label="powerwall" maxlength="20" placeholder="POWER" autocomplete="off"></label>
+                                    </div>
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="lymow" checked aria-label="Show Lymow">
+                                        <label class="settings-field"><span class="label">Lymow</span><input type="text" data-menu-label="lymow" maxlength="20" placeholder="LYMOW" autocomplete="off"></label>
+                                    </div>
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="radio" checked aria-label="Show Mail">
+                                        <label class="settings-field"><span class="label">Mail</span><input type="text" data-menu-label="radio" maxlength="20" placeholder="MAIL" autocomplete="off"></label>
+                                    </div>
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="device" checked aria-label="Show Device">
+                                        <label class="settings-field"><span class="label">Device</span><input type="text" data-menu-label="device" maxlength="20" placeholder="DEVICE" autocomplete="off"></label>
+                                    </div>
+                                    <div class="paper-menu-row">
+                                        <input type="checkbox" data-menu-visible="house" checked aria-label="Show House">
+                                        <label class="settings-field"><span class="label">House</span><input type="text" data-menu-label="house" maxlength="20" placeholder="HOUSE" autocomplete="off"></label>
+                                    </div>
+                                </div>
                             </div>
                             <label class="settings-field">
                                 <span class="label">Timezone</span>
@@ -1178,29 +1212,28 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="378" y="16" width="82" height="82" rx="14" fill="none" stroke="#111" stroke-width="3"/>
                                         <rect x="400" y="50" width="38" height="32" rx="5" fill="#111"/>
                                         <path d="M409 50 v-10 a10 10 0 0 1 20 0 v10" fill="none" stroke="#111" stroke-width="6"/>
-                                        <rect x="24" y="110" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="128" y="176" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">STATUS</text>
-                                        <rect x="248" y="110" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="352" y="176" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HEALTH</text>
-                                        <rect x="24" y="234" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="128" y="300" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PLANS</text>
-                                        <rect x="248" y="234" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="352" y="300" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">NOTE</text>
-                                        <rect x="24" y="358" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="128" y="424" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">BOARD</text>
-                                        <rect x="248" y="358" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="352" y="424" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">POWER</text>
-                                        <rect x="24" y="482" width="208" height="112" rx="12" fill="#111"/>
-                                        <text x="128" y="548" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#f4f1e8">MAIL</text>
-                                        <circle cx="212" cy="502" r="12" fill="#f4f1e8"/>
-                                        <rect x="248" y="482" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="352" y="548" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LYMOW</text>
-                                        <rect x="24" y="606" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="128" y="672" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">DEVICE</text>
-                                        <rect x="248" y="606" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="352" y="672" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOUSE</text>
+                                        <text x="24" y="108" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#555">YARBO</text>
+                                        <rect x="24" y="118" width="208" height="100" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="128" y="178" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">STATUS</text>
+                                        <rect x="248" y="118" width="208" height="100" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="352" y="178" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HEALTH</text>
+                                        <rect x="24" y="230" width="208" height="100" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="128" y="290" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">PLANS</text>
+                                        <rect x="24" y="348" width="208" height="100" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="128" y="408" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">NOTE</text>
+                                        <rect x="248" y="348" width="208" height="100" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="352" y="408" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">POWER</text>
+                                        <rect x="24" y="460" width="208" height="100" rx="12" fill="#111"/>
+                                        <text x="128" y="520" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#f4f1e8">MAIL</text>
+                                        <circle cx="212" cy="480" r="12" fill="#f4f1e8"/>
+                                        <rect x="248" y="460" width="208" height="100" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="352" y="520" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LYMOW</text>
+                                        <rect x="24" y="572" width="208" height="100" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="128" y="632" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">DEVICE</text>
+                                        <rect x="248" y="572" width="208" height="100" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <text x="352" y="632" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOUSE</text>
                                     </svg>
-                                    <figcaption>Unlock menu — tap a page. MAIL shows a blob when a message is unread. Names are set in Settings</figcaption>
+                                    <figcaption>Unlock menu — Yarbo pages grouped. Tick which buttons to show. MAIL blob if unread</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
