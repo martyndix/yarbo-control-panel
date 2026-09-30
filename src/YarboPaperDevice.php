@@ -14,7 +14,8 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.45';
+    public const FIRMWARE_VERSION = '0.1.46';
+    public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
@@ -1259,12 +1260,56 @@ final class YarboPaperDevice
             'brightness' => 80,
             'lock_screen' => 'both',
             'unlock_page' => 'home',
+            'menu_labels' => self::defaultMenuLabels(),
             'timezone' => '',
             'alert_message' => true,
             'alert_yarbo' => true,
             'alert_lymow' => true,
             'alert_powerwall' => true,
         ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function defaultMenuLabels(): array
+    {
+        return [
+            'status' => 'STATUS',
+            'health' => 'HEALTH',
+            'plans' => 'PLANS',
+            'note' => 'NOTE',
+            'board' => 'BOARD',
+            'powerwall' => 'POWER',
+            'lymow' => 'LYMOW',
+            'radio' => 'MAIL',
+            'device' => 'DEVICE',
+            'house' => 'HOUSE',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function normalizeMenuLabels(mixed $input): array
+    {
+        $defaults = self::defaultMenuLabels();
+        $src = is_array($input) ? $input : [];
+        $out = [];
+        foreach ($defaults as $id => $fallback) {
+            $raw = trim((string) ($src[$id] ?? ''));
+            $raw = preg_replace('/\s+/u', ' ', $raw) ?? $raw;
+            $raw = preg_replace('/[\x00-\x1F\x7F]/u', '', $raw) ?? $raw;
+            if (function_exists('mb_substr')) {
+                $raw = mb_substr($raw, 0, self::MENU_LABEL_MAX);
+            } else {
+                $raw = substr($raw, 0, self::MENU_LABEL_MAX);
+            }
+            $raw = trim($raw);
+            $out[$id] = $raw !== '' ? $raw : $fallback;
+        }
+
+        return $out;
     }
 
     /**
@@ -1304,6 +1349,7 @@ final class YarboPaperDevice
             'brightness' => max(0, min(100, (int) ($input['brightness'] ?? $defaults['brightness']))),
             'lock_screen' => $lockScreen,
             'unlock_page' => $unlockPage,
+            'menu_labels' => $this->normalizeMenuLabels($input['menu_labels'] ?? []),
             'timezone' => $timezone,
             'alert_message' => $bool($input['alert_message'] ?? null, $defaults['alert_message']),
             'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),

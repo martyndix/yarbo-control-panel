@@ -84,6 +84,7 @@ int lightOffS = 15;
 int brightnessPct = 80;
 String lockScreen = "both";
 String unlockPage = "home";
+String menuCustom[PAPERMONO_PAGE_COUNT];
 bool alertMessageOn = true;
 bool alertYarboOn = true;
 bool alertLymowOn = true;
@@ -340,7 +341,7 @@ String pageName(int page)
 
 String screenKey()
 {
-    return String(currentPage) + "|" + String(battery) + "|" + charging + "|" + state + "|" + head + "|"
+    String key = String(currentPage) + "|" + String(battery) + "|" + charging + "|" + state + "|" + head + "|"
         + errorLabel + "|" + heading + "|" + rainLabel + "|" + connectionType + "|" + connectionStatus + "|"
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
@@ -355,6 +356,10 @@ String screenKey()
         + String(inboxCount) + "|" + String(radioUi) + "|" + String(radioViewIndex) + "|"
         + String(homeOn ? 1 : 0) + "|" + String(homeCount)
         + "|" + String(menuOpen ? 1 : 0);
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        key += "|" + menuCustom[i];
+    }
+    return key;
 }
 
 bool pageEnabled(int page)
@@ -447,16 +452,80 @@ String clipLabelToWidth(const String &text, int maxPx)
     return s;
 }
 
-void drawButton(int x, int y, int w, int h, const char *label, bool invert)
+void wrapTwoLines(const String &text, int maxPx, String &line1, String &line2)
+{
+    line1 = text;
+    line2 = "";
+    if (maxPx <= 0 || M5.Display.textWidth(text) <= maxPx) {
+        return;
+    }
+    int best = -1;
+    for (int i = 0; i < (int) text.length(); i++) {
+        if (text[i] != ' ') {
+            continue;
+        }
+        String left = text.substring(0, i);
+        if (M5.Display.textWidth(left) <= maxPx) {
+            best = i;
+        }
+    }
+    if (best > 0) {
+        line1 = clipLabelToWidth(text.substring(0, best), maxPx);
+        line2 = clipLabelToWidth(text.substring(best + 1), maxPx);
+        line2.trim();
+        return;
+    }
+    int lo = 1;
+    int hi = (int) text.length();
+    while (lo < hi) {
+        int mid = (lo + hi + 1) / 2;
+        if (M5.Display.textWidth(text.substring(0, mid)) <= maxPx) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    line1 = clipLabelToWidth(text.substring(0, lo), maxPx);
+    line2 = clipLabelToWidth(text.substring(lo), maxPx);
+}
+
+void drawFittedLabel(int cx, int cy, int maxW, const String &text, uint16_t fg, uint16_t bg)
+{
+    M5.Display.setTextColor(fg, bg);
+    M5.Display.setTextDatum(MC_DATUM);
+    int sizes[2] = {3, 2};
+    for (int s = 0; s < 2; s++) {
+        M5.Display.setTextSize(sizes[s]);
+        if (M5.Display.textWidth(text) <= maxW) {
+            M5.Display.drawString(text, cx, cy);
+            return;
+        }
+        String line1;
+        String line2;
+        wrapTwoLines(text, maxW, line1, line2);
+        if (line2.length() == 0) {
+            M5.Display.drawString(line1, cx, cy);
+            return;
+        }
+        if (M5.Display.textWidth(line1) <= maxW && M5.Display.textWidth(line2) <= maxW) {
+            int gap = sizes[s] == 3 ? 8 : 6;
+            int half = sizes[s] == 3 ? 16 : 12;
+            M5.Display.drawString(line1, cx, cy - half - gap / 2);
+            M5.Display.drawString(line2, cx, cy + half + gap / 2);
+            return;
+        }
+    }
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(clipLabelToWidth(text, maxW), cx, cy);
+}
+
+void drawButton(int x, int y, int w, int h, const String &label, bool invert)
 {
     uint16_t bg = invert ? TFT_BLACK : TFT_WHITE;
     uint16_t fg = invert ? TFT_WHITE : TFT_BLACK;
     M5.Display.fillRoundRect(x, y, w, h, 12, bg);
     M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
-    M5.Display.setTextColor(fg, bg);
-    M5.Display.setTextDatum(MC_DATUM);
-    M5.Display.setTextSize(3);
-    M5.Display.drawString(label, x + w / 2, y + h / 2);
+    drawFittedLabel(x + w / 2, y + h / 2, w - 24, label, fg, bg);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
 }
@@ -534,6 +603,9 @@ int menuItemCount()
 {
     int n = 0;
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        if (i == PAPERMONO_PAGE_HOME) {
+            continue;
+        }
         if (pageEnabled(i)) {
             n++;
         }
@@ -545,7 +617,7 @@ int menuPageAtIndex(int idx)
 {
     int n = 0;
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
-        if (!pageEnabled(i)) {
+        if (i == PAPERMONO_PAGE_HOME || !pageEnabled(i)) {
             continue;
         }
         if (n == idx) {
@@ -556,7 +628,22 @@ int menuPageAtIndex(int idx)
     return firstEnabledPage();
 }
 
-const char *menuLabel(int page)
+const char *pageKey(int page)
+{
+    if (page == PAPERMONO_PAGE_STATUS) return "status";
+    if (page == PAPERMONO_PAGE_HEALTH) return "health";
+    if (page == PAPERMONO_PAGE_PLANS) return "plans";
+    if (page == PAPERMONO_PAGE_NOTE) return "note";
+    if (page == PAPERMONO_PAGE_BOARD) return "board";
+    if (page == PAPERMONO_PAGE_POWERWALL) return "powerwall";
+    if (page == PAPERMONO_PAGE_LYMOW) return "lymow";
+    if (page == PAPERMONO_PAGE_RADIO) return "radio";
+    if (page == PAPERMONO_PAGE_DEVICE) return "device";
+    if (page == PAPERMONO_PAGE_HOUSE) return "house";
+    return "home";
+}
+
+String menuLabelDefault(int page)
 {
     if (page == PAPERMONO_PAGE_POWERWALL) return "POWER";
     if (page == PAPERMONO_PAGE_RADIO) return "MAIL";
@@ -571,12 +658,38 @@ const char *menuLabel(int page)
     return "HOME";
 }
 
-void layoutMenu(int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0)
+String menuLabel(int page)
+{
+    if (page >= 0 && page < PAPERMONO_PAGE_COUNT && menuCustom[page].length()) {
+        return menuCustom[page];
+    }
+    return menuLabelDefault(page);
+}
+
+void applyMenuLabels(JsonVariant labels)
+{
+    if (!labels.is<JsonObject>()) {
+        return;
+    }
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        const char *raw = labels[pageKey(i)] | "";
+        String s = String(raw);
+        s.trim();
+        if (s.length() > 20) {
+            s = s.substring(0, 20);
+        }
+        menuCustom[i] = s;
+    }
+}
+
+void layoutTileGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0)
 {
     int W = M5.Display.width();
     int H = M5.Display.height();
     cols = 2;
-    int n = menuItemCount();
+    if (n < 1) {
+        n = 1;
+    }
     rows = (n + cols - 1) / cols;
     if (rows < 1) {
         rows = 1;
@@ -593,6 +706,11 @@ void layoutMenu(int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &
     if (bh < 70) {
         bh = 70;
     }
+}
+
+void layoutMenu(int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0)
+{
+    layoutTileGrid(menuItemCount(), cols, rows, bw, bh, gap, x0, y0);
 }
 
 void menuButtonRect(int idx, int &x, int &y, int &w, int &h)
@@ -787,17 +905,57 @@ int plansStartY()
     return plansRowY0() + PAPERMONO_PLAN_VISIBLE * plansRowH() + 16;
 }
 
-int houseRowY0()
+int houseItemCount()
 {
-    return 100;
+    int shown = homeCount < PAPERMONO_HOME_VISIBLE ? homeCount : PAPERMONO_HOME_VISIBLE;
+    return shown < 0 ? 0 : shown;
 }
 
-int houseRowH()
+void layoutHouse(int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0)
 {
-    int bottom = M5.Display.height() - 12;
-    int n = PAPERMONO_HOME_VISIBLE > 0 ? PAPERMONO_HOME_VISIBLE : 1;
-    int h = (bottom - houseRowY0()) / n;
-    return h < 44 ? 44 : h;
+    int n = houseItemCount();
+    if (n < 1) {
+        n = 1;
+    }
+    layoutTileGrid(n, cols, rows, bw, bh, gap, x0, y0);
+}
+
+void houseButtonRect(int idx, int &x, int &y, int &w, int &h)
+{
+    int cols, rows, bw, bh, gap, x0, y0;
+    layoutHouse(cols, rows, bw, bh, gap, x0, y0);
+    int col = idx % cols;
+    int row = idx / cols;
+    x = x0 + col * (bw + gap);
+    y = y0 + row * (bh + gap);
+    w = bw;
+    h = bh;
+}
+
+void drawHousePage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    int shown = houseItemCount();
+    if (shown == 0) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Assign lights in", 16, 180);
+        M5.Display.drawString("the panel Home page.", 16, 214);
+    }
+    for (int i = 0; i < shown; i++) {
+        int x, y, w, h;
+        houseButtonRect(i, x, y, w, h);
+        String label = homeNames[i];
+        if (homeKinds[i] == "scene") {
+            label = "*" + label;
+        }
+        drawButton(x, y, w, h, label, homeOnState[i]);
+    }
+    drawPager();
+    finishEpdFrame();
 }
 
 void drawPlansPage(bool forceFull)
@@ -848,44 +1006,6 @@ void drawPlansPage(bool forceFull)
     drawButton(16, startY, bw, 72, "START", canStart);
     if (planCount > PAPERMONO_PLAN_VISIBLE) {
         drawButton(16 + bw + gap, startY, bw, 72, "MORE", false);
-    }
-    drawPager();
-    finishEpdFrame();
-}
-
-void drawHousePage(bool forceFull)
-{
-    beginEpdFrame(forceFull);
-    M5.Display.fillScreen(TFT_WHITE);
-    drawHeader();
-    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Display.setTextDatum(TL_DATUM);
-    if (homeCount == 0) {
-        M5.Display.setTextSize(2);
-        M5.Display.drawString("Assign lights in", 16, 180);
-        M5.Display.drawString("the panel Home page.", 16, 214);
-    }
-    int y0 = houseRowY0();
-    int rh = houseRowH();
-    int W = M5.Display.width();
-    int shown = homeCount < PAPERMONO_HOME_VISIBLE ? homeCount : PAPERMONO_HOME_VISIBLE;
-    for (int i = 0; i < shown; i++) {
-        bool on = homeOnState[i];
-        int y = y0 + i * rh;
-        uint16_t bg = on ? TFT_BLACK : TFT_WHITE;
-        uint16_t fg = on ? TFT_WHITE : TFT_BLACK;
-        M5.Display.fillRoundRect(16, y, W - 32, rh - 8, 10, bg);
-        M5.Display.drawRoundRect(16, y, W - 32, rh - 8, 10, TFT_BLACK);
-        M5.Display.setTextColor(fg, bg);
-        M5.Display.setTextDatum(ML_DATUM);
-        M5.Display.setTextSize(2);
-        String label = homeNames[i];
-        if (homeKinds[i] == "scene") {
-            label = "*" + label;
-        }
-        /* Button is 16..(W-16); 16px inset each side so the name uses the full row. */
-        label = clipLabelToWidth(label, W - 64);
-        M5.Display.drawString(label, 32, y + (rh - 8) / 2);
     }
     drawPager();
     finishEpdFrame();
@@ -1435,7 +1555,9 @@ void exitLock()
 {
     screenLocked = false;
     menuOpen = true;
-    applyUnlockPage();
+    if (!pageEnabled(currentPage)) {
+        currentPage = firstEnabledPage();
+    }
     noteActivity();
     applyFrontlight(true);
     if (currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {
@@ -2058,6 +2180,9 @@ void applyCompactExtras(JsonDocument &doc)
     bool prevBoard = vestaboardOn;
     bool prevKnown = vestaboardKnown;
     applyCompanionFields(doc, false);
+    if (doc["menu_labels"].is<JsonObject>()) {
+        applyMenuLabels(doc["menu_labels"]);
+    }
     if (brightnessPct != prevBright && lightOn) {
         applyFrontlight(true);
     }
@@ -2861,19 +2986,17 @@ void handlePlansTouch(int x, int y)
 
 void handleHouseTouch(int x, int y)
 {
-    int y0 = houseRowY0();
-    int rh = houseRowH();
-    int shown = homeCount < PAPERMONO_HOME_VISIBLE ? homeCount : PAPERMONO_HOME_VISIBLE;
-    int listBottom = y0 + shown * rh;
-    if (y >= y0 && y < listBottom) {
-        int row = (y - y0) / rh;
-        if (row >= 0 && row < shown) {
-            const char *cmd = homeKinds[row] == "scene" ? "home_scene" : "home_toggle";
-            httpCommand(cmd, nullptr, nullptr, homeIds[row].c_str());
+    int shown = houseItemCount();
+    for (int i = 0; i < shown; i++) {
+        int bx, by, bw, bh;
+        houseButtonRect(i, bx, by, bw, bh);
+        if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
+            const char *cmd = homeKinds[i] == "scene" ? "home_scene" : "home_toggle";
+            httpCommand(cmd, nullptr, nullptr, homeIds[i].c_str());
             httpGetStatus();
             drawScreen(false);
+            return;
         }
-        return;
     }
 }
 

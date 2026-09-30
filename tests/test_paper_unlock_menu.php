@@ -21,11 +21,17 @@ $needles = [
     'bool tapOnMenuChip(int x, int y)',
     'menuOpen = true;',
     'PAPERMONO_PAGE_RADIO && unreadCount > 0',
-    '#define PAPERMONO_FW_VERSION "0.1.45"',
-    "public const FIRMWARE_VERSION = '0.1.45';",
-    'Unlock opens a page menu',
-    'Unlock menu — tap a page. MAIL shows a blob when a message is unread',
-    'PaperMono firmware **0.1.45**',
+    'PAPERMONO_PAGE_HOME || !pageEnabled(i)',
+    'void applyMenuLabels(JsonVariant labels)',
+    'void drawFittedLabel(int cx, int cy, int maxW, const String &text, uint16_t fg, uint16_t bg)',
+    'void houseButtonRect(int idx, int &x, int &y, int &w, int &h)',
+    '#define PAPERMONO_FW_VERSION "0.1.46"',
+    "public const FIRMWARE_VERSION = '0.1.46';",
+    'data-menu-label="status"',
+    'id="paper-menu-labels"',
+    'PaperMono Unlock always opens the page menu',
+    'Unlock menu — tap a page. MAIL shows a blob when a message is unread. Names are set in Settings',
+    'PaperMono firmware **0.1.46**',
 ];
 
 $hay = $fw . "\n" . $ver . "\n" . $php . "\n" . $html . "\n" . $log;

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.52] - 2026-09-30
+
+### Changed
+- PaperMono firmware **0.1.46**: Unlock always opens the page menu (no HOME tile — Home is still on A/B). Menu button names are set in Settings → E-paper. HOUSE uses the same 2-column tiles as the menu; long names wrap onto two lines.
+- Settings no longer has **Unlock to**. Paper Colour button C still uses the last stored page (default Home).
+
 ## [3.0.51] - 2026-09-30
 
 ### Changed

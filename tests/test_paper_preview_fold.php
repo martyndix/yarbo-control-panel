@@ -11,10 +11,10 @@ if ($html === false) {
 $needles = [
     '<details class="papermono-preview-fold">',
     '<summary>Screen previews</summary>',
-    'HOUSE — up to 12 lights or scenes on one screen, no MORE pager',
+    'HOUSE — same tile shape as the unlock menu; long names wrap',
     'MAIL — inbox with time stamps, read receipts, and WRITE',
     'Lock screen — envelope when mail is waiting, Unlock, and OFF',
-    'Unlock menu — tap a page. MAIL shows a blob when a message is unread',
+    'Unlock menu — tap a page. MAIL shows a blob when a message is unread. Names are set in Settings',
     'Opposite corners: tap 1, then 2',
 ];
 
