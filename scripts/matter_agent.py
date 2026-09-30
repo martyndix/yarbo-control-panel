@@ -36,7 +36,7 @@ DOCKER_IMAGE = os.environ.get(
 )
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 3
+AGENT_VERSION = 4
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -81,6 +81,7 @@ _ws: socket.socket | None = None
 _start_lock = threading.Lock()
 _started_docker = False
 _recovered_storage = False
+_recover_thread_started = False
 
 
 def attr_key(endpoint: int, cluster: int, attr: int) -> str:
@@ -410,44 +411,77 @@ def recover_docker_storage() -> str:
     return note
 
 
-def collect_nodes() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def start_background_recover() -> None:
+    global _recover_thread_started
+    if _recover_thread_started:
+        return
+    _recover_thread_started = True
+    threading.Thread(target=_background_recover, daemon=True).start()
+
+
+def _background_recover() -> None:
+    try:
+        note = recover_docker_storage()
+        if note:
+            print(f"matter recover: {note}", flush=True)
+        rpc = matter_rpc("get_nodes", timeout=45.0)
+        nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
+        if nodes and not flatten_nodes(nodes):
+            for node in nodes:
+                try:
+                    node_id = int(node.get("node_id") or node.get("nodeId") or 0)
+                except (TypeError, ValueError):
+                    node_id = 0
+                if node_id > 0:
+                    matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0)
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter recover failed: {exc}", flush=True)
+
+
+def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    start_background_recover()
     info: dict[str, Any] = {
         "source": "",
         "storage_files": [p.name for p in storage_json_files()],
         "storage_nodes": 0,
         "hint": "",
-        "recover": recover_docker_storage(),
+        "recover": "",
     }
     disk = nodes_from_disk()
     info["storage_nodes"] = len(disk)
-    rpc = matter_rpc("get_nodes", timeout=45.0)
+    if quick and disk:
+        info["source"] = "disk"
+        return disk, info
+    rpc = matter_rpc("get_nodes", timeout=5.0 if quick else 45.0)
     nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
     if nodes:
         info["source"] = "live"
-    if not nodes:
+    if not nodes and disk:
+        nodes = disk
+        info["source"] = "disk"
+    if not quick and not nodes:
         listen = matter_rpc("start_listening", timeout=45.0)
         if listen.get("ok"):
             nodes = nodes_from_result(listen.get("result"))
             if nodes:
                 info["source"] = "listen"
-    if not nodes and disk:
-        nodes = disk
-        info["source"] = "disk"
-    devices = flatten_nodes(nodes)
-    if nodes and not devices:
-        for node in nodes:
-            try:
-                node_id = int(node.get("node_id") or node.get("nodeId") or 0)
-            except (TypeError, ValueError):
-                node_id = 0
-            if node_id > 0:
-                matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0)
-        rpc = matter_rpc("get_nodes", timeout=45.0)
-        if rpc.get("ok"):
-            interviewed = nodes_from_result(rpc.get("result"))
-            if interviewed:
-                nodes = interviewed
-                info["source"] = "interview"
+        if not nodes and disk:
+            nodes = disk
+            info["source"] = "disk"
+        if nodes and not flatten_nodes(nodes):
+            for node in nodes:
+                try:
+                    node_id = int(node.get("node_id") or node.get("nodeId") or 0)
+                except (TypeError, ValueError):
+                    node_id = 0
+                if node_id > 0:
+                    matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0)
+            rpc = matter_rpc("get_nodes", timeout=45.0)
+            if rpc.get("ok"):
+                interviewed = nodes_from_result(rpc.get("result"))
+                if interviewed:
+                    nodes = interviewed
+                    info["source"] = "interview"
     if not nodes:
         info["hint"] = (
             "The Matter fabric on this Pi has no saved nodes. "
@@ -1168,7 +1202,8 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "error": None if listening else (hint or "Matter server is not listening on port 5580"),
         }
     if op == "nodes":
-        nodes, fabric = collect_nodes()
+        quick = body.get("quick", True) is not False
+        nodes, fabric = collect_nodes(quick=quick)
         return {
             "ok": True,
             "devices": flatten_nodes(nodes),
@@ -1275,6 +1310,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     STORAGE.mkdir(parents=True, exist_ok=True)
     threading.Thread(target=ensure_matter_server, daemon=True).start()
+    start_background_recover()
     httpd = ThreadingHTTPServer((HOST, AGENT_PORT), Handler)
     print(f"matter_agent listening on {HOST}:{AGENT_PORT}", flush=True)
     try:

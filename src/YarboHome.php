@@ -261,7 +261,7 @@ final class YarboHome
                 'fabric' => [],
             ];
         } else {
-            $live = $this->liveDevices(45.0);
+            $live = $this->liveDevices(8.0);
             $store = $this->load();
         }
         $hidden = array_fill_keys($store['hidden'], true);
@@ -1264,7 +1264,7 @@ final class YarboHome
         $error = (string) ($status['error'] ?? 'Matter server unavailable');
         $nodes = ['ok' => false, 'devices' => []];
         if (($status['ok'] ?? false) === true || ($status['server'] ?? false) === true) {
-            $nodes = $agent->request(['op' => 'nodes'], max(60.0, $timeout));
+            $nodes = $agent->request(['op' => 'nodes', 'quick' => true], min(8.0, $timeout));
             $error = (string) ($nodes['error'] ?? $error);
         }
         $liveOk = ($nodes['ok'] ?? false) === true;

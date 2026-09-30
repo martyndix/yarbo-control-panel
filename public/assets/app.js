@@ -2658,8 +2658,9 @@ async function loadHomeDashboard() {
         if (!card || card.classList.contains('module-pane-hidden')) return;
     }
     homeLoadBusy = true;
+    let aborted = false;
     try {
-        const data = await homeApi(null, 12000);
+        const data = await homeApi(null, 20000);
         const savingId = homePaperSavingId;
         const localAssigned = savingId
             ? [...(((homeDash.paper_devices || []).find((p) => p.id === savingId) || {}).assigned || [])]
@@ -2671,15 +2672,23 @@ async function loadHomeDashboard() {
         }
         renderHomeDashboard(data);
     } catch (err) {
-        if (isAbortError(err) && homeDash?.setup?.state === 'running') {
-            applyHomeSetupUi(homeDash);
+        if (isAbortError(err)) {
+            aborted = true;
+            const status = document.getElementById('home-server-status');
+            if (status) status.textContent = 'Loading Home…';
+            window.setTimeout(() => {
+                homeLoadBusy = false;
+                loadHomeDashboard();
+            }, 2500);
             return;
         }
         const status = document.getElementById('home-server-status');
         if (status) status.textContent = err.message || 'Could not load Home';
         applyHomeSetupUi({ setup: { state: 'failed', error: err.message || 'Could not load Home' } });
     } finally {
-        homeLoadBusy = false;
+        if (!aborted) {
+            homeLoadBusy = false;
+        }
     }
 }
 

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.59] - 2026-09-30
+
+### Fixed
+- Home no longer shows **Fetch is aborted** while recovering Matter storage. The dashboard returns saved lights immediately; Docker remount and interviews run in the background.
+
 ## [3.0.58] - 2026-09-30
 
 ### Fixed
