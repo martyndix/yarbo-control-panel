@@ -103,6 +103,7 @@ yarbo_matter_ensure_ipv6_route() {
   yarbo_root ip -6 route add default dev "$iface" >/dev/null 2>&1 \
     || ip -6 route add default dev "$iface" >/dev/null 2>&1 \
     || true
+  yarbo_root ip -6 route add multicast ff00::/8 dev "$iface" table local >/dev/null 2>&1 || true
 }
 
 yarbo_matter_primary_interface() {
