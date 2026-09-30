@@ -1624,23 +1624,40 @@ void noteActivity()
     }
 }
 
-int pngFileWidth(const char *path)
+bool pngFileSize(const char *path, int *w, int *h)
 {
     File f = SPIFFS.open(path, FILE_READ);
     if (!f || f.size() < 24) {
         if (f) {
             f.close();
         }
-        return PAPERMONO_LOGO_PX;
+        return false;
     }
     uint8_t hdr[24];
     int n = f.read(hdr, 24);
     f.close();
     if (n != 24 || hdr[0] != 0x89 || hdr[1] != 'P' || hdr[2] != 'N' || hdr[3] != 'G') {
-        return PAPERMONO_LOGO_PX;
+        return false;
     }
-    int w = ((int) hdr[16] << 24) | ((int) hdr[17] << 16) | ((int) hdr[18] << 8) | (int) hdr[19];
-    if (w < 8 || w > 1024) {
+    int pw = ((int) hdr[16] << 24) | ((int) hdr[17] << 16) | ((int) hdr[18] << 8) | (int) hdr[19];
+    int ph = ((int) hdr[20] << 24) | ((int) hdr[21] << 16) | ((int) hdr[22] << 8) | (int) hdr[23];
+    if (pw < 8 || pw > 2048 || ph < 8 || ph > 2048) {
+        return false;
+    }
+    if (w) {
+        *w = pw;
+    }
+    if (h) {
+        *h = ph;
+    }
+    return true;
+}
+
+int pngFileWidth(const char *path)
+{
+    int w = PAPERMONO_LOGO_PX;
+    int h = 0;
+    if (!pngFileSize(path, &w, &h)) {
         return PAPERMONO_LOGO_PX;
     }
     return w;
@@ -1697,47 +1714,91 @@ void drawLockScreen(bool forceFull)
     drawBatteryBadge(batRight, batCy, tabletBat, false);
     int batBottom = batCy + batH / 2;
 
+    int unlockW = 280;
+    int offW = 140;
+    int btnH = 110;
+    int btnGap = 16;
+    int bx = (W - (unlockW + btnGap + offW)) / 2;
+    int by = H - 156;
+    int contentTop = batBottom + 16;
+    int contentBottom = by - 24;
+    if (contentBottom < contentTop + 80) {
+        contentBottom = contentTop + 80;
+    }
+
     bool wantBoard = lockScreen == "vestaboard" || lockScreen == "both";
     bool wantLogo = lockScreen == "logo" || lockScreen == "both";
     bool haveLogo = SPIFFS.exists("/logo.png");
     bool showBoard = wantBoard && (!vestaboardKnown || vestaboardOn);
-    bool logoDrawn = false;
-    int logoY = batBottom + 20;
-    int logoSize = showBoard ? 200 : 232;
-    if (wantLogo && haveLogo) {
-        int srcW = pngFileWidth("/logo.png");
-        float sc = (float) logoSize / (float) srcW;
-        int logoX = (W - logoSize) / 2;
-        logoDrawn = M5.Display.drawPngFile(SPIFFS, "/logo.png", logoX, logoY, 0, 0, 0, 0, sc, sc);
+    bool showLogo = wantLogo && haveLogo;
+
+    int logoY = contentTop;
+    int drawnH = 0;
+    if (showLogo) {
+        int srcW = PAPERMONO_LOGO_PX;
+        int srcH = PAPERMONO_LOGO_PX;
+        pngFileSize("/logo.png", &srcW, &srcH);
+        int maxW = W - 48;
+        int maxH = showBoard ? (contentBottom - contentTop) * 45 / 100 : (contentBottom - contentTop);
+        if (maxH < 90) {
+            maxH = 90;
+        }
+        if (maxH > 240) {
+            maxH = 240;
+        }
+        float sc = (float) maxW / (float) srcW;
+        float scH = (float) maxH / (float) srcH;
+        if (scH < sc) {
+            sc = scH;
+        }
+        int drawnW = (int) ((float) srcW * sc);
+        drawnH = (int) ((float) srcH * sc);
+        int logoX = (W - drawnW) / 2;
+        M5.Display.drawPngFile(SPIFFS, "/logo.png", logoX, logoY, 0, 0, 0, 0, sc, sc);
     } else if (wantLogo && !showBoard) {
         M5.Display.setTextSize(2);
         M5.Display.drawString("Logo after site Wi-Fi", W / 2, logoY + 40);
+        drawnH = 72;
     }
     if (showBoard) {
-        int cell = logoDrawn ? 24 : 30;
+        int gridTop = showLogo ? (logoY + drawnH + 20) : contentTop;
+        int gridRoom = contentBottom - gridTop;
+        if (gridRoom < 48) {
+            gridRoom = 48;
+        }
         int gap = 2;
+        int cellW = (W - 32 - 14 * gap) / 15;
+        int cellH = (gridRoom - 2 * gap) / 3;
+        int cell = cellW < cellH ? cellW : cellH;
+        if (cell > 30) {
+            cell = 30;
+        }
+        if (cell < 14) {
+            cell = 14;
+        }
         int gridW = 15 * cell + 14 * gap;
-        int gridY = logoDrawn ? (logoY + logoSize + 28) : 280;
+        int gridH = 3 * cell + 2 * gap;
+        int gridY = gridTop;
+        if (gridY + gridH > contentBottom) {
+            gridY = contentBottom - gridH;
+        }
+        if (gridY < contentTop) {
+            gridY = contentTop;
+        }
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
     }
 
-    int unlockW = 280;
-    int offW = 140;
-    int btnH = 110;
-    int gap = 16;
-    int bx = (W - (unlockW + gap + offW)) / 2;
-    int by = H - 156;
     drawPadlockIcon(bx + 16, by + 18, 74, false);
     M5.Display.drawRoundRect(bx, by, unlockW, btnH, 18, TFT_BLACK);
     M5.Display.setTextDatum(ML_DATUM);
     M5.Display.setTextSize(3);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.drawString("Unlock", bx + 110, by + btnH / 2);
-    M5.Display.fillRoundRect(bx + unlockW + gap, by, offW, btnH, 18, TFT_BLACK);
+    M5.Display.fillRoundRect(bx + unlockW + btnGap, by, offW, btnH, 18, TFT_BLACK);
     M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
     M5.Display.setTextSize(3);
-    M5.Display.drawString("OFF", bx + unlockW + gap + offW / 2, by + btnH / 2);
+    M5.Display.drawString("OFF", bx + unlockW + btnGap + offW / 2, by + btnH / 2);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     finishEpdFrame();
 }
@@ -3289,6 +3350,11 @@ void setup()
     applyFrontlight(true);
     lastActivity = millis();
     lastLight = millis();
+    screenLocked = false;
+    menuOpen = true;
+    if (currentPage == PAPERMONO_PAGE_HOME || !pageEnabled(currentPage)) {
+        currentPage = firstEnabledPage();
+    }
     if (wifiSsid.length()) {
         WiFi.mode(WIFI_STA);
         WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());

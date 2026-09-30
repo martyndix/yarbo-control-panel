@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.57] - 2026-09-30
+
+### Fixed
+- Home no longer drops Matter lights when the Matter server answers with an empty node list (Hue Bridge endpoints that only advertise Bridged Node + On/Off were skipped, and a successful empty reply overwrote the last known devices). The previous list is kept until the fabric answers again.
+- PaperMono firmware **0.1.51**: lock screen keeps the logo above the Vestaboard preview so the board cannot cover it. A reboot opens the page menu instead of the old Home pad.
+
 ## [3.0.56] - 2026-09-30
 
 ### Changed

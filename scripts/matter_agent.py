@@ -113,21 +113,31 @@ class MatterWs:
     def recv_json(self, timeout: float) -> dict[str, Any] | None:
         self.sock.settimeout(timeout)
         deadline = time.time() + timeout
+        acc = bytearray()
         while time.time() < deadline:
             frame = self._read_frame(max(0.2, deadline - time.time()))
             if frame is None:
                 return None
-            if not frame:
+            fin, opcode, payload = frame
+            if opcode == 0x9:
+                continue
+            if opcode not in (0x1, 0x2, 0x0):
+                acc.clear()
+                continue
+            acc.extend(payload)
+            if not fin:
                 continue
             try:
-                parsed = json.loads(frame.decode())
+                parsed = json.loads(bytes(acc).decode())
             except (UnicodeDecodeError, json.JSONDecodeError):
+                acc.clear()
                 continue
+            acc.clear()
             if isinstance(parsed, dict):
                 return parsed
         return None
 
-    def _read_frame(self, timeout: float) -> bytes | None:
+    def _read_frame(self, timeout: float) -> tuple[bool, int, bytes] | None:
         try:
             while len(self.buf) < 2:
                 chunk = self.sock.recv(4096)
@@ -135,6 +145,7 @@ class MatterWs:
                     return None
                 self.buf.extend(chunk)
             b1, b2 = self.buf[0], self.buf[1]
+            fin = bool(b1 & 0x80)
             opcode = b1 & 0x0F
             masked = b2 & 0x80
             length = b2 & 0x7F
@@ -177,11 +188,7 @@ class MatterWs:
                 payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
             if opcode == 0x8:
                 return None
-            if opcode == 0x9:
-                return b""
-            if opcode in (0x1, 0x2, 0x0):
-                return payload
-            return b""
+            return fin, opcode, payload
         except (TimeoutError, socket.timeout, OSError):
             return None
 
@@ -369,31 +376,60 @@ def matter_rpc(command: str, args: dict[str, Any] | None = None, timeout: float 
         return {"ok": False, "error": str(last_err) if last_err else "Matter server unavailable"}
 
 
+def nodes_from_result(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, list):
+        return [node for node in raw if isinstance(node, dict)]
+    if isinstance(raw, dict):
+        for key in ("nodes", "result", "data"):
+            nested = raw.get(key)
+            if isinstance(nested, list):
+                return [node for node in nested if isinstance(node, dict)]
+        if "node_id" in raw or "attributes" in raw:
+            return [raw]
+    return []
+
+
 def endpoint_ids(attributes: dict[str, Any]) -> set[int]:
     out: set[int] = set()
     for key in attributes:
+        parsed = parse_attr_path(key)
+        if parsed is not None:
+            out.add(parsed[0])
+            continue
         try:
-            ep = int(str(key).split("/", 1)[0])
+            out.add(int(str(key).split("/", 1)[0], 0))
         except ValueError:
             continue
-        out.add(ep)
     return out
+
+
+def device_type_id(item: Any) -> int | None:
+    raw_id: Any = None
+    if isinstance(item, (int, float)):
+        raw_id = item
+    elif isinstance(item, dict):
+        for key in ("0", 0, "deviceType", "device_type", "DeviceType", "type"):
+            if key in item:
+                raw_id = item.get(key)
+                break
+    try:
+        return int(raw_id) if raw_id is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def device_type_ids(types: Any) -> list[int]:
     ids: list[int] = []
-    if isinstance(types, list):
-        for item in types:
-            raw_id: Any = None
-            if isinstance(item, dict):
-                raw_id = item.get("0", item.get(0, item.get("deviceType")))
-            elif isinstance(item, (int, float)):
-                raw_id = item
-            try:
-                if raw_id is not None:
-                    ids.append(int(raw_id))
-            except (TypeError, ValueError):
-                continue
+    if isinstance(types, dict):
+        types = types.get("value", types.get("0", [types]))
+    if isinstance(types, (int, float)):
+        types = [types]
+    if not isinstance(types, list):
+        return ids
+    for item in types:
+        parsed = device_type_id(item)
+        if parsed is not None:
+            ids.append(parsed)
     return ids
 
 
@@ -810,15 +846,21 @@ def set_color_temp(node_id: int, endpoint: int, kelvin: int) -> dict[str, Any]:
     return device_command(node_id, endpoint, COLOR_CONTROL, "MoveToColorTemperature", payload_off)
 
 
+def fallback_kind(attributes: dict[str, Any], endpoint: int) -> str:
+    if endpoint_has_cluster(attributes, endpoint, COLOR_CONTROL) or endpoint_has_cluster(
+        attributes, endpoint, LEVEL_CONTROL
+    ):
+        return "light"
+    return "switch"
+
+
 def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
-    nodes = raw if isinstance(raw, list) else []
+    nodes = nodes_from_result(raw)
     devices: list[dict[str, Any]] = []
     for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        node_id = int(node.get("node_id") or 0)
+        node_id = int(node.get("node_id") or node.get("nodeId") or 0)
         available = bool(node.get("available", True))
-        is_bridge = bool(node.get("is_bridge", False))
+        is_bridge = bool(node.get("is_bridge") or node.get("isBridge") or False)
         attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
         vendor = attr_str(attributes, 0, BASIC_INFO, ATTR_VENDOR_NAME)
         product = attr_str(attributes, 0, BASIC_INFO, ATTR_PRODUCT_NAME)
@@ -828,20 +870,22 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
         for endpoint in sorted(ep_ids):
             if endpoint == 0:
                 continue
-            on_key = attr_key(endpoint, ON_OFF, ATTR_ON_OFF)
-            if on_key not in attributes:
+            on_val = attr_raw(attributes, endpoint, ON_OFF, ATTR_ON_OFF)
+            if on_val is None and not endpoint_has_cluster(attributes, endpoint, ON_OFF):
                 continue
-            types = attributes.get(attr_key(endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES))
+            types = attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES)
             type_ids = device_type_ids(types)
             kind = device_kind(types)
-            if DEVTYPE_AGGREGATOR in type_ids and kind == "other":
-                continue
             if kind == "other":
-                continue
+                if DEVTYPE_AGGREGATOR in type_ids and not endpoint_has_cluster(
+                    attributes, endpoint, ON_OFF
+                ):
+                    continue
+                kind = fallback_kind(attributes, endpoint)
             label = endpoint_name(attributes, endpoint, vendor, product)
-            level = attributes.get(attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL))
+            level = attr_num(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL)
             brightness = None
-            if isinstance(level, (int, float)) and level >= 0:
+            if level is not None and level >= 0:
                 brightness = int(round(float(level) * 100 / 254))
             color = color_payload(attributes, endpoint, type_ids)
             devices.append(
@@ -855,9 +899,9 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "product": product,
                     "source": source,
                     "bridge": is_bridge or len(ep_ids) > 3,
-                    "on": bool(attributes.get(on_key)),
+                    "on": bool(on_val),
                     "brightness": brightness,
-                    "dimmable": attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) in attributes,
+                    "dimmable": attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
                     "available": available,
                     **color,
                 }
@@ -899,10 +943,15 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "error": None if listening else (hint or "Matter server is not listening on port 5580"),
         }
     if op == "nodes":
-        rpc = matter_rpc("get_nodes", timeout=15.0)
+        rpc = matter_rpc("get_nodes", timeout=45.0)
         if not rpc.get("ok"):
             return rpc
-        return {"ok": True, "devices": flatten_nodes(rpc.get("result"))}
+        nodes = nodes_from_result(rpc.get("result"))
+        return {
+            "ok": True,
+            "devices": flatten_nodes(nodes),
+            "node_count": len(nodes),
+        }
     if op == "commission":
         code = str(body.get("code") or "").strip()
         if not code:

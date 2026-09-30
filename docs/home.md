@@ -42,4 +42,6 @@ Thread devices keep using Apple’s (or another) border router. IPv6 is turned o
 
 ## PaperMono
 
-Flash firmware **0.1.50** (USB first, then Wi-Fi OTA). On the Home dashboard, tap **⚙️**, pick a tablet card (each shows how many HOUSE buttons it has), tick lights/scenes for that tablet (up to 12), and drag them into button order. Changes save as you go. The HOUSE page lists all assigned buttons on one screen. Scene buttons fill when the scene matches the lights, and a second tap turns those lights off (panel **3.0.41**, no extra flash required for that behaviour).
+Flash firmware **0.1.51** (USB first, then Wi-Fi OTA). On the Home dashboard, tap **⚙️**, pick a tablet card (each shows how many HOUSE buttons it has), tick lights/scenes for that tablet (up to 12), and drag them into button order. Changes save as you go. The HOUSE page lists all assigned buttons on one screen. Scene buttons fill when the scene matches the lights, and a second tap turns those lights off (panel **3.0.41**, no extra flash required for that behaviour).
+
+If Home says **0 devices** after a panel update, install **3.0.57** and refresh. The panel keeps the last known lights and lists Hue Bridge endpoints that only report as Bridged Node. Pairing is stored in `data/matter-server/` and is not replaced by a git update. If the Matter fabric itself is empty (new Docker volume), add the Hue Bridge pairing code once and the lights come back with the names, rooms, and scenes already in `data/home.json`.

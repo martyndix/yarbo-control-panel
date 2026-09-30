@@ -2533,8 +2533,11 @@ html[data-theme="light"] .plan-activity {
 
 .paper-lock-logo {
     max-width: 7rem;
-    max-height: 7rem;
+    max-height: 5.5rem;
     object-fit: contain;
+    margin: 0.35rem 0 0.2rem;
+    position: relative;
+    z-index: 1;
 }
 
 .paper-lock-logo.is-empty,
@@ -2548,6 +2551,10 @@ html[data-theme="light"] .plan-activity {
     padding: 6px;
     gap: 2px;
     overflow: hidden;
+    margin-top: 0.15rem;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 0;
 }
 
 .paper-lock-board .vestaboard-cell {

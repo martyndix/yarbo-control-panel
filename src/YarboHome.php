@@ -50,6 +50,7 @@ final class YarboHome
             'hidden' => [],
             'device_order' => [],
             'active_scene_id' => '',
+            'last_devices' => [],
         ];
         if (!is_file($this->storePath())) {
             return $defaults;
@@ -167,9 +168,18 @@ final class YarboHome
             'hidden' => $hidden,
             'device_order' => $this->normalizeIdList(is_array($decoded['device_order'] ?? null) ? $decoded['device_order'] : []),
             'active_scene_id' => trim((string) ($decoded['active_scene_id'] ?? '')),
+            'last_devices' => $this->normalizeLastDevices(
+                is_array($decoded['last_devices'] ?? null) ? $decoded['last_devices'] : []
+            ),
         ];
         if ($migrated) {
             $this->write($store);
+        } elseif ($store['last_devices'] === []) {
+            $cached = $this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json');
+            if ($cached !== []) {
+                $store['last_devices'] = $this->normalizeLastDevices($cached);
+                $this->write($store);
+            }
         }
 
         return $store;
@@ -242,26 +252,17 @@ final class YarboHome
                 'setup' => $setup,
             ];
         }
-        if (!($setup['ready'] ?? false)) {
-            $store = $this->load();
-
-            return [
-                'ok' => true,
-                'enabled' => true,
-                'server' => [
-                    'ok' => false,
-                    'error' => (string) ($setup['error'] ?? $setup['message'] ?? 'Matter server is not running yet'),
-                ],
-                'devices' => [],
-                'hidden_devices' => [],
-                'rooms' => $this->roomsPayload($store, []),
-                'scenes' => $this->scenesPayload($store['scenes'], []),
-                'paper_devices' => $this->paperDeviceList($store),
-                'setup' => $setup,
-            ];
-        }
-        $live = $this->liveDevices(8.0);
         $store = $this->load();
+        if (!($setup['ready'] ?? false)) {
+            $live = [
+                'ok' => false,
+                'error' => (string) ($setup['error'] ?? $setup['message'] ?? 'Matter server is not running yet'),
+                'devices' => $store['last_devices'] ?? [],
+            ];
+        } else {
+            $live = $this->liveDevices(8.0);
+            $store = $this->load();
+        }
         $hidden = array_fill_keys($store['hidden'], true);
         $devices = [];
         $hiddenDevices = [];
@@ -1246,12 +1247,12 @@ final class YarboHome
         $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
         $fresh = is_file($cachePath) && (time() - (int) filemtime($cachePath)) < 8;
         if ($fresh) {
-            $cached = json_decode((string) file_get_contents($cachePath), true);
-            if (is_array($cached) && (int) ($cached['v'] ?? 0) >= 4 && is_array($cached['devices'] ?? null)) {
+            $cached = $this->readDeviceCache($cachePath);
+            if ($cached !== []) {
                 return [
                     'ok' => true,
                     'error' => '',
-                    'devices' => $cached['devices'],
+                    'devices' => $cached,
                 ];
             }
         }
@@ -1260,28 +1261,163 @@ final class YarboHome
         $error = (string) ($status['error'] ?? 'Matter server unavailable');
         $nodes = ['ok' => false, 'devices' => []];
         if (($status['ok'] ?? false) === true || ($status['server'] ?? false) === true) {
-            $nodes = $agent->request(['op' => 'nodes'], $timeout);
+            $nodes = $agent->request(['op' => 'nodes'], max(12.0, $timeout));
             $error = (string) ($nodes['error'] ?? $error);
         }
+        $liveOk = ($nodes['ok'] ?? false) === true;
         $devices = is_array($nodes['devices'] ?? null) ? $nodes['devices'] : [];
-        if (($nodes['ok'] ?? false) === true) {
-            @file_put_contents($cachePath, json_encode([
-                'v' => 4,
-                'saved_at' => time(),
-                'devices' => $devices,
-            ], JSON_UNESCAPED_SLASHES));
-        } elseif (is_file($cachePath)) {
-            $cached = json_decode((string) file_get_contents($cachePath), true);
-            if (is_array($cached) && is_array($cached['devices'] ?? null)) {
-                $devices = $cached['devices'];
+        if ($liveOk && $devices !== []) {
+            $this->writeDeviceCache($cachePath, $devices);
+            $this->rememberDevices($devices);
+        } else {
+            $remembered = self::preferLiveOrRemembered($devices, $this->rememberedOrCached($cachePath));
+            if ($remembered !== []) {
+                if ($liveOk) {
+                    $remembered = $this->markDevicesUnavailable($remembered);
+                }
+                $devices = $remembered;
             }
         }
 
         return [
-            'ok' => (bool) ($nodes['ok'] ?? false),
-            'error' => ($nodes['ok'] ?? false) ? '' : $error,
+            'ok' => $liveOk || $devices !== [],
+            'error' => ($liveOk || $devices !== []) ? '' : $error,
             'devices' => $devices,
         ];
+    }
+
+    /**
+     * Keep the last non-empty Matter list. An empty live reply must not wipe devices.
+     *
+     * @param list<array<string, mixed>> $live
+     * @param list<array<string, mixed>> $remembered
+     * @return list<array<string, mixed>>
+     */
+    public static function preferLiveOrRemembered(array $live, array $remembered): array
+    {
+        return $live !== [] ? $live : $remembered;
+    }
+
+    /**
+     * @param list<mixed> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function normalizeLastDevices(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $out[] = [
+                'id' => $id,
+                'node_id' => (int) ($row['node_id'] ?? 0),
+                'endpoint' => (int) ($row['endpoint'] ?? 0),
+                'name' => (string) ($row['name'] ?? $id),
+                'kind' => (string) ($row['kind'] ?? self::KIND_LIGHT),
+                'vendor' => (string) ($row['vendor'] ?? ''),
+                'product' => (string) ($row['product'] ?? ''),
+                'source' => (string) ($row['source'] ?? ''),
+                'bridge' => (bool) ($row['bridge'] ?? false),
+                'on' => (bool) ($row['on'] ?? false),
+                'brightness' => isset($row['brightness']) ? (int) $row['brightness'] : null,
+                'dimmable' => (bool) ($row['dimmable'] ?? false),
+                'colorable' => (bool) ($row['colorable'] ?? false),
+                'color_hs' => (bool) ($row['color_hs'] ?? false),
+                'color_xy' => (bool) ($row['color_xy'] ?? false),
+                'color_ct' => (bool) ($row['color_ct'] ?? false),
+                'color_hex' => (string) ($row['color_hex'] ?? ''),
+                'available' => (bool) ($row['available'] ?? true),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function readDeviceCache(string $path): array
+    {
+        if (!is_file($path)) {
+            return [];
+        }
+        $cached = json_decode((string) file_get_contents($path), true);
+        if (!is_array($cached) || (int) ($cached['v'] ?? 0) < 4 || !is_array($cached['devices'] ?? null)) {
+            return [];
+        }
+        $devices = [];
+        foreach ($cached['devices'] as $row) {
+            if (is_array($row) && trim((string) ($row['id'] ?? '')) !== '') {
+                $devices[] = $row;
+            }
+        }
+
+        return $devices;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $devices
+     */
+    private function writeDeviceCache(string $path, array $devices): void
+    {
+        @file_put_contents($path, json_encode([
+            'v' => 4,
+            'saved_at' => time(),
+            'devices' => $devices,
+        ], JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $devices
+     */
+    private function rememberDevices(array $devices): void
+    {
+        $slim = $this->normalizeLastDevices($devices);
+        if ($slim === []) {
+            return;
+        }
+        $store = $this->load();
+        if (($store['last_devices'] ?? []) === $slim) {
+            return;
+        }
+        $store['last_devices'] = $slim;
+        $this->write($store);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function rememberedOrCached(string $cachePath): array
+    {
+        $cached = $this->readDeviceCache($cachePath);
+        if ($cached !== []) {
+            return $cached;
+        }
+
+        return $this->load()['last_devices'] ?? [];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $devices
+     * @return list<array<string, mixed>>
+     */
+    private function markDevicesUnavailable(array $devices): array
+    {
+        $out = [];
+        foreach ($devices as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $row['available'] = false;
+            $out[] = $row;
+        }
+
+        return $out;
     }
 
     /**
