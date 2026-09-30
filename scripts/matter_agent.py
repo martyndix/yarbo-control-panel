@@ -727,27 +727,54 @@ def wait_matter_port(seconds: float = 25.0) -> bool:
     return False
 
 
+def primary_interface() -> str:
+    env = (os.environ.get("YARBO_MATTER_PRIMARY_INTERFACE") or "").strip()
+    if env:
+        return env
+    try:
+        out = subprocess.run(
+            ["ip", "-4", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        parts = (out.stdout or "").split()
+        if "dev" in parts:
+            return parts[parts.index("dev") + 1]
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
+        pass
+    return "eth0"
+
+
+def matter_container_args() -> list[str]:
+    return [
+        "run",
+        "-d",
+        "--name",
+        DOCKER_NAME,
+        "--restart",
+        "unless-stopped",
+        "--security-opt",
+        "apparmor=unconfined",
+        "--network",
+        "host",
+        "-v",
+        f"{STORAGE}:/data",
+        DOCKER_IMAGE,
+        "--storage-path",
+        "/data",
+        "--paa-root-cert-dir",
+        "/data/credentials",
+        "--primary-interface",
+        primary_interface(),
+    ]
+
+
 def recreate_matter_container() -> None:
     reset_ws()
     run_docker(["stop", DOCKER_NAME])
     run_docker(["rm", DOCKER_NAME])
-    run_docker(
-        [
-            "run",
-            "-d",
-            "--name",
-            DOCKER_NAME,
-            "--restart",
-            "unless-stopped",
-            "--security-opt",
-            "apparmor=unconfined",
-            "--network",
-            "host",
-            "-v",
-            f"{STORAGE}:/data",
-            DOCKER_IMAGE,
-        ]
-    )
+    run_docker(matter_container_args())
     wait_matter_port(30.0)
 
 
@@ -910,23 +937,7 @@ def ensure_matter_server() -> str | None:
             if not running:
                 run_docker(["start", DOCKER_NAME])
         else:
-            run_docker(
-                [
-                    "run",
-                    "-d",
-                    "--name",
-                    DOCKER_NAME,
-                    "--restart",
-                    "unless-stopped",
-                    "--security-opt",
-                    "apparmor=unconfined",
-                    "--network",
-                    "host",
-                    "-v",
-                    f"{STORAGE}:/data",
-                    DOCKER_IMAGE,
-                ]
-            )
+            run_docker(matter_container_args())
         _started_docker = True
         deadline = time.time() + 25
         while time.time() < deadline:

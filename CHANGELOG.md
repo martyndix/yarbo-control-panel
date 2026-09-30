@@ -9,7 +9,7 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ## [3.0.64] - 2026-09-30
 
 ### Fixed
-- Home can turn lights on again after the Hue fabric JSON was left with only CSA `vendor_info` (no `nodes`). The Matter agent reads/writes node stubs via Docker `cp` when the file is root-owned (`chmod 600`), reloads python-matter-server so it can interview the existing CHIP fabric, and retries a command that failed with **Node N is not (yet) available**. An uninterviewed stub is not shown as a single **Matter node** row — saved names, rooms, and scenes stay visible until Hue endpoints return. Do not pair the Hue Bridge a second time.
+- Home can turn lights on again after the Hue fabric JSON was left with only CSA `vendor_info` (no `nodes`). The Matter agent reads/writes node stubs via Docker `cp` when the file is root-owned (`chmod 600`), reloads python-matter-server so it can interview the existing CHIP fabric, and retries a command that failed with **Node N is not (yet) available**. An uninterviewed stub is not shown as a single **Matter node** row — saved names, rooms, and scenes stay visible until Hue endpoints return. Matter Docker is started with `--primary-interface` on the default IPv4 route so link-local IPv6 discovery can find the Hue Bridge. Do not pair the Hue Bridge a second time.
 
 ## [3.0.63] - 2026-09-30
 

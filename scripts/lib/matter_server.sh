@@ -80,10 +80,21 @@ yarbo_docker() {
 }
 
 yarbo_matter_enable_ipv6() {
-  local flag="/proc/sys/net/ipv6/conf/all/disable_ipv6"
-  if [[ -f "$flag" && "$(cat "$flag" 2>/dev/null || echo 0)" == "1" ]]; then
-    yarbo_root sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
+  local flag iface
+  for iface in all default eth0 wlan0; do
+    flag="/proc/sys/net/ipv6/conf/${iface}/disable_ipv6"
+    if [[ -f "$flag" && "$(cat "$flag" 2>/dev/null || echo 0)" == "1" ]]; then
+      yarbo_root sysctl -w "net.ipv6.conf.${iface}.disable_ipv6=0" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
+yarbo_matter_primary_interface() {
+  if [[ -n "${YARBO_MATTER_PRIMARY_INTERFACE:-}" ]]; then
+    echo "$YARBO_MATTER_PRIMARY_INTERFACE"
+    return
   fi
+  ip -4 route show default 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}'
 }
 
 yarbo_matter_install_docker() {
@@ -213,13 +224,28 @@ yarbo_matter_setup() {
   if yarbo_docker inspect "$name" >/dev/null 2>&1; then
     yarbo_docker start "$name" >/dev/null 2>&1 || true
   else
-    yarbo_docker run -d \
-      --name "$name" \
-      --restart unless-stopped \
-      --security-opt apparmor=unconfined \
-      --network host \
-      -v "${ROOT}/data/matter-server:/data" \
-      "$image" >/dev/null 2>&1 || true
+    local iface
+    iface="$(yarbo_matter_primary_interface)"
+    if [[ -n "$iface" ]]; then
+      yarbo_docker run -d \
+        --name "$name" \
+        --restart unless-stopped \
+        --security-opt apparmor=unconfined \
+        --network host \
+        -v "${ROOT}/data/matter-server:/data" \
+        "$image" \
+        --storage-path /data \
+        --paa-root-cert-dir /data/credentials \
+        --primary-interface "$iface" >/dev/null 2>&1 || true
+    else
+      yarbo_docker run -d \
+        --name "$name" \
+        --restart unless-stopped \
+        --security-opt apparmor=unconfined \
+        --network host \
+        -v "${ROOT}/data/matter-server:/data" \
+        "$image" >/dev/null 2>&1 || true
+    fi
   fi
 
   local i
