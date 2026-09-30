@@ -220,6 +220,9 @@ install_update_sudoers() {
     echo "${owner} ALL=(ALL) NOPASSWD: ${wrapper}"
     if [[ -x /usr/sbin/sysctl ]]; then
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.all.disable_ipv6=0"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.default.disable_ipv6=0"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.eth0.disable_ipv6=0"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.wlan0.disable_ipv6=0"
     fi
     if [[ -x /usr/sbin/usermod ]]; then
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/usermod -aG docker ${owner}"
