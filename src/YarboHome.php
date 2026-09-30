@@ -1251,11 +1251,13 @@ final class YarboHome
         $fromMeta = $this->devicesFromStoreHints($store);
         $devices = self::preferLiveOrRemembered($fromDisk, $remembered);
         $devices = self::preferLiveOrRemembered($devices, $fromMeta);
-        $source = $fromDisk !== [] ? 'disk' : ($remembered !== [] ? 'cache' : ($fromMeta !== [] ? 'meta' : ''));
-        if ($fromDisk !== []) {
+        $source = $fromDisk !== [] && !self::looksLikeUninterviewedStub($fromDisk)
+            ? 'disk'
+            : ($remembered !== [] ? 'cache' : ($fromMeta !== [] ? 'meta' : ''));
+        if ($fromDisk !== [] && !self::looksLikeUninterviewedStub($fromDisk)) {
             $this->writeDeviceCache($cachePath, $fromDisk);
             $this->rememberDevices($fromDisk);
-        } elseif ($devices !== []) {
+        } elseif ($devices !== [] && !self::looksLikeUninterviewedStub($devices)) {
             $this->rememberDevices($devices);
         }
         $ready = $this->matterPortUp();
@@ -1291,12 +1293,12 @@ final class YarboHome
             return $local;
         }
         $agent = YarboMatterAgentClient::fromEnv();
-        $nodes = $agent->request(['op' => 'nodes', 'quick' => true], min(2.5, $timeout), false);
+        $nodes = $agent->request(['op' => 'nodes', 'quick' => true], max(8.0, $timeout), false);
         $liveOk = ($nodes['ok'] ?? false) === true;
         $devices = is_array($nodes['devices'] ?? null) ? $nodes['devices'] : [];
         $fabric = is_array($nodes['fabric'] ?? null) ? $nodes['fabric'] : ($local['fabric'] ?? []);
         $error = (string) ($nodes['error'] ?? $local['error']);
-        if ($liveOk && $devices !== []) {
+        if ($liveOk && $devices !== [] && !self::looksLikeUninterviewedStub($devices)) {
             $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
             $this->writeDeviceCache($cachePath, $devices);
             $this->rememberDevices($devices);

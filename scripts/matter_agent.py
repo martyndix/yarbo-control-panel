@@ -991,7 +991,7 @@ def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, A
     if quick and disk:
         info["source"] = "disk"
         return disk, info
-    rpc = matter_rpc("get_nodes", timeout=5.0 if quick else 45.0)
+    rpc = matter_rpc("get_nodes", timeout=15.0 if quick else 45.0)
     nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
     if nodes:
         info["source"] = "live"

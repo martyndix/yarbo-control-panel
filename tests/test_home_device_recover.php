@@ -50,6 +50,10 @@ if (count($named) !== 2 || ($named[0]['id'] ?? '') !== '1:1') {
     fwrite(STDERR, "uninterviewed stub hid remembered devices\n");
     exit(1);
 }
+if (!Yarbo\YarboHome::looksLikeUninterviewedStub($stub)) {
+    fwrite(STDERR, "stub should look uninterviewed\n");
+    exit(1);
+}
 $live = Yarbo\YarboHome::preferLiveOrRemembered(
     [['id' => '1:9', 'name' => 'New']],
     $store['last_devices']
