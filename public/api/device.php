@@ -54,13 +54,41 @@ if ($method === 'GET' && $action === 'ports') {
     json_response($devices->listSerialPorts());
 }
 
+function device_request_power(): array
+{
+    $src = $_GET;
+    foreach (device_json_input() as $key => $value) {
+        $src[$key] = $value;
+    }
+    $battery = YarboPaperDevice::parseBatteryLevel($src['batt'] ?? $src['battery'] ?? $src['battery_level'] ?? null);
+    $charging = YarboPaperDevice::parseChargingFlag($src['chg'] ?? $src['charging'] ?? $src['is_charging'] ?? null);
+
+    return [$battery, $charging];
+}
+
+function device_touch_seen(YarboPaperDevice $devices, array $device, bool $withPower = false): void
+{
+    $id = (string) ($device['id'] ?? '');
+    if ($id === '') {
+        return;
+    }
+    $fw = isset($_GET['fw']) ? (string) $_GET['fw'] : null;
+    if ($withPower) {
+        [$battery, $charging] = device_request_power();
+        $devices->touch($id, $fw, $battery, $charging);
+
+        return;
+    }
+    $devices->touch($id, $fw);
+}
+
 if ($method === 'GET' && $action === 'compact') {
     $token = device_token_from_request();
     $device = $devices->findByToken($token);
     if ($device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
-    $devices->touch((string) $device['id'], isset($_GET['fw']) ? (string) $_GET['fw'] : null);
+    device_touch_seen($devices, $device, true);
     $device = $devices->findByToken($token) ?? $device;
     json_response($devices->compactStatus($devices->deviceKind($device), $device));
 }
@@ -70,7 +98,7 @@ if ($method === 'GET' && $action === 'plans') {
     if ($device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
-    $devices->touch((string) $device['id'], isset($_GET['fw']) ? (string) $_GET['fw'] : null);
+    device_touch_seen($devices, $device, true);
     $device = $devices->findByToken(device_token_from_request()) ?? $device;
     $refresh = isset($_GET['refresh']) && $_GET['refresh'] !== '0';
     json_response($devices->compactPlans($refresh, $devices->deviceKind($device)));

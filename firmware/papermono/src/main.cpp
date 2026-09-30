@@ -2919,13 +2919,30 @@ void runOtaUpdate()
     }
 }
 
+static String panelApiUrl(const char *action)
+{
+    tabletBat = M5.Power.getBatteryLevel();
+    bool chargingNow = M5.Power.isCharging();
+    String url = panelUrl + "/api/device.php?action=";
+    url += action;
+    url += "&fw=";
+    url += PAPERMONO_FW_VERSION;
+    if (tabletBat >= 0) {
+        int pct = tabletBat > 100 ? 100 : tabletBat;
+        url += "&batt=";
+        url += String(pct);
+    }
+    url += chargingNow ? "&chg=1" : "&chg=0";
+    return url;
+}
+
 bool httpGetStatus()
 {
     if (WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
         return false;
     }
     HTTPClient http;
-    String url = panelUrl + "/api/device.php?action=compact&fw=" + String(PAPERMONO_FW_VERSION);
+    String url = panelApiUrl("compact");
     http.begin(url);
     http.addHeader("X-PaperMono-Token", token);
     http.setTimeout(8000);
@@ -3027,7 +3044,7 @@ bool httpGetPlans(bool refresh)
         return false;
     }
     HTTPClient http;
-    String url = panelUrl + "/api/device.php?action=plans&fw=" + String(PAPERMONO_FW_VERSION);
+    String url = panelApiUrl("plans");
     if (refresh) {
         url += "&refresh=1";
     }

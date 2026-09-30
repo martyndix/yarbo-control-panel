@@ -5671,6 +5671,18 @@ function renderPaperOtaPanel(devices) {
     }
 }
 
+function paperBatteryHtml(device) {
+    const has = device.battery_level != null || device.battery_updated_at;
+    if (!has) {
+        return '<span class="papermono-battery papermono-battery--unknown">Battery —</span>';
+    }
+    const pct = device.battery_level != null ? `${Number(device.battery_level)}%` : '—';
+    const charging = Boolean(device.is_charging);
+    const cls = charging ? 'papermono-battery is-charging' : 'papermono-battery';
+    const charge = charging ? ' · Charging' : '';
+    return `<span class="${cls}" title="Tablet battery">${escapeHtml(pct)}${charge}</span>`;
+}
+
 function renderPaperMonoDevices(devices) {
     if (!els.papermonoDevices) return;
     if (!Array.isArray(devices) || devices.length === 0) {
@@ -5692,7 +5704,7 @@ function renderPaperMonoDevices(devices) {
                     <span class="label">Tablet name</span>
                     <input type="text" maxlength="40" value="${escapeHtml(device.name || 'PaperMono')}" data-papermono-name="${escapeHtml(device.id)}" data-papermono-kind="${escapeHtml(device.kind || 'papermono')}">
                 </label>
-                <p class="hint">${kindLabel}${escapeHtml(online)} · ${escapeHtml(last)}${fw}</p>
+                <p class="hint">${kindLabel}${escapeHtml(online)} · ${paperBatteryHtml(device)} · ${escapeHtml(last)}${fw}</p>
             </div>
             <div class="papermono-device-actions">
                 ${paperOtaUpdateButton(device)}
@@ -5963,6 +5975,18 @@ function initPaperMail() {
 }
 
 let paperMonoDashboardCache = null;
+let paperPowerTimer = 0;
+
+function ensurePaperPowerPoll() {
+    if (paperPowerTimer) return;
+    paperPowerTimer = window.setInterval(() => {
+        if (!settingsModalOpen) return;
+        const pane = document.querySelector('[data-settings-pane="papermono"]');
+        if (pane?.classList.contains('is-active')) {
+            loadPaperMonoDashboard();
+        }
+    }, 15000);
+}
 
 async function loadPaperMonoDashboard() {
     if (els.papermonoPanelUrl && !els.papermonoPanelUrl.value) {
@@ -5978,6 +6002,7 @@ async function loadPaperMonoDashboard() {
         applyPaperWebClientName(data.web_client);
         renderPaperMonoDevices(data.devices);
         setMailCompanionVisible(Array.isArray(data.devices) && data.devices.length > 0);
+        ensurePaperPowerPoll();
     } catch (err) {
         if (els.papermonoFwStatus) {
             els.papermonoFwStatus.textContent = err.message || 'Could not load e-paper companion status.';

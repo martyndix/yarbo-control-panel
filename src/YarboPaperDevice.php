@@ -14,9 +14,9 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.51';
+    public const FIRMWARE_VERSION = '0.1.52';
     public const MENU_LABEL_MAX = 20;
-    public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
+    public const FIRMWARE_VERSION_COLOR = '0.2.16-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
@@ -773,7 +773,7 @@ final class YarboPaperDevice
         return true;
     }
 
-    public function touch(string $id, ?string $fwReported = null): void
+    public function touch(string $id, ?string $fwReported = null, ?int $batteryLevel = null, ?bool $charging = null): void
     {
         $store = $this->load();
         foreach ($store['devices'] as &$device) {
@@ -788,6 +788,16 @@ final class YarboPaperDevice
                     $device['kind'] = $inferred;
                 }
             }
+            if ($batteryLevel !== null) {
+                $device['battery_level'] = max(0, min(100, $batteryLevel));
+                $device['battery_updated_at'] = gmdate('c');
+            }
+            if ($charging !== null) {
+                $device['is_charging'] = $charging;
+                if ($batteryLevel === null) {
+                    $device['battery_updated_at'] = gmdate('c');
+                }
+            }
             if ($this->shouldDropOtaPending($device)) {
                 $device['ota_pending'] = false;
                 $device['ota_requested_at'] = null;
@@ -796,6 +806,41 @@ final class YarboPaperDevice
         }
         unset($device);
         $this->save($store);
+    }
+
+    public static function parseBatteryLevel(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_numeric($value)) {
+            return null;
+        }
+        $n = (int) round((float) $value);
+        if ($n < 0 || $n > 100) {
+            return null;
+        }
+
+        return $n;
+    }
+
+    public static function parseChargingFlag(mixed $value): ?bool
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        $s = strtolower(trim((string) $value));
+        if (in_array($s, ['1', 'true', 'yes', 'on', 'charging'], true)) {
+            return true;
+        }
+        if (in_array($s, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+
+        return null;
     }
 
     /**
@@ -2538,6 +2583,9 @@ final class YarboPaperDevice
 
             return $row;
         }
+        $battery = self::parseBatteryLevel($device['battery_level'] ?? null);
+        $charging = self::parseChargingFlag($device['is_charging'] ?? null) ?? false;
+        $hasPower = $battery !== null || !empty($device['battery_updated_at']);
         $row = [
             'id' => (string) ($device['id'] ?? ''),
             'name' => (string) ($device['name'] ?? $this->kindLabel($kind)),
@@ -2552,6 +2600,11 @@ final class YarboPaperDevice
             'ota_pending' => $this->otaPendingActive($device),
             'ota_available' => $this->firmwareAvailable($kind)
                 && (string) ($device['fw_reported'] ?? '') !== $this->firmwareVersionForKind($kind),
+            'battery_level' => $battery,
+            'is_charging' => $charging,
+            'battery_updated_at' => $device['battery_updated_at'] ?? null,
+            'battery_label' => $battery !== null ? $battery . '%' : '—',
+            'charging_label' => !$hasPower ? '—' : ($charging ? 'Charging' : 'Not charging'),
         ];
         if ($includeToken) {
             $row['token'] = (string) ($device['token'] ?? '');

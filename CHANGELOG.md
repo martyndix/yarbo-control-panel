@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.65] - 2026-09-30
+
+### Added
+- Settings → E-paper **Paired devices** shows each PaperMono / Paper Colour tablet battery percent and **Charging** when the tablet is on USB. PaperMono firmware **0.1.52** and Paper Colour **0.2.16-colour** send this on every status poll. Queue a Wi-Fi update after this panel update so existing tablets report power.
+
 ## [3.0.64] - 2026-09-30
 
 ### Fixed

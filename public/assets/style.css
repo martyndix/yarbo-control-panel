@@ -2823,7 +2823,34 @@ html[data-theme="light"] .plan-activity {
 }
 
 .papermono-device-row .hint {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
     margin: 0.15rem 0 0;
+}
+
+.papermono-battery {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.08rem 0.45rem;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+.papermono-battery.is-charging {
+    background: #e8f6ee;
+    border-color: #7ddea0;
+    color: #1d6b3a;
+}
+
+.papermono-battery--unknown {
+    font-weight: 500;
+    color: var(--muted, #667);
 }
 
 .btn-compact {
