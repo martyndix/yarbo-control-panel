@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.55] - 2026-09-30
+
+### Changed
+- PaperMono firmware **0.1.49**: the unlock menu has one **YARBO** button. Side buttons A/B then step Status, Health, and Plans. Menu button order is set in Settings → E-paper with ▲/▼.
+
 ## [3.0.54] - 2026-09-30
 
 ### Changed

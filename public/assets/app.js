@@ -6163,6 +6163,7 @@ function applyPaperMonoPrefs(prefs) {
     if (els.papermonoLockScreen) els.papermonoLockScreen.value = prefs.lock_screen || 'both';
     applyPaperMenuLabels(prefs.menu_labels);
     applyPaperMenuVisible(prefs.menu_visible);
+    applyPaperMenuOrder(prefs.menu_order);
     applyPaperMonoTimezone(prefs.timezone || '');
     if (els.papermonoLockAfter) els.papermonoLockAfter.value = String(prefs.lock_after_s ?? 60);
     if (els.papermonoLightOff) els.papermonoLightOff.value = String(prefs.light_off_s ?? 15);
@@ -6210,6 +6211,48 @@ function paperMenuVisiblePayload() {
     return out;
 }
 
+function paperMenuOrderPayload() {
+    return [...document.querySelectorAll('#paper-menu-list [data-menu-id]')]
+        .map((el) => el.getAttribute('data-menu-id') || '')
+        .filter(Boolean);
+}
+
+function applyPaperMenuOrder(order) {
+    const list = document.getElementById('paper-menu-list');
+    if (!list) return;
+    const rows = new Map();
+    list.querySelectorAll('[data-menu-id]').forEach((el) => {
+        rows.set(el.getAttribute('data-menu-id'), el);
+    });
+    const ids = Array.isArray(order) && order.length
+        ? order.map((id) => String(id || ''))
+        : paperMenuOrderPayload();
+    const seen = new Set();
+    ids.forEach((id) => {
+        const row = rows.get(id);
+        if (!row || seen.has(id)) return;
+        seen.add(id);
+        list.appendChild(row);
+    });
+    rows.forEach((row, id) => {
+        if (!seen.has(id)) list.appendChild(row);
+    });
+}
+
+function movePaperMenuRow(row, dir) {
+    const list = document.getElementById('paper-menu-list');
+    if (!list || !row) return;
+    const rows = [...list.querySelectorAll(':scope > [data-menu-id]')];
+    const idx = rows.indexOf(row);
+    const next = idx + Number(dir);
+    if (idx < 0 || next < 0 || next >= rows.length) return;
+    if (dir < 0) {
+        list.insertBefore(row, rows[next]);
+    } else {
+        list.insertBefore(row, rows[next].nextSibling);
+    }
+}
+
 function applyPaperMonoTimezone(zone) {
     const sel = els.papermonoTimezone;
     if (!sel) return;
@@ -6229,6 +6272,7 @@ function paperMonoPrefsPayload() {
         lock_screen: els.papermonoLockScreen?.value || 'both',
         menu_labels: paperMenuLabelsPayload(),
         menu_visible: paperMenuVisiblePayload(),
+        menu_order: paperMenuOrderPayload(),
         timezone: els.papermonoTimezone?.value || clientTimezone() || '',
         lock_after_s: Number(els.papermonoLockAfter?.value || 60),
         light_off_s: Number(els.papermonoLightOff?.value || 15),
@@ -8003,6 +8047,12 @@ els.papermonoLogoClear?.addEventListener('click', () => clearPaperLogo());
 els.papermonoLockScreen?.addEventListener('change', () => applyPaperPreviewModules());
 els.papermonoName?.addEventListener('input', () => refreshPaperLockPreview());
 els.papermonoPrefsSave?.addEventListener('click', (e) => savePaperMonoPrefs(e.currentTarget));
+document.getElementById('paper-menu-list')?.addEventListener('click', (event) => {
+    const btn = event.target.closest?.('[data-menu-move]');
+    if (!btn) return;
+    const row = btn.closest('[data-menu-id]');
+    movePaperMenuRow(row, btn.getAttribute('data-menu-move') || '0');
+});
 document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
     input.addEventListener('change', () => {
         applyPaperMonoKindUi(paperMonoDashboardCache);

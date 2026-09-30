@@ -14,7 +14,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.48';
+    public const FIRMWARE_VERSION = '0.1.49';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -1342,6 +1342,7 @@ final class YarboPaperDevice
             'unlock_page' => 'home',
             'menu_labels' => self::defaultMenuLabels(),
             'menu_visible' => self::defaultMenuVisible(),
+            'menu_order' => self::defaultMenuKeys(),
             'timezone' => '',
             'alert_message' => true,
             'alert_yarbo' => true,
@@ -1351,14 +1352,20 @@ final class YarboPaperDevice
     }
 
     /**
+     * @return list<string>
+     */
+    public static function defaultMenuKeys(): array
+    {
+        return ['yarbo', 'note', 'powerwall', 'lymow', 'radio', 'device', 'house'];
+    }
+
+    /**
      * @return array<string, string>
      */
     public static function defaultMenuLabels(): array
     {
         return [
-            'status' => 'STATUS',
-            'health' => 'HEALTH',
-            'plans' => 'PLANS',
+            'yarbo' => 'YARBO',
             'note' => 'NOTE',
             'powerwall' => 'POWER',
             'lymow' => 'LYMOW',
@@ -1400,6 +1407,20 @@ final class YarboPaperDevice
 
             return in_array($s, ['1', 'true', 'yes', 'on'], true);
         };
+        if (!array_key_exists('yarbo', $src)) {
+            $any = false;
+            $saw = false;
+            foreach (['status', 'health', 'plans'] as $id) {
+                if (!array_key_exists($id, $src)) {
+                    continue;
+                }
+                $saw = true;
+                $any = $any || $bool($src[$id] ?? null, true);
+            }
+            if ($saw) {
+                $src['yarbo'] = $any;
+            }
+        };
         foreach ($defaults as $id => $fallback) {
             $out[$id] = $bool($src[$id] ?? null, $fallback);
         }
@@ -1414,6 +1435,12 @@ final class YarboPaperDevice
     {
         $defaults = self::defaultMenuLabels();
         $src = is_array($input) ? $input : [];
+        if (!isset($src['yarbo']) || trim((string) $src['yarbo']) === '') {
+            $legacy = trim((string) ($src['status'] ?? ''));
+            if ($legacy !== '') {
+                $src['yarbo'] = $legacy;
+            }
+        }
         $out = [];
         foreach ($defaults as $id => $fallback) {
             $raw = trim((string) ($src[$id] ?? ''));
@@ -1432,6 +1459,37 @@ final class YarboPaperDevice
     }
 
     /**
+     * @return list<string>
+     */
+    private function normalizeMenuOrder(mixed $input): array
+    {
+        $keys = self::defaultMenuKeys();
+        $allowed = array_fill_keys($keys, true);
+        $out = [];
+        $seen = [];
+        if (is_array($input)) {
+            foreach ($input as $id) {
+                $id = strtolower(trim((string) $id));
+                if ($id === 'status' || $id === 'health' || $id === 'plans') {
+                    $id = 'yarbo';
+                }
+                if (!isset($allowed[$id]) || isset($seen[$id])) {
+                    continue;
+                }
+                $seen[$id] = true;
+                $out[] = $id;
+            }
+        }
+        foreach ($keys as $id) {
+            if (!isset($seen[$id])) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
@@ -1444,7 +1502,7 @@ final class YarboPaperDevice
         }
         $unlockPage = strtolower(trim((string) ($input['unlock_page'] ?? $defaults['unlock_page'])));
         if (!in_array($unlockPage, [
-            'home', 'status', 'health', 'plans', 'note', 'board',
+            'home', 'yarbo', 'status', 'health', 'plans', 'note', 'board',
             'powerwall', 'lymow', 'radio', 'device', 'house',
         ], true)) {
             $unlockPage = 'home';
@@ -1470,6 +1528,7 @@ final class YarboPaperDevice
             'unlock_page' => $unlockPage,
             'menu_labels' => $this->normalizeMenuLabels($input['menu_labels'] ?? []),
             'menu_visible' => $this->normalizeMenuVisible($input['menu_visible'] ?? []),
+            'menu_order' => $this->normalizeMenuOrder($input['menu_order'] ?? []),
             'timezone' => $timezone,
             'alert_message' => $bool($input['alert_message'] ?? null, $defaults['alert_message']),
             'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),

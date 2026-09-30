@@ -95,7 +95,17 @@ int menuLaidY[PAPERMONO_MENU_MAX];
 int menuLaidN = 0;
 int menuLaidW = 208;
 int menuLaidH = 100;
-int menuYarboLabelY = -1;
+int menuOrderN = 7;
+int menuOrderPage[PAPERMONO_MENU_MAX] = {
+    PAPERMONO_PAGE_STATUS,
+    PAPERMONO_PAGE_NOTE,
+    PAPERMONO_PAGE_POWERWALL,
+    PAPERMONO_PAGE_LYMOW,
+    PAPERMONO_PAGE_RADIO,
+    PAPERMONO_PAGE_DEVICE,
+    PAPERMONO_PAGE_HOUSE
+};
+int lastYarboPage = PAPERMONO_PAGE_STATUS;
 bool alertMessageOn = true;
 bool alertYarboOn = true;
 bool alertLymowOn = true;
@@ -167,6 +177,7 @@ void noteActivity();
 void nextPage();
 void prevPage();
 void showPage(int page, bool loadPlansIfNeeded);
+void layoutTileGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0);
 void drawPadlockIcon(int x, int y, int size, bool locked);
 void drawWifiIcon(int cx, int cy, int size, bool connected);
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
@@ -367,11 +378,19 @@ String screenKey()
         + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
         + String(inboxCount) + "|" + String(radioUi) + "|" + String(radioViewIndex) + "|"
         + String(homeOn ? 1 : 0) + "|" + String(homeCount)
-        + "|" + String(menuOpen ? 1 : 0);
+        + "|" + String(menuOpen ? 1 : 0) + "|" + String(lastYarboPage);
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         key += "|" + menuCustom[i] + "|" + String(menuShow[i] ? 1 : 0);
     }
+    for (int i = 0; i < menuOrderN; i++) {
+        key += "|" + String(menuOrderPage[i]);
+    }
     return key;
+}
+
+bool isYarboPage(int page)
+{
+    return page == PAPERMONO_PAGE_STATUS || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS;
 }
 
 bool pageEnabled(int page)
@@ -385,7 +404,39 @@ bool pageEnabled(int page)
     if (page < 0 || page >= PAPERMONO_PAGE_COUNT) {
         return false;
     }
+    if (isYarboPage(page) && !yarboOn) {
+        return false;
+    }
     return menuShow[page];
+}
+
+int firstYarboPage()
+{
+    if (pageEnabled(PAPERMONO_PAGE_STATUS)) return PAPERMONO_PAGE_STATUS;
+    if (pageEnabled(PAPERMONO_PAGE_HEALTH)) return PAPERMONO_PAGE_HEALTH;
+    if (pageEnabled(PAPERMONO_PAGE_PLANS)) return PAPERMONO_PAGE_PLANS;
+    return PAPERMONO_PAGE_STATUS;
+}
+
+int stepYarboPage(int from, int dir)
+{
+    static const int kYarbo[] = {
+        PAPERMONO_PAGE_STATUS, PAPERMONO_PAGE_HEALTH, PAPERMONO_PAGE_PLANS
+    };
+    int idx = 0;
+    for (int i = 0; i < 3; i++) {
+        if (kYarbo[i] == from) {
+            idx = i;
+            break;
+        }
+    }
+    for (int n = 0; n < 3; n++) {
+        idx = (idx + dir + 3) % 3;
+        if (pageEnabled(kYarbo[idx])) {
+            return kYarbo[idx];
+        }
+    }
+    return from;
 }
 
 int visiblePageCount()
@@ -407,7 +458,7 @@ int firstEnabledPage()
 
 int pageFromUnlockId(const String &id)
 {
-    if (id == "status") return PAPERMONO_PAGE_STATUS;
+    if (id == "yarbo" || id == "status") return PAPERMONO_PAGE_STATUS;
     if (id == "health") return PAPERMONO_PAGE_HEALTH;
     if (id == "plans") return PAPERMONO_PAGE_PLANS;
     if (id == "note") return PAPERMONO_PAGE_NOTE;
@@ -430,10 +481,16 @@ void applyUnlockPage()
 
 int stepEnabledPage(int from, int dir)
 {
+    if (isYarboPage(from)) {
+        return stepYarboPage(from, dir);
+    }
     int count = PAPERMONO_PAGE_COUNT;
     int p = from;
     for (int i = 0; i < count; i++) {
         p = (p + dir + count) % count;
+        if (p == PAPERMONO_PAGE_HEALTH || p == PAPERMONO_PAGE_PLANS) {
+            continue;
+        }
         if (pageEnabled(p)) return p;
     }
     return firstEnabledPage();
@@ -638,7 +695,7 @@ String menuLabelDefault(int page)
 {
     if (page == PAPERMONO_PAGE_POWERWALL) return "POWER";
     if (page == PAPERMONO_PAGE_RADIO) return "MAIL";
-    if (page == PAPERMONO_PAGE_STATUS) return "STATUS";
+    if (page == PAPERMONO_PAGE_STATUS) return "YARBO";
     if (page == PAPERMONO_PAGE_HEALTH) return "HEALTH";
     if (page == PAPERMONO_PAGE_PLANS) return "PLANS";
     if (page == PAPERMONO_PAGE_NOTE) return "NOTE";
@@ -662,10 +719,18 @@ void applyMenuLabels(JsonVariant labels)
         return;
     }
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
-        if (i == PAPERMONO_PAGE_BOARD) {
+        if (i == PAPERMONO_PAGE_BOARD || i == PAPERMONO_PAGE_HEALTH || i == PAPERMONO_PAGE_PLANS) {
             continue;
         }
-        const char *raw = labels[pageKey(i)] | "";
+        const char *raw = "";
+        if (i == PAPERMONO_PAGE_STATUS) {
+            raw = labels["yarbo"] | "";
+            if (raw[0] == 0) {
+                raw = labels["status"] | "";
+            }
+        } else {
+            raw = labels[pageKey(i)] | "";
+        }
         String s = String(raw);
         s.trim();
         if (s.length() > 20) {
@@ -680,8 +745,18 @@ void applyMenuVisible(JsonVariant vis)
     if (!vis.is<JsonObject>()) {
         return;
     }
+    bool yarboSet = false;
+    bool yarboOnMenu = true;
+    JsonVariant yv = vis["yarbo"];
+    if (yv.is<bool>() || yv.is<int>()) {
+        yarboSet = true;
+        yarboOnMenu = yv.is<bool>() ? yv.as<bool>() : ((int) yv) != 0;
+    }
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         if (i == PAPERMONO_PAGE_HOME || i == PAPERMONO_PAGE_BOARD) {
+            continue;
+        }
+        if (isYarboPage(i)) {
             continue;
         }
         JsonVariant v = vis[pageKey(i)];
@@ -691,90 +766,105 @@ void applyMenuVisible(JsonVariant vis)
             menuShow[i] = ((int) v) != 0;
         }
     }
+    if (!yarboSet) {
+        yarboOnMenu = false;
+        const char *keys[] = {"status", "health", "plans"};
+        bool any = false;
+        bool saw = false;
+        for (int i = 0; i < 3; i++) {
+            JsonVariant v = vis[keys[i]];
+            if (v.is<bool>() || v.is<int>()) {
+                saw = true;
+                bool on = v.is<bool>() ? v.as<bool>() : ((int) v) != 0;
+                any = any || on;
+            }
+        }
+        yarboOnMenu = saw ? any : true;
+    }
+    menuShow[PAPERMONO_PAGE_STATUS] = yarboOnMenu;
+    menuShow[PAPERMONO_PAGE_HEALTH] = yarboOnMenu;
+    menuShow[PAPERMONO_PAGE_PLANS] = yarboOnMenu;
     menuShow[PAPERMONO_PAGE_BOARD] = false;
     menuShow[PAPERMONO_PAGE_HOME] = true;
 }
 
-int countMenuGroup(const int *pages, int n)
+void applyMenuOrder(JsonVariant order)
 {
-    int c = 0;
-    for (int i = 0; i < n; i++) {
-        if (pageEnabled(pages[i])) {
-            c++;
+    static const int kDefault[] = {
+        PAPERMONO_PAGE_STATUS, PAPERMONO_PAGE_NOTE, PAPERMONO_PAGE_POWERWALL,
+        PAPERMONO_PAGE_LYMOW, PAPERMONO_PAGE_RADIO, PAPERMONO_PAGE_DEVICE, PAPERMONO_PAGE_HOUSE
+    };
+    bool used[PAPERMONO_PAGE_COUNT] = {};
+    int n = 0;
+    if (order.is<JsonArray>()) {
+        for (JsonVariant item : order.as<JsonArray>()) {
+            String id = String((const char *) (item | ""));
+            int page = pageFromUnlockId(id);
+            if (id == "yarbo") {
+                page = PAPERMONO_PAGE_STATUS;
+            }
+            if (page == PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_BOARD
+                || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS) {
+                continue;
+            }
+            if (used[page] || n >= PAPERMONO_MENU_MAX) {
+                continue;
+            }
+            used[page] = true;
+            menuOrderPage[n++] = page;
         }
     }
-    return c;
-}
-
-void packMenuGroup(const int *pages, int n, int &y, int x0, int bw, int bh, int gap)
-{
-    int col = 0;
-    for (int i = 0; i < n; i++) {
-        int page = pages[i];
-        if (!pageEnabled(page) || menuLaidN >= PAPERMONO_MENU_MAX) {
+    for (int i = 0; i < 7; i++) {
+        int page = kDefault[i];
+        if (used[page] || n >= PAPERMONO_MENU_MAX) {
             continue;
         }
-        menuLaidPage[menuLaidN] = page;
-        menuLaidX[menuLaidN] = x0 + col * (bw + gap);
-        menuLaidY[menuLaidN] = y;
-        menuLaidN++;
-        col++;
-        if (col == 2) {
-            col = 0;
-            y += bh + gap;
-        }
+        used[page] = true;
+        menuOrderPage[n++] = page;
     }
-    if (col != 0) {
-        y += bh + gap;
-    }
+    menuOrderN = n > 0 ? n : 7;
+}
+
+bool yarboMenuEnabled()
+{
+    return pageEnabled(PAPERMONO_PAGE_STATUS) || pageEnabled(PAPERMONO_PAGE_HEALTH) || pageEnabled(PAPERMONO_PAGE_PLANS);
 }
 
 void rebuildMenuLayout()
 {
-    static const int kYarbo[] = {
-        PAPERMONO_PAGE_STATUS, PAPERMONO_PAGE_HEALTH, PAPERMONO_PAGE_PLANS
-    };
-    static const int kOther[] = {
-        PAPERMONO_PAGE_NOTE, PAPERMONO_PAGE_POWERWALL, PAPERMONO_PAGE_LYMOW,
-        PAPERMONO_PAGE_RADIO, PAPERMONO_PAGE_DEVICE, PAPERMONO_PAGE_HOUSE
-    };
-    menuLaidN = 0;
-    menuYarboLabelY = -1;
-    int nY = countMenuGroup(kYarbo, 3);
-    int nO = countMenuGroup(kOther, 6);
-    int rows = ((nY + 1) / 2) + ((nO + 1) / 2);
-    if (rows < 1) {
-        rows = 1;
-    }
-    int header = nY ? 30 : 0;
-    int split = (nY && nO) ? 12 : 0;
-    int W = M5.Display.width();
-    int H = M5.Display.height();
-    int gap = 10;
-    int x0 = 16;
-    int yBase = 108;
-    int y1 = H - 20;
-    int bw = (W - x0 * 2 - gap) / 2;
-    int avail = y1 - yBase - header - split;
-    int bh = (avail - gap * (rows - 1)) / rows;
-    if (bh > 112) {
-        bh = 112;
-    }
-    if (bh < 64) {
-        bh = 64;
-    }
-    menuLaidW = bw;
-    menuLaidH = bh;
-    int y = yBase;
-    if (nY) {
-        menuYarboLabelY = y;
-        y += header;
-        packMenuGroup(kYarbo, 3, y, x0, bw, bh, gap);
-        if (nO) {
-            y += split;
+    int pages[PAPERMONO_MENU_MAX];
+    int n = 0;
+    for (int i = 0; i < menuOrderN && n < PAPERMONO_MENU_MAX; i++) {
+        int page = menuOrderPage[i];
+        if (page == PAPERMONO_PAGE_STATUS) {
+            if (yarboMenuEnabled()) {
+                pages[n++] = PAPERMONO_PAGE_STATUS;
+            }
+            continue;
+        }
+        if (pageEnabled(page)) {
+            pages[n++] = page;
         }
     }
-    packMenuGroup(kOther, 6, y, x0, bw, bh, gap);
+    int cols = 2;
+    int rows = 1;
+    int bw = 208;
+    int bh = 100;
+    int gap = 10;
+    int x0 = 16;
+    int y0 = 108;
+    layoutTileGrid(n > 0 ? n : 1, cols, rows, bw, bh, gap, x0, y0);
+    menuLaidW = bw;
+    menuLaidH = bh;
+    menuLaidN = 0;
+    for (int i = 0; i < n; i++) {
+        int col = i % cols;
+        int row = i / cols;
+        menuLaidPage[menuLaidN] = pages[i];
+        menuLaidX[menuLaidN] = x0 + col * (bw + gap);
+        menuLaidY[menuLaidN] = y0 + row * (bh + gap);
+        menuLaidN++;
+    }
 }
 
 void layoutTileGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0)
@@ -820,12 +910,6 @@ void drawMenuPage(bool forceFull)
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
     rebuildMenuLayout();
-    if (menuYarboLabelY >= 0) {
-        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-        M5.Display.setTextDatum(TL_DATUM);
-        M5.Display.setTextSize(2);
-        M5.Display.drawString("YARBO", 16, menuYarboLabelY);
-    }
     if (menuLaidN == 0) {
         M5.Display.setTextDatum(TL_DATUM);
         M5.Display.setTextSize(2);
@@ -835,6 +919,9 @@ void drawMenuPage(bool forceFull)
     int highlight = currentPage;
     if (highlight == PAPERMONO_PAGE_BOARD) {
         highlight = PAPERMONO_PAGE_NOTE;
+    }
+    if (isYarboPage(highlight)) {
+        highlight = PAPERMONO_PAGE_STATUS;
     }
     for (int i = 0; i < menuLaidN; i++) {
         int page = menuLaidPage[i];
@@ -871,6 +958,11 @@ void handleMenuTouch(int x, int y)
         if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
             int page = menuLaidPage[i];
             menuOpen = false;
+            if (page == PAPERMONO_PAGE_STATUS) {
+                page = (isYarboPage(lastYarboPage) && pageEnabled(lastYarboPage))
+                    ? lastYarboPage
+                    : firstYarboPage();
+            }
             if (page == PAPERMONO_PAGE_RADIO) {
                 radioUi = PAPERMONO_RADIO_INBOX;
                 radioViewIndex = -1;
@@ -2287,6 +2379,9 @@ void applyCompactExtras(JsonDocument &doc)
     if (doc["menu_visible"].is<JsonObject>()) {
         applyMenuVisible(doc["menu_visible"]);
     }
+    if (doc["menu_order"].is<JsonArray>()) {
+        applyMenuOrder(doc["menu_order"]);
+    }
     if (brightnessPct != prevBright && lightOn) {
         applyFrontlight(true);
     }
@@ -2983,6 +3078,9 @@ void showPage(int page, bool loadPlansIfNeeded)
         page = stepEnabledPage(page, 1);
     }
     currentPage = page;
+    if (isYarboPage(currentPage)) {
+        lastYarboPage = currentPage;
+    }
     offConfirm = false;
     noteActivity();
     if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
@@ -3021,6 +3119,9 @@ bool applyPendingPages()
     }
     for (int i = 0; i < n; i++) {
         currentPage = stepEnabledPage(currentPage, dir);
+    }
+    if (isYarboPage(currentPage)) {
+        lastYarboPage = currentPage;
     }
     offConfirm = false;
     if (currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {

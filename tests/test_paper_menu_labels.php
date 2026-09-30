@@ -18,7 +18,7 @@ file_put_contents($root . '/data/papermono-devices.json', json_encode([
 $devices = new Yarbo\YarboPaperDevice($root);
 $saved = $devices->savePrefs([
     'menu_labels' => [
-        'status' => '  Yarbo  ',
+        'status' => '  Robot  ',
         'house' => 'Lights and scenes name that is way too long',
         'radio' => '',
         'unknown' => 'nope',
@@ -26,8 +26,8 @@ $saved = $devices->savePrefs([
 ]);
 $labels = $saved['prefs']['menu_labels'] ?? [];
 $defaults = Yarbo\YarboPaperDevice::defaultMenuLabels();
-if (($labels['status'] ?? '') !== 'Yarbo') {
-    fwrite(STDERR, 'status ' . json_encode($labels) . "\n");
+if (($labels['yarbo'] ?? '') !== 'Robot') {
+    fwrite(STDERR, 'yarbo migrate ' . json_encode($labels) . "\n");
     exit(1);
 }
 if (!str_starts_with((string) ($labels['house'] ?? ''), 'Lights and scenes')) {
@@ -50,16 +50,18 @@ if (array_key_exists('unknown', $labels) || array_key_exists('home', $labels) ||
 $hidden = $devices->savePrefs([
     'menu_visible' => [
         'health' => false,
+        'status' => false,
+        'plans' => false,
         'note' => '0',
     ],
 ]);
 $vis = $hidden['prefs']['menu_visible'] ?? [];
-if (($vis['health'] ?? true) !== false || ($vis['note'] ?? true) !== false || ($vis['status'] ?? false) !== true) {
+if (($vis['yarbo'] ?? true) !== false || ($vis['note'] ?? true) !== false) {
     fwrite(STDERR, 'visible ' . json_encode($vis) . "\n");
     exit(1);
 }
-if (array_key_exists('board', $vis)) {
-    fwrite(STDERR, "board still visible pref\n");
+if (array_key_exists('board', $vis) || array_key_exists('health', $vis) || array_key_exists('status', $vis)) {
+    fwrite(STDERR, "legacy keys still visible pref\n");
     exit(1);
 }
 foreach ($defaults as $id => $fallback) {
@@ -74,8 +76,27 @@ $compact = $ref->getMethod('prefsCompact');
 $compact->setAccessible(true);
 $tab1 = $devices->findById('tab1');
 $extra = $compact->invoke($devices, $tab1);
-if (($extra['menu_labels']['status'] ?? '') !== 'Yarbo') {
+if (($extra['menu_labels']['yarbo'] ?? '') !== 'Robot') {
     fwrite(STDERR, 'compact labels ' . json_encode($extra['menu_labels'] ?? null) . "\n");
+    exit(1);
+}
+if (($extra['menu_visible']['yarbo'] ?? true) !== false) {
+    fwrite(STDERR, 'compact vis ' . json_encode($extra['menu_visible'] ?? null) . "\n");
+    exit(1);
+}
+
+$ordered = $devices->savePrefs([
+    'menu_order' => ['house', 'radio', 'status', 'house', 'unknown'],
+]);
+$order = $ordered['prefs']['menu_order'] ?? [];
+$expect = ['house', 'radio', 'yarbo', 'note', 'powerwall', 'lymow', 'device'];
+if ($order !== $expect) {
+    fwrite(STDERR, 'order ' . json_encode($order) . "\n");
+    exit(1);
+}
+$compactOrder = $compact->invoke($devices, $tab1)['menu_order'] ?? [];
+if ($compactOrder !== $expect) {
+    fwrite(STDERR, 'compact order ' . json_encode($compactOrder) . "\n");
     exit(1);
 }
 
@@ -86,6 +107,14 @@ if ($html === false || str_contains($html, 'id="papermono-unlock-page"') || str_
 }
 if (str_contains($html, 'data-menu-label="board"') || str_contains($html, 'data-menu-visible="board"')) {
     fwrite(STDERR, "board still on menu settings\n");
+    exit(1);
+}
+if (str_contains($html, 'data-menu-label="status"') || str_contains($html, 'paper-menu-group-title')) {
+    fwrite(STDERR, "legacy status/group menu still in settings UI\n");
+    exit(1);
+}
+if (!str_contains($html, 'id="paper-menu-list"') || !str_contains($html, 'data-menu-move')) {
+    fwrite(STDERR, "menu reorder UI missing\n");
     exit(1);
 }
 

@@ -14,7 +14,7 @@ $needles = [
     'HOUSE — same tile shape as the unlock menu; long names wrap',
     'MAIL — inbox with time stamps, read receipts, and WRITE',
     'Lock screen — envelope when mail is waiting, Unlock, and OFF',
-    'Unlock menu — Yarbo pages grouped. Tick which buttons to show. MAIL blob if unread',
+    'Unlock menu — one YARBO button; A/B steps Status, Health, Plans. Reorder in Settings. MAIL blob if unread',
     'Opposite corners: tap 1, then 2',
 ];
 
