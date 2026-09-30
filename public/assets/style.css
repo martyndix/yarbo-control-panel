@@ -2848,6 +2848,10 @@ html[data-theme="light"] .plan-activity {
     display: none;
 }
 
+#home-card.home-card--empty .home-add-wrap {
+    display: block;
+}
+
 #home-card:not(.home-card--manage) .home-manage-extras {
     display: none;
 }

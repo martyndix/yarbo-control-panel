@@ -13,6 +13,7 @@ $home = new YarboHome($projectRoot);
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method === 'GET') {
+    set_time_limit(90);
     json_response($home->dashboard());
 }
 

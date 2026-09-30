@@ -3238,12 +3238,25 @@ function renderHomeDashboard(data) {
     applyHomeManageUi();
     const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new], [data-home-color], [data-home-kelvin]');
     if (homeDrag) return;
+    const card = document.getElementById('home-card');
+    const devices = data.devices || [];
+    card?.classList.toggle('home-card--empty', devices.length === 0);
     const status = document.getElementById('home-server-status');
     if (status) {
         const err = data.server?.error;
-        status.textContent = data.server?.ok
-            ? `Matter server: connected · ${(data.devices || []).length} device${(data.devices || []).length === 1 ? '' : 's'}`
+        const fabric = data.fabric || {};
+        let line = data.server?.ok
+            ? `Matter server: connected · ${devices.length} device${devices.length === 1 ? '' : 's'}`
             : `Matter server: ${err || 'not running'}`;
+        if (devices.length === 0 && fabric.storage_nodes) {
+            line += ` · ${fabric.storage_nodes} node${fabric.storage_nodes === 1 ? '' : 's'} on disk`;
+        }
+        status.textContent = line;
+    }
+    const hint = document.getElementById('home-setup-status');
+    if (hint && data.fabric?.hint && devices.length === 0) {
+        hint.textContent = data.fabric.hint;
+        hint.classList.remove('hidden');
     }
     const grid = document.getElementById('home-devices');
     if (grid && !naming) {

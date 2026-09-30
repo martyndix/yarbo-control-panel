@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +72,20 @@ def main() -> int:
     wrapped_result = agent.nodes_from_result({"result": [hue_bridge(1)]})
     if not wrapped_result or wrapped_result[0]["node_id"] != 1:
         raise SystemExit("wrapped result list missing")
+
+    keyed = agent.flatten_nodes({"nodes": {"1": hue_bridge(70)}})
+    if len(keyed) != 70:
+        raise SystemExit(f"dict-keyed nodes flattened to {len(keyed)}")
+
+    tmp = Path(tempfile.mkdtemp())
+    agent.STORAGE = tmp
+    (tmp / "aabbcc.json").write_text(json.dumps({"nodes": {"1": hue_bridge(12)}}))
+    disk = agent.nodes_from_disk()
+    if len(disk) != 1:
+        raise SystemExit(f"disk nodes {len(disk)}")
+    lights = agent.flatten_nodes(disk)
+    if len(lights) != 12:
+        raise SystemExit(f"disk flatten {len(lights)}")
 
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0

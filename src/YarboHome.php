@@ -258,9 +258,10 @@ final class YarboHome
                 'ok' => false,
                 'error' => (string) ($setup['error'] ?? $setup['message'] ?? 'Matter server is not running yet'),
                 'devices' => $store['last_devices'] ?? [],
+                'fabric' => [],
             ];
         } else {
-            $live = $this->liveDevices(8.0);
+            $live = $this->liveDevices(45.0);
             $store = $this->load();
         }
         $hidden = array_fill_keys($store['hidden'], true);
@@ -337,6 +338,7 @@ final class YarboHome
             'scenes' => $this->scenesPayload($store['scenes'], $devices),
             'paper_devices' => $this->paperDeviceList($store),
             'setup' => $this->setupStatus(),
+            'fabric' => is_array($live['fabric'] ?? null) ? $live['fabric'] : [],
         ];
     }
 
@@ -1253,6 +1255,7 @@ final class YarboHome
                     'ok' => true,
                     'error' => '',
                     'devices' => $cached,
+                    'fabric' => [],
                 ];
             }
         }
@@ -1261,11 +1264,12 @@ final class YarboHome
         $error = (string) ($status['error'] ?? 'Matter server unavailable');
         $nodes = ['ok' => false, 'devices' => []];
         if (($status['ok'] ?? false) === true || ($status['server'] ?? false) === true) {
-            $nodes = $agent->request(['op' => 'nodes'], max(12.0, $timeout));
+            $nodes = $agent->request(['op' => 'nodes'], max(60.0, $timeout));
             $error = (string) ($nodes['error'] ?? $error);
         }
         $liveOk = ($nodes['ok'] ?? false) === true;
         $devices = is_array($nodes['devices'] ?? null) ? $nodes['devices'] : [];
+        $fabric = is_array($nodes['fabric'] ?? null) ? $nodes['fabric'] : [];
         if ($liveOk && $devices !== []) {
             $this->writeDeviceCache($cachePath, $devices);
             $this->rememberDevices($devices);
@@ -1283,6 +1287,7 @@ final class YarboHome
             'ok' => $liveOk || $devices !== [],
             'error' => ($liveOk || $devices !== []) ? '' : $error,
             'devices' => $devices,
+            'fabric' => $fabric,
         ];
     }
 

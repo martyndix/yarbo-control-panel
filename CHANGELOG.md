@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.58] - 2026-09-30
+
+### Fixed
+- Home recovers Matter lights from the Pi’s `data/matter-server` files and from the Docker volume when the live server answers empty (wrong mount, reset `chip.json`, or a leftover empty container). The pairing box is shown when there are no lights so the Hue Bridge code can be added once if the fabric really is gone.
+
 ## [3.0.57] - 2026-09-30
 
 ### Fixed

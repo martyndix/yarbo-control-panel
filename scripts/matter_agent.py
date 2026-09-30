@@ -14,6 +14,7 @@ import base64
 import hashlib
 import json
 import os
+import shutil
 import socket
 import struct
 import subprocess
@@ -35,7 +36,7 @@ DOCKER_IMAGE = os.environ.get(
 )
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 2
+AGENT_VERSION = 3
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -79,6 +80,7 @@ _ws_lock = threading.Lock()
 _ws: socket.socket | None = None
 _start_lock = threading.Lock()
 _started_docker = False
+_recovered_storage = False
 
 
 def attr_key(endpoint: int, cluster: int, attr: int) -> str:
@@ -253,6 +255,208 @@ def run_docker(args: list[str]) -> subprocess.CompletedProcess:
     return result
 
 
+def storage_json_files() -> list[Path]:
+    STORAGE.mkdir(parents=True, exist_ok=True)
+    files: list[Path] = []
+    for path in STORAGE.iterdir():
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        if name.endswith(".json") or name.endswith(".json.backup"):
+            files.append(path)
+    return sorted(files)
+
+
+def restore_chip_backups() -> bool:
+    restored = False
+    chip = STORAGE / "chip.json"
+    backup = STORAGE / "chip.json.backup"
+    if backup.is_file() and (not chip.is_file() or chip.stat().st_size < 32):
+        shutil.copy2(backup, chip)
+        restored = True
+    for path in list(STORAGE.glob("*.json.backup")):
+        primary = Path(str(path)[: -len(".backup")])
+        if path.name == "chip.json.backup":
+            continue
+        if path.is_file() and (not primary.is_file() or primary.stat().st_size < 32):
+            shutil.copy2(path, primary)
+            restored = True
+    return restored
+
+
+def nodes_from_disk() -> list[dict[str, Any]]:
+    found: dict[int, dict[str, Any]] = {}
+    for path in storage_json_files():
+        if path.name in ("chip.json", "chip.json.backup"):
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        rows: list[Any] = []
+        if isinstance(data, dict):
+            raw = data.get("nodes", data.get("result"))
+            if isinstance(raw, dict):
+                rows = list(raw.values())
+            elif isinstance(raw, list):
+                rows = raw
+            elif "node_id" in data or "attributes" in data:
+                rows = [data]
+        elif isinstance(data, list):
+            rows = data
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                node_id = int(row.get("node_id") or row.get("nodeId") or 0)
+            except (TypeError, ValueError):
+                node_id = 0
+            if node_id <= 0:
+                continue
+            prev = found.get(node_id)
+            prev_attrs = prev.get("attributes") if isinstance(prev, dict) else None
+            new_attrs = row.get("attributes") if isinstance(row.get("attributes"), dict) else {}
+            if prev is None or (isinstance(new_attrs, dict) and len(new_attrs) > len(prev_attrs or {})):
+                found[node_id] = row
+    return [found[key] for key in sorted(found)]
+
+
+def docker_data_mount() -> str:
+    inspect = run_docker(
+        [
+            "inspect",
+            "-f",
+            '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}',
+            DOCKER_NAME,
+        ]
+    )
+    if inspect.returncode != 0:
+        return ""
+    return (inspect.stdout or "").strip()
+
+
+def copy_container_storage() -> None:
+    STORAGE.mkdir(parents=True, exist_ok=True)
+    run_docker(["cp", f"{DOCKER_NAME}:/data/.", str(STORAGE)])
+
+
+def wait_matter_port(seconds: float = 25.0) -> bool:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        probe = socket.socket()
+        probe.settimeout(0.4)
+        try:
+            probe.connect((HOST, SERVER_PORT))
+            return True
+        except OSError:
+            time.sleep(0.4)
+        finally:
+            probe.close()
+    return False
+
+
+def recreate_matter_container() -> None:
+    reset_ws()
+    run_docker(["stop", DOCKER_NAME])
+    run_docker(["rm", DOCKER_NAME])
+    run_docker(
+        [
+            "run",
+            "-d",
+            "--name",
+            DOCKER_NAME,
+            "--restart",
+            "unless-stopped",
+            "--security-opt",
+            "apparmor=unconfined",
+            "--network",
+            "host",
+            "-v",
+            f"{STORAGE}:/data",
+            DOCKER_IMAGE,
+        ]
+    )
+    wait_matter_port(30.0)
+
+
+def recover_docker_storage() -> str:
+    global _recovered_storage
+    if _recovered_storage:
+        return ""
+    _recovered_storage = True
+    inspect = run_docker(["inspect", "-f", "{{.Id}}", DOCKER_NAME])
+    note = ""
+    restored = restore_chip_backups()
+    if inspect.returncode != 0:
+        return "chip.json restored from backup" if restored else ""
+    host_files = [p for p in storage_json_files() if p.stat().st_size > 32]
+    if not host_files:
+        copy_container_storage()
+        restore_chip_backups()
+        host_files = [p for p in storage_json_files() if p.stat().st_size > 32]
+        if host_files:
+            note = "Copied Matter storage out of Docker"
+    mount = docker_data_mount()
+    mount_ok = False
+    if mount:
+        try:
+            mount_ok = Path(mount).resolve() == STORAGE.resolve()
+        except OSError:
+            mount_ok = False
+    if restored or not mount_ok:
+        recreate_matter_container()
+        if not note:
+            note = "Remounted Matter storage so the Hue fabric loads"
+    return note
+
+
+def collect_nodes() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    info: dict[str, Any] = {
+        "source": "",
+        "storage_files": [p.name for p in storage_json_files()],
+        "storage_nodes": 0,
+        "hint": "",
+        "recover": recover_docker_storage(),
+    }
+    disk = nodes_from_disk()
+    info["storage_nodes"] = len(disk)
+    rpc = matter_rpc("get_nodes", timeout=45.0)
+    nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
+    if nodes:
+        info["source"] = "live"
+    if not nodes:
+        listen = matter_rpc("start_listening", timeout=45.0)
+        if listen.get("ok"):
+            nodes = nodes_from_result(listen.get("result"))
+            if nodes:
+                info["source"] = "listen"
+    if not nodes and disk:
+        nodes = disk
+        info["source"] = "disk"
+    devices = flatten_nodes(nodes)
+    if nodes and not devices:
+        for node in nodes:
+            try:
+                node_id = int(node.get("node_id") or node.get("nodeId") or 0)
+            except (TypeError, ValueError):
+                node_id = 0
+            if node_id > 0:
+                matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0)
+        rpc = matter_rpc("get_nodes", timeout=45.0)
+        if rpc.get("ok"):
+            interviewed = nodes_from_result(rpc.get("result"))
+            if interviewed:
+                nodes = interviewed
+                info["source"] = "interview"
+    if not nodes:
+        info["hint"] = (
+            "The Matter fabric on this Pi has no saved nodes. "
+            "Add the Hue Bridge pairing code once (Hue app → Settings → Smart Home → Matter). "
+            "Room names and scenes are still saved."
+        )
+    return nodes, info
+
+
 def ensure_matter_server() -> str | None:
     global _started_docker
     sock = socket.socket()
@@ -384,6 +588,8 @@ def nodes_from_result(raw: Any) -> list[dict[str, Any]]:
             nested = raw.get(key)
             if isinstance(nested, list):
                 return [node for node in nested if isinstance(node, dict)]
+            if isinstance(nested, dict):
+                return [node for node in nested.values() if isinstance(node, dict)]
         if "node_id" in raw or "attributes" in raw:
             return [raw]
     return []
@@ -867,6 +1073,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
         node_name = attr_str(attributes, 0, BASIC_INFO, ATTR_NODE_LABEL)
         source = node_name or product or vendor or f"Matter node {node_id}"
         ep_ids = endpoint_ids(attributes)
+        before = len(devices)
         for endpoint in sorted(ep_ids):
             if endpoint == 0:
                 continue
@@ -906,6 +1113,24 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     **color,
                 }
             )
+        if len(devices) == before and node_id > 0:
+            devices.append(
+                {
+                    "id": f"{node_id}:1",
+                    "node_id": node_id,
+                    "endpoint": 1,
+                    "name": source,
+                    "kind": "light",
+                    "vendor": vendor,
+                    "product": product,
+                    "source": source,
+                    "bridge": True,
+                    "on": False,
+                    "brightness": None,
+                    "dimmable": False,
+                    "available": available,
+                }
+            )
     devices.sort(key=lambda d: (str(d.get("source") or "").lower(), d["name"].lower(), d["id"]))
     return devices
 
@@ -943,14 +1168,12 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "error": None if listening else (hint or "Matter server is not listening on port 5580"),
         }
     if op == "nodes":
-        rpc = matter_rpc("get_nodes", timeout=45.0)
-        if not rpc.get("ok"):
-            return rpc
-        nodes = nodes_from_result(rpc.get("result"))
+        nodes, fabric = collect_nodes()
         return {
             "ok": True,
             "devices": flatten_nodes(nodes),
             "node_count": len(nodes),
+            "fabric": fabric,
         }
     if op == "commission":
         code = str(body.get("code") or "").strip()
