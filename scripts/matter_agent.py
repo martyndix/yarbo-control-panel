@@ -38,6 +38,7 @@ DOCKER_IMAGE = os.environ.get(
     "ghcr.io/home-assistant-libs/python-matter-server:stable",
 )
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
+SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
 AGENT_VERSION = 6
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
@@ -87,6 +88,7 @@ _recovered_storage = False
 _recover_thread_started = False
 _recover_done = threading.Event()
 _restore_lock = threading.Lock()
+_preferred_shared = False
 
 
 def attr_key(endpoint: int, cluster: int, attr: int) -> str:
@@ -426,6 +428,95 @@ def nodes_from_disk() -> list[dict[str, Any]]:
     return [found[key] for key in sorted(found)]
 
 
+def rewrite_device_id(device_id: str, old_node: int, new_node: int) -> str:
+    if not isinstance(device_id, str) or ":" not in device_id:
+        return device_id
+    node_s, rest = device_id.split(":", 1)
+    try:
+        if int(node_s) == old_node:
+            return f"{new_node}:{rest}"
+    except ValueError:
+        pass
+    return device_id
+
+
+def remap_home_node_id(store: dict[str, Any], old_node: int, new_node: int) -> int:
+    """Rewrite home.json-style ids from old_node:x to new_node:x. Returns how many strings changed."""
+    if old_node == new_node or old_node <= 0 or new_node <= 0:
+        return 0
+    changed = 0
+
+    def one(value: Any) -> Any:
+        nonlocal changed
+        if isinstance(value, str) and ":" in value:
+            rewritten = rewrite_device_id(value, old_node, new_node)
+            if rewritten != value:
+                changed += 1
+            return rewritten
+        return value
+
+    for key in ("names", "rooms", "groups"):
+        mapping = store.get(key)
+        if not isinstance(mapping, dict):
+            continue
+        store[key] = {one(k): v for k, v in mapping.items()}
+    hidden = store.get("hidden")
+    if isinstance(hidden, list):
+        store["hidden"] = [one(item) for item in hidden]
+    order = store.get("device_order")
+    if isinstance(order, list):
+        store["device_order"] = [one(item) for item in order]
+    paper = store.get("paper")
+    if isinstance(paper, dict):
+        store["paper"] = {
+            pk: [one(item) for item in lst] if isinstance(lst, list) else lst
+            for pk, lst in paper.items()
+        }
+    for scene in store.get("scenes") or []:
+        if not isinstance(scene, dict):
+            continue
+        actions = scene.get("actions")
+        if not isinstance(actions, list):
+            continue
+        for action in actions:
+            if isinstance(action, dict) and "id" in action:
+                action["id"] = one(action.get("id"))
+    devices = store.get("last_devices")
+    if isinstance(devices, list):
+        for row in devices:
+            if not isinstance(row, dict):
+                continue
+            if "id" in row:
+                row["id"] = one(row.get("id"))
+            try:
+                if int(row.get("node_id") or 0) == old_node:
+                    row["node_id"] = new_node
+                    changed += 1
+            except (TypeError, ValueError):
+                pass
+    return changed
+
+
+def persist_remapped_home(old_node: int, new_node: int) -> int:
+    path = ROOT / "data" / "home.json"
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return 0
+    if not isinstance(store, dict):
+        return 0
+    changed = remap_home_node_id(store, old_node, new_node)
+    if changed:
+        backup = path.with_suffix(".json.pre-remap")
+        if not backup.exists():
+            try:
+                shutil.copy2(path, backup)
+            except OSError:
+                pass
+        path.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
+    return changed
+
+
 def node_ids_from_home_store() -> list[int]:
     ids: set[int] = set()
     home = ROOT / "data" / "home.json"
@@ -662,6 +753,9 @@ def wait_any_node_available(node_ids: list[int], timeout: float) -> bool:
 
 def persist_node_stubs_and_reload() -> list[int]:
     """Stop the Matter container, write missing node stubs, then start it again."""
+    if shared_matter_container():
+        prefer_shared_matter_server()
+        return []
     wanted = node_ids_from_home_store()
     if not wanted:
         return []
@@ -802,6 +896,9 @@ def matter_container_args() -> list[str]:
 
 
 def recreate_matter_container() -> None:
+    if shared_matter_container():
+        prefer_shared_matter_server()
+        return
     reset_ws()
     ensure_ipv6_default_route()
     run_docker(["stop", DOCKER_NAME])
@@ -933,8 +1030,37 @@ def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, A
     return nodes, info
 
 
+def shared_matter_container() -> str | None:
+    inspect = run_docker(["inspect", "-f", "{{.Id}}", SHARED_MATTER_NAME], timeout=8.0)
+    if inspect.returncode == 0 and (inspect.stdout or "").strip():
+        return SHARED_MATTER_NAME
+    return None
+
+
+def prefer_shared_matter_server() -> None:
+    """Home Assistant's matter-server already owns the working Hue fabric. Do not steal 5580."""
+    global _preferred_shared
+    if _preferred_shared:
+        return
+    shared = shared_matter_container()
+    if not shared:
+        return
+    _preferred_shared = True
+    yarbo = run_docker(["inspect", "-f", "{{.State.Running}}", DOCKER_NAME], timeout=8.0)
+    if yarbo.returncode == 0 and (yarbo.stdout or "").strip().lower() == "true":
+        print(
+            "matter: stopping yarbo-matter-server so Home Assistant can keep port 5580",
+            flush=True,
+        )
+        run_docker(["stop", DOCKER_NAME], timeout=25.0)
+        reset_ws()
+    run_docker(["start", shared], timeout=25.0)
+    wait_matter_port(35.0)
+
+
 def ensure_matter_server() -> str | None:
     global _started_docker
+    prefer_shared_matter_server()
     sock = socket.socket()
     sock.settimeout(0.4)
     try:

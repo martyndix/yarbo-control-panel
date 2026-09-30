@@ -117,7 +117,15 @@ curl -sS -m 4 http://127.0.0.1:8080/api/home.php | php -r '$d=json_decode(stream
 
 After **3.0.60**, Home no longer waits on Docker during page load. **3.0.63** also reads a bare fabric node map and rebuilds lights from saved names/scenes. **3.0.64** puts node stubs back into the fabric JSON so python-matter-server can interview the existing CHIP fabric and commands work again. If that folder is truly empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
 
-If lights are listed but a room toggle says **Node N is not (yet) available**, the live Matter server has no node records (or they are offline). Do **not** pair the Hue Bridge again. Paste this on the Pi (it does not stop the panel). After a Docker stop the fabric JSON is often `root:600`, so this copies it out and back with `docker cp` and never reads it as `admin`. Wait about 30 seconds after it prints `matter port 5580 is up`, then toggle a light:
+If lights are listed but a room toggle says **Node N is not (yet) available**, and this Pi also runs **Home Assistant** with a `matter-server` container, Yarbo must not steal port 5580. On the Pi:
+
+```bash
+cd "$(systemctl show -p WorkingDirectory --value yarbo-panel)"
+bash scripts/matter_use_ha.sh
+```
+
+That stops `yarbo-matter-server`, restarts Home Assistant’s Matter server, and rewrites saved `13:x` names onto the live node. Do **not** pair the Hue Bridge again.
+
 
 ```bash
 python3 - <<'PY'

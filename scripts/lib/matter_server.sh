@@ -186,11 +186,34 @@ yarbo_matter_make_storage_readable() {
   chmod a+r "${ROOT}/data/matter-server/"*.json "${ROOT}/data/matter-server/"*.json.backup "${ROOT}/data/matter-server/"*.ini 2>/dev/null || true
 }
 
+yarbo_matter_prefer_shared() {
+  if ! yarbo_docker inspect matter-server >/dev/null 2>&1; then
+    return 1
+  fi
+  local name
+  name="$(yarbo_matter_name)"
+  yarbo_docker stop "$name" >/dev/null 2>&1 || true
+  yarbo_docker start matter-server >/dev/null 2>&1 || true
+  local i
+  for i in $(seq 1 40); do
+    if yarbo_matter_port_up; then
+      yarbo_matter_write_status "done" "Matter server is running"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 yarbo_matter_setup() {
   mkdir -p "${ROOT}/data/matter-server"
   yarbo_matter_write_status "running" "Setting up the Matter server"
   yarbo_matter_enable_ipv6
   yarbo_matter_make_storage_readable
+
+  if yarbo_matter_prefer_shared; then
+    return 0
+  fi
 
   if yarbo_matter_port_up; then
     yarbo_matter_write_status "done" "Matter server is running"
