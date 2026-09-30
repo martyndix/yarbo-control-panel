@@ -271,13 +271,49 @@ def run_docker(args: list[str], timeout: float = 12.0) -> subprocess.CompletedPr
 def storage_json_files() -> list[Path]:
     STORAGE.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
-    for path in STORAGE.iterdir():
+    try:
+        listing = list(STORAGE.iterdir())
+    except OSError:
+        return files
+    for path in listing:
         if not path.is_file():
             continue
         name = path.name.lower()
         if name.endswith(".json") or name.endswith(".json.backup"):
             files.append(path)
     return sorted(files)
+
+
+def ensure_storage_readable() -> None:
+    """Docker bind-mounts are often root:600; the panel user cannot flatten those files."""
+    try:
+        STORAGE.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(STORAGE, 0o755)
+        except OSError:
+            pass
+        for path in storage_json_files():
+            try:
+                os.chmod(path, 0o644)
+            except OSError:
+                pass
+        for path in STORAGE.glob("*.ini"):
+            try:
+                os.chmod(path, 0o644)
+            except OSError:
+                pass
+    except OSError:
+        pass
+    run_docker(
+        [
+            "exec",
+            DOCKER_NAME,
+            "sh",
+            "-c",
+            "chmod a+r /data/*.json /data/*.json.backup /data/*.ini 2>/dev/null; chmod a+X /data",
+        ],
+        timeout=8.0,
+    )
 
 
 def restore_chip_backups() -> bool:
@@ -351,6 +387,7 @@ def docker_data_mount() -> str:
 def copy_container_storage() -> None:
     STORAGE.mkdir(parents=True, exist_ok=True)
     run_docker(["cp", f"{DOCKER_NAME}:/data/.", str(STORAGE)])
+    ensure_storage_readable()
 
 
 def wait_matter_port(seconds: float = 25.0) -> bool:
@@ -400,6 +437,7 @@ def recover_docker_storage() -> str:
     inspect = run_docker(["inspect", "-f", "{{.Id}}", DOCKER_NAME])
     note = ""
     restored = restore_chip_backups()
+    ensure_storage_readable()
     if inspect.returncode != 0:
         return "chip.json restored from backup" if restored else ""
     host_files = [p for p in storage_json_files() if p.stat().st_size > 32]
@@ -1322,6 +1360,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     STORAGE.mkdir(parents=True, exist_ok=True)
+    ensure_storage_readable()
     threading.Thread(target=ensure_matter_server, daemon=True).start()
     start_background_recover()
     httpd = ThreadingHTTPServer((HOST, AGENT_PORT), Handler)

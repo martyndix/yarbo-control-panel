@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.61] - 2026-09-30
+
+### Fixed
+- Home can read the Hue fabric after Docker writes `data/matter-server` as root-only (`chmod 600`). The panel now `chmod`s those JSON files via Docker on start/update, and no longer shows **Add device** as if the lights were gone.
+
 ## [3.0.60] - 2026-09-30
 
 ### Fixed

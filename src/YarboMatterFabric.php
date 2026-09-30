@@ -48,6 +48,21 @@ final class YarboMatterFabric
     }
 
     /**
+     * @return list<string>
+     */
+    public static function unreadableStorageFiles(string $dir): array
+    {
+        $out = [];
+        foreach (self::storageFiles($dir) as $path) {
+            if (!is_readable($path)) {
+                $out[] = basename($path);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public static function nodesFromDisk(string $dir): array

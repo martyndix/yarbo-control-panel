@@ -1245,6 +1245,7 @@ final class YarboHome
         $storageDir = $this->projectRoot . '/data/matter-server';
         $nodes = YarboMatterFabric::nodesFromDisk($storageDir);
         $fromDisk = YarboMatterFabric::flatten($nodes);
+        $unreadable = YarboMatterFabric::unreadableStorageFiles($storageDir);
         $remembered = $this->rememberedOrCached($cachePath);
         $devices = self::preferLiveOrRemembered($fromDisk, $remembered);
         if ($fromDisk !== []) {
@@ -1253,15 +1254,21 @@ final class YarboHome
         }
         $ready = $this->matterPortUp();
         $ok = $devices !== [] || $ready;
+        $hint = '';
+        if ($devices === [] && $unreadable !== []) {
+            $hint = 'Matter lights are saved on this Pi but the panel cannot read them (Docker wrote root-only files). Run: docker exec yarbo-matter-server sh -c \'chmod a+r /data/*.json /data/*.json.backup\' then refresh.';
+        }
 
         return [
             'ok' => $ok,
-            'error' => $ok ? '' : 'Matter server is not running yet',
+            'error' => $hint !== '' ? $hint : ($ok ? '' : 'Matter server is not running yet'),
             'devices' => $devices,
             'fabric' => [
                 'source' => $fromDisk !== [] ? 'disk' : ($remembered !== [] ? 'cache' : ''),
                 'storage_files' => YarboMatterFabric::storageFileNames($storageDir),
                 'storage_nodes' => count($nodes),
+                'unreadable_files' => $unreadable,
+                'hint' => $hint,
             ],
         ];
     }

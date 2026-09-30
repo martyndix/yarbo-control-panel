@@ -64,11 +64,19 @@ tail -n 40 "$ROOT/data/matter-agent.log"
 journalctl -u yarbo-panel -n 40 --no-pager
 ```
 
-To unstick the panel immediately:
+To unstick the panel immediately, make the Hue fabric readable, then install **3.0.61**:
 
 ```bash
-sudo timeout 15 docker stop yarbo-matter-server; sudo systemctl restart yarbo-panel
+ROOT="$(systemctl show -p WorkingDirectory --value yarbo-panel)"
+sudo systemctl stop yarbo-panel
+docker exec yarbo-matter-server sh -c 'chmod a+r /data/*.json /data/*.json.backup /data/*.ini; chmod a+X /data'
+sudo chown -R "$(stat -c %U "$ROOT"):$(stat -c %G "$ROOT")" "$ROOT/data/matter-server"
+cd "$ROOT"
+git fetch origin main
+./scripts/update.sh
 ```
 
-After **3.0.60**, Home no longer waits on Docker during page load. If Home says **0 devices**, pairing is stored in `data/matter-server/` (not git). If that folder is empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
+Then hard-refresh. **Do not pair the Hue Bridge again** unless that folder is empty — pairing a second time uses another fabric slot.
+
+After **3.0.60**, Home no longer waits on Docker during page load. If Home says **0 devices**, pairing is stored in `data/matter-server/` (not git). Docker often writes those files as `root:600`, which the panel cannot read. **3.0.61** chmod’s them on start. If that folder is truly empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
 

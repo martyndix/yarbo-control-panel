@@ -115,4 +115,35 @@ if ($items !== []) {
     exit(1);
 }
 
+$locked = sys_get_temp_dir() . '/yarbo-home-locked-' . bin2hex(random_bytes(3));
+mkdir($locked . '/data/matter-server', 0775, true);
+file_put_contents($locked . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($locked . '/data/home.json', json_encode([
+    'names' => [],
+    'room_defs' => [],
+    'rooms' => [],
+    'group_defs' => [],
+    'groups' => [],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [],
+], JSON_UNESCAPED_SLASHES));
+$secret = $locked . '/data/matter-server/aabbcc.json';
+file_put_contents($secret, json_encode(['nodes' => ['1' => hue_bridge(4)]], JSON_UNESCAPED_SLASHES));
+chmod($secret, 0000);
+$blocked = (new YarboHome($locked))->localHomeDevices();
+chmod($secret, 0644);
+if (($blocked['fabric']['unreadable_files'][0] ?? '') !== 'aabbcc.json') {
+    fwrite(STDERR, 'unreadable fabric not reported ' . json_encode($blocked['fabric'] ?? []) . "\n");
+    exit(1);
+}
+if (!str_contains((string) ($blocked['error'] ?? ''), 'cannot read')) {
+    fwrite(STDERR, 'missing unreadable hint ' . json_encode($blocked) . "\n");
+    exit(1);
+}
+
 echo "ok\n";

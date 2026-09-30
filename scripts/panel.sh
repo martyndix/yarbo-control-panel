@@ -83,11 +83,12 @@ if [[ ! -x "$MATTER_PY" ]]; then
   MATTER_PY="$(command -v python3 || true)"
 fi
 if [[ "$(uname -s)" != "Darwin" && -f "${ROOT}/scripts/lib/matter_server.sh" ]]; then
-  echo "==> Ensuring Matter server is running (Home module)"
+    echo "==> Ensuring Matter server is running (Home module)"
   (
     set +e
     # shellcheck source=scripts/lib/matter_server.sh
     source "${ROOT}/scripts/lib/matter_server.sh" || exit 0
+    yarbo_matter_make_storage_readable
     sudo -n /usr/local/sbin/yarbo-matter-setup "${ROOT}" >/dev/null 2>&1 && exit 0
     yarbo_matter_setup >/dev/null 2>&1 || true
   ) >/dev/null 2>&1 &

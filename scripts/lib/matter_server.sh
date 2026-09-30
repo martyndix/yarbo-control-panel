@@ -148,10 +148,21 @@ yarbo_matter_install_wrapper() {
   fi
 }
 
+yarbo_matter_make_storage_readable() {
+  local name
+  name="$(yarbo_matter_name)"
+  timeout 8 docker exec "$name" sh -c 'chmod a+r /data/*.json /data/*.json.backup /data/*.ini 2>/dev/null; chmod a+X /data' >/dev/null 2>&1 \
+    || timeout 8 sudo -n docker exec "$name" sh -c 'chmod a+r /data/*.json /data/*.json.backup /data/*.ini 2>/dev/null; chmod a+X /data' >/dev/null 2>&1 \
+    || true
+  chmod a+rX "${ROOT}/data/matter-server" 2>/dev/null || true
+  chmod a+r "${ROOT}/data/matter-server/"*.json "${ROOT}/data/matter-server/"*.json.backup "${ROOT}/data/matter-server/"*.ini 2>/dev/null || true
+}
+
 yarbo_matter_setup() {
   mkdir -p "${ROOT}/data/matter-server"
   yarbo_matter_write_status "running" "Setting up the Matter server"
   yarbo_matter_enable_ipv6
+  yarbo_matter_make_storage_readable
 
   if yarbo_matter_port_up; then
     yarbo_matter_write_status "done" "Matter server is running"
@@ -214,6 +225,7 @@ yarbo_matter_setup() {
   local i
   for i in $(seq 1 40); do
     if yarbo_matter_port_up; then
+      yarbo_matter_make_storage_readable
       yarbo_matter_write_status "done" "Matter server is running"
       return 0
     fi

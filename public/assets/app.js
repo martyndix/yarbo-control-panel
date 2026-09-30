@@ -3260,7 +3260,7 @@ function renderHomeDashboard(data) {
     if (homeDrag) return;
     const card = document.getElementById('home-card');
     const devices = data.devices || [];
-    card?.classList.toggle('home-card--empty', devices.length === 0);
+    card?.classList.toggle('home-card--empty', devices.length === 0 && !(data.fabric?.unreadable_files || []).length);
     const status = document.getElementById('home-server-status');
     if (status) {
         const err = data.server?.error;
@@ -3268,7 +3268,9 @@ function renderHomeDashboard(data) {
         let line = data.server?.ok
             ? `Matter server: connected · ${devices.length} device${devices.length === 1 ? '' : 's'}`
             : `Matter server: ${err || 'not running'}`;
-        if (devices.length === 0 && fabric.storage_nodes) {
+        if (devices.length === 0 && (fabric.unreadable_files || []).length) {
+            line += ' · storage not readable (root-owned files)';
+        } else if (devices.length === 0 && fabric.storage_nodes) {
             line += ` · ${fabric.storage_nodes} node${fabric.storage_nodes === 1 ? '' : 's'} on disk`;
         }
         status.textContent = line;

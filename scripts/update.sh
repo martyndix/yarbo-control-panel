@@ -244,6 +244,7 @@ chmod +x "${ROOT}/scripts/lib/matter_server.sh" "${ROOT}/scripts/matter_setup.sh
 if [[ -f "${ROOT}/scripts/lib/matter_server.sh" ]]; then
   # shellcheck source=scripts/lib/matter_server.sh
   source "${ROOT}/scripts/lib/matter_server.sh"
+  yarbo_matter_make_storage_readable
   if sudo -n /usr/local/sbin/yarbo-matter-setup "${ROOT}" >/dev/null 2>&1; then
     step "Matter server is running"
   elif yarbo_matter_setup; then
