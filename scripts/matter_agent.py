@@ -36,7 +36,7 @@ DOCKER_IMAGE = os.environ.get(
 )
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 4
+AGENT_VERSION = 5
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -239,18 +239,30 @@ def docker_bin() -> str | None:
     return None
 
 
-def run_docker(args: list[str]) -> subprocess.CompletedProcess:
+def _docker_once(bin_path: str, args: list[str], timeout: float) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run([bin_path, *args], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args=[bin_path, *args],
+            returncode=124,
+            stdout="",
+            stderr="docker command timed out",
+        )
+
+
+def run_docker(args: list[str], timeout: float = 12.0) -> subprocess.CompletedProcess:
     docker = docker_bin()
     if docker is None:
         return subprocess.CompletedProcess(args=["docker", *args], returncode=127, stdout="", stderr="docker not found")
-    result = subprocess.run([docker, *args], capture_output=True, text=True)
+    result = _docker_once(docker, args, timeout)
     if result.returncode == 0:
         return result
-    sudo = subprocess.run(["sudo", "-n", docker, *args], capture_output=True, text=True)
+    sudo = _docker_once("sudo", ["-n", docker, *args], timeout)
     if sudo.returncode == 0:
         return sudo
     if docker != "/usr/bin/docker" and os.access("/usr/bin/docker", os.X_OK):
-        sudo_bin = subprocess.run(["sudo", "-n", "/usr/bin/docker", *args], capture_output=True, text=True)
+        sudo_bin = _docker_once("sudo", ["-n", "/usr/bin/docker", *args], timeout)
         if sudo_bin.returncode == 0:
             return sudo_bin
     return result
@@ -1194,12 +1206,13 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             listening = False
         finally:
             probe.close()
-        hint = None if listening else ensure_matter_server()
+        if not listening:
+            threading.Thread(target=ensure_matter_server, daemon=True).start()
         return {
             "ok": listening,
             "server": listening,
             "docker": _started_docker,
-            "error": None if listening else (hint or "Matter server is not listening on port 5580"),
+            "error": None if listening else "Matter server is not listening on port 5580",
         }
     if op == "nodes":
         quick = body.get("quick", True) is not False

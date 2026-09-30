@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.60] - 2026-09-30
+
+### Fixed
+- The panel can load again while Matter/Docker is recovering. Home and PaperMono HOUSE now read saved lights from `data/matter-server` (and `last_devices`) instead of waiting on the Matter agent. PHP’s built-in server is single-threaded, so a hung Home request had blocked every other page.
+
+### Added
+- Pi diagnostic: from the panel folder run `sudo bash scripts/matter_diagnose.sh`, or paste the one-liner in [docs/home.md](docs/home.md).
+
 ## [3.0.59] - 2026-09-30
 
 ### Fixed

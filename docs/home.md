@@ -44,4 +44,31 @@ Thread devices keep using Apple’s (or another) border router. IPv6 is turned o
 
 Flash firmware **0.1.51** (USB first, then Wi-Fi OTA). On the Home dashboard, tap **⚙️**, pick a tablet card (each shows how many HOUSE buttons it has), tick lights/scenes for that tablet (up to 12), and drag them into button order. Changes save as you go. The HOUSE page lists all assigned buttons on one screen. Scene buttons fill when the scene matches the lights, and a second tap turns those lights off (panel **3.0.41**, no extra flash required for that behaviour).
 
-If Home says **0 devices** after a panel update, install **3.0.58**. The panel remounts `data/matter-server/` into Docker, restores `chip.json` from its backup if needed, and reads the saved Hue fabric from disk. Pairing is stored there and is not replaced by a git update. If that folder is empty, add the Hue Bridge pairing code once and the lights come back with the names, rooms, and scenes already in `data/home.json`.
+If the whole panel will not load (blank page, spinning forever), Home is probably blocking PHP. On the Pi paste this and send the output:
+
+```bash
+ROOT="$(systemctl show -p WorkingDirectory --value yarbo-panel 2>/dev/null)"
+echo "=== $(date -Is) root=$ROOT ==="
+systemctl is-active yarbo-panel; systemctl show yarbo-panel -p MainPID,ActiveState,SubState,NRestarts --no-pager
+git -C "$ROOT" log -1 --oneline; git -C "$ROOT" describe --tags --always
+ss -lntp | grep -E ':8080|:8766|:5580' || true
+timeout 8 docker ps -a --filter name=yarbo-matter-server --format '{{.Names}} {{.Status}}' 2>/dev/null || timeout 8 sudo -n docker ps -a --filter name=yarbo-matter-server
+ls -lah "$ROOT/data/matter-server" | head
+echo "--- timed APIs ---"
+timeout 6 curl -sS -o /tmp/yarbo-status.json -w "status http=%{http_code} time=%{time_total}\n" http://127.0.0.1:8080/api/status.php
+timeout 6 curl -sS -o /tmp/yarbo-home.json -w "home http=%{http_code} time=%{time_total}\n" http://127.0.0.1:8080/api/home.php
+head -c 400 /tmp/yarbo-home.json; echo
+timeout 3 curl -sS -m 2 -H 'Content-Type: application/json' -d '{"op":"ping"}' http://127.0.0.1:8766/; echo
+echo "--- logs ---"
+tail -n 40 "$ROOT/data/matter-agent.log"
+journalctl -u yarbo-panel -n 40 --no-pager
+```
+
+To unstick the panel immediately:
+
+```bash
+sudo timeout 15 docker stop yarbo-matter-server; sudo systemctl restart yarbo-panel
+```
+
+After **3.0.60**, Home no longer waits on Docker during page load. If Home says **0 devices**, pairing is stored in `data/matter-server/` (not git). If that folder is empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
+

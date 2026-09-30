@@ -2464,6 +2464,7 @@ let homePaperTabletId = '';
 let homePaperFilter = '';
 let homePaperSavingId = '';
 let homeLoadBusy = false;
+let homeLoadAborts = 0;
 let homeSetupPollTimer = 0;
 let homeManageOpen = false;
 let homeDrag = null;
@@ -2671,15 +2672,25 @@ async function loadHomeDashboard() {
             if (paper) paper.assigned = localAssigned;
         }
         renderHomeDashboard(data);
+        homeLoadAborts = 0;
     } catch (err) {
         if (isAbortError(err)) {
             aborted = true;
             const status = document.getElementById('home-server-status');
-            if (status) status.textContent = 'Loading Home…';
-            window.setTimeout(() => {
+            homeLoadAborts += 1;
+            if (status) {
+                status.textContent = homeLoadAborts < 3
+                    ? 'Loading Home…'
+                    : 'Home is still starting. Refresh after a minute, or run the Pi diagnostic from the update notes.';
+            }
+            if (homeLoadAborts < 3) {
+                window.setTimeout(() => {
+                    homeLoadBusy = false;
+                    loadHomeDashboard();
+                }, 2500);
+            } else {
                 homeLoadBusy = false;
-                loadHomeDashboard();
-            }, 2500);
+            }
             return;
         }
         const status = document.getElementById('home-server-status');

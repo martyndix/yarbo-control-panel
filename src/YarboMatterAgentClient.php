@@ -6,7 +6,7 @@ namespace Yarbo;
 
 final class YarboMatterAgentClient
 {
-    public const MIN_VERSION = 4;
+    public const MIN_VERSION = 5;
 
     private static bool $spawnAttempted = false;
 
@@ -27,9 +27,15 @@ final class YarboMatterAgentClient
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
-    public function request(array $body, float $timeoutSeconds = 12.0): array
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    public function request(array $body, float $timeoutSeconds = 12.0, bool $spawn = true): array
     {
-        $this->ensureStarted();
+        if ($spawn) {
+            $this->ensureStarted();
+        }
 
         return $this->post($body, $timeoutSeconds);
     }

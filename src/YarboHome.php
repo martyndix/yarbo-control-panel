@@ -253,17 +253,10 @@ final class YarboHome
             ];
         }
         $store = $this->load();
-        if (!($setup['ready'] ?? false)) {
-            $live = [
-                'ok' => false,
-                'error' => (string) ($setup['error'] ?? $setup['message'] ?? 'Matter server is not running yet'),
-                'devices' => $store['last_devices'] ?? [],
-                'fabric' => [],
-            ];
-        } else {
-            $live = $this->liveDevices(8.0);
-            $store = $this->load();
-        }
+        // Never wait on the Matter agent or Docker here. PHP's built-in server
+        // is single-threaded, so a hung /api/home.php freezes the whole panel.
+        $live = $this->localHomeDevices();
+        $store = $this->load();
         $hidden = array_fill_keys($store['hidden'], true);
         $devices = [];
         $hiddenDevices = [];
@@ -518,7 +511,7 @@ final class YarboHome
 
     private function matterPortUp(): bool
     {
-        $fp = @fsockopen('127.0.0.1', 5580, $errno, $errstr, 0.35);
+        $fp = @fsockopen('127.0.0.1', 5580, $errno, $errstr, 0.15);
         if (!is_resource($fp)) {
             return false;
         }
@@ -1242,46 +1235,66 @@ final class YarboHome
     }
 
     /**
-     * @return array{ok: bool, error: string, devices: list<array<string, mixed>>}
+     * Lights from Matter storage / last_devices. Does not contact the agent.
+     *
+     * @return array{ok: bool, error: string, devices: list<array<string, mixed>>, fabric: array<string, mixed>}
+     */
+    public function localHomeDevices(): array
+    {
+        $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
+        $storageDir = $this->projectRoot . '/data/matter-server';
+        $nodes = YarboMatterFabric::nodesFromDisk($storageDir);
+        $fromDisk = YarboMatterFabric::flatten($nodes);
+        $remembered = $this->rememberedOrCached($cachePath);
+        $devices = self::preferLiveOrRemembered($fromDisk, $remembered);
+        if ($fromDisk !== []) {
+            $this->writeDeviceCache($cachePath, $fromDisk);
+            $this->rememberDevices($fromDisk);
+        }
+        $ready = $this->matterPortUp();
+        $ok = $devices !== [] || $ready;
+
+        return [
+            'ok' => $ok,
+            'error' => $ok ? '' : 'Matter server is not running yet',
+            'devices' => $devices,
+            'fabric' => [
+                'source' => $fromDisk !== [] ? 'disk' : ($remembered !== [] ? 'cache' : ''),
+                'storage_files' => YarboMatterFabric::storageFileNames($storageDir),
+                'storage_nodes' => count($nodes),
+            ],
+        ];
+    }
+
+    /**
+     * @return array{ok: bool, error: string, devices: list<array<string, mixed>>, fabric?: array<string, mixed>}
      */
     private function liveDevices(float $timeout): array
     {
-        $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
-        $fresh = is_file($cachePath) && (time() - (int) filemtime($cachePath)) < 8;
-        if ($fresh) {
-            $cached = $this->readDeviceCache($cachePath);
-            if ($cached !== []) {
-                return [
-                    'ok' => true,
-                    'error' => '',
-                    'devices' => $cached,
-                    'fabric' => [],
-                ];
-            }
+        $local = $this->localHomeDevices();
+        if ($timeout <= 0) {
+            return $local;
         }
         $agent = YarboMatterAgentClient::fromEnv();
-        $status = $agent->request(['op' => 'status'], min(6.0, $timeout));
-        $error = (string) ($status['error'] ?? 'Matter server unavailable');
-        $nodes = ['ok' => false, 'devices' => []];
-        if (($status['ok'] ?? false) === true || ($status['server'] ?? false) === true) {
-            $nodes = $agent->request(['op' => 'nodes', 'quick' => true], min(8.0, $timeout));
-            $error = (string) ($nodes['error'] ?? $error);
-        }
+        $nodes = $agent->request(['op' => 'nodes', 'quick' => true], min(2.5, $timeout), false);
         $liveOk = ($nodes['ok'] ?? false) === true;
         $devices = is_array($nodes['devices'] ?? null) ? $nodes['devices'] : [];
-        $fabric = is_array($nodes['fabric'] ?? null) ? $nodes['fabric'] : [];
+        $fabric = is_array($nodes['fabric'] ?? null) ? $nodes['fabric'] : ($local['fabric'] ?? []);
+        $error = (string) ($nodes['error'] ?? $local['error']);
         if ($liveOk && $devices !== []) {
+            $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
             $this->writeDeviceCache($cachePath, $devices);
             $this->rememberDevices($devices);
-        } else {
-            $remembered = self::preferLiveOrRemembered($devices, $this->rememberedOrCached($cachePath));
-            if ($remembered !== []) {
-                if ($liveOk) {
-                    $remembered = $this->markDevicesUnavailable($remembered);
-                }
-                $devices = $remembered;
-            }
+
+            return [
+                'ok' => true,
+                'error' => '',
+                'devices' => $devices,
+                'fabric' => $fabric,
+            ];
         }
+
+        $devices = self::preferLiveOrRemembered($devices, $local['devices']);
 
         return [
             'ok' => $liveOk || $devices !== [],
@@ -1434,7 +1447,7 @@ final class YarboHome
             return [];
         }
         $store = $this->load();
-        $live = $this->liveDevices(6.0);
+        $live = $this->localHomeDevices();
         $byId = [];
         foreach ($live['devices'] as $device) {
             if (!is_array($device)) {
@@ -1900,7 +1913,7 @@ final class YarboHome
     private function dimmableIdsAmong(array $ids): array
     {
         $dimmable = [];
-        $live = $this->liveDevices(6.0);
+        $live = $this->localHomeDevices();
         foreach ($live['devices'] as $device) {
             if (!is_array($device)) {
                 continue;
