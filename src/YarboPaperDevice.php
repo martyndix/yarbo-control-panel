@@ -14,7 +14,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.44';
+    public const FIRMWARE_VERSION = '0.1.45';
     public const FIRMWARE_VERSION_COLOR = '0.2.15-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;

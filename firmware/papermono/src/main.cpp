@@ -75,6 +75,7 @@ String lastDrawnKey;
 String logoHash = "";
 int currentPage = PAPERMONO_PAGE_HOME;
 bool screenLocked = false;
+bool menuOpen = false;
 uint32_t lastActivity = 0;
 uint32_t lastLight = 0;
 bool lightOn = true;
@@ -152,6 +153,7 @@ void exitLock();
 void noteActivity();
 void nextPage();
 void prevPage();
+void showPage(int page, bool loadPlansIfNeeded);
 void drawPadlockIcon(int x, int y, int size, bool locked);
 void drawWifiIcon(int cx, int cy, int size, bool connected);
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
@@ -164,7 +166,11 @@ bool tapOnPadlock(int x, int y);
 bool tapOnUnlock(int x, int y);
 bool tapOnLockOff(int x, int y);
 bool tapOnMail(int x, int y);
+bool tapOnMenuChip(int x, int y);
 void openInboxFromLock();
+void openMenu();
+void drawMenuPage(bool forceFull);
+void handleMenuTouch(int x, int y);
 void refreshUnreadLed();
 void powerOffTablet();
 void finishEpdFrame();
@@ -347,7 +353,8 @@ String screenKey()
         + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
         + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
         + String(inboxCount) + "|" + String(radioUi) + "|" + String(radioViewIndex) + "|"
-        + String(homeOn ? 1 : 0) + "|" + String(homeCount);
+        + String(homeOn ? 1 : 0) + "|" + String(homeCount)
+        + "|" + String(menuOpen ? 1 : 0);
 }
 
 bool pageEnabled(int page)
@@ -480,11 +487,31 @@ void drawHeader()
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.setTextSize(3);
-    M5.Display.drawString(headerBrand(), 16, 12);
-    String page = pageName(currentPage);
-    if (page != headerBrand()) {
+    String brand = menuOpen ? String("MENU") : headerBrand();
+    M5.Display.drawString(brand, 16, 12);
+    if (!menuOpen) {
+        int chipX = 16;
+        int chipY = 50;
+        int chipW = 120;
+        int chipH = 42;
+        M5.Display.drawRoundRect(chipX, chipY, chipW, chipH, 10, TFT_BLACK);
+        M5.Display.setTextDatum(MC_DATUM);
         M5.Display.setTextSize(2);
-        M5.Display.drawString(page, 16, 52);
+        M5.Display.drawString("MENU", chipX + chipW / 2, chipY + chipH / 2);
+        if (unreadCount > 0) {
+            int cx = chipX + chipW - 8;
+            int cy = chipY + 8;
+            M5.Display.fillCircle(cx, cy, 12, TFT_WHITE);
+            M5.Display.fillCircle(cx, cy, 9, TFT_BLACK);
+        }
+        String page = pageName(currentPage);
+        if (page != brand) {
+            M5.Display.setTextDatum(ML_DATUM);
+            M5.Display.setTextSize(2);
+            M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+            M5.Display.drawString(page, chipX + chipW + 12, chipY + chipH / 2);
+        }
+        M5.Display.setTextDatum(TL_DATUM);
     }
     int W = M5.Display.width();
     int lockX = W - 88;
@@ -501,6 +528,153 @@ void drawHeader()
 
 void drawPager()
 {
+}
+
+int menuItemCount()
+{
+    int n = 0;
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        if (pageEnabled(i)) {
+            n++;
+        }
+    }
+    return n > 0 ? n : 1;
+}
+
+int menuPageAtIndex(int idx)
+{
+    int n = 0;
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        if (!pageEnabled(i)) {
+            continue;
+        }
+        if (n == idx) {
+            return i;
+        }
+        n++;
+    }
+    return firstEnabledPage();
+}
+
+const char *menuLabel(int page)
+{
+    if (page == PAPERMONO_PAGE_POWERWALL) return "POWER";
+    if (page == PAPERMONO_PAGE_RADIO) return "MAIL";
+    if (page == PAPERMONO_PAGE_STATUS) return "STATUS";
+    if (page == PAPERMONO_PAGE_HEALTH) return "HEALTH";
+    if (page == PAPERMONO_PAGE_PLANS) return "PLANS";
+    if (page == PAPERMONO_PAGE_NOTE) return "NOTE";
+    if (page == PAPERMONO_PAGE_BOARD) return "BOARD";
+    if (page == PAPERMONO_PAGE_LYMOW) return "LYMOW";
+    if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
+    if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
+    return "HOME";
+}
+
+void layoutMenu(int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0)
+{
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    cols = 2;
+    int n = menuItemCount();
+    rows = (n + cols - 1) / cols;
+    if (rows < 1) {
+        rows = 1;
+    }
+    gap = 10;
+    x0 = 16;
+    y0 = 108;
+    int y1 = H - 20;
+    bw = (W - x0 * 2 - gap) / cols;
+    bh = (y1 - y0 - gap * (rows - 1)) / rows;
+    if (bh > 112) {
+        bh = 112;
+    }
+    if (bh < 70) {
+        bh = 70;
+    }
+}
+
+void menuButtonRect(int idx, int &x, int &y, int &w, int &h)
+{
+    int cols, rows, bw, bh, gap, x0, y0;
+    layoutMenu(cols, rows, bw, bh, gap, x0, y0);
+    int col = idx % cols;
+    int row = idx / cols;
+    x = x0 + col * (bw + gap);
+    y = y0 + row * (bh + gap);
+    w = bw;
+    h = bh;
+}
+
+void drawNotifyBlob(int bx, int by, int bw, bool invert)
+{
+    int r = 11;
+    int cx = bx + bw - 20;
+    int cy = by + 20;
+    uint16_t fill = invert ? TFT_WHITE : TFT_BLACK;
+    uint16_t halo = invert ? TFT_BLACK : TFT_WHITE;
+    M5.Display.fillCircle(cx, cy, r + 3, halo);
+    M5.Display.fillCircle(cx, cy, r, fill);
+}
+
+void drawMenuPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    int n = menuItemCount();
+    int highlight = currentPage;
+    if (!pageEnabled(highlight)) {
+        highlight = firstEnabledPage();
+    }
+    for (int i = 0; i < n; i++) {
+        int page = menuPageAtIndex(i);
+        int x, y, w, h;
+        menuButtonRect(i, x, y, w, h);
+        bool mailNotify = page == PAPERMONO_PAGE_RADIO && unreadCount > 0;
+        bool invert = mailNotify || page == highlight;
+        drawButton(x, y, w, h, menuLabel(page), invert);
+        if (mailNotify) {
+            drawNotifyBlob(x, y, w, invert);
+        }
+    }
+    finishEpdFrame();
+}
+
+void openMenu()
+{
+    menuOpen = true;
+    offConfirm = false;
+    noteActivity();
+    drawScreen(true);
+}
+
+void handleMenuTouch(int x, int y)
+{
+    int n = menuItemCount();
+    for (int i = 0; i < n; i++) {
+        int bx, by, bw, bh;
+        menuButtonRect(i, bx, by, bw, bh);
+        if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
+            int page = menuPageAtIndex(i);
+            menuOpen = false;
+            if (page == PAPERMONO_PAGE_RADIO) {
+                radioUi = PAPERMONO_RADIO_INBOX;
+                radioViewIndex = -1;
+            }
+            showPage(page, true);
+            return;
+        }
+    }
+}
+
+bool tapOnMenuChip(int x, int y)
+{
+    if (menuOpen || screenLocked) {
+        return false;
+    }
+    return x >= 8 && x <= 150 && y >= 40 && y <= 104;
 }
 
 void drawKv(const char *label, const String &value, int y)
@@ -1249,6 +1423,7 @@ void drawLockScreen(bool forceFull)
 void enterLock()
 {
     screenLocked = true;
+    menuOpen = false;
     offConfirm = false;
     lastLight = millis();
     applyFrontlight(true);
@@ -1259,6 +1434,7 @@ void enterLock()
 void exitLock()
 {
     screenLocked = false;
+    menuOpen = true;
     applyUnlockPage();
     noteActivity();
     applyFrontlight(true);
@@ -1554,6 +1730,15 @@ void drawScreen(bool forceFull)
         lastDrawnKey = screenKey();
         return;
     }
+    if (menuOpen) {
+        String key = screenKey();
+        if (!forceFull && key == lastDrawnKey) {
+            return;
+        }
+        drawMenuPage(forceFull);
+        lastDrawnKey = screenKey();
+        return;
+    }
     String key = screenKey();
     if (!forceFull && key == lastDrawnKey) {
         return;
@@ -1659,7 +1844,8 @@ bool tapOnPager(int y)
 bool tapOnPadlock(int x, int y)
 {
     int W = M5.Display.width();
-    return x >= W - 120 && y >= 0 && y <= 120;
+    int lockX = W - 88;
+    return x >= lockX - 8 && y >= 0 && y <= 92;
 }
 
 bool tapOnUnlock(int x, int y)
@@ -1724,6 +1910,7 @@ void openInboxFromLock()
     radioViewIndex = -1;
     currentPage = PAPERMONO_PAGE_RADIO;
     screenLocked = false;
+    menuOpen = false;
     noteActivity();
     applyFrontlight(true);
     drawScreen(true);
@@ -2511,6 +2698,7 @@ void setVestaboardLive(const char *live)
 
 void showPage(int page, bool loadPlansIfNeeded)
 {
+    menuOpen = false;
     if (!pageEnabled(page)) {
         page = stepEnabledPage(page, 1);
     }
@@ -2540,6 +2728,9 @@ bool applyPendingPages()
         return false;
     }
     pendingPageSteps = 0;
+    if (menuOpen) {
+        menuOpen = false;
+    }
     int dir = steps > 0 ? 1 : -1;
     int n = steps > 0 ? steps : -steps;
     if (n > PAPERMONO_PAGE_COUNT) {
@@ -2780,6 +2971,10 @@ void loop()
             noteActivity();
             if (tapOnPadlock(tx, ty)) {
                 enterLock();
+            } else if (menuOpen) {
+                handleMenuTouch(tx, ty);
+            } else if (tapOnMenuChip(tx, ty)) {
+                openMenu();
             } else {
                 if (currentPage == PAPERMONO_PAGE_HOME) {
                     int which = homeButtonAt(tx, ty);

@@ -14,17 +14,18 @@ $needles = [
     'HOUSE — up to 12 lights or scenes on one screen, no MORE pager',
     'MAIL — inbox with time stamps, read receipts, and WRITE',
     'Lock screen — envelope when mail is waiting, Unlock, and OFF',
+    'Unlock menu — tap a page. MAIL shows a blob when a message is unread',
     'Opposite corners: tap 1, then 2',
 ];
 
-foreach (array_slice($needles, 0, 5) as $needle) {
+foreach (array_slice($needles, 0, 6) as $needle) {
     if (!str_contains($html, $needle)) {
         fwrite(STDERR, "missing: {$needle}\n");
         exit(1);
     }
 }
 
-if (str_contains($html, $needles[5])) {
+if (str_contains($html, $needles[6])) {
     fwrite(STDERR, "stale lock-screen hint still present\n");
     exit(1);
 }

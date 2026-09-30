@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.51] - 2026-09-30
+
+### Changed
+- PaperMono firmware **0.1.45**: Unlock opens a **MENU** of page buttons so you can jump without stepping A/B. **MAIL** shows a notification blob when a message is unread. Unlocked pages have a **MENU** chip (blob if mail is waiting) to return to that grid. Settings → **Unlock to** is still highlighted on the menu, and is still the Paper Colour C-button destination.
+
 ## [3.0.50] - 2026-09-30
 
 ### Added
