@@ -24,15 +24,17 @@ $needles = [
     'void rebuildMenuLayout()',
     'void applyMenuVisible(JsonVariant vis)',
     'i == PAPERMONO_PAGE_HOME || i == PAPERMONO_PAGE_BOARD',
-    '#define PAPERMONO_FW_VERSION "0.1.49"',
-    "public const FIRMWARE_VERSION = '0.1.49';",
+    '#define PAPERMONO_FW_VERSION "0.1.50"',
+    "public const FIRMWARE_VERSION = '0.1.50';",
     'data-menu-label="yarbo"',
     'data-menu-visible="yarbo"',
     'id="paper-menu-list"',
     'int stepYarboPage(int from, int dir)',
     'void applyMenuOrder(JsonVariant order)',
     'Unlock menu — one YARBO button; A/B steps Status, Health, Plans. Reorder in Settings. MAIL blob if unread',
-    'PaperMono firmware **0.1.49**',
+    'PaperMono firmware **0.1.50**',
+    'return menuLabel(PAPERMONO_PAGE_NOTE)',
+    'The name on each button is also the title at the top of that page',
 ];
 
 $hay = $fw . "\n" . $ver . "\n" . $php . "\n" . $html . "\n" . $log;

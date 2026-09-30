@@ -178,6 +178,7 @@ void nextPage();
 void prevPage();
 void showPage(int page, bool loadPlansIfNeeded);
 void layoutTileGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0);
+String menuLabel(int page);
 void drawPadlockIcon(int x, int y, int size, bool locked);
 void drawWifiIcon(int cx, int cy, int size, bool connected);
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
@@ -619,22 +620,27 @@ void layoutButtons(int &bw, int &bh, int &gap, int &y0)
 
 String headerBrand()
 {
-    if (currentPage == PAPERMONO_PAGE_POWERWALL) return "POWERWALL";
-    if (currentPage == PAPERMONO_PAGE_LYMOW) return "LYMOW";
-    if (currentPage == PAPERMONO_PAGE_NOTE || currentPage == PAPERMONO_PAGE_BOARD) return "VESTABOARD";
-    if (currentPage == PAPERMONO_PAGE_RADIO) return "MAIL";
-    if (currentPage == PAPERMONO_PAGE_DEVICE) return "DEVICE";
-    if (currentPage == PAPERMONO_PAGE_HOUSE) return "HOUSE";
-    return "YARBO";
+    if (currentPage == PAPERMONO_PAGE_HOME) {
+        return "YARBO";
+    }
+    if (isYarboPage(currentPage)) {
+        return menuLabel(PAPERMONO_PAGE_STATUS);
+    }
+    if (currentPage == PAPERMONO_PAGE_BOARD) {
+        return menuLabel(PAPERMONO_PAGE_NOTE);
+    }
+    return menuLabel(currentPage);
 }
 
 void drawHeader()
 {
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
+    int W = M5.Display.width();
+    int lockX = W - 88;
     M5.Display.setTextSize(3);
     String brand = menuOpen ? String("MENU") : headerBrand();
-    M5.Display.drawString(brand, 16, 12);
+    M5.Display.drawString(clipLabelToWidth(brand, lockX - 28), 16, 12);
     if (!menuOpen) {
         int chipX = 16;
         int chipY = 50;
@@ -651,7 +657,8 @@ void drawHeader()
             M5.Display.fillCircle(cx, cy, 9, TFT_BLACK);
         }
         String page = pageName(currentPage);
-        if (page != brand) {
+        bool showPageName = isYarboPage(currentPage) || currentPage == PAPERMONO_PAGE_HOME;
+        if (showPageName && page != brand) {
             M5.Display.setTextDatum(ML_DATUM);
             M5.Display.setTextSize(2);
             M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -659,8 +666,6 @@ void drawHeader()
         }
         M5.Display.setTextDatum(TL_DATUM);
     }
-    int W = M5.Display.width();
-    int lockX = W - 88;
     drawPadlockIcon(lockX + 8, 10, 70, true);
     M5.Display.drawRoundRect(lockX, 4, 82, 82, 14, TFT_BLACK);
     int batRight = lockX - 8;

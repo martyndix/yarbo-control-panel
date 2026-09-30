@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.56] - 2026-09-30
+
+### Changed
+- PaperMono firmware **0.1.50**: the name you set on a menu button is the title at the top of that page (so a renamed NOTE is no longer stuck as VESTABOARD).
+
 ## [3.0.55] - 2026-09-30
 
 ### Changed

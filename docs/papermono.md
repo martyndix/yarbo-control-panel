@@ -39,7 +39,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 
 - **Home / Status / Health / Plans:** Yarbo robot tiles (Stop / Dock on Home). Hidden when the Yarbo module is off in Settings.
 - Optional **lock-screen logo** (Settings → E-paper companions). Same image on Paper Colour. A PNG or JPEG is flattened onto white and the tablet downloads it on the next poll.
-- Top line is the current module (**YARBO**, **POWERWALL**, **LYMOW**, **VESTABOARD**, **MAIL**, **DEVICE**). Unlocked pages do not show the device name or firmware version; those stay on the lock screen and the powered-off card. A **MENU** chip under the brand opens the page grid; a black blob on that chip means unread mail.
+- Top line is the current module. Unlocked pages use the **same name as the menu button** (so a renamed NOTE is the title on that page). Device name and firmware stay on the lock screen and the powered-off card. A **MENU** chip under the brand opens the page grid; a black blob on that chip means unread mail.
 - **Note:** live 3×15 Vestaboard plus **YARBO / POWER / LYMOW / ALL** view buttons on the same page. Writes the Note when it is enabled; the lock screen still previews the same grid if you chose Vestaboard there.
 - **Powerwall:** house battery, solar, and draw.
 - **Lymow:** Lymow battery, state, and charging.

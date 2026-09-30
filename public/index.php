@@ -1103,7 +1103,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </label>
                             <p class="hint">PaperMono Unlock always opens the page menu. On a Yarbo screen, A/B step Status, Health, and Plans. Home is still on A/B, not on the menu.</p>
                             <h3 class="settings-subtitle">Menu buttons</h3>
-                            <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. One <strong>Yarbo</strong> button opens Status; side buttons A/B then step Health and Plans. NOTE is the live Vestaboard plus the view buttons. Names wrap on the tablet and apply on the next poll — no reflash.</p>
+                            <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. One <strong>Yarbo</strong> button opens Status; side buttons A/B then step Health and Plans. NOTE is the live Vestaboard plus the view buttons. The name on each button is also the title at the top of that page. Names wrap on the tablet and apply on the next poll — no reflash.</p>
                             <div id="paper-menu-list" class="paper-menu-list">
                                 <div class="paper-menu-row" data-menu-id="yarbo">
                                     <span class="paper-menu-reorder">
