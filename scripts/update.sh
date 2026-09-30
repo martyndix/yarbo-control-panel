@@ -133,8 +133,12 @@ if [[ -f CHANGELOG.md ]]; then
 fi
 
 SYSTEMD_ACTIVE=false
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
-  SYSTEMD_ACTIVE=true
+SYSTEMD_UNIT=false
+if command -v systemctl >/dev/null 2>&1 && systemctl cat "${SERVICE_NAME}.service" >/dev/null 2>&1; then
+  SYSTEMD_UNIT=true
+  if systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
+    SYSTEMD_ACTIVE=true
+  fi
 fi
 
 if $CHECK_ONLY; then
@@ -156,6 +160,16 @@ if $CHECK_ONLY; then
 fi
 
 if ! $BEHIND; then
+  STARTED=false
+  if $SYSTEMD_UNIT && ! $SYSTEMD_ACTIVE; then
+    step "Starting systemd service ${SERVICE_NAME}"
+    if sudo -n systemctl start "${SERVICE_NAME}" 2>/dev/null; then
+      STARTED=true
+      step "Service started"
+    else
+      step "Could not start automatically — run: sudo systemctl start ${SERVICE_NAME}"
+    fi
+  fi
   write_status "done" "Already on latest commit"
   php -r 'echo json_encode([
     "ok" => true,
@@ -168,11 +182,11 @@ if ! $BEHIND; then
     "update_available" => false,
     "changelog_version" => $argv[5] !== "" ? $argv[5] : null,
     "systemd_active" => $argv[6] === "true",
-    "restarted" => false,
-    "steps" => array_values(array_filter(explode("\n", $argv[7]))),
+    "restarted" => $argv[7] === "true",
+    "steps" => array_values(array_filter(explode("\n", $argv[8]))),
   ], JSON_UNESCAPED_SLASHES) . "\n";' \
     "$CURRENT" "$CURRENT_SHORT" "$REMOTE" "$REMOTE_SHORT" "$CHANGELOG_VERSION" \
-    "$($SYSTEMD_ACTIVE && echo true || echo false)" "$(printf '%s\n' "${STEPS[@]}")"
+    "$($SYSTEMD_ACTIVE && echo true || echo false)" "$($STARTED && echo true || echo false)" "$(printf '%s\n' "${STEPS[@]}")"
   exit 0
 fi
 
@@ -191,6 +205,9 @@ fi
 NEW="$(git rev-parse HEAD)"
 NEW_SHORT="$(git rev-parse --short HEAD)"
 step "Now at commit: ${NEW_SHORT}"
+if [[ -f CHANGELOG.md ]]; then
+  CHANGELOG_VERSION="$(grep '^## \[' CHANGELOG.md | grep -v '\[Unreleased\]' | head -n1 | sed 's/^## \[\([^]]*\)\].*/\1/' || true)"
+fi
 
 if ! command -v composer >/dev/null 2>&1; then
   fail "composer is not installed"
@@ -313,7 +330,7 @@ EOF
   rm -f "$tmp"
 }
 
-if $SYSTEMD_ACTIVE; then
+if $SYSTEMD_UNIT; then
   ensure_panel_sh_unit
   step "Restarting systemd service ${SERVICE_NAME}"
   write_status "restarting" "Restarting panel service"

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.62] - 2026-09-30
+
+### Fixed
+- Settings → Panel updates starts `yarbo-panel` again after an update even if the service was stopped first. Previously it only restarted a service that was already running, so the web UI stayed down.
+
 ## [3.0.61] - 2026-09-30
 
 ### Fixed
