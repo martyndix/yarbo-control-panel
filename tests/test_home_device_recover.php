@@ -44,6 +44,12 @@ if (count($kept) !== 2 || ($kept[0]['id'] ?? '') !== '1:1') {
     fwrite(STDERR, "empty live wiped remembered devices\n");
     exit(1);
 }
+$stub = [['id' => '13:1', 'name' => 'Matter node 13', 'kind' => 'light', 'node_id' => 13, 'endpoint' => 1, 'vendor' => '']];
+$named = Yarbo\YarboHome::preferLiveOrRemembered($stub, $store['last_devices']);
+if (count($named) !== 2 || ($named[0]['id'] ?? '') !== '1:1') {
+    fwrite(STDERR, "uninterviewed stub hid remembered devices\n");
+    exit(1);
+}
 $live = Yarbo\YarboHome::preferLiveOrRemembered(
     [['id' => '1:9', 'name' => 'New']],
     $store['last_devices']

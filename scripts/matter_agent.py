@@ -1553,7 +1553,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     **color,
                 }
             )
-        if len(devices) == before and node_id > 0:
+        if len(devices) == before and node_id > 0 and attributes:
             devices.append(
                 {
                     "id": f"{node_id}:1",

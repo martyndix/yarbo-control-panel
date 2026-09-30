@@ -185,3 +185,108 @@ print("wait ~30s for Hue interview, then toggle a light. Do not pair again.")
 PY
 ```
 
+If Home then shows one row named **Matter node 13**, that is the empty stub, not a wipe. Names, rooms, and scenes are still in `data/home.json`. Interview the Hue Bridge (do not pair):
+
+```bash
+python3 - <<'PY'
+import json, os, socket, struct, time, uuid
+HOST, PORT, NODE = "127.0.0.1", 5580, 13
+
+def send(sock, payload):
+    data = json.dumps(payload, separators=(",", ":")).encode()
+    key = os.urandom(4)
+    n = len(data)
+    header = bytearray([0x81])
+    if n < 126:
+        header.append(0x80 | n)
+    elif n < 65536:
+        header.extend([0x80 | 126])
+        header.extend(struct.pack("!H", n))
+    else:
+        header.extend([0x80 | 127])
+        header.extend(struct.pack("!Q", n))
+    header.extend(key)
+    sock.sendall(header + bytes(b ^ key[i % 4] for i, b in enumerate(data)))
+
+def recv_json(sock, timeout):
+    sock.settimeout(timeout)
+    buf = bytearray()
+    acc = bytearray()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        chunk = sock.recv(4096)
+        if not chunk:
+            return None
+        buf.extend(chunk)
+        while True:
+            if len(buf) < 2:
+                break
+            ln = buf[1] & 0x7F
+            idx = 2
+            if ln == 126:
+                if len(buf) < 4:
+                    break
+                ln = struct.unpack("!H", buf[2:4])[0]
+                idx = 4
+            elif ln == 127:
+                if len(buf) < 10:
+                    break
+                ln = struct.unpack("!Q", buf[2:10])[0]
+                idx = 10
+            masked = buf[1] & 0x80
+            if masked:
+                idx += 4
+            total = idx + ln
+            if len(buf) < total:
+                break
+            payload = bytes(buf[idx:total])
+            if masked:
+                mask = buf[idx - 4 : idx]
+                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+            del buf[:total]
+            if payload:
+                return json.loads(payload.decode())
+    return None
+
+sock = socket.create_connection((HOST, PORT), timeout=5)
+key = "dGhlIHNhbXBsZSBub25jZQ=="
+sock.sendall(
+    f"GET /ws HTTP/1.1\r\nHost: {HOST}:{PORT}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode()
+)
+buf = b""
+while b"\r\n\r\n" not in buf:
+    buf += sock.recv(4096)
+hello = recv_json(sock, 8)
+print("hello", {k: hello.get(k) for k in ("fabric_id", "compressed_fabric_id", "sdk_version")} if isinstance(hello, dict) else hello)
+mid = uuid.uuid4().hex[:12]
+send(sock, {"message_id": mid, "command": "interview_node", "args": {"node_id": NODE}})
+print("interviewing node", NODE, "this can take a minute")
+while True:
+    msg = recv_json(sock, 90)
+    if msg is None:
+        raise SystemExit("interview timed out")
+    print("event", msg.get("event") or msg.get("message_id") or list(msg)[:6])
+    if msg.get("message_id") == mid:
+        if msg.get("error_code") or msg.get("error"):
+            raise SystemExit("interview failed: " + str(msg.get("details") or msg.get("error") or msg.get("error_code")))
+        print("interview ok")
+        break
+mid2 = uuid.uuid4().hex[:12]
+send(sock, {"message_id": mid2, "command": "get_nodes"})
+while True:
+    msg = recv_json(sock, 20)
+    if msg is None:
+        raise SystemExit("get_nodes timed out")
+    if msg.get("message_id") == mid2:
+        nodes = msg.get("result") or []
+        if isinstance(nodes, dict):
+            nodes = list(nodes.values())
+        print("nodes", len(nodes) if hasattr(nodes, "__len__") else nodes)
+        if isinstance(nodes, list) and nodes and isinstance(nodes[0], dict):
+            attrs = nodes[0].get("attributes") or {}
+            print("available", nodes[0].get("available"), "attrs", len(attrs), "sample", list(attrs)[:8])
+        break
+print("refresh Home. Names/rooms/scenes come from data/home.json. Do not pair.")
+PY
+```
+

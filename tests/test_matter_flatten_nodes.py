@@ -69,6 +69,10 @@ def main() -> int:
     if empty != []:
         raise SystemExit("empty nodes should flatten to []")
 
+    stub = agent.flatten_nodes({"nodes": [{"node_id": 13, "available": False, "attributes": {}}]})
+    if stub != []:
+        raise SystemExit(f"uninterviewed stub should not flatten to a fake light {stub}")
+
     wrapped_result = agent.nodes_from_result({"result": [hue_bridge(1)]})
     if not wrapped_result or wrapped_result[0]["node_id"] != 1:
         raise SystemExit("wrapped result list missing")

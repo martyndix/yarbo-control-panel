@@ -227,7 +227,7 @@ final class YarboMatterFabric
                     'available' => $available,
                 ] + self::colorPayload($attributes, $endpoint, $typeIds, $kind);
             }
-            if (count($devices) === $before && $nodeId > 0) {
+            if (count($devices) === $before && $nodeId > 0 && $attributes !== []) {
                 $devices[] = [
                     'id' => $nodeId . ':1',
                     'node_id' => $nodeId,

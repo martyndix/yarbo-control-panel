@@ -179,4 +179,35 @@ if ($metaIds !== ['1:10', '1:11', '1:12'] || ($meta['fabric']['source'] ?? '') !
     exit(1);
 }
 
+$stubRoot = sys_get_temp_dir() . '/yarbo-home-stub-' . bin2hex(random_bytes(3));
+mkdir($stubRoot . '/data/matter-server', 0775, true);
+file_put_contents($stubRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($stubRoot . '/data/home.json', json_encode([
+    'names' => ['13:2' => 'Landing', '13:3' => 'Hall'],
+    'room_defs' => [['id' => 'r1', 'name' => 'Landing']],
+    'rooms' => ['13:2' => 'r1'],
+    'group_defs' => [],
+    'groups' => [],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [
+        ['id' => '13:1', 'name' => 'Matter node 13', 'kind' => 'light', 'node_id' => 13, 'endpoint' => 1],
+    ],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents(
+    $stubRoot . '/data/matter-server/aabbcc.json',
+    json_encode(['nodes' => ['13' => ['node_id' => 13, 'available' => false, 'attributes' => []]]], JSON_UNESCAPED_SLASHES)
+);
+$stubbed = (new YarboHome($stubRoot))->localHomeDevices();
+$stubIds = array_column($stubbed['devices'], 'id');
+sort($stubIds);
+if ($stubIds !== ['13:2', '13:3']) {
+    fwrite(STDERR, 'stub node hid saved lights ' . json_encode($stubbed) . "\n");
+    exit(1);
+}
+
 echo "ok\n";

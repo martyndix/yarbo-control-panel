@@ -1326,9 +1326,43 @@ final class YarboHome
      * @param list<array<string, mixed>> $remembered
      * @return list<array<string, mixed>>
      */
+    /**
+     * @param list<array<string, mixed>> $live
+     * @param list<array<string, mixed>> $remembered
+     * @return list<array<string, mixed>>
+     */
     public static function preferLiveOrRemembered(array $live, array $remembered): array
     {
-        return $live !== [] ? $live : $remembered;
+        if ($live === [] || (self::looksLikeUninterviewedStub($live) && $remembered !== [])) {
+            return $remembered;
+        }
+
+        return $live;
+    }
+
+    /**
+     * An empty Matter node stub (no Hue endpoints yet) must not hide saved lights.
+     *
+     * @param list<array<string, mixed>> $devices
+     */
+    public static function looksLikeUninterviewedStub(array $devices): bool
+    {
+        if ($devices === []) {
+            return false;
+        }
+        foreach ($devices as $row) {
+            if (!is_array($row)) {
+                return false;
+            }
+            $name = (string) ($row['name'] ?? '');
+            $vendor = trim((string) ($row['vendor'] ?? ''));
+            $product = trim((string) ($row['product'] ?? ''));
+            if (!str_starts_with($name, 'Matter node ') || $vendor !== '' || $product !== '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
