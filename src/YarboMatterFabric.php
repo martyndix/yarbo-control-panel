@@ -221,7 +221,7 @@ final class YarboMatterFabric
                     'product' => $product,
                     'source' => $source,
                     'bridge' => $isBridge || count($epIds) > 3,
-                    'on' => (bool) $onVal,
+                    'on' => self::attrBool($onVal),
                     'brightness' => $brightness,
                     'dimmable' => self::attrRaw($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) !== null,
                     'available' => $available,
@@ -454,6 +454,39 @@ final class YarboMatterFabric
         }
 
         return null;
+    }
+
+    /**
+     * Matter On/Off may be a bool, 0/1, or a wrapped object like {"value": false}.
+     * A non-empty array must not count as on.
+     */
+    public static function attrBool(mixed $val): bool
+    {
+        if ($val === null || $val === false || $val === 0 || $val === 0.0 || $val === '0') {
+            return false;
+        }
+        if ($val === true || $val === 1 || $val === 1.0 || $val === '1') {
+            return true;
+        }
+        if (is_string($val)) {
+            $s = strtolower(trim($val));
+            if (in_array($s, ['', '0', 'false', 'off', 'no', 'null', 'none'], true)) {
+                return false;
+            }
+
+            return in_array($s, ['1', 'true', 'on', 'yes'], true);
+        }
+        if (is_array($val)) {
+            foreach (['value', 'Value', 'OnOff', 'on', 0, '0'] as $key) {
+                if (array_key_exists($key, $val)) {
+                    return self::attrBool($val[$key]);
+                }
+            }
+
+            return false;
+        }
+
+        return false;
     }
 
     /**

@@ -2465,6 +2465,7 @@ let homePaperFilter = '';
 let homePaperSavingId = '';
 let homeLoadBusy = false;
 let homeLoadAborts = 0;
+let homeStateTimer = 0;
 let homeSetupPollTimer = 0;
 let homeManageOpen = false;
 let homeDrag = null;
@@ -2673,6 +2674,7 @@ async function loadHomeDashboard() {
         }
         renderHomeDashboard(data);
         homeLoadAborts = 0;
+        ensureHomeStatePoll();
     } catch (err) {
         if (isAbortError(err)) {
             aborted = true;
@@ -2701,6 +2703,24 @@ async function loadHomeDashboard() {
             homeLoadBusy = false;
         }
     }
+}
+
+function homeCardIsWatching() {
+    const card = document.getElementById('home-card');
+    if (!card || card.classList.contains('module-pane-hidden')) return false;
+    if (homeManageOpen || homeDrag) return false;
+    const active = document.activeElement;
+    if (active && card.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)) {
+        return false;
+    }
+    return true;
+}
+
+function ensureHomeStatePoll() {
+    if (homeStateTimer) return;
+    homeStateTimer = window.setInterval(() => {
+        if (homeCardIsWatching()) loadHomeDashboard();
+    }, 8000);
 }
 
 function applyHomeManageUi() {
@@ -3712,7 +3732,14 @@ function bindHomeDashboard() {
         if (!btn) return;
         btn.disabled = true;
         try {
-            const data = await homeApi({ action: 'command', id: btn.getAttribute('data-home-toggle'), command: 'toggle' });
+            const id = btn.getAttribute('data-home-toggle') || '';
+            const device = [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])]
+                .find((d) => d.id === id);
+            const data = await homeApi({
+                action: 'command',
+                id,
+                command: device?.on ? 'off' : 'on',
+            });
             if (!data.ok) throw new Error(data.error || 'Failed');
             await loadHomeDashboard();
         } catch (err) {

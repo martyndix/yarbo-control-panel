@@ -253,9 +253,9 @@ final class YarboHome
             ];
         }
         $store = $this->load();
-        // Never wait on the Matter agent or Docker here. PHP's built-in server
-        // is single-threaded, so a hung /api/home.php freezes the whole panel.
-        $live = $this->localHomeDevices();
+        // Live On/Off comes from the Matter agent when it answers quickly.
+        // Device names and rooms still come from disk so a hung agent cannot freeze the panel.
+        $live = $this->devicesWithLiveState();
         $store = $this->load();
         $hidden = array_fill_keys($store['hidden'], true);
         $devices = [];
@@ -291,7 +291,7 @@ final class YarboHome
                 'product' => (string) ($device['product'] ?? ''),
                 'source' => (string) ($device['source'] ?? ''),
                 'bridge' => (bool) ($device['bridge'] ?? false),
-                'on' => (bool) ($device['on'] ?? false),
+                'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
                 'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
                 'dimmable' => (bool) ($device['dimmable'] ?? false),
                 'colorable' => (bool) ($device['colorable'] ?? false)
@@ -591,9 +591,12 @@ final class YarboHome
         if (!($result['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string) ($result['error'] ?? 'Command failed')];
         }
-        @unlink($this->projectRoot . '/data/home-nodes-cache.json');
+        $patch = $this->commandStatePatch($id, $action, $body, $result);
+        if ($patch !== []) {
+            $this->patchCachedDeviceState($id, $patch);
+        }
 
-        return ['ok' => true];
+        return ['ok' => true] + $patch;
     }
 
     /**
@@ -828,7 +831,6 @@ final class YarboHome
         if ($errors !== []) {
             return ['ok' => false, 'error' => 'Scene partly failed: ' . $errors[0]];
         }
-        @unlink($this->projectRoot . '/data/home-nodes-cache.json');
         $this->setActiveSceneId($id);
 
         return ['ok' => true, 'on' => true];
@@ -859,7 +861,6 @@ final class YarboHome
         if ($errors !== []) {
             return ['ok' => false, 'error' => 'Scene partly failed: ' . $errors[0]];
         }
-        @unlink($this->projectRoot . '/data/home-nodes-cache.json');
         if ($this->load()['active_scene_id'] === $id) {
             $this->setActiveSceneId('');
         }
@@ -1249,16 +1250,23 @@ final class YarboHome
         $unreadable = YarboMatterFabric::unreadableStorageFiles($storageDir);
         $remembered = $this->rememberedOrCached($cachePath);
         $fromMeta = $this->devicesFromStoreHints($store);
-        $devices = self::preferLiveOrRemembered($fromDisk, $remembered);
-        $devices = self::preferLiveOrRemembered($devices, $fromMeta);
-        $source = $fromDisk !== [] && !self::looksLikeUninterviewedStub($fromDisk)
-            ? 'disk'
-            : ($remembered !== [] ? 'cache' : ($fromMeta !== [] ? 'meta' : ''));
-        if ($fromDisk !== [] && !self::looksLikeUninterviewedStub($fromDisk)) {
-            $this->writeDeviceCache($cachePath, $fromDisk);
-            $this->rememberDevices($fromDisk);
-        } elseif ($devices !== [] && !self::looksLikeUninterviewedStub($devices)) {
-            $this->rememberDevices($devices);
+        $diskReady = $fromDisk !== [] && !self::looksLikeUninterviewedStub($fromDisk);
+        if ($diskReady) {
+            $devices = $remembered !== []
+                ? self::overlayDeviceStates($fromDisk, $remembered)
+                : $fromDisk;
+            $source = 'disk';
+            if ($remembered === []) {
+                $this->writeDeviceCache($cachePath, $fromDisk);
+                $this->rememberDevices($fromDisk);
+            }
+        } else {
+            $devices = self::preferLiveOrRemembered($fromDisk, $remembered);
+            $devices = self::preferLiveOrRemembered($devices, $fromMeta);
+            $source = $remembered !== [] ? 'cache' : ($fromMeta !== [] ? 'meta' : '');
+            if ($devices !== [] && !self::looksLikeUninterviewedStub($devices)) {
+                $this->rememberDevices($devices);
+            }
         }
         $ready = $this->matterPortUp();
         $ok = $devices !== [] || $ready;
@@ -1284,12 +1292,180 @@ final class YarboHome
     }
 
     /**
+     * Disk topology plus the latest On/Off the agent has, without waiting on get_nodes.
+     *
+     * @return array{ok: bool, error: string, devices: list<array<string, mixed>>, fabric: array<string, mixed>}
+     */
+    private function devicesWithLiveState(): array
+    {
+        $local = $this->localHomeDevices();
+        $states = $this->agentDeviceStates();
+        if ($states === []) {
+            return $local;
+        }
+        $devices = self::overlayDeviceStates($local['devices'], $states);
+        $this->writeDeviceCache($this->projectRoot . '/data/home-nodes-cache.json', $devices);
+        $local['devices'] = $devices;
+
+        return $local;
+    }
+
+    /**
+     * Fast in-memory On/Off from the Matter agent. Never starts Docker.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function agentDeviceStates(): array
+    {
+        $agent = YarboMatterAgentClient::fromEnv();
+        $result = $agent->request(['op' => 'states'], 0.8, false);
+        if (($result['ok'] ?? false) !== true) {
+            return [];
+        }
+        $devices = is_array($result['devices'] ?? null) ? $result['devices'] : [];
+        if ($devices === [] || self::looksLikeUninterviewedStub($devices)) {
+            return [];
+        }
+
+        return $devices;
+    }
+
+    /**
+     * Copy live on/brightness/colour onto the saved device list. Missing ids are left unchanged.
+     *
+     * @param list<array<string, mixed>> $devices
+     * @param list<array<string, mixed>> $states
+     * @return list<array<string, mixed>>
+     */
+    public static function overlayDeviceStates(array $devices, array $states): array
+    {
+        $byId = [];
+        foreach ($states as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '') {
+                $byId[$id] = $row;
+            }
+        }
+        if ($byId === []) {
+            return $devices;
+        }
+        $out = [];
+        foreach ($devices as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = (string) ($device['id'] ?? '');
+            if ($id !== '' && isset($byId[$id])) {
+                $live = $byId[$id];
+                if (array_key_exists('on', $live)) {
+                    $device['on'] = YarboMatterFabric::attrBool($live['on']);
+                }
+                if (array_key_exists('brightness', $live)) {
+                    $device['brightness'] = $live['brightness'] === null || $live['brightness'] === ''
+                        ? null
+                        : (int) $live['brightness'];
+                }
+                if (array_key_exists('available', $live)) {
+                    $device['available'] = (bool) $live['available'];
+                }
+                foreach (['color_hex', 'hue', 'saturation', 'color_temp'] as $key) {
+                    if (array_key_exists($key, $live)) {
+                        $device[$key] = $live[$key];
+                    }
+                }
+            }
+            $out[] = $device;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $result
+     * @return array<string, mixed>
+     */
+    private function commandStatePatch(string $id, string $action, array $body, array $result): array
+    {
+        $patch = [];
+        if (array_key_exists('on', $result)) {
+            $patch['on'] = YarboMatterFabric::attrBool($result['on']);
+        } elseif ($action === 'on') {
+            $patch['on'] = true;
+        } elseif ($action === 'off') {
+            $patch['on'] = false;
+        } elseif ($action === 'toggle') {
+            $current = $this->cachedDeviceOn($id);
+            if ($current !== null) {
+                $patch['on'] = !$current;
+            }
+        }
+        if ($action === 'brightness' && array_key_exists('brightness', $body)) {
+            $patch['brightness'] = max(0, min(100, (int) $body['brightness']));
+            $patch['on'] = $patch['brightness'] > 0;
+        } elseif ($action === 'color' || $action === 'color_temp' || $action === 'kelvin') {
+            $patch['on'] = true;
+        }
+
+        return $patch;
+    }
+
+    private function cachedDeviceOn(string $id): ?bool
+    {
+        foreach ($this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json') as $row) {
+            if (is_array($row) && (string) ($row['id'] ?? '') === $id && array_key_exists('on', $row)) {
+                return YarboMatterFabric::attrBool($row['on']);
+            }
+        }
+        foreach ($this->load()['last_devices'] ?? [] as $row) {
+            if (is_array($row) && (string) ($row['id'] ?? '') === $id && array_key_exists('on', $row)) {
+                return YarboMatterFabric::attrBool($row['on']);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $fields
+     */
+    private function patchCachedDeviceState(string $id, array $fields): void
+    {
+        $path = $this->projectRoot . '/data/home-nodes-cache.json';
+        $devices = $this->readDeviceCache($path);
+        if ($devices === []) {
+            $devices = $this->load()['last_devices'] ?? [];
+        }
+        $found = false;
+        foreach ($devices as $i => $row) {
+            if (!is_array($row) || (string) ($row['id'] ?? '') !== $id) {
+                continue;
+            }
+            $devices[$i] = $row + [];
+            foreach ($fields as $key => $value) {
+                $devices[$i][$key] = $value;
+            }
+            $found = true;
+            break;
+        }
+        if (!$found && $id !== '') {
+            $devices[] = ['id' => $id] + $fields;
+        }
+        if ($devices !== []) {
+            $this->writeDeviceCache($path, $devices);
+        }
+    }
+
+    /**
      * @return array{ok: bool, error: string, devices: list<array<string, mixed>>, fabric?: array<string, mixed>}
      */
     private function liveDevices(float $timeout): array
     {
-        $local = $this->localHomeDevices();
-        if ($timeout <= 0) {
+        $local = $this->devicesWithLiveState();
+        if ($timeout <= 0 || $local['devices'] !== []) {
             return $local;
         }
         $agent = YarboMatterAgentClient::fromEnv();
@@ -1324,11 +1500,6 @@ final class YarboHome
     /**
      * Keep the last non-empty Matter list. An empty live reply must not wipe devices.
      *
-     * @param list<array<string, mixed>> $live
-     * @param list<array<string, mixed>> $remembered
-     * @return list<array<string, mixed>>
-     */
-    /**
      * @param list<array<string, mixed>> $live
      * @param list<array<string, mixed>> $remembered
      * @return list<array<string, mixed>>
@@ -1392,7 +1563,7 @@ final class YarboHome
                 'product' => (string) ($row['product'] ?? ''),
                 'source' => (string) ($row['source'] ?? ''),
                 'bridge' => (bool) ($row['bridge'] ?? false),
-                'on' => (bool) ($row['on'] ?? false),
+                'on' => YarboMatterFabric::attrBool($row['on'] ?? false),
                 'brightness' => isset($row['brightness']) ? (int) $row['brightness'] : null,
                 'dimmable' => (bool) ($row['dimmable'] ?? false),
                 'colorable' => (bool) ($row['colorable'] ?? false),
@@ -1580,7 +1751,7 @@ final class YarboHome
             return [];
         }
         $store = $this->load();
-        $live = $this->localHomeDevices();
+        $live = $this->devicesWithLiveState();
         $byId = [];
         foreach ($live['devices'] as $device) {
             if (!is_array($device)) {
@@ -1594,7 +1765,7 @@ final class YarboHome
                 'id' => $id,
                 'name' => $store['names'][$id] ?? (string) ($device['name'] ?? $id),
                 'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
-                'on' => (bool) ($device['on'] ?? false),
+                'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
                 'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
             ];
         }
@@ -1607,7 +1778,7 @@ final class YarboHome
                 'id' => $sid,
                 'name' => (string) ($scene['name'] ?? 'Scene'),
                 'kind' => self::KIND_SCENE,
-                'on' => $this->sceneIsActive($scene, $byId) || ($store['active_scene_id'] ?? '') === ($scene['id'] ?? ''),
+                'on' => $this->sceneIsActive($scene, $byId),
             ];
         }
         $assigned = $store['paper'][$tabletId] ?? [];
@@ -1621,7 +1792,7 @@ final class YarboHome
                 'id' => (string) $item['id'],
                 'name' => YarboHub::normalizeDisplayName((string) $item['name'], self::PAPER_NAME_MAX) ?: (string) $item['id'],
                 'kind' => (string) ($item['kind'] ?? self::KIND_LIGHT),
-                'on' => (bool) ($item['on'] ?? false),
+                'on' => YarboMatterFabric::attrBool($item['on'] ?? false),
             ];
             if (count($out) >= self::PAPER_MAX) {
                 break;
@@ -1705,7 +1876,6 @@ final class YarboHome
                 $byId[$id] = $device;
             }
         }
-        $activeId = $this->load()['active_scene_id'] ?? '';
         $out = [];
         foreach ($scenes as $scene) {
             if (!is_array($scene)) {
@@ -1720,7 +1890,7 @@ final class YarboHome
                 'name' => $normalized['name'],
                 'actions' => $normalized['actions'],
                 'count' => count($normalized['actions']),
-                'on' => $this->sceneIsActive($normalized, $byId) || $activeId === $normalized['id'],
+                'on' => $this->sceneIsActive($normalized, $byId),
             ];
         }
 

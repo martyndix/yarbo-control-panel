@@ -98,6 +98,22 @@ def main() -> int:
     if len(bare) != 9:
         raise SystemExit(f"bare fabric map flattened to {len(bare)}")
 
+    wrapped_off = hue_bridge(2)
+    wrapped_off["attributes"]["2/6/0"] = {"value": False}
+    wrapped_off["attributes"]["3/6/0"] = {"0": 0}
+    wrapped_devices = agent.flatten_nodes({"nodes": [wrapped_off]})
+    by_id = {d["id"]: d for d in wrapped_devices}
+    if by_id["1:2"]["on"] or by_id["1:3"]["on"]:
+        raise SystemExit(f"wrapped off counted as on: {by_id}")
+    wrapped_on = hue_bridge(1)
+    wrapped_on["attributes"]["2/6/0"] = {"value": True}
+    if not agent.flatten_nodes({"nodes": [wrapped_on]})[0]["on"]:
+        raise SystemExit("wrapped true should be on")
+    if agent.attr_bool({"value": False}) or not agent.attr_bool({"value": True}):
+        raise SystemExit("attr_bool wrappers failed")
+    if agent.attr_bool("false") or agent.attr_bool("off") or not agent.attr_bool(1):
+        raise SystemExit("attr_bool scalars failed")
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 

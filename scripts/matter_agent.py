@@ -40,7 +40,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 6
+AGENT_VERSION = 7
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -89,6 +89,9 @@ _recover_thread_started = False
 _recover_done = threading.Event()
 _restore_lock = threading.Lock()
 _preferred_shared = False
+_live_lock = threading.Lock()
+_live_devices: list[dict[str, Any]] = []
+_state_poll_started = False
 
 
 def attr_key(endpoint: int, cluster: int, attr: int) -> str:
@@ -977,6 +980,70 @@ def _background_recover() -> None:
         _recover_done.set()
 
 
+def looks_like_uninterviewed_stub(devices: list[dict[str, Any]]) -> bool:
+    if not devices:
+        return False
+    for row in devices:
+        if not isinstance(row, dict):
+            return False
+        name = str(row.get("name") or "")
+        vendor = str(row.get("vendor") or "").strip()
+        product = str(row.get("product") or "").strip()
+        if not name.startswith("Matter node ") or vendor or product:
+            return False
+    return True
+
+
+def remember_live_devices(devices: list[dict[str, Any]]) -> None:
+    global _live_devices
+    if not devices or looks_like_uninterviewed_stub(devices):
+        return
+    with _live_lock:
+        _live_devices = [dict(row) for row in devices if isinstance(row, dict)]
+
+
+def current_live_devices() -> list[dict[str, Any]]:
+    with _live_lock:
+        return [dict(row) for row in _live_devices]
+
+
+def patch_live_device(device_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+    if device_id == "" or not fields:
+        return None
+    with _live_lock:
+        for row in _live_devices:
+            if str(row.get("id") or "") == device_id:
+                row.update(fields)
+                return dict(row)
+        return None
+
+
+def refresh_live_devices(timeout: float = 10.0) -> list[dict[str, Any]]:
+    rpc = matter_rpc("get_nodes", timeout=timeout)
+    if not rpc.get("ok"):
+        return current_live_devices()
+    devices = flatten_nodes(nodes_from_result(rpc.get("result")))
+    remember_live_devices(devices)
+    return current_live_devices()
+
+
+def start_state_poll() -> None:
+    global _state_poll_started
+    if _state_poll_started:
+        return
+    _state_poll_started = True
+
+    def loop() -> None:
+        while True:
+            try:
+                refresh_live_devices(12.0)
+            except Exception as exc:  # noqa: BLE001
+                print(f"matter state poll failed: {exc}", flush=True)
+            time.sleep(8.0)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     start_background_recover()
     info: dict[str, Any] = {
@@ -1359,6 +1426,28 @@ def attr_num(attributes: dict[str, Any], endpoint: int, cluster: int, attr: int)
     return None
 
 
+def attr_bool(val: Any) -> bool:
+    if val is None or val is False:
+        return False
+    if val is True:
+        return True
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return val != 0
+    if isinstance(val, str):
+        s = val.strip().lower()
+        if s in ("", "0", "false", "off", "no", "null", "none"):
+            return False
+        return s in ("1", "true", "on", "yes")
+    if isinstance(val, dict):
+        for key in ("value", "Value", "OnOff", "on", 0, "0"):
+            if key in val:
+                return attr_bool(val[key])
+        return False
+    if isinstance(val, (list, tuple)) and val:
+        return attr_bool(val[0])
+    return False
+
+
 def clamp_int(value: float, lo: int, hi: int) -> int:
     return max(lo, min(hi, int(round(value))))
 
@@ -1716,7 +1805,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "product": product,
                     "source": source,
                     "bridge": is_bridge or len(ep_ids) > 3,
-                    "on": bool(on_val),
+                    "on": attr_bool(on_val),
                     "brightness": brightness,
                     "dimmable": attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
                     "available": available,
@@ -1781,11 +1870,29 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
     if op == "nodes":
         quick = body.get("quick", True) is not False
         nodes, fabric = collect_nodes(quick=quick)
+        devices = flatten_nodes(nodes)
+        if fabric.get("source") == "live":
+            remember_live_devices(devices)
+        live = current_live_devices()
+        if live:
+            by_id = {str(row.get("id") or ""): row for row in live}
+            for row in devices:
+                device_id = str(row.get("id") or "")
+                if device_id in by_id and "on" in by_id[device_id]:
+                    row["on"] = attr_bool(by_id[device_id].get("on"))
+                    if "brightness" in by_id[device_id]:
+                        row["brightness"] = by_id[device_id].get("brightness")
         return {
             "ok": True,
-            "devices": flatten_nodes(nodes),
+            "devices": devices,
             "node_count": len(nodes),
             "fabric": fabric,
+        }
+    if op == "states":
+        start_state_poll()
+        return {
+            "ok": True,
+            "devices": current_live_devices(),
         }
     if op == "restore_nodes":
         restored = persist_node_stubs_and_reload()
@@ -1847,11 +1954,29 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 )
 
             rpc = command_with_reconnect(node_id, send_onoff)
-            return rpc if not rpc.get("ok") else {"ok": True}
+            if not rpc.get("ok"):
+                return rpc
+            on: bool | None
+            if action == "on":
+                on = True
+            elif action == "off":
+                on = False
+            else:
+                current = next(
+                    (row for row in current_live_devices() if str(row.get("id") or "") == device_id),
+                    None,
+                )
+                on = (not attr_bool(current.get("on"))) if current is not None else None
+            if on is not None:
+                patch_live_device(device_id, {"on": on})
+            out: dict[str, Any] = {"ok": True, "id": device_id}
+            if on is not None:
+                out["on"] = on
+            return out
         if action == "brightness":
             pct = max(0, min(100, int(body.get("brightness") or 0)))
             level = int(round(pct * 254 / 100))
-            return device_command(
+            rpc = device_command(
                 node_id,
                 endpoint,
                 LEVEL_CONTROL,
@@ -1863,6 +1988,10 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     "optionsOverride": 0,
                 },
             )
+            if rpc.get("ok"):
+                patch_live_device(device_id, {"on": pct > 0, "brightness": pct})
+                rpc = {**rpc, "id": device_id, "on": pct > 0, "brightness": pct}
+            return rpc
         if action in COLOR_ACTIONS:
             return set_color(node_id, endpoint, body)
         if action in COLOR_TEMP_ACTIONS:
@@ -1908,6 +2037,7 @@ def main() -> None:
     ensure_storage_readable()
     threading.Thread(target=ensure_matter_server, daemon=True).start()
     start_background_recover()
+    start_state_poll()
     httpd = ThreadingHTTPServer((HOST, AGENT_PORT), Handler)
     print(f"matter_agent listening on {HOST}:{AGENT_PORT}", flush=True)
     try:
