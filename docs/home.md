@@ -290,3 +290,48 @@ print("refresh Home. Names/rooms/scenes come from data/home.json. Do not pair.")
 PY
 ```
 
+If interview fails with **Failed to interview node 13**, names are still safe. The Hue Bridge did not answer Matter (CASE/mDNS), or `chip.json` no longer has that node’s credentials. Paste this dump (still do not pair):
+
+```bash
+echo "=== logs ==="
+timeout 8 docker logs --tail 80 yarbo-matter-server 2>&1 | tail -n 80
+echo "=== chip keys ==="
+python3 - <<'PY'
+import json, re, subprocess
+from pathlib import Path
+
+def docker(*args):
+    for prefix in ([], ["sudo", "-n"]):
+        try:
+            r = subprocess.run(prefix + ["docker", *args], capture_output=True, text=True, timeout=30)
+        except FileNotFoundError:
+            continue
+        if r.returncode == 0:
+            return r
+    return subprocess.CompletedProcess(args=["docker"], returncode=1, stdout="", stderr="docker failed")
+
+docker("cp", "yarbo-matter-server:/data/chip.json", "/tmp/yarbo-chip.json")
+docker("cp", "yarbo-matter-server:/data/chip.json.backup", "/tmp/yarbo-chip.json.backup")
+for label, path in [("chip", Path("/tmp/yarbo-chip.json")), ("backup", Path("/tmp/yarbo-chip.json.backup"))]:
+    if not path.is_file():
+        print(label, "missing")
+        continue
+    print(label, "size", path.stat().st_size)
+    try:
+        data = json.loads(path.read_text())
+    except Exception as e:
+        print(label, "json", type(e).__name__, e)
+        continue
+    sdk = data.get("sdk-config") if isinstance(data, dict) else None
+    keys = list(sdk) if isinstance(sdk, dict) else list(data)[:20]
+    print(label, "keys", len(keys))
+    interesting = [k for k in keys if re.search(r"(^|/)s(/|$)|13|000000000000000[Dd]|node", str(k), re.I)]
+    print(label, "node-ish", interesting[:40])
+print("mdns", f"{1415963636765591517:016X}-000000000000000D._matter._tcp.local.")
+PY
+echo "=== mdns ==="
+timeout 6 avahi-browse -t _matter._tcp 2>/dev/null | head -n 40 || timeout 6 avahi-browse -t -r _matter._tcp 2>/dev/null | head -n 40 || echo "no avahi-browse"
+echo "=== ipv6 ==="
+ip -6 addr show scope global | head -n 20
+```
+
