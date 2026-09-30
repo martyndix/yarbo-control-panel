@@ -262,4 +262,41 @@ if (($kinds['22:2']['kind'] ?? '') !== 'heater') {
     exit(1);
 }
 
+$lightTypedHeater = [
+    'node_id' => 23,
+    'available' => true,
+    'attributes' => [
+        '0/40/3' => 'Towel rail',
+        '1/29/0' => [['deviceType' => 0x0101, 'revision' => 1]],
+        '1/6/0' => true,
+        '1/8/0' => 200,
+        '1/768/3' => 200,
+        '1/513/0' => 2100,
+    ],
+];
+$lightTypedVacuum = [
+    'node_id' => 24,
+    'available' => true,
+    'attributes' => [
+        '0/40/3' => 'Robot vac',
+        '1/29/0' => [['deviceType' => 0x0100, 'revision' => 1]],
+        '1/6/0' => false,
+        '1/8/0' => 40,
+        '1/84/0' => 1,
+        '1/97/0' => 1,
+    ],
+];
+$kinds = [];
+foreach (YarboMatterFabric::flatten([$lightTypedHeater, $lightTypedVacuum]) as $row) {
+    $kinds[$row['id']] = $row;
+}
+if (($kinds['23:1']['kind'] ?? '') !== 'heater' || !empty($kinds['23:1']['colorable']) || !empty($kinds['23:1']['dimmable'])) {
+    fwrite(STDERR, 'light-typed heater ' . json_encode($kinds['23:1'] ?? null) . "\n");
+    exit(1);
+}
+if (($kinds['24:1']['kind'] ?? '') !== 'vacuum' || !empty($kinds['24:1']['colorable']) || !empty($kinds['24:1']['dimmable'])) {
+    fwrite(STDERR, 'light-typed vacuum ' . json_encode($kinds['24:1'] ?? null) . "\n");
+    exit(1);
+}
+
 echo "ok\n";

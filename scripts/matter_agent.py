@@ -1805,7 +1805,11 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             types = attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES)
             type_ids = device_type_ids(types)
             kind = device_kind(types)
-            if kind == "other":
+            if endpoint_looks_heater(attributes, endpoint):
+                kind = "heater"
+            elif endpoint_looks_vacuum(attributes, endpoint):
+                kind = "vacuum"
+            elif kind == "other":
                 if DEVTYPE_AGGREGATOR in type_ids and not endpoint_has_cluster(
                     attributes, endpoint, ON_OFF
                 ) and not endpoint_looks_heater(attributes, endpoint) and not endpoint_looks_vacuum(

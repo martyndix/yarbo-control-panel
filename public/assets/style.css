@@ -2991,9 +2991,24 @@ html[data-theme="light"] .plan-activity {
     font-weight: 600;
     font-size: 0.88rem;
     margin: 0;
+    min-width: 0;
+    flex: 1 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.home-device-kind {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 650;
+    line-height: 1.3;
 }
 
 .home-device.is-on .home-device-name {

@@ -2573,6 +2573,21 @@ function homeIsLight(d) {
     return !d?.kind || d.kind === 'light';
 }
 
+function homeKindLabel(d) {
+    switch (String(d?.kind || '')) {
+        case 'heater':
+            return 'Heater';
+        case 'vacuum':
+            return 'Vacuum';
+        case 'plug':
+            return 'Plug';
+        case 'switch':
+            return 'Switch';
+        default:
+            return '';
+    }
+}
+
 function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
     if (!homeIsLight(d)) {
         return '';
@@ -3188,6 +3203,8 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         .filter(Boolean)
         .join(' · ');
     const defaultName = d.default_name || d.name || '';
+    const kindName = homeKindLabel(d);
+    const kindChip = kindName ? `<span class="home-device-kind">${escapeHtml(kindName)}</span>` : '';
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
@@ -3206,6 +3223,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
             ${label}
+            ${kindChip}
         </div>
         ${roomSelect}
         ${groupSelect}

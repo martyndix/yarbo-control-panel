@@ -114,6 +114,36 @@ def main() -> int:
     if agent.attr_bool("false") or agent.attr_bool("off") or not agent.attr_bool(1):
         raise SystemExit("attr_bool scalars failed")
 
+    light_heater = {
+        "node_id": 23,
+        "available": True,
+        "attributes": {
+            "0/40/3": "Towel rail",
+            "1/29/0": [{"deviceType": 0x0101, "revision": 1}],
+            "1/6/0": True,
+            "1/8/0": 200,
+            "1/768/3": 200,
+            "1/513/0": 2100,
+        },
+    }
+    light_vacuum = {
+        "node_id": 24,
+        "available": True,
+        "attributes": {
+            "0/40/3": "Robot vac",
+            "1/29/0": [{"deviceType": 0x0100, "revision": 1}],
+            "1/6/0": False,
+            "1/8/0": 40,
+            "1/84/0": 1,
+            "1/97/0": 1,
+        },
+    }
+    extra = {d["id"]: d for d in agent.flatten_nodes({"nodes": [light_heater, light_vacuum]})}
+    if extra.get("23:1", {}).get("kind") != "heater" or extra["23:1"].get("colorable") or extra["23:1"].get("dimmable"):
+        raise SystemExit(f"light-typed heater {extra.get('23:1')}")
+    if extra.get("24:1", {}).get("kind") != "vacuum" or extra["24:1"].get("colorable"):
+        raise SystemExit(f"light-typed vacuum {extra.get('24:1')}")
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 

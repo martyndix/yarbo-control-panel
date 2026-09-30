@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.68] - 2026-09-30
+
+### Fixed
+- Home classifies thermostat heaters and robotic vacuums even when Matter also advertises them as dimmable lights. They show a **Heater** or **Vacuum** label and no colour picker.
+
 ## [3.0.67] - 2026-09-30
 
 ### Fixed

@@ -203,7 +203,11 @@ final class YarboMatterFabric
                 $types = self::attrRaw($attributes, $endpoint, self::DESCRIPTOR, self::ATTR_DEVICE_TYPES);
                 $typeIds = self::deviceTypeIds($types);
                 $kind = self::deviceKind($types);
-                if ($kind === 'other') {
+                if (self::endpointLooksHeater($attributes, $endpoint)) {
+                    $kind = 'heater';
+                } elseif (self::endpointLooksVacuum($attributes, $endpoint)) {
+                    $kind = 'vacuum';
+                } elseif ($kind === 'other') {
                     if (in_array(self::DEVTYPE_AGGREGATOR, $typeIds, true)
                         && !self::endpointHasCluster($attributes, $endpoint, self::ON_OFF)
                         && !self::endpointLooksAccessory($attributes, $endpoint)) {
@@ -235,7 +239,15 @@ final class YarboMatterFabric
                     'brightness' => $brightness,
                     'dimmable' => $isLight && self::attrRaw($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) !== null,
                     'available' => $available,
-                ] + self::colorPayload($attributes, $endpoint, $typeIds, $kind);
+                ] + ($isLight
+                    ? self::colorPayload($attributes, $endpoint, $typeIds, $kind)
+                    : [
+                        'colorable' => false,
+                        'color_hs' => false,
+                        'color_xy' => false,
+                        'color_ct' => false,
+                        'color_hex' => '',
+                    ]);
             }
             if (count($devices) === $before && $nodeId > 0 && $attributes !== []) {
                 $devices[] = [
