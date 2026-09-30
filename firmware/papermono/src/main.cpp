@@ -115,6 +115,7 @@ bool lymowError = false;
 bool powerwallError = false;
 uint32_t lastErrorAlert = 0;
 int tabletBat = -1;
+bool tabletCharging = false;
 String clockLocal = "--:--";
 String clockDate = "";
 int clockOffset = 0;
@@ -181,7 +182,9 @@ void layoutTileGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int
 String menuLabel(int page);
 void drawPadlockIcon(int x, int y, int size, bool locked);
 void drawWifiIcon(int cx, int cy, int size, bool connected);
+void drawChargeBolt(int cx, int cy, int size);
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
+bool tabletPluggedIn();
 bool takeTouchPress(int &x, int &y);
 void applyFrontlight(bool on, bool force = false);
 bool unreadFrontlightHold();
@@ -379,7 +382,8 @@ String screenKey()
         + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
         + String(inboxCount) + "|" + String(radioUi) + "|" + String(radioViewIndex) + "|"
         + String(homeOn ? 1 : 0) + "|" + String(homeCount)
-        + "|" + String(menuOpen ? 1 : 0) + "|" + String(lastYarboPage);
+        + "|" + String(menuOpen ? 1 : 0) + "|" + String(lastYarboPage)
+        + "|" + String(tabletCharging ? 1 : 0);
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         key += "|" + menuCustom[i] + "|" + String(menuShow[i] ? 1 : 0);
     }
@@ -1568,6 +1572,27 @@ void drawWifiIcon(int cx, int cy, int size, bool connected)
     }
 }
 
+void drawChargeBolt(int cx, int cy, int size)
+{
+    int thick = max(4, size / 8);
+    int x0 = cx + size / 5;
+    int y0 = cy - size / 2;
+    int x1 = cx - size / 4;
+    int y1 = cy - size / 18;
+    int x2 = cx + size / 3;
+    int y2 = y1;
+    int x3 = cx - size / 5;
+    int y3 = cy + size / 2;
+    for (int t = -thick; t <= thick; t++) {
+        M5.Display.drawLine(x0 + t, y0, x1 + t, y1, TFT_BLACK);
+        M5.Display.drawLine(x0, y0 + t, x1, y1 + t, TFT_BLACK);
+        M5.Display.drawLine(x1 + t, y1, x2 + t, y2, TFT_BLACK);
+        M5.Display.drawLine(x1, y1 + t, x2, y2 + t, TFT_BLACK);
+        M5.Display.drawLine(x2 + t, y2, x3 + t, y3, TFT_BLACK);
+        M5.Display.drawLine(x2, y2 + t, x3, y3 + t, TFT_BLACK);
+    }
+}
+
 void drawBatteryBadge(int right, int cy, int pct, bool compact)
 {
     const int w = compact ? 92 : 160;
@@ -1746,6 +1771,10 @@ void drawLockScreen(bool forceFull)
     int wifiCx = batLeft / 2;
     drawWifiIcon(wifiCx, batCy, 56, WiFi.status() == WL_CONNECTED);
     drawBatteryBadge(batRight, batCy, tabletBat, false);
+    if (tabletCharging) {
+        int boltCx = W - wifiCx;
+        drawChargeBolt(boltCx, batCy, 56);
+    }
     int batBottom = batCy + batH / 2;
 
     int unlockW = 280;
@@ -2953,10 +2982,22 @@ void runOtaUpdate()
     }
 }
 
+bool tabletPluggedIn()
+{
+    if (M5.Power.isCharging() == m5::Power_Class::is_charging) {
+        return true;
+    }
+    int16_t vbus = M5.Power.getVBUSVoltage();
+    if (vbus >= 4000) {
+        return true;
+    }
+    return false;
+}
+
 static String panelApiUrl(const char *action)
 {
     tabletBat = M5.Power.getBatteryLevel();
-    bool chargingNow = M5.Power.isCharging();
+    tabletCharging = tabletPluggedIn();
     String url = panelUrl + "/api/device.php?action=";
     url += action;
     url += "&fw=";
@@ -2966,7 +3007,7 @@ static String panelApiUrl(const char *action)
         url += "&batt=";
         url += String(pct);
     }
-    url += chargingNow ? "&chg=1" : "&chg=0";
+    url += tabletCharging ? "&chg=1" : "&chg=0";
     return url;
 }
 
@@ -3438,6 +3479,7 @@ void loop()
     loraService();
     rgbTick();
     tabletBat = M5.Power.getBatteryLevel();
+    tabletCharging = tabletPluggedIn();
     if (WiFi.status() == WL_CONNECTED) {
         ensureNtp();
     }

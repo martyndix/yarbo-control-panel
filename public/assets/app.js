@@ -2569,7 +2569,14 @@ function collectHomeSceneActions() {
     return actions;
 }
 
+function homeIsLight(d) {
+    return !d?.kind || d.kind === 'light';
+}
+
 function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
+    if (!homeIsLight(d)) {
+        return '';
+    }
     if (d.colorable || d.kind === 'light') {
         return `<input type="color" value="${escapeHtml(hex || d.color_hex || '#ffd27a')}" ${colorAttr} title="Colour" aria-label="Colour">`;
     }
@@ -3166,7 +3173,7 @@ function homeNodeGroupsHtml(devices) {
 
 function homeDeviceCardHtml(d, hidden, rooms) {
     const on = Boolean(d.on);
-    const bright = !hidden && d.dimmable
+    const bright = !hidden && homeIsLight(d) && d.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
         : '';
     const color = hidden ? '' : homeColorInputsHtml(
@@ -5733,7 +5740,7 @@ function paperBatteryHtml(device) {
     const charging = Boolean(device.is_charging);
     const cls = charging ? 'papermono-battery is-charging' : 'papermono-battery';
     const charge = charging ? ' · Charging' : '';
-    return `<span class="${cls}" title="Tablet battery">${escapeHtml(pct)}${charge}</span>`;
+    return `<span class="${cls}" title="Tablet battery">${charging ? '⚡ ' : ''}${escapeHtml(pct)}${charge}</span>`;
 }
 
 function renderPaperMonoDevices(devices) {
@@ -5750,22 +5757,42 @@ function renderPaperMonoDevices(devices) {
         const kindLabel = device.kind_label ? `${escapeHtml(String(device.kind_label))} · ` : '';
         const fw = device.fw_reported ? ` · fw ${escapeHtml(String(device.fw_reported))}` : '';
         const online = device.online ? 'online' : 'offline';
-        const revokeLabel = device.kind_label || device.name || 'companion';
-        return `<div class="papermono-device-row">
+        const revokeLabel = device.name || device.kind_label || 'companion';
+        const id = escapeHtml(device.id);
+        const name = escapeHtml(device.name || 'PaperMono');
+        return `<div class="papermono-device-row" data-papermono-row="${id}">
             <div class="papermono-device-meta">
-                <label class="settings-field papermono-device-name-field">
-                    <span class="label">Tablet name</span>
-                    <input type="text" maxlength="40" value="${escapeHtml(device.name || 'PaperMono')}" data-papermono-name="${escapeHtml(device.id)}" data-papermono-kind="${escapeHtml(device.kind || 'papermono')}">
-                </label>
+                <p class="papermono-device-ota-name">${name}</p>
                 <p class="hint">${kindLabel}${escapeHtml(online)} · ${paperBatteryHtml(device)} · ${escapeHtml(last)}${fw}</p>
+                <div class="papermono-device-tools hidden">
+                    <label class="settings-field papermono-device-name-field">
+                        <span class="label">Tablet name</span>
+                        <input type="text" maxlength="40" value="${name}" data-papermono-name="${id}" data-papermono-kind="${escapeHtml(device.kind || 'papermono')}">
+                    </label>
+                    <div class="papermono-device-tool-actions">
+                        <button type="button" class="btn btn-secondary btn-compact" data-papermono-rename="${id}">Save name</button>
+                        <button type="button" class="btn btn-secondary btn-compact" data-papermono-revoke="${id}" data-papermono-revoke-label="${escapeHtml(String(revokeLabel))}">Revoke</button>
+                    </div>
+                </div>
             </div>
             <div class="papermono-device-actions">
                 ${paperOtaUpdateButton(device)}
-                <button type="button" class="btn btn-secondary btn-compact" data-papermono-rename="${escapeHtml(device.id)}">Save name</button>
-                <button type="button" class="btn btn-secondary btn-compact" data-papermono-revoke="${escapeHtml(device.id)}" data-papermono-revoke-label="${escapeHtml(String(revokeLabel))}">Revoke</button>
+                <button type="button" class="home-manage-toggle" data-papermono-gear="${id}" aria-pressed="false" aria-label="Rename or revoke ${name}" title="Rename or revoke">⚙️</button>
             </div>
         </div>`;
     }).join('');
+    els.papermonoDevices.querySelectorAll('[data-papermono-gear]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const row = button.closest('[data-papermono-row]');
+            const tools = row?.querySelector('.papermono-device-tools');
+            if (!tools) return;
+            const open = tools.classList.toggle('hidden') === false;
+            button.setAttribute('aria-pressed', open ? 'true' : 'false');
+            if (open) {
+                row?.querySelector('[data-papermono-name]')?.focus();
+            }
+        });
+    });
     els.papermonoDevices.querySelectorAll('[data-papermono-revoke]').forEach((button) => {
         button.addEventListener('click', () => revokePaperMono(button.dataset.papermonoRevoke, button));
     });
@@ -6490,8 +6517,22 @@ async function renamePaperMono(id, button) {
 
 async function revokePaperMono(id, button) {
     if (!id) return;
-    const label = button?.dataset?.papermonoRevokeLabel || 'companion';
-    if (!window.confirm(`Revoke this ${label}? It will stop receiving status until you flash or pair it again.`)) {
+    const row = button?.closest('[data-papermono-row]');
+    const typedName = row?.querySelector('[data-papermono-name]')?.value.trim()
+        || button?.dataset?.papermonoRevokeLabel
+        || 'companion';
+    if (!window.confirm(`Revoke ${typedName}? It will stop receiving status until you flash or pair it again.`)) {
+        return;
+    }
+    if (!window.confirm(`This cannot be undone from Settings. Continue revoking ${typedName}?`)) {
+        return;
+    }
+    const typed = window.prompt(`Type the tablet name “${typedName}” to revoke it:`);
+    if (typed === null) {
+        return;
+    }
+    if (typed.trim() !== typedName) {
+        showToast('Name did not match. The tablet was not revoked.', 'error');
         return;
     }
     if (button) button.disabled = true;
@@ -6503,7 +6544,7 @@ async function revokePaperMono(id, button) {
         });
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Revoke failed');
-        showToast(`${label} revoked`, 'success');
+        showToast(`${typedName} revoked`, 'success');
         loadPaperMonoDashboard();
         fetchPaperMail();
     } catch (err) {

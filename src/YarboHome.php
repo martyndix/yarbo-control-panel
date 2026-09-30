@@ -10,6 +10,7 @@ final class YarboHome
     public const KIND_PLUG = 'plug';
     public const KIND_SWITCH = 'switch';
     public const KIND_HEATER = 'heater';
+    public const KIND_VACUUM = 'vacuum';
     public const KIND_SCENE = 'scene';
     public const PAPER_MAX = 12;
     /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
@@ -280,6 +281,7 @@ final class YarboHome
                     }
                 }
             }
+            $isLight = ((string) ($device['kind'] ?? self::KIND_LIGHT)) === self::KIND_LIGHT;
             $row = [
                 'id' => $id,
                 'node_id' => (int) ($device['node_id'] ?? 0),
@@ -292,10 +294,9 @@ final class YarboHome
                 'source' => (string) ($device['source'] ?? ''),
                 'bridge' => (bool) ($device['bridge'] ?? false),
                 'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
-                'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
-                'dimmable' => (bool) ($device['dimmable'] ?? false),
-                'colorable' => (bool) ($device['colorable'] ?? false)
-                    || ((string) ($device['kind'] ?? '') === self::KIND_LIGHT),
+                'brightness' => $isLight && isset($device['brightness']) ? (int) $device['brightness'] : null,
+                'dimmable' => $isLight && (bool) ($device['dimmable'] ?? false),
+                'colorable' => $isLight,
                 'color_hs' => (bool) ($device['color_hs'] ?? false),
                 'color_xy' => (bool) ($device['color_xy'] ?? false),
                 'color_ct' => (bool) ($device['color_ct'] ?? false),

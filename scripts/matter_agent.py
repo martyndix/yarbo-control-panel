@@ -47,6 +47,10 @@ COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 ON_OFF = 6
 LEVEL_CONTROL = 8
 COLOR_CONTROL = 0x0300
+THERMOSTAT = 0x0201
+RVC_RUN = 0x0054
+RVC_CLEAN = 0x0055
+RVC_OPERATIONAL = 0x0061
 DESCRIPTOR = 29
 BASIC_INFO = 40
 BRIDGED_BASIC = 57
@@ -76,6 +80,9 @@ DEVTYPE_DIMMABLE_LIGHT = 0x0101
 DEVTYPE_COLOR_LIGHT = 0x0102
 DEVTYPE_CT_LIGHT = 0x010C
 DEVTYPE_EXTENDED_COLOR_LIGHT = 0x010D
+DEVTYPE_THERMOSTAT = 0x0300
+DEVTYPE_HEATING_COOLING = 0x0301
+DEVTYPE_RVC = 0x0074
 COLOR_CAP_HS = 1 << 0
 COLOR_CAP_XY = 1 << 3
 COLOR_CAP_CT = 1 << 4
@@ -1315,7 +1322,9 @@ def device_type_ids(types: Any) -> list[int]:
 
 def device_kind(types: Any) -> str:
     ids = device_type_ids(types)
-    if any(i in (0x0301,) for i in ids):
+    if any(i == DEVTYPE_RVC for i in ids):
+        return "vacuum"
+    if any(i in (DEVTYPE_THERMOSTAT, DEVTYPE_HEATING_COOLING) for i in ids):
         return "heater"
     if any(i in (0x010A, 0x010B) for i in ids):
         return "plug"
@@ -1751,7 +1760,23 @@ def set_color_temp(node_id: int, endpoint: int, kelvin: int) -> dict[str, Any]:
     return device_command(node_id, endpoint, COLOR_CONTROL, "MoveToColorTemperature", payload_off)
 
 
+def endpoint_looks_heater(attributes: dict[str, Any], endpoint: int) -> bool:
+    return endpoint_has_cluster(attributes, endpoint, THERMOSTAT)
+
+
+def endpoint_looks_vacuum(attributes: dict[str, Any], endpoint: int) -> bool:
+    return (
+        endpoint_has_cluster(attributes, endpoint, RVC_RUN)
+        or endpoint_has_cluster(attributes, endpoint, RVC_CLEAN)
+        or endpoint_has_cluster(attributes, endpoint, RVC_OPERATIONAL)
+    )
+
+
 def fallback_kind(attributes: dict[str, Any], endpoint: int) -> str:
+    if endpoint_looks_heater(attributes, endpoint):
+        return "heater"
+    if endpoint_looks_vacuum(attributes, endpoint):
+        return "vacuum"
     if endpoint_has_cluster(attributes, endpoint, COLOR_CONTROL) or endpoint_has_cluster(
         attributes, endpoint, LEVEL_CONTROL
     ):
@@ -1777,23 +1802,33 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             if endpoint == 0:
                 continue
             on_val = attr_raw(attributes, endpoint, ON_OFF, ATTR_ON_OFF)
-            if on_val is None and not endpoint_has_cluster(attributes, endpoint, ON_OFF):
-                continue
             types = attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES)
             type_ids = device_type_ids(types)
             kind = device_kind(types)
             if kind == "other":
                 if DEVTYPE_AGGREGATOR in type_ids and not endpoint_has_cluster(
                     attributes, endpoint, ON_OFF
+                ) and not endpoint_looks_heater(attributes, endpoint) and not endpoint_looks_vacuum(
+                    attributes, endpoint
                 ):
                     continue
                 kind = fallback_kind(attributes, endpoint)
+            has_on_off = on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF)
+            if not has_on_off and kind not in ("heater", "vacuum"):
+                continue
+            is_light = kind == "light"
             label = endpoint_name(attributes, endpoint, vendor, product)
-            level = attr_num(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL)
+            level = attr_num(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) if is_light else None
             brightness = None
             if level is not None and level >= 0:
                 brightness = int(round(float(level) * 100 / 254))
-            color = color_payload(attributes, endpoint, type_ids)
+            color = color_payload(attributes, endpoint, type_ids) if is_light else {
+                "colorable": False,
+                "color_hs": False,
+                "color_xy": False,
+                "color_ct": False,
+                "color_hex": "",
+            }
             devices.append(
                 {
                     "id": f"{node_id}:{endpoint}",
@@ -1807,7 +1842,8 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "bridge": is_bridge or len(ep_ids) > 3,
                     "on": attr_bool(on_val),
                     "brightness": brightness,
-                    "dimmable": attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
+                    "dimmable": is_light
+                    and attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
                     "available": available,
                     **color,
                 }

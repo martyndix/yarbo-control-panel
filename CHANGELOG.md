@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.67] - 2026-09-30
+
+### Fixed
+- Settings → E-paper shows **Charging** when a PaperMono / Paper Colour is on USB even if the battery is already full. PaperMono firmware **0.1.54** and Paper Colour **0.2.17-colour** also draw a lightning bolt to the right of the lock-screen battery when plugged in.
+- Home no longer treats thermostat heaters and robotic vacuums as colour lights. They keep On/Off where Matter provides it, without a colour picker.
+
+### Changed
+- Paired-tablet **Save name** and **Revoke** sit behind a ⚙️. Revoke asks twice, then you must type the tablet name.
+
 ## [3.0.66] - 2026-09-30
 
 ### Fixed

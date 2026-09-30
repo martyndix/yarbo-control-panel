@@ -210,4 +210,56 @@ if ($stubIds !== ['13:2', '13:3']) {
     exit(1);
 }
 
+$heaterNode = [
+    'node_id' => 20,
+    'available' => true,
+    'attributes' => [
+        '0/40/3' => 'Hall heater',
+        '1/29/0' => [['0' => 0x0300, '1' => 1]],
+        '1/6/0' => true,
+        '1/8/0' => 80,
+        '1/513/0' => 2100,
+    ],
+];
+$vacuumNode = [
+    'node_id' => 21,
+    'available' => true,
+    'attributes' => [
+        '0/40/3' => 'Upstairs vacuum',
+        '1/29/0' => [['deviceType' => 0x0074, 'revision' => 1]],
+        '1/6/0' => false,
+        '1/8/0' => 10,
+        '1/84/0' => 1,
+    ],
+];
+$bridgedHeater = [
+    'node_id' => 22,
+    'available' => true,
+    'is_bridge' => true,
+    'attributes' => [
+        '0/40/3' => 'Hue Bridge',
+        '2/29/0' => [['deviceType' => 0x0013, 'revision' => 1]],
+        '2/6/0' => true,
+        '2/8/0' => 40,
+        '2/513/0' => 2000,
+        '2/57/5' => 'Bathroom heater',
+    ],
+];
+$kinds = [];
+foreach (YarboMatterFabric::flatten([$heaterNode, $vacuumNode, $bridgedHeater]) as $row) {
+    $kinds[$row['id']] = $row;
+}
+if (($kinds['20:1']['kind'] ?? '') !== 'heater' || !empty($kinds['20:1']['colorable']) || !empty($kinds['20:1']['dimmable'])) {
+    fwrite(STDERR, 'heater ' . json_encode($kinds['20:1'] ?? null) . "\n");
+    exit(1);
+}
+if (($kinds['21:1']['kind'] ?? '') !== 'vacuum' || !empty($kinds['21:1']['colorable'])) {
+    fwrite(STDERR, 'vacuum ' . json_encode($kinds['21:1'] ?? null) . "\n");
+    exit(1);
+}
+if (($kinds['22:2']['kind'] ?? '') !== 'heater') {
+    fwrite(STDERR, 'bridged heater ' . json_encode($kinds['22:2'] ?? null) . "\n");
+    exit(1);
+}
+
 echo "ok\n";

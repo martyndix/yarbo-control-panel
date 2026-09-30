@@ -2815,6 +2815,20 @@ html[data-theme="light"] .plan-activity {
     flex-wrap: wrap;
     gap: 0.4rem;
     justify-content: flex-end;
+    align-items: flex-start;
+}
+
+.papermono-device-tools {
+    margin-top: 0.55rem;
+    padding-top: 0.55rem;
+    border-top: 1px dashed var(--border);
+}
+
+.papermono-device-tool-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
 }
 
 .papermono-device-ota-name {

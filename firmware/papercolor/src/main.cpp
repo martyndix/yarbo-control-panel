@@ -830,10 +830,22 @@ void runOtaUpdate()
     }
 }
 
+bool tabletPluggedIn()
+{
+    if (M5.Power.isCharging() == m5::Power_Class::is_charging) {
+        return true;
+    }
+    int16_t vbus = M5.Power.getVBUSVoltage();
+    if (vbus >= 4000) {
+        return true;
+    }
+    return false;
+}
+
 static String panelApiUrl(const char *action)
 {
     tabletBat = M5.Power.getBatteryLevel();
-    bool chargingNow = M5.Power.isCharging();
+    bool chargingNow = tabletPluggedIn();
     String url = panelUrl + "/api/device.php?action=";
     url += action;
     url += "&fw=";

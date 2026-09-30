@@ -12,6 +12,10 @@ final class YarboMatterFabric
     private const ON_OFF = 6;
     private const LEVEL_CONTROL = 8;
     private const COLOR_CONTROL = 0x0300;
+    private const THERMOSTAT = 0x0201;
+    private const RVC_RUN = 0x0054;
+    private const RVC_CLEAN = 0x0055;
+    private const RVC_OPERATIONAL = 0x0061;
     private const DESCRIPTOR = 29;
     private const BASIC_INFO = 40;
     private const BRIDGED_BASIC = 57;
@@ -30,6 +34,9 @@ final class YarboMatterFabric
     private const DEVTYPE_COLOR_LIGHT = 0x0102;
     private const DEVTYPE_CT_LIGHT = 0x010C;
     private const DEVTYPE_EXTENDED_COLOR_LIGHT = 0x010D;
+    private const DEVTYPE_THERMOSTAT = 0x0300;
+    private const DEVTYPE_HEATING_COOLING = 0x0301;
+    private const DEVTYPE_RVC = 0x0074;
 
     /**
      * @return list<array<string, mixed>>
@@ -193,20 +200,23 @@ final class YarboMatterFabric
                     continue;
                 }
                 $onVal = self::attrRaw($attributes, $endpoint, self::ON_OFF, self::ATTR_ON_OFF);
-                if ($onVal === null && !self::endpointHasCluster($attributes, $endpoint, self::ON_OFF)) {
-                    continue;
-                }
                 $types = self::attrRaw($attributes, $endpoint, self::DESCRIPTOR, self::ATTR_DEVICE_TYPES);
                 $typeIds = self::deviceTypeIds($types);
                 $kind = self::deviceKind($types);
                 if ($kind === 'other') {
                     if (in_array(self::DEVTYPE_AGGREGATOR, $typeIds, true)
-                        && !self::endpointHasCluster($attributes, $endpoint, self::ON_OFF)) {
+                        && !self::endpointHasCluster($attributes, $endpoint, self::ON_OFF)
+                        && !self::endpointLooksAccessory($attributes, $endpoint)) {
                         continue;
                     }
                     $kind = self::fallbackKind($attributes, $endpoint);
                 }
-                $level = self::attrNum($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL);
+                $hasOnOff = $onVal !== null || self::endpointHasCluster($attributes, $endpoint, self::ON_OFF);
+                if (!$hasOnOff && $kind !== 'heater' && $kind !== 'vacuum') {
+                    continue;
+                }
+                $isLight = $kind === 'light';
+                $level = $isLight ? self::attrNum($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) : null;
                 $brightness = null;
                 if ($level !== null && $level >= 0) {
                     $brightness = (int) round($level * 100 / 254);
@@ -223,7 +233,7 @@ final class YarboMatterFabric
                     'bridge' => $isBridge || count($epIds) > 3,
                     'on' => self::attrBool($onVal),
                     'brightness' => $brightness,
-                    'dimmable' => self::attrRaw($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) !== null,
+                    'dimmable' => $isLight && self::attrRaw($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) !== null,
                     'available' => $available,
                 ] + self::colorPayload($attributes, $endpoint, $typeIds, $kind);
             }
@@ -361,7 +371,12 @@ final class YarboMatterFabric
     {
         $ids = self::deviceTypeIds($types);
         foreach ($ids as $id) {
-            if ($id === 0x0301) {
+            if ($id === self::DEVTYPE_RVC) {
+                return 'vacuum';
+            }
+        }
+        foreach ($ids as $id) {
+            if ($id === self::DEVTYPE_THERMOSTAT || $id === self::DEVTYPE_HEATING_COOLING) {
                 return 'heater';
             }
         }
@@ -395,12 +410,45 @@ final class YarboMatterFabric
      */
     private static function fallbackKind(array $attributes, int $endpoint): string
     {
+        if (self::endpointLooksHeater($attributes, $endpoint)) {
+            return 'heater';
+        }
+        if (self::endpointLooksVacuum($attributes, $endpoint)) {
+            return 'vacuum';
+        }
         if (self::endpointHasCluster($attributes, $endpoint, self::COLOR_CONTROL)
             || self::endpointHasCluster($attributes, $endpoint, self::LEVEL_CONTROL)) {
             return 'light';
         }
 
         return 'switch';
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
+    private static function endpointLooksHeater(array $attributes, int $endpoint): bool
+    {
+        return self::endpointHasCluster($attributes, $endpoint, self::THERMOSTAT);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
+    private static function endpointLooksVacuum(array $attributes, int $endpoint): bool
+    {
+        return self::endpointHasCluster($attributes, $endpoint, self::RVC_RUN)
+            || self::endpointHasCluster($attributes, $endpoint, self::RVC_CLEAN)
+            || self::endpointHasCluster($attributes, $endpoint, self::RVC_OPERATIONAL);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
+    private static function endpointLooksAccessory(array $attributes, int $endpoint): bool
+    {
+        return self::endpointLooksHeater($attributes, $endpoint)
+            || self::endpointLooksVacuum($attributes, $endpoint);
     }
 
     /**
@@ -585,13 +633,7 @@ final class YarboMatterFabric
     private static function colorPayload(array $attributes, int $endpoint, array $typeIds, string $kind): array
     {
         $hasCc = self::endpointHasCluster($attributes, $endpoint, self::COLOR_CONTROL);
-        $isLight = $kind === 'light' || array_intersect($typeIds, [
-            self::DEVTYPE_ONOFF_LIGHT,
-            self::DEVTYPE_DIMMABLE_LIGHT,
-            self::DEVTYPE_COLOR_LIGHT,
-            self::DEVTYPE_CT_LIGHT,
-            self::DEVTYPE_EXTENDED_COLOR_LIGHT,
-        ]) !== [];
+        $isLight = $kind === 'light';
         $colorHs = $hasCc || $isLight;
         $colorXy = $hasCc || $isLight;
         $colorCt = $hasCc || $isLight;
