@@ -746,6 +746,37 @@ def primary_interface() -> str:
     return "eth0"
 
 
+def ensure_ipv6_default_route() -> None:
+    """CHIP mDNS needs an IPv6 route even on IPv4-only ISPs (link-local on LAN)."""
+    iface = primary_interface()
+    if not iface:
+        return
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if (shown.stdout or "").strip():
+            return
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    candidates = [
+        ["ip", "-6", "route", "add", "default", "dev", iface],
+        ["sudo", "-n", "ip", "-6", "route", "add", "default", "dev", iface],
+        ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "add", "default", "dev", iface],
+        ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", "ipv6-route"],
+    ]
+    for cmd in candidates:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if r.returncode == 0:
+            return
+
+
 def matter_container_args() -> list[str]:
     return [
         "run",
@@ -772,6 +803,7 @@ def matter_container_args() -> list[str]:
 
 def recreate_matter_container() -> None:
     reset_ws()
+    ensure_ipv6_default_route()
     run_docker(["stop", DOCKER_NAME])
     run_docker(["rm", DOCKER_NAME])
     run_docker(matter_container_args())
@@ -931,6 +963,7 @@ def ensure_matter_server() -> str | None:
                 "A Raspberry Pi panel update installs Docker and the server automatically."
             )
         STORAGE.mkdir(parents=True, exist_ok=True)
+        ensure_ipv6_default_route()
         inspect = run_docker(["inspect", "-f", "{{.State.Running}}", DOCKER_NAME])
         if inspect.returncode == 0:
             running = (inspect.stdout or "").strip().lower() == "true"

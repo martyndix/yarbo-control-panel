@@ -88,7 +88,7 @@ install_project() {
 
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
   chmod +x scripts/update.sh 2>/dev/null || true
-  chmod +x scripts/dev.sh scripts/panel.sh scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/matter_setup.sh scripts/lib/matter_server.sh scripts/lib/matter_agent.sh 2>/dev/null || true
+  chmod +x scripts/dev.sh scripts/panel.sh scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/matter_check_node.py scripts/matter_setup.sh scripts/lib/matter_server.sh scripts/lib/matter_agent.sh 2>/dev/null || true
 
   echo "==> Matter server (Home module)"
   # shellcheck source=scripts/lib/matter_server.sh
@@ -223,7 +223,15 @@ install_update_sudoers() {
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.default.disable_ipv6=0"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.eth0.disable_ipv6=0"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.wlan0.disable_ipv6=0"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.eth0.accept_ra=1"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.wlan0.accept_ra=1"
     fi
+    for ip_bin in /usr/sbin/ip /bin/ip /usr/bin/ip; do
+      if [[ -x "$ip_bin" ]]; then
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} -6 route add default dev eth0"
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} -6 route add default dev wlan0"
+      fi
+    done
     if [[ -x /usr/sbin/usermod ]]; then
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/usermod -aG docker ${owner}"
     fi

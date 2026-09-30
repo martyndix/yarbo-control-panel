@@ -87,6 +87,22 @@ yarbo_matter_enable_ipv6() {
       yarbo_root sysctl -w "net.ipv6.conf.${iface}.disable_ipv6=0" >/dev/null 2>&1 || true
     fi
   done
+  yarbo_matter_ensure_ipv6_route
+}
+
+yarbo_matter_ensure_ipv6_route() {
+  local iface
+  iface="$(yarbo_matter_primary_interface)"
+  if [[ -z "$iface" ]]; then
+    return 0
+  fi
+  yarbo_root sysctl -w "net.ipv6.conf.${iface}.accept_ra=1" >/dev/null 2>&1 || true
+  if ip -6 route show default 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  yarbo_root ip -6 route add default dev "$iface" >/dev/null 2>&1 \
+    || ip -6 route add default dev "$iface" >/dev/null 2>&1 \
+    || true
 }
 
 yarbo_matter_primary_interface() {
@@ -268,6 +284,10 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     ROOT="$YARBO_ROOT"
   else
     ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  fi
+  if [[ "${1:-}" == "ipv6-route" ]]; then
+    yarbo_matter_enable_ipv6
+    exit 0
   fi
   cd "$ROOT"
   yarbo_matter_setup
