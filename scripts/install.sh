@@ -88,7 +88,7 @@ install_project() {
 
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
   chmod +x scripts/update.sh 2>/dev/null || true
-  chmod +x scripts/dev.sh scripts/panel.sh scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/matter_check_node.py scripts/matter_setup.sh scripts/lib/matter_server.sh scripts/lib/matter_agent.sh 2>/dev/null || true
+  chmod +x scripts/dev.sh scripts/panel.sh scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/matter_check_node.py scripts/matter_fix_ipv6.sh scripts/matter_setup.sh scripts/lib/matter_server.sh scripts/lib/matter_agent.sh 2>/dev/null || true
 
   echo "==> Matter server (Home module)"
   # shellcheck source=scripts/lib/matter_server.sh

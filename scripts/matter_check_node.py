@@ -232,7 +232,10 @@ def recv_json(sock: socket.socket, timeout: float) -> dict | None:
     buf = bytearray()
     deadline = time.time() + timeout
     while time.time() < deadline:
-        chunk = sock.recv(4096)
+        try:
+            chunk = sock.recv(4096)
+        except (TimeoutError, socket.timeout):
+            continue
         if not chunk:
             return None
         buf.extend(chunk)

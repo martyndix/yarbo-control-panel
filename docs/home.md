@@ -294,10 +294,10 @@ If interview fails with **Failed to interview node 13**, names are still safe. T
 
 ```bash
 cd "$(systemctl show -p WorkingDirectory --value yarbo-panel)"
-python3 scripts/matter_check_node.py
+bash scripts/matter_fix_ipv6.sh
 ```
 
-That prints CHIP logs, `chip.json` keys, Hue/Matter mDNS, adds an IPv6 default route if the ISP is IPv4-only, restarts the Matter container, and retries the interview. Or paste this dump:
+That adds an IPv6 default route if the ISP is IPv4-only, looks for the Hue Bridge over SSDP, restarts the Matter container, and retries the interview. Or paste this dump:
 
 ```bash
 echo "=== logs ==="
