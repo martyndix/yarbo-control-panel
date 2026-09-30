@@ -1559,11 +1559,9 @@ void drawWifiIcon(int cx, int cy, int size, bool connected)
             }
         }
     }
-    int cropY = yDot + 1;
-    int cropH = (cy + size / 2) - cropY;
-    if (cropH > 0) {
-        M5.Display.fillRect(cx - size - 6, cropY, size * 2 + 12, cropH, TFT_WHITE);
-    }
+    /* Circles are only the Wi-Fi arcs: wipe everything below the hotspot. */
+    int maxR = (size * 3) / 5 + thick;
+    M5.Display.fillRect(cx - maxR - 4, yDot + 1, maxR * 2 + 8, maxR + 2, TFT_WHITE);
     if (!connected) {
         int x1 = cx - size / 2;
         int y1 = cy - size / 3;

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.70] - 2026-09-30
+
+### Fixed
+- PaperMono firmware **0.1.56** draws the lock-screen Wi-Fi mark as upper arcs only. 0.1.55 left the bottom half of those circles visible.
+
 ## [3.0.69] - 2026-09-30
 
 ### Fixed
