@@ -117,13 +117,13 @@ curl -sS -m 4 http://127.0.0.1:8080/api/home.php | php -r '$d=json_decode(stream
 
 After **3.0.60**, Home no longer waits on Docker during page load. **3.0.63** also reads a bare fabric node map and rebuilds lights from saved names/scenes. **3.0.64** puts node stubs back into the fabric JSON so python-matter-server can interview the existing CHIP fabric and commands work again. If that folder is truly empty, add the Hue Bridge pairing code once; names, rooms, and scenes stay in `data/home.json`. From 3.0.60 you can also run `sudo bash scripts/matter_diagnose.sh` in the panel folder.
 
-If lights are listed but a room toggle says **Node N is not (yet) available**, the live Matter server has no node records (or they are offline). Do **not** pair the Hue Bridge again. Paste this on the Pi (it does not stop the panel), wait about 30 seconds, then toggle a light:
+If lights are listed but a room toggle says **Node N is not (yet) available**, the live Matter server has no node records (or they are offline). Do **not** pair the Hue Bridge again. Paste this on the Pi (it does not stop the panel). The fabric JSON is often root-owned, so this copies it in with Docker rather than writing it as `admin`. Wait about 30 seconds after it prints `matter port 5580 is up`, then toggle a light:
 
 ```bash
 ROOT="$(systemctl show -p WorkingDirectory --value yarbo-panel)"
 export ROOT
 python3 - <<'PY'
-import json, os, shutil, socket, subprocess, time
+import json, os, socket, subprocess, time
 from pathlib import Path
 root = Path(os.environ["ROOT"])
 storage = root / "data" / "matter-server"
@@ -176,22 +176,27 @@ for node_id in ids:
     }
 data["nodes"] = nodes
 data["last_node_id"] = max(int(data.get("last_node_id") or 0), max(ids))
-backup = Path(str(fabric) + ".nodes-restore")
-if not backup.exists():
-    shutil.copy2(fabric, backup)
+tmp = Path("/tmp/yarbo-fabric-nodes.json")
+tmp.write_text(json.dumps(data, separators=(",", ":")))
+print("wrote", tmp, "bytes", tmp.stat().st_size)
 
-def docker(*args):
+def docker(*args, required=True):
     for prefix in ([], ["sudo", "-n"]):
         try:
-            return subprocess.run(prefix + ["docker", *args], capture_output=True, text=True, timeout=30)
+            r = subprocess.run(prefix + ["docker", *args], capture_output=True, text=True, timeout=40)
         except FileNotFoundError:
             continue
-    raise SystemExit("docker not found")
+        print("docker", " ".join(args), "rc", r.returncode, (r.stderr or "")[-200:].strip())
+        if r.returncode == 0:
+            return r
+    if not required:
+        return None
+    raise SystemExit("docker command failed: " + " ".join(args))
 
-print("stopping yarbo-matter-server")
-docker("stop", "yarbo-matter-server")
-fabric.write_text(json.dumps(data, separators=(",", ":")))
-os.chmod(fabric, 0o644)
+print("stopping yarbo-matter-server (ok if already stopped)")
+docker("stop", "yarbo-matter-server", required=False)
+print("copying fabric into container as root")
+docker("cp", str(tmp), f"yarbo-matter-server:/data/{fabric.name}")
 print("starting yarbo-matter-server")
 docker("start", "yarbo-matter-server")
 deadline = time.time() + 30
@@ -208,6 +213,7 @@ while time.time() < deadline:
         probe.close()
 else:
     print("port 5580 not up yet; wait and retry a light")
+docker("exec", "yarbo-matter-server", "sh", "-c", "chmod a+r /data/*.json /data/*.json.backup; chmod a+X /data")
 print("nodes now", list(nodes))
 print("wait ~30s for Hue interview, then toggle a light. Do not pair again.")
 PY

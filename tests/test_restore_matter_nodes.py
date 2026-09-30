@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -113,6 +114,26 @@ def main() -> int:
     retried = agent.command_with_reconnect(13, send_fail_then_ok)
     if not retried.get("ok") or calls["n"] != 2:
         raise SystemExit(f"reconnect {retried} calls={calls['n']}")
+
+    owned = storage / "root-owned.json"
+    owned.write_text(json.dumps({"vendor_info": {"9": "x"}}), encoding="utf-8")
+    os.chmod(owned, 0o444)
+
+    def fake_docker(args, timeout=12.0):
+        if args and args[0] == "cp" and len(args) >= 3:
+            src = Path(args[1])
+            dest = storage / Path(str(args[2]).split("/")[-1])
+            os.chmod(dest, 0o644)
+            dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            return __import__("subprocess").CompletedProcess(args=["docker", *args], returncode=0, stdout="", stderr="")
+        return __import__("subprocess").CompletedProcess(args=["docker"], returncode=1, stdout="", stderr="no docker")
+
+    agent.run_docker = fake_docker  # type: ignore[method-assign]
+    if not agent.write_storage_file(owned, json.dumps({"nodes": {"13": {"node_id": 13}}})):
+        raise SystemExit("docker cp fallback failed")
+    copied = json.loads(owned.read_text(encoding="utf-8"))
+    if "nodes" not in copied:
+        raise SystemExit(f"root-owned fabric not replaced {copied}")
 
     print("ok: fabric node stubs restore from saved Home ids")
     return 0

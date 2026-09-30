@@ -20,6 +20,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -288,6 +289,37 @@ def storage_json_files() -> list[Path]:
     return sorted(files)
 
 
+def write_storage_file(path: Path, text: str) -> bool:
+    """Write Matter storage even when Docker left the file root-owned."""
+    try:
+        path.write_text(text, encoding="utf-8")
+        return True
+    except OSError:
+        pass
+    fd, tmp_name = tempfile.mkstemp(prefix="yarbo-matter-", suffix=".json")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        copied = run_docker(["cp", str(tmp), f"{DOCKER_NAME}:/data/{path.name}"], timeout=15.0)
+        if copied.returncode == 0:
+            return True
+        sudo_cp = subprocess.run(
+            ["sudo", "-n", "cp", str(tmp), str(path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return sudo_cp.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
 def ensure_storage_readable() -> None:
     """Docker bind-mounts are often root:600; the panel user cannot flatten those files."""
     try:
@@ -508,11 +540,16 @@ def restore_nodes_into_fabric() -> list[int]:
         current_last = 0
     data["last_node_id"] = max(current_last, max(node_ids))
     backup = Path(str(path) + ".nodes-restore")
-    try:
-        if not backup.exists():
+    payload = json.dumps(data, separators=(",", ":"))
+    if not backup.exists():
+        try:
             shutil.copy2(path, backup)
-        path.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
-    except OSError:
+        except OSError:
+            try:
+                write_storage_file(backup, path.read_text(encoding="utf-8"))
+            except OSError:
+                pass
+    if not write_storage_file(path, payload):
         return []
     ensure_storage_readable()
     return written
