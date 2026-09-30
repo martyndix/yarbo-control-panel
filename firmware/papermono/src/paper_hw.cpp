@@ -19,6 +19,7 @@ constexpr auto kResetPin = M5IOE1_PIN_10;
 constexpr auto kAntennaSwitchPin = M5IOE1_PIN_2;
 constexpr auto kLedG = M5IOE1_PIN_8;
 constexpr auto kLedB = M5IOE1_PIN_9;
+constexpr int kChargerI2cPin = 11;
 
 SPIClass loraSpi(HSPI);
 SX1262 radio = new Module(
@@ -75,12 +76,16 @@ bool enableLoRaHardware()
     ioe1.pinMode(kAntennaSwitchPin, OUTPUT);
     ioe1.pinMode(kLedG, OUTPUT);
     ioe1.pinMode(kLedB, OUTPUT);
+    ioe1.pinMode(kChargerI2cPin, OUTPUT);
     ioe1.setDriveMode(kResetPin, M5IOE1_DRIVE_PUSHPULL);
     ioe1.setDriveMode(kAntennaSwitchPin, M5IOE1_DRIVE_PUSHPULL);
     ioe1.setDriveMode(kLedG, M5IOE1_DRIVE_PUSHPULL);
     ioe1.setDriveMode(kLedB, M5IOE1_DRIVE_PUSHPULL);
+    ioe1.setDriveMode(kChargerI2cPin, M5IOE1_DRIVE_PUSHPULL);
     ioe1.digitalWrite(kLedG, LOW);
     ioe1.digitalWrite(kLedB, LOW);
+    /* IP2316 must not stay on the system I2C bus or FT6336G touch dies. */
+    ioe1.digitalWrite(kChargerI2cPin, LOW);
     delay(200);
     m5ioe1_err_t ioeWriteError = M5IOE1_OK;
     ioe1.digitalWriteWithRes(kResetPin, LOW, &ioeWriteError);

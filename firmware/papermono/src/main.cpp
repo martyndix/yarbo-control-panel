@@ -185,6 +185,7 @@ void drawWifiIcon(int cx, int cy, int size, bool connected);
 void drawChargeBolt(int cx, int cy, int size);
 void drawBatteryBadge(int right, int cy, int pct, bool compact);
 bool tabletPluggedIn();
+void refreshTabletPower(bool force);
 bool takeTouchPress(int &x, int &y);
 void applyFrontlight(bool on, bool force = false);
 bool unreadFrontlightHold();
@@ -1558,7 +1559,11 @@ void drawWifiIcon(int cx, int cy, int size, bool connected)
             }
         }
     }
-    M5.Display.fillRect(cx - size - 6, yDot + 1, size * 2 + 12, size + 10, TFT_WHITE);
+    int cropY = yDot + 1;
+    int cropH = (cy + size / 2) - cropY;
+    if (cropH > 0) {
+        M5.Display.fillRect(cx - size - 6, cropY, size * 2 + 12, cropH, TFT_WHITE);
+    }
     if (!connected) {
         int x1 = cx - size / 2;
         int y1 = cy - size / 3;
@@ -1801,8 +1806,16 @@ void drawLockScreen(bool forceFull)
         int srcW = PAPERMONO_LOGO_PX;
         int srcH = PAPERMONO_LOGO_PX;
         pngFileSize("/logo.png", &srcW, &srcH);
+        if (srcW < 8) {
+            srcW = PAPERMONO_LOGO_PX;
+        }
+        if (srcH < 8) {
+            srcH = PAPERMONO_LOGO_PX;
+        }
+        int minGrid = showBoard ? 56 : 0;
+        int gapBoard = showBoard ? 16 : 0;
         int maxW = W - 48;
-        int maxH = showBoard ? (contentBottom - contentTop) * 45 / 100 : (contentBottom - contentTop);
+        int maxH = contentBottom - contentTop - minGrid - gapBoard;
         if (maxH < 90) {
             maxH = 90;
         }
@@ -1816,18 +1829,27 @@ void drawLockScreen(bool forceFull)
         }
         int drawnW = (int) ((float) srcW * sc);
         drawnH = (int) ((float) srcH * sc);
+        if (drawnW < 8) {
+            drawnW = 8;
+        }
+        if (drawnH < 8) {
+            drawnH = 8;
+        }
         int logoX = (W - drawnW) / 2;
-        M5.Display.drawPngFile(SPIFFS, "/logo.png", logoX, logoY, 0, 0, 0, 0, sc, sc);
+        M5.Display.drawPngFile(SPIFFS, "/logo.png", logoX, logoY, drawnW, drawnH, 0, 0, sc, sc);
     } else if (wantLogo && !showBoard) {
         M5.Display.setTextSize(2);
         M5.Display.drawString("Logo after site Wi-Fi", W / 2, logoY + 40);
         drawnH = 72;
     }
     if (showBoard) {
-        int gridTop = showLogo ? (logoY + drawnH + 20) : contentTop;
+        int gridTop = showLogo ? (logoY + drawnH + 16) : contentTop;
+        if (gridTop < contentTop) {
+            gridTop = contentTop;
+        }
         int gridRoom = contentBottom - gridTop;
-        if (gridRoom < 48) {
-            gridRoom = 48;
+        if (gridRoom < 36) {
+            gridRoom = 36;
         }
         int gap = 2;
         int cellW = (W - 32 - 14 * gap) / 15;
@@ -1836,8 +1858,8 @@ void drawLockScreen(bool forceFull)
         if (cell > 30) {
             cell = 30;
         }
-        if (cell < 14) {
-            cell = 14;
+        if (cell < 12) {
+            cell = 12;
         }
         int gridW = 15 * cell + 14 * gap;
         int gridH = 3 * cell + 2 * gap;
@@ -1845,8 +1867,8 @@ void drawLockScreen(bool forceFull)
         if (gridY + gridH > contentBottom) {
             gridY = contentBottom - gridH;
         }
-        if (gridY < contentTop) {
-            gridY = contentTop;
+        if (gridY < gridTop) {
+            gridY = gridTop;
         }
         drawVestaboardGrid((W - gridW) / 2, gridY, cell, gap);
     }
@@ -2984,20 +3006,28 @@ void runOtaUpdate()
 
 bool tabletPluggedIn()
 {
-    if (M5.Power.isCharging() == m5::Power_Class::is_charging) {
-        return true;
-    }
+    /* PaperMono: do not poll Power isCharging here. That attaches the IP2316 to the
+     * shared I2C bus (FT6336G touch) and leaves taps dead while USB is in. PM1
+     * VBUS is enough to know the tablet is on power, including a full battery. */
     int16_t vbus = M5.Power.getVBUSVoltage();
-    if (vbus >= 4000) {
-        return true;
+    return vbus >= 4000;
+}
+
+void refreshTabletPower(bool force)
+{
+    static uint32_t lastPowerMs = 0;
+    uint32_t now = millis();
+    if (!force && lastPowerMs != 0 && now - lastPowerMs < 2000) {
+        return;
     }
-    return false;
+    lastPowerMs = now;
+    tabletBat = M5.Power.getBatteryLevel();
+    tabletCharging = tabletPluggedIn();
 }
 
 static String panelApiUrl(const char *action)
 {
-    tabletBat = M5.Power.getBatteryLevel();
-    tabletCharging = tabletPluggedIn();
+    refreshTabletPower(true);
     String url = panelUrl + "/api/device.php?action=";
     url += action;
     url += "&fw=";
@@ -3478,8 +3508,7 @@ void loop()
     }
     loraService();
     rgbTick();
-    tabletBat = M5.Power.getBatteryLevel();
-    tabletCharging = tabletPluggedIn();
+    refreshTabletPower(false);
     if (WiFi.status() == WL_CONNECTED) {
         ensureNtp();
     }

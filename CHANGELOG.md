@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [3.0.69] - 2026-09-30
+
+### Fixed
+- PaperMono firmware **0.1.55** keeps the touchscreen working while USB is plugged in. Reading the charger every loop had put the IP2316 on the shared I2C bus with the FT6336G. Plugged-in / charging now uses PM1 VBUS a couple of times a second, and LoRa setup holds the charger off the bus. The lock-screen logo is drawn in full below the battery so the Vestaboard grid cannot cover the bottom half.
+
 ## [3.0.68] - 2026-09-30
 
 ### Fixed
