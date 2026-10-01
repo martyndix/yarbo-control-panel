@@ -403,12 +403,6 @@ final class YarboUnifi
             return [];
         }
         $wanted = array_fill_keys($config['show_on_home'], true);
-        foreach (array_keys($wanted) as $id) {
-            if (str_starts_with($id, 'unifi:door:') || str_starts_with($id, 'unifi:hub:') || str_contains($id, ':sensor:dps-')) {
-                $this->refreshAccessDoorStatus(2.0);
-                break;
-            }
-        }
         $rows = [];
         foreach ($this->dashboardPayload(false)['devices'] as $device) {
             if (!is_array($device)) {
@@ -593,31 +587,31 @@ final class YarboUnifi
         if ($config['protect_api_key'] === '') {
             return ['ok' => false, 'error' => 'Add a Protect API key first'];
         }
-        $url = $this->protectUrl($config, '/lights/' . rawurlencode($id));
-        // Official Integration API: isLightForceEnabled turns the LED.
-        // lightModeSettings.mode always/off is the motion schedule, not On/Off.
-        // Protect often echoes the previous light object on PATCH, so a 200 is enough.
-        $payloads = $on
+        $private = $this->protectPrivateUrl($config, '/lights/' . rawurlencode($id));
+        $public = $this->protectUrl($config, '/lights/' . rawurlencode($id));
+        // UF-Floodlight LEDs are driven by the private Protect API
+        // (lightOnSettings.isLedForceOn). The public Integration field
+        // isLightForceEnabled is tried after that. mode=always is a schedule.
+        $attempts = $on
             ? [
-                [
-                    'isLightForceEnabled' => true,
-                    'lightDeviceSettings' => ['ledLevel' => 6],
-                ],
-                ['isLightForceEnabled' => true],
+                [$private, ['lightOnSettings' => ['isLedForceOn' => true], 'lightDeviceSettings' => ['ledLevel' => 6]], 2.5],
+                [$private, ['lightOnSettings' => ['isLedForceOn' => true]], 2.5],
+                [$public, ['isLightForceEnabled' => true, 'lightDeviceSettings' => ['ledLevel' => 6]], 4.0],
+                [$public, ['isLightForceEnabled' => true], 4.0],
             ]
             : [
-                ['isLightForceEnabled' => false],
+                [$private, ['lightOnSettings' => ['isLedForceOn' => false]], 2.5],
+                [$public, ['isLightForceEnabled' => false], 4.0],
             ];
         $last = ['ok' => false, 'error' => 'Protect light failed'];
-        foreach ($payloads as $payload) {
+        foreach ($attempts as [$url, $payload, $timeout]) {
             $body = json_encode($payload, JSON_THROW_ON_ERROR);
-            $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, 6.0, false);
+            $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, $timeout, false);
+            if ($res['status'] === 404 || $res['status'] === 405) {
+                $res = $this->request('PUT', $url, $this->protectHeaders($config), $body, $timeout, false);
+            }
             if ($res['status'] < 200 || $res['status'] >= 300) {
                 $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . $res['status'])];
-                $hint = strtolower((string) ($last['error'] ?? ''));
-                if (!str_contains($hint, 'ajv') && !str_contains($hint, 'additional') && !str_contains($hint, 'rejected') && ($res['status'] < 400 || $res['status'] >= 500)) {
-                    break;
-                }
                 continue;
             }
             $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
@@ -1833,6 +1827,18 @@ final class YarboUnifi
         $path = '/' . ltrim($path, '/');
 
         return 'https://' . $config['host'] . '/proxy/protect/integration/v1' . $path;
+    }
+
+    /**
+     * Unofficial Protect API used by Home Assistant / uiprotect for floodlight LEDs.
+     *
+     * @param array<string, mixed> $config
+     */
+    private function protectPrivateUrl(array $config, string $path): string
+    {
+        $path = '/' . ltrim($path, '/');
+
+        return 'https://' . $config['host'] . '/proxy/protect/api' . $path;
     }
 
     /**

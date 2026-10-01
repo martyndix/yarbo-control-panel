@@ -7,7 +7,7 @@ Not affiliated with Ubiquiti.
 ## What it can do
 
 - List Protect cameras and show JPEG stills on the UniFi page and on Home.
-- Toggle Protect floodlights (`PATCH /lights/{id}` with `isLightForceEnabled` and `ledLevel`).
+- Toggle Protect floodlights (`PATCH /proxy/protect/api/lights/{id}` with `lightOnSettings.isLedForceOn`, then the public Integration `isLightForceEnabled` API).
 - Toggle Protect relays (`POST /relays/{id}/outputs/{outputId}/activate`). Relays are dry-contact outputs in Protect, not Access doors.
 - Show Protect sensor status (open/closed, motion, temperature/humidity when the Integration API returns them).
 - Unlock Access doors and **door controllers** (UA Hub / Gate Hub) from the Access OpenAPI (`/api/v1/developer/doors` and `/devices`). Gate Hub three-button mode can send Open / Close / Stop (`control_cmd`).
@@ -63,7 +63,7 @@ The panel also tries UniFi OS proxy paths (`/proxy/access/api/v1/developer` and 
 
 Door list: `GET /doors` (`view:space`). Device/hub list: `GET /devices?refresh=true` (`view:device`). Unlock: `PUT /doors/{id}/unlock` (`edit:space`; POST if the console rejects PUT). Gate Hub: add `?control_cmd=open|close|stop`. Door position is `door_position_status` on each door.
 
-Protect lights: `PATCH /lights/{id}` with `{ "isLightForceEnabled": true, "lightDeviceSettings": { "ledLevel": 6 } }` to turn on, and `{ "isLightForceEnabled": false }` to turn off. Relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
+Protect lights: the panel PATCHes the private Protect API `{ "lightOnSettings": { "isLedForceOn": true }, "lightDeviceSettings": { "ledLevel": 6 } }` first (`/proxy/protect/api/lights/{id}`), then the public Integration `{ "isLightForceEnabled": true }`. Off sends `isLedForceOn` / `isLightForceEnabled` false. Relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
 
 ## Home
 
@@ -73,4 +73,4 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 ## Rollback
 
-This is panel **4.0.16**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+This is panel **4.0.17**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
