@@ -3176,6 +3176,8 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         el.disabled = !on;
     });
     if (extras.brightness != null) {
+        const device = homeDeviceRecord(id);
+        if (device) device.brightness = extras.brightness;
         const bright = card.querySelector('[data-home-bright]');
         if (bright && document.activeElement !== bright) bright.value = String(extras.brightness);
     }
@@ -3189,6 +3191,12 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
             dot.style.background = extras.color_hex;
             dot.style.boxShadow = `0 0 0.35rem ${extras.color_hex}`;
         }
+    }
+    if (extras.color_temp != null) {
+        const device = homeDeviceRecord(id);
+        if (device) device.color_temp = extras.color_temp;
+        const kelvin = card.querySelector('[data-home-kelvin]');
+        if (kelvin && document.activeElement !== kelvin) kelvin.value = String(extras.color_temp);
     }
 }
 
@@ -3215,7 +3223,12 @@ function patchHomeDashboard(data) {
         const sticky = homeStickyOn(d.id);
         if (sticky !== null) d.on = sticky;
         const rec = homeDeviceRecord(d.id);
-        if (rec && typeof d.on === 'boolean') rec.on = Boolean(d.on);
+        if (rec) {
+            if (typeof d.on === 'boolean') rec.on = Boolean(d.on);
+            if (d.brightness != null) rec.brightness = d.brightness;
+            if (d.color_hex) rec.color_hex = d.color_hex;
+            if (d.color_temp != null) rec.color_temp = d.color_temp;
+        }
         patchHomeDeviceVisual(d.id, d.on, d);
     });
     (data.rooms || []).forEach((room) => {

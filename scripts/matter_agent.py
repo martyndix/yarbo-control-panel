@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 11
+AGENT_VERSION = 12
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
@@ -68,6 +68,8 @@ ATTR_CURRENT_X = 3
 ATTR_CURRENT_Y = 4
 ATTR_COLOR_TEMP_MIREDS = 7
 ATTR_COLOR_MODE = 8
+ATTR_ENHANCED_CURRENT_HUE = 0x4000
+ATTR_ENHANCED_COLOR_MODE = 0x4001
 ATTR_COLOR_CAPABILITIES = 0x400A
 ATTR_CT_PHYSICAL_MIN = 0x400B
 ATTR_CT_PHYSICAL_MAX = 0x400C
@@ -1070,28 +1072,37 @@ def patch_live_device(device_id: str, fields: dict[str, Any], *, sticky: bool = 
         return None
     now = time.time()
     with _live_lock:
-        payload = dict(fields)
-        payload["_patched_at"] = now if sticky else 0
+        payload = {key: value for key, value in fields.items() if key not in ("_patched_at", "_sticky_keys")}
+        if not payload:
+            return None
         for row in _live_devices:
             if str(row.get("id") or "") != device_id:
                 continue
-            if not sticky:
+            if sticky:
+                sticky_keys = list(payload.keys())
+                payload["_patched_at"] = now
+                payload["_sticky_keys"] = sticky_keys
+            else:
                 patched_at = float(row.get("_patched_at") or 0)
+                sticky_keys = {str(key) for key in (row.get("_sticky_keys") or [])}
                 if patched_at > 0 and (now - patched_at) < STICKY_HOLD:
-                    conflict = False
-                    for key, val in payload.items():
-                        if key == "_patched_at":
-                            continue
-                        if key in row and row[key] != val:
-                            conflict = True
-                            break
-                    if conflict:
+                    for key in list(payload.keys()):
+                        if key in sticky_keys and key in row and row[key] != payload[key]:
+                            payload.pop(key, None)
+                    if not payload:
                         return dict(row)
+                    row.update(payload)
+                    return dict(row)
+                payload["_patched_at"] = 0
+                payload["_sticky_keys"] = []
             row.update(payload)
             return dict(row)
-        row = {"id": device_id, **payload}
-        _live_devices.append(row)
-        return dict(row)
+        seeded = {"id": device_id, **payload}
+        if sticky:
+            seeded["_patched_at"] = now
+            seeded["_sticky_keys"] = [key for key in payload.keys()]
+        _live_devices.append(seeded)
+        return dict(seeded)
 
 
 def refresh_live_devices(timeout: float = 5.0) -> list[dict[str, Any]]:
@@ -1464,6 +1475,15 @@ def parse_attribute_event(data: Any) -> tuple[int, str, Any] | None:
         value = data[2]
     else:
         return None
+    if isinstance(data, dict) and path == "":
+        try:
+            endpoint = int(data.get("endpoint") or data.get("endpoint_id") or 0)
+            cluster = int(data.get("cluster") or data.get("cluster_id") or 0)
+            attr = int(data.get("attribute") or data.get("attribute_id") or 0)
+        except (TypeError, ValueError):
+            endpoint = cluster = attr = 0
+        if endpoint > 0:
+            path = f"{endpoint}/{cluster}/{attr}"
     if node_id <= 0 or path == "":
         return None
     return node_id, path, value
@@ -1486,6 +1506,112 @@ def attr_path_parts(path: str) -> tuple[int, int, int] | None:
     return None
 
 
+def event_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    if isinstance(value, dict):
+        for key in ("value", "Value", "current_level", "CurrentLevel", 0, "0"):
+            if key in value:
+                found = event_number(value[key])
+                if found is not None:
+                    return found
+        return None
+    if isinstance(value, (list, tuple)) and value:
+        return event_number(value[0])
+    return None
+
+
+def live_device_snapshot(device_id: str) -> dict[str, Any]:
+    with _live_lock:
+        for row in _live_devices:
+            if str(row.get("id") or "") == device_id:
+                return dict(row)
+    return {"id": device_id}
+
+
+def color_hex_from_row(row: dict[str, Any]) -> str | None:
+    mode_raw = row.get("_color_mode")
+    try:
+        mode = int(mode_raw) if mode_raw is not None else None
+    except (TypeError, ValueError):
+        mode = None
+    hue = row.get("_hue_254")
+    sat = row.get("_sat_254")
+    if hue is None and row.get("hue") is not None:
+        try:
+            hue = float(row["hue"]) * 254 / 360
+        except (TypeError, ValueError):
+            hue = None
+    if sat is None and row.get("saturation") is not None:
+        try:
+            sat = float(row["saturation"]) * 254 / 100
+        except (TypeError, ValueError):
+            sat = None
+    x = row.get("_color_x")
+    y = row.get("_color_y")
+    mireds = row.get("_mireds")
+    kelvin: int | None = None
+    if mireds is not None:
+        kelvin = mireds_to_kelvin(mireds)
+    elif row.get("color_temp") is not None:
+        try:
+            kelvin = int(row["color_temp"])
+        except (TypeError, ValueError):
+            kelvin = None
+    if mode in (0, 3) and hue is not None and sat is not None:
+        return hs_to_hex(hue, sat)
+    if mode == 1 and x is not None and y is not None:
+        return xy_to_hex(x, y)
+    if mode == 2 and kelvin is not None:
+        return kelvin_to_hex(kelvin)
+    if hue is not None and sat is not None:
+        return hs_to_hex(hue, sat)
+    if x is not None and y is not None:
+        return xy_to_hex(x, y)
+    if kelvin is not None:
+        return kelvin_to_hex(kelvin)
+    return None
+
+
+def apply_color_attribute(device_id: str, attr: int, value: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    number = event_number(value)
+    if attr == ATTR_CURRENT_HUE and number is not None:
+        fields["_hue_254"] = number
+        fields["hue"] = clamp_int(number * 360 / 254, 0, 360)
+    elif attr == ATTR_ENHANCED_CURRENT_HUE and number is not None:
+        hue_254 = number / 256.0
+        fields["_hue_254"] = hue_254
+        fields["hue"] = clamp_int(hue_254 * 360 / 254, 0, 360)
+    elif attr == ATTR_CURRENT_SATURATION and number is not None:
+        fields["_sat_254"] = number
+        fields["saturation"] = clamp_int(number * 100 / 254, 0, 100)
+    elif attr == ATTR_CURRENT_X and number is not None:
+        fields["_color_x"] = number
+    elif attr == ATTR_CURRENT_Y and number is not None:
+        fields["_color_y"] = number
+    elif attr == ATTR_COLOR_TEMP_MIREDS and number is not None:
+        fields["_mireds"] = number
+        fields["color_temp"] = mireds_to_kelvin(number)
+    elif attr in (ATTR_COLOR_MODE, ATTR_ENHANCED_COLOR_MODE) and number is not None:
+        fields["_color_mode"] = int(number)
+    if not fields:
+        return fields
+    merged = live_device_snapshot(device_id)
+    merged.update(fields)
+    hex_s = color_hex_from_row(merged)
+    if hex_s:
+        fields["color_hex"] = hex_s
+    return fields
+
+
 def apply_attribute_event(data: Any) -> None:
     parsed = parse_attribute_event(data)
     if parsed is None:
@@ -1500,13 +1626,14 @@ def apply_attribute_event(data: Any) -> None:
     if cluster == ON_OFF and attr == ATTR_ON_OFF:
         fields["on"] = attr_bool(value)
     elif cluster == LEVEL_CONTROL and attr == ATTR_CURRENT_LEVEL:
-        try:
-            level = int(value if not isinstance(value, dict) else value.get("value") or 0)
-        except (TypeError, ValueError):
-            level = 0
+        level = event_number(value)
+        if level is None:
+            return
         fields["brightness"] = max(0, min(100, int(round(level * 100 / 254)))) if level else 0
         if level > 0:
             fields["on"] = True
+    elif cluster == COLOR_CONTROL:
+        fields = apply_color_attribute(device_id, attr, value)
     if fields:
         patch_live_device(device_id, fields)
 

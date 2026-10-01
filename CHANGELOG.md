@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.10] - 2026-10-01
+
+### Fixed
+- Home brightness and colour tiles now follow Apple Home and the Hue app. The Matter agent (v12) applies live Level Control and Color Control events (HS, XY, colour temperature), not only On/Off. A panel On/Off click no longer blocks the brightness slider from those apps for a few seconds. Settings → Panel updates restarts the agent; do not pair Hue again.
+
 ## [4.0.9] - 2026-10-01
 
 ### Fixed

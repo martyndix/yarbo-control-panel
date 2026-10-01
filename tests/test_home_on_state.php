@@ -69,6 +69,18 @@ $kept = YarboHome::overlayDeviceStates(
     []
 );
 assert_true(($kept[0]['on'] ?? false) === true, 'empty live state must keep cached On/Off');
+$colourLive = YarboHome::overlayDeviceStates(
+    [['id' => '1:2', 'name' => 'Lamp', 'on' => true, 'brightness' => 20, 'color_hex' => '#ff0000']],
+    [['id' => '1:2', 'on' => true, 'brightness' => 55, 'color_hex' => '#00ff00', 'color_temp' => 2700]]
+);
+assert_true(($colourLive[0]['brightness'] ?? 0) === 55, 'overlay must copy live brightness');
+assert_true(($colourLive[0]['color_hex'] ?? '') === '#00ff00', 'overlay must copy live colour');
+assert_true(($colourLive[0]['color_temp'] ?? 0) === 2700, 'overlay must copy live kelvin');
+$keepHex = YarboHome::overlayDeviceStates(
+    [['id' => '1:2', 'name' => 'Lamp', 'on' => true, 'color_hex' => '#112233']],
+    [['id' => '1:2', 'on' => true, 'color_hex' => '']]
+);
+assert_true(($keepHex[0]['color_hex'] ?? '') === '#112233', 'empty live colour must not wipe the tile');
 
 $root = sys_get_temp_dir() . '/yarbo-home-on-' . bin2hex(random_bytes(3));
 mkdir($root . '/data/matter-server', 0775, true);
@@ -258,5 +270,7 @@ assert_true(
     'colour picker must not treat every light as colourable'
 );
 assert_true(str_contains($js, 'class="home-kelvin"'), 'colour-temperature slider must be distinct from brightness');
+assert_true(str_contains($js, 'data-home-kelvin'), 'Home poll must be able to patch the kelvin slider');
+assert_true(str_contains($js, 'if (extras.color_temp != null)'), 'Apple Home colour temperature must update the tile');
 
 echo "ok\n";

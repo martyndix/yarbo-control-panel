@@ -1470,9 +1470,15 @@ final class YarboHome
                 if (array_key_exists('available', $live)) {
                     $device['available'] = (bool) $live['available'];
                 }
-                foreach (['color_hex', 'hue', 'saturation', 'color_temp'] as $key) {
-                    if (array_key_exists($key, $live)) {
+                foreach (['hue', 'saturation', 'color_temp'] as $key) {
+                    if (array_key_exists($key, $live) && $live[$key] !== null && $live[$key] !== '') {
                         $device[$key] = $live[$key];
+                    }
+                }
+                if (array_key_exists('color_hex', $live)) {
+                    $hex = trim((string) ($live['color_hex'] ?? ''));
+                    if ($hex !== '') {
+                        $device['color_hex'] = $hex;
                     }
                 }
             }

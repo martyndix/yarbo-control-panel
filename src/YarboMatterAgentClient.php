@@ -6,7 +6,7 @@ namespace Yarbo;
 
 final class YarboMatterAgentClient
 {
-    public const MIN_VERSION = 11;
+    public const MIN_VERSION = 12;
 
     private static bool $spawnAttempted = false;
 

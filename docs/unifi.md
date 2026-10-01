@@ -72,4 +72,4 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 ## Rollback
 
-This is panel **4.0.9**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+This is panel **4.0.10**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.

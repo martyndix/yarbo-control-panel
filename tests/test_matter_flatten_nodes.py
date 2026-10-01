@@ -168,7 +168,7 @@ def main() -> int:
     if not seeded or seeded[0].get("id") != "1:2" or seeded[0].get("on") is not True:
         raise SystemExit(f"event on empty live list {seeded}")
 
-    agent._live_devices = [{"id": "1:2", "on": True, "_patched_at": __import__("time").time()}]
+    agent._live_devices = [{"id": "1:2", "on": True, "_patched_at": __import__("time").time(), "_sticky_keys": ["on"]}]
     agent.apply_attribute_event([1, "2/6/0", False])
     held = agent.current_live_devices()
     if not held or held[0].get("on") is not True:
@@ -185,6 +185,40 @@ def main() -> int:
     kept = agent.current_live_devices()
     if not kept or kept[0].get("on") is not True:
         raise SystemExit(f"sticky command patch lost {kept}")
+
+    agent._live_devices = [{"id": "1:2", "on": True, "brightness": 20}]
+    agent.apply_attribute_event([1, "2/8/0", 127])
+    dimmed = agent.current_live_devices()
+    if not dimmed or dimmed[0].get("brightness") != 50:
+        raise SystemExit(f"CurrentLevel event did not update brightness {dimmed}")
+
+    agent._live_devices = [{"id": "1:2", "on": True, "brightness": 20}]
+    agent.apply_attribute_event({"node_id": 1, "endpoint": 2, "cluster": 8, "attribute": 0, "value": {"value": 254}})
+    full = agent.current_live_devices()
+    if not full or full[0].get("brightness") != 100:
+        raise SystemExit(f"wrapped CurrentLevel event {full}")
+
+    agent._live_devices = [{"id": "1:2", "on": True, "brightness": 20, "_patched_at": __import__("time").time(), "_sticky_keys": ["on"]}]
+    agent.apply_attribute_event([1, "2/8/0", 127])
+    during_on = agent.current_live_devices()
+    if not during_on or during_on[0].get("on") is not True or during_on[0].get("brightness") != 50:
+        raise SystemExit(f"sticky On must still take Apple Home brightness {during_on}")
+
+    agent._live_devices = [{"id": "1:2", "on": True, "color_hex": "#000000"}]
+    agent.apply_attribute_event([1, "2/768/0", 0])
+    agent.apply_attribute_event([1, "2/768/1", 254])
+    hs = agent.current_live_devices()
+    if not hs or str(hs[0].get("color_hex") or "").lower() != "#ff0000":
+        raise SystemExit(f"HS colour event {hs}")
+
+    agent._live_devices = [{"id": "1:2", "on": True, "color_hex": "#000000"}]
+    agent.apply_attribute_event([1, "2/768/8", 1])
+    agent.apply_attribute_event([1, "2/768/3", 19660])
+    agent.apply_attribute_event([1, "2/768/4", 19660])
+    xy = agent.current_live_devices()
+    hex_s = str((xy[0] if xy else {}).get("color_hex") or "")
+    if not hex_s.startswith("#") or hex_s.lower() == "#000000":
+        raise SystemExit(f"XY colour event {xy}")
 
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
