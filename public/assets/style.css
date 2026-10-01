@@ -3809,7 +3809,7 @@ body.home-is-reordering {
 
 .unifi-pick-rows {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
     gap: 0.2rem 0.85rem;
 }
 
@@ -3841,6 +3841,9 @@ body.home-is-reordering {
     flex: 1 1 auto;
     min-width: 0;
     font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .unifi-pick-meta {
