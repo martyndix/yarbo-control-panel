@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -47,6 +48,8 @@ class FakeMatterServer:
         self.conn: socket.socket | None = None
         self.listen_conn: socket.socket | None = None
         self.cmd_conn: socket.socket | None = None
+        self.poll_conn: socket.socket | None = None
+        self.light_on = False
         self._conns: list[socket.socket] = []
         self._sock = socket.socket()
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -56,6 +59,11 @@ class FakeMatterServer:
         self._stop = threading.Event()
         self._send_lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def current_nodes(self) -> list[dict]:
+        nodes = copy.deepcopy(SAMPLE_NODES)
+        nodes[0]["attributes"]["2/6/0"] = self.light_on
+        return nodes
 
     def start(self) -> None:
         self._thread.start()
@@ -151,7 +159,28 @@ class FakeMatterServer:
                     continue
                 if command == "device_command":
                     self.cmd_conn = conn
-                self._send(conn, {"message_id": msg.get("message_id"), "result": SAMPLE_NODES if command == "get_nodes" else None})
+                    name = str((msg.get("args") or {}).get("command_name") or "")
+                    if name == "On":
+                        self.light_on = True
+                    elif name == "Off":
+                        self.light_on = False
+                if command == "read_attribute":
+                    self.poll_conn = conn
+                    paths = list((msg.get("args") or {}).get("attribute_path") or [])
+                    result = {}
+                    for path in paths:
+                        path_s = str(path)
+                        if path_s.endswith("/6/0"):
+                            result[path_s] = self.light_on
+                        elif path_s.endswith("/8/0"):
+                            result[path_s] = 80
+                    self._send(conn, {"message_id": msg.get("message_id"), "result": result})
+                    continue
+                if command == "get_nodes":
+                    self.poll_conn = self.poll_conn or conn
+                    self._send(conn, {"message_id": msg.get("message_id"), "result": self.current_nodes()})
+                    continue
+                self._send(conn, {"message_id": msg.get("message_id"), "result": None})
         except (TimeoutError, socket.timeout, OSError, struct.error):
             return
         finally:
@@ -166,7 +195,7 @@ class FakeMatterServer:
         if self._stop.is_set():
             return
         try:
-            self._send(conn, {"message_id": msg.get("message_id"), "result": SAMPLE_NODES})
+            self._send(conn, {"message_id": msg.get("message_id"), "result": self.current_nodes()})
         except OSError:
             return
 
@@ -288,11 +317,10 @@ def main() -> int:
     )
     try:
         ping = wait_ping()
-        assert ping.get("version") == 10, ping
+        assert ping.get("version") == 15, ping
         time.sleep(0.4)
         started = time.time()
         result = post({"op": "command", "id": "1:2", "action": "on"}, timeout=3.0)
-        elapsed = time.time() - started
         elapsed = time.time() - started
         assert result.get("ok") is True, result
         assert result.get("on") is True, result
@@ -306,20 +334,28 @@ def main() -> int:
 
         row = wait_device("1:2")
         assert row.get("on") is True, row
-        deadline = time.time() + 8.0
+        # Sticky hold is 4s and the listen dump is 6s. After both, poll must
+        # still show On (website → light), then Apple Home Off via OnOff poll.
+        time.sleep(7.0)
+        row = wait_device("1:2")
+        assert row.get("on") is True, f"poll/dump snapped the tile off after website On {row}"
+        fake.light_on = False
+        deadline = time.time() + 10.0
         saw_off = False
         while time.time() < deadline:
-            try:
-                fake.emit_updated(1, "2/6/0", False)
-            except AssertionError:
-                pass
             row = wait_device("1:2", timeout=0.4)
             if row.get("on") is False:
                 saw_off = True
                 break
             time.sleep(0.2)
-        assert saw_off, f"Apple Home Off event did not apply: {post({'op': 'states'})}"
-        print("ok: On/Off used a command socket; Apple Home event applied")
+        assert saw_off, f"Apple Home Off via OnOff poll did not apply: {post({'op': 'states'})}"
+        onoff_paths = []
+        for cmd in fake.commands:
+            if cmd.get("command") != "read_attribute":
+                continue
+            onoff_paths.extend(str(p) for p in (cmd.get("args") or {}).get("attribute_path") or [])
+        assert any(path.endswith("/6/0") for path in onoff_paths), fake.commands
+        print("ok: website On used cmd socket; Apple Home Off reached the tile via poll")
         return 0
     except Exception:
         try:

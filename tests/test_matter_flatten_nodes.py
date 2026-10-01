@@ -250,13 +250,17 @@ def main() -> int:
             paths = list((args or {}).get("attribute_path") or [])
             result = {}
             for path in paths:
-                if path.endswith("/8/0"):
+                if path.endswith("/6/0"):
+                    result[path] = True
+                elif path.endswith("/8/0"):
                     result[path] = 200
                 elif path.endswith("/768/0"):
                     result[path] = 0
                 elif path.endswith("/768/1"):
                     result[path] = 254
             return {"ok": True, "result": result}
+        if command == "get_nodes":
+            return {"ok": True, "result": [hue_bridge(1)]}
         return {"ok": False, "error": "no"}
 
     agent._live_devices = [
@@ -265,14 +269,99 @@ def main() -> int:
     agent.matter_rpc = fake_rpc
     agent.poll_light_attributes()
     polled = agent.current_live_devices()
+    on_paths = []
+    for command, args, channel in calls:
+        if command == "read_attribute" and channel == "poll":
+            on_paths.extend(list((args or {}).get("attribute_path") or []))
     if not calls or calls[0][0] != "read_attribute" or calls[0][2] != "poll":
         raise SystemExit(f"poll did not read on poll channel {calls}")
-    if not polled or polled[0].get("on") is not False:
-        raise SystemExit(f"poll must not mark Off Hue lights On {polled}")
+    if not any(str(path).endswith("/6/0") for path in on_paths):
+        raise SystemExit(f"poll did not read OnOff {on_paths}")
+    if not polled or polled[0].get("on") is not True:
+        raise SystemExit(f"Apple Home OnOff poll did not turn the tile on {polled}")
     if int(polled[0].get("brightness") or 0) != 79:
         raise SystemExit(f"poll brightness {polled}")
     if str(polled[0].get("color_hex") or "").lower() != "#ff0000":
         raise SystemExit(f"poll colour {polled}")
+
+    calls.clear()
+
+    def fake_rpc_off(command, args=None, timeout=20.0, channel="cmd", listen=True):
+        calls.append((command, args, channel))
+        if command == "read_attribute":
+            paths = list((args or {}).get("attribute_path") or [])
+            result = {path: False if str(path).endswith("/6/0") else 80 for path in paths if str(path).endswith("/6/0") or str(path).endswith("/8/0")}
+            return {"ok": True, "result": result}
+        return {"ok": False, "error": "no"}
+
+    agent.matter_rpc = fake_rpc_off
+    agent._live_devices = [
+        {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": True, "brightness": 50}
+    ]
+    agent.poll_light_attributes()
+    offed = agent.current_live_devices()
+    if not offed or offed[0].get("on") is not False:
+        raise SystemExit(f"Apple Home Off via OnOff poll {offed}")
+
+    calls.clear()
+    empty_nodes = []
+
+    def fake_rpc_empty_live(command, args=None, timeout=20.0, channel="cmd", listen=True):
+        calls.append((command, args, channel))
+        if command == "get_nodes":
+            return {"ok": True, "result": [hue_bridge(1)]}
+        if command == "read_attribute":
+            paths = list((args or {}).get("attribute_path") or [])
+            return {"ok": True, "result": {path: True if str(path).endswith("/6/0") else 100 for path in paths}}
+        return {"ok": False, "error": "no"}
+
+    agent._live_devices = []
+    agent.matter_rpc = fake_rpc_empty_live
+    agent.poll_light_attributes()
+    if not any(command == "get_nodes" and channel == "poll" for command, _args, channel in calls):
+        raise SystemExit(f"empty live list must get_nodes on poll channel {calls}")
+    filled = agent.current_live_devices()
+    if not filled or filled[0].get("id") != "1:2":
+        raise SystemExit(f"empty live poll did not populate {filled}")
+
+    calls.clear()
+    agent._command_busy = 1
+    agent._live_devices = [
+        {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": False}
+    ]
+    agent.poll_light_attributes()
+    if calls:
+        raise SystemExit(f"poll must skip while a website command is in flight {calls}")
+    agent._command_busy = 0
+
+    agent._live_devices = [{"id": "1:2", "on": False, "brightness": 10}]
+    agent.apply_read_attributes(1, [["2/6/0", True], ["2/8/0", 127]])
+    listed = agent.current_live_devices()
+    if not listed or listed[0].get("on") is not True or int(listed[0].get("brightness") or 0) != 50:
+        raise SystemExit(f"list read_attribute {listed}")
+
+    cmd_calls: list[tuple] = []
+    busy_during_send: list[bool] = []
+
+    def fake_cmd_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True):
+        cmd_calls.append((command, channel))
+        busy_during_send.append(agent.command_in_flight())
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = fake_cmd_rpc
+    agent._live_devices = [{"id": "1:2", "on": False}]
+    sent = agent.dispatch({"op": "command", "id": "1:2", "action": "on"})
+    if not sent.get("ok") or sent.get("on") is not True:
+        raise SystemExit(f"website On {sent}")
+    if any(channel == "poll" for _command, channel in cmd_calls):
+        raise SystemExit(f"website On used poll channel {cmd_calls}")
+    if not any(command == "device_command" and channel == "cmd" for command, channel in cmd_calls):
+        raise SystemExit(f"website On did not use cmd channel {cmd_calls}")
+    if not any(busy_during_send):
+        raise SystemExit("website On must mark command in flight so poll pauses")
+    held = agent.current_live_devices()
+    if not held or held[0].get("on") is not True:
+        raise SystemExit(f"website On sticky {held}")
 
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0

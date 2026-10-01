@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 14
+AGENT_VERSION = 15
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
@@ -124,6 +124,10 @@ _preferred_shared = False
 _live_lock = threading.Lock()
 _live_devices: list[dict[str, Any]] = []
 _state_poll_started = False
+_command_busy = 0
+_command_busy_lock = threading.Lock()
+_listen_starting = False
+_listen_start_lock = threading.Lock()
 
 
 def attr_key(endpoint: int, cluster: int, attr: int) -> str:
@@ -825,14 +829,35 @@ def node_unavailable(result: dict[str, Any]) -> bool:
     return "not (yet) available" in err or "is not available" in err
 
 
+def begin_command() -> None:
+    global _command_busy
+    with _command_busy_lock:
+        _command_busy += 1
+
+
+def end_command() -> None:
+    global _command_busy
+    with _command_busy_lock:
+        _command_busy = max(0, _command_busy - 1)
+
+
+def command_in_flight() -> bool:
+    with _command_busy_lock:
+        return _command_busy > 0
+
+
 def command_with_reconnect(node_id: int, send) -> dict[str, Any]:
-    result = send()
-    if result.get("ok") or not node_unavailable(result):
-        return result
-    start_background_recover()
-    _recover_done.wait(timeout=45.0)
-    wait_node_available(node_id, 5.0)
-    return send()
+    begin_command()
+    try:
+        result = send()
+        if result.get("ok") or not node_unavailable(result):
+            return result
+        start_background_recover()
+        _recover_done.wait(timeout=45.0)
+        wait_node_available(node_id, 5.0)
+        return send()
+    finally:
+        end_command()
 
 
 def docker_data_mount() -> str:
@@ -1136,6 +1161,22 @@ COLOR_POLL_ATTRS = (
 
 
 def apply_read_attributes(node_id: int, values: Any) -> None:
+    if isinstance(values, dict) and "result" in values and not any(
+        "/" in str(key) for key in values if key != "result"
+    ):
+        values = values.get("result")
+    if isinstance(values, list):
+        for item in values:
+            if isinstance(item, dict):
+                event = dict(item)
+                event.setdefault("node_id", node_id)
+                apply_attribute_event(event)
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                if len(item) >= 3:
+                    apply_attribute_event(item)
+                else:
+                    apply_attribute_event([node_id, item[0], item[1]])
+        return
     if not isinstance(values, dict):
         return
     for path, value in values.items():
@@ -1170,17 +1211,37 @@ def light_poll_groups() -> dict[int, list[int]]:
     return groups
 
 
+def refresh_live_from_nodes() -> bool:
+    rpc = matter_rpc("get_nodes", timeout=15.0, channel=POLL_CHANNEL, listen=False)
+    if not rpc.get("ok"):
+        return False
+    devices = flatten_nodes(nodes_from_result(rpc.get("result")))
+    if not devices:
+        return False
+    remember_live_devices(devices)
+    return True
+
+
 def poll_light_attributes() -> None:
+    if command_in_flight():
+        return
     groups = light_poll_groups()
     if not groups:
-        return
+        if not refresh_live_from_nodes():
+            return
+        groups = light_poll_groups()
+        if not groups:
+            return
     any_ok = False
     for node_id, endpoints in groups.items():
+        if command_in_flight():
+            return
+        on_paths = [attr_key(endpoint, ON_OFF, ATTR_ON_OFF) for endpoint in endpoints]
         level_paths = [attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) for endpoint in endpoints]
         color_paths: list[str] = []
         for endpoint in endpoints:
             color_paths.extend(attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS)
-        for paths in (level_paths, color_paths):
+        for paths in (on_paths, level_paths, color_paths):
             if not paths:
                 continue
             rpc = matter_rpc(
@@ -1212,11 +1273,7 @@ def poll_light_attributes() -> None:
             any_ok = True
     if any_ok:
         return
-    rpc = matter_rpc("get_nodes", timeout=15.0, channel=POLL_CHANNEL, listen=False)
-    if not rpc.get("ok"):
-        return
-    devices = flatten_nodes(nodes_from_result(rpc.get("result")))
-    remember_live_devices(devices)
+    refresh_live_from_nodes()
 
 
 def start_state_poll() -> None:
@@ -1228,11 +1285,12 @@ def start_state_poll() -> None:
     def loop() -> None:
         while True:
             try:
-                ensure_listening()
+                # Listen dump can take tens of seconds on a Hue Bridge. Do not
+                # wait for it here or Apple Home On/Off never gets polled.
+                kick_listening()
                 poll_light_attributes()
             except Exception as exc:  # noqa: BLE001
                 print(f"matter state poll failed: {exc}", flush=True)
-                reset_ws(LISTEN_CHANNEL)
                 reset_ws(POLL_CHANNEL)
             time.sleep(3.0)
 
@@ -1472,16 +1530,28 @@ def start_recv_loop(channel: str) -> None:
 
 
 def kick_listening() -> None:
+    global _listen_starting
     if _listening and _ws_slots.get(LISTEN_CHANNEL) is not None:
         return
+    with _listen_start_lock:
+        if _listening and _ws_slots.get(LISTEN_CHANNEL) is not None:
+            return
+        if _listen_starting:
+            return
+        _listen_starting = True
     threading.Thread(target=_listen_worker, daemon=True).start()
 
 
 def _listen_worker() -> None:
+    global _listen_starting
     try:
         ensure_listening()
     except Exception as exc:  # noqa: BLE001
         print(f"matter listen failed: {exc}", flush=True)
+        reset_ws(LISTEN_CHANNEL)
+    finally:
+        with _listen_start_lock:
+            _listen_starting = False
 
 
 def ensure_listening() -> None:

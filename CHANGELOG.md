@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.18] - 2026-10-01
+
+### Fixed
+- Apple Home / Hue app On/Off, brightness, and colour pull back onto the website again, without blocking website clicks. The Matter agent (v15) reads On/Off on the same poll as brightness (Hue often does not push those events), fills the live list from `get_nodes` if listen is empty, does not wait for the Hue `start_listening` dump before polling, and pauses that poll while a panel command is in flight. Settings → Panel updates restarts the agent; do not pair Hue again.
+
 ## [4.0.17] - 2026-10-01
 
 ### Fixed
