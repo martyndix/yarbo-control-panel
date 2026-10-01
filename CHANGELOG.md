@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-10-01
+
+### Fixed
+- Settings → **Save** now persists module ticks. Broker IP, serial, email, and URL fields on other panes are `display:none` while Modules is open, so the browser was blocking submit with no error. The form uses `novalidate`; empty broker/serial still fail in JavaScript (and jump to **Yarbo**) and on the server.
+
 ## [4.0.0] - 2026-10-01
 
 ### Added

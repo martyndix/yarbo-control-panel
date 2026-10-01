@@ -690,7 +690,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         </div>
 
         <div id="settings-page" class="settings-page hidden" role="region" aria-labelledby="settings-title">
-                <form id="settings-form" class="settings-form">
+                <form id="settings-form" class="settings-form" method="post" action="/api/settings.php" novalidate>
                     <div class="settings-page-toolbar">
                         <div>
                             <h2 id="settings-title">Settings</h2>

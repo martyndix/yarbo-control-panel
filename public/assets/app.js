@@ -4292,8 +4292,9 @@ function applyCompanionSettingsVisibility() {
     const unifiOn = Boolean(els.settingsModuleUnifi?.checked);
     document.getElementById('settings-yarbo-section')?.classList.toggle('hidden', !yarboOn);
     document.querySelector('[data-settings-nav="yarbo"]')?.classList.toggle('hidden', !yarboOn);
-    if (els.settingsHost) els.settingsHost.required = yarboOn;
-    if (els.settingsSerial) els.settingsSerial.required = yarboOn;
+    // Never set native required on these: they live on the Yarbo pane, which is
+    // display:none while Settings → Modules is open. HTML5 then blocks Save with
+    // no visible bubble, so ticks look saved until refresh. JS/PHP still check.
     document.getElementById('settings-powerwall-section')?.classList.toggle(
         'hidden',
         !powerwallOn,
@@ -7148,6 +7149,7 @@ async function saveSettings(event) {
     const dataSource = els.settingsDataSource?.value || 'auto';
     const yarboOn = Boolean(els.settingsModuleYarbo?.checked);
     if (yarboOn && (!brokerHost || !serial)) {
+        showSettingsPane('yarbo');
         setSettingsError('Broker IP and serial number are required.');
         return;
     }
@@ -8344,7 +8346,10 @@ window.addEventListener('hashchange', () => {
         if (mailPageOpen) closeMailPage({ updateHash: false });
     }
 });
-els.settingsForm?.addEventListener('submit', saveSettings);
+if (els.settingsForm) {
+    els.settingsForm.noValidate = true;
+    els.settingsForm.addEventListener('submit', saveSettings);
+}
 els.settingsConnectionTest?.addEventListener('click', (e) => testLocalConnection(e.currentTarget));
 els.settingsCloudTest?.addEventListener('click', (e) => testCloudConnection(e.currentTarget));
 els.settingsVestaboardEnabled?.addEventListener('change', () => {
