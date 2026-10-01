@@ -220,6 +220,50 @@ def main() -> int:
     if not hex_s.startswith("#") or hex_s.lower() == "#000000":
         raise SystemExit(f"XY colour event {xy}")
 
+    agent._live_devices = [
+        {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": True, "brightness": 10, "color_hex": "#000000"}
+    ]
+    agent.apply_read_attributes(1, {"2/8/0": 127, "2/768/0": 0, "2/768/1": 254})
+    pulled = agent.current_live_devices()
+    if not pulled or pulled[0].get("brightness") != 50:
+        raise SystemExit(f"read_attribute brightness {pulled}")
+    if str(pulled[0].get("color_hex") or "").lower() != "#ff0000":
+        raise SystemExit(f"read_attribute colour {pulled}")
+
+    groups = agent.light_poll_groups()
+    if groups.get(1) != [2]:
+        raise SystemExit(f"light poll groups {groups}")
+
+    calls: list[tuple] = []
+
+    def fake_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True):
+        calls.append((command, args, channel))
+        if command == "read_attribute":
+            paths = list((args or {}).get("attribute_path") or [])
+            result = {}
+            for path in paths:
+                if path.endswith("/8/0"):
+                    result[path] = 200
+                elif path.endswith("/768/0"):
+                    result[path] = 0
+                elif path.endswith("/768/1"):
+                    result[path] = 254
+            return {"ok": True, "result": result}
+        return {"ok": False, "error": "no"}
+
+    agent._live_devices = [
+        {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": True, "brightness": 5, "color_hex": "#111111"}
+    ]
+    agent.matter_rpc = fake_rpc
+    agent.poll_light_attributes()
+    polled = agent.current_live_devices()
+    if not calls or calls[0][0] != "read_attribute" or calls[0][2] != "poll":
+        raise SystemExit(f"poll did not read on poll channel {calls}")
+    if not polled or int(polled[0].get("brightness") or 0) != 79:
+        raise SystemExit(f"poll brightness {polled}")
+    if str(polled[0].get("color_hex") or "").lower() != "#ff0000":
+        raise SystemExit(f"poll colour {polled}")
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 

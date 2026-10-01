@@ -41,10 +41,11 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 12
+AGENT_VERSION = 13
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
+POLL_CHANNEL = "poll"
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -93,12 +94,24 @@ COLOR_CAP_HS = 1 << 0
 COLOR_CAP_XY = 1 << 3
 COLOR_CAP_CT = 1 << 4
 
-_ws_slots: dict[str, MatterWs | None] = {CMD_CHANNEL: None, LISTEN_CHANNEL: None}
-_ws_send_locks = {CMD_CHANNEL: threading.Lock(), LISTEN_CHANNEL: threading.Lock()}
-_ws_connect_locks = {CMD_CHANNEL: threading.Lock(), LISTEN_CHANNEL: threading.Lock()}
+_ws_slots: dict[str, MatterWs | None] = {
+    CMD_CHANNEL: None,
+    LISTEN_CHANNEL: None,
+    POLL_CHANNEL: None,
+}
+_ws_send_locks = {
+    CMD_CHANNEL: threading.Lock(),
+    LISTEN_CHANNEL: threading.Lock(),
+    POLL_CHANNEL: threading.Lock(),
+}
+_ws_connect_locks = {
+    CMD_CHANNEL: threading.Lock(),
+    LISTEN_CHANNEL: threading.Lock(),
+    POLL_CHANNEL: threading.Lock(),
+}
 _pending: dict[str, dict[str, Any]] = {}
 _pending_lock = threading.Lock()
-_recv_started = {CMD_CHANNEL: False, LISTEN_CHANNEL: False}
+_recv_started = {CMD_CHANNEL: False, LISTEN_CHANNEL: False, POLL_CHANNEL: False}
 _listening = False
 _listen_lock = threading.Lock()
 _start_lock = threading.Lock()
@@ -1110,6 +1123,102 @@ def refresh_live_devices(timeout: float = 5.0) -> list[dict[str, Any]]:
     return current_live_devices()
 
 
+COLOR_POLL_ATTRS = (
+    ATTR_CURRENT_HUE,
+    ATTR_CURRENT_SATURATION,
+    ATTR_CURRENT_X,
+    ATTR_CURRENT_Y,
+    ATTR_COLOR_TEMP_MIREDS,
+    ATTR_COLOR_MODE,
+    ATTR_ENHANCED_CURRENT_HUE,
+    ATTR_ENHANCED_COLOR_MODE,
+)
+
+
+def apply_read_attributes(node_id: int, values: Any) -> None:
+    if not isinstance(values, dict):
+        return
+    for path, value in values.items():
+        apply_attribute_event([node_id, str(path), value])
+
+
+def light_poll_groups() -> dict[int, list[int]]:
+    groups: dict[int, list[int]] = {}
+    for row in current_live_devices():
+        if not isinstance(row, dict):
+            continue
+        kind = str(row.get("kind") or "")
+        if kind in ("switch", "vacuum", "plug", "heater", "sensor", "camera", "door", "hub"):
+            continue
+        try:
+            node_id = int(row.get("node_id") or 0)
+            endpoint = int(row.get("endpoint") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+            endpoint = 0
+        if node_id <= 0 or endpoint <= 0:
+            try:
+                node_s, ep_s = str(row.get("id") or "").split(":", 1)
+                node_id, endpoint = int(node_s), int(ep_s)
+            except (TypeError, ValueError):
+                continue
+        if node_id <= 0 or endpoint <= 0:
+            continue
+        bucket = groups.setdefault(node_id, [])
+        if endpoint not in bucket:
+            bucket.append(endpoint)
+    return groups
+
+
+def poll_light_attributes() -> None:
+    groups = light_poll_groups()
+    if not groups:
+        return
+    any_ok = False
+    for node_id, endpoints in groups.items():
+        level_paths = [attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) for endpoint in endpoints]
+        color_paths: list[str] = []
+        for endpoint in endpoints:
+            color_paths.extend(attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS)
+        for paths in (level_paths, color_paths):
+            if not paths:
+                continue
+            rpc = matter_rpc(
+                "read_attribute",
+                {"node_id": node_id, "attribute_path": paths},
+                timeout=12.0,
+                channel=POLL_CHANNEL,
+                listen=False,
+            )
+            if not rpc.get("ok"):
+                err = str(rpc.get("error") or "").lower()
+                if "timed" in err or "timeout" in err:
+                    continue
+                if paths is color_paths:
+                    for endpoint in endpoints:
+                        one = [attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS]
+                        one_rpc = matter_rpc(
+                            "read_attribute",
+                            {"node_id": node_id, "attribute_path": one},
+                            timeout=6.0,
+                            channel=POLL_CHANNEL,
+                            listen=False,
+                        )
+                        if one_rpc.get("ok"):
+                            apply_read_attributes(node_id, one_rpc.get("result"))
+                            any_ok = True
+                continue
+            apply_read_attributes(node_id, rpc.get("result"))
+            any_ok = True
+    if any_ok:
+        return
+    rpc = matter_rpc("get_nodes", timeout=15.0, channel=POLL_CHANNEL, listen=False)
+    if not rpc.get("ok"):
+        return
+    devices = flatten_nodes(nodes_from_result(rpc.get("result")))
+    remember_live_devices(devices)
+
+
 def start_state_poll() -> None:
     global _state_poll_started
     if _state_poll_started:
@@ -1120,10 +1229,12 @@ def start_state_poll() -> None:
         while True:
             try:
                 ensure_listening()
+                poll_light_attributes()
             except Exception as exc:  # noqa: BLE001
                 print(f"matter state poll failed: {exc}", flush=True)
                 reset_ws(LISTEN_CHANNEL)
-            time.sleep(8.0)
+                reset_ws(POLL_CHANNEL)
+            time.sleep(3.0)
 
     threading.Thread(target=loop, daemon=True).start()
 
@@ -1261,8 +1372,8 @@ def ensure_matter_server() -> str | None:
 
 
 def _channel_name(channel: str | None) -> str:
-    if channel == LISTEN_CHANNEL:
-        return LISTEN_CHANNEL
+    if channel in (LISTEN_CHANNEL, POLL_CHANNEL, CMD_CHANNEL):
+        return str(channel)
     return CMD_CHANNEL
 
 
@@ -1302,7 +1413,7 @@ def fail_pending(error: str, channel: str | None = None) -> None:
 
 def reset_ws(channel: str | None = None) -> None:
     global _listening
-    names = [_channel_name(channel)] if channel else [CMD_CHANNEL, LISTEN_CHANNEL]
+    names = [_channel_name(channel)] if channel else [CMD_CHANNEL, LISTEN_CHANNEL, POLL_CHANNEL]
     if LISTEN_CHANNEL in names:
         _listening = False
     for name in names:

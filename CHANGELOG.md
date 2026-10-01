@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.11] - 2026-10-01
+
+### Fixed
+- Home brightness and colour from Apple Home / the Hue app now pull onto the web tiles. Hue often does not push Level Control or Color Control subscription events (On/Off still does), so the Matter agent (v13) reads those attributes on a separate poll websocket every few seconds and never blocks On/Off/colour commands. Settings → Panel updates restarts the agent; do not pair Hue again.
+
 ## [4.0.10] - 2026-10-01
 
 ### Fixed
