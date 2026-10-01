@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.3] - 2026-10-01
+
+### Fixed
+- Protect **floodlights** now PATCH `isLightForceEnabled` (official Integration API). Sending `lightMode` was rejected with `AJV_PARSE_ERROR` / additional properties.
+- Protect **relays** (UL-Relay outputs) are no longer treated as Access doors. Relays use `POST /relays/{id}/outputs/{outputId}/activate`. Access **door controllers** (UA Hub / Gate Hub) stay on `/developer/devices` and unlock the bound door.
+
 ## [4.0.2] - 2026-10-01
 
 ### Fixed

@@ -73,15 +73,63 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
             'content_type' => 'application/json',
         ];
     }
+    if ($method === 'PATCH' && str_contains($url, '/lights/')) {
+        $decoded = json_decode((string) $body, true);
+        if (!is_array($decoded) || array_key_exists('lightMode', $decoded) || ($decoded['isLightForceEnabled'] ?? null) !== true) {
+            return [
+                'status' => 400,
+                'body' => json_encode([
+                    'error' => "Failed to parse 'request-body'",
+                    'name' => 'AJV_PARSE_ERROR',
+                    'entity' => 'request-body',
+                    'issues' => [['instancePath' => '', 'message' => 'must NOT have additional properties']],
+                ]),
+                'content_type' => 'application/json',
+                'error' => 'bad light',
+            ];
+        }
+        return ['status' => 200, 'body' => '{}', 'content_type' => 'application/json'];
+    }
     if (str_contains($url, '/lights')) {
         return [
             'status' => 200,
-            'body' => json_encode(['data' => [['id' => 'light1', 'name' => 'Flood', 'lightMode' => 'off']]]),
+            'body' => json_encode(['data' => [[
+                'id' => 'light1',
+                'name' => 'Flood',
+                'isLightOn' => false,
+                'isLightForceEnabled' => false,
+                'lightModeSettings' => ['mode' => 'motion'],
+            ]]]),
             'content_type' => 'application/json',
         ];
     }
-    if (str_contains($url, '/sensors') || str_contains($url, '/relays')) {
+    if (str_contains($url, '/sensors')) {
         return ['status' => 200, 'body' => '[]', 'content_type' => 'application/json'];
+    }
+    if ($method === 'POST' && str_contains($url, '/relays/') && str_contains($url, '/activate')) {
+        $decoded = json_decode((string) $body, true);
+        if (($decoded['state'] ?? '') !== 'on') {
+            return ['status' => 400, 'body' => '', 'content_type' => '', 'error' => 'bad relay'];
+        }
+        if (!str_contains($url, '/relays/relay1/outputs/1/activate')) {
+            return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'bad relay path'];
+        }
+        return ['status' => 200, 'body' => '{}', 'content_type' => 'application/json'];
+    }
+    if (str_contains($url, '/relays')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([[
+                'id' => 'relay1',
+                'name' => 'Garage',
+                'type' => 'UL-Relay',
+                'state' => 'CONNECTED',
+                'outputs' => [
+                    ['id' => 1, 'name' => 'Gate', 'state' => 'off'],
+                ],
+            ]]),
+            'content_type' => 'application/json',
+        ];
     }
     if (str_contains($url, '/doors') && $method === 'GET') {
         return [
@@ -124,13 +172,6 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
     if (str_contains($url, '/snapshot')) {
         return ['status' => 200, 'body' => 'JFIF', 'content_type' => 'image/jpeg'];
     }
-    if ($method === 'PATCH' && str_contains($url, '/lights/')) {
-        $decoded = json_decode((string) $body, true);
-        if (($decoded['lightMode'] ?? '') !== 'on') {
-            return ['status' => 400, 'body' => '', 'content_type' => '', 'error' => 'bad light'];
-        }
-        return ['status' => 200, 'body' => '{}', 'content_type' => 'application/json'];
-    }
 
     return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'unexpected ' . $url];
 });
@@ -140,12 +181,12 @@ if (!($probe['ok'] ?? false) || ($probe['counts']['cameras'] ?? 0) !== 1 || ($pr
     fwrite(STDERR, 'probe ' . json_encode($probe) . "\n");
     exit(1);
 }
-if (($probe['counts']['hubs'] ?? 0) !== 1) {
-    fwrite(STDERR, 'hubs ' . json_encode($probe['counts'] ?? []) . "\n");
+if (($probe['counts']['hubs'] ?? 0) !== 1 || ($probe['counts']['relays'] ?? 0) !== 1) {
+    fwrite(STDERR, 'hubs/relays ' . json_encode($probe['counts'] ?? []) . "\n");
     exit(1);
 }
 $probeIds = array_column($probe['devices'] ?? [], 'id');
-if (!in_array('unifi:hub:7483c2773855', $probeIds, true) || !in_array('unifi:sensor:dps-door1', $probeIds, true)) {
+if (!in_array('unifi:hub:7483c2773855', $probeIds, true) || !in_array('unifi:sensor:dps-door1', $probeIds, true) || !in_array('unifi:relay:relay1:1', $probeIds, true)) {
     fwrite(STDERR, 'access extras ' . json_encode($probeIds) . "\n");
     exit(1);
 }
@@ -153,6 +194,37 @@ if (!in_array('unifi:hub:7483c2773855', $probeIds, true) || !in_array('unifi:sen
 $light = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
 if (!($light['ok'] ?? false) || empty($light['on'])) {
     fwrite(STDERR, 'light ' . json_encode($light) . "\n");
+    exit(1);
+}
+$lightPatched = false;
+foreach ($calls as $call) {
+    if (($call[0] ?? '') === 'PATCH' && str_contains((string) ($call[1] ?? ''), '/lights/')) {
+        $decoded = json_decode((string) ($call[3] ?? ''), true);
+        if (($decoded['isLightForceEnabled'] ?? null) === true && !array_key_exists('lightMode', $decoded ?: [])) {
+            $lightPatched = true;
+        }
+        break;
+    }
+}
+if (!$lightPatched) {
+    fwrite(STDERR, "light did not PATCH isLightForceEnabled\n");
+    exit(1);
+}
+
+$relay = $unifi->command(['id' => 'unifi:relay:relay1:1', 'command' => 'on']);
+if (!($relay['ok'] ?? false) || empty($relay['on'])) {
+    fwrite(STDERR, 'relay ' . json_encode($relay) . "\n");
+    exit(1);
+}
+$relayPosted = false;
+foreach ($calls as $call) {
+    if (($call[0] ?? '') === 'POST' && str_contains((string) ($call[1] ?? ''), '/relays/relay1/outputs/1/activate')) {
+        $relayPosted = true;
+        break;
+    }
+}
+if (!$relayPosted) {
+    fwrite(STDERR, "relay did not POST activate\n");
     exit(1);
 }
 

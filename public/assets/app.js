@@ -2501,8 +2501,9 @@ function unifiKindGroup(d) {
     const kind = String(d?.kind || '');
     if (kind === 'camera') return 'cameras';
     if (kind === 'light') return 'lights';
+    if (kind === 'relay') return 'relays';
     if (kind === 'hub') return 'hubs';
-    if (kind === 'door' || kind === 'relay') return 'doors';
+    if (kind === 'door') return 'doors';
     if (kind === 'sensor' && (d.product === 'Door position sensor' || String(d.native_id || '').startsWith('dps-'))) {
         return 'dps';
     }
@@ -2514,8 +2515,9 @@ function unifiKindLabel(d) {
     switch (unifiKindGroup(d)) {
         case 'cameras': return 'Camera';
         case 'lights': return 'Light';
-        case 'hubs': return 'Hub';
-        case 'doors': return d?.kind === 'relay' ? 'Relay' : 'Door';
+        case 'relays': return 'Relay';
+        case 'hubs': return 'Controller';
+        case 'doors': return 'Door';
         case 'dps': return 'Door sensor';
         case 'sensors': return 'Sensor';
         default: return homeKindLabel(d) || 'UniFi';
@@ -2549,12 +2551,13 @@ function renderUnifiHomePicker(data, { replace = false } = {}) {
 
 function unifiPickerHtml(devices) {
     if (!devices.length) {
-        return '<p class="hint">Test the connection to list cameras, lights, sensors, doors, and hubs.</p>';
+        return '<p class="hint">Test the connection to list cameras, lights, relays, sensors, doors, and controllers.</p>';
     }
     const groups = [
         { id: 'cameras', title: 'Cameras' },
         { id: 'lights', title: 'Lights' },
-        { id: 'hubs', title: 'Door hubs' },
+        { id: 'relays', title: 'Relays' },
+        { id: 'hubs', title: 'Door controllers' },
         { id: 'doors', title: 'Doors' },
         { id: 'dps', title: 'Door position sensors' },
         { id: 'sensors', title: 'Sensors' },
@@ -2627,19 +2630,21 @@ function unifiDeviceCardHtml(d) {
             <p class="hint unifi-card-status">${escapeHtml(d.status || '')}</p>
         </article>`;
     }
-    if (kind === 'light') {
+    if (kind === 'light' || kind === 'relay') {
+        const label = kind === 'relay' ? 'Relay' : 'Light';
+        const attr = kind === 'relay' ? 'data-unifi-relay' : 'data-unifi-light';
         return `<article class="home-device${on ? ' is-on' : ''}" data-unifi-id="${escapeHtml(d.id)}">
             <div class="home-device-label">
                 <span class="home-device-dot" aria-hidden="true"></span>
-                <p class="home-device-name">${escapeHtml(d.name || 'Light')}</p>
-                <span class="home-device-kind">Light</span>
+                <p class="home-device-name">${escapeHtml(d.name || label)}</p>
+                <span class="home-device-kind">${label}</span>
             </div>
             <div class="home-device-actions">
-                <button type="button" class="btn btn-secondary btn-compact" data-unifi-light="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
+                <button type="button" class="btn btn-secondary btn-compact" ${attr}="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             </div>
         </article>`;
     }
-    if (kind === 'door' || kind === 'relay' || kind === 'hub') {
+    if (kind === 'door' || kind === 'hub') {
         const bound = kind !== 'hub' || Boolean(d.door_id);
         const gate = d.gate
             ? `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="open">Open</button>
@@ -2649,7 +2654,7 @@ function unifiDeviceCardHtml(d) {
         const unlock = bound
             ? `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="unlock">Unlock</button>`
             : '';
-        const kindLabel = kind === 'hub' ? 'Hub' : (kind === 'relay' ? 'Relay' : 'Door');
+        const kindLabel = kind === 'hub' ? 'Controller' : 'Door';
         return `<article class="home-device${on ? ' is-on' : ''}" data-unifi-id="${escapeHtml(d.id)}">
             <div class="home-device-label">
                 <span class="home-device-dot" aria-hidden="true"></span>
@@ -2691,8 +2696,8 @@ function patchUnifiWrap(wrap, items, htmlFn) {
         if (name && d.name) name.textContent = d.name;
         const status = el.querySelector('.unifi-card-status, .home-device-meta');
         if (status) status.textContent = d.status || '';
-        const lightBtn = el.querySelector('[data-unifi-light]');
-        if (lightBtn) lightBtn.textContent = d.on ? 'Off' : 'On';
+        const toggleBtn = el.querySelector('[data-unifi-light], [data-unifi-relay]');
+        if (toggleBtn) toggleBtn.textContent = d.on ? 'Off' : 'On';
     });
     [...wrap.querySelectorAll('[data-unifi-id]')].forEach((el) => {
         const id = el.getAttribute('data-unifi-id') || '';
@@ -2722,8 +2727,9 @@ function renderUnifiDashboard(data, { replace = false } = {}) {
         }
     }
     patchUnifiWrap(document.getElementById('unifi-lights'), data?.lights || [], unifiDeviceCardHtml);
+    patchUnifiWrap(document.getElementById('unifi-relays'), data?.relays || [], unifiDeviceCardHtml);
     patchUnifiWrap(document.getElementById('unifi-hubs'), data?.hubs || [], unifiDeviceCardHtml);
-    patchUnifiWrap(document.getElementById('unifi-doors'), [...(data?.doors || []), ...(data?.relays || [])], unifiDeviceCardHtml);
+    patchUnifiWrap(document.getElementById('unifi-doors'), data?.doors || [], unifiDeviceCardHtml);
     patchUnifiWrap(document.getElementById('unifi-sensors'), data?.sensors || [], unifiDeviceCardHtml);
     renderUnifiHomePicker(data, { replace });
 }
@@ -2879,13 +2885,13 @@ function homeKindLabel(d) {
             case 'door':
                 return 'Door';
             case 'hub':
-                return 'Hub';
+                return 'Controller';
             case 'sensor':
                 return 'Sensor';
             case 'relay':
                 return 'Relay';
             case 'light':
-                return 'UniFi';
+                return 'Light';
             default:
                 return 'UniFi';
         }
@@ -3562,7 +3568,7 @@ function homeDeviceActionsHtml(d, bright, color) {
         if (kind === 'sensor') {
             return `<div class="home-device-actions"><span class="home-device-meta">${escapeHtml(d.status || '—')}</span></div>`;
         }
-        if (kind === 'door' || kind === 'relay' || kind === 'hub') {
+        if (kind === 'door' || kind === 'hub') {
             const gate = d.gate
                 ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="open">Open</button>
                    <button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="close">Close</button>
@@ -8686,21 +8692,21 @@ els.settingsUnifiDevices?.addEventListener('change', (event) => {
     saveUnifiShowOnHome(input.getAttribute('data-unifi-home') || '', input.checked);
 });
 document.getElementById('unifi-card')?.addEventListener('click', async (event) => {
-    const lightBtn = event.target.closest('[data-unifi-light]');
-    if (lightBtn) {
-        const id = lightBtn.getAttribute('data-unifi-light') || '';
-        const card = lightBtn.closest('[data-unifi-id]');
+    const toggleBtn = event.target.closest('[data-unifi-light], [data-unifi-relay]');
+    if (toggleBtn) {
+        const id = toggleBtn.getAttribute('data-unifi-light') || toggleBtn.getAttribute('data-unifi-relay') || '';
+        const card = toggleBtn.closest('[data-unifi-id]');
         const on = card?.classList.contains('is-on');
-        lightBtn.disabled = true;
+        toggleBtn.disabled = true;
         try {
             const data = await unifiApi({ action: 'command', id, command: on ? 'off' : 'on' });
             if (!data.ok) throw new Error(data.error || 'Failed');
             await loadUnifiDashboard({ silent: true });
             if (lastHub?.modules?.home) loadHomeDashboard();
         } catch (err) {
-            showToast(err.message || 'UniFi light failed', 'error');
+            showToast(err.message || 'UniFi command failed', 'error');
         } finally {
-            lightBtn.disabled = false;
+            toggleBtn.disabled = false;
         }
         return;
     }

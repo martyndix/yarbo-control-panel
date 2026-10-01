@@ -638,11 +638,12 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-            <p class="hint">Protect cameras, lights, and sensors, plus Access doors and hubs. Tick a device below to put it on the Home grid. Credentials stay in Settings → UniFi.</p>
+            <p class="hint">Protect cameras, floodlights, relays, and sensors, plus Access doors and door controllers. Tick a device below to put it on the Home grid. Credentials stay in Settings → UniFi.</p>
             <p id="unifi-status" class="updated">UniFi: —</p>
             <div id="unifi-home-picker" class="unifi-pick" aria-label="Show on Home"></div>
             <div id="unifi-cameras" class="unifi-camera-grid"></div>
             <div id="unifi-lights" class="home-device-grid unifi-device-grid"></div>
+            <div id="unifi-relays" class="home-device-grid unifi-device-grid"></div>
             <div id="unifi-hubs" class="home-device-grid unifi-device-grid"></div>
             <div id="unifi-doors" class="home-device-grid unifi-device-grid"></div>
             <div id="unifi-sensors" class="home-device-grid unifi-device-grid"></div>
@@ -997,7 +998,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-unifi-test">Test UniFi connection</button>
                             </div>
                             <h3 class="settings-subtitle">Show on Home</h3>
-                            <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Devices are grouped by type. Door hubs (UA Hub / Gate Hub) unlock the bound door. A door position sensor appears when UniFi reports one on that hub.</p>
+                            <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Protect floodlights use On/Off. Protect relays (UL-Relay) are switches, not Access doors. Door controllers (UA Hub / Gate Hub) unlock the bound Access door. A door position sensor appears when Access reports one on that door.</p>
                             <div id="settings-unifi-devices" class="unifi-pick"></div>
                         </section>
 

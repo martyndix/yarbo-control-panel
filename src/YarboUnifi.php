@@ -292,13 +292,15 @@ final class YarboUnifi
         ]);
         $message = $ok
             ? sprintf(
-                'Connected. %d camera%s, %d light%s, %d sensor%s, %d door%s, %d hub%s.',
+                'Connected. %d camera%s, %d light%s, %d relay%s, %d sensor%s, %d door%s, %d controller%s.',
                 $counts['cameras'],
                 $counts['cameras'] === 1 ? '' : 's',
                 $counts['lights'],
                 $counts['lights'] === 1 ? '' : 's',
-                $counts['sensors'] + $counts['relays'],
-                ($counts['sensors'] + $counts['relays']) === 1 ? '' : 's',
+                $counts['relays'],
+                $counts['relays'] === 1 ? '' : 's',
+                $counts['sensors'],
+                $counts['sensors'] === 1 ? '' : 's',
                 $counts['doors'],
                 $counts['doors'] === 1 ? '' : 's',
                 $counts['hubs'],
@@ -437,7 +439,18 @@ final class YarboUnifi
 
             return $this->setLight($native, $action === 'on');
         }
-        if ($kind === self::KIND_DOOR || $kind === self::KIND_RELAY || $kind === self::KIND_HUB) {
+        if ($kind === self::KIND_RELAY) {
+            if ($action === 'toggle') {
+                $on = $this->relayIsOn($native);
+                $action = $on ? 'off' : 'on';
+            }
+            if (!in_array($action, ['on', 'off'], true)) {
+                return ['ok' => false, 'error' => 'Protect relays support On and Off'];
+            }
+
+            return $this->setRelay($native, $action === 'on');
+        }
+        if ($kind === self::KIND_DOOR || $kind === self::KIND_HUB) {
             $doorId = $native;
             if ($kind === self::KIND_HUB) {
                 $linked = $this->hubDoorId($native);
@@ -470,10 +483,43 @@ final class YarboUnifi
             return ['ok' => false, 'error' => 'Add a Protect API key first'];
         }
         $url = $this->protectUrl($config, '/lights/' . rawurlencode($id));
-        $body = json_encode(['lightMode' => $on ? 'on' : 'off'], JSON_THROW_ON_ERROR);
+        $body = json_encode(['isLightForceEnabled' => $on], JSON_THROW_ON_ERROR);
         $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, 6.0, false);
         if ($res['status'] < 200 || $res['status'] >= 300) {
             return ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . $res['status'])];
+        }
+
+        return ['ok' => true, 'on' => $on];
+    }
+
+    /**
+     * Protect UL-Relay (and similar) outputs — not Access doors.
+     *
+     * @return array<string, mixed>
+     */
+    public function setRelay(string $id, bool $on): array
+    {
+        $config = $this->load();
+        if ($config['protect_api_key'] === '') {
+            return ['ok' => false, 'error' => 'Add a Protect API key first'];
+        }
+        $relayId = $id;
+        $outputId = 1;
+        if (str_contains($id, ':')) {
+            [$relayId, $out] = explode(':', $id, 2);
+            $outputId = (int) $out;
+            if ($outputId < 1) {
+                $outputId = 1;
+            }
+        }
+        if ($relayId === '') {
+            return ['ok' => false, 'error' => 'Pick a relay'];
+        }
+        $url = $this->protectUrl($config, '/relays/' . rawurlencode($relayId) . '/outputs/' . $outputId . '/activate');
+        $body = json_encode(['state' => $on ? 'on' : 'off'], JSON_THROW_ON_ERROR);
+        $res = $this->request('POST', $url, $this->protectHeaders($config), $body, 6.0, false);
+        if ($res['status'] < 200 || $res['status'] >= 300) {
+            return ['ok' => false, 'error' => $res['error'] ?? ('Protect relay HTTP ' . $res['status'])];
         }
 
         return ['ok' => true, 'on' => $on];
@@ -562,11 +608,16 @@ final class YarboUnifi
                     if (!is_array($item)) {
                         continue;
                     }
+                    if ($key === 'relays') {
+                        foreach ($this->mapRelays($item) as $mapped) {
+                            $rows[] = $mapped;
+                        }
+                        continue;
+                    }
                     $mapped = match ($key) {
                         'cameras' => $this->mapCamera($item),
                         'lights' => $this->mapLight($item),
-                        'sensors' => $this->mapSensor($item),
-                        default => $this->mapRelay($item),
+                        default => $this->mapSensor($item),
                     };
                     if ($mapped !== null) {
                         $rows[] = $mapped;
@@ -669,11 +720,19 @@ final class YarboUnifi
         if ($id === '') {
             return null;
         }
-        $mode = strtolower((string) ($row['lightMode'] ?? $row['light_mode'] ?? ''));
-        if ($mode === '' && isset($row['lightDeviceSettings']) && is_array($row['lightDeviceSettings'])) {
-            $mode = $this->truthy($row['lightDeviceSettings']['isLedForceOn'] ?? false) ? 'on' : 'off';
+        $force = $this->truthy($row['isLightForceEnabled'] ?? $row['is_light_force_enabled'] ?? false);
+        if (!$force && isset($row['lightOnSettings']) && is_array($row['lightOnSettings'])) {
+            $force = $this->truthy($row['lightOnSettings']['isLedForceOn'] ?? false);
         }
-        $on = $mode === 'on' || $mode === 'motion';
+        $on = $force
+            || $this->truthy($row['isLightOn'] ?? $row['is_light_on'] ?? false);
+        if (!$on) {
+            $mode = strtolower((string) ($row['lightMode'] ?? $row['light_mode'] ?? ''));
+            if ($mode === '' && isset($row['lightModeSettings']) && is_array($row['lightModeSettings'])) {
+                $mode = strtolower((string) ($row['lightModeSettings']['mode'] ?? ''));
+            }
+            $on = $mode === 'on';
+        }
 
         return [
             'id' => self::homeId(self::KIND_LIGHT, $id),
@@ -747,31 +806,78 @@ final class YarboUnifi
     }
 
     /**
+     * Protect relays (UL-Relay). Access door controllers are hubs, not these.
+     *
      * @param array<string, mixed> $row
-     * @return array<string, mixed>|null
+     * @return list<array<string, mixed>>
      */
-    private function mapRelay(array $row): ?array
+    private function mapRelays(array $row): array
     {
         $id = $this->nativeId($row);
         if ($id === '') {
-            return null;
+            return [];
         }
-        $on = $this->truthy($row['relayState'] ?? $row['isOn'] ?? $row['on'] ?? false);
+        $outputs = $row['outputs'] ?? [];
+        if (!is_array($outputs) || $outputs === []) {
+            $on = $this->truthy($row['relayState'] ?? $row['isOn'] ?? $row['on'] ?? false);
+            $native = $id . ':1';
 
-        return [
-            'id' => self::homeId(self::KIND_RELAY, $id),
-            'native_id' => $id,
-            'name' => $this->displayName($row, 'Relay'),
-            'kind' => self::KIND_RELAY,
-            'source' => self::SOURCE,
-            'product' => (string) ($row['type'] ?? $row['model'] ?? 'Protect relay'),
-            'available' => true,
-            'on' => $on,
-            'dimmable' => false,
-            'colorable' => false,
-            'status' => $on ? 'On' : 'Off',
-            'gate' => false,
-        ];
+            return [[
+                'id' => self::homeId(self::KIND_RELAY, $native),
+                'native_id' => $native,
+                'relay_id' => $id,
+                'output_id' => 1,
+                'name' => $this->displayName($row, 'Relay'),
+                'kind' => self::KIND_RELAY,
+                'source' => self::SOURCE,
+                'product' => (string) ($row['type'] ?? $row['model'] ?? 'Protect relay'),
+                'available' => $this->relayConnected($row),
+                'on' => $on,
+                'dimmable' => false,
+                'colorable' => false,
+                'status' => $on ? 'On' : 'Off',
+            ]];
+        }
+        $deviceName = $this->displayName($row, 'Relay');
+        $rows = [];
+        foreach ($outputs as $output) {
+            if (!is_array($output)) {
+                continue;
+            }
+            $oid = $output['id'] ?? $output['outputId'] ?? $output['output_id'] ?? 0;
+            $state = strtolower((string) ($output['state'] ?? ''));
+            $on = $state === 'on' || $this->truthy($output['state'] ?? false);
+            $outName = YarboHub::normalizeDisplayName((string) ($output['name'] ?? ''), 48);
+            $name = $outName !== '' ? $outName : $deviceName;
+            $native = $id . ':' . (string) $oid;
+            $rows[] = [
+                'id' => self::homeId(self::KIND_RELAY, $native),
+                'native_id' => $native,
+                'relay_id' => $id,
+                'output_id' => (int) $oid,
+                'name' => $name,
+                'kind' => self::KIND_RELAY,
+                'source' => self::SOURCE,
+                'product' => (string) ($row['type'] ?? $row['model'] ?? 'Protect relay'),
+                'available' => $this->relayConnected($row),
+                'on' => $on,
+                'dimmable' => false,
+                'colorable' => false,
+                'status' => $on ? 'On' : 'Off',
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function relayConnected(array $row): bool
+    {
+        $state = strtoupper((string) ($row['state'] ?? ''));
+
+        return $state === '' || $state === 'CONNECTED' || $this->truthy($row['isConnected'] ?? true);
     }
 
     /**
@@ -1162,6 +1268,17 @@ final class YarboUnifi
         return false;
     }
 
+    private function relayIsOn(string $nativeId): bool
+    {
+        foreach ($this->readInventory()['relays'] as $row) {
+            if (is_array($row) && (string) ($row['native_id'] ?? '') === $nativeId) {
+                return (bool) ($row['on'] ?? false);
+            }
+        }
+
+        return false;
+    }
+
     /**
      * @return array{
      *   cameras: list<array<string, mixed>>,
@@ -1414,11 +1531,33 @@ final class YarboUnifi
             return ['status' => $status, 'body' => '', 'content_type' => $ctype, 'error' => $err !== '' ? $err : 'UniFi request failed'];
         }
         if ($status >= 400) {
-            $hint = $binary ? ('HTTP ' . $status) : (trim(substr((string) $raw, 0, 180)) ?: ('HTTP ' . $status));
+            $hint = $binary ? ('HTTP ' . $status) : $this->httpErrorHint((string) $raw, $status);
 
             return ['status' => $status, 'body' => (string) $raw, 'content_type' => $ctype, 'error' => $hint];
         }
 
         return ['status' => $status, 'body' => (string) $raw, 'content_type' => $ctype];
+    }
+
+    private function httpErrorHint(string $raw, int $status): string
+    {
+        $decoded = $this->decodeJson($raw);
+        if (is_array($decoded)) {
+            $name = (string) ($decoded['name'] ?? '');
+            $msg = (string) ($decoded['error'] ?? $decoded['message'] ?? $decoded['msg'] ?? '');
+            if ($name === 'AJV_PARSE_ERROR' || str_contains($msg, 'AJV_PARSE_ERROR') || str_contains($msg, 'additional properties')) {
+                return 'Protect rejected that command';
+            }
+            $msg = trim(preg_replace('/\s+/', ' ', $msg) ?? $msg);
+            if ($msg !== '') {
+                return strlen($msg) > 140 ? substr($msg, 0, 137) . '…' : $msg;
+            }
+        }
+        $plain = trim(preg_replace('/\s+/', ' ', $raw) ?? $raw);
+        if ($plain !== '' && $plain[0] !== '{' && $plain[0] !== '[') {
+            return strlen($plain) > 140 ? substr($plain, 0, 137) . '…' : $plain;
+        }
+
+        return 'HTTP ' . $status;
     }
 }
