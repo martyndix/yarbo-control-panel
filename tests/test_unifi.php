@@ -31,6 +31,11 @@ if (Yarbo\YarboUnifi::unlockPath('door-1', 'open') !== '/doors/door-1/unlock?con
     exit(1);
 }
 
+if (Yarbo\YarboUnifi::flattenAccessItems([[['id' => 'a'], ['id' => 'b']], ['id' => 'c']]) !== [['id' => 'a'], ['id' => 'b'], ['id' => 'c']]) {
+    fwrite(STDERR, "flattenAccessItems failed\n");
+    exit(1);
+}
+
 if (!$unifi->save([
     'unifi_host' => '192.168.1.1',
     'unifi_protect_api_key' => 'protect-secret',
@@ -79,16 +84,38 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
             'status' => 200,
             'body' => json_encode([
                 'code' => 'SUCCESS',
-                'data' => [['id' => 'door1', 'name' => 'Front', 'door_lock_relay_status' => 'lock']],
+                'data' => [[
+                    'id' => 'door1',
+                    'name' => 'Front',
+                    'door_lock_relay_status' => 'lock',
+                    'door_position_status' => 'close',
+                    'is_bind_hub' => true,
+                ]],
             ]),
             'content_type' => 'application/json',
         ];
     }
     if (str_contains($url, '/unlock')) {
+        if ($method !== 'PUT' && $method !== 'POST') {
+            return ['status' => 405, 'body' => '', 'content_type' => '', 'error' => 'method'];
+        }
         if (!str_contains($url, 'control_cmd=open')) {
             return ['status' => 400, 'body' => '', 'content_type' => '', 'error' => 'missing control_cmd'];
         }
         return ['status' => 200, 'body' => json_encode(['code' => 'SUCCESS']), 'content_type' => 'application/json'];
+    }
+    if (str_contains($url, '/devices')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'code' => 'SUCCESS',
+                'data' => [[
+                    ['id' => '7483c2773855', 'name' => 'UA-HUB-3855', 'type' => 'UAH', 'location_id' => 'door1', 'full_name' => 'Front - UA-HUB-3855'],
+                    ['id' => 'f492bfd28ced', 'name' => 'UA-LITE-8CED', 'type' => 'UDA-LITE'],
+                ]],
+            ]),
+            'content_type' => 'application/json',
+        ];
     }
     if (str_contains($url, '/snapshot')) {
         return ['status' => 200, 'body' => 'JFIF', 'content_type' => 'image/jpeg'];
@@ -109,6 +136,15 @@ if (!($probe['ok'] ?? false) || ($probe['counts']['cameras'] ?? 0) !== 1 || ($pr
     fwrite(STDERR, 'probe ' . json_encode($probe) . "\n");
     exit(1);
 }
+if (($probe['counts']['hubs'] ?? 0) !== 1) {
+    fwrite(STDERR, 'hubs ' . json_encode($probe['counts'] ?? []) . "\n");
+    exit(1);
+}
+$probeIds = array_column($probe['devices'] ?? [], 'id');
+if (!in_array('unifi:hub:7483c2773855', $probeIds, true) || !in_array('unifi:sensor:dps-door1', $probeIds, true)) {
+    fwrite(STDERR, 'access extras ' . json_encode($probeIds) . "\n");
+    exit(1);
+}
 
 $light = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
 if (!($light['ok'] ?? false) || empty($light['on'])) {
@@ -119,6 +155,23 @@ if (!($light['ok'] ?? false) || empty($light['on'])) {
 $unlock = $unifi->unlockDoor('door1', 'open');
 if (!($unlock['ok'] ?? false)) {
     fwrite(STDERR, 'unlock ' . json_encode($unlock) . "\n");
+    exit(1);
+}
+$putUnlock = false;
+foreach ($calls as $call) {
+    if (($call[0] ?? '') === 'PUT' && str_contains((string) ($call[1] ?? ''), '/unlock')) {
+        $putUnlock = true;
+        break;
+    }
+}
+if (!$putUnlock) {
+    fwrite(STDERR, "unlock did not PUT\n");
+    exit(1);
+}
+
+$hubUnlock = $unifi->command(['id' => 'unifi:hub:7483c2773855', 'command' => 'unlock', 'control_cmd' => 'open']);
+if (!($hubUnlock['ok'] ?? false)) {
+    fwrite(STDERR, 'hub unlock ' . json_encode($hubUnlock) . "\n");
     exit(1);
 }
 

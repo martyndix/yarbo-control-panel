@@ -21,7 +21,7 @@ if ($method === 'GET' && $action === 'snapshot') {
     try {
         $jpeg = $unifi->snapshotJpeg((string) ($_GET['id'] ?? ''));
         header('Content-Type: image/jpeg');
-        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Cache-Control: private, max-age=20');
         header('Content-Length: ' . (string) strlen($jpeg));
         echo $jpeg;
         exit;

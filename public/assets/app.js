@@ -2392,8 +2392,8 @@ function applyHubFromStatus(data) {
     if (ids.includes('home')) {
         loadHomeDashboard();
     }
-    if (ids.includes('unifi')) {
-        loadUnifiDashboard();
+    if (ids.includes('unifi') && activeModuleId === 'unifi' && !settingsModalOpen) {
+        loadUnifiDashboard({ silent: true });
     }
     if (data.vestaboard) {
         applyVestaboardLiveSwitch(data);
@@ -2486,31 +2486,119 @@ function updateLymowDashboard(ly) {
 }
 
 let unifiPollTimer = 0;
-let unifiDash = { cameras: [], lights: [], sensors: [], relays: [], doors: [], devices: [] };
+let unifiDash = { cameras: [], lights: [], sensors: [], relays: [], doors: [], hubs: [], devices: [] };
+let unifiPickerDirty = false;
+let unifiSnapGen = 0;
 
 function unifiShowOnHomeSnapshot() {
-    return [...document.querySelectorAll('#settings-unifi-devices input[data-unifi-home]:checked')]
+    const ids = [...document.querySelectorAll('input[data-unifi-home]:checked')]
         .map((el) => el.getAttribute('data-unifi-home') || '')
         .filter(Boolean);
+    return [...new Set(ids)];
 }
 
-function renderUnifiHomePicker(data) {
-    const wrap = els.settingsUnifiDevices;
-    if (!wrap) return;
+function unifiKindGroup(d) {
+    const kind = String(d?.kind || '');
+    if (kind === 'camera') return 'cameras';
+    if (kind === 'light') return 'lights';
+    if (kind === 'hub') return 'hubs';
+    if (kind === 'door' || kind === 'relay') return 'doors';
+    if (kind === 'sensor' && (d.product === 'Door position sensor' || String(d.native_id || '').startsWith('dps-'))) {
+        return 'dps';
+    }
+    if (kind === 'sensor') return 'sensors';
+    return 'other';
+}
+
+function unifiKindLabel(d) {
+    switch (unifiKindGroup(d)) {
+        case 'cameras': return 'Camera';
+        case 'lights': return 'Light';
+        case 'hubs': return 'Hub';
+        case 'doors': return d?.kind === 'relay' ? 'Relay' : 'Door';
+        case 'dps': return 'Door sensor';
+        case 'sensors': return 'Sensor';
+        default: return homeKindLabel(d) || 'UniFi';
+    }
+}
+
+function renderUnifiHomePicker(data, { replace = false } = {}) {
+    const wraps = [els.settingsUnifiDevices, document.getElementById('unifi-home-picker')].filter(Boolean);
+    if (!wraps.length) return;
     const devices = Array.isArray(data?.devices) ? data.devices : [];
-    if (!devices.length) {
-        wrap.innerHTML = '<p class="hint">Test the connection to list cameras, lights, sensors, and doors.</p>';
+    const existing = document.querySelectorAll('input[data-unifi-home]');
+    if (!replace && existing.length && unifiPickerDirty) {
         return;
     }
-    wrap.innerHTML = devices.map((d) => {
-        const id = String(d.id || '');
-        const checked = d.show_on_home ? 'checked' : '';
-        const kind = homeKindLabel(d) || d.kind || 'UniFi';
-        return `<label class="settings-field settings-checkbox">
-            <input type="checkbox" data-unifi-home="${escapeHtml(id)}" ${checked}>
-            <span>${escapeHtml(d.name || id)} <em class="unifi-picker-kind">${escapeHtml(kind)}</em></span>
-        </label>`;
-    }).join('');
+    if (!replace && existing.length) {
+        wraps.forEach((wrap) => {
+            wrap.querySelectorAll('input[data-unifi-home]').forEach((input) => {
+                const id = input.getAttribute('data-unifi-home') || '';
+                const meta = wrap.querySelector(`[data-unifi-pick="${CSS.escape(id)}"] .unifi-pick-meta`);
+                const row = devices.find((d) => String(d.id) === id);
+                if (meta && row) meta.textContent = String(row.status || unifiKindLabel(row));
+            });
+        });
+        return;
+    }
+    const html = unifiPickerHtml(devices);
+    wraps.forEach((wrap) => {
+        wrap.innerHTML = html;
+    });
+}
+
+function unifiPickerHtml(devices) {
+    if (!devices.length) {
+        return '<p class="hint">Test the connection to list cameras, lights, sensors, doors, and hubs.</p>';
+    }
+    const groups = [
+        { id: 'cameras', title: 'Cameras' },
+        { id: 'lights', title: 'Lights' },
+        { id: 'hubs', title: 'Door hubs' },
+        { id: 'doors', title: 'Doors' },
+        { id: 'dps', title: 'Door position sensors' },
+        { id: 'sensors', title: 'Sensors' },
+        { id: 'other', title: 'Other' },
+    ];
+    const byGroup = new Map();
+    devices.forEach((d) => {
+        const g = unifiKindGroup(d);
+        if (!byGroup.has(g)) byGroup.set(g, []);
+        byGroup.get(g).push(d);
+    });
+    const preserved = unifiPickerDirty ? new Set(unifiShowOnHomeSnapshot()) : null;
+    let out = '<p class="unifi-pick-lead">Show on Home</p>';
+    groups.forEach((group) => {
+        const rows = byGroup.get(group.id) || [];
+        if (!rows.length) return;
+        out += `<section class="unifi-pick-group"><h4 class="unifi-pick-title">${escapeHtml(group.title)} <span class="unifi-pick-count">${rows.length}</span></h4><div class="unifi-pick-rows">`;
+        rows.forEach((d) => {
+            const id = String(d.id || '');
+            const checked = preserved ? preserved.has(id) : Boolean(d.show_on_home);
+            const meta = d.status || unifiKindLabel(d);
+            out += `<label class="unifi-pick-row" data-unifi-pick="${escapeHtml(id)}">
+                <input type="checkbox" data-unifi-home="${escapeHtml(id)}" ${checked ? 'checked' : ''}>
+                <span class="unifi-pick-name">${escapeHtml(d.name || id)}</span>
+                <span class="unifi-pick-meta">${escapeHtml(meta)}</span>
+            </label>`;
+        });
+        out += '</div></section>';
+    });
+    return out;
+}
+
+async function saveUnifiShowOnHome(id, show) {
+    unifiPickerDirty = true;
+    document.querySelectorAll(`input[data-unifi-home="${CSS.escape(id)}"]`).forEach((el) => {
+        el.checked = show;
+    });
+    try {
+        const data = await unifiApi({ action: 'show_on_home', id, show }, 8000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not update Home list');
+        unifiPickerDirty = false;
+    } catch (err) {
+        showToast(err.message || 'Could not update Home list', 'error');
+    }
 }
 
 async function unifiApi(body, timeoutMs = 20000) {
@@ -2522,15 +2610,21 @@ async function unifiApi(body, timeoutMs = 20000) {
     return parseJsonResponse(res);
 }
 
+function unifiSnapSrc(d, bust) {
+    const id = d.native_id || d.id || '';
+    const base = `/api/unifi.php?action=snapshot&id=${encodeURIComponent(id)}`;
+    return bust ? `${base}&r=${unifiSnapGen}` : base;
+}
+
 function unifiDeviceCardHtml(d) {
     const kind = String(d.kind || '');
     const on = Boolean(d.on);
     if (kind === 'camera') {
-        const src = d.snapshot || `/api/unifi.php?action=snapshot&id=${encodeURIComponent(d.native_id || d.id)}`;
-        return `<article class="unifi-camera-card">
-            <img class="unifi-camera-still" src="${escapeHtml(src)}" alt="${escapeHtml(d.name || 'Camera')}" loading="lazy">
+        const src = unifiSnapSrc(d, false);
+        return `<article class="unifi-camera-card" data-unifi-id="${escapeHtml(d.id)}">
+            <img class="unifi-camera-still" src="${escapeHtml(src)}" alt="${escapeHtml(d.name || 'Camera')}" decoding="async">
             <p class="unifi-camera-name">${escapeHtml(d.name || 'Camera')}</p>
-            <p class="hint">${escapeHtml(d.status || '')}</p>
+            <p class="hint unifi-card-status">${escapeHtml(d.status || '')}</p>
         </article>`;
     }
     if (kind === 'light') {
@@ -2545,36 +2639,68 @@ function unifiDeviceCardHtml(d) {
             </div>
         </article>`;
     }
-    if (kind === 'door' || kind === 'relay') {
+    if (kind === 'door' || kind === 'relay' || kind === 'hub') {
+        const bound = kind !== 'hub' || Boolean(d.door_id);
         const gate = d.gate
             ? `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="open">Open</button>
                <button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="close">Close</button>
                <button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="stop">Stop</button>`
             : '';
+        const unlock = bound
+            ? `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="unlock">Unlock</button>`
+            : '';
+        const kindLabel = kind === 'hub' ? 'Hub' : (kind === 'relay' ? 'Relay' : 'Door');
         return `<article class="home-device${on ? ' is-on' : ''}" data-unifi-id="${escapeHtml(d.id)}">
             <div class="home-device-label">
                 <span class="home-device-dot" aria-hidden="true"></span>
-                <p class="home-device-name">${escapeHtml(d.name || 'Door')}</p>
-                <span class="home-device-kind">${kind === 'relay' ? 'Relay' : 'Door'}</span>
+                <p class="home-device-name">${escapeHtml(d.name || kindLabel)}</p>
+                <span class="home-device-kind">${kindLabel}</span>
             </div>
-            <p class="home-device-meta">${escapeHtml(d.status || '')}</p>
-            <div class="home-device-actions">
-                <button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="unlock">Unlock</button>
-                ${gate}
-            </div>
+            <p class="home-device-meta unifi-card-status">${escapeHtml(d.status || '')}</p>
+            <div class="home-device-actions">${unlock}${gate}</div>
         </article>`;
     }
-    return `<article class="home-device${on ? ' is-on' : ''}">
+    return `<article class="home-device${on ? ' is-on' : ''}" data-unifi-id="${escapeHtml(d.id)}">
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
             <p class="home-device-name">${escapeHtml(d.name || 'Sensor')}</p>
-            <span class="home-device-kind">Sensor</span>
+            <span class="home-device-kind">${escapeHtml(unifiKindLabel(d))}</span>
         </div>
-        <p class="home-device-meta">${escapeHtml(d.status || '—')}</p>
+        <p class="home-device-meta unifi-card-status">${escapeHtml(d.status || '—')}</p>
     </article>`;
 }
 
-function renderUnifiDashboard(data) {
+function patchUnifiWrap(wrap, items, htmlFn) {
+    if (!wrap) return;
+    if (!items.length) {
+        if (wrap.children.length) wrap.innerHTML = '';
+        return;
+    }
+    const seen = new Set();
+    items.forEach((d) => {
+        const id = String(d.id || '');
+        if (id === '') return;
+        seen.add(id);
+        let el = wrap.querySelector(`[data-unifi-id="${CSS.escape(id)}"]`);
+        if (!el) {
+            wrap.insertAdjacentHTML('beforeend', htmlFn(d));
+            return;
+        }
+        el.classList.toggle('is-on', Boolean(d.on));
+        const name = el.querySelector('.unifi-camera-name, .home-device-name');
+        if (name && d.name) name.textContent = d.name;
+        const status = el.querySelector('.unifi-card-status, .home-device-meta');
+        if (status) status.textContent = d.status || '';
+        const lightBtn = el.querySelector('[data-unifi-light]');
+        if (lightBtn) lightBtn.textContent = d.on ? 'Off' : 'On';
+    });
+    [...wrap.querySelectorAll('[data-unifi-id]')].forEach((el) => {
+        const id = el.getAttribute('data-unifi-id') || '';
+        if (id && !seen.has(id)) el.remove();
+    });
+}
+
+function renderUnifiDashboard(data, { replace = false } = {}) {
     unifiDash = data || unifiDash;
     const status = document.getElementById('unifi-status');
     if (status) {
@@ -2587,37 +2713,31 @@ function renderUnifiDashboard(data) {
     const cameras = data?.cameras || [];
     const camWrap = document.getElementById('unifi-cameras');
     if (camWrap) {
-        camWrap.innerHTML = cameras.length
-            ? cameras.map((d) => unifiDeviceCardHtml(d)).join('')
-            : '<p class="hint">No Protect cameras yet. Add an API key in Settings → UniFi and tap Test.</p>';
+        if (!replace && camWrap.querySelector('[data-unifi-id]')) {
+            patchUnifiWrap(camWrap, cameras, unifiDeviceCardHtml);
+        } else {
+            camWrap.innerHTML = cameras.length
+                ? cameras.map((d) => unifiDeviceCardHtml(d)).join('')
+                : '<p class="hint">No Protect cameras yet. Add an API key in Settings → UniFi and tap Test.</p>';
+        }
     }
-    const lights = data?.lights || [];
-    const lightWrap = document.getElementById('unifi-lights');
-    if (lightWrap) {
-        lightWrap.innerHTML = lights.length ? lights.map((d) => unifiDeviceCardHtml(d)).join('') : '';
-    }
-    const doors = [...(data?.doors || []), ...(data?.relays || [])];
-    const doorWrap = document.getElementById('unifi-doors');
-    if (doorWrap) {
-        doorWrap.innerHTML = doors.length ? doors.map((d) => unifiDeviceCardHtml(d)).join('') : '';
-    }
-    const sensors = data?.sensors || [];
-    const sensorWrap = document.getElementById('unifi-sensors');
-    if (sensorWrap) {
-        sensorWrap.innerHTML = sensors.length ? sensors.map((d) => unifiDeviceCardHtml(d)).join('') : '';
-    }
-    renderUnifiHomePicker(data);
+    patchUnifiWrap(document.getElementById('unifi-lights'), data?.lights || [], unifiDeviceCardHtml);
+    patchUnifiWrap(document.getElementById('unifi-hubs'), data?.hubs || [], unifiDeviceCardHtml);
+    patchUnifiWrap(document.getElementById('unifi-doors'), [...(data?.doors || []), ...(data?.relays || [])], unifiDeviceCardHtml);
+    patchUnifiWrap(document.getElementById('unifi-sensors'), data?.sensors || [], unifiDeviceCardHtml);
+    renderUnifiHomePicker(data, { replace });
 }
 
-async function loadUnifiDashboard() {
+async function loadUnifiDashboard(opts = {}) {
     try {
         const data = await unifiApi(null, 12000);
-        if (data && data.ok !== false) renderUnifiDashboard(data);
-        else if (data?.error) {
+        if (data && data.ok !== false) renderUnifiDashboard(data, { replace: Boolean(opts.replace) });
+        else if (data?.error && !opts.silent) {
             const status = document.getElementById('unifi-status');
             if (status) status.textContent = `UniFi: ${data.error}`;
         }
     } catch (err) {
+        if (opts.silent) return;
         const status = document.getElementById('unifi-status');
         if (status) status.textContent = `UniFi: ${err.message || 'unavailable'}`;
     }
@@ -2625,9 +2745,10 @@ async function loadUnifiDashboard() {
 
 function startUnifiPoll() {
     stopUnifiPoll();
-    loadUnifiDashboard();
+    loadUnifiDashboard({ replace: true });
     unifiPollTimer = window.setInterval(() => {
-        if (activeModuleId === 'unifi') loadUnifiDashboard();
+        if (activeModuleId !== 'unifi' || settingsModalOpen) return;
+        loadUnifiDashboard({ silent: true });
     }, 15000);
 }
 
@@ -2757,6 +2878,8 @@ function homeKindLabel(d) {
                 return 'Camera';
             case 'door':
                 return 'Door';
+            case 'hub':
+                return 'Hub';
             case 'sensor':
                 return 'Sensor';
             case 'relay':
@@ -3439,7 +3562,7 @@ function homeDeviceActionsHtml(d, bright, color) {
         if (kind === 'sensor') {
             return `<div class="home-device-actions"><span class="home-device-meta">${escapeHtml(d.status || '—')}</span></div>`;
         }
-        if (kind === 'door' || kind === 'relay') {
+        if (kind === 'door' || kind === 'relay' || kind === 'hub') {
             const gate = d.gate
                 ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="open">Open</button>
                    <button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="close">Close</button>
@@ -5459,7 +5582,7 @@ function showSettingsPane(pane, { updateHash = true } = {}) {
         loadHomeDashboard();
     }
     if (id === 'unifi') {
-        loadUnifiDashboard();
+        loadUnifiDashboard({ silent: true });
     }
 }
 
@@ -5677,7 +5800,7 @@ async function loadSettings() {
         if (els.settingsUnifiAccessStandalone) {
             els.settingsUnifiAccessStandalone.checked = Boolean(data.unifi?.access_standalone);
         }
-        renderUnifiHomePicker(data.unifi);
+        renderUnifiHomePicker(data.unifi, { replace: !unifiPickerDirty });
         if (els.settingsVestaboardLive) {
             els.settingsVestaboardLive.value = data.hub?.vestaboard_live || 'yarbo';
         }
@@ -7207,7 +7330,7 @@ async function saveSettings(event) {
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;
-        if (document.querySelectorAll('#settings-unifi-devices input[data-unifi-home]').length) {
+        if (document.querySelectorAll('input[data-unifi-home]').length) {
             payload.unifi_show_on_home = unifiShowOnHomeSnapshot();
         }
         if (cloudPassword !== '') {
@@ -7255,6 +7378,7 @@ async function saveSettings(event) {
         applyLymowDeviceName();
         applyDeviceNameSubtitle();
         applyPanelTitle(data.hub);
+        unifiPickerDirty = false;
         if (data.hub) {
             applyModuleSwitcher(data.hub);
             applyCompanionSettingsVisibility();
@@ -8516,7 +8640,7 @@ els.settingsUnifiTest?.addEventListener('click', async (e) => {
             unifi_protect_username: els.settingsUnifiProtectUser?.value.trim() || '',
             unifi_access_standalone: Boolean(els.settingsUnifiAccessStandalone?.checked),
         };
-        if (document.querySelectorAll('#settings-unifi-devices input[data-unifi-home]').length) {
+        if (document.querySelectorAll('input[data-unifi-home]').length) {
             payload.unifi_show_on_home = unifiShowOnHomeSnapshot();
         }
         const key = els.settingsUnifiProtectKey?.value ?? '';
@@ -8535,8 +8659,7 @@ els.settingsUnifiTest?.addEventListener('click', async (e) => {
         if (els.settingsUnifiProtectKey) els.settingsUnifiProtectKey.value = '';
         if (els.settingsUnifiProtectPassword) els.settingsUnifiProtectPassword.value = '';
         if (els.settingsUnifiAccessToken) els.settingsUnifiAccessToken.value = '';
-        renderUnifiHomePicker(data);
-        renderUnifiDashboard(data);
+        renderUnifiDashboard(data, { replace: true });
         showToast(msg, 'success');
         if (lastHub?.modules?.home) loadHomeDashboard();
     } catch (err) {
@@ -8550,6 +8673,16 @@ els.settingsUnifiTest?.addEventListener('click', async (e) => {
         button.disabled = false;
     }
 });
+document.getElementById('unifi-card')?.addEventListener('change', (event) => {
+    const input = event.target.closest('input[data-unifi-home]');
+    if (!input) return;
+    saveUnifiShowOnHome(input.getAttribute('data-unifi-home') || '', input.checked);
+});
+els.settingsUnifiDevices?.addEventListener('change', (event) => {
+    const input = event.target.closest('input[data-unifi-home]');
+    if (!input) return;
+    saveUnifiShowOnHome(input.getAttribute('data-unifi-home') || '', input.checked);
+});
 document.getElementById('unifi-card')?.addEventListener('click', async (event) => {
     const lightBtn = event.target.closest('[data-unifi-light]');
     if (lightBtn) {
@@ -8560,7 +8693,7 @@ document.getElementById('unifi-card')?.addEventListener('click', async (event) =
         try {
             const data = await unifiApi({ action: 'command', id, command: on ? 'off' : 'on' });
             if (!data.ok) throw new Error(data.error || 'Failed');
-            await loadUnifiDashboard();
+            await loadUnifiDashboard({ silent: true });
             if (lastHub?.modules?.home) loadHomeDashboard();
         } catch (err) {
             showToast(err.message || 'UniFi light failed', 'error');
@@ -8578,7 +8711,7 @@ document.getElementById('unifi-card')?.addEventListener('click', async (event) =
             const data = await unifiApi({ action: 'command', id, command: cmd, control_cmd: cmd === 'unlock' ? '' : cmd });
             if (!data.ok) throw new Error(data.error || 'Failed');
             showToast(cmd === 'unlock' ? 'Unlock sent' : `${cmd} sent`, 'success');
-            await loadUnifiDashboard();
+            await loadUnifiDashboard({ silent: true });
         } catch (err) {
             showToast(err.message || 'UniFi door failed', 'error');
         } finally {

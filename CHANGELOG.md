@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.2] - 2026-10-01
+
+### Fixed
+- UniFi **Show on Home** ticks no longer snap back while the list is polling. Ticks save as you click, and dashboard refresh updates status in place so camera stills stay on screen.
+- The Show on Home list is grouped (cameras, lights, hubs, doors, door sensors) with the checkbox on the same row as the name.
+
+### Added
+- Access **door hubs** (UA Hub / Gate Hub) from `/api/v1/developer/devices`, with Unlock on the bound door.
+- **Door position sensors** when Access reports `door_position_status` on a door. Unlock uses PUT (with POST fallback) per the Access developer API.
+
 ## [4.0.1] - 2026-10-01
 
 ### Fixed

@@ -9,8 +9,9 @@ Not affiliated with Ubiquiti.
 - List Protect cameras and show JPEG stills on the UniFi page and on Home.
 - Toggle Protect floodlights.
 - Show Protect sensor status (open/closed, motion, temperature/humidity when the Integration API returns them).
-- Unlock Access doors. Gate Hub three-button mode can send Open / Close / Stop (`control_cmd`).
-- Tick **Show on Home** per device so it behaves like another Home row (camera still, light on/off, door Unlock, sensor text).
+- Unlock Access doors and **door hubs** (UA Hub / Gate Hub). Gate Hub three-button mode can send Open / Close / Stop (`control_cmd`).
+- Show a **door position** row when Access reports a sensor on that door (`door_position_status`).
+- Tick **Show on Home** per device so it behaves like another Home row (camera still, light on/off, door/hub Unlock, sensor text). Ticks save as you click.
 
 ## What it cannot do (this version)
 
@@ -56,7 +57,7 @@ Standalone Access:
 https://CONSOLE:12445/api/v1/developer/...
 ```
 
-Door unlock: `POST /doors/{id}/unlock`. Gate Hub: add `?control_cmd=open|close|stop`.
+Door unlock: `PUT /doors/{id}/unlock` (POST if the console rejects PUT). Gate Hub: add `?control_cmd=open|close|stop`. Hubs come from `GET /devices`. Door position is `door_position_status` on each door.
 
 ## Home
 
@@ -64,4 +65,4 @@ Turn **Home** on as well. UniFi rows use ids like `unifi:camera:…`. Hide or Re
 
 ## Rollback
 
-This is panel **4.0.0**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+This is panel **4.0.2**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.

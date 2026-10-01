@@ -12,6 +12,7 @@ final class YarboUnifi
     public const KIND_SENSOR = 'sensor';
     public const KIND_DOOR = 'door';
     public const KIND_RELAY = 'relay';
+    public const KIND_HUB = 'hub';
 
     /** @var callable|null */
     private $transport = null;
@@ -273,6 +274,7 @@ final class YarboUnifi
             'sensors' => count($inventory['sensors']),
             'relays' => count($inventory['relays']),
             'doors' => count($inventory['doors']),
+            'hubs' => count($inventory['hubs'] ?? []),
         ];
         $ok = array_sum($counts) > 0 || $errors === [];
         $error = $ok ? '' : implode(' ', $errors);
@@ -288,7 +290,7 @@ final class YarboUnifi
         ]);
         $message = $ok
             ? sprintf(
-                'Connected. %d camera%s, %d light%s, %d sensor%s, %d door%s.',
+                'Connected. %d camera%s, %d light%s, %d sensor%s, %d door%s, %d hub%s.',
                 $counts['cameras'],
                 $counts['cameras'] === 1 ? '' : 's',
                 $counts['lights'],
@@ -296,7 +298,9 @@ final class YarboUnifi
                 $counts['sensors'] + $counts['relays'],
                 ($counts['sensors'] + $counts['relays']) === 1 ? '' : 's',
                 $counts['doors'],
-                $counts['doors'] === 1 ? '' : 's'
+                $counts['doors'] === 1 ? '' : 's',
+                $counts['hubs'],
+                $counts['hubs'] === 1 ? '' : 's'
             )
             : ($error !== '' ? $error : 'Could not reach UniFi.');
 
@@ -340,6 +344,7 @@ final class YarboUnifi
             'sensors' => $inventory['sensors'],
             'relays' => $inventory['relays'],
             'doors' => $inventory['doors'],
+            'hubs' => $inventory['hubs'] ?? [],
             'devices' => $this->catalogFromInventory($inventory, $show),
         ];
     }
@@ -386,7 +391,7 @@ final class YarboUnifi
         }
         $cacheDir = $this->projectRoot . '/data';
         $cache = $cacheDir . '/unifi-snap-' . preg_replace('/[^a-zA-Z0-9._-]+/', '_', $cameraId) . '.jpg';
-        if (is_file($cache) && (time() - (int) filemtime($cache)) < 2) {
+        if (is_file($cache) && (time() - (int) filemtime($cache)) < 20) {
             $cached = file_get_contents($cache);
             if (is_string($cached) && $cached !== '') {
                 return $cached;
@@ -430,13 +435,21 @@ final class YarboUnifi
 
             return $this->setLight($native, $action === 'on');
         }
-        if ($kind === self::KIND_DOOR || $kind === self::KIND_RELAY) {
+        if ($kind === self::KIND_DOOR || $kind === self::KIND_RELAY || $kind === self::KIND_HUB) {
+            $doorId = $native;
+            if ($kind === self::KIND_HUB) {
+                $linked = $this->hubDoorId($native);
+                if ($linked === '') {
+                    return ['ok' => false, 'error' => 'This hub is not bound to a door'];
+                }
+                $doorId = $linked;
+            }
             $cmd = strtolower(trim((string) ($input['control_cmd'] ?? '')));
             if ($action === 'unlock' || $action === 'on' || $action === 'open' || $action === '') {
-                return $this->unlockDoor($native, $cmd !== '' ? $cmd : null);
+                return $this->unlockDoor($doorId, $cmd !== '' ? $cmd : null);
             }
             if (in_array($action, ['open', 'close', 'stop'], true)) {
-                return $this->unlockDoor($native, $action);
+                return $this->unlockDoor($doorId, $action);
             }
 
             return ['ok' => false, 'error' => 'Doors unlock; they are not Matter toggles'];
@@ -482,7 +495,11 @@ final class YarboUnifi
             $path .= '?control_cmd=' . rawurlencode($cmd);
         }
         $url = $this->accessUrl($config, $path);
-        $res = $this->request('POST', $url, $this->accessHeaders($config), '{}', 8.0, false);
+        $headers = $this->accessHeaders($config);
+        $res = $this->request('PUT', $url, $headers, '{}', 8.0, false);
+        if ($res['status'] === 404 || $res['status'] === 405) {
+            $res = $this->request('POST', $url, $headers, '{}', 8.0, false);
+        }
         if ($res['status'] < 200 || $res['status'] >= 300) {
             return ['ok' => false, 'error' => $res['error'] ?? ('Access unlock HTTP ' . $res['status'])];
         }
@@ -514,6 +531,7 @@ final class YarboUnifi
      *   sensors: list<array<string, mixed>>,
      *   relays: list<array<string, mixed>>,
      *   doors: list<array<string, mixed>>,
+     *   hubs: list<array<string, mixed>>,
      *   errors: list<string>
      * }
      */
@@ -525,6 +543,7 @@ final class YarboUnifi
             'sensors' => [],
             'relays' => [],
             'doors' => [],
+            'hubs' => [],
             'errors' => [],
         ];
         if ($config['protect_api_key'] !== '') {
@@ -555,22 +574,7 @@ final class YarboUnifi
             }
         }
         if ($config['access_token'] !== '') {
-            $res = $this->accessJson($config, '/doors', $timeout);
-            if (!($res['ok'] ?? false)) {
-                $out['errors'][] = (string) ($res['error'] ?? 'Access doors failed');
-            } else {
-                $rows = [];
-                foreach ($res['items'] as $item) {
-                    if (!is_array($item)) {
-                        continue;
-                    }
-                    $mapped = $this->mapDoor($item);
-                    if ($mapped !== null) {
-                        $rows[] = $mapped;
-                    }
-                }
-                $out['doors'] = $rows;
-            }
+            $this->appendAccessInventory($out, $config, $timeout);
         }
 
         return $out;
@@ -585,7 +589,7 @@ final class YarboUnifi
     {
         $show = array_fill_keys($showOnHome, true);
         $out = [];
-        foreach (['cameras', 'lights', 'sensors', 'relays', 'doors'] as $group) {
+        foreach (['cameras', 'lights', 'sensors', 'relays', 'doors', 'hubs'] as $group) {
             foreach ($inventory[$group] ?? [] as $row) {
                 if (!is_array($row)) {
                     continue;
@@ -808,7 +812,274 @@ final class YarboUnifi
             'status' => implode(' · ', $parts),
             'locked' => $locked,
             'gate' => $gate,
+            'has_dps' => $this->doorHasPositionSensor($row),
+            'dps' => $dps,
         ];
+    }
+
+    /**
+     * Access /devices is a list of per-door groups (hub + readers). Flatten those
+     * and emit hubs plus a door-position row when a DPS is wired to the hub.
+     *
+     * @param array<string, mixed> $out
+     * @param array<string, mixed> $config
+     */
+    private function appendAccessInventory(array &$out, array $config, float $timeout): void
+    {
+        $doorsRes = $this->accessJson($config, '/doors', $timeout);
+        if (!($doorsRes['ok'] ?? false)) {
+            $out['errors'][] = (string) ($doorsRes['error'] ?? 'Access doors failed');
+        } else {
+            $rows = [];
+            $sensors = is_array($out['sensors']) ? $out['sensors'] : [];
+            foreach (self::flattenAccessItems($doorsRes['items']) as $item) {
+                $mapped = $this->mapDoor($item);
+                if ($mapped === null) {
+                    continue;
+                }
+                $rows[] = $mapped;
+                $dps = $this->mapDoorPositionSensor($item);
+                if ($dps !== null) {
+                    $sensors[] = $dps;
+                }
+            }
+            $out['doors'] = $rows;
+            $out['sensors'] = $sensors;
+        }
+
+        $devRes = $this->accessJson($config, '/devices', $timeout);
+        if (!($devRes['ok'] ?? false)) {
+            return;
+        }
+        $doorsById = [];
+        $doorsByName = [];
+        foreach ($out['doors'] as $door) {
+            if (!is_array($door)) {
+                continue;
+            }
+            $doorsById[(string) ($door['native_id'] ?? '')] = $door;
+            $name = strtolower((string) ($door['name'] ?? ''));
+            if ($name !== '') {
+                $doorsByName[$name] = $door;
+            }
+        }
+        $hubs = [];
+        foreach ($this->accessDeviceGroups($devRes['items']) as $group) {
+            $groupDoorId = '';
+            foreach ($group as $item) {
+                $loc = trim((string) ($item['location_id'] ?? $item['door_id'] ?? ''));
+                if ($loc !== '' && isset($doorsById[$loc])) {
+                    $groupDoorId = $loc;
+                    break;
+                }
+            }
+            foreach ($group as $item) {
+                if (!$this->isAccessHub($item)) {
+                    continue;
+                }
+                $mapped = $this->mapHub($item, $groupDoorId, $doorsById, $doorsByName);
+                if ($mapped !== null) {
+                    $hubs[] = $mapped;
+                }
+            }
+        }
+        $out['hubs'] = $hubs;
+    }
+
+    /**
+     * @param list<mixed> $items
+     * @return list<list<array<string, mixed>>>
+     */
+    private function accessDeviceGroups(array $items): array
+    {
+        $groups = [];
+        $looksGrouped = false;
+        foreach ($items as $item) {
+            if (is_array($item) && array_is_list($item)) {
+                $looksGrouped = true;
+                $group = [];
+                foreach (self::flattenAccessItems($item) as $row) {
+                    $group[] = $row;
+                }
+                if ($group !== []) {
+                    $groups[] = $group;
+                }
+            }
+        }
+        if ($looksGrouped) {
+            return $groups;
+        }
+        $flat = [];
+        foreach (self::flattenAccessItems($items) as $row) {
+            $flat[] = [$row];
+        }
+
+        return $flat;
+    }
+
+    /**
+     * @param list<mixed> $items
+     * @return list<array<string, mixed>>
+     */
+    public static function flattenAccessItems(array $items): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $assoc = !array_is_list($item);
+            if ($assoc && (isset($item['id']) || isset($item['name']) || isset($item['type']))) {
+                $out[] = $item;
+                continue;
+            }
+            foreach (self::flattenAccessItems($item) as $inner) {
+                $out[] = $inner;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<string, array<string, mixed>> $doorsById
+     * @param array<string, array<string, mixed>> $doorsByName
+     * @return array<string, mixed>|null
+     */
+    private function mapHub(array $row, string $groupDoorId, array $doorsById, array $doorsByName): ?array
+    {
+        $id = $this->nativeId($row);
+        if ($id === '') {
+            return null;
+        }
+        $doorId = trim((string) ($row['location_id'] ?? $row['door_id'] ?? ''));
+        if ($doorId === '' || !isset($doorsById[$doorId])) {
+            $doorId = $groupDoorId;
+        }
+        if ($doorId === '' || !isset($doorsById[$doorId])) {
+            $hay = strtolower((string) ($row['full_name'] ?? '') . ' ' . (string) ($row['name'] ?? ''));
+            foreach ($doorsByName as $name => $door) {
+                if ($name !== '' && str_contains($hay, $name)) {
+                    $doorId = (string) ($door['native_id'] ?? '');
+                    break;
+                }
+            }
+        }
+        $door = $doorsById[$doorId] ?? null;
+        $type = (string) ($row['type'] ?? $row['device_type'] ?? 'Access hub');
+        $gate = str_contains(strtolower($type), 'gate')
+            || (is_array($door) && !empty($door['gate']));
+        $online = $this->truthy($row['online'] ?? $row['isOnline'] ?? true);
+        $bound = $doorId !== '';
+        $parts = [];
+        $parts[] = $online ? 'Online' : 'Offline';
+        if (!$bound) {
+            $parts[] = 'Not bound';
+        } elseif (is_array($door) && ($door['status'] ?? '') !== '') {
+            $parts[] = (string) $door['status'];
+        }
+
+        return [
+            'id' => self::homeId(self::KIND_HUB, $id),
+            'native_id' => $id,
+            'door_id' => $doorId,
+            'name' => $this->displayName($row, 'Door hub'),
+            'kind' => self::KIND_HUB,
+            'source' => self::SOURCE,
+            'product' => (string) ($row['full_name'] ?? $type),
+            'available' => $online && $bound,
+            'on' => is_array($door) ? !empty($door['on']) : false,
+            'dimmable' => false,
+            'colorable' => false,
+            'status' => implode(' · ', $parts),
+            'gate' => $gate,
+            'locked' => is_array($door) ? !empty($door['locked']) : true,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private function mapDoorPositionSensor(array $row): ?array
+    {
+        if (!$this->doorHasPositionSensor($row)) {
+            return null;
+        }
+        $doorId = $this->nativeId($row);
+        if ($doorId === '') {
+            return null;
+        }
+        $dps = strtolower(trim((string) ($row['door_position_status'] ?? $row['doorPositionStatus'] ?? '')));
+        $open = $dps === 'open';
+        $closed = $dps === 'close' || $dps === 'closed';
+        $status = $open ? 'Open' : ($closed ? 'Closed' : 'Unknown');
+        $doorName = $this->displayName($row, 'Door');
+
+        return [
+            'id' => self::homeId(self::KIND_SENSOR, 'dps-' . $doorId),
+            'native_id' => 'dps-' . $doorId,
+            'door_id' => $doorId,
+            'name' => $doorName . ' position',
+            'kind' => self::KIND_SENSOR,
+            'source' => self::SOURCE,
+            'product' => 'Door position sensor',
+            'available' => true,
+            'on' => $open,
+            'dimmable' => false,
+            'colorable' => false,
+            'status' => $status,
+            'open' => $open ? true : ($closed ? false : null),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function doorHasPositionSensor(array $row): bool
+    {
+        if (!array_key_exists('door_position_status', $row) && !array_key_exists('doorPositionStatus', $row)) {
+            return false;
+        }
+        $raw = $row['door_position_status'] ?? $row['doorPositionStatus'];
+        if ($raw === null) {
+            return false;
+        }
+        $value = strtolower(trim((string) $raw));
+
+        return $value !== '' && $value !== 'null' && $value !== 'none';
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function isAccessHub(array $row): bool
+    {
+        $type = strtolower((string) ($row['type'] ?? $row['device_type'] ?? ''));
+        $name = strtolower((string) ($row['name'] ?? ''));
+        if ($type === '' && $name === '') {
+            return false;
+        }
+        if (preg_match('/^uah($|-|_)/', $type) === 1 || $type === 'uah') {
+            return true;
+        }
+        if (str_contains($type, 'hub')) {
+            return true;
+        }
+
+        return str_contains($name, 'ua-hub') || str_contains($name, 'uah-');
+    }
+
+    private function hubDoorId(string $hubId): string
+    {
+        foreach ($this->readInventory()['hubs'] ?? [] as $row) {
+            if (is_array($row) && (string) ($row['native_id'] ?? '') === $hubId) {
+                return trim((string) ($row['door_id'] ?? ''));
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -896,6 +1167,7 @@ final class YarboUnifi
      *   sensors: list<array<string, mixed>>,
      *   relays: list<array<string, mixed>>,
      *   doors: list<array<string, mixed>>,
+     *   hubs: list<array<string, mixed>>,
      *   errors: list<string>
      * }
      */
@@ -907,6 +1179,7 @@ final class YarboUnifi
             'sensors' => [],
             'relays' => [],
             'doors' => [],
+            'hubs' => [],
             'errors' => [],
         ];
         if (!is_file($this->inventoryPath())) {
@@ -946,7 +1219,7 @@ final class YarboUnifi
     private function inventoryCount(array $inventory): int
     {
         $n = 0;
-        foreach (['cameras', 'lights', 'sensors', 'relays', 'doors'] as $key) {
+        foreach (['cameras', 'lights', 'sensors', 'relays', 'doors', 'hubs'] as $key) {
             $n += is_array($inventory[$key] ?? null) ? count($inventory[$key]) : 0;
         }
 
