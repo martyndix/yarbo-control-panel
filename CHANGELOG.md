@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.15] - 2026-10-01
+
+### Fixed
+- Home now shows UniFi sensor readings and Access **Open / Closed** on the same tiles as Unlock. Those fields were on the UniFi page but dropped when Home built its grid, so controllers only had an Unlock button.
+
 ## [4.0.14] - 2026-10-01
 
 ### Added

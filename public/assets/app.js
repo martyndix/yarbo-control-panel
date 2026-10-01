@@ -2626,8 +2626,15 @@ function unifiSnapSrc(d, bust) {
 }
 
 function unifiDpsMetaHtml(d, attr) {
-    const label = String(d?.dps_label || '').trim()
+    let label = String(d?.dps_label || '').trim()
         || (d?.dps === 'open' ? 'Open' : (d?.dps === 'close' || d?.dps === 'closed' ? 'Closed' : ''));
+    if (!label && d?.open === true) label = 'Open';
+    if (!label && d?.open === false && d?.has_dps) label = 'Closed';
+    if (!label) {
+        const status = String(d?.status || '');
+        if (/(^|[·\s])Open(\s|$)/i.test(status)) label = 'Open';
+        else if (/(^|[·\s])Closed(\s|$)/i.test(status)) label = 'Closed';
+    }
     if (!label && !d?.has_dps) return '';
     const open = label === 'Open' || d?.open === true;
     return `<span class="home-device-meta${open ? ' is-open' : ''}" ${attr}>${escapeHtml(label || '—')}</span>`;

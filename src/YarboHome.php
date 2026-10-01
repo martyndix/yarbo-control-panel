@@ -326,6 +326,23 @@ final class YarboHome
                 'gate' => (bool) ($device['gate'] ?? false),
                 'locked' => array_key_exists('locked', $device) ? (bool) $device['locked'] : null,
             ];
+            if ($isUnifi) {
+                foreach ([
+                    'native_id',
+                    'door_id',
+                    'dps',
+                    'dps_label',
+                    'has_dps',
+                    'open',
+                    'temperature',
+                    'humidity',
+                    'motion',
+                ] as $key) {
+                    if (array_key_exists($key, $device)) {
+                        $row[$key] = $device[$key];
+                    }
+                }
+            }
             if ($row['hidden']) {
                 $hiddenDevices[] = $row;
             } else {

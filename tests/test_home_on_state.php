@@ -264,6 +264,68 @@ $staleRow = $staleKind['devices'][0] ?? [];
 assert_true(($staleRow['kind'] ?? '') === 'heater', 'cached mill light must reclassify to heater ' . json_encode($staleRow));
 assert_true(empty($staleRow['colorable']), 'cached mill heater must drop colour picker');
 
+$unifiHomeRoot = sys_get_temp_dir() . '/yarbo-home-unifi-' . bin2hex(random_bytes(3));
+mkdir($unifiHomeRoot . '/data', 0775, true);
+file_put_contents($unifiHomeRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+    'active_module' => 'home',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($unifiHomeRoot . '/data/unifi-config.json', json_encode([
+    'host' => '',
+    'show_on_home' => ['unifi:hub:h1', 'unifi:sensor:s1'],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($unifiHomeRoot . '/data/unifi-inventory.json', json_encode([
+    'cameras' => [],
+    'lights' => [],
+    'relays' => [],
+    'doors' => [],
+    'hubs' => [[
+        'id' => 'unifi:hub:h1',
+        'native_id' => 'h1',
+        'door_id' => 'door1',
+        'name' => 'UA Hub Door Mini 2076',
+        'kind' => 'hub',
+        'source' => 'unifi',
+        'product' => 'UA-Hub-Door-Mini',
+        'on' => false,
+        'status' => 'Online · Locked · Closed',
+        'has_dps' => true,
+        'dps' => 'close',
+        'dps_label' => 'Closed',
+        'open' => false,
+        'locked' => true,
+        'gate' => false,
+    ]],
+    'sensors' => [[
+        'id' => 'unifi:sensor:s1',
+        'native_id' => 's1',
+        'name' => 'Toilet Downstairs',
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'product' => 'UP Sense',
+        'on' => false,
+        'status' => '21.4° · 48% RH',
+        'temperature' => 21.4,
+        'humidity' => 48,
+        'open' => false,
+    ]],
+    'errors' => [],
+], JSON_UNESCAPED_SLASHES));
+$homeUnifi = new YarboHome($unifiHomeRoot);
+$homeDash = $homeUnifi->dashboard();
+$byHomeId = [];
+foreach ($homeDash['devices'] ?? [] as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $byHomeId[$row['id']] = $row;
+    }
+}
+assert_true(isset($byHomeId['unifi:hub:h1']), 'Home must include the Access controller ' . json_encode($homeDash['devices'] ?? []));
+assert_true(($byHomeId['unifi:hub:h1']['dps_label'] ?? '') === 'Closed', 'Home controller must keep Open/Closed ' . json_encode($byHomeId['unifi:hub:h1'] ?? []));
+assert_true(($byHomeId['unifi:hub:h1']['has_dps'] ?? false) === true, 'Home controller must keep has_dps');
+assert_true(isset($byHomeId['unifi:sensor:s1']), 'Home must include the UniFi sensor');
+assert_true(($byHomeId['unifi:sensor:s1']['status'] ?? '') === '21.4° · 48% RH', 'Home sensor must keep temperature status');
+assert_true((float) ($byHomeId['unifi:sensor:s1']['humidity'] ?? 0) === 48.0, 'Home sensor must keep humidity');
+
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(
     !preg_match('/function homeColorInputsHtml[\s\S]{0,500}d\.kind === [\'"]light[\'"]/', $js),
