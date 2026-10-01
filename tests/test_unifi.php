@@ -228,6 +228,25 @@ if (!$relayPosted) {
     exit(1);
 }
 
+if (!$unifi->setShowOnHome('unifi:light:light1', true) || !$unifi->setShowOnHome('unifi:relay:relay1:1', true)) {
+    fwrite(STDERR, "show on home after command failed\n");
+    exit(1);
+}
+$homeRows = [];
+foreach ($unifi->homeRows() as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $homeRows[$row['id']] = $row;
+    }
+}
+if (($homeRows['unifi:light:light1']['on'] ?? false) !== true) {
+    fwrite(STDERR, 'homeRows light after on ' . json_encode($homeRows) . "\n");
+    exit(1);
+}
+if (($homeRows['unifi:relay:relay1:1']['on'] ?? false) !== true) {
+    fwrite(STDERR, 'homeRows relay after on ' . json_encode($homeRows) . "\n");
+    exit(1);
+}
+
 $unlock = $unifi->unlockDoor('door1', 'open');
 if (!($unlock['ok'] ?? false)) {
     fwrite(STDERR, 'unlock ' . json_encode($unlock) . "\n");

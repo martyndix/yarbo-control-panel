@@ -488,6 +488,7 @@ final class YarboUnifi
         if ($res['status'] < 200 || $res['status'] >= 300) {
             return ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . $res['status'])];
         }
+        $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
 
         return ['ok' => true, 'on' => $on];
     }
@@ -521,6 +522,7 @@ final class YarboUnifi
         if ($res['status'] < 200 || $res['status'] >= 300) {
             return ['ok' => false, 'error' => $res['error'] ?? ('Protect relay HTTP ' . $res['status'])];
         }
+        $this->patchInventoryOn(self::KIND_RELAY, $id, $on);
 
         return ['ok' => true, 'on' => $on];
     }
@@ -1255,6 +1257,30 @@ final class YarboUnifi
         }
 
         return (float) $cur;
+    }
+
+    private function patchInventoryOn(string $kind, string $nativeId, bool $on): void
+    {
+        $group = $kind === self::KIND_RELAY ? 'relays' : 'lights';
+        $inventory = $this->readInventory();
+        $homeId = self::homeId($kind, $nativeId);
+        $found = false;
+        foreach ($inventory[$group] as $i => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            $nid = (string) ($row['native_id'] ?? '');
+            if ($id !== $homeId && $nid !== $nativeId && $id !== $nativeId) {
+                continue;
+            }
+            $inventory[$group][$i]['on'] = $on;
+            $inventory[$group][$i]['status'] = $on ? 'On' : 'Off';
+            $found = true;
+        }
+        if ($found) {
+            $this->writeInventory($inventory);
+        }
     }
 
     private function lightIsOn(string $nativeId): bool

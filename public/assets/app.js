@@ -2389,7 +2389,7 @@ function applyHubFromStatus(data) {
     const ids = applyModuleSwitcher(hub);
     updatePowerwallDashboard(data.powerwall);
     updateLymowDashboard(data.lymow);
-    if (ids.includes('home')) {
+    if (ids.includes('home') && !homeStateTimer && !homeLoadBusy && !homePollBlocked()) {
         loadHomeDashboard();
     }
     if (ids.includes('unifi') && activeModuleId === 'unifi' && !settingsModalOpen) {
@@ -2605,12 +2605,18 @@ async function saveUnifiShowOnHome(id, show) {
 }
 
 async function unifiApi(body, timeoutMs = 20000) {
-    const res = await fetchWithTimeout('/api/unifi.php', {
-        method: body ? 'POST' : 'GET',
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-    }, timeoutMs);
-    return parseJsonResponse(res);
+    const isCommand = Boolean(body && (body.action === 'command' || body.action === 'unlock' || body.action === 'light'));
+    if (isCommand) beginHomeControl();
+    try {
+        const res = await fetchWithTimeout('/api/unifi.php', {
+            method: body ? 'POST' : 'GET',
+            headers: body ? { 'Content-Type': 'application/json' } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+        }, timeoutMs);
+        return parseJsonResponse(res);
+    } finally {
+        if (isCommand) endHomeControl();
+    }
 }
 
 function unifiSnapSrc(d, bust) {
@@ -2872,6 +2878,16 @@ function homeIsUnifi(d) {
     return d?.source === 'unifi' || String(d?.id || '').startsWith('unifi:');
 }
 
+function homeDeviceCanToggle(d) {
+    if (!d) return false;
+    if (homeIsUnifi(d)) {
+        const kind = String(d.kind || '');
+        return kind === 'light' || kind === 'relay';
+    }
+    const kind = String(d.kind || 'light');
+    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub';
+}
+
 function homeIsLight(d) {
     if (homeIsUnifi(d)) return d.kind === 'light';
     return !d?.kind || d.kind === 'light';
@@ -2926,13 +2942,74 @@ function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
     return '';
 }
 
+const HOME_CONTROL_ACTIONS = new Set(['command', 'room_command', 'group_command', 'scene_run', 'scene_off']);
+let homeAbort = null;
+let homeControlBusy = 0;
+const homeSticky = new Map();
+
+function abortPanelGets() {
+    if (statusAbort) {
+        statusAbort.abort();
+        statusAbort = null;
+        polling = false;
+    }
+    if (homeAbort) {
+        homeAbort.abort();
+        homeAbort = null;
+        homeLoadBusy = false;
+    }
+}
+
+function beginHomeControl() {
+    homeControlBusy += 1;
+    noteCommandQuiet();
+    abortPanelGets();
+}
+
+function endHomeControl() {
+    homeControlBusy = Math.max(0, homeControlBusy - 1);
+    noteCommandQuiet();
+}
+
+function homePollBlocked() {
+    return homeControlBusy > 0 || Date.now() < commandQuietUntil;
+}
+
+function rememberHomeSticky(id, on) {
+    if (!id) return;
+    homeSticky.set(id, { on: Boolean(on), until: Date.now() + COMMAND_QUIET_MS });
+}
+
+function homeStickyOn(id) {
+    const row = homeSticky.get(id);
+    if (!row) return null;
+    if (Date.now() > row.until) {
+        homeSticky.delete(id);
+        return null;
+    }
+    return row.on;
+}
+
 async function homeApi(body, timeoutMs = 20000) {
-    const res = await fetchWithTimeout('/api/home.php', {
-        method: body ? 'POST' : 'GET',
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-    }, timeoutMs);
-    return parseJsonResponse(res);
+    const isCommand = Boolean(body && HOME_CONTROL_ACTIONS.has(body.action));
+    if (isCommand) beginHomeControl();
+    try {
+        const extra = {};
+        if (!body) {
+            if (homeAbort) homeAbort.abort();
+            homeAbort = new AbortController();
+            extra.signal = homeAbort.signal;
+        }
+        const res = await fetchWithTimeout('/api/home.php', {
+            method: body ? 'POST' : 'GET',
+            headers: body ? { 'Content-Type': 'application/json' } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+            ...extra,
+        }, timeoutMs);
+        return parseJsonResponse(res);
+    } finally {
+        if (isCommand) endHomeControl();
+    }
 }
 
 function applyHomeSetupUi(data) {
@@ -3003,6 +3080,7 @@ async function startHomeSetup(button) {
 
 async function loadHomeDashboard(opts = {}) {
     if (homeDrag) return;
+    if (opts.patch && homePollBlocked()) return;
     if (homeLoadBusy && !opts.force) return;
     const card = document.getElementById('home-card');
     const homeEnabled = Boolean(document.querySelector('[data-module-id="home"]'));
@@ -3033,6 +3111,10 @@ async function loadHomeDashboard(opts = {}) {
     } catch (err) {
         if (isAbortError(err)) {
             aborted = true;
+            if (homePollBlocked()) {
+                homeLoadBusy = false;
+                return;
+            }
             const status = document.getElementById('home-server-status');
             homeLoadAborts += 1;
             if (status) {
@@ -3074,6 +3156,7 @@ function homeCardIsWatching() {
 function ensureHomeStatePoll() {
     if (homeStateTimer) return;
     homeStateTimer = window.setInterval(() => {
+        if (homePollBlocked()) return;
         if (homeCardIsWatching()) loadHomeDashboard({ patch: true });
     }, 3000);
 }
@@ -3099,6 +3182,7 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
 }
 
 function setHomeDeviceOn(id, on) {
+    rememberHomeSticky(id, on);
     const device = homeDeviceRecord(id);
     if (device) device.on = Boolean(on);
     patchHomeDeviceVisual(id, on);
@@ -3116,7 +3200,13 @@ function patchHomeDashboard(data) {
         renderHomeDashboard(data);
         return;
     }
-    next.forEach((d) => patchHomeDeviceVisual(d.id, d.on, d));
+    next.forEach((d) => {
+        const sticky = homeStickyOn(d.id);
+        if (sticky !== null) d.on = sticky;
+        const rec = homeDeviceRecord(d.id);
+        if (rec && typeof d.on === 'boolean') rec.on = Boolean(d.on);
+        patchHomeDeviceVisual(d.id, d.on, d);
+    });
     (data.rooms || []).forEach((room) => {
         const el = document.querySelector(`[data-home-room="${CSS.escape(room.id)}"]`);
         if (!el) return;
@@ -3594,6 +3684,8 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const defaultName = d.default_name || d.name || '';
     const kindName = homeKindLabel(d);
     const kindChip = kindName ? `<span class="home-device-kind">${escapeHtml(kindName)}</span>` : '';
+    const canToggle = !hidden && homeDeviceCanToggle(d);
+    const toggleClass = canToggle ? ' home-device--toggle' : '';
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
@@ -3608,7 +3700,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
     const actions = hidden ? '' : homeDeviceActionsHtml(d, bright, color);
-    return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
+    return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${toggleClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
@@ -3904,6 +3996,30 @@ async function saveHomeGroupName(input) {
         if (current) input.value = current.name || '';
     } finally {
         delete input.dataset.homeNameSaving;
+    }
+}
+
+async function sendHomeDeviceToggle(id, button) {
+    const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
+    const device = homeDeviceRecord(id);
+    if (!homeDeviceCanToggle(device || { id })) return;
+    const currentlyOn = card?.classList.contains('is-on') || Boolean(device?.on);
+    const nextOn = !currentlyOn;
+    setHomeDeviceOn(id, nextOn);
+    if (button) button.disabled = true;
+    try {
+        const data = await homeApi({
+            action: 'command',
+            id,
+            command: nextOn ? 'on' : 'off',
+        }, 25000);
+        if (!data.ok) throw new Error(data.error || 'Failed');
+        if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
+    } catch (err) {
+        setHomeDeviceOn(id, currentlyOn);
+        showToast(err.message || 'Home command failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -4220,28 +4336,15 @@ function bindHomeDashboard() {
             return;
         }
         const btn = event.target.closest('[data-home-toggle]');
-        if (!btn) return;
-        const id = btn.getAttribute('data-home-toggle') || '';
-        const card = btn.closest('[data-home-id]');
-        const device = homeDeviceRecord(id);
-        const currentlyOn = card?.classList.contains('is-on') || Boolean(device?.on);
-        const nextOn = !currentlyOn;
-        setHomeDeviceOn(id, nextOn);
-        btn.disabled = true;
-        try {
-            const data = await homeApi({
-                action: 'command',
-                id,
-                command: nextOn ? 'on' : 'off',
-            }, 25000);
-            if (!data.ok) throw new Error(data.error || 'Failed');
-            if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
-        } catch (err) {
-            setHomeDeviceOn(id, currentlyOn);
-            showToast(err.message || 'Home command failed', 'error');
-        } finally {
-            btn.disabled = false;
+        if (btn) {
+            await sendHomeDeviceToggle(btn.getAttribute('data-home-toggle') || '', btn);
+            return;
         }
+        const row = event.target.closest('[data-home-id].home-device--toggle');
+        if (!row || event.target.closest('button, input, select, a, .home-drag-handle, .home-reorder-controls, .home-device-manage')) {
+            return;
+        }
+        await sendHomeDeviceToggle(row.getAttribute('data-home-id') || '');
     });
     document.getElementById('home-devices')?.addEventListener('change', async (event) => {
         const assign = event.target.closest('[data-home-room-assign]');
@@ -7877,10 +7980,18 @@ function sleep(ms) {
 async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const extra = options.signal;
+    const onExtraAbort = () => controller.abort();
+    if (extra) {
+        if (extra.aborted) controller.abort();
+        else extra.addEventListener('abort', onExtraAbort, { once: true });
+    }
     try {
-        return await fetch(url, { ...options, signal: controller.signal });
+        const { signal: _ignored, ...rest } = options;
+        return await fetch(url, { ...rest, signal: controller.signal });
     } finally {
         clearTimeout(timer);
+        extra?.removeEventListener?.('abort', onExtraAbort);
     }
 }
 
@@ -8781,13 +8892,21 @@ document.getElementById('unifi-card')?.addEventListener('click', async (event) =
         const id = toggleBtn.getAttribute('data-unifi-light') || toggleBtn.getAttribute('data-unifi-relay') || '';
         const card = toggleBtn.closest('[data-unifi-id]');
         const on = card?.classList.contains('is-on');
+        const nextOn = !on;
+        card?.classList.toggle('is-on', nextOn);
+        if (toggleBtn) toggleBtn.textContent = nextOn ? 'Off' : 'On';
         toggleBtn.disabled = true;
         try {
-            const data = await unifiApi({ action: 'command', id, command: on ? 'off' : 'on' });
+            const data = await unifiApi({ action: 'command', id, command: nextOn ? 'on' : 'off' });
             if (!data.ok) throw new Error(data.error || 'Failed');
-            await loadUnifiDashboard({ silent: true });
-            if (lastHub?.modules?.home) loadHomeDashboard();
+            if (typeof data.on === 'boolean') {
+                card?.classList.toggle('is-on', data.on);
+                toggleBtn.textContent = data.on ? 'Off' : 'On';
+            }
+            if (lastHub?.modules?.home) loadHomeDashboard({ patch: true });
         } catch (err) {
+            card?.classList.toggle('is-on', Boolean(on));
+            toggleBtn.textContent = on ? 'Off' : 'On';
             showToast(err.message || 'UniFi command failed', 'error');
         } finally {
             toggleBtn.disabled = false;

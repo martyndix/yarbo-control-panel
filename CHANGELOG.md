@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.7] - 2026-10-01
+
+### Fixed
+- Home On/Off from the **web page** now reaches Hue and UniFi lights. Apple Home → panel already worked because the 3-second GET poll could run; that same poll (plus status) was occupying the single-threaded `php -S` server so click POSTs never ran, then the poll snapped the dots back Off. Clicks now pause those GETs, keep the optimistic On/Off for a few seconds, and Home polls reuse the device cache instead of re-parsing the Hue fabric every time. UniFi On/Off is written into the cached inventory so the next Home refresh stays in sync. Do not pair Hue again.
+
 ## [4.0.6] - 2026-10-01
 
 ### Fixed

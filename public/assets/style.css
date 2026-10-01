@@ -3060,6 +3060,10 @@ html[data-theme="light"] .plan-activity {
     border-color: var(--accent);
 }
 
+.home-device--toggle {
+    cursor: pointer;
+}
+
 .home-device-manage {
     display: none;
     flex-wrap: nowrap;

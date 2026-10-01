@@ -158,4 +158,42 @@ foreach ($cached['devices'] as $row) {
 assert_true(($cachedBy['1:2']['on'] ?? true) === false, 'cache off must win over stale disk on');
 assert_true(($cachedBy['1:4']['on'] ?? true) === false, 'cache off must win over stale disk on for both lights');
 
+$fabricPath = $root . '/data/matter-server/aabbcc.json';
+file_put_contents(
+    $fabricPath,
+    json_encode(['nodes' => ['1' => [
+        'node_id' => 1,
+        'available' => true,
+        'is_bridge' => true,
+        'attributes' => [
+            '0/40/1' => 'Signify',
+            '0/40/3' => 'Hue Bridge',
+            '2/29/0' => [['deviceType' => 0x0013]],
+            '2/6/0' => false,
+            '2/57/5' => 'Lamp',
+            '5/29/0' => [['deviceType' => 0x0013]],
+            '5/6/0' => true,
+            '5/57/5' => 'Extra',
+        ],
+    ]]], JSON_UNESCAPED_SLASHES)
+);
+$fabricMtime = (int) filemtime($fabricPath);
+file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
+    'v' => 4,
+    'saved_at' => time(),
+    'fabric_mtime' => $fabricMtime,
+    'devices' => [
+        ['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => false],
+    ],
+], JSON_UNESCAPED_SLASHES));
+$skipped = $home->localHomeDevices();
+$skippedIds = array_column($skipped['devices'], 'id');
+assert_true($skipped['fabric']['source'] === 'cache', 'fresh cache should skip re-parsing Hue fabric');
+assert_true(!in_array('1:5', $skippedIds, true), 'stale fabric extra light must wait until the fabric file changes');
+
+touch($fabricPath, $fabricMtime + 5);
+$refreshed = $home->localHomeDevices();
+$refreshedIds = array_column($refreshed['devices'], 'id');
+assert_true(in_array('1:5', $refreshedIds, true), 'newer fabric file must add the extra light');
+
 echo "ok\n";

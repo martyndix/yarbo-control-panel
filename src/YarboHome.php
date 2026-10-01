@@ -1272,21 +1272,39 @@ final class YarboHome
         $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
         $storageDir = $this->projectRoot . '/data/matter-server';
         $store = $this->load();
+        $bundle = $this->readDeviceCacheBundle($cachePath);
+        $remembered = $bundle['devices'] !== [] ? $bundle['devices'] : ($store['last_devices'] ?? []);
+        $fromMeta = $this->devicesFromStoreHints($store);
+        $fabricMtime = YarboMatterFabric::storageMtime($storageDir);
+        $cacheFresh = $remembered !== []
+            && !self::looksLikeUninterviewedStub($remembered)
+            && $bundle['fabric_mtime'] > 0
+            && $bundle['fabric_mtime'] >= $fabricMtime;
+        if ($cacheFresh) {
+            return [
+                'ok' => true,
+                'error' => '',
+                'devices' => $remembered,
+                'fabric' => [
+                    'source' => 'cache',
+                    'storage_files' => YarboMatterFabric::storageFileNames($storageDir),
+                    'storage_nodes' => 0,
+                    'unreadable_files' => [],
+                    'hint' => '',
+                ],
+            ];
+        }
         $nodes = YarboMatterFabric::nodesFromDisk($storageDir);
         $fromDisk = YarboMatterFabric::flatten($nodes);
         $unreadable = YarboMatterFabric::unreadableStorageFiles($storageDir);
-        $remembered = $this->rememberedOrCached($cachePath);
-        $fromMeta = $this->devicesFromStoreHints($store);
         $diskReady = $fromDisk !== [] && !self::looksLikeUninterviewedStub($fromDisk);
         if ($diskReady) {
             $devices = $remembered !== []
                 ? self::overlayDeviceStates($fromDisk, $remembered)
                 : $fromDisk;
             $source = 'disk';
-            if ($remembered === []) {
-                $this->writeDeviceCache($cachePath, $fromDisk);
-                $this->rememberDevices($fromDisk);
-            }
+            $this->writeDeviceCache($cachePath, $devices, $fabricMtime);
+            $this->rememberDevices($devices);
         } else {
             $devices = self::preferLiveOrRemembered($fromDisk, $remembered);
             $devices = self::preferLiveOrRemembered($devices, $fromMeta);
@@ -1649,14 +1667,18 @@ final class YarboHome
     /**
      * @return list<array<string, mixed>>
      */
-    private function readDeviceCache(string $path): array
+    /**
+     * @return array{devices: list<array<string, mixed>>, fabric_mtime: int}
+     */
+    private function readDeviceCacheBundle(string $path): array
     {
+        $empty = ['devices' => [], 'fabric_mtime' => 0];
         if (!is_file($path)) {
-            return [];
+            return $empty;
         }
         $cached = json_decode((string) file_get_contents($path), true);
         if (!is_array($cached) || (int) ($cached['v'] ?? 0) < 4 || !is_array($cached['devices'] ?? null)) {
-            return [];
+            return $empty;
         }
         $devices = [];
         foreach ($cached['devices'] as $row) {
@@ -1665,17 +1687,33 @@ final class YarboHome
             }
         }
 
-        return $devices;
+        return [
+            'devices' => $devices,
+            'fabric_mtime' => (int) ($cached['fabric_mtime'] ?? 0),
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function readDeviceCache(string $path): array
+    {
+        return $this->readDeviceCacheBundle($path)['devices'];
     }
 
     /**
      * @param list<array<string, mixed>> $devices
      */
-    private function writeDeviceCache(string $path, array $devices): void
+    private function writeDeviceCache(string $path, array $devices, ?int $fabricMtime = null): void
     {
+        $mtime = $fabricMtime;
+        if ($mtime === null) {
+            $mtime = $this->readDeviceCacheBundle($path)['fabric_mtime'];
+        }
         @file_put_contents($path, json_encode([
             'v' => 4,
             'saved_at' => time(),
+            'fabric_mtime' => $mtime,
             'devices' => $devices,
         ], JSON_UNESCAPED_SLASHES));
     }

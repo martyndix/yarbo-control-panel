@@ -55,6 +55,22 @@ final class YarboMatterFabric
     }
 
     /**
+     * Newest mtime of Matter storage files. Used so Home polls can skip re-parsing a huge Hue fabric.
+     */
+    public static function storageMtime(string $dir): int
+    {
+        $max = 0;
+        foreach (self::storageFiles($dir) as $path) {
+            $mtime = @filemtime($path);
+            if (is_int($mtime) && $mtime > $max) {
+                $max = $mtime;
+            }
+        }
+
+        return $max;
+    }
+
+    /**
      * @return list<string>
      */
     public static function unreadableStorageFiles(string $dir): array
