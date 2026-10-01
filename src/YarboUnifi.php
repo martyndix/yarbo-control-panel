@@ -403,6 +403,12 @@ final class YarboUnifi
             return [];
         }
         $wanted = array_fill_keys($config['show_on_home'], true);
+        foreach (array_keys($wanted) as $id) {
+            if (str_starts_with($id, 'unifi:door:') || str_starts_with($id, 'unifi:hub:') || str_contains($id, ':sensor:dps-')) {
+                $this->refreshAccessDoorStatus(2.0);
+                break;
+            }
+        }
         $rows = [];
         foreach ($this->dashboardPayload(false)['devices'] as $device) {
             if (!is_array($device)) {
@@ -415,6 +421,73 @@ final class YarboUnifi
         }
 
         return $rows;
+    }
+
+    /**
+     * Re-read Access doors so Open/Closed on Home stays current without a full Protect poll.
+     */
+    private function refreshAccessDoorStatus(float $timeout): void
+    {
+        $config = $this->load();
+        if ($config['host'] === '' || ($config['access_token'] === '' && $config['protect_api_key'] === '')) {
+            return;
+        }
+        $inventory = $this->readInventory();
+        $at = (int) ($inventory['access_status_at'] ?? 0);
+        if ($at > 0 && (time() - $at) < 5) {
+            return;
+        }
+        $doorsRes = $this->accessJson($config, '/doors', $timeout);
+        if (!($doorsRes['ok'] ?? false)) {
+            return;
+        }
+        $rows = [];
+        $dpsByDoor = [];
+        foreach (self::flattenAccessItems($doorsRes['items']) as $item) {
+            $mapped = $this->mapDoor($item);
+            if ($mapped === null) {
+                continue;
+            }
+            $rows[] = $mapped;
+            $dps = $this->mapDoorPositionSensor($item);
+            if ($dps !== null) {
+                $dpsByDoor[(string) ($mapped['native_id'] ?? '')] = $dps;
+            }
+        }
+        if ($rows === []) {
+            return;
+        }
+        $inventory['doors'] = $rows;
+        $sensors = [];
+        foreach ($inventory['sensors'] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $native = (string) ($row['native_id'] ?? '');
+            if (str_starts_with($native, 'dps-')) {
+                continue;
+            }
+            $sensors[] = $row;
+        }
+        foreach ($dpsByDoor as $dps) {
+            $sensors[] = $dps;
+        }
+        $inventory['sensors'] = $sensors;
+        $byId = [];
+        foreach ($rows as $door) {
+            $byId[(string) ($door['native_id'] ?? '')] = $door;
+        }
+        foreach ($inventory['hubs'] as $i => $hub) {
+            if (!is_array($hub)) {
+                continue;
+            }
+            $doorId = (string) ($hub['door_id'] ?? '');
+            if ($doorId !== '' && isset($byId[$doorId])) {
+                $inventory['hubs'][$i] = $this->hubWithDoorStatus($hub, $byId[$doorId]);
+            }
+        }
+        $inventory['access_status_at'] = time();
+        $this->writeInventory($inventory);
     }
 
     public function snapshotJpeg(string $cameraId): string
@@ -991,15 +1064,14 @@ final class YarboUnifi
         if ($lock === 'unlock' || $lock === 'unlocked') {
             $locked = false;
         }
-        $dps = strtolower((string) ($row['door_position_status'] ?? $row['doorPositionStatus'] ?? ''));
+        $dps = $this->doorPositionRaw($row) ?? '';
+        $dpsLabel = $this->dpsLabel($dps);
         $gate = $this->truthy($row['is_bind_gate'] ?? $row['gate'] ?? false)
             || str_contains(strtolower((string) ($row['type'] ?? $row['device_type'] ?? '')), 'gate');
         $parts = [];
         $parts[] = $locked ? 'Locked' : 'Unlocked';
-        if ($dps === 'open') {
-            $parts[] = 'Open';
-        } elseif ($dps === 'close' || $dps === 'closed') {
-            $parts[] = 'Closed';
+        if ($dpsLabel !== '') {
+            $parts[] = $dpsLabel;
         }
 
         return [
@@ -1018,6 +1090,8 @@ final class YarboUnifi
             'gate' => $gate,
             'has_dps' => $this->doorHasPositionSensor($row),
             'dps' => $dps,
+            'dps_label' => $dpsLabel,
+            'open' => $dpsLabel === 'Open' ? true : ($dpsLabel === 'Closed' ? false : null),
         ];
     }
 
@@ -1174,19 +1248,11 @@ final class YarboUnifi
         }
         $door = $doorsById[$doorId] ?? null;
         $type = (string) ($row['type'] ?? $row['device_type'] ?? 'Access hub');
-        $gate = str_contains(strtolower($type), 'gate')
+        $gate = str_contains(strtolower($type . ' ' . (string) ($row['full_name'] ?? '')), 'gate')
             || (is_array($door) && !empty($door['gate']));
         $online = $this->truthy($row['online'] ?? $row['isOnline'] ?? true);
         $bound = $doorId !== '';
-        $parts = [];
-        $parts[] = $online ? 'Online' : 'Offline';
-        if (!$bound) {
-            $parts[] = 'Not bound';
-        } elseif (is_array($door) && ($door['status'] ?? '') !== '') {
-            $parts[] = (string) $door['status'];
-        }
-
-        return [
+        $hub = [
             'id' => self::homeId(self::KIND_HUB, $id),
             'native_id' => $id,
             'door_id' => $doorId,
@@ -1198,10 +1264,53 @@ final class YarboUnifi
             'on' => is_array($door) ? !empty($door['on']) : false,
             'dimmable' => false,
             'colorable' => false,
-            'status' => implode(' · ', $parts),
+            'status' => $online ? 'Online' : 'Offline',
             'gate' => $gate,
             'locked' => is_array($door) ? !empty($door['locked']) : true,
         ];
+        if (is_array($door)) {
+            $hub = $this->hubWithDoorStatus($hub, $door);
+        }
+        if (!$online) {
+            $rest = preg_replace('/^Online/', 'Offline', (string) $hub['status'], 1);
+            $hub['status'] = is_string($rest) && $rest !== '' ? $rest : 'Offline';
+        } elseif (!$bound) {
+            $hub['status'] = 'Online · Not bound';
+        }
+
+        return $hub;
+    }
+
+    /**
+     * Copy lock + door-position onto a hub so the controller tile can show Open/Closed.
+     *
+     * @param array<string, mixed> $hub
+     * @param array<string, mixed> $door
+     * @return array<string, mixed>
+     */
+    private function hubWithDoorStatus(array $hub, array $door): array
+    {
+        $hub['on'] = !empty($door['on']);
+        $hub['locked'] = !empty($door['locked']);
+        $dpsLabel = trim((string) ($door['dps_label'] ?? $this->dpsLabel((string) ($door['dps'] ?? ''))));
+        if (!empty($door['has_dps']) || $dpsLabel !== '') {
+            $hub['has_dps'] = true;
+            $hub['dps'] = (string) ($door['dps'] ?? '');
+            $hub['dps_label'] = $dpsLabel;
+            $hub['open'] = array_key_exists('open', $door) ? $door['open'] : ($dpsLabel === 'Open');
+        }
+        $parts = [str_starts_with((string) ($hub['status'] ?? ''), 'Offline') ? 'Offline' : 'Online'];
+        if (trim((string) ($hub['door_id'] ?? '')) === '') {
+            $parts[] = 'Not bound';
+        } else {
+            $parts[] = !empty($hub['locked']) ? 'Locked' : 'Unlocked';
+            if ($dpsLabel !== '') {
+                $parts[] = $dpsLabel;
+            }
+        }
+        $hub['status'] = implode(' · ', $parts);
+
+        return $hub;
     }
 
     /**
@@ -1217,10 +1326,11 @@ final class YarboUnifi
         if ($doorId === '') {
             return null;
         }
-        $dps = strtolower(trim((string) ($row['door_position_status'] ?? $row['doorPositionStatus'] ?? '')));
-        $open = $dps === 'open';
-        $closed = $dps === 'close' || $dps === 'closed';
-        $status = $open ? 'Open' : ($closed ? 'Closed' : 'Unknown');
+        $dps = $this->doorPositionRaw($row) ?? '';
+        $dpsLabel = $this->dpsLabel($dps);
+        $open = $dpsLabel === 'Open';
+        $closed = $dpsLabel === 'Closed';
+        $status = $dpsLabel !== '' ? $dpsLabel : 'Unknown';
         $doorName = $this->displayName($row, 'Door');
 
         return [
@@ -1236,6 +1346,9 @@ final class YarboUnifi
             'dimmable' => false,
             'colorable' => false,
             'status' => $status,
+            'dps' => $dps,
+            'dps_label' => $dpsLabel !== '' ? $dpsLabel : $status,
+            'has_dps' => true,
             'open' => $open ? true : ($closed ? false : null),
         ];
     }
@@ -1245,16 +1358,52 @@ final class YarboUnifi
      */
     private function doorHasPositionSensor(array $row): bool
     {
-        if (!array_key_exists('door_position_status', $row) && !array_key_exists('doorPositionStatus', $row)) {
-            return false;
-        }
-        $raw = $row['door_position_status'] ?? $row['doorPositionStatus'];
-        if ($raw === null) {
-            return false;
-        }
-        $value = strtolower(trim((string) $raw));
+        return $this->doorPositionRaw($row) !== null;
+    }
 
-        return $value !== '' && $value !== 'null' && $value !== 'none';
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function doorPositionRaw(array $row): ?string
+    {
+        foreach (['door_position_status', 'doorPositionStatus', 'dps_status', 'dpsStatus', 'position_status'] as $key) {
+            if (!array_key_exists($key, $row) || $row[$key] === null) {
+                continue;
+            }
+            $value = strtolower(trim((string) $row[$key]));
+            if ($value !== '' && $value !== 'null' && $value !== 'none') {
+                return $value;
+            }
+        }
+        foreach (['extras', 'extra', 'status', 'state'] as $nest) {
+            if (!isset($row[$nest]) || !is_array($row[$nest]) || array_is_list($row[$nest])) {
+                continue;
+            }
+            foreach (['door_position_status', 'doorPositionStatus', 'dps_status', 'dpsStatus'] as $key) {
+                if (!array_key_exists($key, $row[$nest]) || $row[$nest][$key] === null) {
+                    continue;
+                }
+                $value = strtolower(trim((string) $row[$nest][$key]));
+                if ($value !== '' && $value !== 'null' && $value !== 'none') {
+                    return $value;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function dpsLabel(string $dps): string
+    {
+        $dps = strtolower(trim($dps));
+        if ($dps === 'open') {
+            return 'Open';
+        }
+        if ($dps === 'close' || $dps === 'closed') {
+            return 'Closed';
+        }
+
+        return '';
     }
 
     /**

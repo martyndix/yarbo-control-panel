@@ -2625,6 +2625,14 @@ function unifiSnapSrc(d, bust) {
     return bust ? `${base}&r=${unifiSnapGen}` : base;
 }
 
+function unifiDpsMetaHtml(d, attr) {
+    const label = String(d?.dps_label || '').trim()
+        || (d?.dps === 'open' ? 'Open' : (d?.dps === 'close' || d?.dps === 'closed' ? 'Closed' : ''));
+    if (!label && !d?.has_dps) return '';
+    const open = label === 'Open' || d?.open === true;
+    return `<span class="home-device-meta${open ? ' is-open' : ''}" ${attr}>${escapeHtml(label || '—')}</span>`;
+}
+
 function unifiDeviceCardHtml(d) {
     const kind = String(d.kind || '');
     const on = Boolean(d.on);
@@ -2661,14 +2669,14 @@ function unifiDeviceCardHtml(d) {
             ? `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="unlock">Unlock</button>`
             : '';
         const kindLabel = kind === 'hub' ? 'Controller' : 'Door';
+        const dps = unifiDpsMetaHtml(d, 'data-unifi-dps');
         return `<article class="home-device${on ? ' is-on' : ''}" data-unifi-id="${escapeHtml(d.id)}">
             <div class="home-device-label">
                 <span class="home-device-dot" aria-hidden="true"></span>
                 <p class="home-device-name">${escapeHtml(d.name || kindLabel)}</p>
                 <span class="home-device-kind">${kindLabel}</span>
             </div>
-            <p class="home-device-meta unifi-card-status">${escapeHtml(d.status || '')}</p>
-            <div class="home-device-actions">${unlock}${gate}</div>
+            <div class="home-device-actions">${dps}${unlock}${gate}</div>
         </article>`;
     }
     return `<article class="home-device${on ? ' is-on' : ''}" data-unifi-id="${escapeHtml(d.id)}">
@@ -2677,7 +2685,7 @@ function unifiDeviceCardHtml(d) {
             <p class="home-device-name">${escapeHtml(d.name || 'Sensor')}</p>
             <span class="home-device-kind">${escapeHtml(unifiKindLabel(d))}</span>
         </div>
-        <p class="home-device-meta unifi-card-status">${escapeHtml(d.status || '—')}</p>
+        <div class="home-device-actions"><span class="home-device-meta" data-unifi-dps>${escapeHtml(d.status || '—')}</span></div>
     </article>`;
 }
 
@@ -2700,8 +2708,12 @@ function patchUnifiWrap(wrap, items, htmlFn) {
         el.classList.toggle('is-on', Boolean(d.on));
         const name = el.querySelector('.unifi-camera-name, .home-device-name');
         if (name && d.name) name.textContent = d.name;
-        const status = el.querySelector('.unifi-card-status, .home-device-meta');
-        if (status) status.textContent = d.status || '';
+        const status = el.querySelector('[data-unifi-dps], .unifi-card-status, .home-device-meta');
+        if (status) {
+            const label = String(d.dps_label || d.status || '').trim();
+            if (label) status.textContent = label;
+            status.classList.toggle('is-open', d.open === true || d.dps === 'open' || label === 'Open');
+        }
         const toggleBtn = el.querySelector('[data-unifi-light], [data-unifi-relay]');
         if (toggleBtn) toggleBtn.textContent = d.on ? 'Off' : 'On';
     });
@@ -2903,6 +2915,9 @@ function homeKindLabel(d) {
             case 'hub':
                 return 'Controller';
             case 'sensor':
+                if (d.product === 'Door position sensor' || String(d.native_id || '').startsWith('dps-')) {
+                    return 'Door sensor';
+                }
                 return 'Sensor';
             case 'relay':
                 return 'Relay';
@@ -3198,6 +3213,24 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         const kelvin = card.querySelector('[data-home-kelvin]');
         if (kelvin && document.activeElement !== kelvin) kelvin.value = String(extras.color_temp);
     }
+    const dpsLabel = String(extras.dps_label || '').trim();
+    if (dpsLabel || extras.dps != null || extras.status) {
+        const device = homeDeviceRecord(id);
+        if (device) {
+            if (dpsLabel) device.dps_label = dpsLabel;
+            if (extras.dps != null) device.dps = extras.dps;
+            if (extras.open != null) device.open = extras.open;
+            if (extras.status) device.status = extras.status;
+        }
+        const meta = card.querySelector('[data-home-dps], [data-home-status]');
+        if (meta) {
+            const label = dpsLabel
+                || extras.status
+                || (extras.dps === 'open' ? 'Open' : (extras.dps === 'close' || extras.dps === 'closed' ? 'Closed' : meta.textContent));
+            meta.textContent = label;
+            meta.classList.toggle('is-open', extras.open === true || extras.dps === 'open' || label === 'Open');
+        }
+    }
 }
 
 function setHomeDeviceOn(id, on) {
@@ -3228,6 +3261,10 @@ function patchHomeDashboard(data) {
             if (d.brightness != null) rec.brightness = d.brightness;
             if (d.color_hex) rec.color_hex = d.color_hex;
             if (d.color_temp != null) rec.color_temp = d.color_temp;
+            if (d.dps_label) rec.dps_label = d.dps_label;
+            if (d.dps != null) rec.dps = d.dps;
+            if (d.open != null) rec.open = d.open;
+            if (d.status) rec.status = d.status;
         }
         patchHomeDeviceVisual(d.id, d.on, d);
     });
@@ -3748,7 +3785,8 @@ function homeDeviceActionsHtml(d, bright, color) {
             </div>`;
         }
         if (kind === 'sensor') {
-            return `<div class="home-device-actions"><span class="home-device-meta">${escapeHtml(d.status || '—')}</span></div>`;
+            const open = d.open === true || d.status === 'Open';
+            return `<div class="home-device-actions"><span class="home-device-meta${open ? ' is-open' : ''}" data-home-status>${escapeHtml(d.status || '—')}</span></div>`;
         }
         if (kind === 'door' || kind === 'hub') {
             const gate = d.gate
@@ -3757,6 +3795,7 @@ function homeDeviceActionsHtml(d, bright, color) {
                    <button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="stop">Stop</button>`
                 : '';
             return `<div class="home-device-actions">
+                ${unifiDpsMetaHtml(d, 'data-home-dps')}
                 <button type="button" class="btn btn-secondary btn-compact" data-home-unifi-unlock>Unlock</button>
                 ${gate}
             </div>`;

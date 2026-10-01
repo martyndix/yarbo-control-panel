@@ -272,5 +272,13 @@ assert_true(
 assert_true(str_contains($js, 'class="home-kelvin"'), 'colour-temperature slider must be distinct from brightness');
 assert_true(str_contains($js, 'data-home-kelvin'), 'Home poll must be able to patch the kelvin slider');
 assert_true(str_contains($js, 'if (extras.color_temp != null)'), 'Apple Home colour temperature must update the tile');
+assert_true(str_contains($js, 'data-home-dps'), 'Home door controller must show Open/Closed next to Unlock');
+assert_true(str_contains($js, 'unifiDpsMetaHtml'), 'UniFi door position belongs in the actions box');
+
+$css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
+assert_true(
+    str_contains($css, '.home-device-actions .home-device-meta'),
+    'sensor-style meta next to Unlock must be visible in the actions box'
+);
 
 echo "ok\n";

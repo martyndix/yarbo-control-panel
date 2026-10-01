@@ -190,6 +190,23 @@ if (!in_array('unifi:hub:7483c2773855', $probeIds, true) || !in_array('unifi:sen
     fwrite(STDERR, 'access extras ' . json_encode($probeIds) . "\n");
     exit(1);
 }
+$hubRow = null;
+$doorRow = null;
+foreach ($probe['devices'] ?? [] as $row) {
+    if (!is_array($row)) {
+        continue;
+    }
+    if (($row['id'] ?? '') === 'unifi:hub:7483c2773855') {
+        $hubRow = $row;
+    }
+    if (($row['id'] ?? '') === 'unifi:door:door1') {
+        $doorRow = $row;
+    }
+}
+if (($hubRow['dps_label'] ?? '') !== 'Closed' || ($doorRow['dps_label'] ?? '') !== 'Closed') {
+    fwrite(STDERR, 'hub/door missing Closed DPS ' . json_encode([$hubRow, $doorRow]) . "\n");
+    exit(1);
+}
 
 $light = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
 if (!($light['ok'] ?? false) || empty($light['on'])) {
@@ -581,6 +598,17 @@ $sameKeyOk->setTransport(function (string $method, string $url, array $headers) 
 $sameKeyOkProbe = $sameKeyOk->probe();
 if (($sameKeyOkProbe['counts']['doors'] ?? 0) !== 1 || ($sameKeyOkProbe['counts']['hubs'] ?? 0) !== 1) {
     fwrite(STDERR, 'same-key proxy X-API-KEY should list doors ' . json_encode($sameKeyOkProbe) . "\n");
+    exit(1);
+}
+
+$js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
+$css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
+if (!str_contains($js, 'data-home-dps') || !str_contains($js, 'data-unifi-dps') || !str_contains($js, 'unifiDpsMetaHtml')) {
+    fwrite(STDERR, "door position meta missing from controller actions\n");
+    exit(1);
+}
+if (!str_contains($css, '.home-device-actions .home-device-meta')) {
+    fwrite(STDERR, "actions-box meta CSS missing\n");
     exit(1);
 }
 

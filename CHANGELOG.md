@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.14] - 2026-10-01
+
+### Added
+- Access door position now shows as **Open** / **Closed** in the same actions box as Unlock on the door controller (and door) tile, like temperature and humidity on Protect sensors. Home refreshes that status from Access every few seconds. Tick the controller on Home — you do not need a separate door-sensor row.
+
 ## [4.0.13] - 2026-10-01
 
 ### Fixed
