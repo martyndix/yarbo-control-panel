@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.17] - 2026-10-01
+
+### Fixed
+- Home On/Off from the website reaches Hue and other Matter lights again. 4.0.15 polled Access door status on every Home refresh so Open/Closed stayed live; on the single-threaded panel server that blocked light clicks. Home now reads the last UniFi inventory; Open/Closed still updates on the UniFi page.
+- UniFi floodlights now PATCH Protect’s private `lightOnSettings.isLedForceOn` (the same path Home Assistant uses) before the public `isLightForceEnabled` API.
+
 ## [4.0.16] - 2026-10-01
 
 ### Fixed
