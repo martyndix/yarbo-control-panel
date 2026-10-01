@@ -257,5 +257,6 @@ assert_true(
     !preg_match('/function homeColorInputsHtml[\s\S]{0,500}d\.kind === [\'"]light[\'"]/', $js),
     'colour picker must not treat every light as colourable'
 );
+assert_true(str_contains($js, 'class="home-kelvin"'), 'colour-temperature slider must be distinct from brightness');
 
 echo "ok\n";

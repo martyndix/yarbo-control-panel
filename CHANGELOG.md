@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.9] - 2026-10-01
+
+### Fixed
+- White-ambiance Hue bulbs show two sliders on purpose: **brightness** (blue) and **colour temperature** (amber, warm to cool). They are not full-colour, so there is no colour picker.
+- UniFi floodlights now PATCH `lightModeSettings.mode` `always`/`off` first (without `enableAt`, which some consoles reject), then force-on and LED level, and only keep a payload if the light reports on.
+- Access follows the official OpenAPI host `https://CONSOLE:12445` with `Authorization: Bearer` ([API reference](https://assets.identity.ui.com/unifi-access/api_reference.pdf)). `GET /devices?refresh=true` lists hubs. If the token returns `CODE_UNAUTHORIZED` (“You do not have permission to perform this action”), Test UniFi explains that the token needs `view:space` and `view:device` from Access → Settings → General → Advanced → API Token — a Protect Integration key cannot list door controllers.
+
 ## [4.0.8] - 2026-10-01
 
 ### Fixed

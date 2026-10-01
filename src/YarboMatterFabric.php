@@ -731,10 +731,19 @@ final class YarboMatterFabric
     private static function colorPayload(array $attributes, int $endpoint, array $typeIds, string $kind): array
     {
         $hasCc = self::endpointHasCluster($attributes, $endpoint, self::COLOR_CONTROL);
+        $extended = in_array(self::DEVTYPE_COLOR_LIGHT, $typeIds, true)
+            || in_array(self::DEVTYPE_EXTENDED_COLOR_LIGHT, $typeIds, true);
+        $ctType = in_array(self::DEVTYPE_CT_LIGHT, $typeIds, true);
         $isLight = $kind === 'light';
-        $colorHs = $hasCc || $isLight;
-        $colorXy = $hasCc || $isLight;
-        $colorCt = $hasCc || $isLight;
+        $colorHs = false;
+        $colorXy = false;
+        $colorCt = false;
+        if ($ctType && !$extended) {
+            $colorCt = true;
+        } elseif ($hasCc || $extended || $isLight) {
+            $colorHs = true;
+            $colorXy = true;
+        }
 
         return [
             'colorable' => $colorHs || $colorXy,

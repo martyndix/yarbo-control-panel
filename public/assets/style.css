@@ -3048,6 +3048,14 @@ html[data-theme="light"] .plan-activity {
     margin: 0;
 }
 
+.home-device-actions input.home-bright {
+    accent-color: #6ea8ff;
+}
+
+.home-device-actions input.home-kelvin {
+    accent-color: #e09a4a;
+}
+
 .home-device .btn-compact {
     padding: 0.18rem 0.45rem;
     font-size: 0.75rem;

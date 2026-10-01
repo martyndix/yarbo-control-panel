@@ -198,6 +198,7 @@ if (!($light['ok'] ?? false) || empty($light['on'])) {
 }
 $lightPatched = false;
 $lightCombined = false;
+$firstLight = true;
 foreach ($calls as $call) {
     if (($call[0] ?? '') !== 'PATCH' || !str_contains((string) ($call[1] ?? ''), '/lights/')) {
         continue;
@@ -206,10 +207,13 @@ foreach ($calls as $call) {
     if (($decoded['isLightForceEnabled'] ?? null) === true && !array_key_exists('lightMode', $decoded ?: [])) {
         $lightPatched = true;
     }
-    if (($decoded['isLightForceEnabled'] ?? null) === true
-        && ($decoded['lightModeSettings']['mode'] ?? '') === 'always') {
-        $lightCombined = true;
-        break;
+    if ($firstLight) {
+        $firstLight = false;
+        if (($decoded['isLightForceEnabled'] ?? null) === true
+            && ($decoded['lightModeSettings']['mode'] ?? '') === 'always'
+            && !array_key_exists('enableAt', $decoded['lightModeSettings'] ?? [])) {
+            $lightCombined = true;
+        }
     }
 }
 if (!$lightPatched) {
@@ -413,6 +417,77 @@ $hint->setTransport(function (string $method, string $url) {
 $hintProbe = $hint->probe();
 if (!str_contains((string) ($hintProbe['message'] ?? ''), 'Access API token')) {
     fwrite(STDERR, 'missing Access token hint ' . json_encode($hintProbe) . "\n");
+    exit(1);
+}
+
+$deniedBody = json_encode([
+    'code' => 'CODE_UNAUTHORIZED',
+    'msg' => 'You do not have permission to perform this action.',
+]);
+$permRoot = sys_get_temp_dir() . '/yarbo-access-perm-' . bin2hex(random_bytes(3));
+mkdir($permRoot . '/data', 0775, true);
+$perm = new Yarbo\YarboUnifi($permRoot);
+$perm->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'protect-secret',
+    'unifi_access_token' => 'access-no-scope',
+]);
+$perm->setTransport(function (string $method, string $url, array $headers) use ($deniedBody): array {
+    if (str_contains($url, '/proxy/protect/')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([['id' => 'cam1', 'name' => 'Driveway', 'isConnected' => true]]),
+            'content_type' => 'application/json',
+        ];
+    }
+    $key = (string) ($headers['X-API-KEY'] ?? '');
+    if ($key !== '' && (str_contains($url, '/doors') || str_contains($url, '/devices'))) {
+        $data = str_contains($url, '/devices')
+            ? [[['id' => 'hub1', 'name' => 'UA-HUB-1', 'type' => 'UAH', 'location_id' => 'door1']]]
+            : [['id' => 'door1', 'name' => 'Front', 'door_lock_relay_status' => 'lock']];
+
+        return [
+            'status' => 200,
+            'body' => json_encode(['code' => 'SUCCESS', 'data' => $data]),
+            'content_type' => 'application/json',
+        ];
+    }
+
+    return ['status' => 200, 'body' => $deniedBody, 'content_type' => 'application/json'];
+});
+$permProbe = $perm->probe();
+if (($permProbe['counts']['doors'] ?? 0) !== 1 || ($permProbe['counts']['hubs'] ?? 0) !== 1) {
+    fwrite(STDERR, 'X-API-KEY Access fallback ' . json_encode($permProbe) . "\n");
+    exit(1);
+}
+
+$deniedRoot = sys_get_temp_dir() . '/yarbo-access-denied-' . bin2hex(random_bytes(3));
+mkdir($deniedRoot . '/data', 0775, true);
+$denied = new Yarbo\YarboUnifi($deniedRoot);
+$denied->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'protect-secret',
+    'unifi_access_token' => 'access-no-scope',
+]);
+$denied->setTransport(function (string $method, string $url) use ($deniedBody): array {
+    if (str_contains($url, '/proxy/protect/')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([['id' => 'cam1', 'name' => 'Driveway', 'isConnected' => true]]),
+            'content_type' => 'application/json',
+        ];
+    }
+
+    return ['status' => 200, 'body' => $deniedBody, 'content_type' => 'application/json'];
+});
+$deniedProbe = $denied->probe();
+$deniedMsg = (string) ($deniedProbe['message'] ?? '');
+if (substr_count(strtolower($deniedMsg), 'you do not have permission') > 1) {
+    fwrite(STDERR, "permission error not unique $deniedMsg\n");
+    exit(1);
+}
+if (!str_contains($deniedMsg, 'view:space') || !str_contains($deniedMsg, 'view:device')) {
+    fwrite(STDERR, 'missing Access scope hint ' . json_encode($deniedProbe) . "\n");
     exit(1);
 }
 

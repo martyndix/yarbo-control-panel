@@ -94,6 +94,9 @@ final class YarboUnifi
      *   protect_password: string,
      *   access_token: string,
      *   access_port: int,
+     *   access_auth: string,
+     *   access_path: string,
+     *   access_use_protect_key: bool,
      *   show_on_home: list<string>,
      *   last_ok: bool,
      *   last_error: string,
@@ -110,6 +113,9 @@ final class YarboUnifi
             'protect_password' => '',
             'access_token' => '',
             'access_port' => 0,
+            'access_auth' => '',
+            'access_path' => '',
+            'access_use_protect_key' => false,
             'show_on_home' => [],
             'last_ok' => false,
             'last_error' => '',
@@ -132,6 +138,13 @@ final class YarboUnifi
             'protect_password' => (string) ($decoded['protect_password'] ?? ''),
             'access_token' => (string) ($decoded['access_token'] ?? ''),
             'access_port' => max(0, (int) ($decoded['access_port'] ?? 0)),
+            'access_auth' => in_array((string) ($decoded['access_auth'] ?? ''), ['bearer', 'x-api-key'], true)
+                ? (string) $decoded['access_auth']
+                : '',
+            'access_path' => in_array((string) ($decoded['access_path'] ?? ''), ['api', 'integration'], true)
+                ? (string) $decoded['access_path']
+                : '',
+            'access_use_protect_key' => (bool) ($decoded['access_use_protect_key'] ?? false),
             'show_on_home' => $this->normalizeIdList($decoded['show_on_home'] ?? []),
             'last_ok' => (bool) ($decoded['last_ok'] ?? false),
             'last_error' => (string) ($decoded['last_error'] ?? ''),
@@ -179,6 +192,9 @@ final class YarboUnifi
             $next = trim((string) ($input['unifi_access_token'] ?? $input['access_token'] ?? ''));
             if ($next !== '') {
                 $access = $next;
+                $current['access_auth'] = '';
+                $current['access_path'] = '';
+                $current['access_use_protect_key'] = false;
             }
         }
         $port = $current['access_port'];
@@ -186,6 +202,22 @@ final class YarboUnifi
             $port = max(0, (int) ($input['unifi_access_port'] ?? $input['access_port'] ?? 0));
         } elseif (array_key_exists('unifi_access_standalone', $input)) {
             $port = YarboHub::asBool($input['unifi_access_standalone']) ? 12445 : 0;
+        }
+        $auth = $current['access_auth'];
+        if (array_key_exists('access_auth', $input)) {
+            $auth = in_array((string) $input['access_auth'], ['bearer', 'x-api-key'], true)
+                ? (string) $input['access_auth']
+                : '';
+        }
+        $accessPath = $current['access_path'];
+        if (array_key_exists('access_path', $input)) {
+            $accessPath = in_array((string) $input['access_path'], ['api', 'integration'], true)
+                ? (string) $input['access_path']
+                : '';
+        }
+        $useProtect = $current['access_use_protect_key'];
+        if (array_key_exists('access_use_protect_key', $input)) {
+            $useProtect = YarboHub::asBool($input['access_use_protect_key']);
         }
         $show = array_key_exists('unifi_show_on_home', $input) || array_key_exists('show_on_home', $input)
             ? $this->normalizeIdList($input['unifi_show_on_home'] ?? $input['show_on_home'] ?? [])
@@ -198,6 +230,9 @@ final class YarboUnifi
             'protect_password' => $password,
             'access_token' => $access,
             'access_port' => $port,
+            'access_auth' => $auth,
+            'access_path' => $accessPath,
+            'access_use_protect_key' => $useProtect,
             'show_on_home' => $show,
             'last_ok' => array_key_exists('last_ok', $input) ? (bool) $input['last_ok'] : $current['last_ok'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
@@ -307,10 +342,10 @@ final class YarboUnifi
                 $counts['hubs'] === 1 ? '' : 's'
             )
             : ($error !== '' ? $error : 'Could not reach UniFi.');
-        if ($ok && $config['access_token'] === '' && $counts['doors'] === 0 && $counts['hubs'] === 0) {
-            $message .= ' Add an Access API token for doors and controllers.';
+        if ($ok && $config['access_token'] === '' && $config['protect_api_key'] !== '' && $counts['doors'] === 0 && $counts['hubs'] === 0) {
+            $message .= ' Add an Access API token (Access → Settings → General → Advanced → API Token, Door and Location View or Edit) — a Protect key cannot list door controllers.';
         } elseif ($ok && $error !== '' && $counts['doors'] === 0 && $counts['hubs'] === 0) {
-            $message .= ' Access: ' . $error;
+            $message .= ' ' . $this->accessPermissionHint($error);
         }
 
         return [
@@ -488,30 +523,59 @@ final class YarboUnifi
             return ['ok' => false, 'error' => 'Add a Protect API key first'];
         }
         $url = $this->protectUrl($config, '/lights/' . rawurlencode($id));
-        $payloads = [
-            [
-                'isLightForceEnabled' => $on,
-                'lightModeSettings' => [
-                    'mode' => $on ? 'always' : 'off',
-                    'enableAt' => 'fulltime',
+        $payloads = $on
+            ? [
+                [
+                    'isLightForceEnabled' => true,
+                    'lightModeSettings' => ['mode' => 'always'],
                 ],
-            ],
-            ['isLightForceEnabled' => $on],
-        ];
+                [
+                    'isLightForceEnabled' => true,
+                    'lightModeSettings' => [
+                        'mode' => 'always',
+                        'enableAt' => 'fulltime',
+                    ],
+                ],
+                [
+                    'isLightForceEnabled' => true,
+                    'lightDeviceSettings' => ['ledLevel' => 6],
+                ],
+                ['isLightForceEnabled' => true],
+            ]
+            : [
+                [
+                    'isLightForceEnabled' => false,
+                    'lightModeSettings' => ['mode' => 'off'],
+                ],
+                ['isLightForceEnabled' => false],
+            ];
         $last = ['ok' => false, 'error' => 'Protect light failed'];
-        foreach ($payloads as $payload) {
+        $accepted = false;
+        foreach ($payloads as $index => $payload) {
             $body = json_encode($payload, JSON_THROW_ON_ERROR);
             $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, 6.0, false);
-            if ($res['status'] >= 200 && $res['status'] < 300) {
+            if ($res['status'] < 200 || $res['status'] >= 300) {
+                $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . $res['status'])];
+                $hint = strtolower((string) ($last['error'] ?? ''));
+                if (!str_contains($hint, 'ajv') && !str_contains($hint, 'additional') && !str_contains($hint, 'rejected') && ($res['status'] < 400 || $res['status'] >= 500)) {
+                    break;
+                }
+                continue;
+            }
+            $accepted = true;
+            $decoded = $this->decodeJson($res['body']);
+            $reported = is_array($decoded) ? $this->lightRowIsOn($decoded) : null;
+            $isLast = $index === array_key_last($payloads);
+            if ($reported === $on || ($reported === null && $isLast)) {
                 $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
 
                 return ['ok' => true, 'on' => $on];
             }
-            $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . $res['status'])];
-            $hint = strtolower((string) ($last['error'] ?? ''));
-            if (!str_contains($hint, 'ajv') && !str_contains($hint, 'additional') && !str_contains($hint, 'rejected') && ($res['status'] < 400 || $res['status'] >= 500)) {
-                break;
-            }
+        }
+        if ($accepted) {
+            $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
+
+            return ['ok' => true, 'on' => $on];
         }
 
         return $last;
@@ -568,9 +632,11 @@ final class YarboUnifi
             }
             $path .= '?control_cmd=' . rawurlencode($cmd);
         }
-        $headers = $this->accessHeaders($config);
+        $headers = [];
         $last = ['ok' => false, 'error' => 'Access unlock failed'];
-        foreach ($this->accessUrls($config, $path) as $url) {
+        foreach ($this->accessAttempts($config, $path) as $attempt) {
+            $url = (string) $attempt['url'];
+            $headers = $attempt['headers'];
             $res = $this->request('PUT', $url, $headers, '{}', 8.0, false);
             if ($res['status'] === 404 || $res['status'] === 405) {
                 $res = $this->request('POST', $url, $headers, '{}', 8.0, false);
@@ -584,9 +650,7 @@ final class YarboUnifi
                 $last = ['ok' => false, 'error' => (string) ($decoded['msg'] ?? $decoded['message'] ?? 'Access unlock failed')];
                 continue;
             }
-            if ((int) ($config['access_port'] ?? 0) !== 12445 && str_contains($url, ':12445/')) {
-                $this->save(['unifi_access_standalone' => true]);
-            }
+            $this->rememberAccessAttempt($config, $attempt);
 
             return ['ok' => true, 'on' => false, 'unlocked' => true];
         }
@@ -659,9 +723,10 @@ final class YarboUnifi
                 $out[$key] = $rows;
             }
         }
-        if ($config['access_token'] !== '') {
+        if ($config['access_token'] !== '' || $config['protect_api_key'] !== '') {
             $this->appendAccessInventory($out, $config, $timeout);
         }
+        $out['errors'] = array_values(array_unique(array_filter($out['errors'])));
 
         return $out;
     }
@@ -764,7 +829,7 @@ final class YarboUnifi
             if ($mode === '' && isset($row['lightModeSettings']) && is_array($row['lightModeSettings'])) {
                 $mode = strtolower((string) ($row['lightModeSettings']['mode'] ?? ''));
             }
-            $on = $mode === 'on';
+            $on = $mode === 'on' || $mode === 'always';
         }
 
         return [
@@ -988,7 +1053,7 @@ final class YarboUnifi
             $out['sensors'] = $sensors;
         }
 
-        $devRes = $this->accessJson($config, '/devices', $timeout);
+        $devRes = $this->accessJson($config, '/devices?refresh=true', $timeout);
         if (!($devRes['ok'] ?? false)) {
             $out['errors'][] = (string) ($devRes['error'] ?? 'Access devices failed');
 
@@ -1427,8 +1492,9 @@ final class YarboUnifi
     {
         $last = ['ok' => false, 'items' => [], 'error' => 'Access request failed'];
         $emptyOk = null;
-        foreach ($this->accessUrls($config, $path) as $url) {
-            $res = $this->request('GET', $url, $this->accessHeaders($config), null, $timeout, false);
+        foreach ($this->accessAttempts($config, $path) as $attempt) {
+            $url = (string) $attempt['url'];
+            $res = $this->request('GET', $url, $attempt['headers'], null, $timeout, false);
             if ($res['status'] < 200 || $res['status'] >= 300) {
                 $last = ['ok' => false, 'items' => [], 'error' => $res['error'] ?? ('Access HTTP ' . $res['status'])];
                 continue;
@@ -1443,9 +1509,7 @@ final class YarboUnifi
                 continue;
             }
             $items = $this->listFromJson($res['body']);
-            if ((int) ($config['access_port'] ?? 0) !== 12445 && str_contains($url, ':12445/')) {
-                $this->save(['unifi_access_standalone' => true]);
-            }
+            $this->rememberAccessAttempt($config, $attempt);
             if ($items === []) {
                 $emptyOk = ['ok' => true, 'items' => []];
                 continue;
@@ -1459,21 +1523,115 @@ final class YarboUnifi
 
     /**
      * @param array<string, mixed> $config
+     * @return list<array{url: string, headers: array<string, string>, auth: string, path: string, port: int, use_protect: bool}>
+     */
+    private function accessAttempts(array $config, string $path): array
+    {
+        $path = '/' . ltrim($path, '/');
+        $saved = $this->load();
+        $host = (string) ($config['host'] ?? $saved['host']);
+        $hostname = explode(':', $host, 2)[0];
+        $access = trim((string) ($config['access_token'] ?? $saved['access_token']));
+        $protect = trim((string) ($config['protect_api_key'] ?? $saved['protect_api_key']));
+        $bases = [
+            [
+                'url' => 'https://' . $hostname . ':12445/api/v1/developer' . $path,
+                'path' => 'api',
+                'port' => 12445,
+            ],
+            [
+                'url' => 'https://' . $host . '/proxy/access/integration/v1/developer' . $path,
+                'path' => 'integration',
+                'port' => 0,
+            ],
+            [
+                'url' => 'https://' . $host . '/proxy/access/api/v1/developer' . $path,
+                'path' => 'api',
+                'port' => 0,
+            ],
+        ];
+        $preferredPort = (int) ($saved['access_port'] ?: ($config['access_port'] ?? 0));
+        $preferredPath = (string) ($saved['access_path'] ?: ($config['access_path'] ?? ''));
+        $preferredAuth = (string) ($saved['access_auth'] ?: ($config['access_auth'] ?? ''));
+        $preferProtect = (bool) ($saved['access_use_protect_key'] ?? false);
+        if ($preferredPath === 'integration') {
+            $bases = [$bases[1], $bases[2], $bases[0]];
+        } elseif ($preferredPath === 'api' && $preferredPort !== 12445) {
+            $bases = [$bases[2], $bases[1], $bases[0]];
+        }
+        $tokens = [];
+        if ($access !== '') {
+            $tokens[] = ['token' => $access, 'use_protect' => false];
+        }
+        if ($protect !== '' && $protect !== $access) {
+            $tokens[] = ['token' => $protect, 'use_protect' => true];
+        }
+        if ($preferProtect) {
+            usort($tokens, static fn (array $a, array $b): int => (int) $b['use_protect'] <=> (int) $a['use_protect']);
+        }
+        $auths = $preferredAuth === 'x-api-key' ? ['x-api-key', 'bearer'] : ['bearer', 'x-api-key'];
+        $attempts = [];
+        $seen = [];
+        foreach ($bases as $base) {
+            foreach ($tokens as $token) {
+                foreach ($auths as $auth) {
+                    $headers = $auth === 'x-api-key'
+                        ? $this->accessKeyHeaders($token['token'])
+                        : $this->accessBearerHeaders($token['token']);
+                    $key = $base['url'] . '|' . $auth . '|' . ($token['use_protect'] ? 'p' : 'a');
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $attempts[] = [
+                        'url' => $base['url'],
+                        'headers' => $headers,
+                        'auth' => $auth,
+                        'path' => $base['path'],
+                        'port' => $base['port'],
+                        'use_protect' => $token['use_protect'],
+                    ];
+                }
+            }
+        }
+
+        return $attempts;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @param array{url: string, headers: array<string, string>, auth?: string, path?: string, port?: int, use_protect?: bool} $attempt
+     */
+    private function rememberAccessAttempt(array $config, array $attempt): void
+    {
+        $port = (int) ($attempt['port'] ?? 0);
+        $auth = (string) ($attempt['auth'] ?? '');
+        $path = (string) ($attempt['path'] ?? '');
+        $useProtect = (bool) ($attempt['use_protect'] ?? false);
+        $changed = $port !== (int) ($config['access_port'] ?? 0)
+            || $auth !== (string) ($config['access_auth'] ?? '')
+            || $path !== (string) ($config['access_path'] ?? '')
+            || $useProtect !== (bool) ($config['access_use_protect_key'] ?? false);
+        if (!$changed) {
+            return;
+        }
+        $this->save([
+            'unifi_access_standalone' => $port === 12445,
+            'access_auth' => $auth,
+            'access_path' => $path,
+            'access_use_protect_key' => $useProtect,
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $config
      * @return list<string>
      */
     private function accessUrls(array $config, string $path): array
     {
-        $path = '/' . ltrim($path, '/');
-        $host = (string) $config['host'];
-        $hostname = explode(':', $host, 2)[0];
         $urls = [];
-        $port = (int) ($config['access_port'] ?? 0);
-        if ($port === 12445) {
-            $urls[] = 'https://' . $hostname . ':12445/api/v1/developer' . $path;
-            $urls[] = 'https://' . $host . '/proxy/access/api/v1/developer' . $path;
-        } else {
-            $urls[] = 'https://' . $host . '/proxy/access/api/v1/developer' . $path;
-            $urls[] = 'https://' . $hostname . ':12445/api/v1/developer' . $path;
+        foreach ($this->accessAttempts($config, $path) as $attempt) {
+            $urls[] = $attempt['url'];
         }
 
         return array_values(array_unique($urls));
@@ -1524,10 +1682,68 @@ final class YarboUnifi
      */
     private function accessHeaders(array $config): array
     {
+        $token = (string) $config['access_token'];
+        if (($config['access_auth'] ?? '') === 'x-api-key' || ($config['access_use_protect_key'] ?? false)) {
+            if (($config['access_use_protect_key'] ?? false) && (string) $config['protect_api_key'] !== '') {
+                $token = (string) $config['protect_api_key'];
+            }
+
+            return $this->accessKeyHeaders($token);
+        }
+
+        return $this->accessBearerHeaders($token);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function accessBearerHeaders(string $token): array
+    {
         return [
             'Accept' => 'application/json',
-            'Authorization' => 'Bearer ' . $config['access_token'],
+            'Content-Type' => 'application/json',
+            'Authorization' => 'Bearer ' . $token,
         ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function accessKeyHeaders(string $token): array
+    {
+        return [
+            'Accept' => 'application/json',
+            'Content-Type' => 'application/json',
+            'X-API-KEY' => $token,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function lightRowIsOn(array $row): ?bool
+    {
+        if (isset($row['data']) && is_array($row['data']) && !array_is_list($row['data'])) {
+            $row = $row['data'];
+        }
+        if (!array_key_exists('isLightForceEnabled', $row) && !array_key_exists('isLightOn', $row)
+            && !isset($row['lightModeSettings']) && !isset($row['lightOnSettings'])) {
+            return null;
+        }
+        $mapped = $this->mapLight($row + ['id' => (string) ($row['id'] ?? 'light')]);
+
+        return $mapped === null ? null : (bool) $mapped['on'];
+    }
+
+    private function accessPermissionHint(string $error): string
+    {
+        $error = trim(preg_replace('/\s+/', ' ', $error) ?? $error);
+        $lower = strtolower($error);
+        if (str_contains($lower, 'permission') || str_contains($lower, 'unauthorized') || str_contains($lower, 'not allowed')) {
+            return 'Access: that token is not allowed to list doors (CODE_UNAUTHORIZED). Create a new token in UniFi Access → Settings → General → Advanced → API Token and enable view:space (doors) and view:device (hubs). A Protect Integration key cannot list Access controllers.';
+        }
+
+        return $error === '' ? 'Access request failed.' : 'Access: ' . $error;
     }
 
     /**

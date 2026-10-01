@@ -964,7 +964,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section hidden" id="settings-unifi-section" data-settings-pane="unifi">
                             <h3 class="settings-subtitle">UniFi Access &amp; Protect</h3>
-                            <p class="hint">Talks to a <strong>local UniFi OS console</strong> (Dream Machine, Cloud Gateway, UNVR) — not unifi.ui.com. Create a Protect key at UniFi OS → Settings → Control Plane → Integrations (<code>X-API-KEY</code>). Create an Access token in Access → Settings → Advanced → Developer API. Leave a secret blank on later saves to keep the stored value. See <code>docs/unifi.md</code>.</p>
+                            <p class="hint">Talks to a <strong>local UniFi OS console</strong> (Dream Machine, Cloud Gateway, UNVR) — not unifi.ui.com. Create a Protect key at UniFi OS → Settings → Control Plane → Integrations (<code>X-API-KEY</code>). Create an Access token in Access → Settings → General → Advanced → API Token and tick <code>view:space</code> (doors) and <code>view:device</code> (hubs); unlock needs <code>edit:space</code>. Leave a secret blank on later saves to keep the stored value. See <code>docs/unifi.md</code>.</p>
                             <label class="settings-field">
                                 <span class="label">Console host</span>
                                 <input type="text" id="settings-unifi-host" name="unifi_host" placeholder="192.168.1.1" autocomplete="off" spellcheck="false">
@@ -998,7 +998,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-unifi-test">Test UniFi connection</button>
                             </div>
                             <h3 class="settings-subtitle">Show on Home</h3>
-                            <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Protect floodlights use On/Off. Protect relays (UL-Relay) are switches, not Access doors. Door controllers (UA Hub / Gate Hub) unlock the bound Access door. A door position sensor appears when Access reports one on that door.</p>
+                            <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Protect floodlights use On/Off. Protect relays (UL-Relay) are switches, not Access doors. Door controllers (UA Hub / Gate Hub) unlock the bound Access door. A door position sensor appears when Access reports one on that door. If Test shows 0 doors and “permission”, the Access token is missing <code>view:space</code> / <code>view:device</code> — recreate it in Access → Settings → General → Advanced → API Token.</p>
                             <div id="settings-unifi-devices" class="unifi-pick"></div>
                         </section>
 

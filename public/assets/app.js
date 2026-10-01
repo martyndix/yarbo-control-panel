@@ -2937,7 +2937,7 @@ function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
         const min = Number(d.color_temp_min || 2000);
         const max = Number(d.color_temp_max || 6500);
         const value = Number(kelvin || d.color_temp || 2700);
-        return `<input type="range" min="${min}" max="${max}" step="50" value="${value}" ${kelvinAttr} ${on ? '' : 'disabled'} title="Colour temperature" aria-label="Colour temperature">`;
+        return `<input type="range" min="${min}" max="${max}" step="50" value="${value}" ${kelvinAttr} class="home-kelvin" ${on ? '' : 'disabled'} title="Colour temperature (warm to cool)" aria-label="Colour temperature">`;
     }
     return '';
 }
@@ -3679,7 +3679,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const on = Boolean(d.on);
     const unifi = homeIsUnifi(d);
     const bright = !hidden && !unifi && homeIsLight(d) && d.dimmable
-        ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}">`
+        ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}" class="home-bright" title="Brightness" aria-label="Brightness">`
         : '';
     const color = hidden || unifi ? '' : homeColorInputsHtml(
         d,

@@ -1937,7 +1937,7 @@ def color_payload(attributes: dict[str, Any], endpoint: int, type_ids: list[int]
             # Hue Bridge often omits Color Control values until you write them.
             color_hs = not ct_type
             color_xy = not ct_type
-            color_ct = True
+            color_ct = bool(ct_type)
     hex_s = None
     hue_deg = clamp_int((hue or 0) * 360 / 254, 0, 360) if hue is not None else None
     sat_pct = clamp_int((sat or 0) * 100 / 254, 0, 100) if sat is not None else None
