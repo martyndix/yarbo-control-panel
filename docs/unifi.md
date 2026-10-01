@@ -29,16 +29,17 @@ Not affiliated with Ubiquiti.
 2. Open **Settings → UniFi**.
 3. **Console host** is the LAN IP or hostname of the UniFi OS device (Dream Machine, Cloud Gateway, UNVR). Do not include `https://`.
 4. Leave **Verify TLS** off unless you have installed a trusted certificate (UniFi’s default certificate is self-signed).
-5. **Protect API key:** UniFi OS → Settings → Control Plane → Integrations → Create API Key. Cameras and lights need this (`X-API-KEY`).
-6. **Access API token:** UniFi Access → Settings → General → Advanced → API Token → Create New. Select permission scopes when creating it (they cannot be changed later):
+5. **Protect API key:** UniFi OS → Settings → Control Plane → Integrations → Create API Key. Cameras, lights, sensors, and relays need this (`X-API-KEY`). UniFi OS also shows this page under Protect → Integrations and Access → Integrations — it is the **same Control Plane key**. It cannot list Access doors.
+6. **Access API token:** this is a **different** secret. Open the **Access application** (not Control Plane) → Settings → General → Advanced → API Token → Create New. Select permission scopes when creating it (they cannot be changed later):
    - `view:space` — list doors
    - `view:device` — list hubs / controllers
    - `edit:space` — remote unlock
+   If Test UniFi says `you entered no-man zone` or 0 doors / 0 controllers after pasting the Control Plane key into both fields, recreate the token inside Access and paste only that into Access API token.
 7. Optional Protect local username/password is stored for a later “full access” path if sensors are empty on API-key-only.
 8. If Access is **not** hosted on UniFi OS, tick **Access is standalone (port 12445)**. The official OpenAPI host is always `https://CONSOLE:12445` (self-signed cert).
 9. **Test UniFi connection**, then tick devices under **Show on Home**.
 
-`CODE_UNAUTHORIZED` / “You do not have permission to perform this action” means the token reached Access but those scopes are missing. Recreate the token in Access (not a Protect Integration key).
+`you entered no-man zone` / `CODE_NOT_FOUND` means the panel hit Access with a Control Plane / Protect key (or the OpenAPI is disabled). Recreate the token **inside Access**. `CODE_UNAUTHORIZED` / “You do not have permission to perform this action” means an Access token reached the API but those scopes are missing.
 
 Leave a key or token blank on later saves to keep the stored value. Credentials stay in `data/unifi-config.json` and are never sent back to the browser.
 
@@ -72,4 +73,4 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 ## Rollback
 
-This is panel **4.0.12**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+This is panel **4.0.13**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.

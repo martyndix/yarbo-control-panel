@@ -491,4 +491,97 @@ if (!str_contains($deniedMsg, 'view:space') || !str_contains($deniedMsg, 'view:d
     exit(1);
 }
 
+$nomanBody = json_encode([
+    'code' => 404,
+    'codeS' => 'CODE_NOT_FOUND',
+    'msg' => 'The API was not found.',
+    'error' => 'you entered no-man zone',
+]);
+$nomanRoot = sys_get_temp_dir() . '/yarbo-access-noman-' . bin2hex(random_bytes(3));
+mkdir($nomanRoot . '/data', 0775, true);
+$noman = new Yarbo\YarboUnifi($nomanRoot);
+$noman->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'same-console-key',
+    'unifi_access_token' => 'same-console-key',
+]);
+$nomanCalls = [];
+$noman->setTransport(function (string $method, string $url, array $headers) use ($nomanBody, &$nomanCalls): array {
+    $nomanCalls[] = [$url, $headers];
+    if (str_contains($url, '/proxy/protect/')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([['id' => 'cam1', 'name' => 'Driveway', 'isConnected' => true]]),
+            'content_type' => 'application/json',
+        ];
+    }
+
+    return ['status' => 404, 'body' => $nomanBody, 'content_type' => 'application/json', 'error' => 'you entered no-man zone'];
+});
+$nomanProbe = $noman->probe();
+$nomanMsg = (string) ($nomanProbe['message'] ?? '');
+if (($nomanProbe['counts']['doors'] ?? 1) !== 0 || ($nomanProbe['counts']['hubs'] ?? 1) !== 0) {
+    fwrite(STDERR, 'same-key no-man still listed doors ' . json_encode($nomanProbe) . "\n");
+    exit(1);
+}
+if (!str_contains($nomanMsg, 'Control Plane') || !str_contains($nomanMsg, 'inside the Access app')) {
+    fwrite(STDERR, 'missing same-key Access hint ' . json_encode($nomanProbe) . "\n");
+    exit(1);
+}
+if (substr_count(strtolower($nomanMsg), 'no-man zone') > 1) {
+    fwrite(STDERR, "no-man zone not unique $nomanMsg\n");
+    exit(1);
+}
+$nomanFirstAccess = '';
+foreach ($nomanCalls as $call) {
+    if (str_contains((string) ($call[0] ?? ''), '/access/') || str_contains((string) ($call[0] ?? ''), ':12445/')) {
+        $nomanFirstAccess = (string) $call[0];
+        $nomanFirstHeaders = is_array($call[1] ?? null) ? $call[1] : [];
+        if (!str_contains($nomanFirstAccess, '/proxy/access/integration/') || !isset($nomanFirstHeaders['X-API-KEY'])) {
+            fwrite(STDERR, "same-key Access should try proxy X-API-KEY first, got $nomanFirstAccess " . json_encode($nomanFirstHeaders) . "\n");
+            exit(1);
+        }
+        break;
+    }
+}
+
+$sameKeyOkRoot = sys_get_temp_dir() . '/yarbo-access-samekey-ok-' . bin2hex(random_bytes(3));
+mkdir($sameKeyOkRoot . '/data', 0775, true);
+$sameKeyOk = new Yarbo\YarboUnifi($sameKeyOkRoot);
+$sameKeyOk->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'same-console-key',
+    'unifi_access_token' => 'same-console-key',
+]);
+$sameKeyOk->setTransport(function (string $method, string $url, array $headers) use ($nomanBody): array {
+    if (str_contains($url, '/proxy/protect/')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([['id' => 'cam1', 'name' => 'Driveway', 'isConnected' => true]]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if (str_contains($url, ':12445/')) {
+        return ['status' => 404, 'body' => $nomanBody, 'content_type' => 'application/json', 'error' => 'you entered no-man zone'];
+    }
+    if (($headers['X-API-KEY'] ?? '') === 'same-console-key' && str_contains($url, '/proxy/access/')) {
+        $data = str_contains($url, '/devices')
+            ? [[['id' => 'hub1', 'name' => 'UA-HUB-1', 'type' => 'UAH', 'location_id' => 'door1']]]
+            : [['id' => 'door1', 'name' => 'Front', 'door_lock_relay_status' => 'lock']];
+
+        return [
+            'status' => 200,
+            'body' => json_encode(['code' => 'SUCCESS', 'data' => $data]),
+            'content_type' => 'application/json',
+        ];
+    }
+
+    return ['status' => 404, 'body' => $nomanBody, 'content_type' => 'application/json', 'error' => 'you entered no-man zone'];
+});
+$sameKeyOkProbe = $sameKeyOk->probe();
+if (($sameKeyOkProbe['counts']['doors'] ?? 0) !== 1 || ($sameKeyOkProbe['counts']['hubs'] ?? 0) !== 1) {
+    fwrite(STDERR, 'same-key proxy X-API-KEY should list doors ' . json_encode($sameKeyOkProbe) . "\n");
+    exit(1);
+}
+
 echo "ok: unifi\n";

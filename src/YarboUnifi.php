@@ -342,10 +342,8 @@ final class YarboUnifi
                 $counts['hubs'] === 1 ? '' : 's'
             )
             : ($error !== '' ? $error : 'Could not reach UniFi.');
-        if ($ok && $config['access_token'] === '' && $config['protect_api_key'] !== '' && $counts['doors'] === 0 && $counts['hubs'] === 0) {
-            $message .= ' Add an Access API token (Access → Settings → General → Advanced → API Token, Door and Location View or Edit) — a Protect key cannot list door controllers.';
-        } elseif ($ok && $error !== '' && $counts['doors'] === 0 && $counts['hubs'] === 0) {
-            $message .= ' ' . $this->accessPermissionHint($error);
+        if ($ok && $counts['doors'] === 0 && $counts['hubs'] === 0) {
+            $message .= ' ' . $this->accessPermissionHint($error, $config);
         }
 
         return [
@@ -1500,11 +1498,17 @@ final class YarboUnifi
                 continue;
             }
             $decoded = $this->decodeJson($res['body']);
-            if (is_array($decoded) && isset($decoded['code']) && strtoupper((string) $decoded['code']) !== 'SUCCESS') {
+            if (!is_array($decoded)) {
+                $last = ['ok' => false, 'items' => [], 'error' => $res['error'] ?? ('Access HTTP ' . $res['status'])];
+                continue;
+            }
+            $code = strtoupper((string) ($decoded['code'] ?? $decoded['codeS'] ?? ''));
+            $errText = trim((string) ($decoded['error'] ?? $decoded['msg'] ?? $decoded['message'] ?? ''));
+            if (($code !== '' && $code !== 'SUCCESS') || $this->isAccessWrongKeyError($errText)) {
                 $last = [
                     'ok' => false,
                     'items' => [],
-                    'error' => (string) ($decoded['msg'] ?? $decoded['message'] ?? 'Access error'),
+                    'error' => $errText !== '' ? $errText : 'Access error',
                 ];
                 continue;
             }
@@ -1549,15 +1553,26 @@ final class YarboUnifi
                 'path' => 'api',
                 'port' => 0,
             ],
+            [
+                'url' => 'https://' . $host . '/proxy/access/integration/v1' . $path,
+                'path' => 'integration',
+                'port' => 0,
+            ],
         ];
         $preferredPort = (int) ($saved['access_port'] ?: ($config['access_port'] ?? 0));
         $preferredPath = (string) ($saved['access_path'] ?: ($config['access_path'] ?? ''));
         $preferredAuth = (string) ($saved['access_auth'] ?: ($config['access_auth'] ?? ''));
         $preferProtect = (bool) ($saved['access_use_protect_key'] ?? false);
-        if ($preferredPath === 'integration') {
-            $bases = [$bases[1], $bases[2], $bases[0]];
+        $sameKey = $this->accessTokenLooksLikeProtectKey([
+            'access_token' => $access,
+            'protect_api_key' => $protect,
+        ]);
+        if ($sameKey || $preferProtect) {
+            $bases = [$bases[1], $bases[3], $bases[2], $bases[0]];
+        } elseif ($preferredPath === 'integration') {
+            $bases = [$bases[1], $bases[3], $bases[2], $bases[0]];
         } elseif ($preferredPath === 'api' && $preferredPort !== 12445) {
-            $bases = [$bases[2], $bases[1], $bases[0]];
+            $bases = [$bases[2], $bases[1], $bases[3], $bases[0]];
         }
         $tokens = [];
         if ($access !== '') {
@@ -1569,7 +1584,9 @@ final class YarboUnifi
         if ($preferProtect) {
             usort($tokens, static fn (array $a, array $b): int => (int) $b['use_protect'] <=> (int) $a['use_protect']);
         }
-        $auths = $preferredAuth === 'x-api-key' ? ['x-api-key', 'bearer'] : ['bearer', 'x-api-key'];
+        $auths = ($sameKey || $preferProtect || $preferredAuth === 'x-api-key')
+            ? ['x-api-key', 'bearer']
+            : ['bearer', 'x-api-key'];
         $attempts = [];
         $seen = [];
         foreach ($bases as $base) {
@@ -1735,9 +1752,43 @@ final class YarboUnifi
         return $mapped === null ? null : (bool) $mapped['on'];
     }
 
-    private function accessPermissionHint(string $error): string
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function accessTokenLooksLikeProtectKey(array $config): bool
+    {
+        $access = trim((string) ($config['access_token'] ?? ''));
+        $protect = trim((string) ($config['protect_api_key'] ?? ''));
+
+        return $access !== '' && $protect !== '' && hash_equals($protect, $access);
+    }
+
+    private function isAccessWrongKeyError(string $error): bool
+    {
+        $lower = strtolower($error);
+
+        return str_contains($lower, 'no-man')
+            || str_contains($lower, 'no man zone')
+            || str_contains($lower, 'code_not_found')
+            || str_contains($lower, 'api was not found')
+            || str_contains($lower, 'associated with unifi protect');
+    }
+
+    private function accessWrongKeyHint(): string
+    {
+        return 'Access: UniFi OS Control Plane → Integrations is the same page for Protect and Access — that key only works for Protect cameras and lights. Door controllers need a token created inside the Access app: open Access (not Control Plane) → Settings → General → Advanced → API Token, tick view:space and view:device, and paste that into Access API token. Keep the Control Plane key in Protect API key.';
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function accessPermissionHint(string $error, array $config = []): string
     {
         $error = trim(preg_replace('/\s+/', ' ', $error) ?? $error);
+        $missing = trim((string) ($config['access_token'] ?? '')) === '';
+        if ($missing || $this->accessTokenLooksLikeProtectKey($config) || $this->isAccessWrongKeyError($error)) {
+            return $this->accessWrongKeyHint();
+        }
         $lower = strtolower($error);
         if (str_contains($lower, 'permission') || str_contains($lower, 'unauthorized') || str_contains($lower, 'not allowed')) {
             return 'Access: that token is not allowed to list doors (CODE_UNAUTHORIZED). Create a new token in UniFi Access → Settings → General → Advanced → API Token and enable view:space (doors) and view:device (hubs). A Protect Integration key cannot list Access controllers.';

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.13] - 2026-10-01
+
+### Fixed
+- Access doors still showed 0 when the same UniFi OS Control Plane key was pasted into Protect and Access. That page is shared; the key is only for Protect. Hitting `:12445` with it returns `you entered no-man zone`. Test UniFi now says to create a token **inside the Access app** (Settings → General → Advanced → API Token) and tries the Access proxy with `X-API-KEY` before the standalone OpenAPI port.
+
 ## [4.0.12] - 2026-10-01
 
 ### Fixed
