@@ -594,19 +594,11 @@ final class YarboUnifi
             return ['ok' => false, 'error' => 'Add a Protect API key first'];
         }
         $url = $this->protectUrl($config, '/lights/' . rawurlencode($id));
+        // Official Integration API: isLightForceEnabled turns the LED.
+        // lightModeSettings.mode always/off is the motion schedule, not On/Off.
+        // Protect often echoes the previous light object on PATCH, so a 200 is enough.
         $payloads = $on
             ? [
-                [
-                    'isLightForceEnabled' => true,
-                    'lightModeSettings' => ['mode' => 'always'],
-                ],
-                [
-                    'isLightForceEnabled' => true,
-                    'lightModeSettings' => [
-                        'mode' => 'always',
-                        'enableAt' => 'fulltime',
-                    ],
-                ],
                 [
                     'isLightForceEnabled' => true,
                     'lightDeviceSettings' => ['ledLevel' => 6],
@@ -614,15 +606,10 @@ final class YarboUnifi
                 ['isLightForceEnabled' => true],
             ]
             : [
-                [
-                    'isLightForceEnabled' => false,
-                    'lightModeSettings' => ['mode' => 'off'],
-                ],
                 ['isLightForceEnabled' => false],
             ];
         $last = ['ok' => false, 'error' => 'Protect light failed'];
-        $accepted = false;
-        foreach ($payloads as $index => $payload) {
+        foreach ($payloads as $payload) {
             $body = json_encode($payload, JSON_THROW_ON_ERROR);
             $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, 6.0, false);
             if ($res['status'] < 200 || $res['status'] >= 300) {
@@ -633,17 +620,6 @@ final class YarboUnifi
                 }
                 continue;
             }
-            $accepted = true;
-            $decoded = $this->decodeJson($res['body']);
-            $reported = is_array($decoded) ? $this->lightRowIsOn($decoded) : null;
-            $isLast = $index === array_key_last($payloads);
-            if ($reported === $on || ($reported === null && $isLast)) {
-                $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
-
-                return ['ok' => true, 'on' => $on];
-            }
-        }
-        if ($accepted) {
             $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
 
             return ['ok' => true, 'on' => $on];
@@ -798,6 +774,8 @@ final class YarboUnifi
             $this->appendAccessInventory($out, $config, $timeout);
         }
         $out['errors'] = array_values(array_unique(array_filter($out['errors'])));
+        $pending = $this->readInventory()['light_commands'] ?? [];
+        $out['light_commands'] = $this->applyPendingLightCommands($out['lights'], is_array($pending) ? $pending : []);
 
         return $out;
     }
@@ -893,15 +871,8 @@ final class YarboUnifi
         if (!$force && isset($row['lightOnSettings']) && is_array($row['lightOnSettings'])) {
             $force = $this->truthy($row['lightOnSettings']['isLedForceOn'] ?? false);
         }
-        $on = $force
-            || $this->truthy($row['isLightOn'] ?? $row['is_light_on'] ?? false);
-        if (!$on) {
-            $mode = strtolower((string) ($row['lightMode'] ?? $row['light_mode'] ?? ''));
-            if ($mode === '' && isset($row['lightModeSettings']) && is_array($row['lightModeSettings'])) {
-                $mode = strtolower((string) ($row['lightModeSettings']['mode'] ?? ''));
-            }
-            $on = $mode === 'on' || $mode === 'always';
-        }
+        // isLightOn is the LED. mode=always is only the Protect schedule (often "when dark").
+        $on = $force || $this->truthy($row['isLightOn'] ?? $row['is_light_on'] ?? false);
 
         return [
             'id' => self::homeId(self::KIND_LIGHT, $id),
@@ -1523,9 +1494,60 @@ final class YarboUnifi
             $inventory[$group][$i]['status'] = $on ? 'On' : 'Off';
             $found = true;
         }
+        if ($kind === self::KIND_LIGHT) {
+            $commands = $inventory['light_commands'] ?? [];
+            if (!is_array($commands)) {
+                $commands = [];
+            }
+            $commands[$nativeId] = ['on' => $on, 'at' => time()];
+            $inventory['light_commands'] = $commands;
+            $found = true;
+        }
         if ($found) {
             $this->writeInventory($inventory);
         }
+    }
+
+    /**
+     * Keep a website On/Off for a few seconds while Protect GET still reports the old LED.
+     *
+     * @param list<array<string, mixed>> $lights
+     * @param array<string, mixed> $commands
+     * @return array<string, array{on: bool, at: int}>
+     */
+    private function applyPendingLightCommands(array &$lights, array $commands): array
+    {
+        $now = time();
+        $keep = [];
+        foreach ($commands as $nid => $cmd) {
+            $nid = (string) $nid;
+            if ($nid === '' || !is_array($cmd)) {
+                continue;
+            }
+            $at = (int) ($cmd['at'] ?? 0);
+            if ($at <= 0 || ($now - $at) > 15) {
+                continue;
+            }
+            $keep[$nid] = ['on' => (bool) ($cmd['on'] ?? false), 'at' => $at];
+        }
+        foreach ($lights as $i => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $nid = (string) ($row['native_id'] ?? '');
+            if ($nid === '' || !isset($keep[$nid])) {
+                continue;
+            }
+            $want = $keep[$nid]['on'];
+            if ((bool) ($row['on'] ?? false) === $want) {
+                unset($keep[$nid]);
+                continue;
+            }
+            $lights[$i]['on'] = $want;
+            $lights[$i]['status'] = $want ? 'On' : 'Off';
+        }
+
+        return $keep;
     }
 
     private function lightIsOn(string $nativeId): bool
@@ -1882,23 +1904,6 @@ final class YarboUnifi
             'Content-Type' => 'application/json',
             'X-API-KEY' => $token,
         ];
-    }
-
-    /**
-     * @param array<string, mixed> $row
-     */
-    private function lightRowIsOn(array $row): ?bool
-    {
-        if (isset($row['data']) && is_array($row['data']) && !array_is_list($row['data'])) {
-            $row = $row['data'];
-        }
-        if (!array_key_exists('isLightForceEnabled', $row) && !array_key_exists('isLightOn', $row)
-            && !isset($row['lightModeSettings']) && !isset($row['lightOnSettings'])) {
-            return null;
-        }
-        $mapped = $this->mapLight($row + ['id' => (string) ($row['id'] ?? 'light')]);
-
-        return $mapped === null ? null : (bool) $mapped['on'];
     }
 
     /**

@@ -75,7 +75,7 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
     }
     if ($method === 'PATCH' && str_contains($url, '/lights/')) {
         $decoded = json_decode((string) $body, true);
-        if (!is_array($decoded) || array_key_exists('lightMode', $decoded) || ($decoded['isLightForceEnabled'] ?? null) !== true) {
+        if (!is_array($decoded) || array_key_exists('lightMode', $decoded) || !array_key_exists('isLightForceEnabled', $decoded)) {
             return [
                 'status' => 400,
                 'body' => json_encode([
@@ -88,7 +88,18 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                 'error' => 'bad light',
             ];
         }
-        return ['status' => 200, 'body' => '{}', 'content_type' => 'application/json'];
+        $force = (bool) ($decoded['isLightForceEnabled'] ?? false);
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'id' => 'light1',
+                'name' => 'Flood',
+                'isLightOn' => $force,
+                'isLightForceEnabled' => $force,
+                'lightModeSettings' => ['mode' => 'motion'],
+            ]),
+            'content_type' => 'application/json',
+        ];
     }
     if (str_contains($url, '/lights')) {
         return [
@@ -98,7 +109,7 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                 'name' => 'Flood',
                 'isLightOn' => false,
                 'isLightForceEnabled' => false,
-                'lightModeSettings' => ['mode' => 'motion'],
+                'lightModeSettings' => ['mode' => 'always'],
             ]]]),
             'content_type' => 'application/json',
         ];
@@ -207,6 +218,17 @@ if (($hubRow['dps_label'] ?? '') !== 'Closed' || ($doorRow['dps_label'] ?? '') !
     fwrite(STDERR, 'hub/door missing Closed DPS ' . json_encode([$hubRow, $doorRow]) . "\n");
     exit(1);
 }
+$floodRow = null;
+foreach ($probe['devices'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:light:light1') {
+        $floodRow = $row;
+        break;
+    }
+}
+if (($floodRow['on'] ?? true) !== false || ($floodRow['status'] ?? '') !== 'Off') {
+    fwrite(STDERR, 'schedule always must not count as On ' . json_encode($floodRow) . "\n");
+    exit(1);
+}
 
 $light = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
 if (!($light['ok'] ?? false) || empty($light['on'])) {
@@ -214,22 +236,26 @@ if (!($light['ok'] ?? false) || empty($light['on'])) {
     exit(1);
 }
 $lightPatched = false;
-$lightCombined = false;
+$lightForceLed = false;
 $firstLight = true;
 foreach ($calls as $call) {
     if (($call[0] ?? '') !== 'PATCH' || !str_contains((string) ($call[1] ?? ''), '/lights/')) {
         continue;
     }
     $decoded = json_decode((string) ($call[3] ?? ''), true);
-    if (($decoded['isLightForceEnabled'] ?? null) === true && !array_key_exists('lightMode', $decoded ?: [])) {
+    if (($decoded['isLightForceEnabled'] ?? null) === true && !array_key_exists('lightMode', $decoded ?: []) && !isset($decoded['lightModeSettings'])) {
         $lightPatched = true;
+    }
+    if (isset($decoded['lightModeSettings']) || array_key_exists('lightMode', $decoded ?: [])) {
+        fwrite(STDERR, "light PATCH must not set the schedule " . json_encode($decoded) . "\n");
+        exit(1);
     }
     if ($firstLight) {
         $firstLight = false;
         if (($decoded['isLightForceEnabled'] ?? null) === true
-            && ($decoded['lightModeSettings']['mode'] ?? '') === 'always'
-            && !array_key_exists('enableAt', $decoded['lightModeSettings'] ?? [])) {
-            $lightCombined = true;
+            && (int) ($decoded['lightDeviceSettings']['ledLevel'] ?? 0) === 6
+            && !isset($decoded['lightModeSettings'])) {
+            $lightForceLed = true;
         }
     }
 }
@@ -237,8 +263,27 @@ if (!$lightPatched) {
     fwrite(STDERR, "light did not PATCH isLightForceEnabled\n");
     exit(1);
 }
-if (!$lightCombined) {
-    fwrite(STDERR, "light did not PATCH lightModeSettings.mode=always first\n");
+if (!$lightForceLed) {
+    fwrite(STDERR, "light did not PATCH force-on with ledLevel first\n");
+    exit(1);
+}
+
+$lightOff = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'off']);
+if (!($lightOff['ok'] ?? false) || !array_key_exists('on', $lightOff) || !empty($lightOff['on'])) {
+    fwrite(STDERR, 'light off ' . json_encode($lightOff) . "\n");
+    exit(1);
+}
+$lightForceOff = false;
+foreach (array_reverse($calls) as $call) {
+    if (($call[0] ?? '') !== 'PATCH' || !str_contains((string) ($call[1] ?? ''), '/lights/')) {
+        continue;
+    }
+    $decoded = json_decode((string) ($call[3] ?? ''), true);
+    $lightForceOff = ($decoded['isLightForceEnabled'] ?? null) === false && !isset($decoded['lightModeSettings']);
+    break;
+}
+if (!$lightForceOff) {
+    fwrite(STDERR, "light off did not PATCH isLightForceEnabled false\n");
     exit(1);
 }
 
@@ -263,6 +308,11 @@ if (!$unifi->setShowOnHome('unifi:light:light1', true) || !$unifi->setShowOnHome
     fwrite(STDERR, "show on home after command failed\n");
     exit(1);
 }
+$lightOnAgain = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
+if (!($lightOnAgain['ok'] ?? false) || empty($lightOnAgain['on'])) {
+    fwrite(STDERR, 'light on again ' . json_encode($lightOnAgain) . "\n");
+    exit(1);
+}
 $homeRows = [];
 foreach ($unifi->homeRows() as $row) {
     if (is_array($row) && isset($row['id'])) {
@@ -275,6 +325,16 @@ if (($homeRows['unifi:light:light1']['on'] ?? false) !== true) {
 }
 if (($homeRows['unifi:relay:relay1:1']['on'] ?? false) !== true) {
     fwrite(STDERR, 'homeRows relay after on ' . json_encode($homeRows) . "\n");
+    exit(1);
+}
+$liveLights = [];
+foreach ($unifi->dashboardPayload(true)['lights'] ?? [] as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $liveLights[$row['id']] = $row;
+    }
+}
+if (($liveLights['unifi:light:light1']['on'] ?? false) !== true) {
+    fwrite(STDERR, 'refresh light after on ' . json_encode($liveLights) . "\n");
     exit(1);
 }
 
