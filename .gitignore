@@ -41,6 +41,9 @@
 /data/lymow-live.log
 /data/lymow-listen.pid
 /data/lymow-listen.log
+/data/unifi-config.json
+/data/unifi-inventory.json
+/data/unifi-snap-*.jpg
 /data/home.json
 /data/home-nodes-cache.json
 /data/matter-server/

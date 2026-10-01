@@ -122,6 +122,8 @@ final class YarboMetrics
                 'powerwall' => !empty($modules[YarboHub::MODULE_POWERWALL]),
                 'lymow' => !empty($modules[YarboHub::MODULE_LYMOW]),
                 'home' => !empty($modules[YarboHub::MODULE_HOME]),
+                'unifi' => !empty($modules[YarboHub::MODULE_UNIFI]),
+            ],
                 'vestaboard' => !empty($vb['enabled']),
             ],
             'paper' => [

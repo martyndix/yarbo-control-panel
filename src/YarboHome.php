@@ -257,6 +257,7 @@ final class YarboHome
         // Live On/Off comes from the Matter agent when it answers quickly.
         // Device names and rooms still come from disk so a hung agent cannot freeze the panel.
         $live = $this->devicesWithLiveState();
+        $live['devices'] = $this->mergeUnifiDevices($live['devices']);
         $store = $this->load();
         $hidden = array_fill_keys($store['hidden'], true);
         $devices = [];
@@ -281,6 +282,7 @@ final class YarboHome
                     }
                 }
             }
+            $isUnifi = YarboUnifi::isHomeId($id) || ((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE;
             $isLight = ((string) ($device['kind'] ?? self::KIND_LIGHT)) === self::KIND_LIGHT;
             $row = [
                 'id' => $id,
@@ -291,15 +293,15 @@ final class YarboHome
                 'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
                 'vendor' => (string) ($device['vendor'] ?? ''),
                 'product' => (string) ($device['product'] ?? ''),
-                'source' => (string) ($device['source'] ?? ''),
+                'source' => $isUnifi ? YarboUnifi::SOURCE : (string) ($device['source'] ?? ''),
                 'bridge' => (bool) ($device['bridge'] ?? false),
                 'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
-                'brightness' => $isLight && isset($device['brightness']) ? (int) $device['brightness'] : null,
-                'dimmable' => $isLight && (bool) ($device['dimmable'] ?? false),
-                'colorable' => $isLight,
-                'color_hs' => (bool) ($device['color_hs'] ?? false),
-                'color_xy' => (bool) ($device['color_xy'] ?? false),
-                'color_ct' => (bool) ($device['color_ct'] ?? false),
+                'brightness' => $isLight && !$isUnifi && isset($device['brightness']) ? (int) $device['brightness'] : null,
+                'dimmable' => $isLight && !$isUnifi && (bool) ($device['dimmable'] ?? false),
+                'colorable' => $isLight && !$isUnifi,
+                'color_hs' => !$isUnifi && (bool) ($device['color_hs'] ?? false),
+                'color_xy' => !$isUnifi && (bool) ($device['color_xy'] ?? false),
+                'color_ct' => !$isUnifi && (bool) ($device['color_ct'] ?? false),
                 'color_hex' => $this->normalizeHex((string) ($device['color_hex'] ?? '')),
                 'hue' => isset($device['hue']) ? (int) $device['hue'] : null,
                 'saturation' => isset($device['saturation']) ? (int) $device['saturation'] : null,
@@ -311,6 +313,10 @@ final class YarboHome
                 'room' => $roomName,
                 'group_id' => $this->deviceGroupId($store, $id, $roomId),
                 'hidden' => isset($hidden[$id]),
+                'status' => (string) ($device['status'] ?? ''),
+                'snapshot' => (string) ($device['snapshot'] ?? ''),
+                'gate' => (bool) ($device['gate'] ?? false),
+                'locked' => array_key_exists('locked', $device) ? (bool) $device['locked'] : null,
             ];
             if ($row['hidden']) {
                 $hiddenDevices[] = $row;
@@ -561,6 +567,9 @@ final class YarboHome
         if ($id === '' || $action === '') {
             return ['ok' => false, 'error' => 'Device and action are required'];
         }
+        if (YarboUnifi::isHomeId($id)) {
+            return (new YarboUnifi($this->projectRoot))->command($input);
+        }
         $agent = YarboMatterAgentClient::fromEnv();
         $body = ['op' => 'command', 'id' => $id, 'action' => $action];
         if ($action === 'brightness' && array_key_exists('brightness', $input)) {
@@ -642,6 +651,20 @@ final class YarboHome
         if ($id === '') {
             return ['ok' => false, 'error' => 'Pick a device'];
         }
+        if (YarboUnifi::isHomeId($id)) {
+            $ok = (new YarboUnifi($this->projectRoot))->setShowOnHome($id, !$hidden);
+            if (!$ok) {
+                return ['ok' => false, 'error' => 'Could not update the UniFi Home list'];
+            }
+
+            return [
+                'ok' => true,
+                'hidden' => $hidden,
+                'message' => $hidden
+                    ? 'Removed from Home. The UniFi device stays on your console.'
+                    : 'Shown on the Home dashboard again',
+            ];
+        }
         $store = $this->load();
         $list = $store['hidden'];
         if ($hidden) {
@@ -675,6 +698,9 @@ final class YarboHome
     public function removeDevice(string $id, bool $wholeNode = false): array
     {
         $id = trim($id);
+        if (YarboUnifi::isHomeId($id)) {
+            return $this->hideDevice($id, true);
+        }
         if ($id === '' || !str_contains($id, ':')) {
             return ['ok' => false, 'error' => 'Pick a device'];
         }
@@ -1293,6 +1319,46 @@ final class YarboHome
     }
 
     /**
+     * Selected UniFi devices appear on Home like Matter rows.
+     *
+     * @param list<array<string, mixed>> $devices
+     * @return list<array<string, mixed>>
+     */
+    private function mergeUnifiDevices(array $devices): array
+    {
+        if (!(new YarboHub($this->projectRoot))->enabled(YarboHub::MODULE_UNIFI)) {
+            return $devices;
+        }
+        try {
+            $extra = (new YarboUnifi($this->projectRoot))->homeRows();
+        } catch (\Throwable) {
+            return $devices;
+        }
+        if ($extra === []) {
+            return $devices;
+        }
+        $seen = [];
+        foreach ($devices as $row) {
+            if (is_array($row)) {
+                $id = (string) ($row['id'] ?? '');
+                if ($id !== '') {
+                    $seen[$id] = true;
+                }
+            }
+        }
+        foreach ($extra as $row) {
+            $id = (string) ($row['id'] ?? '');
+            if ($id === '' || isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $devices[] = $row;
+        }
+
+        return $devices;
+    }
+
+    /**
      * Disk topology plus the latest On/Off the agent has, without waiting on get_nodes.
      *
      * @return array{ok: bool, error: string, devices: list<array<string, mixed>>, fabric: array<string, mixed>}
@@ -1551,7 +1617,7 @@ final class YarboHome
                 continue;
             }
             $id = trim((string) ($row['id'] ?? ''));
-            if ($id === '') {
+            if ($id === '' || YarboUnifi::isHomeId($id)) {
                 continue;
             }
             $out[] = [

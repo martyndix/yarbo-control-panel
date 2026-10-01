@@ -11,6 +11,7 @@ use Yarbo\YarboHub;
 use Yarbo\YarboLymow;
 use Yarbo\YarboPowerwall;
 use Yarbo\YarboRainSettings;
+use Yarbo\YarboUnifi;
 use Yarbo\YarboRobotName;
 use Yarbo\YarboVestaboard;
 
@@ -23,6 +24,7 @@ $vestaboard = new YarboVestaboard($projectRoot);
 $hub = new YarboHub($projectRoot);
 $powerwall = new YarboPowerwall($projectRoot);
 $lymow = new YarboLymow($projectRoot);
+$unifi = new YarboUnifi($projectRoot);
 $rainSettings = new YarboRainSettings($dataDir);
 $robotName = new YarboRobotName($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -41,6 +43,7 @@ if ($method === 'GET') {
         'hub' => $hub->publicView(),
         'powerwall' => $powerwall->publicView(),
         'lymow' => $lymow->publicView(),
+        'unifi' => $unifi->publicView(),
         'rain' => $rainSettings->publicView(),
         // Skip Python SDK probe by default — it can block the single-threaded php -S server.
         'cloud_status' => $includeCloudStatus ? $cloud->status() : null,
@@ -142,6 +145,13 @@ if (!$lymow->save($input)) {
     ], 500);
 }
 
+if (!$unifi->save($input)) {
+    json_response([
+        'ok' => false,
+        'error' => 'Could not write UniFi settings. Check permissions on the data/ directory.',
+    ], 500);
+}
+
 if (!$rainSettings->save($input)) {
     json_response([
         'ok' => false,
@@ -168,5 +178,6 @@ json_response([
     'hub' => $hub->publicView(),
     'powerwall' => $powerwall->publicView(),
     'lymow' => $lymow->publicView(),
+    'unifi' => $unifi->publicView(),
     'rain' => $rainSettings->publicView(),
 ]);

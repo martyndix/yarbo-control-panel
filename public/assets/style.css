@@ -3736,3 +3736,51 @@ body.home-is-reordering {
         grid-column: 1 / -1;
     }
 }
+
+.unifi-camera-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+    gap: 0.75rem;
+    margin: 0.75rem 0;
+}
+
+.unifi-camera-card {
+    background: #111;
+    border-radius: 8px;
+    overflow: hidden;
+    color: #f4f4f4;
+}
+
+.unifi-camera-still,
+.unifi-thumb {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 180px;
+    object-fit: cover;
+    background: #000;
+}
+
+.unifi-camera-name {
+    margin: 0.4rem 0.65rem 0.15rem;
+    font-weight: 600;
+}
+
+.unifi-camera-card .hint {
+    margin: 0 0.65rem 0.65rem;
+    color: #bbb;
+}
+
+.unifi-device-grid:empty {
+    display: none;
+}
+
+.unifi-picker-kind {
+    font-style: normal;
+    color: var(--muted, #667);
+    font-size: 0.85em;
+}
+
+.home-device-actions--camera {
+    display: block;
+}

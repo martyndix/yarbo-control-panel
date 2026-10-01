@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-01
+
+### Added
+- **UniFi** module: local Protect Integration API (cameras, lights, sensors) and Access Developer API (door unlock, Gate Hub open/close/stop). Settings → UniFi stores the console host, Protect API key, and Access token. Tick devices to show them on the Home grid like Matter rows. See [docs/unifi.md](docs/unifi.md).
+
+### Changed
+- Panel version is **4.0.0**. The previous release is **3.0.70** if you need to stay on 3.x.
+- Settings treats Yarbo as a peer of Lymow, Powerwall, Home, and Vestaboard. **Connection** is only the panel name. Broker IP, serial, robot name, cloud fallback, and rain sensitivity live on **Settings → Yarbo**.
+
 ## [3.0.70] - 2026-09-30
 
 ### Fixed

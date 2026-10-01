@@ -23,14 +23,16 @@ $current = [
     'powerwall' => true,
     'lymow' => true,
     'home' => true,
+    'unifi' => false,
 ];
 $fromJson = Yarbo\YarboHub::modulesFromInput([
     'module_yarbo' => true,
     'module_powerwall' => false,
     'module_lymow' => false,
     'module_home' => true,
+    'module_unifi' => true,
 ], $current);
-if ($fromJson['powerwall'] !== false || $fromJson['lymow'] !== false || $fromJson['home'] !== true) {
+if ($fromJson['powerwall'] !== false || $fromJson['lymow'] !== false || $fromJson['home'] !== true || $fromJson['unifi'] !== true) {
     fwrite(STDERR, 'json flags ' . json_encode($fromJson) . "\n");
     exit(1);
 }
@@ -49,7 +51,7 @@ if ($stringFalse['powerwall'] !== false || $stringFalse['lymow'] !== false || $s
 $form = Yarbo\YarboHub::modulesFromInput([
     'module_yarbo' => 'on',
 ], $current);
-if ($form['yarbo'] !== true || $form['powerwall'] !== false || $form['lymow'] !== false || $form['home'] !== false) {
+if ($form['yarbo'] !== true || $form['powerwall'] !== false || $form['lymow'] !== false || $form['home'] !== false || $form['unifi'] !== false) {
     fwrite(STDERR, 'form omit ' . json_encode($form) . "\n");
     exit(1);
 }

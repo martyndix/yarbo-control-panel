@@ -10,6 +10,7 @@ final class YarboHub
     public const MODULE_POWERWALL = 'powerwall';
     public const MODULE_LYMOW = 'lymow';
     public const MODULE_HOME = 'home';
+    public const MODULE_UNIFI = 'unifi';
     public const LIVE_BATTERIES = 'batteries';
 
     /** Vestaboard pages. Home is not included until Matter has a Note layout. */
@@ -26,6 +27,7 @@ final class YarboHub
         self::MODULE_POWERWALL,
         self::MODULE_LYMOW,
         self::MODULE_HOME,
+        self::MODULE_UNIFI,
     ];
 
     public function __construct(private readonly string $projectRoot)
@@ -53,6 +55,7 @@ final class YarboHub
                 self::MODULE_POWERWALL => false,
                 self::MODULE_LYMOW => false,
                 self::MODULE_HOME => false,
+                self::MODULE_UNIFI => false,
             ],
             'active_module' => self::MODULE_YARBO,
             'vestaboard_live' => self::MODULE_YARBO,
@@ -204,6 +207,7 @@ final class YarboHub
             self::MODULE_POWERWALL => 'Powerwall',
             self::MODULE_LYMOW => 'Lymow',
             self::MODULE_HOME => 'Home',
+            self::MODULE_UNIFI => 'UniFi',
         ];
         $enabled = [];
         foreach (self::MODULES as $id) {

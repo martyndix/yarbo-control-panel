@@ -1,0 +1,67 @@
+# UniFi Protect and Access
+
+Optional module: cameras, floodlights, sensors, and door unlock from a **local UniFi OS console**. Selected devices can appear on the **Home** grid next to Matter lights.
+
+Not affiliated with Ubiquiti.
+
+## What it can do
+
+- List Protect cameras and show JPEG stills on the UniFi page and on Home.
+- Toggle Protect floodlights.
+- Show Protect sensor status (open/closed, motion, temperature/humidity when the Integration API returns them).
+- Unlock Access doors. Gate Hub three-button mode can send Open / Close / Stop (`control_cmd`).
+- Tick **Show on Home** per device so it behaves like another Home row (camera still, light on/off, door Unlock, sensor text).
+
+## What it cannot do (this version)
+
+- Remote UniFi via `unifi.ui.com`.
+- A Vestaboard UniFi page.
+- PaperMono HOUSE buttons for UniFi devices.
+- Protect recordings, event history, or two-way talk.
+- Access user / credential administration.
+
+## Settings
+
+1. Tick **UniFi** under Settings → Modules.
+2. Open **Settings → UniFi**.
+3. **Console host** is the LAN IP or hostname of the UniFi OS device (Dream Machine, Cloud Gateway, UNVR). Do not include `https://`.
+4. Leave **Verify TLS** off unless you have installed a trusted certificate (UniFi’s default certificate is self-signed).
+5. **Protect API key:** UniFi OS → Settings → Control Plane → Integrations → Create API Key. Cameras and lights need this.
+6. **Access API token:** UniFi Access → Settings → Advanced → Developer API. Doors need this.
+7. Optional Protect local username/password is stored for a later “full access” path if sensors are empty on API-key-only.
+8. If Access is **not** hosted on UniFi OS, tick **Access is standalone (port 12445)**.
+9. **Test UniFi connection**, then tick devices under **Show on Home**.
+
+Leave a key or token blank on later saves to keep the stored value. Credentials stay in `data/unifi-config.json` and are never sent back to the browser.
+
+## APIs
+
+Protect Integration API (local):
+
+```
+https://CONSOLE/proxy/protect/integration/v1/...
+Header: X-API-KEY
+```
+
+Access Developer API on UniFi OS:
+
+```
+https://CONSOLE/proxy/access/api/v1/developer/...
+Header: Authorization: Bearer TOKEN
+```
+
+Standalone Access:
+
+```
+https://CONSOLE:12445/api/v1/developer/...
+```
+
+Door unlock: `POST /doors/{id}/unlock`. Gate Hub: add `?control_cmd=open|close|stop`.
+
+## Home
+
+Turn **Home** on as well. UniFi rows use ids like `unifi:camera:…`. Hide or Remove on Home only unchecks Show on Home — nothing is unpaired on the console. Scenes stay Matter-only.
+
+## Rollback
+
+This is panel **4.0.0**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.

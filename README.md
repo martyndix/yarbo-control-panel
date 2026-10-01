@@ -80,7 +80,7 @@ Open the panel in a browser and you can:
 - **Manual drive** — hold-to-drive D-pad (forward, back, left, right) via MQTT `cmd_vel`
 - **PaperMono companion** — optional [M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperMono) e-paper remote: Home (Stop / Dock / Pause / Lights), plus Status, Health, and Plans pages. Flash from **Settings**, or download a USB setup kit for a laptop. See [PaperMono](#papermono-companion)
 - **Vestaboard Note (optional)** — push 3×15 status (mowing / charging / idle / rain / error) over Local or Cloud API. Enable in **Settings**. See [Vestaboard Note](#vestaboard-note-optional)
-- **Modules (v3.0)** — header switcher for Yarbo, Tesla Powerwall, Lymow, and Home (Matter). Powerwall: [docs/powerwall.md](docs/powerwall.md). Lymow: [docs/lymow.md](docs/lymow.md). Home: [docs/home.md](docs/home.md). Vestaboard live module is chosen in Settings, on the Note card pills, or **Rotate** to cycle views.
+- **Modules (v4)** — header switcher for Yarbo, Tesla Powerwall, Lymow, Home (Matter), and UniFi (Protect + Access). Powerwall: [docs/powerwall.md](docs/powerwall.md). Lymow: [docs/lymow.md](docs/lymow.md). Home: [docs/home.md](docs/home.md). UniFi: [docs/unifi.md](docs/unifi.md). Vestaboard live module is chosen in Settings, on the Note card pills, or **Rotate** to cycle views.
 - **Paper Colour companion** — no-touch M5Stack PaperColor. Same Settings flash path as PaperMono: pick **Paper Colour**, then flash or download a USB setup kit. See [docs/papercolor.md](docs/papercolor.md).
 - **Camera streams** — *not currently functional for most users* (see [Camera support](#camera-support-not-currently-working) below)
 
@@ -186,10 +186,11 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | Step | What to do |
 |------|------------|
 | **Connect robot** | Pi/host must be on the same network as Yarbo; port **1883** reachable |
-| **Configure** | Web **Settings** → broker IP + serial (writes `config.php`) |
-| **Optional cloud** | Settings → enable cloud fallback for map/plan reads |
+| **Configure** | Web **Settings → Yarbo** → broker IP + serial (writes `config.php`). Panel name stays under **Connection**. |
+| **Optional cloud** | Settings → Yarbo → enable cloud fallback for map/plan reads |
 | **Lymow (unofficial)** | Settings → Modules → Lymow, then app email/password + camera IP. See [docs/lymow.md](docs/lymow.md) |
 | **Home (Matter)** | Settings → Modules → Home. Panel updates install the Matter server on a Pi. Pair Hue Bridge / Apple share / any Matter code. See [docs/home.md](docs/home.md) |
+| **UniFi** | Settings → Modules → UniFi, then console host + Protect API key and/or Access token. Tick devices to show on Home. See [docs/unifi.md](docs/unifi.md) |
 | **PaperMono / Paper Colour** | Settings → E-paper companions — pick hardware, USB flash + Wi-Fi, or download a USB setup kit for a laptop. See [PaperMono](#papermono-companion) and [docs/papercolor.md](docs/papercolor.md) |
 | **Vestaboard Note (optional)** | Settings → enable Vestaboard Note — Local or Cloud API. See [Vestaboard Note](#vestaboard-note-optional) |
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
@@ -638,7 +639,7 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 
 While the panel is running it sends an **anonymous ping** after a version change and about once a day (at most about once per 20 hours otherwise). This is so the project can see how many installs exist. It is **not** tied to your robot.
 
-**Included:** a random install id (not your Yarbo serial), panel version, which modules are on (Yarbo / Powerwall / Lymow / Home / Vestaboard), how many PaperMono and Paper Colour tablets are paired, and `linux` or `darwin`.
+**Included:** a random install id (not your Yarbo serial), panel version, which modules are on (Yarbo / Powerwall / Lymow / Home / UniFi / Vestaboard), how many PaperMono and Paper Colour tablets are paired, and `linux` or `darwin`.
 
 **Never included:** serial number, broker IP, GPS, emails, Tesla/Lymow secrets, tablet names, or LAN URLs.
 

@@ -6,6 +6,7 @@ require __DIR__ . '/../src/YarboMatterFabric.php';
 require __DIR__ . '/../src/YarboMatterAgentClient.php';
 require __DIR__ . '/../src/YarboHub.php';
 require __DIR__ . '/../src/YarboPaperDevice.php';
+require __DIR__ . '/../src/YarboUnifi.php';
 require __DIR__ . '/../src/YarboHome.php';
 
 use Yarbo\YarboHome;

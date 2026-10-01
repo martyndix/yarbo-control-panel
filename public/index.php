@@ -583,7 +583,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. A Hue Bridge is one pairing: every Hue light then appears as its own row. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps. Tap ⚙️ to drag rooms, groups, lights, and scenes into the order you want.</p>
+                            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. Tick UniFi devices in Settings → UniFi to show them here too. A Hue Bridge is one pairing: every Hue light then appears as its own row. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps. Tap ⚙️ to drag rooms, groups, lights, and scenes into the order you want.</p>
             <p id="home-server-status" class="updated">Matter server: —</p>
             <p id="home-setup-status" class="hint hidden"></p>
             <button type="button" class="btn btn-secondary hidden" id="home-setup">Set up Matter server</button>
@@ -629,6 +629,21 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div id="home-paper-tablets" class="home-paper-tablets" role="tablist" aria-label="PaperMono tablets"></div>
             <div id="home-paper-assign" class="home-paper-assign"></div>
             </div>
+        </section>
+
+        <section class="card panel-section module-pane-hidden" data-panel-id="unifi" data-module="unifi" id="unifi-card">
+            <div class="section-header section-header--simple">
+                <h2>UniFi</h2>
+                <div class="section-header-actions">
+                    <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+                </div>
+            </div>
+            <p class="hint">Protect cameras, lights, and sensors, plus Access doors. Tick <strong>Show on Home</strong> to put a device on the Home grid like a Matter row. Credentials stay in Settings → UniFi.</p>
+            <p id="unifi-status" class="updated">UniFi: —</p>
+            <div id="unifi-cameras" class="unifi-camera-grid"></div>
+            <div id="unifi-lights" class="home-device-grid unifi-device-grid"></div>
+            <div id="unifi-doors" class="home-device-grid unifi-device-grid"></div>
+            <div id="unifi-sensors" class="home-device-grid unifi-device-grid"></div>
         </section>
 
         </div>
@@ -679,7 +694,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <div class="settings-page-toolbar">
                         <div>
                             <h2 id="settings-title">Settings</h2>
-                            <p class="hint settings-page-lead">Connection, modules, Vestaboard, PaperMono / Paper Colour, and panel updates.</p>
+                            <p class="hint settings-page-lead">Panel name, modules, Vestaboard, PaperMono / Paper Colour, and panel updates.</p>
                         </div>
                         <div class="settings-page-toolbar-actions">
                             <p id="settings-error" class="settings-error hidden" role="alert"></p>
@@ -689,12 +704,12 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <div class="settings-page-layout">
                     <nav class="settings-nav" aria-label="Settings sections">
                         <button type="button" class="settings-nav-btn is-active" data-settings-nav="connection">Connection</button>
-                        <button type="button" class="settings-nav-btn" data-settings-nav="cloud">Cloud</button>
-                        <button type="button" class="settings-nav-btn" data-settings-nav="rain">Rain</button>
                         <button type="button" class="settings-nav-btn" data-settings-nav="modules">Modules</button>
+                        <button type="button" class="settings-nav-btn hidden" data-settings-nav="yarbo">Yarbo</button>
                         <button type="button" class="settings-nav-btn hidden" data-settings-nav="lymow">Lymow</button>
                         <button type="button" class="settings-nav-btn hidden" data-settings-nav="powerwall">Powerwall</button>
                         <button type="button" class="settings-nav-btn hidden" data-settings-nav="home">Home</button>
+                        <button type="button" class="settings-nav-btn hidden" data-settings-nav="unifi">UniFi</button>
                         <button type="button" class="settings-nav-btn" data-settings-nav="vestaboard">Vestaboard</button>
                         <button type="button" class="settings-nav-btn" data-settings-nav="papermono">E-paper</button>
                         <button type="button" class="settings-nav-btn" data-settings-nav="appearance">Appearance</button>
@@ -716,6 +731,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 >
                             </label>
                             <p class="hint">Shown as the title. <strong>28LPC</strong> becomes <strong>28LPC Control Panel</strong>. Leave blank for <strong>Control Panel</strong>.</p>
+                        </section>
+
+                        <section class="settings-section hidden" id="settings-yarbo-section" data-settings-pane="yarbo">
+                            <h3 class="settings-subtitle">Yarbo</h3>
+                            <p class="hint">Local MQTT for the robot, optional cloud map fallback, and rain sensitivity. Same fields as before — they now live on this Yarbo page instead of Connection / Cloud / Rain.</p>
                             <div id="settings-yarbo-connection-fields">
                             <label class="settings-field">
                                 <span class="label">Broker IP (Yarbo host)</span>
@@ -755,9 +775,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p id="settings-connection-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-connection-test">Test local connection</button>
                             </div>
-                        </section>
 
-                        <section class="settings-section" id="settings-cloud-section" data-settings-pane="cloud">
                             <h3 class="settings-subtitle">Cloud reads (optional)</h3>
                             <p class="hint">Map/plan data from your Yarbo account when local MQTT returns nothing. Controls always use local MQTT.</p>
                             <label class="settings-field settings-checkbox">
@@ -783,9 +801,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p id="settings-cloud-status" class="hint">Cloud bridge: checking…</p>
                             <p id="settings-cloud-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
-                        </section>
 
-                        <section class="settings-section" id="settings-rain-section" data-settings-pane="rain">
                             <h3 class="settings-subtitle">Rain sensitivity</h3>
                             <p class="hint">Match the Yarbo app <strong>Detection &amp; Rain Sensitivity</strong> slider (20–1000). Status and the Vestaboard only show rain when the sensor reading is at or above this value. Readings below 20 always clear (the app never blocks mowing there). Leave blank to use 20. If the robot publishes its slider over MQTT, that value is used instead.</p>
                             <label class="settings-field">
@@ -813,7 +829,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <input type="checkbox" id="settings-module-home" name="module_home">
                                 <span>Home (Matter lights, Hue Bridge, heaters, plugs)</span>
                             </label>
-                            <p class="hint">Tick a module, then open its section in the sidebar. Lymow uses the same email and password as the Lymow phone app.</p>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-module-unifi" name="module_unifi">
+                                <span>UniFi (Protect cameras, lights, sensors, Access doors)</span>
+                            </label>
+                            <p class="hint">Tick a module, then open its section in the sidebar. Lymow uses the same email and password as the Lymow phone app. UniFi uses a local console API key (Protect) and optional Access token.</p>
                             <label class="settings-field">
                                 <span class="label">Vestaboard live module</span>
                                 <select id="settings-vestaboard-live" name="vestaboard_live">
@@ -937,6 +957,46 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p id="settings-home-setup-status" class="updated">Matter server: —</p>
                             <button type="button" class="btn" id="settings-home-setup">Set up Matter server</button>
                             <p class="hint">On a Raspberry Pi, Settings → Panel updates installs Docker and starts the Matter server. Tap the button if pairing is not ready yet. Pairing works on the Pi (IPv6 on). See <code>docs/home.md</code>.</p>
+                        </section>
+
+                        <section class="settings-section hidden" id="settings-unifi-section" data-settings-pane="unifi">
+                            <h3 class="settings-subtitle">UniFi Access &amp; Protect</h3>
+                            <p class="hint">Talks to a <strong>local UniFi OS console</strong> (Dream Machine, Cloud Gateway, UNVR) — not unifi.ui.com. Create a Protect key at UniFi OS → Settings → Control Plane → Integrations (<code>X-API-KEY</code>). Create an Access token in Access → Settings → Advanced → Developer API. Leave a secret blank on later saves to keep the stored value. See <code>docs/unifi.md</code>.</p>
+                            <label class="settings-field">
+                                <span class="label">Console host</span>
+                                <input type="text" id="settings-unifi-host" name="unifi_host" placeholder="192.168.1.1" autocomplete="off" spellcheck="false">
+                            </label>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-unifi-verify-tls" name="unifi_verify_tls">
+                                <span>Verify TLS (off for the usual self-signed UniFi certificate)</span>
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Protect API key</span>
+                                <input type="password" id="settings-unifi-protect-key" name="unifi_protect_api_key" autocomplete="new-password" placeholder="Leave blank to keep the saved key">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Protect local username (optional)</span>
+                                <input type="text" id="settings-unifi-protect-user" name="unifi_protect_username" autocomplete="username" spellcheck="false" placeholder="Local UniFi OS admin">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Protect local password (optional)</span>
+                                <input type="password" id="settings-unifi-protect-password" name="unifi_protect_password" autocomplete="new-password" placeholder="Leave blank to keep the saved password">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Access API token</span>
+                                <input type="password" id="settings-unifi-access-token" name="unifi_access_token" autocomplete="new-password" placeholder="Leave blank to keep the saved token">
+                            </label>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-unifi-access-standalone" name="unifi_access_standalone">
+                                <span>Access is standalone (port 12445) instead of UniFi OS proxy</span>
+                            </label>
+                            <p id="settings-unifi-result" class="settings-cloud-result hidden" role="status"></p>
+                            <div class="settings-update-actions">
+                                <button type="button" class="btn btn-secondary" id="settings-unifi-test">Test UniFi connection</button>
+                            </div>
+                            <h3 class="settings-subtitle">Show on Home</h3>
+                            <p class="hint">Tick devices to list them on the Home grid. Cameras show a still; lights toggle; doors unlock; sensors are status only.</p>
+                            <div id="settings-unifi-devices" class="unifi-home-picker"></div>
                         </section>
 
                         <section class="settings-section" id="settings-vestaboard-section" data-settings-pane="vestaboard">

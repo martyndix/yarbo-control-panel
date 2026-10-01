@@ -8,6 +8,7 @@ use Yarbo\YarboErrors;
 use Yarbo\YarboHub;
 use Yarbo\YarboLymow;
 use Yarbo\YarboMqtt;
+use Yarbo\YarboUnifi;
 use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboPowerwall;
 use Yarbo\YarboRobotName;
@@ -45,6 +46,7 @@ function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVest
     $powerwall = null;
     $lymow = null;
     $home = null;
+    $unifi = null;
     $vestaboard = null;
 
     try {
@@ -71,6 +73,14 @@ function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVest
         $home = null;
     }
 
+    try {
+        $unifi = $hub->enabled(YarboHub::MODULE_UNIFI)
+            ? (new YarboUnifi($root))->dashboardPayload(false)
+            : null;
+    } catch (Throwable $e) {
+        $unifi = ['ok' => false, 'online' => false, 'error' => $e->getMessage()];
+    }
+
     if ($includeVestaboard) {
         try {
             $vestaboard = vestaboard_status_payload(null, false);
@@ -84,6 +94,7 @@ function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVest
         'powerwall' => $powerwall,
         'lymow' => $lymow,
         'home' => $home,
+        'unifi' => $unifi,
     ];
     if ($includeVestaboard) {
         $extras['vestaboard'] = $vestaboard;
