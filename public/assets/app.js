@@ -5800,7 +5800,9 @@ async function loadSettings() {
         if (els.settingsUnifiAccessStandalone) {
             els.settingsUnifiAccessStandalone.checked = Boolean(data.unifi?.access_standalone);
         }
-        renderUnifiHomePicker(data.unifi, { replace: !unifiPickerDirty });
+        if (Array.isArray(data.unifi?.devices) && data.unifi.devices.length) {
+            renderUnifiHomePicker(data.unifi, { replace: !unifiPickerDirty });
+        }
         if (els.settingsVestaboardLive) {
             els.settingsVestaboardLive.value = data.hub?.vestaboard_live || 'yarbo';
         }

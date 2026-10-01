@@ -54,6 +54,10 @@ if (isset($view['protect_api_key']) || isset($view['access_token'])) {
     fwrite(STDERR, "secrets leaked in publicView\n");
     exit(1);
 }
+if (!is_array($view['devices'] ?? null)) {
+    fwrite(STDERR, "publicView devices missing\n");
+    exit(1);
+}
 if ($view['show_on_home'] !== ['unifi:camera:cam1']) {
     fwrite(STDERR, 'show_on_home ' . json_encode($view['show_on_home']) . "\n");
     exit(1);

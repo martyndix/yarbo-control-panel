@@ -3813,22 +3813,28 @@ body.home-is-reordering {
     gap: 0.2rem 0.85rem;
 }
 
-.unifi-pick-row {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    margin: 0;
-    padding: 0.4rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    cursor: pointer;
-}
-
+.settings-form .unifi-pick-row input[type="checkbox"],
 .unifi-pick-row input[type="checkbox"] {
-    width: auto;
+    width: 1.15rem !important;
+    height: 1.15rem;
+    min-width: 1.15rem;
+    max-width: 1.15rem;
+    padding: 0;
     flex: 0 0 auto;
     margin: 0;
     accent-color: var(--accent);
+}
+
+.unifi-pick-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 0;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
 }
 
 .unifi-pick-name {

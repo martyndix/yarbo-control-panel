@@ -237,6 +237,7 @@ final class YarboUnifi
     public function publicView(): array
     {
         $config = $this->load();
+        $inventory = $this->readInventory();
 
         return [
             'host' => $config['host'],
@@ -251,6 +252,7 @@ final class YarboUnifi
             'last_ok' => $config['last_ok'],
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
             'last_check' => $config['last_check'],
+            'devices' => $this->catalogFromInventory($inventory, $config['show_on_home']),
         ];
     }
 
