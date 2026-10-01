@@ -40,7 +40,10 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 9
+AGENT_VERSION = 10
+STICKY_HOLD = 4.0
+CMD_CHANNEL = "cmd"
+LISTEN_CHANNEL = "listen"
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -87,12 +90,12 @@ COLOR_CAP_HS = 1 << 0
 COLOR_CAP_XY = 1 << 3
 COLOR_CAP_CT = 1 << 4
 
-_ws: MatterWs | None = None
-_ws_send_lock = threading.Lock()
-_ws_connect_lock = threading.Lock()
+_ws_slots: dict[str, MatterWs | None] = {CMD_CHANNEL: None, LISTEN_CHANNEL: None}
+_ws_send_locks = {CMD_CHANNEL: threading.Lock(), LISTEN_CHANNEL: threading.Lock()}
+_ws_connect_locks = {CMD_CHANNEL: threading.Lock(), LISTEN_CHANNEL: threading.Lock()}
 _pending: dict[str, dict[str, Any]] = {}
 _pending_lock = threading.Lock()
-_recv_started = False
+_recv_started = {CMD_CHANNEL: False, LISTEN_CHANNEL: False}
 _listening = False
 _listen_lock = threading.Lock()
 _start_lock = threading.Lock()
@@ -729,11 +732,11 @@ def reload_matter_server() -> bool:
 
 def interview_node_ids(node_ids: list[int]) -> None:
     for node_id in node_ids:
-        matter_rpc("interview_node", {"node_id": node_id}, timeout=45.0, channel="poll")
+        matter_rpc("interview_node", {"node_id": node_id}, timeout=45.0, channel=CMD_CHANNEL)
 
 
 def live_node_ids() -> list[int]:
-    rpc = matter_rpc("get_nodes", timeout=8.0, channel="poll")
+    rpc = matter_rpc("get_nodes", timeout=8.0, channel=CMD_CHANNEL)
     if not rpc.get("ok"):
         return []
     found: list[int] = []
@@ -752,7 +755,7 @@ def live_node_ids() -> list[int]:
 def wait_node_available(node_id: int, timeout: float) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        rpc = matter_rpc("get_node", {"node_id": node_id}, timeout=4.0, channel="poll")
+        rpc = matter_rpc("get_node", {"node_id": node_id}, timeout=4.0, channel=CMD_CHANNEL)
         node = rpc.get("result") if rpc.get("ok") else None
         if isinstance(node, dict) and node.get("available"):
             return True
@@ -765,7 +768,7 @@ def wait_any_node_available(node_ids: list[int], timeout: float) -> bool:
         return False
     deadline = time.time() + timeout
     while time.time() < deadline:
-        rpc = matter_rpc("get_nodes", timeout=8.0, channel="poll")
+        rpc = matter_rpc("get_nodes", timeout=8.0, channel=CMD_CHANNEL)
         if rpc.get("ok"):
             wanted = set(node_ids)
             for node in nodes_from_result(rpc.get("result")):
@@ -995,7 +998,7 @@ def _background_recover() -> None:
             if not wait_any_node_available(restored, 35.0):
                 interview_node_ids(restored)
                 wait_any_node_available(restored, 20.0)
-        rpc = matter_rpc("get_nodes", timeout=20.0, channel="poll")
+        rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
         nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
         if nodes and not flatten_nodes(nodes):
             ids: list[int] = []
@@ -1046,7 +1049,7 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
             device_id = str(item.get("id") or "")
             prev = previous.get(device_id)
             patched_at = float((prev or {}).get("_patched_at") or 0)
-            if prev is not None and patched_at > 0 and (now - patched_at) < 2.0:
+            if prev is not None and patched_at > 0 and (now - patched_at) < STICKY_HOLD:
                 for key in ("on", "brightness", "color_hex", "hue", "saturation", "color_temp"):
                     if key in prev:
                         item[key] = prev[key]
@@ -1064,13 +1067,27 @@ def current_live_devices() -> list[dict[str, Any]]:
 def patch_live_device(device_id: str, fields: dict[str, Any], *, sticky: bool = False) -> dict[str, Any] | None:
     if device_id == "" or not fields:
         return None
+    now = time.time()
     with _live_lock:
         payload = dict(fields)
-        payload["_patched_at"] = time.time() if sticky else 0
+        payload["_patched_at"] = now if sticky else 0
         for row in _live_devices:
-            if str(row.get("id") or "") == device_id:
-                row.update(payload)
-                return dict(row)
+            if str(row.get("id") or "") != device_id:
+                continue
+            if not sticky:
+                patched_at = float(row.get("_patched_at") or 0)
+                if patched_at > 0 and (now - patched_at) < STICKY_HOLD:
+                    conflict = False
+                    for key, val in payload.items():
+                        if key == "_patched_at":
+                            continue
+                        if key in row and row[key] != val:
+                            conflict = True
+                            break
+                    if conflict:
+                        return dict(row)
+            row.update(payload)
+            return dict(row)
         row = {"id": device_id, **payload}
         _live_devices.append(row)
         return dict(row)
@@ -1093,7 +1110,7 @@ def start_state_poll() -> None:
                 ensure_listening()
             except Exception as exc:  # noqa: BLE001
                 print(f"matter state poll failed: {exc}", flush=True)
-                reset_ws()
+                reset_ws(LISTEN_CHANNEL)
             time.sleep(8.0)
 
     threading.Thread(target=loop, daemon=True).start()
@@ -1113,7 +1130,7 @@ def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, A
     if quick and disk:
         info["source"] = "disk"
         return disk, info
-    rpc = matter_rpc("get_nodes", timeout=15.0 if quick else 45.0, channel="poll")
+    rpc = matter_rpc("get_nodes", timeout=15.0 if quick else 45.0, channel=CMD_CHANNEL)
     nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
     if nodes:
         info["source"] = "live"
@@ -1121,11 +1138,10 @@ def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, A
         nodes = disk
         info["source"] = "disk"
     if not quick and not nodes:
-        listen = matter_rpc("start_listening", timeout=45.0, channel="poll")
-        if listen.get("ok"):
-            nodes = nodes_from_result(listen.get("result"))
-            if nodes:
-                info["source"] = "listen"
+        try:
+            ensure_listening()
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter listen during collect failed: {exc}", flush=True)
         if not nodes and disk:
             nodes = disk
             info["source"] = "disk"
@@ -1136,8 +1152,8 @@ def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, A
                 except (TypeError, ValueError):
                     node_id = 0
                 if node_id > 0:
-                    matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0, channel="poll")
-            rpc = matter_rpc("get_nodes", timeout=45.0, channel="poll")
+                    matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0, channel=CMD_CHANNEL)
+            rpc = matter_rpc("get_nodes", timeout=45.0, channel=CMD_CHANNEL)
             if rpc.get("ok"):
                 interviewed = nodes_from_result(rpc.get("result"))
                 if interviewed:
@@ -1232,68 +1248,92 @@ def ensure_matter_server() -> str | None:
         )
 
 
-def connected_ws() -> MatterWs:
-    global _ws
-    if _ws is not None:
-        return _ws
-    with _ws_connect_lock:
-        if _ws is not None:
-            return _ws
+def _channel_name(channel: str | None) -> str:
+    if channel == LISTEN_CHANNEL:
+        return LISTEN_CHANNEL
+    return CMD_CHANNEL
+
+
+def connected_ws(channel: str = CMD_CHANNEL) -> MatterWs:
+    channel = _channel_name(channel)
+    existing = _ws_slots.get(channel)
+    if existing is not None:
+        return existing
+    with _ws_connect_locks[channel]:
+        existing = _ws_slots.get(channel)
+        if existing is not None:
+            return existing
         err = ensure_matter_server()
         if err:
             raise RuntimeError(err)
-        _ws = ws_connect()
-        start_recv_loop()
-        return _ws
+        client = ws_connect()
+        _ws_slots[channel] = client
+        start_recv_loop(channel)
+        return client
 
 
-def fail_pending(error: str) -> None:
+def fail_pending(error: str, channel: str | None = None) -> None:
     with _pending_lock:
-        waiters = list(_pending.values())
-        _pending.clear()
+        if channel is None:
+            waiters = list(_pending.values())
+            _pending.clear()
+        else:
+            waiters = []
+            for mid, waiter in list(_pending.items()):
+                if waiter.get("channel") == channel:
+                    waiters.append(waiter)
+                    _pending.pop(mid, None)
     for waiter in waiters:
         waiter["error"] = error
         waiter["event"].set()
 
 
-def reset_ws(channel: str | None = None) -> None:  # noqa: ARG001
-    global _ws, _listening
-    _listening = False
-    client = _ws
-    _ws = None
-    if client is not None:
-        try:
-            client.sock.close()
-        except OSError:
-            pass
-    fail_pending("Matter server unavailable")
+def reset_ws(channel: str | None = None) -> None:
+    global _listening
+    names = [_channel_name(channel)] if channel else [CMD_CHANNEL, LISTEN_CHANNEL]
+    if LISTEN_CHANNEL in names:
+        _listening = False
+    for name in names:
+        client = _ws_slots.get(name)
+        _ws_slots[name] = None
+        if client is not None:
+            try:
+                client.sock.close()
+            except OSError:
+                pass
+        fail_pending("Matter server unavailable", name)
 
 
-def start_recv_loop() -> None:
-    global _recv_started
-    if _recv_started:
+def start_recv_loop(channel: str) -> None:
+    channel = _channel_name(channel)
+    if _recv_started.get(channel):
         return
-    _recv_started = True
+    _recv_started[channel] = True
 
     def loop() -> None:
         while True:
-            client = _ws
+            client = _ws_slots.get(channel)
             if client is None:
                 time.sleep(0.15)
                 continue
             try:
-                msg = client.recv_json(30.0)
+                if _ws_slots.get(channel) is not client:
+                    time.sleep(0.05)
+                    continue
+                msg = client.recv_json(1.0)
             except Exception:  # noqa: BLE001
-                if _ws is client:
-                    reset_ws()
+                if _ws_slots.get(channel) is client:
+                    reset_ws(channel)
                 time.sleep(0.4)
                 continue
+            if _ws_slots.get(channel) is not client:
+                continue
             if msg is None:
-                if _ws is client:
+                if _ws_slots.get(channel) is client:
                     try:
                         client.sock.getpeername()
                     except OSError:
-                        reset_ws()
+                        reset_ws(channel)
                 continue
             ingest_ws_message(msg)
             mid = str(msg.get("message_id") or "")
@@ -1305,11 +1345,11 @@ def start_recv_loop() -> None:
                 waiter["msg"] = msg
                 waiter["event"].set()
 
-    threading.Thread(target=loop, daemon=True).start()
+    threading.Thread(target=loop, daemon=True, name=f"matter-recv-{channel}").start()
 
 
 def kick_listening() -> None:
-    if _listening and _ws is not None:
+    if _listening and _ws_slots.get(LISTEN_CHANNEL) is not None:
         return
     threading.Thread(target=_listen_worker, daemon=True).start()
 
@@ -1324,11 +1364,12 @@ def _listen_worker() -> None:
 def ensure_listening() -> None:
     global _listening
     with _listen_lock:
-        if _listening and _ws is not None:
+        if _listening and _ws_slots.get(LISTEN_CHANNEL) is not None:
             return
-        connected_ws()
-        rpc = matter_rpc("start_listening", timeout=45.0, listen=False)
+        connected_ws(LISTEN_CHANNEL)
+        rpc = matter_rpc("start_listening", timeout=45.0, channel=LISTEN_CHANNEL, listen=False)
         if not rpc.get("ok"):
+            reset_ws(LISTEN_CHANNEL)
             raise RuntimeError(str(rpc.get("error") or "Matter listen failed"))
         devices = flatten_nodes(nodes_from_result(rpc.get("result")))
         remember_live_devices(devices)
@@ -1339,39 +1380,54 @@ def matter_rpc(
     command: str,
     args: dict[str, Any] | None = None,
     timeout: float = 20.0,
-    channel: str = "cmd",
+    channel: str = CMD_CHANNEL,
     listen: bool = True,
 ) -> dict[str, Any]:
-    del channel
-    message_id = uuid.uuid4().hex[:12]
-    payload: dict[str, Any] = {"message_id": message_id, "command": command}
+    if command == "start_listening":
+        channel = LISTEN_CHANNEL
+        listen = False
+    else:
+        channel = _channel_name(channel)
+        if channel == LISTEN_CHANNEL and command != "start_listening":
+            channel = CMD_CHANNEL
+    payload: dict[str, Any] = {"command": command}
     if args:
         payload["args"] = args
     last_err: Exception | str | None = None
-    for _ in range(2):
-        waiter: dict[str, Any] = {"event": threading.Event(), "msg": None, "error": None}
+    for attempt in range(2):
+        message_id = uuid.uuid4().hex[:12]
+        payload["message_id"] = message_id
+        waiter: dict[str, Any] = {
+            "event": threading.Event(),
+            "msg": None,
+            "error": None,
+            "channel": channel,
+        }
         try:
-            client = connected_ws()
-            if listen and command != "start_listening":
+            if listen:
                 kick_listening()
-                client = connected_ws()
+            client = connected_ws(channel)
             with _pending_lock:
                 _pending[message_id] = waiter
-            with _ws_send_lock:
+            with _ws_send_locks[channel]:
                 client.send_json(payload)
             if not waiter["event"].wait(timeout):
                 last_err = "Matter server timed out"
                 with _pending_lock:
                     _pending.pop(message_id, None)
+                reset_ws(channel)
                 continue
             with _pending_lock:
                 _pending.pop(message_id, None)
             if waiter.get("error"):
                 last_err = str(waiter["error"])
+                if attempt == 0:
+                    reset_ws(channel)
                 continue
             msg = waiter.get("msg")
             if not isinstance(msg, dict):
                 last_err = "Matter server unavailable"
+                reset_ws(channel)
                 continue
             if "error_code" in msg or "error" in msg:
                 err = msg.get("details") or msg.get("error") or msg.get("error_code")
@@ -1381,7 +1437,7 @@ def matter_rpc(
             last_err = exc
             with _pending_lock:
                 _pending.pop(message_id, None)
-            reset_ws()
+            reset_ws(channel)
     return {"ok": False, "error": str(last_err) if last_err else "Matter server unavailable"}
 
 

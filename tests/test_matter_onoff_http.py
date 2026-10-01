@@ -45,6 +45,8 @@ class FakeMatterServer:
     def __init__(self) -> None:
         self.commands: list[dict] = []
         self.conn: socket.socket | None = None
+        self.listen_conn: socket.socket | None = None
+        self.cmd_conn: socket.socket | None = None
         self._conns: list[socket.socket] = []
         self._sock = socket.socket()
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -85,7 +87,7 @@ class FakeMatterServer:
         deadline = time.time() + 3.0
         last_err: Exception | None = None
         while time.time() < deadline:
-            conn = self.conn
+            conn = self.listen_conn or self.conn
             if conn is not None:
                 try:
                     self._send(conn, {"event": "attribute_updated", "data": [node_id, path, value]})
@@ -139,14 +141,17 @@ class FakeMatterServer:
                     continue
                 self.commands.append(msg)
                 command = str(msg.get("command") or "")
-                if command in ("start_listening", "get_nodes"):
+                if command == "start_listening":
+                    self.listen_conn = conn
                     threading.Thread(
                         target=self._reply_dump,
                         args=(conn, msg),
                         daemon=True,
                     ).start()
                     continue
-                self._send(conn, {"message_id": msg.get("message_id"), "result": None})
+                if command == "device_command":
+                    self.cmd_conn = conn
+                self._send(conn, {"message_id": msg.get("message_id"), "result": SAMPLE_NODES if command == "get_nodes" else None})
         except (TimeoutError, socket.timeout, OSError, struct.error):
             return
         finally:
@@ -283,10 +288,11 @@ def main() -> int:
     )
     try:
         ping = wait_ping()
-        assert ping.get("version") == 9, ping
+        assert ping.get("version") == 10, ping
         time.sleep(0.4)
         started = time.time()
         result = post({"op": "command", "id": "1:2", "action": "on"}, timeout=3.0)
+        elapsed = time.time() - started
         elapsed = time.time() - started
         assert result.get("ok") is True, result
         assert result.get("on") is True, result
@@ -295,20 +301,25 @@ def main() -> int:
         assert "On" in names, fake.commands
         listen_n = len([c for c in fake.commands if c.get("command") == "start_listening"])
         assert listen_n >= 1, fake.commands
+        assert fake.cmd_conn is not None and fake.listen_conn is not None, "need cmd and listen sockets"
+        assert fake.cmd_conn is not fake.listen_conn, "On/Off must not share the listen websocket"
 
         row = wait_device("1:2")
         assert row.get("on") is True, row
-        fake.emit_updated(1, "2/6/0", False)
-        deadline = time.time() + 2.0
+        deadline = time.time() + 8.0
         saw_off = False
         while time.time() < deadline:
+            try:
+                fake.emit_updated(1, "2/6/0", False)
+            except AssertionError:
+                pass
             row = wait_device("1:2", timeout=0.4)
             if row.get("on") is False:
                 saw_off = True
                 break
-            time.sleep(0.05)
+            time.sleep(0.2)
         assert saw_off, f"Apple Home Off event did not apply: {post({'op': 'states'})}"
-        print("ok: On/Off did not wait for listen dump; Apple Home event applied")
+        print("ok: On/Off used a command socket; Apple Home event applied")
         return 0
     except Exception:
         try:

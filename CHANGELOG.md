@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.6] - 2026-10-01
+
+### Fixed
+- Home On/Off from the panel now uses a **command** websocket that never waits on the Hue `start_listening` dump. Live Apple Home updates stay on a second listen socket. Clicks were returning OK, then the dots snapped back off because the command was stuck behind the dump and the poll still showed Off. The update restarts the Matter agent (v10); do not pair Hue again.
+
 ## [4.0.5] - 2026-10-01
 
 ### Fixed

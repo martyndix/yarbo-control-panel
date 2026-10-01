@@ -158,9 +158,15 @@ def main() -> int:
 
     agent._live_devices = [{"id": "1:2", "on": True, "_patched_at": __import__("time").time()}]
     agent.apply_attribute_event([1, "2/6/0", False])
+    held = agent.current_live_devices()
+    if not held or held[0].get("on") is not True:
+        raise SystemExit(f"sticky should hold against stale off {held}")
+
+    agent._live_devices = [{"id": "1:2", "on": True, "_patched_at": __import__("time").time() - 10}]
+    agent.apply_attribute_event([1, "2/6/0", False])
     yielded = agent.current_live_devices()
     if not yielded or yielded[0].get("on") is not False:
-        raise SystemExit(f"live event should override sticky patch {yielded}")
+        raise SystemExit(f"live event after sticky {yielded}")
 
     agent._live_devices = [{"id": "1:2", "on": True, "_patched_at": __import__("time").time()}]
     agent.remember_live_devices([{"id": "1:2", "on": False, "name": "Lamp"}])

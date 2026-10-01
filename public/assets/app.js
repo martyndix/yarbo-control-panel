@@ -4160,7 +4160,6 @@ function bindHomeDashboard() {
                     command: nextOn ? 'on' : 'off',
                 }, 90000);
                 if (!data.ok) throw new Error(data.error || 'Failed');
-                loadHomeDashboard({ force: true, patch: true });
             } catch (err) {
                 if (group) group.on = currentlyOn;
                 (homeDash.devices || []).filter((d) => d.group_id === id).forEach((d) => setHomeDeviceOn(d.id, currentlyOn));
@@ -4188,7 +4187,6 @@ function bindHomeDashboard() {
                     command: nextOn ? 'on' : 'off',
                 }, 90000);
                 if (!data.ok) throw new Error(data.error || 'Failed');
-                loadHomeDashboard({ force: true, patch: true });
             } catch (err) {
                 if (room) room.on = currentlyOn;
                 (homeDash.devices || []).filter((d) => d.room_id === id).forEach((d) => setHomeDeviceOn(d.id, currentlyOn));
@@ -4238,7 +4236,6 @@ function bindHomeDashboard() {
             }, 25000);
             if (!data.ok) throw new Error(data.error || 'Failed');
             if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
-            loadHomeDashboard({ force: true, patch: true });
         } catch (err) {
             setHomeDeviceOn(id, currentlyOn);
             showToast(err.message || 'Home command failed', 'error');
