@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.16] - 2026-10-01
+
+### Fixed
+- UniFi floodlights now force the LED on/off (`isLightForceEnabled`, with brightness `ledLevel` 6 when turning on). The previous PATCH set Protect’s **schedule** to `always`/`off` and treated that as the light being on, so the website showed On while the floodlight stayed off.
+
 ## [4.0.15] - 2026-10-01
 
 ### Fixed
