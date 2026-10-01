@@ -144,6 +144,18 @@ def main() -> int:
     if extra.get("24:1", {}).get("kind") != "vacuum" or extra["24:1"].get("colorable"):
         raise SystemExit(f"light-typed vacuum {extra.get('24:1')}")
 
+    agent._live_devices = [{"id": "1:2", "on": False}]
+    agent.apply_attribute_event([1, "2/6/0", True])
+    live = agent.current_live_devices()
+    if not live or live[0].get("on") is not True:
+        raise SystemExit(f"attribute event did not turn on {live}")
+
+    agent._live_devices = [{"id": "1:2", "on": True, "_patched_at": __import__("time").time()}]
+    agent.remember_live_devices([{"id": "1:2", "on": False, "name": "Lamp"}])
+    kept = agent.current_live_devices()
+    if not kept or kept[0].get("on") is not True:
+        raise SystemExit(f"sticky command patch lost {kept}")
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 

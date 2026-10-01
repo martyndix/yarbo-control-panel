@@ -3001,9 +3001,9 @@ async function startHomeSetup(button) {
     }
 }
 
-async function loadHomeDashboard() {
+async function loadHomeDashboard(opts = {}) {
     if (homeDrag) return;
-    if (homeLoadBusy) return;
+    if (homeLoadBusy && !opts.force) return;
     const card = document.getElementById('home-card');
     const homeEnabled = Boolean(document.querySelector('[data-module-id="home"]'));
     const settingsHomeOpen = document.getElementById('settings-home-section')?.classList.contains('is-active');
@@ -3013,7 +3013,7 @@ async function loadHomeDashboard() {
     homeLoadBusy = true;
     let aborted = false;
     try {
-        const data = await homeApi(null, 20000);
+        const data = await homeApi(null, 12000);
         const savingId = homePaperSavingId;
         const localAssigned = savingId
             ? [...(((homeDash.paper_devices || []).find((p) => p.id === savingId) || {}).assigned || [])]
@@ -3023,7 +3023,11 @@ async function loadHomeDashboard() {
             const paper = (homeDash.paper_devices || []).find((p) => p.id === savingId);
             if (paper) paper.assigned = localAssigned;
         }
-        renderHomeDashboard(data);
+        if (opts.patch && !homeManageOpen && !homeDrag && document.querySelector('#home-devices [data-home-id]')) {
+            patchHomeDashboard(data);
+        } else {
+            renderHomeDashboard(data);
+        }
         homeLoadAborts = 0;
         ensureHomeStatePoll();
     } catch (err) {
@@ -3070,8 +3074,70 @@ function homeCardIsWatching() {
 function ensureHomeStatePoll() {
     if (homeStateTimer) return;
     homeStateTimer = window.setInterval(() => {
-        if (homeCardIsWatching()) loadHomeDashboard();
-    }, 8000);
+        if (homeCardIsWatching()) loadHomeDashboard({ patch: true });
+    }, 2500);
+}
+
+function homeDeviceRecord(id) {
+    return [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])]
+        .find((d) => d.id === id);
+}
+
+function patchHomeDeviceVisual(id, on, extras = {}) {
+    const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+    card.classList.toggle('is-on', Boolean(on));
+    const btn = card.querySelector('[data-home-toggle]');
+    if (btn) btn.textContent = on ? 'Off' : 'On';
+    card.querySelectorAll('[data-home-color], [data-home-kelvin]').forEach((el) => {
+        el.disabled = !on;
+    });
+    if (extras.brightness != null) {
+        const bright = card.querySelector('[data-home-bright]');
+        if (bright && document.activeElement !== bright) bright.value = String(extras.brightness);
+    }
+}
+
+function setHomeDeviceOn(id, on) {
+    const device = homeDeviceRecord(id);
+    if (device) device.on = Boolean(on);
+    patchHomeDeviceVisual(id, on);
+}
+
+function patchHomeDashboard(data) {
+    applyHomeSetupUi(data);
+    applyHomeManageUi();
+    const shown = [...document.querySelectorAll('#home-devices [data-home-id], #home-hidden-devices [data-home-id]')]
+        .map((el) => el.getAttribute('data-home-id') || '')
+        .filter(Boolean);
+    const next = [...(data.devices || []), ...(data.hidden_devices || [])];
+    const nextIds = new Set(next.map((d) => String(d.id || '')).filter(Boolean));
+    if (shown.length !== nextIds.size || shown.some((id) => !nextIds.has(id))) {
+        renderHomeDashboard(data);
+        return;
+    }
+    next.forEach((d) => patchHomeDeviceVisual(d.id, d.on, d));
+    (data.rooms || []).forEach((room) => {
+        const el = document.querySelector(`[data-home-room="${CSS.escape(room.id)}"]`);
+        if (!el) return;
+        el.classList.toggle('is-on', Boolean(room.on));
+        const btn = el.querySelector('[data-home-room-toggle]');
+        if (btn) btn.textContent = room.on ? 'Off' : 'On';
+        (room.groups || []).forEach((group) => {
+            const wrap = document.querySelector(`[data-home-group="${CSS.escape(group.id)}"]`);
+            if (!wrap) return;
+            wrap.querySelector('.home-group-heading')?.classList.toggle('is-on', Boolean(group.on));
+            const gbtn = wrap.querySelector('[data-home-group-toggle]');
+            if (gbtn) gbtn.textContent = group.on ? 'Off' : 'On';
+        });
+    });
+    if (!homeManageOpen) {
+        (data.scenes || []).forEach((scene) => {
+            const btn = document.querySelector(`#home-scenes [data-home-scene="${CSS.escape(scene.id)}"]`);
+            if (!btn) return;
+            btn.classList.toggle('btn-secondary', !scene.on);
+        });
+    }
 }
 
 function applyHomeManageUi() {
@@ -4080,16 +4146,24 @@ function bindHomeDashboard() {
         if (groupToggle) {
             const id = groupToggle.getAttribute('data-home-group-toggle') || '';
             const group = (homeDash.rooms || []).flatMap((r) => r.groups || []).find((g) => g.id === id);
+            const currentlyOn = Boolean(group?.on);
+            const nextOn = !currentlyOn;
+            if (group) group.on = nextOn;
+            groupToggle.textContent = nextOn ? 'Off' : 'On';
+            groupToggle.closest('.home-group-heading')?.classList.toggle('is-on', nextOn);
+            (homeDash.devices || []).filter((d) => d.group_id === id).forEach((d) => setHomeDeviceOn(d.id, nextOn));
             groupToggle.disabled = true;
             try {
                 const data = await homeApi({
                     action: 'group_command',
                     group_id: id,
-                    command: group?.on ? 'off' : 'on',
+                    command: nextOn ? 'on' : 'off',
                 }, 90000);
                 if (!data.ok) throw new Error(data.error || 'Failed');
-                await loadHomeDashboard();
+                loadHomeDashboard({ force: true, patch: true });
             } catch (err) {
+                if (group) group.on = currentlyOn;
+                (homeDash.devices || []).filter((d) => d.group_id === id).forEach((d) => setHomeDeviceOn(d.id, currentlyOn));
                 showToast(err.message || 'Group command failed', 'error');
             } finally {
                 groupToggle.disabled = false;
@@ -4100,16 +4174,24 @@ function bindHomeDashboard() {
         if (roomToggle) {
             const id = roomToggle.getAttribute('data-home-room-toggle') || '';
             const room = (homeDash.rooms || []).find((r) => r.id === id);
+            const currentlyOn = Boolean(room?.on);
+            const nextOn = !currentlyOn;
+            if (room) room.on = nextOn;
+            roomToggle.textContent = nextOn ? 'Off' : 'On';
+            roomToggle.closest('[data-home-room]')?.classList.toggle('is-on', nextOn);
+            (homeDash.devices || []).filter((d) => d.room_id === id).forEach((d) => setHomeDeviceOn(d.id, nextOn));
             roomToggle.disabled = true;
             try {
                 const data = await homeApi({
                     action: 'room_command',
                     room_id: id,
-                    command: room?.on ? 'off' : 'on',
+                    command: nextOn ? 'on' : 'off',
                 }, 90000);
                 if (!data.ok) throw new Error(data.error || 'Failed');
-                await loadHomeDashboard();
+                loadHomeDashboard({ force: true, patch: true });
             } catch (err) {
+                if (room) room.on = currentlyOn;
+                (homeDash.devices || []).filter((d) => d.room_id === id).forEach((d) => setHomeDeviceOn(d.id, currentlyOn));
                 showToast(err.message || 'Room command failed', 'error');
             } finally {
                 roomToggle.disabled = false;
@@ -4141,19 +4223,24 @@ function bindHomeDashboard() {
         }
         const btn = event.target.closest('[data-home-toggle]');
         if (!btn) return;
+        const id = btn.getAttribute('data-home-toggle') || '';
+        const card = btn.closest('[data-home-id]');
+        const device = homeDeviceRecord(id);
+        const currentlyOn = card?.classList.contains('is-on') || Boolean(device?.on);
+        const nextOn = !currentlyOn;
+        setHomeDeviceOn(id, nextOn);
         btn.disabled = true;
         try {
-            const id = btn.getAttribute('data-home-toggle') || '';
-            const device = [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])]
-                .find((d) => d.id === id);
             const data = await homeApi({
                 action: 'command',
                 id,
-                command: device?.on ? 'off' : 'on',
-            });
+                command: nextOn ? 'on' : 'off',
+            }, 25000);
             if (!data.ok) throw new Error(data.error || 'Failed');
-            await loadHomeDashboard();
+            if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
+            loadHomeDashboard({ force: true, patch: true });
         } catch (err) {
+            setHomeDeviceOn(id, currentlyOn);
             showToast(err.message || 'Home command failed', 'error');
         } finally {
             btn.disabled = false;

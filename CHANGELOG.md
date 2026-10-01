@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.4] - 2026-10-01
+
+### Fixed
+- Home On/Off from the panel no longer waits behind Matter `get_nodes` polling, so lights respond instead of appearing to do nothing. The green on/off dots update as you click and follow Apple Home within a couple of seconds.
+
 ## [4.0.3] - 2026-10-01
 
 ### Fixed

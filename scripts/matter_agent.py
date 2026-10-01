@@ -40,7 +40,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 7
+AGENT_VERSION = 8
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -87,8 +87,11 @@ COLOR_CAP_HS = 1 << 0
 COLOR_CAP_XY = 1 << 3
 COLOR_CAP_CT = 1 << 4
 
-_ws_lock = threading.Lock()
-_ws: socket.socket | None = None
+_ws_slots: dict[str, MatterWs | None] = {"cmd": None, "poll": None}
+_ws_channel_locks = {
+    "cmd": threading.Lock(),
+    "poll": threading.Lock(),
+}
 _start_lock = threading.Lock()
 _started_docker = False
 _recovered_storage = False
@@ -709,11 +712,11 @@ def reload_matter_server() -> bool:
 
 def interview_node_ids(node_ids: list[int]) -> None:
     for node_id in node_ids:
-        matter_rpc("interview_node", {"node_id": node_id}, timeout=45.0)
+        matter_rpc("interview_node", {"node_id": node_id}, timeout=45.0, channel="poll")
 
 
 def live_node_ids() -> list[int]:
-    rpc = matter_rpc("get_nodes", timeout=8.0)
+    rpc = matter_rpc("get_nodes", timeout=8.0, channel="poll")
     if not rpc.get("ok"):
         return []
     found: list[int] = []
@@ -732,7 +735,7 @@ def live_node_ids() -> list[int]:
 def wait_node_available(node_id: int, timeout: float) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        rpc = matter_rpc("get_node", {"node_id": node_id}, timeout=4.0)
+        rpc = matter_rpc("get_node", {"node_id": node_id}, timeout=4.0, channel="poll")
         node = rpc.get("result") if rpc.get("ok") else None
         if isinstance(node, dict) and node.get("available"):
             return True
@@ -745,7 +748,7 @@ def wait_any_node_available(node_ids: list[int], timeout: float) -> bool:
         return False
     deadline = time.time() + timeout
     while time.time() < deadline:
-        rpc = matter_rpc("get_nodes", timeout=8.0)
+        rpc = matter_rpc("get_nodes", timeout=8.0, channel="poll")
         if rpc.get("ok"):
             wanted = set(node_ids)
             for node in nodes_from_result(rpc.get("result")):
@@ -819,16 +822,22 @@ def copy_container_storage() -> None:
 def wait_matter_port(seconds: float = 25.0) -> bool:
     deadline = time.time() + seconds
     while time.time() < deadline:
-        probe = socket.socket()
-        probe.settimeout(0.4)
-        try:
-            probe.connect((HOST, SERVER_PORT))
+        if matter_port_up():
             return True
-        except OSError:
-            time.sleep(0.4)
-        finally:
-            probe.close()
+        time.sleep(0.4)
     return False
+
+
+def matter_port_up() -> bool:
+    probe = socket.socket()
+    probe.settimeout(0.2)
+    try:
+        probe.connect((HOST, SERVER_PORT))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
 
 
 def primary_interface() -> str:
@@ -969,7 +978,7 @@ def _background_recover() -> None:
             if not wait_any_node_available(restored, 35.0):
                 interview_node_ids(restored)
                 wait_any_node_available(restored, 20.0)
-        rpc = matter_rpc("get_nodes", timeout=20.0)
+        rpc = matter_rpc("get_nodes", timeout=20.0, channel="poll")
         nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
         if nodes and not flatten_nodes(nodes):
             ids: list[int] = []
@@ -1005,8 +1014,29 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
     global _live_devices
     if not devices or looks_like_uninterviewed_stub(devices):
         return
+    now = time.time()
     with _live_lock:
-        _live_devices = [dict(row) for row in devices if isinstance(row, dict)]
+        previous = {
+            str(row.get("id") or ""): row
+            for row in _live_devices
+            if isinstance(row, dict)
+        }
+        merged: list[dict[str, Any]] = []
+        for row in devices:
+            if not isinstance(row, dict):
+                continue
+            item = dict(row)
+            device_id = str(item.get("id") or "")
+            prev = previous.get(device_id)
+            patched_at = float((prev or {}).get("_patched_at") or 0)
+            if prev is not None and patched_at > 0 and (now - patched_at) < 4.0:
+                for key in ("on", "brightness", "color_hex", "hue", "saturation", "color_temp"):
+                    if key in prev:
+                        item[key] = prev[key]
+                item["_patched_at"] = patched_at
+            merged.append(item)
+        if merged:
+            _live_devices = merged
 
 
 def current_live_devices() -> list[dict[str, Any]]:
@@ -1014,19 +1044,26 @@ def current_live_devices() -> list[dict[str, Any]]:
         return [dict(row) for row in _live_devices]
 
 
-def patch_live_device(device_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+def patch_live_device(device_id: str, fields: dict[str, Any], *, sticky: bool = False) -> dict[str, Any] | None:
     if device_id == "" or not fields:
         return None
     with _live_lock:
+        payload = dict(fields)
+        if sticky:
+            payload["_patched_at"] = time.time()
         for row in _live_devices:
             if str(row.get("id") or "") == device_id:
-                row.update(fields)
+                row.update(payload)
                 return dict(row)
+        if sticky:
+            row = {"id": device_id, **payload}
+            _live_devices.append(row)
+            return dict(row)
         return None
 
 
-def refresh_live_devices(timeout: float = 10.0) -> list[dict[str, Any]]:
-    rpc = matter_rpc("get_nodes", timeout=timeout)
+def refresh_live_devices(timeout: float = 5.0) -> list[dict[str, Any]]:
+    rpc = matter_rpc("get_nodes", timeout=timeout, channel="poll")
     if not rpc.get("ok"):
         return current_live_devices()
     devices = flatten_nodes(nodes_from_result(rpc.get("result")))
@@ -1043,10 +1080,10 @@ def start_state_poll() -> None:
     def loop() -> None:
         while True:
             try:
-                refresh_live_devices(12.0)
+                refresh_live_devices(5.0)
             except Exception as exc:  # noqa: BLE001
                 print(f"matter state poll failed: {exc}", flush=True)
-            time.sleep(8.0)
+            time.sleep(2.5)
 
     threading.Thread(target=loop, daemon=True).start()
 
@@ -1065,7 +1102,7 @@ def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, A
     if quick and disk:
         info["source"] = "disk"
         return disk, info
-    rpc = matter_rpc("get_nodes", timeout=15.0 if quick else 45.0)
+    rpc = matter_rpc("get_nodes", timeout=15.0 if quick else 45.0, channel="poll")
     nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
     if nodes:
         info["source"] = "live"
@@ -1073,7 +1110,7 @@ def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, A
         nodes = disk
         info["source"] = "disk"
     if not quick and not nodes:
-        listen = matter_rpc("start_listening", timeout=45.0)
+        listen = matter_rpc("start_listening", timeout=45.0, channel="poll")
         if listen.get("ok"):
             nodes = nodes_from_result(listen.get("result"))
             if nodes:
@@ -1088,8 +1125,8 @@ def collect_nodes(quick: bool = True) -> tuple[list[dict[str, Any]], dict[str, A
                 except (TypeError, ValueError):
                     node_id = 0
                 if node_id > 0:
-                    matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0)
-            rpc = matter_rpc("get_nodes", timeout=45.0)
+                    matter_rpc("interview_node", {"node_id": node_id}, timeout=40.0, channel="poll")
+            rpc = matter_rpc("get_nodes", timeout=45.0, channel="poll")
             if rpc.get("ok"):
                 interviewed = nodes_from_result(rpc.get("result"))
                 if interviewed:
@@ -1134,16 +1171,11 @@ def prefer_shared_matter_server() -> None:
 
 def ensure_matter_server() -> str | None:
     global _started_docker
-    prefer_shared_matter_server()
-    sock = socket.socket()
-    sock.settimeout(0.4)
-    try:
-        sock.connect((HOST, SERVER_PORT))
+    if matter_port_up():
         return None
-    except OSError:
-        pass
-    finally:
-        sock.close()
+    prefer_shared_matter_server()
+    if matter_port_up():
+        return None
 
     with _start_lock:
         sock = socket.socket()
@@ -1189,45 +1221,163 @@ def ensure_matter_server() -> str | None:
         )
 
 
-def connected_ws() -> MatterWs:
-    global _ws
-    if _ws is not None:
-        return _ws
+def connected_ws(channel: str = "cmd") -> MatterWs:
+    if channel not in _ws_slots:
+        channel = "cmd"
+    existing = _ws_slots.get(channel)
+    if existing is not None:
+        return existing
     err = ensure_matter_server()
     if err:
         raise RuntimeError(err)
-    _ws = ws_connect()
+    client = ws_connect()
     # Drain the hello event so the first command is not mixed with it.
-    _ws.recv_json(2.0)
-    return _ws
+    hello = client.recv_json(2.0)
+    if isinstance(hello, dict):
+        ingest_ws_message(hello)
+    _ws_slots[channel] = client
+    return client
 
 
-def reset_ws() -> None:
-    global _ws
-    if _ws is not None:
+def reset_ws(channel: str | None = None) -> None:
+    names = [channel] if channel in _ws_slots else list(_ws_slots)
+    for name in names:
+        client = _ws_slots.get(name)
+        if client is None:
+            continue
         try:
-            _ws.sock.close()
+            client.sock.close()
         except OSError:
             pass
-        _ws = None
+        _ws_slots[name] = None
 
 
-def matter_rpc(command: str, args: dict[str, Any] | None = None, timeout: float = 20.0) -> dict[str, Any]:
+def parse_attribute_event(data: Any) -> tuple[int, str, Any] | None:
+    node_id = 0
+    path = ""
+    value: Any = None
+    if isinstance(data, dict):
+        try:
+            node_id = int(data.get("node_id") or data.get("nodeId") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+        path = str(data.get("attribute_path") or data.get("path") or data.get("attributePath") or "")
+        value = data.get("value")
+        if "new_value" in data:
+            value = data.get("new_value")
+    elif isinstance(data, (list, tuple)) and len(data) >= 3:
+        try:
+            node_id = int(data[0] or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+        path = str(data[1] or "")
+        value = data[2]
+    else:
+        return None
+    if node_id <= 0 or path == "":
+        return None
+    return node_id, path, value
+
+
+def attr_path_parts(path: str) -> tuple[int, int, int] | None:
+    nums: list[int] = []
+    for part in str(path).replace(".", "/").split("/"):
+        part = part.strip()
+        if part == "":
+            continue
+        try:
+            nums.append(int(part))
+        except ValueError:
+            return None
+    if len(nums) >= 4:
+        return nums[-3], nums[-2], nums[-1]
+    if len(nums) >= 3:
+        return nums[0], nums[1], nums[2]
+    return None
+
+
+def apply_attribute_event(data: Any) -> None:
+    parsed = parse_attribute_event(data)
+    if parsed is None:
+        return
+    node_id, path, value = parsed
+    parts = attr_path_parts(path)
+    if parts is None:
+        return
+    endpoint, cluster, attr = parts
+    device_id = f"{node_id}:{endpoint}"
+    fields: dict[str, Any] = {}
+    if cluster == ON_OFF and attr == ATTR_ON_OFF:
+        fields["on"] = attr_bool(value)
+    elif cluster == LEVEL_CONTROL and attr == ATTR_CURRENT_LEVEL:
+        try:
+            level = int(value if not isinstance(value, dict) else value.get("value") or 0)
+        except (TypeError, ValueError):
+            level = 0
+        fields["brightness"] = max(0, min(100, int(round(level * 100 / 254)))) if level else 0
+        if level > 0:
+            fields["on"] = True
+    if fields:
+        patch_live_device(device_id, fields)
+
+
+def merge_live_nodes(nodes: list[dict[str, Any]]) -> None:
+    devices = flatten_nodes(nodes)
+    if not devices:
+        return
+    with _live_lock:
+        by_id = {str(row.get("id") or ""): dict(row) for row in _live_devices if isinstance(row, dict)}
+        for row in devices:
+            if not isinstance(row, dict):
+                continue
+            device_id = str(row.get("id") or "")
+            if device_id == "":
+                continue
+            prev = by_id.get(device_id, {})
+            merged = dict(prev)
+            merged.update(row)
+            by_id[device_id] = merged
+        _live_devices.clear()
+        _live_devices.extend(by_id.values())
+
+
+def ingest_ws_message(msg: dict[str, Any]) -> None:
+    event = str(msg.get("event") or "")
+    if event == "attribute_updated":
+        apply_attribute_event(msg.get("data"))
+        return
+    if event in ("node_updated", "node_added"):
+        data = msg.get("data")
+        if isinstance(data, dict):
+            merge_live_nodes([data])
+        elif isinstance(data, list):
+            merge_live_nodes([row for row in data if isinstance(row, dict)])
+
+
+def matter_rpc(
+    command: str,
+    args: dict[str, Any] | None = None,
+    timeout: float = 20.0,
+    channel: str = "cmd",
+) -> dict[str, Any]:
     message_id = uuid.uuid4().hex[:12]
     payload: dict[str, Any] = {"message_id": message_id, "command": command}
     if args:
         payload["args"] = args
-    with _ws_lock:
+    if channel not in _ws_channel_locks:
+        channel = "cmd"
+    with _ws_channel_locks[channel]:
         last_err = None
         for _ in range(2):
             try:
-                client = connected_ws()
+                client = connected_ws(channel)
                 client.send_json(payload)
                 deadline = time.time() + timeout
                 while time.time() < deadline:
                     msg = client.recv_json(max(0.5, deadline - time.time()))
                     if not isinstance(msg, dict):
                         continue
+                    ingest_ws_message(msg)
                     if msg.get("message_id") != message_id:
                         continue
                     if "error_code" in msg or "error" in msg:
@@ -1237,7 +1387,7 @@ def matter_rpc(command: str, args: dict[str, Any] | None = None, timeout: float 
                 return {"ok": False, "error": "Matter server timed out"}
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
-                reset_ws()
+                reset_ws(channel)
         return {"ok": False, "error": str(last_err) if last_err else "Matter server unavailable"}
 
 
@@ -1672,6 +1822,7 @@ def is_transport_error(result: dict[str, Any]) -> bool:
             "timeout",
             "not listening",
             "not running",
+            "not ready",
             "connection refused",
             "websocket",
         )
@@ -2008,7 +2159,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 )
                 on = (not attr_bool(current.get("on"))) if current is not None else None
             if on is not None:
-                patch_live_device(device_id, {"on": on})
+                patch_live_device(device_id, {"on": on}, sticky=True)
             out: dict[str, Any] = {"ok": True, "id": device_id}
             if on is not None:
                 out["on"] = on
@@ -2029,7 +2180,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 },
             )
             if rpc.get("ok"):
-                patch_live_device(device_id, {"on": pct > 0, "brightness": pct})
+                patch_live_device(device_id, {"on": pct > 0, "brightness": pct}, sticky=True)
                 rpc = {**rpc, "id": device_id, "on": pct > 0, "brightness": pct}
             return rpc
         if action in COLOR_ACTIONS:

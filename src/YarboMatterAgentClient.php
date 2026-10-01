@@ -6,7 +6,7 @@ namespace Yarbo;
 
 final class YarboMatterAgentClient
 {
-    public const MIN_VERSION = 6;
+    public const MIN_VERSION = 8;
 
     private static bool $spawnAttempted = false;
 
@@ -80,12 +80,16 @@ final class YarboMatterAgentClient
         if (($probe['ok'] ?? false) !== true) {
             return false;
         }
+        $version = (int) ($probe['version'] ?? 0);
+        if ($version > 0 && $version < self::MIN_VERSION) {
+            return false;
+        }
         $features = $probe['features'] ?? null;
         if (is_array($features) && in_array('color', $features, true)) {
             return true;
         }
 
-        return (int) ($probe['version'] ?? 0) >= self::MIN_VERSION;
+        return $version >= self::MIN_VERSION;
     }
 
     public static function isUnknownCommandError(array $result): bool
