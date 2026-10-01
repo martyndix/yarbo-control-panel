@@ -192,6 +192,14 @@ def main() -> int:
     if not dimmed or dimmed[0].get("brightness") != 50:
         raise SystemExit(f"CurrentLevel event did not update brightness {dimmed}")
 
+    agent._live_devices = [{"id": "1:2", "on": False, "brightness": 20}]
+    agent.apply_attribute_event([1, "2/8/0", 200])
+    stayed_off = agent.current_live_devices()
+    if not stayed_off or stayed_off[0].get("on") is not False:
+        raise SystemExit(f"CurrentLevel must not turn an Off Hue light On {stayed_off}")
+    if int(stayed_off[0].get("brightness") or 0) != 79:
+        raise SystemExit(f"off light must still take CurrentLevel brightness {stayed_off}")
+
     agent._live_devices = [{"id": "1:2", "on": True, "brightness": 20}]
     agent.apply_attribute_event({"node_id": 1, "endpoint": 2, "cluster": 8, "attribute": 0, "value": {"value": 254}})
     full = agent.current_live_devices()
@@ -252,14 +260,16 @@ def main() -> int:
         return {"ok": False, "error": "no"}
 
     agent._live_devices = [
-        {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": True, "brightness": 5, "color_hex": "#111111"}
+        {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": False, "brightness": 5, "color_hex": "#111111"}
     ]
     agent.matter_rpc = fake_rpc
     agent.poll_light_attributes()
     polled = agent.current_live_devices()
     if not calls or calls[0][0] != "read_attribute" or calls[0][2] != "poll":
         raise SystemExit(f"poll did not read on poll channel {calls}")
-    if not polled or int(polled[0].get("brightness") or 0) != 79:
+    if not polled or polled[0].get("on") is not False:
+        raise SystemExit(f"poll must not mark Off Hue lights On {polled}")
+    if int(polled[0].get("brightness") or 0) != 79:
         raise SystemExit(f"poll brightness {polled}")
     if str(polled[0].get("color_hex") or "").lower() != "#ff0000":
         raise SystemExit(f"poll colour {polled}")

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.12] - 2026-10-01
+
+### Fixed
+- Home no longer marks every Hue light On just because brightness is stored while they are Off. The Matter agent (v14) takes On/Off only from the On/Off cluster; CurrentLevel updates the slider only. Settings → Panel updates restarts the agent; do not pair Hue again.
+
 ## [4.0.11] - 2026-10-01
 
 ### Fixed

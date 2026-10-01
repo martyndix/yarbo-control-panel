@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 13
+AGENT_VERSION = 14
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
@@ -1740,9 +1740,8 @@ def apply_attribute_event(data: Any) -> None:
         level = event_number(value)
         if level is None:
             return
+        # Hue keeps CurrentLevel at the last brightness while Off. Never infer On from it.
         fields["brightness"] = max(0, min(100, int(round(level * 100 / 254)))) if level else 0
-        if level > 0:
-            fields["on"] = True
     elif cluster == COLOR_CONTROL:
         fields = apply_color_attribute(device_id, attr, value)
     if fields:
