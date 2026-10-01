@@ -286,8 +286,18 @@ $lightTypedVacuum = [
         '1/97/0' => 1,
     ],
 ];
+$millHeater = [
+    'node_id' => 25,
+    'available' => true,
+    'attributes' => [
+        '0/40/1' => 'Mill',
+        '0/40/3' => 'Mill Wi-Fi Panel Heater Gen4',
+        '1/29/0' => [['deviceType' => 0x0100, 'revision' => 1]],
+        '1/6/0' => true,
+    ],
+];
 $kinds = [];
-foreach (YarboMatterFabric::flatten([$lightTypedHeater, $lightTypedVacuum]) as $row) {
+foreach (YarboMatterFabric::flatten([$lightTypedHeater, $lightTypedVacuum, $millHeater]) as $row) {
     $kinds[$row['id']] = $row;
 }
 if (($kinds['23:1']['kind'] ?? '') !== 'heater' || !empty($kinds['23:1']['colorable']) || !empty($kinds['23:1']['dimmable'])) {
@@ -296,6 +306,24 @@ if (($kinds['23:1']['kind'] ?? '') !== 'heater' || !empty($kinds['23:1']['colora
 }
 if (($kinds['24:1']['kind'] ?? '') !== 'vacuum' || !empty($kinds['24:1']['colorable']) || !empty($kinds['24:1']['dimmable'])) {
     fwrite(STDERR, 'light-typed vacuum ' . json_encode($kinds['24:1'] ?? null) . "\n");
+    exit(1);
+}
+if (($kinds['25:1']['kind'] ?? '') !== 'heater' || !empty($kinds['25:1']['colorable']) || !empty($kinds['25:1']['dimmable'])) {
+    fwrite(STDERR, 'mill panel heater ' . json_encode($kinds['25:1'] ?? null) . "\n");
+    exit(1);
+}
+
+$cachedMill = YarboMatterFabric::reclassifyRow([
+    'id' => '25:1',
+    'name' => 'Mill Wi-Fi Panel Heater Gen4',
+    'kind' => 'light',
+    'product' => 'Mill Wi-Fi Panel Heater Gen4',
+    'vendor' => 'Mill',
+    'colorable' => true,
+    'dimmable' => true,
+]);
+if (($cachedMill['kind'] ?? '') !== 'heater' || !empty($cachedMill['colorable']) || !empty($cachedMill['dimmable'])) {
+    fwrite(STDERR, 'cached mill heater ' . json_encode($cachedMill) . "\n");
     exit(1);
 }
 

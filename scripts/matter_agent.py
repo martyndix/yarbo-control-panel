@@ -15,6 +15,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -40,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 10
+AGENT_VERSION = 11
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
@@ -1622,6 +1623,27 @@ def device_type_ids(types: Any) -> list[int]:
     return ids
 
 
+def name_looks_heater(text: str) -> bool:
+    t = (text or "").lower()
+    if re.search(r"\b(heater|radiator|thermostat|towel\s*rail)\b", t):
+        return True
+    return bool(re.search(r"\bmill\b", t) and re.search(r"\b(panel|wifi|wi-?fi|gen\s*\d)\b", t))
+
+
+def name_looks_vacuum(text: str) -> bool:
+    t = (text or "").lower()
+    return bool(re.search(r"\b(vacuum|robot\s*vac|roborock|roomba)\b", t))
+
+
+def classify_by_name(kind: str, *labels: str) -> str:
+    text = " ".join(labels)
+    if name_looks_vacuum(text):
+        return "vacuum"
+    if name_looks_heater(text):
+        return "heater"
+    return kind or "light"
+
+
 def device_kind(types: Any) -> str:
     ids = device_type_ids(types)
     if any(i == DEVTYPE_RVC for i in ids):
@@ -2011,28 +2033,38 @@ def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, An
     if hs is None:
         return {"ok": False, "error": "Colour needs a hex value"}
     xy = hex_to_xy(hex_s) if hex_s else None
-    # Hue often ignores colour writes while off, even with ExecuteIfOff.
     on_result = device_command(node_id, endpoint, ON_OFF, "On", {})
     if is_transport_error(on_result):
         return on_result
-    attempts: list[tuple[str, dict[str, Any]]] = [
+    attempts: list[tuple[str, dict[str, Any]]] = []
+    # Hue often applies XY more reliably than HS, and some stacks reject optionsMask.
+    if xy is not None:
+        attempts.append(("MoveToColor", {"colorX": xy[0], "colorY": xy[1], "transitionTime": 0}))
+    attempts.append(
+        ("MoveToHueAndSaturation", {"hue": hs[0], "saturation": hs[1], "transitionTime": 0})
+    )
+    attempts.append(
         (
             "MoveToHueAndSaturation",
             {"hue": hs[0], "saturation": hs[1], **color_transition(True)},
-        ),
+        )
+    )
+    attempts.append(
         (
             "EnhancedMoveToHueAndSaturation",
             {
                 "enhancedHue": min(65535, hs[0] * 256),
                 "saturation": hs[1],
-                **color_transition(True),
+                "transitionTime": 0,
             },
-        ),
-    ]
+        )
+    )
     if xy is not None:
         attempts.append(("MoveToColor", {"colorX": xy[0], "colorY": xy[1], **color_transition(True)}))
     result = try_color_commands(node_id, endpoint, attempts)
-    if result.get("ok") or is_transport_error(result):
+    if result.get("ok"):
+        return {**result, "on": True, "color_hex": hex_s or None}
+    if is_transport_error(result):
         return result
     fallback: list[tuple[str, dict[str, Any]]] = [
         (
@@ -2042,7 +2074,10 @@ def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, An
     ]
     if xy is not None:
         fallback.append(("MoveToColor", {"colorX": xy[0], "colorY": xy[1], **color_transition(False)}))
-    return try_color_commands(node_id, endpoint, fallback)
+    last = try_color_commands(node_id, endpoint, fallback)
+    if last.get("ok"):
+        return {**last, "on": True, "color_hex": hex_s or None}
+    return last
 
 
 def set_color_temp(node_id: int, endpoint: int, kelvin: int) -> dict[str, Any]:
@@ -2108,6 +2143,8 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             types = attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES)
             type_ids = device_type_ids(types)
             kind = device_kind(types)
+            label = endpoint_name(attributes, endpoint, vendor, product)
+            kind = classify_by_name(kind, label, vendor, product, source)
             if endpoint_looks_heater(attributes, endpoint):
                 kind = "heater"
             elif endpoint_looks_vacuum(attributes, endpoint):
@@ -2124,7 +2161,6 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             if not has_on_off and kind not in ("heater", "vacuum"):
                 continue
             is_light = kind == "light"
-            label = endpoint_name(attributes, endpoint, vendor, product)
             level = attr_num(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) if is_light else None
             brightness = None
             if level is not None and level >= 0:
@@ -2156,13 +2192,15 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 }
             )
         if len(devices) == before and node_id > 0 and attributes:
+            stub_kind = classify_by_name("light", source, vendor, product)
+            stub_light = stub_kind == "light"
             devices.append(
                 {
                     "id": f"{node_id}:1",
                     "node_id": node_id,
                     "endpoint": 1,
                     "name": source,
-                    "kind": "light",
+                    "kind": stub_kind,
                     "vendor": vendor,
                     "product": product,
                     "source": source,
@@ -2171,6 +2209,11 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "brightness": None,
                     "dimmable": False,
                     "available": available,
+                    "colorable": stub_light,
+                    "color_hs": stub_light,
+                    "color_xy": stub_light,
+                    "color_ct": stub_light,
+                    "color_hex": "",
                 }
             )
     devices.sort(key=lambda d: (str(d.get("source") or "").lower(), d["name"].lower(), d["id"]))
@@ -2336,7 +2379,15 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 rpc = {**rpc, "id": device_id, "on": pct > 0, "brightness": pct}
             return rpc
         if action in COLOR_ACTIONS:
-            return set_color(node_id, endpoint, body)
+            rpc = set_color(node_id, endpoint, body)
+            if rpc.get("ok"):
+                fields: dict[str, Any] = {"on": True}
+                hex_s = rpc.get("color_hex") or body.get("hex") or body.get("color_hex")
+                if hex_s:
+                    fields["color_hex"] = hex_s
+                patch_live_device(device_id, fields, sticky=True)
+                rpc = {**rpc, "id": device_id, **fields}
+            return rpc
         if action in COLOR_TEMP_ACTIONS:
             try:
                 kelvin = int(body.get("kelvin") or body.get("color_temp") or 0)

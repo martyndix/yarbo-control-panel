@@ -307,6 +307,11 @@ final class YarboUnifi
                 $counts['hubs'] === 1 ? '' : 's'
             )
             : ($error !== '' ? $error : 'Could not reach UniFi.');
+        if ($ok && $config['access_token'] === '' && $counts['doors'] === 0 && $counts['hubs'] === 0) {
+            $message .= ' Add an Access API token for doors and controllers.';
+        } elseif ($ok && $error !== '' && $counts['doors'] === 0 && $counts['hubs'] === 0) {
+            $message .= ' Access: ' . $error;
+        }
 
         return [
             'ok' => $ok,
@@ -483,14 +488,33 @@ final class YarboUnifi
             return ['ok' => false, 'error' => 'Add a Protect API key first'];
         }
         $url = $this->protectUrl($config, '/lights/' . rawurlencode($id));
-        $body = json_encode(['isLightForceEnabled' => $on], JSON_THROW_ON_ERROR);
-        $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, 6.0, false);
-        if ($res['status'] < 200 || $res['status'] >= 300) {
-            return ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . $res['status'])];
-        }
-        $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
+        $payloads = [
+            [
+                'isLightForceEnabled' => $on,
+                'lightModeSettings' => [
+                    'mode' => $on ? 'always' : 'off',
+                    'enableAt' => 'fulltime',
+                ],
+            ],
+            ['isLightForceEnabled' => $on],
+        ];
+        $last = ['ok' => false, 'error' => 'Protect light failed'];
+        foreach ($payloads as $payload) {
+            $body = json_encode($payload, JSON_THROW_ON_ERROR);
+            $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, 6.0, false);
+            if ($res['status'] >= 200 && $res['status'] < 300) {
+                $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
 
-        return ['ok' => true, 'on' => $on];
+                return ['ok' => true, 'on' => $on];
+            }
+            $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . $res['status'])];
+            $hint = strtolower((string) ($last['error'] ?? ''));
+            if (!str_contains($hint, 'ajv') && !str_contains($hint, 'additional') && !str_contains($hint, 'rejected') && ($res['status'] < 400 || $res['status'] >= 500)) {
+                break;
+            }
+        }
+
+        return $last;
     }
 
     /**
@@ -544,23 +568,30 @@ final class YarboUnifi
             }
             $path .= '?control_cmd=' . rawurlencode($cmd);
         }
-        $url = $this->accessUrl($config, $path);
         $headers = $this->accessHeaders($config);
-        $res = $this->request('PUT', $url, $headers, '{}', 8.0, false);
-        if ($res['status'] === 404 || $res['status'] === 405) {
-            $res = $this->request('POST', $url, $headers, '{}', 8.0, false);
-        }
-        if ($res['status'] < 200 || $res['status'] >= 300) {
-            return ['ok' => false, 'error' => $res['error'] ?? ('Access unlock HTTP ' . $res['status'])];
-        }
-        $decoded = $this->decodeJson($res['body']);
-        if (is_array($decoded) && isset($decoded['code']) && strtoupper((string) $decoded['code']) !== 'SUCCESS') {
-            $msg = (string) ($decoded['msg'] ?? $decoded['message'] ?? 'Access unlock failed');
+        $last = ['ok' => false, 'error' => 'Access unlock failed'];
+        foreach ($this->accessUrls($config, $path) as $url) {
+            $res = $this->request('PUT', $url, $headers, '{}', 8.0, false);
+            if ($res['status'] === 404 || $res['status'] === 405) {
+                $res = $this->request('POST', $url, $headers, '{}', 8.0, false);
+            }
+            if ($res['status'] < 200 || $res['status'] >= 300) {
+                $last = ['ok' => false, 'error' => $res['error'] ?? ('Access unlock HTTP ' . $res['status'])];
+                continue;
+            }
+            $decoded = $this->decodeJson($res['body']);
+            if (is_array($decoded) && isset($decoded['code']) && strtoupper((string) $decoded['code']) !== 'SUCCESS') {
+                $last = ['ok' => false, 'error' => (string) ($decoded['msg'] ?? $decoded['message'] ?? 'Access unlock failed')];
+                continue;
+            }
+            if ((int) ($config['access_port'] ?? 0) !== 12445 && str_contains($url, ':12445/')) {
+                $this->save(['unifi_access_standalone' => true]);
+            }
 
-            return ['ok' => false, 'error' => $msg];
+            return ['ok' => true, 'on' => false, 'unlocked' => true];
         }
 
-        return ['ok' => true, 'on' => false, 'unlocked' => true];
+        return $last;
     }
 
     public static function unlockPath(string $doorId, ?string $controlCmd = null): string
@@ -959,6 +990,8 @@ final class YarboUnifi
 
         $devRes = $this->accessJson($config, '/devices', $timeout);
         if (!($devRes['ok'] ?? false)) {
+            $out['errors'][] = (string) ($devRes['error'] ?? 'Access devices failed');
+
             return;
         }
         $doorsById = [];
@@ -1171,11 +1204,11 @@ final class YarboUnifi
         if ($type === '' && $name === '') {
             return false;
         }
-        if (preg_match('/^uah($|-|_)/', $type) === 1 || $type === 'uah') {
+        if (preg_match('/uah|ua-hub|ua_hub|ua hub|gate.?hub|ua-ultra|ua_ultra|uah-door/', $type . ' ' . $name) === 1) {
             return true;
         }
-        if (str_contains($type, 'hub')) {
-            return true;
+        if (str_contains($type, 'hub') || str_contains($name, 'hub')) {
+            return !str_contains($type, 'reader') && !str_contains($name, 'reader');
         }
 
         return str_contains($name, 'ua-hub') || str_contains($name, 'uah-');
@@ -1392,21 +1425,58 @@ final class YarboUnifi
      */
     private function accessJson(array $config, string $path, float $timeout): array
     {
-        $url = $this->accessUrl($config, $path);
-        $res = $this->request('GET', $url, $this->accessHeaders($config), null, $timeout, false);
-        if ($res['status'] < 200 || $res['status'] >= 300) {
-            return ['ok' => false, 'items' => [], 'error' => $res['error'] ?? ('Access HTTP ' . $res['status'])];
-        }
-        $decoded = $this->decodeJson($res['body']);
-        if (is_array($decoded) && isset($decoded['code']) && strtoupper((string) $decoded['code']) !== 'SUCCESS') {
-            return [
-                'ok' => false,
-                'items' => [],
-                'error' => (string) ($decoded['msg'] ?? $decoded['message'] ?? 'Access error'),
-            ];
+        $last = ['ok' => false, 'items' => [], 'error' => 'Access request failed'];
+        $emptyOk = null;
+        foreach ($this->accessUrls($config, $path) as $url) {
+            $res = $this->request('GET', $url, $this->accessHeaders($config), null, $timeout, false);
+            if ($res['status'] < 200 || $res['status'] >= 300) {
+                $last = ['ok' => false, 'items' => [], 'error' => $res['error'] ?? ('Access HTTP ' . $res['status'])];
+                continue;
+            }
+            $decoded = $this->decodeJson($res['body']);
+            if (is_array($decoded) && isset($decoded['code']) && strtoupper((string) $decoded['code']) !== 'SUCCESS') {
+                $last = [
+                    'ok' => false,
+                    'items' => [],
+                    'error' => (string) ($decoded['msg'] ?? $decoded['message'] ?? 'Access error'),
+                ];
+                continue;
+            }
+            $items = $this->listFromJson($res['body']);
+            if ((int) ($config['access_port'] ?? 0) !== 12445 && str_contains($url, ':12445/')) {
+                $this->save(['unifi_access_standalone' => true]);
+            }
+            if ($items === []) {
+                $emptyOk = ['ok' => true, 'items' => []];
+                continue;
+            }
+
+            return ['ok' => true, 'items' => $items];
         }
 
-        return ['ok' => true, 'items' => $this->listFromJson($res['body'])];
+        return $emptyOk ?? $last;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return list<string>
+     */
+    private function accessUrls(array $config, string $path): array
+    {
+        $path = '/' . ltrim($path, '/');
+        $host = (string) $config['host'];
+        $hostname = explode(':', $host, 2)[0];
+        $urls = [];
+        $port = (int) ($config['access_port'] ?? 0);
+        if ($port === 12445) {
+            $urls[] = 'https://' . $hostname . ':12445/api/v1/developer' . $path;
+            $urls[] = 'https://' . $host . '/proxy/access/api/v1/developer' . $path;
+        } else {
+            $urls[] = 'https://' . $host . '/proxy/access/api/v1/developer' . $path;
+            $urls[] = 'https://' . $hostname . ':12445/api/v1/developer' . $path;
+        }
+
+        return array_values(array_unique($urls));
     }
 
     /**

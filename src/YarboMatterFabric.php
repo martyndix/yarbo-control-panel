@@ -219,6 +219,8 @@ final class YarboMatterFabric
                 $types = self::attrRaw($attributes, $endpoint, self::DESCRIPTOR, self::ATTR_DEVICE_TYPES);
                 $typeIds = self::deviceTypeIds($types);
                 $kind = self::deviceKind($types);
+                $epName = self::endpointName($attributes, $endpoint, $vendor, $product);
+                $kind = self::classifyByName($kind, $epName, $vendor, $product, $source);
                 if (self::endpointLooksHeater($attributes, $endpoint)) {
                     $kind = 'heater';
                 } elseif (self::endpointLooksVacuum($attributes, $endpoint)) {
@@ -245,7 +247,7 @@ final class YarboMatterFabric
                     'id' => $nodeId . ':' . $endpoint,
                     'node_id' => $nodeId,
                     'endpoint' => $endpoint,
-                    'name' => self::endpointName($attributes, $endpoint, $vendor, $product),
+                    'name' => $epName,
                     'kind' => $kind,
                     'vendor' => $vendor,
                     'product' => $product,
@@ -266,12 +268,14 @@ final class YarboMatterFabric
                     ]);
             }
             if (count($devices) === $before && $nodeId > 0 && $attributes !== []) {
+                $stubKind = self::classifyByName('light', $source, $vendor, $product);
+                $stubLight = $stubKind === 'light';
                 $devices[] = [
                     'id' => $nodeId . ':1',
                     'node_id' => $nodeId,
                     'endpoint' => 1,
                     'name' => $source,
-                    'kind' => 'light',
+                    'kind' => $stubKind,
                     'vendor' => $vendor,
                     'product' => $product,
                     'source' => $source,
@@ -280,10 +284,10 @@ final class YarboMatterFabric
                     'brightness' => null,
                     'dimmable' => false,
                     'available' => $available,
-                    'colorable' => true,
-                    'color_hs' => true,
-                    'color_xy' => true,
-                    'color_ct' => true,
+                    'colorable' => $stubLight,
+                    'color_hs' => $stubLight,
+                    'color_xy' => $stubLight,
+                    'color_ct' => $stubLight,
                     'color_hex' => '',
                 ];
             }
@@ -431,6 +435,72 @@ final class YarboMatterFabric
         }
 
         return 'other';
+    }
+
+    /**
+     * Mill panel heaters (and similar) often advertise as On/Off lights with no Thermostat cluster.
+     */
+    public static function nameLooksHeater(string $text): bool
+    {
+        $text = strtolower($text);
+        if ($text === '') {
+            return false;
+        }
+        if (preg_match('/\b(heater|radiator|thermostat|towel\s*rail)\b/', $text) === 1) {
+            return true;
+        }
+
+        return preg_match('/\bmill\b/', $text) === 1
+            && preg_match('/\b(panel|wifi|wi-?fi|gen\s*\d)\b/', $text) === 1;
+    }
+
+    public static function nameLooksVacuum(string $text): bool
+    {
+        $text = strtolower($text);
+        if ($text === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(vacuum|robot\s*vac|roborock|roomba)\b/', $text);
+    }
+
+    public static function classifyByName(string $kind, string ...$labels): string
+    {
+        $text = strtolower(trim(implode(' ', $labels)));
+        if (self::nameLooksVacuum($text)) {
+            return 'vacuum';
+        }
+        if (self::nameLooksHeater($text)) {
+            return 'heater';
+        }
+
+        return $kind === '' ? 'light' : $kind;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    public static function reclassifyRow(array $row): array
+    {
+        $kind = self::classifyByName(
+            (string) ($row['kind'] ?? 'light'),
+            (string) ($row['name'] ?? ''),
+            (string) ($row['product'] ?? ''),
+            (string) ($row['vendor'] ?? ''),
+            (string) ($row['source'] ?? '')
+        );
+        $row['kind'] = $kind;
+        if ($kind === 'heater' || $kind === 'vacuum') {
+            $row['colorable'] = false;
+            $row['dimmable'] = false;
+            $row['color_hs'] = false;
+            $row['color_xy'] = false;
+            $row['color_ct'] = false;
+            $row['brightness'] = null;
+        }
+
+        return $row;
     }
 
     /**

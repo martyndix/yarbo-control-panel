@@ -123,7 +123,7 @@ assert_true(($dash['rooms'][0]['on'] ?? true) === false, 'room should be off whe
 assert_true(($dash['scenes'][0]['on'] ?? true) === false, 'sticky scene id must not keep scene green');
 
 file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
-    'v' => 4,
+    'v' => 5,
     'saved_at' => time(),
     'devices' => [
         ['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => false],
@@ -179,7 +179,7 @@ file_put_contents(
 );
 $fabricMtime = (int) filemtime($fabricPath);
 file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
-    'v' => 4,
+    'v' => 5,
     'saved_at' => time(),
     'fabric_mtime' => $fabricMtime,
     'devices' => [
@@ -195,5 +195,66 @@ touch($fabricPath, $fabricMtime + 5);
 $refreshed = $home->localHomeDevices();
 $refreshedIds = array_column($refreshed['devices'], 'id');
 assert_true(in_array('1:5', $refreshedIds, true), 'newer fabric file must add the extra light');
+
+$millRoot = sys_get_temp_dir() . '/yarbo-mill-' . bin2hex(random_bytes(3));
+mkdir($millRoot . '/data/matter-server', 0775, true);
+file_put_contents($millRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($millRoot . '/data/home.json', json_encode([
+    'names' => [],
+    'room_defs' => [],
+    'rooms' => [],
+    'group_defs' => [],
+    'groups' => [],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [],
+], JSON_UNESCAPED_SLASHES));
+$millFabric = $millRoot . '/data/matter-server/mill.json';
+file_put_contents($millFabric, json_encode(['nodes' => ['25' => [
+    'node_id' => 25,
+    'available' => true,
+    'attributes' => [
+        '0/40/1' => 'Mill',
+        '0/40/3' => 'Mill Wi-Fi Panel Heater Gen4',
+        '1/29/0' => [['deviceType' => 0x0100, 'revision' => 1]],
+        '1/6/0' => true,
+    ],
+]]], JSON_UNESCAPED_SLASHES));
+$millHome = new YarboHome($millRoot);
+$millDash = $millHome->dashboard();
+$millRow = $millDash['devices'][0] ?? [];
+assert_true(($millRow['kind'] ?? '') === 'heater', 'mill panel heater must not stay a light ' . json_encode($millRow));
+assert_true(empty($millRow['colorable']) && empty($millRow['dimmable']), 'mill heater must not show colour or brightness');
+
+$millMtime = (int) filemtime($millFabric);
+file_put_contents($millRoot . '/data/home-nodes-cache.json', json_encode([
+    'v' => 5,
+    'saved_at' => time(),
+    'fabric_mtime' => $millMtime,
+    'devices' => [[
+        'id' => '25:1',
+        'name' => 'Mill Wi-Fi Panel Heater Gen4',
+        'product' => 'Mill Wi-Fi Panel Heater Gen4',
+        'vendor' => 'Mill',
+        'kind' => 'light',
+        'on' => true,
+        'colorable' => true,
+        'dimmable' => true,
+    ]],
+], JSON_UNESCAPED_SLASHES));
+$staleKind = $millHome->dashboard();
+$staleRow = $staleKind['devices'][0] ?? [];
+assert_true(($staleRow['kind'] ?? '') === 'heater', 'cached mill light must reclassify to heater ' . json_encode($staleRow));
+assert_true(empty($staleRow['colorable']), 'cached mill heater must drop colour picker');
+
+$js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
+assert_true(
+    !preg_match('/function homeColorInputsHtml[\s\S]{0,500}d\.kind === [\'"]light[\'"]/', $js),
+    'colour picker must not treat every light as colourable'
+);
 
 echo "ok\n";

@@ -197,17 +197,27 @@ if (!($light['ok'] ?? false) || empty($light['on'])) {
     exit(1);
 }
 $lightPatched = false;
+$lightCombined = false;
 foreach ($calls as $call) {
-    if (($call[0] ?? '') === 'PATCH' && str_contains((string) ($call[1] ?? ''), '/lights/')) {
-        $decoded = json_decode((string) ($call[3] ?? ''), true);
-        if (($decoded['isLightForceEnabled'] ?? null) === true && !array_key_exists('lightMode', $decoded ?: [])) {
-            $lightPatched = true;
-        }
+    if (($call[0] ?? '') !== 'PATCH' || !str_contains((string) ($call[1] ?? ''), '/lights/')) {
+        continue;
+    }
+    $decoded = json_decode((string) ($call[3] ?? ''), true);
+    if (($decoded['isLightForceEnabled'] ?? null) === true && !array_key_exists('lightMode', $decoded ?: [])) {
+        $lightPatched = true;
+    }
+    if (($decoded['isLightForceEnabled'] ?? null) === true
+        && ($decoded['lightModeSettings']['mode'] ?? '') === 'always') {
+        $lightCombined = true;
         break;
     }
 }
 if (!$lightPatched) {
     fwrite(STDERR, "light did not PATCH isLightForceEnabled\n");
+    exit(1);
+}
+if (!$lightCombined) {
+    fwrite(STDERR, "light did not PATCH lightModeSettings.mode=always first\n");
     exit(1);
 }
 
@@ -311,6 +321,98 @@ if (!($hide['ok'] ?? false)) {
 $afterHide = array_column($home->dashboard()['devices'] ?? [], 'id');
 if (in_array('unifi:camera:cam1', $afterHide, true)) {
     fwrite(STDERR, 'camera stayed after hide ' . json_encode($afterHide) . "\n");
+    exit(1);
+}
+
+$accessRoot = sys_get_temp_dir() . '/yarbo-access-' . bin2hex(random_bytes(3));
+mkdir($accessRoot . '/data', 0775, true);
+$access = new Yarbo\YarboUnifi($accessRoot);
+if (!$access->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'protect-secret',
+    'unifi_access_token' => 'access-secret',
+])) {
+    fwrite(STDERR, "access save failed\n");
+    exit(1);
+}
+$accessCalls = [];
+$access->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$accessCalls): array {
+    $accessCalls[] = [$method, $url];
+    if (str_contains($url, '/proxy/protect/')) {
+        return ['status' => 200, 'body' => '[]', 'content_type' => 'application/json'];
+    }
+    if (str_contains($url, '/proxy/access/')) {
+        return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'Access HTTP 404'];
+    }
+    if (str_contains($url, ':12445/') && str_contains($url, '/doors') && $method === 'GET') {
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'code' => 'SUCCESS',
+                'data' => [['id' => 'door1', 'name' => 'Front', 'door_lock_relay_status' => 'lock']],
+            ]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if (str_contains($url, ':12445/') && str_contains($url, '/devices')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'code' => 'SUCCESS',
+                'data' => [[['id' => 'hub1', 'name' => 'UA-HUB-1', 'type' => 'UAH', 'location_id' => 'door1']]],
+            ]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if (str_contains($url, ':12445/') && str_contains($url, '/unlock')) {
+        return ['status' => 200, 'body' => json_encode(['code' => 'SUCCESS']), 'content_type' => 'application/json'];
+    }
+
+    return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'unexpected ' . $url];
+});
+$accessProbe = $access->probe();
+if (!($accessProbe['ok'] ?? false) || ($accessProbe['counts']['doors'] ?? 0) !== 1 || ($accessProbe['counts']['hubs'] ?? 0) !== 1) {
+    fwrite(STDERR, '12445 probe ' . json_encode($accessProbe) . "\n");
+    exit(1);
+}
+$usedStandalone = false;
+foreach ($accessCalls as $call) {
+    if (str_contains((string) ($call[1] ?? ''), ':12445/')) {
+        $usedStandalone = true;
+        break;
+    }
+}
+if (!$usedStandalone) {
+    fwrite(STDERR, "Access did not fall back to :12445\n");
+    exit(1);
+}
+$accessUnlock = $access->unlockDoor('door1');
+if (!($accessUnlock['ok'] ?? false)) {
+    fwrite(STDERR, '12445 unlock ' . json_encode($accessUnlock) . "\n");
+    exit(1);
+}
+
+$hintRoot = sys_get_temp_dir() . '/yarbo-access-hint-' . bin2hex(random_bytes(3));
+mkdir($hintRoot . '/data', 0775, true);
+$hint = new Yarbo\YarboUnifi($hintRoot);
+$hint->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'protect-secret',
+]);
+$hint->setTransport(function (string $method, string $url) {
+    if (str_contains($url, '/proxy/protect/')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([['id' => 'cam1', 'name' => 'Driveway', 'isConnected' => true]]),
+            'content_type' => 'application/json',
+        ];
+    }
+
+    return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'no access'];
+});
+$hintProbe = $hint->probe();
+if (!str_contains((string) ($hintProbe['message'] ?? ''), 'Access API token')) {
+    fwrite(STDERR, 'missing Access token hint ' . json_encode($hintProbe) . "\n");
     exit(1);
 }
 

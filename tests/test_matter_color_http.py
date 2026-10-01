@@ -205,7 +205,7 @@ def main() -> int:
         assert result.get("ok") is True, result
         names = [c.get("args", {}).get("command_name") for c in fake.commands if c.get("command") == "device_command"]
         assert "On" in names, fake.commands
-        assert "MoveToHueAndSaturation" in names, fake.commands
+        assert "MoveToColor" in names or "MoveToHueAndSaturation" in names, fake.commands
         print("ok: HTTP colour command reached Color Control")
         return 0
     finally:

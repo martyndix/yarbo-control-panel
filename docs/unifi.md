@@ -60,7 +60,9 @@ https://CONSOLE:12445/api/v1/developer/...
 
 Door unlock: `PUT /doors/{id}/unlock` (POST if the console rejects PUT). Gate Hub: add `?control_cmd=open|close|stop`. Controllers come from `GET /devices`. Door position is `door_position_status` on each door.
 
-Protect lights: `PATCH /lights/{id}` with `{ "isLightForceEnabled": true|false }`. Protect relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
+Protect lights: `PATCH /lights/{id}` with `{ "isLightForceEnabled": true|false }` and, when the console accepts it, `lightModeSettings.mode` `always`/`off`. Protect relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
+
+If Access on UniFi OS returns empty or 404, the panel also tries `https://CONSOLE:12445/api/v1/developer/...`.
 
 ## Home
 
@@ -68,4 +70,4 @@ Turn **Home** on as well. UniFi rows use ids like `unifi:camera:…`. Hide or Re
 
 ## Rollback
 
-This is panel **4.0.3**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+This is panel **4.0.8**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.

@@ -44,7 +44,7 @@ def main() -> int:
         assert result.get("ok") is True, (action, result)
         names = [call[3] for call in calls]
         assert "On" in names, names
-        assert "MoveToHueAndSaturation" in names, names
+        assert "MoveToColor" in names or "MoveToHueAndSaturation" in names, names
 
     calls.clear()
     kelvin = agent.dispatch(

@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.8] - 2026-10-01
+
+### Fixed
+- Mill Wi-Fi panel heaters (and other named heaters) no longer show as colour lights. They advertise as On/Off Light in Matter, so Home now classifies by product name, drops the colour picker, and labels them **Heater**. Old Home cache is discarded so a previous `kind=light` row cannot stick.
+- Hue colour from the panel now sends XY `MoveToColor` first (then HS), keeps the optimistic colour, and does not reload the whole Home grid after a colour click. The Matter agent restarts (v11); do not pair Hue again.
+- UniFi floodlights PATCH `isLightForceEnabled` together with `lightModeSettings.mode` `always`/`off`, then fall back to force-only if the console rejects extra fields.
+- Access doors and controllers are discovered on UniFi OS **and** standalone `:12445`. Probe says when an Access API token is missing instead of reporting “Connected … 0 doors, 0 controllers”. Unlock uses the same URL fallback.
+
 ## [4.0.7] - 2026-10-01
 
 ### Fixed

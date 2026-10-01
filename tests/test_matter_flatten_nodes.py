@@ -138,11 +138,23 @@ def main() -> int:
             "1/97/0": 1,
         },
     }
-    extra = {d["id"]: d for d in agent.flatten_nodes({"nodes": [light_heater, light_vacuum]})}
+    mill_heater = {
+        "node_id": 25,
+        "available": True,
+        "attributes": {
+            "0/40/1": "Mill",
+            "0/40/3": "Mill Wi-Fi Panel Heater Gen4",
+            "1/29/0": [{"deviceType": 0x0100, "revision": 1}],
+            "1/6/0": True,
+        },
+    }
+    extra = {d["id"]: d for d in agent.flatten_nodes({"nodes": [light_heater, light_vacuum, mill_heater]})}
     if extra.get("23:1", {}).get("kind") != "heater" or extra["23:1"].get("colorable") or extra["23:1"].get("dimmable"):
         raise SystemExit(f"light-typed heater {extra.get('23:1')}")
     if extra.get("24:1", {}).get("kind") != "vacuum" or extra["24:1"].get("colorable"):
         raise SystemExit(f"light-typed vacuum {extra.get('24:1')}")
+    if extra.get("25:1", {}).get("kind") != "heater" or extra["25:1"].get("colorable") or extra["25:1"].get("dimmable"):
+        raise SystemExit(f"mill panel heater {extra.get('25:1')}")
 
     agent._live_devices = [{"id": "1:2", "on": False}]
     agent.apply_attribute_event([1, "2/6/0", True])

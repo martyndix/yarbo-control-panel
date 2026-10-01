@@ -2930,7 +2930,7 @@ function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
     if (!homeIsLight(d) || homeIsUnifi(d)) {
         return '';
     }
-    if (d.colorable || d.kind === 'light') {
+    if (d.colorable || d.color_hs || d.color_xy) {
         return `<input type="color" value="${escapeHtml(hex || d.color_hex || '#ffd27a')}" ${colorAttr} title="Colour" aria-label="Colour">`;
     }
     if (d.color_ct) {
@@ -3178,6 +3178,17 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
     if (extras.brightness != null) {
         const bright = card.querySelector('[data-home-bright]');
         if (bright && document.activeElement !== bright) bright.value = String(extras.brightness);
+    }
+    if (extras.color_hex) {
+        const device = homeDeviceRecord(id);
+        if (device) device.color_hex = extras.color_hex;
+        const picker = card.querySelector('[data-home-color]');
+        if (picker && document.activeElement !== picker) picker.value = extras.color_hex;
+        const dot = card.querySelector('.home-device-dot');
+        if (dot && on) {
+            dot.style.background = extras.color_hex;
+            dot.style.boxShadow = `0 0 0.35rem ${extras.color_hex}`;
+        }
     }
 }
 
@@ -4424,15 +4435,18 @@ function bindHomeDashboard() {
         }
         const color = event.target.closest('[data-home-color]');
         if (color) {
+            const id = color.getAttribute('data-home-color');
+            const hex = color.value;
             try {
+                setHomeDeviceOn(id, true);
+                patchHomeDeviceVisual(id, true, { color_hex: hex });
                 const data = await homeApi({
                     action: 'command',
-                    id: color.getAttribute('data-home-color'),
+                    id,
                     command: 'color',
-                    hex: color.value,
+                    hex,
                 });
                 if (!data.ok) throw new Error(data.error || 'Failed');
-                await loadHomeDashboard();
             } catch (err) {
                 showToast(err.message || 'Colour failed', 'error');
             }

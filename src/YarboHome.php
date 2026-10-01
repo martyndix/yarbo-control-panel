@@ -270,6 +270,10 @@ final class YarboHome
             if ($id === '') {
                 continue;
             }
+            $isUnifi = YarboUnifi::isHomeId($id) || ((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE;
+            if (!$isUnifi) {
+                $device = YarboMatterFabric::reclassifyRow($device);
+            }
             $defaultName = (string) ($device['name'] ?? $id);
             $name = $store['names'][$id] ?? $defaultName;
             $roomId = (string) ($store['rooms'][$id] ?? '');
@@ -282,8 +286,12 @@ final class YarboHome
                     }
                 }
             }
-            $isUnifi = YarboUnifi::isHomeId($id) || ((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE;
             $isLight = ((string) ($device['kind'] ?? self::KIND_LIGHT)) === self::KIND_LIGHT;
+            $colorable = $isLight && !$isUnifi && (
+                (bool) ($device['colorable'] ?? false)
+                || (bool) ($device['color_hs'] ?? false)
+                || (bool) ($device['color_xy'] ?? false)
+            );
             $row = [
                 'id' => $id,
                 'node_id' => (int) ($device['node_id'] ?? 0),
@@ -298,7 +306,7 @@ final class YarboHome
                 'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
                 'brightness' => $isLight && !$isUnifi && isset($device['brightness']) ? (int) $device['brightness'] : null,
                 'dimmable' => $isLight && !$isUnifi && (bool) ($device['dimmable'] ?? false),
-                'colorable' => $isLight && !$isUnifi,
+                'colorable' => $colorable,
                 'color_hs' => !$isUnifi && (bool) ($device['color_hs'] ?? false),
                 'color_xy' => !$isUnifi && (bool) ($device['color_xy'] ?? false),
                 'color_ct' => !$isUnifi && (bool) ($device['color_ct'] ?? false),
@@ -1281,10 +1289,15 @@ final class YarboHome
             && $bundle['fabric_mtime'] > 0
             && $bundle['fabric_mtime'] >= $fabricMtime;
         if ($cacheFresh) {
+            $devices = [];
+            foreach ($remembered as $row) {
+                $devices[] = is_array($row) ? YarboMatterFabric::reclassifyRow($row) : $row;
+            }
+
             return [
                 'ok' => true,
                 'error' => '',
-                'devices' => $remembered,
+                'devices' => $devices,
                 'fabric' => [
                     'source' => 'cache',
                     'storage_files' => YarboMatterFabric::storageFileNames($storageDir),
@@ -1494,6 +1507,15 @@ final class YarboHome
             $patch['on'] = $patch['brightness'] > 0;
         } elseif ($action === 'color' || $action === 'color_temp' || $action === 'kelvin') {
             $patch['on'] = true;
+            if ($action === 'color') {
+                $hex = $this->normalizeHex((string) ($result['color_hex'] ?? $body['hex'] ?? ''));
+                if ($hex !== null) {
+                    $patch['color_hex'] = $hex;
+                }
+            }
+            if (($action === 'color_temp' || $action === 'kelvin') && isset($body['kelvin'])) {
+                $patch['color_temp'] = (int) $body['kelvin'];
+            }
         }
 
         return $patch;
@@ -1558,6 +1580,11 @@ final class YarboHome
         $nodes = $agent->request(['op' => 'nodes', 'quick' => true], max(8.0, $timeout), false);
         $liveOk = ($nodes['ok'] ?? false) === true;
         $devices = is_array($nodes['devices'] ?? null) ? $nodes['devices'] : [];
+        $classified = [];
+        foreach ($devices as $row) {
+            $classified[] = is_array($row) ? YarboMatterFabric::reclassifyRow($row) : $row;
+        }
+        $devices = $classified;
         $fabric = is_array($nodes['fabric'] ?? null) ? $nodes['fabric'] : ($local['fabric'] ?? []);
         $error = (string) ($nodes['error'] ?? $local['error']);
         if ($liveOk && $devices !== [] && !self::looksLikeUninterviewedStub($devices)) {
@@ -1639,7 +1666,7 @@ final class YarboHome
             if ($id === '' || YarboUnifi::isHomeId($id)) {
                 continue;
             }
-            $out[] = [
+            $out[] = YarboMatterFabric::reclassifyRow([
                 'id' => $id,
                 'node_id' => (int) ($row['node_id'] ?? 0),
                 'endpoint' => (int) ($row['endpoint'] ?? 0),
@@ -1658,15 +1685,12 @@ final class YarboHome
                 'color_ct' => (bool) ($row['color_ct'] ?? false),
                 'color_hex' => (string) ($row['color_hex'] ?? ''),
                 'available' => (bool) ($row['available'] ?? true),
-            ];
+            ]);
         }
 
         return $out;
     }
 
-    /**
-     * @return list<array<string, mixed>>
-     */
     /**
      * @return array{devices: list<array<string, mixed>>, fabric_mtime: int}
      */
@@ -1677,7 +1701,7 @@ final class YarboHome
             return $empty;
         }
         $cached = json_decode((string) file_get_contents($path), true);
-        if (!is_array($cached) || (int) ($cached['v'] ?? 0) < 4 || !is_array($cached['devices'] ?? null)) {
+        if (!is_array($cached) || (int) ($cached['v'] ?? 0) < 5 || !is_array($cached['devices'] ?? null)) {
             return $empty;
         }
         $devices = [];
@@ -1711,7 +1735,7 @@ final class YarboHome
             $mtime = $this->readDeviceCacheBundle($path)['fabric_mtime'];
         }
         @file_put_contents($path, json_encode([
-            'v' => 4,
+            'v' => 5,
             'saved_at' => time(),
             'fabric_mtime' => $mtime,
             'devices' => $devices,
@@ -1775,7 +1799,7 @@ final class YarboHome
             if ($nodeId <= 0 || $endpoint < 0) {
                 continue;
             }
-            $out[] = [
+            $out[] = YarboMatterFabric::reclassifyRow([
                 'id' => $id,
                 'node_id' => $nodeId,
                 'endpoint' => $endpoint,
@@ -1794,7 +1818,7 @@ final class YarboHome
                 'color_ct' => true,
                 'color_hex' => '',
                 'available' => false,
-            ];
+            ]);
         }
 
         return $out;
