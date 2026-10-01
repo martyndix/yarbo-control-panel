@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""On/Off must not wait behind a slow get_nodes poll on the Matter websocket."""
+"""On/Off must not wait behind a slow start_listening dump; Apple Home events must apply."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -20,17 +21,38 @@ ROOT = Path(__file__).resolve().parents[1]
 AGENT_PORT = 18768
 SERVER_PORT = 15581
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+DUMP_DELAY = 6.0
+SAMPLE_NODES = [
+    {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            "0/40/1": "Signify Netherlands B.V.",
+            "0/40/3": "Hue Bridge",
+            "0/40/5": "Hue Bridge",
+            "1/29/0": [{"0": 0x000E, "1": 1}],
+            "2/29/0": [{"deviceType": 0x0013, "revision": 1}],
+            "2/6/0": False,
+            "2/8/0": 80,
+            "2/57/5": "Lamp",
+        },
+    }
+]
 
 
 class FakeMatterServer:
     def __init__(self) -> None:
         self.commands: list[dict] = []
+        self.conn: socket.socket | None = None
+        self._conns: list[socket.socket] = []
         self._sock = socket.socket()
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(("127.0.0.1", SERVER_PORT))
-        self._sock.listen(4)
+        self._sock.listen(8)
         self._sock.settimeout(0.5)
         self._stop = threading.Event()
+        self._send_lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> None:
@@ -42,6 +64,36 @@ class FakeMatterServer:
             self._sock.close()
         except OSError:
             pass
+        for conn in list(self._conns):
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+    def _remember(self, conn: socket.socket) -> None:
+        if conn not in self._conns:
+            self._conns.append(conn)
+        self.conn = conn
+
+    def _forget(self, conn: socket.socket) -> None:
+        if conn in self._conns:
+            self._conns.remove(conn)
+        if self.conn is conn:
+            self.conn = self._conns[-1] if self._conns else None
+
+    def emit_updated(self, node_id: int, path: str, value: object) -> None:
+        deadline = time.time() + 3.0
+        last_err: Exception | None = None
+        while time.time() < deadline:
+            conn = self.conn
+            if conn is not None:
+                try:
+                    self._send(conn, {"event": "attribute_updated", "data": [node_id, path, value]})
+                    return
+                except OSError as exc:
+                    last_err = exc
+            time.sleep(0.05)
+        raise AssertionError(f"websocket not connected ({last_err})")
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -52,7 +104,8 @@ class FakeMatterServer:
             threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
 
     def _handle(self, conn: socket.socket) -> None:
-        conn.settimeout(12)
+        conn.settimeout(30)
+        self.conn = conn
         try:
             buf = b""
             while b"\r\n\r\n" not in buf:
@@ -74,6 +127,7 @@ class FakeMatterServer:
                     "\r\n"
                 ).encode()
             )
+            self._remember(conn)
             self._send(conn, {"event": "server_info", "data": {}})
             leftover = buf.split(b"\r\n\r\n", 1)[1]
             data = bytearray(leftover)
@@ -84,18 +138,32 @@ class FakeMatterServer:
                 if not isinstance(msg, dict):
                     continue
                 self.commands.append(msg)
-                if msg.get("command") == "get_nodes":
-                    time.sleep(6)
-                    self._send(conn, {"message_id": msg.get("message_id"), "result": []})
+                command = str(msg.get("command") or "")
+                if command in ("start_listening", "get_nodes"):
+                    threading.Thread(
+                        target=self._reply_dump,
+                        args=(conn, msg),
+                        daemon=True,
+                    ).start()
                     continue
                 self._send(conn, {"message_id": msg.get("message_id"), "result": None})
         except (TimeoutError, socket.timeout, OSError, struct.error):
             return
         finally:
+            self._forget(conn)
             try:
                 conn.close()
             except OSError:
                 pass
+
+    def _reply_dump(self, conn: socket.socket, msg: dict) -> None:
+        time.sleep(DUMP_DELAY)
+        if self._stop.is_set():
+            return
+        try:
+            self._send(conn, {"message_id": msg.get("message_id"), "result": SAMPLE_NODES})
+        except OSError:
+            return
 
     def _send(self, conn: socket.socket, payload: dict) -> None:
         raw = json.dumps(payload).encode()
@@ -109,7 +177,8 @@ class FakeMatterServer:
         else:
             header.append(127)
             header.extend(struct.pack("!Q", n))
-        conn.sendall(header + raw)
+        with self._send_lock:
+            conn.sendall(header + raw)
 
     def _read_json(self, conn: socket.socket, buf: bytearray) -> dict | None:
         while True:
@@ -186,32 +255,68 @@ def wait_ping(timeout: float = 5.0) -> dict:
     raise AssertionError(f"agent did not start: {last}")
 
 
+def wait_device(device_id: str, timeout: float = 2.0) -> dict:
+    deadline = time.time() + timeout
+    last: list = []
+    while time.time() < deadline:
+        last = post({"op": "states"}).get("devices") or []
+        row = next((d for d in last if str(d.get("id") or "") == device_id), None)
+        if row is not None:
+            return row
+        time.sleep(0.05)
+    raise AssertionError(f"device {device_id} missing from states: {last}")
+
+
 def main() -> int:
     fake = FakeMatterServer()
     fake.start()
     env = os.environ.copy()
     env["YARBO_MATTER_AGENT_PORT"] = str(AGENT_PORT)
     env["YARBO_MATTER_SERVER_PORT"] = str(SERVER_PORT)
+    log_file = tempfile.NamedTemporaryFile("w+", delete=False)
     proc = subprocess.Popen(
         [sys.executable, str(ROOT / "scripts" / "matter_agent.py")],
         cwd=str(ROOT),
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=log_file,
         stderr=subprocess.STDOUT,
     )
     try:
-        wait_ping()
+        ping = wait_ping()
+        assert ping.get("version") == 9, ping
         time.sleep(0.4)
         started = time.time()
         result = post({"op": "command", "id": "1:2", "action": "on"}, timeout=3.0)
         elapsed = time.time() - started
         assert result.get("ok") is True, result
         assert result.get("on") is True, result
-        assert elapsed < 2.5, f"On/Off waited on get_nodes ({elapsed:.2f}s)"
+        assert elapsed < 2.5, f"On/Off waited on start_listening dump ({elapsed:.2f}s)"
         names = [c.get("args", {}).get("command_name") for c in fake.commands if c.get("command") == "device_command"]
         assert "On" in names, fake.commands
-        print("ok: On/Off did not wait for get_nodes")
+        listen_n = len([c for c in fake.commands if c.get("command") == "start_listening"])
+        assert listen_n >= 1, fake.commands
+
+        row = wait_device("1:2")
+        assert row.get("on") is True, row
+        fake.emit_updated(1, "2/6/0", False)
+        deadline = time.time() + 2.0
+        saw_off = False
+        while time.time() < deadline:
+            row = wait_device("1:2", timeout=0.4)
+            if row.get("on") is False:
+                saw_off = True
+                break
+            time.sleep(0.05)
+        assert saw_off, f"Apple Home Off event did not apply: {post({'op': 'states'})}"
+        print("ok: On/Off did not wait for listen dump; Apple Home event applied")
         return 0
+    except Exception:
+        try:
+            log_file.flush()
+            sys.stderr.write(Path(log_file.name).read_text()[-4000:])
+        except OSError:
+            pass
+        raise
     finally:
         proc.terminate()
         try:
@@ -219,6 +324,11 @@ def main() -> int:
         except subprocess.TimeoutExpired:
             proc.kill()
         fake.stop()
+        log_file.close()
+        try:
+            os.unlink(log_file.name)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

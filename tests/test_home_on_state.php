@@ -63,6 +63,11 @@ $overlaid = YarboHome::overlayDeviceStates(
 );
 assert_true(($overlaid[0]['on'] ?? true) === false, 'overlay must copy off');
 assert_true(($overlaid[1]['on'] ?? false) === true, 'overlay must leave unmatched devices');
+$kept = YarboHome::overlayDeviceStates(
+    [['id' => '1:2', 'name' => 'Lamp', 'on' => true]],
+    []
+);
+assert_true(($kept[0]['on'] ?? false) === true, 'empty live state must keep cached On/Off');
 
 $root = sys_get_temp_dir() . '/yarbo-home-on-' . bin2hex(random_bytes(3));
 mkdir($root . '/data/matter-server', 0775, true);

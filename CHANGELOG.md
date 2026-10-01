@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.5] - 2026-10-01
+
+### Fixed
+- Home On/Off now stays in sync both ways: panel clicks still reach the lights, and Apple Home / wall-switch changes update the dots. The Matter agent keeps one websocket, calls `start_listening` once, and applies `attribute_updated` events instead of dumping `get_nodes` every few seconds (that left the live list empty). An empty agent list no longer freezes the saved On/Off cache. The update restarts the agent (v9); do not pair Hue again.
+
 ## [4.0.4] - 2026-10-01
 
 ### Fixed

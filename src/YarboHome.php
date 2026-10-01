@@ -1367,6 +1367,7 @@ final class YarboHome
     {
         $local = $this->localHomeDevices();
         $states = $this->agentDeviceStates();
+        // Empty live state must not overwrite the On/Off cache (stale agent / listen still starting).
         if ($states === []) {
             return $local;
         }

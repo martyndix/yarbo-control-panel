@@ -150,6 +150,18 @@ def main() -> int:
     if not live or live[0].get("on") is not True:
         raise SystemExit(f"attribute event did not turn on {live}")
 
+    agent._live_devices = []
+    agent.apply_attribute_event([1, "2/6/0", True])
+    seeded = agent.current_live_devices()
+    if not seeded or seeded[0].get("id") != "1:2" or seeded[0].get("on") is not True:
+        raise SystemExit(f"event on empty live list {seeded}")
+
+    agent._live_devices = [{"id": "1:2", "on": True, "_patched_at": __import__("time").time()}]
+    agent.apply_attribute_event([1, "2/6/0", False])
+    yielded = agent.current_live_devices()
+    if not yielded or yielded[0].get("on") is not False:
+        raise SystemExit(f"live event should override sticky patch {yielded}")
+
     agent._live_devices = [{"id": "1:2", "on": True, "_patched_at": __import__("time").time()}]
     agent.remember_live_devices([{"id": "1:2", "on": False, "name": "Lamp"}])
     kept = agent.current_live_devices()

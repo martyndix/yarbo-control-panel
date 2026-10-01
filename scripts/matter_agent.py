@@ -40,7 +40,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 8
+AGENT_VERSION = 9
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -87,11 +87,14 @@ COLOR_CAP_HS = 1 << 0
 COLOR_CAP_XY = 1 << 3
 COLOR_CAP_CT = 1 << 4
 
-_ws_slots: dict[str, MatterWs | None] = {"cmd": None, "poll": None}
-_ws_channel_locks = {
-    "cmd": threading.Lock(),
-    "poll": threading.Lock(),
-}
+_ws: MatterWs | None = None
+_ws_send_lock = threading.Lock()
+_ws_connect_lock = threading.Lock()
+_pending: dict[str, dict[str, Any]] = {}
+_pending_lock = threading.Lock()
+_recv_started = False
+_listening = False
+_listen_lock = threading.Lock()
 _start_lock = threading.Lock()
 _started_docker = False
 _recovered_storage = False
@@ -109,29 +112,37 @@ def attr_key(endpoint: int, cluster: int, attr: int) -> str:
 
 
 class MatterWs:
-    def __init__(self, sock: socket.socket) -> None:
+    def __init__(self, sock: socket.socket, leftover: bytes = b"") -> None:
         self.sock = sock
-        self.buf = bytearray()
+        self.buf = bytearray(leftover)
+        self._out = threading.Lock()
 
     def send_json(self, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, separators=(",", ":")).encode()
+        self._send_frame(0x1, data)
+
+    def send_pong(self, payload: bytes = b"") -> None:
+        self._send_frame(0xA, payload)
+
+    def _send_frame(self, opcode: int, payload: bytes) -> None:
         key = os.urandom(4)
         header = bytearray()
-        n = len(data)
+        n = len(payload)
         if n < 126:
-            header.append(0x81)
+            header.append(0x80 | opcode)
             header.append(0x80 | n)
         elif n < 65536:
-            header.append(0x81)
+            header.append(0x80 | opcode)
             header.append(0x80 | 126)
             header.extend(struct.pack("!H", n))
         else:
-            header.append(0x81)
+            header.append(0x80 | opcode)
             header.append(0x80 | 127)
             header.extend(struct.pack("!Q", n))
         header.extend(key)
-        masked = bytes(b ^ key[i % 4] for i, b in enumerate(data))
-        self.sock.sendall(header + masked)
+        masked = bytes(b ^ key[i % 4] for i, b in enumerate(payload))
+        with self._out:
+            self.sock.sendall(header + masked)
 
     def recv_json(self, timeout: float) -> dict[str, Any] | None:
         self.sock.settimeout(timeout)
@@ -143,6 +154,10 @@ class MatterWs:
                 return None
             fin, opcode, payload = frame
             if opcode == 0x9:
+                try:
+                    self.send_pong(payload)
+                except OSError:
+                    return None
                 continue
             if opcode not in (0x1, 0x2, 0x0):
                 acc.clear()
@@ -162,6 +177,7 @@ class MatterWs:
 
     def _read_frame(self, timeout: float) -> tuple[bool, int, bytes] | None:
         try:
+            self.sock.settimeout(max(0.2, timeout))
             while len(self.buf) < 2:
                 chunk = self.sock.recv(4096)
                 if not chunk:
@@ -245,7 +261,8 @@ def ws_connect() -> MatterWs:
     if accept.encode() not in buf:
         # Some stacks omit a strict accept check in tests; still require 101.
         pass
-    return MatterWs(sock)
+    leftover = buf.split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in buf else b""
+    return MatterWs(sock, leftover)
 
 
 def docker_bin() -> str | None:
@@ -1029,7 +1046,7 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
             device_id = str(item.get("id") or "")
             prev = previous.get(device_id)
             patched_at = float((prev or {}).get("_patched_at") or 0)
-            if prev is not None and patched_at > 0 and (now - patched_at) < 4.0:
+            if prev is not None and patched_at > 0 and (now - patched_at) < 2.0:
                 for key in ("on", "brightness", "color_hex", "hue", "saturation", "color_temp"):
                     if key in prev:
                         item[key] = prev[key]
@@ -1049,25 +1066,18 @@ def patch_live_device(device_id: str, fields: dict[str, Any], *, sticky: bool = 
         return None
     with _live_lock:
         payload = dict(fields)
-        if sticky:
-            payload["_patched_at"] = time.time()
+        payload["_patched_at"] = time.time() if sticky else 0
         for row in _live_devices:
             if str(row.get("id") or "") == device_id:
                 row.update(payload)
                 return dict(row)
-        if sticky:
-            row = {"id": device_id, **payload}
-            _live_devices.append(row)
-            return dict(row)
-        return None
+        row = {"id": device_id, **payload}
+        _live_devices.append(row)
+        return dict(row)
 
 
 def refresh_live_devices(timeout: float = 5.0) -> list[dict[str, Any]]:
-    rpc = matter_rpc("get_nodes", timeout=timeout, channel="poll")
-    if not rpc.get("ok"):
-        return current_live_devices()
-    devices = flatten_nodes(nodes_from_result(rpc.get("result")))
-    remember_live_devices(devices)
+    ensure_listening()
     return current_live_devices()
 
 
@@ -1080,10 +1090,11 @@ def start_state_poll() -> None:
     def loop() -> None:
         while True:
             try:
-                refresh_live_devices(5.0)
+                ensure_listening()
             except Exception as exc:  # noqa: BLE001
                 print(f"matter state poll failed: {exc}", flush=True)
-            time.sleep(2.5)
+                reset_ws()
+            time.sleep(8.0)
 
     threading.Thread(target=loop, daemon=True).start()
 
@@ -1221,35 +1232,157 @@ def ensure_matter_server() -> str | None:
         )
 
 
-def connected_ws(channel: str = "cmd") -> MatterWs:
-    if channel not in _ws_slots:
-        channel = "cmd"
-    existing = _ws_slots.get(channel)
-    if existing is not None:
-        return existing
-    err = ensure_matter_server()
-    if err:
-        raise RuntimeError(err)
-    client = ws_connect()
-    # Drain the hello event so the first command is not mixed with it.
-    hello = client.recv_json(2.0)
-    if isinstance(hello, dict):
-        ingest_ws_message(hello)
-    _ws_slots[channel] = client
-    return client
+def connected_ws() -> MatterWs:
+    global _ws
+    if _ws is not None:
+        return _ws
+    with _ws_connect_lock:
+        if _ws is not None:
+            return _ws
+        err = ensure_matter_server()
+        if err:
+            raise RuntimeError(err)
+        _ws = ws_connect()
+        start_recv_loop()
+        return _ws
 
 
-def reset_ws(channel: str | None = None) -> None:
-    names = [channel] if channel in _ws_slots else list(_ws_slots)
-    for name in names:
-        client = _ws_slots.get(name)
-        if client is None:
-            continue
+def fail_pending(error: str) -> None:
+    with _pending_lock:
+        waiters = list(_pending.values())
+        _pending.clear()
+    for waiter in waiters:
+        waiter["error"] = error
+        waiter["event"].set()
+
+
+def reset_ws(channel: str | None = None) -> None:  # noqa: ARG001
+    global _ws, _listening
+    _listening = False
+    client = _ws
+    _ws = None
+    if client is not None:
         try:
             client.sock.close()
         except OSError:
             pass
-        _ws_slots[name] = None
+    fail_pending("Matter server unavailable")
+
+
+def start_recv_loop() -> None:
+    global _recv_started
+    if _recv_started:
+        return
+    _recv_started = True
+
+    def loop() -> None:
+        while True:
+            client = _ws
+            if client is None:
+                time.sleep(0.15)
+                continue
+            try:
+                msg = client.recv_json(30.0)
+            except Exception:  # noqa: BLE001
+                if _ws is client:
+                    reset_ws()
+                time.sleep(0.4)
+                continue
+            if msg is None:
+                if _ws is client:
+                    try:
+                        client.sock.getpeername()
+                    except OSError:
+                        reset_ws()
+                continue
+            ingest_ws_message(msg)
+            mid = str(msg.get("message_id") or "")
+            if mid == "":
+                continue
+            with _pending_lock:
+                waiter = _pending.get(mid)
+            if waiter is not None:
+                waiter["msg"] = msg
+                waiter["event"].set()
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
+def kick_listening() -> None:
+    if _listening and _ws is not None:
+        return
+    threading.Thread(target=_listen_worker, daemon=True).start()
+
+
+def _listen_worker() -> None:
+    try:
+        ensure_listening()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter listen failed: {exc}", flush=True)
+
+
+def ensure_listening() -> None:
+    global _listening
+    with _listen_lock:
+        if _listening and _ws is not None:
+            return
+        connected_ws()
+        rpc = matter_rpc("start_listening", timeout=45.0, listen=False)
+        if not rpc.get("ok"):
+            raise RuntimeError(str(rpc.get("error") or "Matter listen failed"))
+        devices = flatten_nodes(nodes_from_result(rpc.get("result")))
+        remember_live_devices(devices)
+        _listening = True
+
+
+def matter_rpc(
+    command: str,
+    args: dict[str, Any] | None = None,
+    timeout: float = 20.0,
+    channel: str = "cmd",
+    listen: bool = True,
+) -> dict[str, Any]:
+    del channel
+    message_id = uuid.uuid4().hex[:12]
+    payload: dict[str, Any] = {"message_id": message_id, "command": command}
+    if args:
+        payload["args"] = args
+    last_err: Exception | str | None = None
+    for _ in range(2):
+        waiter: dict[str, Any] = {"event": threading.Event(), "msg": None, "error": None}
+        try:
+            client = connected_ws()
+            if listen and command != "start_listening":
+                kick_listening()
+                client = connected_ws()
+            with _pending_lock:
+                _pending[message_id] = waiter
+            with _ws_send_lock:
+                client.send_json(payload)
+            if not waiter["event"].wait(timeout):
+                last_err = "Matter server timed out"
+                with _pending_lock:
+                    _pending.pop(message_id, None)
+                continue
+            with _pending_lock:
+                _pending.pop(message_id, None)
+            if waiter.get("error"):
+                last_err = str(waiter["error"])
+                continue
+            msg = waiter.get("msg")
+            if not isinstance(msg, dict):
+                last_err = "Matter server unavailable"
+                continue
+            if "error_code" in msg or "error" in msg:
+                err = msg.get("details") or msg.get("error") or msg.get("error_code")
+                return {"ok": False, "error": str(err)}
+            return {"ok": True, "result": msg.get("result")}
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            with _pending_lock:
+                _pending.pop(message_id, None)
+            reset_ws()
+    return {"ok": False, "error": str(last_err) if last_err else "Matter server unavailable"}
 
 
 def parse_attribute_event(data: Any) -> tuple[int, str, Any] | None:
@@ -1352,43 +1485,6 @@ def ingest_ws_message(msg: dict[str, Any]) -> None:
             merge_live_nodes([data])
         elif isinstance(data, list):
             merge_live_nodes([row for row in data if isinstance(row, dict)])
-
-
-def matter_rpc(
-    command: str,
-    args: dict[str, Any] | None = None,
-    timeout: float = 20.0,
-    channel: str = "cmd",
-) -> dict[str, Any]:
-    message_id = uuid.uuid4().hex[:12]
-    payload: dict[str, Any] = {"message_id": message_id, "command": command}
-    if args:
-        payload["args"] = args
-    if channel not in _ws_channel_locks:
-        channel = "cmd"
-    with _ws_channel_locks[channel]:
-        last_err = None
-        for _ in range(2):
-            try:
-                client = connected_ws(channel)
-                client.send_json(payload)
-                deadline = time.time() + timeout
-                while time.time() < deadline:
-                    msg = client.recv_json(max(0.5, deadline - time.time()))
-                    if not isinstance(msg, dict):
-                        continue
-                    ingest_ws_message(msg)
-                    if msg.get("message_id") != message_id:
-                        continue
-                    if "error_code" in msg or "error" in msg:
-                        err = msg.get("details") or msg.get("error") or msg.get("error_code")
-                        return {"ok": False, "error": str(err)}
-                    return {"ok": True, "result": msg.get("result")}
-                return {"ok": False, "error": "Matter server timed out"}
-            except Exception as exc:  # noqa: BLE001
-                last_err = exc
-                reset_ws(channel)
-        return {"ok": False, "error": str(last_err) if last_err else "Matter server unavailable"}
 
 
 def looks_like_node(row: dict[str, Any]) -> bool:

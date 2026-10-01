@@ -3075,7 +3075,7 @@ function ensureHomeStatePoll() {
     if (homeStateTimer) return;
     homeStateTimer = window.setInterval(() => {
         if (homeCardIsWatching()) loadHomeDashboard({ patch: true });
-    }, 2500);
+    }, 3000);
 }
 
 function homeDeviceRecord(id) {
