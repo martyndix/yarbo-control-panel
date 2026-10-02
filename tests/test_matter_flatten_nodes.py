@@ -145,7 +145,10 @@ def main() -> int:
             "0/40/1": "Mill",
             "0/40/3": "Mill Wi-Fi Panel Heater Gen4",
             "1/29/0": [{"deviceType": 0x0100, "revision": 1}],
-            "1/6/0": True,
+            "1/513/0": 2140,
+            "1/513/18": 2100,
+            "1/513/28": 0,
+            "1/1026/0": 2140,
         },
     }
     extra = {d["id"]: d for d in agent.flatten_nodes({"nodes": [light_heater, light_vacuum, mill_heater]})}
@@ -155,6 +158,43 @@ def main() -> int:
         raise SystemExit(f"light-typed vacuum {extra.get('24:1')}")
     if extra.get("25:1", {}).get("kind") != "heater" or extra["25:1"].get("colorable") or extra["25:1"].get("dimmable"):
         raise SystemExit(f"mill panel heater {extra.get('25:1')}")
+    if extra["25:1"].get("on") is not False:
+        raise SystemExit(f"mill SystemMode Off must be off {extra['25:1']}")
+    if extra["25:1"].get("local_temperature") != 21.4 or extra["25:1"].get("heating_setpoint") != 21.0:
+        raise SystemExit(f"mill heater temps {extra['25:1']}")
+
+    mill_split = {
+        "node_id": 26,
+        "available": True,
+        "attributes": {
+            "0/40/1": "Mill",
+            "0/40/3": "Mill Wi-Fi Panel Heater Gen4",
+            "1/29/0": [{"deviceType": 0x0100, "revision": 1}],
+            "1/6/0": True,
+            "2/29/0": [{"deviceType": 0x0300, "revision": 1}],
+            "2/513/0": 2000,
+            "2/513/18": 2200,
+            "2/513/28": 4,
+        },
+    }
+    split = {d["id"]: d for d in agent.flatten_nodes({"nodes": [mill_split]})}
+    if "26:1" in split or "26:2" not in split:
+        raise SystemExit(f"mill OnOff sibling must not be a heater row {split}")
+    if split["26:2"].get("kind") != "heater" or split["26:2"].get("on") is not True:
+        raise SystemExit(f"mill thermostat endpoint {split.get('26:2')}")
+
+    agent._live_devices = [{"id": "25:1", "kind": "heater", "on": False}]
+    agent.apply_attribute_event([25, "1/513/0", 2190])
+    agent.apply_attribute_event([25, "1/513/18", 2200])
+    agent.apply_attribute_event([25, "1/513/28", 4])
+    heated = agent.current_live_devices()
+    if (
+        not heated
+        or heated[0].get("local_temperature") != 21.9
+        or heated[0].get("heating_setpoint") != 22.0
+        or heated[0].get("on") is not True
+    ):
+        raise SystemExit(f"thermostat events {heated}")
 
     agent._live_devices = [{"id": "1:2", "on": False}]
     agent.apply_attribute_event([1, "2/6/0", True])

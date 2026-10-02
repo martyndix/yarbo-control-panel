@@ -293,7 +293,10 @@ $millHeater = [
         '0/40/1' => 'Mill',
         '0/40/3' => 'Mill Wi-Fi Panel Heater Gen4',
         '1/29/0' => [['deviceType' => 0x0100, 'revision' => 1]],
-        '1/6/0' => true,
+        '1/513/0' => 2140,
+        '1/513/18' => 2100,
+        '1/513/28' => 0,
+        '1/1026/0' => 2140,
     ],
 ];
 $kinds = [];
@@ -310,6 +313,40 @@ if (($kinds['24:1']['kind'] ?? '') !== 'vacuum' || !empty($kinds['24:1']['colora
 }
 if (($kinds['25:1']['kind'] ?? '') !== 'heater' || !empty($kinds['25:1']['colorable']) || !empty($kinds['25:1']['dimmable'])) {
     fwrite(STDERR, 'mill panel heater ' . json_encode($kinds['25:1'] ?? null) . "\n");
+    exit(1);
+}
+if (($kinds['25:1']['on'] ?? true) !== false) {
+    fwrite(STDERR, 'mill SystemMode Off must be off ' . json_encode($kinds['25:1']) . "\n");
+    exit(1);
+}
+if (($kinds['25:1']['local_temperature'] ?? null) !== 21.4 || ($kinds['25:1']['heating_setpoint'] ?? null) !== 21.0) {
+    fwrite(STDERR, 'mill heater temps ' . json_encode($kinds['25:1']) . "\n");
+    exit(1);
+}
+$millSplit = [
+    'node_id' => 26,
+    'available' => true,
+    'attributes' => [
+        '0/40/1' => 'Mill',
+        '0/40/3' => 'Mill Wi-Fi Panel Heater Gen4',
+        '1/29/0' => [['deviceType' => 0x0100, 'revision' => 1]],
+        '1/6/0' => true,
+        '2/29/0' => [['deviceType' => 0x0300, 'revision' => 1]],
+        '2/513/0' => 2000,
+        '2/513/18' => 2200,
+        '2/513/28' => 4,
+    ],
+];
+$splitKinds = [];
+foreach (YarboMatterFabric::flatten([$millSplit]) as $row) {
+    $splitKinds[$row['id']] = $row;
+}
+if (isset($splitKinds['26:1']) || !isset($splitKinds['26:2'])) {
+    fwrite(STDERR, 'mill OnOff sibling must not be a heater row ' . json_encode($splitKinds) . "\n");
+    exit(1);
+}
+if (($splitKinds['26:2']['kind'] ?? '') !== 'heater' || ($splitKinds['26:2']['on'] ?? false) !== true) {
+    fwrite(STDERR, 'mill thermostat endpoint ' . json_encode($splitKinds['26:2'] ?? null) . "\n");
     exit(1);
 }
 

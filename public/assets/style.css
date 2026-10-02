@@ -3084,10 +3084,47 @@ html[data-theme="light"] .plan-activity {
     border-radius: 6px;
 }
 
-.home-device.is-on [data-home-toggle] {
+.home-device.is-on [data-home-toggle],
+.home-device-actions--heater [data-home-power].is-active {
     background: var(--accent);
     color: #fff;
     border-color: var(--accent);
+}
+
+.home-device-actions--heater {
+    gap: 0.35rem;
+}
+
+.home-heater-room {
+    min-width: 2.6rem;
+    font-size: 0.78rem;
+    font-weight: 650;
+    color: var(--text);
+    text-align: right;
+}
+
+.home-heater-room.is-empty {
+    color: var(--muted);
+    font-weight: 500;
+}
+
+.home-heater-set {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.72rem;
+    color: var(--muted);
+}
+
+.home-heater-setpoint,
+.home-scene-member input[data-scene-setpoint] {
+    width: 3.4rem;
+    padding: 0.12rem 0.2rem;
+    font-size: 0.8rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
 }
 
 .home-device--toggle {

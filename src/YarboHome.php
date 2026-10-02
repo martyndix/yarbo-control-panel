@@ -326,6 +326,15 @@ final class YarboHome
                 'gate' => (bool) ($device['gate'] ?? false),
                 'locked' => array_key_exists('locked', $device) ? (bool) $device['locked'] : null,
             ];
+            if (($row['kind'] ?? '') === self::KIND_HEATER) {
+                $row['has_thermostat'] = (bool) ($device['has_thermostat'] ?? false)
+                    || isset($device['local_temperature'])
+                    || isset($device['heating_setpoint']);
+                $row['local_temperature'] = self::optionalCelsius($device['local_temperature'] ?? null);
+                $row['heating_setpoint'] = self::optionalCelsius($device['heating_setpoint'] ?? null);
+                $row['heating_min'] = self::optionalCelsius($device['heating_min'] ?? 5) ?? 5.0;
+                $row['heating_max'] = self::optionalCelsius($device['heating_max'] ?? 35) ?? 35.0;
+            }
             if ($isUnifi) {
                 foreach ([
                     'native_id',
@@ -630,6 +639,13 @@ final class YarboHome
         if (($action === 'color_temp' || $action === 'kelvin') && array_key_exists('kelvin', $input)) {
             $body['kelvin'] = max(1500, min(8000, (int) $input['kelvin']));
         }
+        if (in_array($action, ['setpoint', 'temperature', 'heating_setpoint'], true)) {
+            $celsius = $input['celsius'] ?? $input['setpoint'] ?? $input['temperature'] ?? null;
+            if ($celsius === null || $celsius === '') {
+                return ['ok' => false, 'error' => 'Set a heating temperature'];
+            }
+            $body['celsius'] = max(5.0, min(35.0, (float) $celsius));
+        }
         $result = $agent->request($body, 60.0);
         if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
             $agent->forceRestart();
@@ -835,13 +851,32 @@ final class YarboHome
             return ['ok' => false, 'error' => 'Scene not found'];
         }
         $errors = [];
+        $kinds = $this->deviceKindMap();
         foreach ($scene['actions'] as $action) {
             $deviceId = (string) ($action['id'] ?? '');
             if ($deviceId === '') {
                 continue;
             }
+            $kind = $kinds[$deviceId] ?? '';
+            $isHeater = $kind === self::KIND_HEATER;
             if (empty($action['on'])) {
                 $result = $this->command(['id' => $deviceId, 'command' => 'off']);
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+                continue;
+            }
+            if ($isHeater) {
+                $setpoint = self::optionalCelsius($action['heating_setpoint'] ?? $action['celsius'] ?? null);
+                if ($setpoint !== null) {
+                    $result = $this->command([
+                        'id' => $deviceId,
+                        'command' => 'setpoint',
+                        'celsius' => $setpoint,
+                    ]);
+                } else {
+                    $result = $this->command(['id' => $deviceId, 'command' => 'on']);
+                }
                 if (!($result['ok'] ?? false)) {
                     $errors[] = (string) ($result['error'] ?? 'failed');
                 }
@@ -1282,6 +1317,9 @@ final class YarboHome
         if (in_array($kind, ['camera', 'sensor', 'door', 'hub'], true)) {
             return false;
         }
+        if ($kind === self::KIND_HEATER) {
+            return in_array($action, ['on', 'off', 'toggle', 'setpoint', 'temperature', 'heating_setpoint'], true);
+        }
 
         return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp'], true);
     }
@@ -1685,6 +1723,21 @@ final class YarboHome
                         $device['color_hex'] = $hex;
                     }
                 }
+                foreach (['local_temperature', 'heating_setpoint', 'heating_min', 'heating_max'] as $key) {
+                    if (!array_key_exists($key, $live) || $live[$key] === null || $live[$key] === '') {
+                        continue;
+                    }
+                    $celsius = self::optionalCelsius($live[$key]);
+                    if ($celsius !== null) {
+                        $device[$key] = $celsius;
+                    }
+                }
+                if (array_key_exists('has_thermostat', $live)) {
+                    $device['has_thermostat'] = (bool) $live['has_thermostat'];
+                }
+                if (array_key_exists('system_mode', $live) && $live['system_mode'] !== null && $live['system_mode'] !== '') {
+                    $device['system_mode'] = (int) $live['system_mode'];
+                }
             }
             $out[] = $device;
         }
@@ -1726,6 +1779,13 @@ final class YarboHome
             if (($action === 'color_temp' || $action === 'kelvin') && isset($body['kelvin'])) {
                 $patch['color_temp'] = (int) $body['kelvin'];
             }
+        }
+        if (in_array($action, ['setpoint', 'temperature', 'heating_setpoint'], true)) {
+            $celsius = self::optionalCelsius($result['heating_setpoint'] ?? $body['celsius'] ?? null);
+            if ($celsius !== null) {
+                $patch['heating_setpoint'] = $celsius;
+            }
+            $patch['on'] = true;
         }
 
         return $patch;
@@ -2157,7 +2217,7 @@ final class YarboHome
 
     /**
      * @param array<string, mixed> $scene
-     * @return array{id: string, name: string, actions: list<array{id: string, on: bool, brightness: ?int, color_hex: ?string, color_temp: ?int}>}|null
+     * @return array{id: string, name: string, actions: list<array{id: string, on: bool, brightness: ?int, color_hex: ?string, color_temp: ?int, heating_setpoint: ?float}>}|null
      */
     private function normalizeScene(array $scene): ?array
     {
@@ -2182,10 +2242,15 @@ final class YarboHome
             $kelvin = array_key_exists('color_temp', $action) && $action['color_temp'] !== null && $action['color_temp'] !== ''
                 ? max(1500, min(8000, (int) $action['color_temp']))
                 : null;
+            $setpoint = self::optionalCelsius($action['heating_setpoint'] ?? $action['celsius'] ?? null);
+            if ($setpoint !== null) {
+                $setpoint = max(5.0, min(35.0, $setpoint));
+            }
             if (!$on) {
                 $brightness = null;
                 $hex = null;
                 $kelvin = null;
+                $setpoint = null;
             }
             $actions[] = [
                 'id' => $deviceId,
@@ -2193,6 +2258,7 @@ final class YarboHome
                 'brightness' => $brightness,
                 'color_hex' => $hex,
                 'color_temp' => $kelvin,
+                'heating_setpoint' => $setpoint,
             ];
         }
         if ($id === '' || $name === '' || $actions === []) {
@@ -2294,6 +2360,18 @@ final class YarboHome
         }
 
         return $anyOn;
+    }
+
+    private static function optionalCelsius(mixed $value): ?float
+    {
+        if ($value === null || $value === '' || is_bool($value)) {
+            return null;
+        }
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        return round((float) $value, 1);
     }
 
     private function normalizeHex(string $value): ?string

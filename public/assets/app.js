@@ -2873,6 +2873,9 @@ function homeSceneStateForDevice(d, fallback) {
             : Number(d.brightness ?? (d.on ? 100 : 0)),
         hex: current.hex || d.color_hex || '#ffd27a',
         kelvin: current.kelvin || d.color_temp || 2700,
+        setpoint: current.setpoint !== undefined && current.setpoint !== null
+            ? Number(current.setpoint)
+            : (d.heating_setpoint != null ? Number(d.heating_setpoint) : 21),
     };
 }
 
@@ -2887,6 +2890,7 @@ function homeFillSceneDraftFromOn() {
             brightness: d.dimmable ? Number(d.brightness ?? 100) : null,
             hex: d.colorable ? (d.color_hex || '#ffd27a') : null,
             kelvin: d.color_ct && !d.colorable ? Number(d.color_temp || 2700) : null,
+            setpoint: d.kind === 'heater' ? Number(d.heating_setpoint ?? 21) : null,
         };
     });
     homeSceneDraft.included = included;
@@ -2904,6 +2908,7 @@ function homeLoadSceneDraft(scene) {
             brightness: action.brightness,
             hex: action.color_hex || null,
             kelvin: action.color_temp || null,
+            setpoint: action.heating_setpoint != null ? Number(action.heating_setpoint) : null,
         };
     });
     homeSceneDraft = {
@@ -2927,6 +2932,7 @@ function readHomeSceneDraftFromDom() {
             brightness: Number(row.querySelector('[data-scene-bright]')?.value ?? 100),
             hex: row.querySelector('[data-scene-color]')?.value || null,
             kelvin: Number(row.querySelector('[data-scene-kelvin]')?.value || 0) || null,
+            setpoint: Number(row.querySelector('[data-scene-setpoint]')?.value || 0) || null,
         };
     });
 }
@@ -2938,12 +2944,14 @@ function collectHomeSceneActions() {
         if (homeIsUnifi(d) || !homeSceneDraft.included[d.id]) return;
         const st = homeSceneStateForDevice(d);
         const on = Boolean(st.on);
+        const heater = String(d.kind || '') === 'heater';
         actions.push({
             id: d.id,
             on,
-            brightness: on && d.dimmable ? Number(st.brightness ?? 100) : null,
-            color_hex: on && d.colorable ? (st.hex || null) : null,
-            color_temp: on && d.color_ct && !d.colorable ? Number(st.kelvin || 0) || null : null,
+            brightness: on && d.dimmable && !heater ? Number(st.brightness ?? 100) : null,
+            color_hex: on && d.colorable && !heater ? (st.hex || null) : null,
+            color_temp: on && d.color_ct && !d.colorable && !heater ? Number(st.kelvin || 0) || null : null,
+            heating_setpoint: on && heater ? Number(st.setpoint || d.heating_setpoint || 21) : null,
         });
     });
     return actions;
@@ -3263,6 +3271,10 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
     card.classList.toggle('is-on', Boolean(on));
     const btn = card.querySelector('[data-home-toggle]');
     if (btn) btn.textContent = on ? 'Off' : 'On';
+    card.querySelectorAll('[data-home-power]').forEach((el) => {
+        const want = el.getAttribute('data-home-power') === 'on';
+        el.classList.toggle('is-active', Boolean(on) === want);
+    });
     card.querySelectorAll('[data-home-color], [data-home-kelvin]').forEach((el) => {
         el.disabled = !on;
     });
@@ -3288,6 +3300,21 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         if (device) device.color_temp = extras.color_temp;
         const kelvin = card.querySelector('[data-home-kelvin]');
         if (kelvin && document.activeElement !== kelvin) kelvin.value = String(extras.color_temp);
+    }
+    if (extras.local_temperature != null && extras.local_temperature !== '') {
+        const device = homeDeviceRecord(id);
+        if (device) device.local_temperature = extras.local_temperature;
+        const room = card.querySelector('[data-home-room-temp]');
+        if (room) {
+            room.textContent = `${Number(extras.local_temperature).toFixed(1)}°`;
+            room.classList.remove('is-empty');
+        }
+    }
+    if (extras.heating_setpoint != null && extras.heating_setpoint !== '') {
+        const device = homeDeviceRecord(id);
+        if (device) device.heating_setpoint = extras.heating_setpoint;
+        const set = card.querySelector('[data-home-setpoint]');
+        if (set && document.activeElement !== set) set.value = String(extras.heating_setpoint);
     }
     const dpsLabel = String(extras.dps_label || '').trim();
     if (dpsLabel || extras.dps != null || extras.open != null || extras.status) {
@@ -3348,6 +3375,8 @@ function patchHomeDashboard(data) {
             if (d.brightness != null) rec.brightness = d.brightness;
             if (d.color_hex) rec.color_hex = d.color_hex;
             if (d.color_temp != null) rec.color_temp = d.color_temp;
+            if (d.local_temperature != null) rec.local_temperature = d.local_temperature;
+            if (d.heating_setpoint != null) rec.heating_setpoint = d.heating_setpoint;
             if (d.dps_label) rec.dps_label = d.dps_label;
             if (d.dps != null) rec.dps = d.dps;
             if (d.open != null) rec.open = d.open;
@@ -3832,7 +3861,8 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const defaultName = d.default_name || d.name || '';
     const kindName = homeKindLabel(d);
     const kindChip = kindName ? `<span class="home-device-kind">${escapeHtml(kindName)}</span>` : '';
-    const canToggle = !hidden && homeDeviceCanToggle(d);
+    const heater = String(d.kind || '') === 'heater';
+    const canToggle = !hidden && homeDeviceCanToggle(d) && !heater;
     const toggleClass = canToggle ? ' home-device--toggle' : '';
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
@@ -3893,11 +3923,41 @@ function homeDeviceActionsHtml(d, bright, color) {
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
         </div>`;
     }
+    if (String(d.kind || '') === 'heater') {
+        return homeHeaterActionsHtml(d);
+    }
     const on = Boolean(d.on);
     return `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             ${bright}
             ${color}
+        </div>`;
+}
+
+function homeFormatTemp(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '';
+    return n.toFixed(1);
+}
+
+function homeHeaterActionsHtml(d) {
+    const on = Boolean(d.on);
+    const min = Number(d.heating_min ?? 5);
+    const max = Number(d.heating_max ?? 35);
+    const set = d.heating_setpoint != null && d.heating_setpoint !== ''
+        ? Number(d.heating_setpoint)
+        : 21;
+    const room = d.local_temperature != null && d.local_temperature !== ''
+        ? homeFormatTemp(d.local_temperature)
+        : '';
+    const roomHtml = room
+        ? `<span class="home-heater-room" data-home-room-temp title="Room temperature">${escapeHtml(room)}°</span>`
+        : `<span class="home-heater-room is-empty" data-home-room-temp title="Room temperature">—°</span>`;
+    return `<div class="home-device-actions home-device-actions--heater">
+            <button type="button" class="btn btn-secondary btn-compact${on ? ' is-active' : ''}" data-home-power="on">On</button>
+            <button type="button" class="btn btn-secondary btn-compact${on ? '' : ' is-active'}" data-home-power="off">Off</button>
+            ${roomHtml}
+            <label class="home-heater-set">Set <input type="number" class="home-heater-setpoint" min="${min}" max="${max}" step="0.5" value="${escapeHtml(String(set))}" data-home-setpoint="${escapeHtml(d.id)}" inputmode="decimal" aria-label="Heating setpoint">°</label>
         </div>`;
 }
 
@@ -3951,6 +4011,16 @@ function homeSceneMemberRowHtml(d) {
     const included = Boolean(homeSceneDraft.included[d.id]);
     const st = homeSceneStateForDevice(d);
     const on = Boolean(st.on);
+    if (String(d.kind || '') === 'heater') {
+        const min = Number(d.heating_min ?? 5);
+        const max = Number(d.heating_max ?? 35);
+        const set = st.setpoint != null ? Number(st.setpoint) : Number(d.heating_setpoint ?? 21);
+        return `<div class="home-scene-member${included ? ' is-in' : ''}${included && on ? ' is-on' : ''}" data-scene-member="${escapeHtml(d.id)}">
+        <label class="home-scene-member-pick"><input type="checkbox" data-scene-include ${included ? 'checked' : ''}> <span class="home-scene-member-name">${escapeHtml(d.name)}</span></label>
+        <label class="home-scene-on"><input type="checkbox" data-scene-on ${on ? 'checked' : ''} ${included ? '' : 'disabled'}> On</label>
+        <label class="home-heater-set">Set <input type="number" min="${min}" max="${max}" step="0.5" value="${escapeHtml(String(set))}" data-scene-setpoint ${included && on ? '' : 'disabled'} aria-label="Heating setpoint">°</label>
+    </div>`;
+    }
     const bright = d.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(st.brightness ?? 100)}" data-scene-bright ${included && on ? '' : 'disabled'}>`
         : '';
@@ -3973,7 +4043,7 @@ function homeSceneMemberRowHtml(d) {
 function renderHomeDashboard(data) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
-    const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new], [data-home-color], [data-home-kelvin]');
+    const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new], [data-home-color], [data-home-kelvin], [data-home-setpoint]');
     if (homeDrag) return;
     const card = document.getElementById('home-card');
     const devices = data.devices || [];
@@ -4150,12 +4220,12 @@ async function saveHomeGroupName(input) {
     }
 }
 
-async function sendHomeDeviceToggle(id, button) {
+async function sendHomeDeviceToggle(id, button, forceOn) {
     const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
     const device = homeDeviceRecord(id);
     if (!homeDeviceCanToggle(device || { id })) return;
     const currentlyOn = card?.classList.contains('is-on') || Boolean(device?.on);
-    const nextOn = !currentlyOn;
+    const nextOn = typeof forceOn === 'boolean' ? forceOn : !currentlyOn;
     setHomeDeviceOn(id, nextOn);
     if (button) button.disabled = true;
     try {
@@ -4171,6 +4241,34 @@ async function sendHomeDeviceToggle(id, button) {
         showToast(err.message || 'Home command failed', 'error');
     } finally {
         if (button) button.disabled = false;
+    }
+}
+
+async function sendHomeHeaterSetpoint(id, celsius, input) {
+    const device = homeDeviceRecord(id);
+    const previous = device?.heating_setpoint;
+    const currentlyOn = Boolean(device?.on);
+    if (device) device.heating_setpoint = celsius;
+    setHomeDeviceOn(id, true);
+    if (input) input.disabled = true;
+    try {
+        const data = await homeApi({
+            action: 'command',
+            id,
+            command: 'setpoint',
+            celsius,
+        }, 25000);
+        if (!data.ok) throw new Error(data.error || 'Failed');
+        if (data.heating_setpoint != null && device) device.heating_setpoint = data.heating_setpoint;
+        if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
+        if (input && data.heating_setpoint != null) input.value = String(data.heating_setpoint);
+    } catch (err) {
+        if (device) device.heating_setpoint = previous;
+        if (input && previous != null) input.value = String(previous);
+        setHomeDeviceOn(id, currentlyOn);
+        showToast(err.message || 'Could not set temperature', 'error');
+    } finally {
+        if (input) input.disabled = false;
     }
 }
 
@@ -4491,6 +4589,13 @@ function bindHomeDashboard() {
             await sendHomeDeviceToggle(btn.getAttribute('data-home-toggle') || '', btn);
             return;
         }
+        const power = event.target.closest('[data-home-power]');
+        if (power) {
+            const card = power.closest('[data-home-id]');
+            const id = card?.getAttribute('data-home-id') || '';
+            await sendHomeDeviceToggle(id, power, power.getAttribute('data-home-power') === 'on');
+            return;
+        }
         const row = event.target.closest('[data-home-id].home-device--toggle');
         if (!row || event.target.closest('button, input, select, a, .home-drag-handle, .home-reorder-controls, .home-device-manage')) {
             return;
@@ -4571,6 +4676,16 @@ function bindHomeDashboard() {
             } catch (err) {
                 showToast(err.message || 'Brightness failed', 'error');
             }
+            return;
+        }
+        const setpoint = event.target.closest('[data-home-setpoint]');
+        if (setpoint) {
+            const celsius = Number(setpoint.value);
+            if (!Number.isFinite(celsius) || celsius <= 0) {
+                showToast('Set a heating temperature', 'error');
+                return;
+            }
+            await sendHomeHeaterSetpoint(setpoint.getAttribute('data-home-setpoint') || '', celsius, setpoint);
             return;
         }
         const color = event.target.closest('[data-home-color]');

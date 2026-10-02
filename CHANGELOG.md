@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.36] - 2026-10-02
+
+### Fixed
+- Home **heaters** (Mill Wi-Fi Panel Heater Gen4 and other Matter thermostats) no longer send OnOff, which returned **UnsupportedCluster (0xc3)**. On/Off now uses Thermostat **SystemMode** (Heat/Off), with OnOff only as a fallback.
+
+### Added
+- Heater tiles show **On** and **Off**, the **room temperature** from the built-in thermometer, and a **set** temperature (°C). Scenes can store that setpoint instead of brightness or colour.
+
 ## [4.0.35] - 2026-10-02
 
 ### Fixed

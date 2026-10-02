@@ -54,6 +54,9 @@ assert_true(YarboHome::deviceAcceptsCommand('unifi:hub:door1', 'unlock'), 'Acces
 assert_true(YarboHome::deviceAcceptsCommand('unifi:light:porch', 'on'), 'UniFi light must accept on');
 assert_true(YarboHome::deviceAcceptsCommand('1:2', 'on', 'light'), 'Matter light must accept on');
 assert_true(YarboHome::deviceAcceptsCommand('1:9', 'on', 'heater'), 'heater must accept on');
+assert_true(YarboHome::deviceAcceptsCommand('1:9', 'off', 'heater'), 'heater must accept off');
+assert_true(YarboHome::deviceAcceptsCommand('1:9', 'setpoint', 'heater'), 'heater must accept setpoint');
+assert_true(!YarboHome::deviceAcceptsCommand('1:9', 'color', 'heater'), 'heater must not accept colour');
 assert_true(!YarboHome::deviceAcceptsCommand('9:1', 'on', 'sensor'), 'Matter sensor must not accept on');
 
 $filtered = $home->filterCommandIds(['unifi:sensor:s1', 'unifi:light:porch', '1:2', 'unifi:hub:door1'], 'on');
@@ -551,7 +554,9 @@ assert_true(!YarboHomeAutomations::pidIsRunning(2147483647), 'missing pid is not
 assert_true($auto->acquireRunnerLock(), 'runner lock can be taken');
 $auto->kickRunner();
 assert_true(!is_file($auto->pidPath()) || (int) trim((string) file_get_contents($auto->pidPath())) === getmypid(), 'kickRunner must not spawn when scripts/ is missing');
-assert_true(str_contains($js, 'autoPageOpen'), 'automations page keeps polling');
+assert_true(str_contains($js, 'homeHeaterActionsHtml'), 'heater On/Off and setpoint controls');
+assert_true(str_contains($js, 'data-home-setpoint'), 'heater setpoint input');
+assert_true(str_contains($js, 'data-home-room-temp'), 'heater room temperature');
 assert_true(str_contains($js, 'Last ran stays empty'), 'stale runner copy');
 assert_true(str_contains($js, 'Runner is active'), 'active runner copy');
 assert_true(str_contains($js, 'Not run yet.'), 'not-run-yet copy');
@@ -559,6 +564,6 @@ assert_true(str_contains($index, 'data-panel-version'), 'panel version on the pa
 $matterPhp = (string) file_get_contents(__DIR__ . '/../src/YarboMatterAgentClient.php');
 assert_true(str_contains($matterPhp, 'function portOpen'), 'Matter client checks the listening port');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
-assert_true(str_contains($change, '## [4.0.35]'), 'changelog 4.0.35');
+assert_true(str_contains($change, '## [4.0.36]'), 'changelog 4.0.36');
 
 echo "test_home_automations.php ok\n";

@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 15
+AGENT_VERSION = 16
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
@@ -53,6 +53,7 @@ ON_OFF = 6
 LEVEL_CONTROL = 8
 COLOR_CONTROL = 0x0300
 THERMOSTAT = 0x0201
+TEMP_MEASUREMENT = 0x0402
 RVC_RUN = 0x0054
 RVC_CLEAN = 0x0055
 RVC_OPERATIONAL = 0x0061
@@ -80,6 +81,16 @@ ATTR_VENDOR_NAME = 1
 ATTR_PRODUCT_NAME = 3
 ATTR_NODE_LABEL = 5
 ATTR_FEATURE_MAP = 0xFFFC
+ATTR_LOCAL_TEMPERATURE = 0
+ATTR_ABS_MIN_HEAT_SETPOINT = 3
+ATTR_ABS_MAX_HEAT_SETPOINT = 4
+ATTR_OCCUPIED_HEATING_SETPOINT = 0x0012
+ATTR_MIN_HEAT_SETPOINT = 0x0015
+ATTR_MAX_HEAT_SETPOINT = 0x0016
+ATTR_SYSTEM_MODE = 0x001C
+ATTR_MEASURED_TEMP = 0
+SYSTEM_MODE_OFF = 0
+SYSTEM_MODE_HEAT = 4
 DEVTYPE_AGGREGATOR = 0x000E
 DEVTYPE_BRIDGED_NODE = 0x0013
 DEVTYPE_ONOFF_LIGHT = 0x0100
@@ -1806,6 +1817,17 @@ def apply_attribute_event(data: Any) -> None:
     fields: dict[str, Any] = {}
     if cluster == ON_OFF and attr == ATTR_ON_OFF:
         fields["on"] = attr_bool(value)
+    elif cluster == THERMOSTAT and attr == ATTR_LOCAL_TEMPERATURE:
+        fields["local_temperature"] = matter_celsius(value)
+    elif cluster == THERMOSTAT and attr == ATTR_OCCUPIED_HEATING_SETPOINT:
+        fields["heating_setpoint"] = matter_celsius(value)
+    elif cluster == THERMOSTAT and attr == ATTR_SYSTEM_MODE:
+        on_mode = system_mode_is_on(value)
+        if on_mode is not None:
+            fields["on"] = on_mode
+            fields["system_mode"] = int(event_number(value) or 0)
+    elif cluster == TEMP_MEASUREMENT and attr == ATTR_MEASURED_TEMP:
+        fields["local_temperature"] = matter_celsius(value)
     elif cluster == LEVEL_CONTROL and attr == ATTR_CURRENT_LEVEL:
         level = event_number(value)
         if level is None:
@@ -2409,6 +2431,112 @@ def endpoint_looks_heater(attributes: dict[str, Any], endpoint: int) -> bool:
     return endpoint_has_cluster(attributes, endpoint, THERMOSTAT)
 
 
+def matter_celsius(raw: Any) -> float | None:
+    number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
+    if number is None:
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            return None
+    n = int(round(number))
+    if n in (0x8000, -32768):
+        return None
+    if n < -27315 or n > 32767:
+        return None
+    return round(n / 100.0, 1)
+
+
+def system_mode_is_on(raw: Any) -> bool | None:
+    number = event_number(raw)
+    if number is None:
+        try:
+            number = int(raw)
+        except (TypeError, ValueError):
+            return None
+    return int(number) not in (SYSTEM_MODE_OFF, 7)
+
+
+def thermostat_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
+    has_thermo = endpoint_has_cluster(attributes, endpoint, THERMOSTAT)
+    local = matter_celsius(attr_raw(attributes, endpoint, THERMOSTAT, ATTR_LOCAL_TEMPERATURE))
+    if local is None:
+        local = matter_celsius(attr_raw(attributes, endpoint, TEMP_MEASUREMENT, ATTR_MEASURED_TEMP))
+    setpoint = matter_celsius(attr_raw(attributes, endpoint, THERMOSTAT, ATTR_OCCUPIED_HEATING_SETPOINT))
+    heat_min = matter_celsius(attr_raw(attributes, endpoint, THERMOSTAT, ATTR_MIN_HEAT_SETPOINT))
+    if heat_min is None:
+        heat_min = matter_celsius(attr_raw(attributes, endpoint, THERMOSTAT, ATTR_ABS_MIN_HEAT_SETPOINT))
+    heat_max = matter_celsius(attr_raw(attributes, endpoint, THERMOSTAT, ATTR_MAX_HEAT_SETPOINT))
+    if heat_max is None:
+        heat_max = matter_celsius(attr_raw(attributes, endpoint, THERMOSTAT, ATTR_ABS_MAX_HEAT_SETPOINT))
+    mode = attr_raw(attributes, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE)
+    on_from_mode = system_mode_is_on(mode) if mode is not None else None
+    return {
+        "has_thermostat": has_thermo or local is not None or setpoint is not None,
+        "local_temperature": local,
+        "heating_setpoint": setpoint,
+        "heating_min": heat_min if heat_min is not None else (5.0 if has_thermo or setpoint is not None else None),
+        "heating_max": heat_max if heat_max is not None else (35.0 if has_thermo or setpoint is not None else None),
+        "system_mode": int(mode) if isinstance(mode, (int, float)) else None,
+        "thermostat_on": on_from_mode,
+    }
+
+
+def write_attribute(node_id: int, endpoint: int, cluster: int, attr: int, value: Any) -> dict[str, Any]:
+    def send() -> dict[str, Any]:
+        rpc = matter_rpc(
+            "write_attribute",
+            {
+                "node_id": node_id,
+                "attribute_path": f"{endpoint}/{cluster}/{attr}",
+                "value": value,
+            },
+            timeout=12.0,
+        )
+        return rpc if not rpc.get("ok") else {"ok": True}
+
+    return command_with_reconnect(node_id, send)
+
+
+def is_unsupported_cluster(result: dict[str, Any]) -> bool:
+    err = str(result.get("error") or "").lower().replace(" ", "")
+    return "unsupportedcluster" in err or "0xc3" in err
+
+
+def live_kind(device_id: str) -> str:
+    row = next((item for item in current_live_devices() if str(item.get("id") or "") == device_id), None)
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("kind") or "")
+
+
+def set_heater_power(node_id: int, endpoint: int, on: bool) -> dict[str, Any]:
+    mode = SYSTEM_MODE_HEAT if on else SYSTEM_MODE_OFF
+    thermo = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, mode)
+    if thermo.get("ok"):
+        return {"ok": True, "on": on, "system_mode": mode}
+    if is_transport_error(thermo) and not is_unsupported_cluster(thermo):
+        return thermo
+    name = "On" if on else "Off"
+    onoff = device_command(node_id, endpoint, ON_OFF, name, {})
+    if onoff.get("ok"):
+        return {"ok": True, "on": on}
+    if is_unsupported_cluster(onoff) and not thermo.get("ok"):
+        return {"ok": False, "error": str(thermo.get("error") or onoff.get("error") or "Heater command failed")}
+    return onoff if not thermo.get("ok") else thermo
+
+
+def set_heater_setpoint(node_id: int, endpoint: int, celsius: float) -> dict[str, Any]:
+    celsius = max(5.0, min(35.0, float(celsius)))
+    hundredths = int(round(celsius * 100))
+    rpc = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_OCCUPIED_HEATING_SETPOINT, hundredths)
+    if not rpc.get("ok"):
+        return rpc
+    power = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_HEAT)
+    if not power.get("ok") and not is_unsupported_cluster(power) and is_transport_error(power):
+        return power
+    return {"ok": True, "on": True, "heating_setpoint": round(celsius, 1)}
+
+
 def endpoint_looks_vacuum(attributes: dict[str, Any], endpoint: int) -> bool:
     return (
         endpoint_has_cluster(attributes, endpoint, RVC_RUN)
@@ -2442,6 +2570,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
         node_name = attr_str(attributes, 0, BASIC_INFO, ATTR_NODE_LABEL)
         source = node_name or product or vendor or f"Matter node {node_id}"
         ep_ids = endpoint_ids(attributes)
+        node_has_thermo = any(ep != 0 and endpoint_looks_heater(attributes, ep) for ep in ep_ids)
         before = len(devices)
         for endpoint in sorted(ep_ids):
             if endpoint == 0:
@@ -2464,10 +2593,24 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 ):
                     continue
                 kind = fallback_kind(attributes, endpoint)
+            if kind == "heater" and node_has_thermo and not endpoint_looks_heater(attributes, endpoint):
+                continue
             has_on_off = on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF)
             if not has_on_off and kind not in ("heater", "vacuum"):
                 continue
             is_light = kind == "light"
+            thermo = thermostat_payload(attributes, endpoint) if kind == "heater" else {
+                "has_thermostat": False,
+                "local_temperature": None,
+                "heating_setpoint": None,
+                "heating_min": None,
+                "heating_max": None,
+                "system_mode": None,
+                "thermostat_on": None,
+            }
+            on = attr_bool(on_val)
+            if thermo.get("thermostat_on") is not None:
+                on = bool(thermo["thermostat_on"])
             level = attr_num(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) if is_light else None
             brightness = None
             if level is not None and level >= 0:
@@ -2490,12 +2633,13 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "product": product,
                     "source": source,
                     "bridge": is_bridge or len(ep_ids) > 3,
-                    "on": attr_bool(on_val),
+                    "on": on,
                     "brightness": brightness,
                     "dimmable": is_light
                     and attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
                     "available": available,
                     **color,
+                    **({k: v for k, v in thermo.items() if k != "thermostat_on"} if kind == "heater" else {}),
                 }
             )
         if len(devices) == before and node_id > 0 and attributes:
@@ -2539,7 +2683,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "ok": True,
             "engine": "matter-agent",
             "version": AGENT_VERSION,
-            "features": ["color", "color_temp"],
+            "features": ["color", "color_temp", "thermostat"],
         }
     if op == "status":
         probe = socket.socket()
@@ -2573,8 +2717,19 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 device_id = str(row.get("id") or "")
                 if device_id in by_id and "on" in by_id[device_id]:
                     row["on"] = attr_bool(by_id[device_id].get("on"))
-                    if "brightness" in by_id[device_id]:
-                        row["brightness"] = by_id[device_id].get("brightness")
+                    live_row = by_id[device_id]
+                    if "brightness" in live_row:
+                        row["brightness"] = live_row.get("brightness")
+                    for key in (
+                        "local_temperature",
+                        "heating_setpoint",
+                        "heating_min",
+                        "heating_max",
+                        "has_thermostat",
+                        "system_mode",
+                    ):
+                        if key in live_row:
+                            row[key] = live_row.get(key)
         return {
             "ok": True,
             "devices": devices,
@@ -2632,23 +2787,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         action = str(body.get("action") or body.get("command") or "").strip().lower()
         if action in ("on", "off", "toggle"):
             name = {"on": "On", "off": "Off", "toggle": "Toggle"}[action]
-
-            def send_onoff() -> dict[str, Any]:
-                return matter_rpc(
-                    "device_command",
-                    {
-                        "node_id": node_id,
-                        "endpoint_id": endpoint,
-                        "cluster_id": ON_OFF,
-                        "command_name": name,
-                        "payload": {},
-                    },
-                    timeout=12.0,
-                )
-
-            rpc = command_with_reconnect(node_id, send_onoff)
-            if not rpc.get("ok"):
-                return rpc
+            heater = live_kind(device_id) == "heater"
             on: bool | None
             if action == "on":
                 on = True
@@ -2659,13 +2798,54 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     (row for row in current_live_devices() if str(row.get("id") or "") == device_id),
                     None,
                 )
-                on = (not attr_bool(current.get("on"))) if current is not None else None
+                on = (not attr_bool(current.get("on"))) if current is not None else True
+            if heater:
+                rpc = set_heater_power(node_id, endpoint, bool(on))
+            else:
+
+                def send_onoff() -> dict[str, Any]:
+                    return matter_rpc(
+                        "device_command",
+                        {
+                            "node_id": node_id,
+                            "endpoint_id": endpoint,
+                            "cluster_id": ON_OFF,
+                            "command_name": name if action != "toggle" else ("On" if on else "Off"),
+                            "payload": {},
+                        },
+                        timeout=12.0,
+                    )
+
+                rpc = command_with_reconnect(node_id, send_onoff)
+                if not rpc.get("ok") and is_unsupported_cluster(rpc):
+                    rpc = set_heater_power(node_id, endpoint, bool(on))
+            if not rpc.get("ok"):
+                return rpc
             if on is not None:
-                patch_live_device(device_id, {"on": on}, sticky=True)
+                patch = {"on": bool(rpc.get("on", on))}
+                if rpc.get("system_mode") is not None:
+                    patch["system_mode"] = rpc["system_mode"]
+                patch_live_device(device_id, patch, sticky=True)
             out: dict[str, Any] = {"ok": True, "id": device_id}
             if on is not None:
-                out["on"] = on
+                out["on"] = bool(rpc.get("on", on))
             return out
+        if action in ("setpoint", "temperature", "heating_setpoint"):
+            try:
+                celsius = float(body.get("celsius") or body.get("setpoint") or body.get("temperature") or 0)
+            except (TypeError, ValueError):
+                celsius = 0.0
+            if celsius <= 0:
+                return {"ok": False, "error": "Set a heating temperature"}
+            rpc = set_heater_setpoint(node_id, endpoint, celsius)
+            if rpc.get("ok"):
+                patch_live_device(
+                    device_id,
+                    {"on": True, "heating_setpoint": rpc.get("heating_setpoint")},
+                    sticky=True,
+                )
+                rpc = {**rpc, "id": device_id}
+            return rpc
         if action == "brightness":
             pct = max(0, min(100, int(body.get("brightness") or 0)))
             level = int(round(pct * 254 / 100))

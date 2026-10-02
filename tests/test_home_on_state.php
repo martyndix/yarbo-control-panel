@@ -81,6 +81,13 @@ $keepHex = YarboHome::overlayDeviceStates(
     [['id' => '1:2', 'on' => true, 'color_hex' => '']]
 );
 assert_true(($keepHex[0]['color_hex'] ?? '') === '#112233', 'empty live colour must not wipe the tile');
+$heaterLive = YarboHome::overlayDeviceStates(
+    [['id' => '25:1', 'name' => 'Heater', 'kind' => 'heater', 'on' => false, 'local_temperature' => 18.0, 'heating_setpoint' => 20.0]],
+    [['id' => '25:1', 'on' => true, 'local_temperature' => 21.4, 'heating_setpoint' => 22.0, 'has_thermostat' => true]]
+);
+assert_true(($heaterLive[0]['on'] ?? false) === true, 'overlay must copy heater on');
+assert_true(($heaterLive[0]['local_temperature'] ?? 0) === 21.4, 'overlay must copy room temp');
+assert_true(($heaterLive[0]['heating_setpoint'] ?? 0) === 22.0, 'overlay must copy setpoint');
 
 $root = sys_get_temp_dir() . '/yarbo-home-on-' . bin2hex(random_bytes(3));
 mkdir($root . '/data/matter-server', 0775, true);
@@ -234,7 +241,10 @@ file_put_contents($millFabric, json_encode(['nodes' => ['25' => [
         '0/40/1' => 'Mill',
         '0/40/3' => 'Mill Wi-Fi Panel Heater Gen4',
         '1/29/0' => [['deviceType' => 0x0100, 'revision' => 1]],
-        '1/6/0' => true,
+        '1/513/0' => 2140,
+        '1/513/18' => 2100,
+        '1/513/28' => 0,
+        '1/1026/0' => 2140,
     ],
 ]]], JSON_UNESCAPED_SLASHES));
 $millHome = new YarboHome($millRoot);
@@ -242,6 +252,9 @@ $millDash = $millHome->dashboard();
 $millRow = $millDash['devices'][0] ?? [];
 assert_true(($millRow['kind'] ?? '') === 'heater', 'mill panel heater must not stay a light ' . json_encode($millRow));
 assert_true(empty($millRow['colorable']) && empty($millRow['dimmable']), 'mill heater must not show colour or brightness');
+assert_true(($millRow['on'] ?? true) === false, 'mill SystemMode Off must show as off');
+assert_true(($millRow['local_temperature'] ?? null) === 21.4, 'mill must show room temperature ' . json_encode($millRow));
+assert_true(($millRow['heating_setpoint'] ?? null) === 21.0, 'mill must show heating setpoint ' . json_encode($millRow));
 
 $millMtime = (int) filemtime($millFabric);
 file_put_contents($millRoot . '/data/home-nodes-cache.json', json_encode([

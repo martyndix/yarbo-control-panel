@@ -13,6 +13,7 @@ final class YarboMatterFabric
     private const LEVEL_CONTROL = 8;
     private const COLOR_CONTROL = 0x0300;
     private const THERMOSTAT = 0x0201;
+    private const TEMP_MEASUREMENT = 0x0402;
     private const RVC_RUN = 0x0054;
     private const RVC_CLEAN = 0x0055;
     private const RVC_OPERATIONAL = 0x0061;
@@ -28,6 +29,16 @@ final class YarboMatterFabric
     private const ATTR_VENDOR_NAME = 1;
     private const ATTR_PRODUCT_NAME = 3;
     private const ATTR_NODE_LABEL = 5;
+    private const ATTR_LOCAL_TEMPERATURE = 0;
+    private const ATTR_ABS_MIN_HEAT_SETPOINT = 3;
+    private const ATTR_ABS_MAX_HEAT_SETPOINT = 4;
+    private const ATTR_OCCUPIED_HEATING_SETPOINT = 0x0012;
+    private const ATTR_MIN_HEAT_SETPOINT = 0x0015;
+    private const ATTR_MAX_HEAT_SETPOINT = 0x0016;
+    private const ATTR_SYSTEM_MODE = 0x001C;
+    private const ATTR_MEASURED_TEMP = 0;
+    private const SYSTEM_MODE_OFF = 0;
+    private const SYSTEM_MODE_FAN = 7;
     private const DEVTYPE_AGGREGATOR = 0x000E;
     private const DEVTYPE_ONOFF_LIGHT = 0x0100;
     private const DEVTYPE_DIMMABLE_LIGHT = 0x0101;
@@ -211,6 +222,13 @@ final class YarboMatterFabric
             $before = count($devices);
             $sorted = $epIds;
             sort($sorted, SORT_NUMERIC);
+            $nodeHasThermo = false;
+            foreach ($sorted as $ep) {
+                if ($ep !== 0 && self::endpointLooksHeater($attributes, $ep)) {
+                    $nodeHasThermo = true;
+                    break;
+                }
+            }
             foreach ($sorted as $endpoint) {
                 if ($endpoint === 0) {
                     continue;
@@ -233,6 +251,9 @@ final class YarboMatterFabric
                     }
                     $kind = self::fallbackKind($attributes, $endpoint);
                 }
+                if ($kind === 'heater' && $nodeHasThermo && !self::endpointLooksHeater($attributes, $endpoint)) {
+                    continue;
+                }
                 $hasOnOff = $onVal !== null || self::endpointHasCluster($attributes, $endpoint, self::ON_OFF);
                 if (!$hasOnOff && $kind !== 'heater' && $kind !== 'vacuum') {
                     continue;
@@ -243,6 +264,12 @@ final class YarboMatterFabric
                 if ($level !== null && $level >= 0) {
                     $brightness = (int) round($level * 100 / 254);
                 }
+                $thermo = $kind === 'heater' ? self::thermostatPayload($attributes, $endpoint) : [];
+                $on = self::attrBool($onVal);
+                if (array_key_exists('thermostat_on', $thermo) && $thermo['thermostat_on'] !== null) {
+                    $on = (bool) $thermo['thermostat_on'];
+                }
+                unset($thermo['thermostat_on']);
                 $devices[] = [
                     'id' => $nodeId . ':' . $endpoint,
                     'node_id' => $nodeId,
@@ -253,7 +280,7 @@ final class YarboMatterFabric
                     'product' => $product,
                     'source' => $source,
                     'bridge' => $isBridge || count($epIds) > 3,
-                    'on' => self::attrBool($onVal),
+                    'on' => $on,
                     'brightness' => $brightness,
                     'dimmable' => $isLight && self::attrRaw($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) !== null,
                     'available' => $available,
@@ -265,7 +292,7 @@ final class YarboMatterFabric
                         'color_xy' => false,
                         'color_ct' => false,
                         'color_hex' => '',
-                    ]);
+                    ]) + $thermo;
             }
             if (count($devices) === $before && $nodeId > 0 && $attributes !== []) {
                 $stubKind = self::classifyByName('light', $source, $vendor, $product);
@@ -438,7 +465,7 @@ final class YarboMatterFabric
     }
 
     /**
-     * Mill panel heaters (and similar) often advertise as On/Off lights with no Thermostat cluster.
+     * Mill panel heaters (and similar) often advertise as On/Off lights. Prefer the Thermostat cluster when it is present.
      */
     public static function nameLooksHeater(string $text): bool
     {
@@ -520,6 +547,90 @@ final class YarboMatterFabric
         }
 
         return 'switch';
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array<string, mixed>
+     */
+    private static function thermostatPayload(array $attributes, int $endpoint): array
+    {
+        $hasThermo = self::endpointHasCluster($attributes, $endpoint, self::THERMOSTAT);
+        $local = self::matterCelsius(self::attrRaw($attributes, $endpoint, self::THERMOSTAT, self::ATTR_LOCAL_TEMPERATURE));
+        if ($local === null) {
+            $local = self::matterCelsius(self::attrRaw($attributes, $endpoint, self::TEMP_MEASUREMENT, self::ATTR_MEASURED_TEMP));
+        }
+        $setpoint = self::matterCelsius(self::attrRaw($attributes, $endpoint, self::THERMOSTAT, self::ATTR_OCCUPIED_HEATING_SETPOINT));
+        $heatMin = self::matterCelsius(self::attrRaw($attributes, $endpoint, self::THERMOSTAT, self::ATTR_MIN_HEAT_SETPOINT));
+        if ($heatMin === null) {
+            $heatMin = self::matterCelsius(self::attrRaw($attributes, $endpoint, self::THERMOSTAT, self::ATTR_ABS_MIN_HEAT_SETPOINT));
+        }
+        $heatMax = self::matterCelsius(self::attrRaw($attributes, $endpoint, self::THERMOSTAT, self::ATTR_MAX_HEAT_SETPOINT));
+        if ($heatMax === null) {
+            $heatMax = self::matterCelsius(self::attrRaw($attributes, $endpoint, self::THERMOSTAT, self::ATTR_ABS_MAX_HEAT_SETPOINT));
+        }
+        $mode = self::attrRaw($attributes, $endpoint, self::THERMOSTAT, self::ATTR_SYSTEM_MODE);
+        $onFromMode = $mode !== null ? self::systemModeIsOn($mode) : null;
+        $showLimits = $hasThermo || $setpoint !== null;
+
+        return [
+            'has_thermostat' => $hasThermo || $local !== null || $setpoint !== null,
+            'local_temperature' => $local,
+            'heating_setpoint' => $setpoint,
+            'heating_min' => $heatMin ?? ($showLimits ? 5.0 : null),
+            'heating_max' => $heatMax ?? ($showLimits ? 35.0 : null),
+            'system_mode' => is_int($mode) || is_float($mode) ? (int) $mode : null,
+            'thermostat_on' => $onFromMode,
+        ];
+    }
+
+    private static function matterCelsius(mixed $raw): ?float
+    {
+        $number = null;
+        if (is_int($raw) || is_float($raw)) {
+            $number = (float) $raw;
+        } elseif (is_string($raw) && is_numeric($raw)) {
+            $number = (float) $raw;
+        } elseif (is_array($raw)) {
+            $inner = $raw['value'] ?? $raw['0'] ?? $raw[0] ?? null;
+            if (is_int($inner) || is_float($inner)) {
+                $number = (float) $inner;
+            } elseif (is_string($inner) && is_numeric($inner)) {
+                $number = (float) $inner;
+            }
+        }
+        if ($number === null) {
+            return null;
+        }
+        $n = (int) round($number);
+        if ($n === 0x8000 || $n === -32768) {
+            return null;
+        }
+        if ($n < -27315 || $n > 32767) {
+            return null;
+        }
+
+        return round($n / 100.0, 1);
+    }
+
+    private static function systemModeIsOn(mixed $raw): ?bool
+    {
+        $number = null;
+        if (is_int($raw) || is_float($raw)) {
+            $number = (int) $raw;
+        } elseif (is_string($raw) && is_numeric($raw)) {
+            $number = (int) $raw;
+        } elseif (is_array($raw)) {
+            $inner = $raw['value'] ?? $raw['0'] ?? $raw[0] ?? null;
+            if (is_int($inner) || is_float($inner) || (is_string($inner) && is_numeric($inner))) {
+                $number = (int) $inner;
+            }
+        }
+        if ($number === null) {
+            return null;
+        }
+
+        return $number !== self::SYSTEM_MODE_OFF && $number !== self::SYSTEM_MODE_FAN;
     }
 
     /**
