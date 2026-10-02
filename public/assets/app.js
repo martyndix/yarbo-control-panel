@@ -2625,21 +2625,24 @@ function unifiSnapSrc(d, bust) {
     return bust ? `${base}&r=${unifiSnapGen}` : base;
 }
 
-function unifiDoorIsOpen(d) {
+function unifiDoorHasPosition(d) {
     if (!d || typeof d !== 'object') return false;
+    if (d.has_dps) return true;
+    const label = String(d.dps_label || '').trim();
+    if (/^(Open|Closed)$/i.test(label)) return true;
+    const dps = String(d.dps || '').toLowerCase();
+    return dps === 'open' || dps === 'opened' || dps === 'close' || dps === 'closed';
+}
+
+function unifiDoorIsOpen(d) {
+    if (!unifiDoorHasPosition(d)) return false;
     if (d.open === true) return true;
     if (d.open === false) return false;
     const label = String(d.dps_label || '').trim();
     if (/^Open$/i.test(label)) return true;
     if (/^Closed$/i.test(label)) return false;
     const dps = String(d.dps || '').toLowerCase();
-    if (dps === 'open' || dps === 'opened') return true;
-    if (dps === 'close' || dps === 'closed') return false;
-    return /(^|[·\s])Open(\s|$)/i.test(String(d.status || ''));
-}
-
-function unifiDoorLockCommand(d) {
-    return unifiDoorIsOpen(d) ? 'lock' : 'unlock';
+    return dps === 'open' || dps === 'opened';
 }
 
 function unifiDoorLockLabel(d) {
@@ -2647,29 +2650,26 @@ function unifiDoorLockLabel(d) {
 }
 
 function unifiDoorLockButtonHtml(d, { home = false } = {}) {
-    const cmd = unifiDoorLockCommand(d);
     const label = unifiDoorLockLabel(d);
     if (home) {
-        return `<button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="${cmd}">${escapeHtml(label)}</button>`;
+        return `<button type="button" class="btn btn-secondary btn-compact" data-home-unifi-unlock>${escapeHtml(label)}</button>`;
     }
-    return `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="${cmd}">${escapeHtml(label)}</button>`;
+    return `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="unlock">${escapeHtml(label)}</button>`;
 }
 
 function patchUnifiDoorLockButton(root, d) {
     if (!root) return;
     const btn = root.querySelector('[data-unifi-cmd="unlock"], [data-unifi-cmd="lock"], [data-home-unifi-cmd="unlock"], [data-home-unifi-cmd="lock"], [data-home-unifi-unlock]');
     if (!btn) return;
-    const cmd = unifiDoorLockCommand(d);
     btn.textContent = unifiDoorLockLabel(d);
-    if (btn.hasAttribute('data-unifi-cmd')) btn.setAttribute('data-unifi-cmd', cmd);
-    if (btn.hasAttribute('data-home-unifi-cmd') || btn.hasAttribute('data-home-unifi-unlock')) {
-        btn.setAttribute('data-home-unifi-cmd', cmd);
+    if (btn.hasAttribute('data-unifi-cmd')) btn.setAttribute('data-unifi-cmd', 'unlock');
+    if (btn.hasAttribute('data-home-unifi-cmd') && !['open', 'close', 'stop'].includes(String(btn.getAttribute('data-home-unifi-cmd') || ''))) {
+        btn.setAttribute('data-home-unifi-cmd', 'unlock');
     }
 }
 
 function unifiDoorCommandToast(cmd) {
-    if (cmd === 'lock') return 'Lock sent';
-    if (cmd === 'unlock') return 'Unlock sent';
+    if (cmd === 'unlock' || cmd === 'lock') return 'Unlock sent';
     return `${cmd} sent`;
 }
 
@@ -4454,7 +4454,7 @@ function bindHomeDashboard() {
                 const data = await homeApi({
                     action: 'command',
                     id,
-                    command: cmd,
+                    command: (cmd === 'lock' ? 'unlock' : cmd),
                     control_cmd: (cmd === 'unlock' || cmd === 'lock') ? '' : cmd,
                 });
                 if (!data.ok) throw new Error(data.error || 'Failed');
@@ -9054,7 +9054,7 @@ document.getElementById('unifi-card')?.addEventListener('click', async (event) =
         const cmd = doorBtn.getAttribute('data-unifi-cmd') || 'unlock';
         doorBtn.disabled = true;
         try {
-            const data = await unifiApi({ action: 'command', id, command: cmd, control_cmd: (cmd === 'unlock' || cmd === 'lock') ? '' : cmd });
+            const data = await unifiApi({ action: 'command', id, command: (cmd === 'lock' ? 'unlock' : cmd), control_cmd: (cmd === 'unlock' || cmd === 'lock') ? '' : cmd });
             if (!data.ok) throw new Error(data.error || 'Failed');
             showToast(unifiDoorCommandToast(cmd), 'success');
             await loadUnifiDashboard({ silent: true });

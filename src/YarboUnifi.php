@@ -786,19 +786,16 @@ final class YarboUnifi
                 $doorId = $linked;
             }
             $cmd = strtolower(trim((string) ($input['control_cmd'] ?? '')));
-            if ($action === 'lock' || $action === 'off') {
-                return $this->lockDoor($doorId);
-            }
             if (in_array($action, ['open', 'close', 'stop'], true)) {
                 return $this->unlockDoor($doorId, $action);
             }
-            if ($action === 'unlock' || $action === 'on' || $action === '') {
+            if ($action === 'unlock' || $action === 'lock' || $action === 'on' || $action === 'off' || $action === '') {
                 $gate = in_array($cmd, ['open', 'close', 'stop'], true) ? $cmd : null;
 
                 return $this->unlockDoor($doorId, $gate);
             }
 
-            return ['ok' => false, 'error' => 'Doors lock and unlock; they are not Matter toggles'];
+            return ['ok' => false, 'error' => 'Doors unlock; they are not Matter toggles'];
         }
 
         return ['ok' => false, 'error' => 'That UniFi device is read-only on Home'];
@@ -1257,71 +1254,6 @@ final class YarboUnifi
         return $last;
     }
 
-    /**
-     * End a remote unlock / unlock hold so the strike locks again.
-     * Access has no PUT /lock; this is lock_rule lock_now, then lock_early.
-     *
-     * @return array<string, mixed>
-     */
-    public function lockDoor(string $id): array
-    {
-        $config = $this->load();
-        if ($config['access_token'] === '') {
-            return ['ok' => false, 'error' => 'Add an Access API token first'];
-        }
-        $path = self::lockPath($id);
-        $last = ['ok' => false, 'error' => 'Access lock failed'];
-        foreach ($this->accessAttempts($config, $path) as $attempt) {
-            $url = (string) $attempt['url'];
-            $headers = $attempt['headers'];
-            foreach (['lock_now', 'lock_early'] as $type) {
-                $body = json_encode(['type' => $type], JSON_THROW_ON_ERROR);
-                $res = $this->request('PUT', $url, $headers, $body, 8.0, false);
-                if ($res['status'] === 404 || $res['status'] === 405) {
-                    $res = $this->request('POST', $url, $headers, $body, 8.0, false);
-                }
-                if ($res['status'] < 200 || $res['status'] >= 300) {
-                    $last = ['ok' => false, 'error' => $res['error'] ?? ('Access lock HTTP ' . $res['status'])];
-                    if ($this->accessLockTypeRejected($res)) {
-                        continue;
-                    }
-                    break;
-                }
-                $decoded = $this->decodeJson($res['body']);
-                if (is_array($decoded) && isset($decoded['code']) && strtoupper((string) $decoded['code']) !== 'SUCCESS') {
-                    $last = ['ok' => false, 'error' => (string) ($decoded['msg'] ?? $decoded['message'] ?? 'Access lock failed')];
-                    if ($this->accessLockTypeRejected($res, $decoded)) {
-                        continue;
-                    }
-                    break;
-                }
-                $this->rememberAccessAttempt($config, $attempt);
-
-                return ['ok' => true, 'on' => false, 'unlocked' => false, 'locked' => true];
-            }
-        }
-
-        return $last;
-    }
-
-    /**
-     * @param array<string, mixed> $res
-     * @param array<string, mixed>|null $decoded
-     */
-    private function accessLockTypeRejected(array $res, ?array $decoded = null): bool
-    {
-        $hint = strtolower((string) ($res['error'] ?? ''));
-        $msg = strtolower((string) (($decoded['msg'] ?? $decoded['message'] ?? '') ?: ''));
-        $blob = $hint . ' ' . $msg . ' ' . strtolower((string) ($res['body'] ?? ''));
-
-        return str_contains($blob, 'type')
-            && (str_contains($blob, 'invalid')
-                || str_contains($blob, 'unknown')
-                || str_contains($blob, 'not allowed')
-                || str_contains($blob, 'enum')
-                || str_contains($blob, 'ajv'));
-    }
-
     public static function unlockPath(string $doorId, ?string $controlCmd = null): string
     {
         $path = '/doors/' . rawurlencode($doorId) . '/unlock';
@@ -1330,11 +1262,6 @@ final class YarboUnifi
         }
 
         return $path;
-    }
-
-    public static function lockPath(string $doorId): string
-    {
-        return '/doors/' . rawurlencode($doorId) . '/lock_rule';
     }
 
     /**

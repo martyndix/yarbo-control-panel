@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.25] - 2026-10-02
+
+### Fixed
+- Access **Lock** on a door controller is only a label. It still sends the same remote **Unlock** as before (`PUT /doors/{id}/unlock`). 4.0.24 sent Access `lock_rule`, which did not work. Controllers with no door-position sensor stay on Unlock.
+
 ## [4.0.24] - 2026-10-02
 
 ### Changed

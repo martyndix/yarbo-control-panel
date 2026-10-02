@@ -336,8 +336,10 @@ assert_true(str_contains($js, 'data-home-kelvin'), 'Home poll must be able to pa
 assert_true(str_contains($js, 'if (extras.color_temp != null)'), 'Apple Home colour temperature must update the tile');
 assert_true(str_contains($js, 'data-home-dps'), 'Home door controller must show Open/Closed next to Unlock/Lock');
 assert_true(str_contains($js, 'unifiDpsMetaHtml'), 'UniFi door position belongs in the actions box');
-assert_true(str_contains($js, 'function unifiDoorLockLabel'), 'door button label must follow Open/Closed');
-assert_true(str_contains($js, "return unifiDoorIsOpen(d) ? 'Lock' : 'Unlock'"), 'Open doors must rename Unlock to Lock');
+assert_true(str_contains($js, 'function unifiDoorHasPosition'), 'Lock label is only for controllers with a door-position sensor');
+assert_true(str_contains($js, "return unifiDoorIsOpen(d) ? 'Lock' : 'Unlock'"), 'Open doors with DPS rename Unlock to Lock');
+assert_true(str_contains($js, 'data-unifi-cmd="unlock"'), 'Lock is a label; the click still sends unlock');
+assert_true(!str_contains($js, 'function unifiDoorLockCommand'), 'door tiles must not send a lock command');
 assert_true(str_contains($js, 'patchUnifiDoorLockButton'), 'Home must rename Unlock to Lock when Open/Closed patches');
 assert_true(str_contains($js, 'unifiDoorLockButtonHtml(d, { home: true })'), 'Home door actions must use the live Unlock/Lock label');
 
