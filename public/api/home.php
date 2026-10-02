@@ -15,6 +15,10 @@ $home = new YarboHome($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method === 'GET') {
     set_time_limit(8);
+    try {
+        (new YarboHomeAutomations($projectRoot))->kickRunner();
+    } catch (Throwable) {
+    }
     json_response($home->dashboard());
 }
 

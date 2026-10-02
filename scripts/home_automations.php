@@ -3,9 +3,10 @@
 
 /**
  * Evaluate Home automations in the background.
- * Started by scripts/panel.sh next to the Vestaboard watcher.
- * Never run from /api/home.php — php -S is single-threaded.
+ * Started by scripts/panel.sh, and kicked from Home GET if that loop is down.
+ * Does not run inside the GET itself — php -S is single-threaded.
  * Exits 0 when source files change so panel.sh can reload new PHP.
+ * Exits 75 if another runner pid is already alive.
  */
 
 declare(strict_types=1);
@@ -24,6 +25,17 @@ require $autoload;
 use Yarbo\YarboHomeAutomations;
 
 $once = in_array('--once', $argv, true);
+$root = dirname(__DIR__);
+foreach ($argv as $arg) {
+    if (!is_string($arg) || !str_starts_with($arg, '--root=')) {
+        continue;
+    }
+    $candidate = substr($arg, 7);
+    if ($candidate !== '' && is_dir($candidate)) {
+        $root = $candidate;
+    }
+}
+
 $engine = new YarboHomeAutomations($root);
 
 function home_automations_tick(YarboHomeAutomations $engine): void
@@ -56,6 +68,11 @@ function home_automations_tick(YarboHomeAutomations $engine): void
 if ($once) {
     home_automations_tick($engine);
     exit(0);
+}
+
+if (!$engine->acquireRunnerLock()) {
+    fwrite(STDERR, "home_automations: already running\n");
+    exit(75);
 }
 
 $startedAt = time();

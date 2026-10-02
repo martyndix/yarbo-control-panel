@@ -49,6 +49,7 @@
 /data/home-automations.json
 /data/home-automations-state.json
 /data/home-automations.log
+/data/home-automations.pid
 /data/matter-server/
 /data/matter-agent.log
 /data/matter-setup.json

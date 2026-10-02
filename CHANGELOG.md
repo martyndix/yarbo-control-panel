@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.33] - 2026-10-02
+
+### Fixed
+- Home Automations starts the background runner when you open Home or Automations if it was not already running. Times cannot fire (and Last ran stays empty) without that process. The Automations page keeps polling so the warning clears once the runner is up.
+
 ## [4.0.32] - 2026-10-02
 
 ### Fixed

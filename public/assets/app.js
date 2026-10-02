@@ -3248,7 +3248,7 @@ function ensureHomeStatePoll() {
     if (homeStateTimer) return;
     homeStateTimer = window.setInterval(() => {
         if (homePollBlocked()) return;
-        if (homeCardIsWatching()) loadHomeDashboard({ patch: true });
+        if (homeCardIsWatching() || autoPageOpen) loadHomeDashboard({ patch: true });
     }, 3000);
 }
 
@@ -5108,7 +5108,7 @@ function renderHomeAutomations() {
         const err = String(runner.last_error || '').trim();
         if (stale) {
             runnerEl.classList.remove('hidden');
-            runnerEl.textContent = 'The automations runner is not active. Times will not fire until the panel service is running (Settings → Panel updates, or restart the panel).';
+            runnerEl.textContent = 'The automations runner is not active, so times cannot fire and Last ran stays empty. Opening this page starts it — wait a few seconds. If this remains, restart the panel (Settings → Panel updates).';
         } else if (err) {
             runnerEl.classList.remove('hidden');
             runnerEl.textContent = err;

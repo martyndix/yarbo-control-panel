@@ -86,7 +86,18 @@ echo "==> Starting Home automations"
 mkdir -p "${ROOT}/data"
 (
   while true; do
-    "$PHP_BIN" "${ROOT}/scripts/home_automations.php" >> "${ROOT}/data/home-automations.log" 2>&1 && echo "home_automations: reloading" || echo "home_automations: exited, restarting" >&2
+    set +e
+    "$PHP_BIN" "${ROOT}/scripts/home_automations.php" --root="${ROOT}" >> "${ROOT}/data/home-automations.log" 2>&1
+    code=$?
+    set -e
+    if [[ "$code" -eq 75 ]]; then
+      echo "home_automations: already running"
+      sleep 5
+    elif [[ "$code" -eq 0 ]]; then
+      echo "home_automations: reloading"
+    else
+      echo "home_automations: exited, restarting" >&2
+    fi
     sleep 1
   done
 ) &

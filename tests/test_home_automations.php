@@ -470,13 +470,14 @@ $stateAfterTickless = is_file($auto->statePath()) ? filemtime($auto->statePath()
 assert_true($stateAfterTickless === $stateBefore, 'Home GET must not run the automations loop');
 
 $homePhp = (string) file_get_contents(__DIR__ . '/../public/api/home.php');
-assert_true(!str_contains($homePhp, 'home_automations.php'), 'home.php must not start the sidecar');
+assert_true(str_contains($homePhp, 'kickRunner'), 'home.php must start the sidecar if it is down');
 assert_true(str_contains($homePhp, 'automation_save'), 'home.php CRUD');
 $panel = (string) file_get_contents(__DIR__ . '/../scripts/panel.sh');
 assert_true(str_contains($panel, 'home_automations.php'), 'panel.sh must start the sidecar');
 assert_true(str_contains($panel, 'home-automations.log'), 'sidecar writes a log');
 $sidecar = (string) file_get_contents(__DIR__ . '/../scripts/home_automations.php');
 assert_true(strpos($sidecar, 'tick();') < strpos($sidecar, 'refreshUnifiIfDue'), 'time tick must run before UniFi refresh');
+assert_true(str_contains($sidecar, 'acquireRunnerLock'), 'sidecar takes a pid lock');
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -529,5 +530,13 @@ $off->setCommandHandler(static function (array $action) use (&$fired): array {
 });
 $r = $off->tick([['id' => '1:2', 'on' => false]], $now);
 assert_true($r['fired'] === [] && $fired === [], 'disabled Home module must not run automations');
+
+assert_true(YarboHomeAutomations::pidIsRunning(getmypid()), 'current pid is running');
+assert_true(!YarboHomeAutomations::pidIsRunning(2147483647), 'missing pid is not running');
+assert_true($auto->acquireRunnerLock(), 'runner lock can be taken');
+$auto->kickRunner();
+assert_true(!is_file($auto->pidPath()) || (int) trim((string) file_get_contents($auto->pidPath())) === getmypid(), 'kickRunner must not spawn when scripts/ is missing');
+assert_true(str_contains($js, 'autoPageOpen'), 'automations page keeps polling');
+assert_true(str_contains($js, 'Last ran stays empty'), 'stale runner copy');
 
 echo "test_home_automations.php ok\n";

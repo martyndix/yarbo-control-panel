@@ -150,6 +150,94 @@ final class YarboHomeAutomations
         ];
     }
 
+    public function pidPath(): string
+    {
+        return $this->projectRoot . '/data/home-automations.pid';
+    }
+
+    public static function pidIsRunning(int $pid): bool
+    {
+        if ($pid <= 1) {
+            return false;
+        }
+        if (function_exists('posix_kill')) {
+            return @posix_kill($pid, 0);
+        }
+
+        return is_dir('/proc/' . $pid);
+    }
+
+    public function acquireRunnerLock(): bool
+    {
+        $path = $this->pidPath();
+        $dir = dirname($path);
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return false;
+        }
+        $pid = is_file($path) ? (int) trim((string) file_get_contents($path)) : 0;
+        if ($pid > 1 && $pid !== getmypid() && self::pidIsRunning($pid)) {
+            return false;
+        }
+
+        return file_put_contents($path, (string) getmypid() . "\n", LOCK_EX) !== false;
+    }
+
+    /**
+     * Start scripts/home_automations.php if the loop is not already alive.
+     * Home GET is single-threaded; this only spawns a background process.
+     */
+    public function kickRunner(): void
+    {
+        $pub = $this->runnerPublic();
+        if (!empty($pub['running'])) {
+            return;
+        }
+        $pidPath = $this->pidPath();
+        $pid = is_file($pidPath) ? (int) trim((string) file_get_contents($pidPath)) : 0;
+        if ($pid > 1 && self::pidIsRunning($pid)) {
+            return;
+        }
+        if (is_file($pidPath) && (time() - (int) @filemtime($pidPath)) < 8) {
+            return;
+        }
+        $script = $this->projectRoot . '/scripts/home_automations.php';
+        if (!is_file($script)) {
+            return;
+        }
+        $dir = dirname($pidPath);
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        @file_put_contents($pidPath, "0\n");
+        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $log = $this->projectRoot . '/data/home-automations.log';
+        $command = sprintf(
+            'cd %s && %s %s --root=%s >> %s 2>&1 < /dev/null &',
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($php),
+            escapeshellarg($script),
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($log)
+        );
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['file', $log, 'a'],
+            2 => ['file', $log, 'a'],
+        ];
+        $process = @proc_open(
+            ['bash', '-c', $command],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot
+        );
+        if (is_resource($process)) {
+            if (isset($pipes[0]) && is_resource($pipes[0])) {
+                fclose($pipes[0]);
+            }
+            proc_close($process);
+        }
+    }
+
     /**
      * @return array{latitude: ?float, longitude: ?float, timezone: string, automations: list<array<string, mixed>>}
      */
