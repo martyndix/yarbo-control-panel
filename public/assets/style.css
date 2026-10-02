@@ -4104,6 +4104,23 @@ body.home-is-reordering {
     background: color-mix(in srgb, var(--accent) 22%, var(--surface));
 }
 
+.auto-off-after {
+    margin-top: 0.75rem;
+    gap: 0.35rem;
+}
+
+.auto-off-after-row,
+.auto-off-after-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.auto-chip--scene {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
 @media (max-width: 720px) {
     .auto-row {
         grid-template-columns: 1fr;

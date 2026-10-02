@@ -37,7 +37,7 @@ file_put_contents($root . '/data/home.json', json_encode([
     ],
     'group_defs' => [['id' => 'g1', 'name' => 'Sensors', 'room_id' => 'r1']],
     'groups' => ['unifi:sensor:s1' => 'g1'],
-    'scenes' => [],
+    'scenes' => [['id' => 'sc-outdoor', 'name' => 'Outdoor Lights']],
     'paper' => [],
     'hidden' => [],
     'device_order' => [],
@@ -226,6 +226,71 @@ $sensorThen = $auto->save([
 ]);
 assert_true(empty($sensorThen['ok']), 'sensors must not be Then actions');
 
+$auto->delete('a-sun');
+$auto->delete('a-bad');
+$commands = [];
+@unlink($auto->statePath());
+
+$motionScene = $auto->save([
+    'id' => 'a-motion',
+    'name' => '',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'actions' => [['kind' => 'scene', 'id' => 'sc-outdoor', 'command' => 'run']],
+    'off_after_sec' => 300,
+    'cooldown_sec' => 30,
+    'names' => ['unifi:sensor:s1' => 'Kitchen Sensor', 'scene:sc-outdoor' => 'Outdoor Lights'],
+]);
+assert_true(!empty($motionScene['ok']), 'save motion → scene: ' . json_encode($motionScene));
+assert_true(($motionScene['automation']['off_after_sec'] ?? 0) === 300, 'off_after persisted');
+assert_true(str_contains((string) ($motionScene['automation']['name'] ?? ''), 'off after 5 min'), 'auto-name includes timer: ' . ($motionScene['automation']['name'] ?? ''));
+assert_true(str_contains((string) ($motionScene['automation']['name'] ?? ''), 'Outdoor Lights'), 'auto-name includes scene');
+
+$sense = static function (bool $motion): array {
+    return [[
+        'id' => 'unifi:sensor:s1',
+        'kind' => 'sensor',
+        'open' => false,
+        'on' => false,
+        'motion' => $motion,
+    ]];
+};
+
+$tMotion = 1_800_000_000;
+$r = $auto->tick($sense(false), $tMotion);
+assert_true($r['fired'] === [] && ($r['turned_off'] ?? []) === [], 'motion idle must not fire');
+$r = $auto->tick($sense(true), $tMotion + 1);
+assert_true($r['fired'] === ['a-motion'], 'motion edge must run the scene: ' . json_encode($r));
+assert_true(count($commands) === 1
+    && ($commands[0]['kind'] ?? '') === 'scene'
+    && ($commands[0]['id'] ?? '') === 'sc-outdoor'
+    && ($commands[0]['command'] ?? '') === 'run', 'motion action is scene run: ' . json_encode($commands));
+$r = $auto->tick($sense(true), $tMotion + 300);
+assert_true($r['fired'] === [] && ($r['turned_off'] ?? []) === [], 'off-after must wait the full 5 min from fire');
+$r = $auto->tick($sense(false), $tMotion + 301);
+assert_true(($r['turned_off'] ?? []) === ['a-motion'], 'off-after must stop the scene: ' . json_encode($r));
+assert_true(count($commands) === 2
+    && ($commands[1]['kind'] ?? '') === 'scene'
+    && ($commands[1]['command'] ?? '') === 'stop', 'off-after command is scene stop: ' . json_encode($commands));
+
+$commands = [];
+@unlink($auto->statePath());
+$r = $auto->tick($sense(false), $tMotion);
+$r = $auto->tick($sense(true), $tMotion + 1);
+assert_true($r['fired'] === ['a-motion'], 'second motion fire');
+$r = $auto->tick($sense(false), $tMotion + 2);
+$r = $auto->tick($sense(true), $tMotion + 11);
+assert_true($r['fired'] === [], 'cooldown must skip a second scene run');
+assert_true(count($commands) === 1, 'cooldown retrigger must not run Then again: ' . json_encode($commands));
+$r = $auto->tick($sense(false), $tMotion + 301);
+assert_true(($r['turned_off'] ?? []) === [], 'retrigger during cooldown must extend the timer');
+$r = $auto->tick($sense(false), $tMotion + 311);
+assert_true(($r['turned_off'] ?? []) === ['a-motion'], 'extended off-after must fire from last motion: ' . json_encode($r));
+
+$auto->delete('a-motion');
+$commands = [];
+@unlink($auto->statePath());
+
 assert_true(YarboHomeAutomations::hmInWindow('21:00', '20:00', '22:00'), 'window inside');
 assert_true(!YarboHomeAutomations::hmInWindow('19:00', '20:00', '22:00'), 'window before');
 assert_true(YarboHomeAutomations::hmInWindow('23:00', '22:00', '06:00'), 'overnight window');
@@ -252,6 +317,10 @@ assert_true(str_contains($js, 'homeAutoTrayGroups'), 'tray grouping helper');
 assert_true(str_contains($js, "['lights', 'Lights']"), 'lights group');
 assert_true(str_contains($js, "['sensors', 'Sensors']"), 'sensors group');
 assert_true(str_contains($js, "['doors', 'Doors']"), 'doors group');
+assert_true(str_contains($js, "['scenes', 'Scenes']"), 'scenes group');
+assert_true(str_contains($js, 'homeAutoReadOffAfter'), 'turn-off-after helper');
+assert_true(str_contains($js, "data-auto-starter=\"motion\""), 'motion starter');
+assert_true(str_contains($index, 'auto-off-after'), 'turn-off-after field');
 
 $offRoot = sys_get_temp_dir() . '/yarbo-auto-off-' . bin2hex(random_bytes(3));
 mkdir($offRoot . '/data', 0775, true);

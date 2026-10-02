@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.28] - 2026-10-02
+
+### Added
+- Home Automations **Then** can run a **scene** (for example Kitchen motion → Outdoor Lights). Scenes stay in the Add tray under Scenes.
+- **Turn off after** timer on Then: after the rule fires, those lights or the scene turn off. If the When fires again, the timer restarts.
+
 ## [4.0.27] - 2026-10-02
 
 ### Changed

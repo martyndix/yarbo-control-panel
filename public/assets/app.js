@@ -3184,7 +3184,10 @@ async function loadHomeDashboard(opts = {}) {
         } else {
             renderHomeDashboard(data);
         }
-        if (autoPageOpen && !autoDraft) renderHomeAutomations();
+        if (autoPageOpen) {
+            if (autoDraft) renderHomeAutoTray();
+            else renderHomeAutomations();
+        }
         homeLoadAborts = 0;
         ensureHomeStatePoll();
     } catch (err) {
@@ -4637,7 +4640,7 @@ function homeAutoWhenEvents(d) {
             ['stays_closed', 'is closed for'],
         ];
         if (d.kind === 'sensor') {
-            events.push(['motion', 'motion'], ['no_motion', 'no motion for']);
+            events.unshift(['motion', 'motion'], ['no_motion', 'no motion for']);
             if (d.temperature != null) {
                 events.push(['temp_above', 'temperature above'], ['temp_below', 'temperature below']);
             }
@@ -4647,12 +4650,16 @@ function homeAutoWhenEvents(d) {
         }
         return events;
     }
-    return [
+    const events = [
         ['turns_on', 'turns on'],
         ['turns_off', 'turns off'],
         ['stays_on', 'is on for'],
         ['stays_off', 'is off for'],
     ];
+    if (d.kind === 'sensor' || d.motion != null) {
+        events.unshift(['motion', 'motion'], ['no_motion', 'no motion for']);
+    }
+    return events;
 }
 
 function homeAutoThenCommands(d) {
@@ -4671,10 +4678,19 @@ function homeAutoThenCommands(d) {
 
 function homeAutoDefaultWhen(d) {
     if (!d) return null;
-    if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub' || d.kind === 'sensor')) {
+    if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub')) {
         return { type: 'device', id: d.id, event: 'opens' };
     }
+    if (d.kind === 'sensor' || homeAutoLooksLikeMotion(d)) {
+        return { type: 'device', id: d.id, event: 'motion' };
+    }
     return { type: 'device', id: d.id, event: 'turns_on' };
+}
+
+function homeAutoLooksLikeMotion(d) {
+    if (!d) return false;
+    if (d.motion != null) return true;
+    return /motion/i.test(`${d.product || ''} ${d.name || ''}`);
 }
 
 function homeAutoDefaultThen(d) {
@@ -4752,7 +4768,10 @@ function homeAutoThenPhrase(action, names) {
 
 function homeAutoSentence(rule, names) {
     const then = (rule.actions || []).map((action) => homeAutoThenPhrase(action, names)).join(', ') || '…';
-    return `${homeAutoWhenPhrase(rule.trigger, names)} → ${then}`;
+    let text = `${homeAutoWhenPhrase(rule.trigger, names)} → ${then}`;
+    const off = Number(rule.off_after_sec || 0);
+    if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+    return text;
 }
 
 function homeAutoBlankDraft() {
@@ -4763,6 +4782,7 @@ function homeAutoBlankDraft() {
         trigger: null,
         conditions: [],
         actions: [],
+        off_after_sec: 0,
         cooldown_sec: 30,
     };
 }
@@ -4836,6 +4856,7 @@ function renderHomeAutomations() {
         html += `<p class="hint">Drag a When and a Then. Or start from one of these.</p>
         <div class="auto-starters">
             <button type="button" class="auto-starter" data-auto-starter="sunset"><strong>Lights at sunset</strong><span class="hint">Turn a light on when the sun goes down.</span></button>
+            <button type="button" class="auto-starter" data-auto-starter="motion"><strong>Motion → scene</strong><span class="hint">A sensor runs a scene, then turns off after 5 minutes.</span></button>
             <button type="button" class="auto-starter" data-auto-starter="timeout"><strong>Off after 30 minutes</strong><span class="hint">If a light stays on, turn it off.</span></button>
             <button type="button" class="auto-starter" data-auto-starter="door"><strong>Door open 5 minutes</strong><span class="hint">If a door stays open, turn a light on.</span></button>
         </div>`;
@@ -4895,7 +4916,40 @@ function renderHomeAutoEditor() {
         || '<p class="hint">Drop a light or scene here.</p>';
     document.getElementById('auto-if-chips').innerHTML = (autoDraft.conditions || []).map((cond, i) => homeAutoIfChipHtml(cond, i)).join('');
     if ((autoDraft.conditions || []).length) document.getElementById('auto-if')?.setAttribute('open', '');
+    homeAutoSyncOffAfterFields();
     renderHomeAutoTray();
+}
+
+function homeAutoOffAfterParts(sec) {
+    const n = Math.max(0, Number(sec) || 0);
+    if (n >= 3600 && n % 3600 === 0) return { value: n / 3600, unit: 3600 };
+    if (n >= 60 && n % 60 === 0) return { value: n / 60, unit: 60 };
+    if (n > 0) return { value: n, unit: 1 };
+    return { value: 5, unit: 60 };
+}
+
+function homeAutoReadOffAfter() {
+    if (document.getElementById('auto-off-after-enabled')?.value !== '1') return 0;
+    const value = Number(document.getElementById('auto-off-after-value')?.value || 5);
+    const unit = Number(document.getElementById('auto-off-after-unit')?.value || 60);
+    return Math.max(1, Math.round(value * unit));
+}
+
+function homeAutoSyncOffAfterFields() {
+    if (!autoDraft) return;
+    const enabled = document.getElementById('auto-off-after-enabled');
+    const valueEl = document.getElementById('auto-off-after-value');
+    const unitEl = document.getElementById('auto-off-after-unit');
+    const fields = document.getElementById('auto-off-after-fields');
+    const sec = Number(autoDraft.off_after_sec || 0);
+    const on = sec > 0;
+    if (enabled && document.activeElement !== enabled) enabled.value = on ? '1' : '0';
+    fields?.classList.toggle('hidden', !on);
+    if (on) {
+        const parts = homeAutoOffAfterParts(sec);
+        if (valueEl && document.activeElement !== valueEl) valueEl.value = String(parts.value);
+        if (unitEl && document.activeElement !== unitEl) unitEl.value = String(parts.unit);
+    }
 }
 
 function homeAutoWhenChipHtml(trigger) {
@@ -4959,7 +5013,7 @@ function homeAutoThenChipHtml(action, index) {
         : homeAutoDeviceById(action.id) || { id: action.id, kind: 'light', name: action.id };
     const cmds = homeAutoThenCommands(d);
     const cmd = action.command || (isScene ? 'run' : 'on');
-    return `<div class="auto-chip" draggable="true" data-auto-then="${index}">
+    return `<div class="auto-chip${isScene ? ' auto-chip--scene' : ''}" draggable="true" data-auto-then="${index}">
         ${escapeHtml(d.name || action.id)}
         <select data-auto-cmd>${cmds.map(([v, label]) =>
             `<option value="${v}" ${v === cmd ? 'selected' : ''}>${label}</option>`
@@ -5092,7 +5146,10 @@ function homeAutoApplyTray(kind, id, zone) {
         return;
     }
     if (kind === 'scene') {
-        if (zone === 'when') return;
+        if (zone === 'when') {
+            showToast('Scenes go in Then', 'error');
+            return;
+        }
         const action = homeAutoDefaultThen({ id: `scene:${id}`, kind: 'scene', name: homeAutoSceneById(id)?.name });
         if (action) autoDraft.actions.push(action);
         homeAutoSyncName();
@@ -5151,6 +5208,9 @@ function homeAutoStarter(kind) {
     const lights = (homeDash.devices || []).filter((d) => homeAutoThenOk(d) && d.kind !== 'door' && d.kind !== 'hub');
     const light = lights[0];
     const door = (homeDash.devices || []).find((d) => d.kind === 'door' || d.kind === 'hub');
+    const sensor = (homeDash.devices || []).find((d) => d.kind === 'sensor')
+        || (homeDash.devices || []).find((d) => homeAutoLooksLikeMotion(d));
+    const scene = (homeDash.scenes || [])[0];
     if (kind === 'sunset') {
         homeAutoStartEditor({
             trigger: { type: 'sun', event: 'sunset', offset_min: 0 },
@@ -5162,6 +5222,17 @@ function homeAutoStarter(kind) {
         homeAutoStartEditor({
             trigger: light ? { type: 'device', id: light.id, event: 'stays_on', for_sec: 1800 } : null,
             actions: light ? [{ kind: 'device', id: light.id, command: 'off' }] : [],
+        });
+        return;
+    }
+    if (kind === 'motion') {
+        const then = scene
+            ? { kind: 'scene', id: scene.id, command: 'run' }
+            : (light ? homeAutoDefaultThen(light) : null);
+        homeAutoStartEditor({
+            trigger: sensor ? { type: 'device', id: sensor.id, event: 'motion' } : null,
+            actions: then ? [then] : [],
+            off_after_sec: 300,
         });
         return;
     }
@@ -5202,6 +5273,7 @@ async function homeAutoSave() {
     if (autoDraft.trigger?.type === 'device' && homeAutoDurationEvent(autoDraft.trigger.event)) {
         autoDraft.trigger.for_sec = homeAutoReadDuration();
     }
+    autoDraft.off_after_sec = homeAutoReadOffAfter();
     if (autoDraft.trigger?.type === 'sun' && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);
         const lon = Number(document.getElementById('auto-lon')?.value);
@@ -5218,6 +5290,7 @@ async function homeAutoSave() {
         trigger: autoDraft.trigger,
         conditions: autoDraft.conditions,
         actions: autoDraft.actions,
+        off_after_sec: autoDraft.off_after_sec || 0,
         cooldown_sec: autoDraft.cooldown_sec || 30,
         names: homeAutoNames(),
     });
@@ -5365,6 +5438,10 @@ function bindHomeAutomations() {
         if (event.target.matches('[data-auto-for], [data-auto-for-unit]') && autoDraft.trigger) {
             autoDraft.trigger.for_sec = homeAutoReadDuration();
         }
+        if (event.target.matches('#auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit')) {
+            autoDraft.off_after_sec = homeAutoReadOffAfter();
+            homeAutoSyncOffAfterFields();
+        }
         if (event.target.matches('[data-auto-thresh]') && autoDraft.trigger?.type === 'threshold') {
             autoDraft.trigger.value = Number(event.target.value);
         }
@@ -5398,7 +5475,7 @@ function bindHomeAutomations() {
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
         homeAutoSyncName();
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

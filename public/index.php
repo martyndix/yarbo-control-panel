@@ -696,6 +696,24 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <h3 class="settings-subtitle">Then</h3>
                         <p class="hint">Drag lights, scenes, or Unlock here. Reorder by dragging.</p>
                         <div class="auto-drop-chips" id="auto-then-chips"></div>
+                        <label class="settings-field auto-off-after">
+                            <span class="label">Turn off after</span>
+                            <span class="auto-off-after-row">
+                                <select id="auto-off-after-enabled" aria-label="Turn off after">
+                                    <option value="0">Stay on</option>
+                                    <option value="1">Timer</option>
+                                </select>
+                                <span id="auto-off-after-fields" class="auto-off-after-fields hidden">
+                                    <input type="number" min="1" id="auto-off-after-value" value="5" aria-label="Turn off after amount">
+                                    <select id="auto-off-after-unit" aria-label="Turn off after unit">
+                                        <option value="1">sec</option>
+                                        <option value="60" selected>min</option>
+                                        <option value="3600">hr</option>
+                                    </select>
+                                </span>
+                            </span>
+                            <span class="hint">Optional. After Then runs, turn those lights or the scene off. If this fires again, the timer restarts.</span>
+                        </label>
                     </section>
                 </div>
                 <div class="auto-tray-wrap">
