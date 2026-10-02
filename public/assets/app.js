@@ -2858,6 +2858,7 @@ let autoPageOpen = false;
 let autoDraft = null;
 let autoNameLocked = false;
 let autoDrag = null;
+let homeAutoGeoBusy = false;
 
 function homeResetSceneDraft() {
     homeSceneDraft = { id: '', name: '', included: {}, states: {} };
@@ -4630,42 +4631,97 @@ function homeAutoDurationEvent(event) {
     return ['stays_on', 'stays_off', 'stays_open', 'stays_closed', 'no_motion'].includes(event);
 }
 
+function homeAutoKind(d) {
+    return String(d?.kind || '');
+}
+
+function homeAutoLooksLikeMotionName(d) {
+    return /motion|occupancy|presence|pir/i.test(`${d?.product || ''} ${d?.name || ''}`);
+}
+
+function homeAutoLooksLikeContactName(d) {
+    return /contact|door|window|magnet|leak/i.test(`${d?.product || ''} ${d?.name || ''}`);
+}
+
+function homeAutoCanOpen(d) {
+    if (!d) return false;
+    const kind = homeAutoKind(d);
+    if (kind === 'door' || kind === 'hub') return true;
+    if (['light', 'plug', 'switch', 'heater', 'relay', 'vacuum', 'scene', 'camera'].includes(kind)) return false;
+    if (homeAutoLooksLikeMotionName(d) && !homeAutoLooksLikeContactName(d)) return false;
+    if (d.has_open === true || d.has_dps === true) return true;
+    return kind === 'sensor' && homeAutoLooksLikeContactName(d);
+}
+
+function homeAutoCanMotion(d) {
+    if (!d) return false;
+    const kind = homeAutoKind(d);
+    if (kind === 'camera') return true;
+    if (['light', 'plug', 'switch', 'heater', 'relay', 'vacuum', 'door', 'hub', 'scene'].includes(kind)) return false;
+    if (d.has_motion === true) return true;
+    if (homeAutoLooksLikeMotionName(d)) return true;
+    return kind === 'sensor' && !homeAutoCanOpen(d);
+}
+
+function homeAutoCanOnOff(d) {
+    return ['light', 'plug', 'switch', 'heater', 'relay', 'vacuum'].includes(homeAutoKind(d));
+}
+
 function homeAutoWhenEvents(d) {
     if (!d) return [];
-    if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub' || d.kind === 'sensor')) {
-        const events = [
-            ['opens', 'opens'],
-            ['closes', 'closes'],
-            ['stays_open', 'is open for'],
-            ['stays_closed', 'is closed for'],
-        ];
-        if (d.kind === 'sensor') {
-            events.unshift(['motion', 'motion'], ['no_motion', 'no motion for']);
-            if (d.temperature != null) {
-                events.push(['temp_above', 'temperature above'], ['temp_below', 'temperature below']);
-            }
-            if (d.humidity != null) {
-                events.push(['hum_above', 'humidity above'], ['hum_below', 'humidity below']);
-            }
+    const events = [];
+    if (homeAutoCanMotion(d)) {
+        events.push(['motion', 'motion'], ['no_motion', 'no motion for']);
+    }
+    if (homeAutoCanOpen(d)) {
+        events.push(['opens', 'opens'], ['closes', 'closes'], ['stays_open', 'is open for'], ['stays_closed', 'is closed for']);
+    }
+    if (d.kind === 'sensor' || d.kind === 'camera') {
+        if (d.temperature != null) {
+            events.push(['temp_above', 'temperature above'], ['temp_below', 'temperature below']);
         }
-        return events;
+        if (d.humidity != null) {
+            events.push(['hum_above', 'humidity above'], ['hum_below', 'humidity below']);
+        }
     }
-    if (d.kind === 'camera' || d.motion != null) {
-        return [
-            ['motion', 'motion'],
-            ['no_motion', 'no motion for'],
-        ];
-    }
-    const events = [
-        ['turns_on', 'turns on'],
-        ['turns_off', 'turns off'],
-        ['stays_on', 'is on for'],
-        ['stays_off', 'is off for'],
-    ];
-    if (d.kind === 'sensor' || d.motion != null) {
-        events.unshift(['motion', 'motion'], ['no_motion', 'no motion for']);
+    if (homeAutoCanOnOff(d) || events.length === 0) {
+        events.push(['turns_on', 'turns on'], ['turns_off', 'turns off'], ['stays_on', 'is on for'], ['stays_off', 'is off for']);
     }
     return events;
+}
+
+function homeAutoThenCanOffAfter(action) {
+    const cmd = String(action?.command || (action?.kind === 'scene' ? 'run' : 'on'));
+    return !['off', 'stop', 'unlock', 'lock', 'open', 'close'].includes(cmd);
+}
+
+function homeAutoOffAfterChoices(sec) {
+    const n = Math.max(0, Number(sec) || 0);
+    const opts = [
+        [0, 'stay on'],
+        [60, 'off 1 min'],
+        [120, 'off 2 min'],
+        [180, 'off 3 min'],
+        [300, 'off 5 min'],
+        [600, 'off 10 min'],
+        [900, 'off 15 min'],
+        [1200, 'off 20 min'],
+        [1800, 'off 30 min'],
+        [3600, 'off 1 hr'],
+    ];
+    if (n > 0 && !opts.some(([v]) => v === n)) {
+        opts.splice(1, 0, [n, `off ${homeAutoFormatDuration(n)}`]);
+    }
+    return opts;
+}
+
+function homeAutoApplyOffAfterToActions(sec) {
+    if (!autoDraft || !Array.isArray(autoDraft.actions)) return;
+    const n = Math.max(0, Number(sec) || 0);
+    autoDraft.actions = autoDraft.actions.map((action) => {
+        if (!homeAutoThenCanOffAfter(action)) return action;
+        return { ...action, off_after_sec: n };
+    });
 }
 
 function homeAutoThenCommands(d) {
@@ -4684,19 +4740,17 @@ function homeAutoThenCommands(d) {
 
 function homeAutoDefaultWhen(d) {
     if (!d) return null;
-    if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub')) {
-        return { type: 'device', id: d.id, event: 'opens' };
-    }
-    if (d.kind === 'sensor' || homeAutoLooksLikeMotion(d)) {
+    if (homeAutoCanMotion(d)) {
         return { type: 'device', id: d.id, event: 'motion' };
+    }
+    if (homeAutoCanOpen(d)) {
+        return { type: 'device', id: d.id, event: 'opens' };
     }
     return { type: 'device', id: d.id, event: 'turns_on' };
 }
 
 function homeAutoLooksLikeMotion(d) {
-    if (!d) return false;
-    if (d.motion != null) return true;
-    return /motion/i.test(`${d.product || ''} ${d.name || ''}`);
+    return homeAutoCanMotion(d);
 }
 
 function homeAutoDefaultThen(d) {
@@ -4781,20 +4835,32 @@ function homeAutoWhenPhrase(trigger, names) {
 function homeAutoThenPhrase(action, names) {
     if (action.kind === 'scene') {
         const name = names[`scene:${action.id}`] || names[action.id] || 'Scene';
-        return action.command === 'stop' ? `${name} off` : name;
+        let text = action.command === 'stop' ? `${name} off` : name;
+        const off = Number(action.off_after_sec || 0);
+        if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+        return text;
     }
     const name = names[action.id] || 'Device';
     if (action.command === 'off') return `${name} off`;
     if (action.command === 'unlock') return `${name} unlock`;
-    if (action.command === 'brightness') return `${name} ${action.brightness || 100}%`;
-    return `${name} on`;
+    if (action.command === 'brightness') {
+        let text = `${name} ${action.brightness || 100}%`;
+        const off = Number(action.off_after_sec || 0);
+        if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+        return text;
+    }
+    let text = `${name} on`;
+    const off = Number(action.off_after_sec || 0);
+    if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+    return text;
 }
 
 function homeAutoSentence(rule, names) {
     const then = (rule.actions || []).map((action) => homeAutoThenPhrase(action, names)).join(', ') || '…';
     let text = `${homeAutoWhenPhrase(rule.trigger, names)} → ${then}`;
+    const actionOff = (rule.actions || []).some((action) => Number(action.off_after_sec || 0) > 0);
     const off = Number(rule.off_after_sec || 0);
-    if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+    if (!actionOff && off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
     return text;
 }
 
@@ -4823,6 +4889,71 @@ function homeAutoSunNeedsCoords() {
     if (!trigger || trigger.type !== 'sun') return false;
     const coords = homeDash.sun_coords || {};
     return Boolean(coords.needs_coords);
+}
+
+function homeAutoHasCoords() {
+    const coords = homeDash.sun_coords || {};
+    return Number.isFinite(Number(coords.latitude)) && Number.isFinite(Number(coords.longitude));
+}
+
+function homeAutoRoundCoord(n) {
+    return Math.round(Number(n) * 10000) / 10000;
+}
+
+async function homeAutoApplyBrowserCoords(lat, lon) {
+    const latitude = homeAutoRoundCoord(lat);
+    const longitude = homeAutoRoundCoord(lon);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+    const latEl = document.getElementById('auto-lat');
+    const lonEl = document.getElementById('auto-lon');
+    if (latEl && document.activeElement !== latEl) latEl.value = String(latitude);
+    if (lonEl && document.activeElement !== lonEl) lonEl.value = String(longitude);
+    homeDash.sun_coords = {
+        ...(homeDash.sun_coords || {}),
+        latitude,
+        longitude,
+        source: 'browser',
+        needs_coords: false,
+    };
+    try {
+        const data = await homeApi({ action: 'automation_save', latitude, longitude });
+        if (data.sun_coords) homeDash.sun_coords = data.sun_coords;
+    } catch {
+        // Fields still hold the browser GPS if save fails.
+    }
+    if (autoDraft) renderHomeAutoEditor();
+}
+
+function homeAutoRequestBrowserGps({ force = false } = {}) {
+    const coords = homeDash.sun_coords || {};
+    if (!force && homeAutoHasCoords() && !coords.needs_coords) return;
+    const hint = document.getElementById('auto-coords-hint');
+    if (!navigator.geolocation) {
+        if (hint && (force || homeAutoSunNeedsCoords())) {
+            hint.hidden = false;
+            hint.textContent = 'This browser cannot share GPS. Enter latitude and longitude, or use the last Yarbo GPS.';
+        }
+        return;
+    }
+    if (homeAutoGeoBusy) return;
+    homeAutoGeoBusy = true;
+    navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+            homeAutoGeoBusy = false;
+            await homeAutoApplyBrowserCoords(pos.coords.latitude, pos.coords.longitude);
+        },
+        (err) => {
+            homeAutoGeoBusy = false;
+            if (!hint) return;
+            hint.hidden = false;
+            if (err?.code === 1) {
+                hint.textContent = 'Location permission was denied. Enter latitude and longitude, or allow location for this page.';
+            } else {
+                hint.textContent = 'Could not read this browser’s GPS. Enter latitude and longitude, or try Use my location.';
+            }
+        },
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 30 * 60 * 1000 }
+    );
 }
 
 function homeAutoTimezoneList() {
@@ -4914,6 +5045,7 @@ function openHomeAutomations({ updateHash = true } = {}) {
     autoNameLocked = false;
     loadHomeDashboard({ force: true }).then(async () => {
         await homeAutoEnsureTimezone();
+        homeAutoRequestBrowserGps();
         if (autoPageOpen) renderHomeAutomations();
     }).catch(() => {});
     renderHomeAutomations();
@@ -5017,16 +5149,27 @@ function homeAutoDayButtons(days) {
 
 function renderHomeAutoEditor() {
     if (!autoDraft) return;
+    homeAutoClampDraft();
     const nameEl = document.getElementById('auto-name');
     if (nameEl && document.activeElement !== nameEl) nameEl.value = autoDraft.name || '';
+    const sun = autoDraft.trigger?.type === 'sun';
     const needs = homeAutoSunNeedsCoords();
-    document.getElementById('auto-coords-hint')?.toggleAttribute('hidden', !needs);
-    document.getElementById('auto-coords')?.classList.toggle('hidden', !needs);
+    const hint = document.getElementById('auto-coords-hint');
+    if (hint) {
+        hint.hidden = !sun;
+        if (sun && !needs) {
+            hint.textContent = 'Sunrise and sunset use this location. Use my location to fill it from this browser’s GPS.';
+        } else if (sun) {
+            hint.textContent = 'Sunrise and sunset need a location. This page can fill it from this browser’s GPS. The last Yarbo GPS is used when it exists.';
+        }
+    }
+    document.getElementById('auto-coords')?.classList.toggle('hidden', !sun);
     const coords = homeDash.sun_coords || {};
     const lat = document.getElementById('auto-lat');
     const lon = document.getElementById('auto-lon');
     if (lat && document.activeElement !== lat) lat.value = coords.latitude ?? '';
     if (lon && document.activeElement !== lon) lon.value = coords.longitude ?? '';
+    if (sun && needs) homeAutoRequestBrowserGps();
     document.getElementById('auto-when-chips').innerHTML = homeAutoWhenChipHtml(autoDraft.trigger);
     document.getElementById('auto-then-chips').innerHTML = (autoDraft.actions || []).map((action, i) => homeAutoThenChipHtml(action, i)).join('')
         || '<p class="hint">Drop a light or scene here.</p>';
@@ -5034,6 +5177,30 @@ function renderHomeAutoEditor() {
     if ((autoDraft.conditions || []).length) document.getElementById('auto-if')?.setAttribute('open', '');
     homeAutoSyncOffAfterFields();
     renderHomeAutoTray();
+}
+
+function homeAutoClampDraft() {
+    if (!autoDraft) return;
+    if (autoDraft.trigger?.type === 'device') {
+        const d = homeAutoDeviceById(autoDraft.trigger.id);
+        const events = homeAutoWhenEvents(d || { id: autoDraft.trigger.id, kind: 'light' });
+        const allowed = events.map(([v]) => v);
+        if (allowed.length && !allowed.includes(autoDraft.trigger.event)) {
+            autoDraft.trigger.event = allowed[0];
+            if (homeAutoDurationEvent(autoDraft.trigger.event)) {
+                autoDraft.trigger.for_sec = autoDraft.trigger.for_sec || 300;
+            } else {
+                delete autoDraft.trigger.for_sec;
+            }
+        }
+    }
+    (autoDraft.conditions || []).forEach((cond) => {
+        if (!cond || cond.type === 'time_window') return;
+        const states = homeAutoIfStateOptions(homeAutoDeviceById(cond.id));
+        if (states.length && !states.some(([v]) => v === cond.state)) {
+            cond.state = states[0][0];
+        }
+    });
 }
 
 function homeAutoOffAfterParts(sec) {
@@ -5129,12 +5296,20 @@ function homeAutoThenChipHtml(action, index) {
         : homeAutoDeviceById(action.id) || { id: action.id, kind: 'light', name: action.id };
     const cmds = homeAutoThenCommands(d);
     const cmd = action.command || (isScene ? 'run' : 'on');
+    const canOff = homeAutoThenCanOffAfter({ ...action, command: cmd });
+    const offSec = canOff ? Number(action.off_after_sec || 0) : 0;
+    const offHtml = canOff
+        ? `<select data-auto-then-off aria-label="Turn off after">${homeAutoOffAfterChoices(offSec).map(([v, label]) =>
+            `<option value="${v}" ${Number(v) === offSec ? 'selected' : ''}>${escapeHtml(label)}</option>`
+        ).join('')}</select>`
+        : '';
     return `<div class="auto-chip${isScene ? ' auto-chip--scene' : ''}" draggable="true" data-auto-then="${index}">
         ${escapeHtml(d.name || action.id)}
         <select data-auto-cmd>${cmds.map(([v, label]) =>
             `<option value="${v}" ${v === cmd ? 'selected' : ''}>${label}</option>`
         ).join('')}</select>
         ${cmd === 'brightness' ? `<input type="number" min="1" max="100" data-auto-bright value="${Number(action.brightness || 100)}">` : ''}
+        ${offHtml}
         <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
     </div>`;
 }
@@ -5171,17 +5346,17 @@ function homeAutoIfChipHtml(cond, index) {
 
 function homeAutoIfStateOptions(d) {
     if (!d) return [['on', 'on'], ['off', 'off']];
-    if (d.kind === 'door' || d.kind === 'hub') {
-        return [['open', 'open'], ['closed', 'closed']];
+    const states = [];
+    if (homeAutoCanOnOff(d)) {
+        states.push(['on', 'on'], ['off', 'off']);
     }
-    const states = [['on', 'on'], ['off', 'off']];
-    if (d.kind === 'sensor' || d.open != null) {
+    if (homeAutoCanOpen(d)) {
         states.push(['open', 'open'], ['closed', 'closed']);
     }
-    if (d.kind === 'sensor' || d.kind === 'camera' || d.motion != null) {
+    if (homeAutoCanMotion(d)) {
         states.push(['motion', 'motion'], ['no_motion', 'no motion']);
     }
-    return states;
+    return states.length ? states : [['on', 'on'], ['off', 'off']];
 }
 
 function homeAutoDeviceSelectGroups(devices) {
@@ -5322,7 +5497,12 @@ function homeAutoApplyTray(kind, id, zone) {
             return;
         }
         const action = homeAutoDefaultThen({ id: `scene:${id}`, kind: 'scene', name: homeAutoSceneById(id)?.name });
-        if (action) autoDraft.actions.push(action);
+        if (action) {
+            if (homeAutoThenCanOffAfter(action) && Number(autoDraft.off_after_sec || 0) > 0) {
+                action.off_after_sec = Number(autoDraft.off_after_sec);
+            }
+            autoDraft.actions.push(action);
+        }
         homeAutoSyncName();
         renderHomeAutoEditor();
         return;
@@ -5344,6 +5524,9 @@ function homeAutoApplyTray(kind, id, zone) {
             renderHomeAutoEditor();
         }
         return;
+    }
+    if (homeAutoThenCanOffAfter(action) && Number(autoDraft.off_after_sec || 0) > 0) {
+        action.off_after_sec = Number(autoDraft.off_after_sec);
     }
     autoDraft.actions.push(action);
     homeAutoSyncName();
@@ -5369,6 +5552,14 @@ function homeAutoStartEditor(partial) {
     autoDraft = { ...homeAutoBlankDraft(), ...partial };
     if (!Array.isArray(autoDraft.actions)) autoDraft.actions = [];
     if (!Array.isArray(autoDraft.conditions)) autoDraft.conditions = [];
+    const ruleOff = Number(autoDraft.off_after_sec || 0);
+    autoDraft.actions = autoDraft.actions.map((action) => {
+        const next = { ...action };
+        if (ruleOff > 0 && !(Number(next.off_after_sec || 0) > 0) && homeAutoThenCanOffAfter(next)) {
+            next.off_after_sec = ruleOff;
+        }
+        return next;
+    });
     autoNameLocked = Boolean(partial?.name);
     homeAutoSyncName();
     renderHomeAutomations();
@@ -5398,8 +5589,8 @@ function homeAutoStarter(kind) {
     }
     if (kind === 'motion') {
         const then = scene
-            ? { kind: 'scene', id: scene.id, command: 'run' }
-            : (light ? homeAutoDefaultThen(light) : null);
+            ? { kind: 'scene', id: scene.id, command: 'run', off_after_sec: 300 }
+            : (light ? { ...homeAutoDefaultThen(light), off_after_sec: 300 } : null);
         homeAutoStartEditor({
             trigger: sensor ? { type: 'device', id: sensor.id, event: 'motion' } : null,
             actions: then ? [then] : [],
@@ -5493,6 +5684,9 @@ function bindHomeAutomations() {
         } finally {
             if (btn) btn.disabled = false;
         }
+    });
+    document.getElementById('auto-geo')?.addEventListener('click', () => {
+        homeAutoRequestBrowserGps({ force: true });
     });
     document.getElementById('auto-name')?.addEventListener('input', () => {
         autoNameLocked = true;
@@ -5616,6 +5810,7 @@ function bindHomeAutomations() {
         }
         if (event.target.matches('#auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit')) {
             autoDraft.off_after_sec = homeAutoReadOffAfter();
+            homeAutoApplyOffAfterToActions(autoDraft.off_after_sec);
             homeAutoSyncOffAfterFields();
         }
         if (event.target.matches('[data-auto-thresh]') && autoDraft.trigger?.type === 'threshold') {
@@ -5628,6 +5823,19 @@ function bindHomeAutomations() {
                 if (event.target.value === 'brightness' && autoDraft.actions[i].brightness == null) {
                     autoDraft.actions[i].brightness = 100;
                 }
+                if (!homeAutoThenCanOffAfter(autoDraft.actions[i])) {
+                    delete autoDraft.actions[i].off_after_sec;
+                }
+            }
+        }
+        if (event.target.matches('[data-auto-then-off]')) {
+            const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
+            if (autoDraft.actions[i]) {
+                const sec = Math.max(0, Number(event.target.value || 0));
+                if (sec > 0) autoDraft.actions[i].off_after_sec = sec;
+                else delete autoDraft.actions[i].off_after_sec;
+                const secs = autoDraft.actions.filter(homeAutoThenCanOffAfter).map((a) => Number(a.off_after_sec || 0));
+                if (secs.length && secs.every((s) => s === secs[0])) autoDraft.off_after_sec = secs[0];
             }
         }
         if (event.target.matches('[data-auto-bright]')) {
@@ -5657,7 +5865,7 @@ function bindHomeAutomations() {
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
         homeAutoSyncName();
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, [data-auto-if-id]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, [data-auto-if-id]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

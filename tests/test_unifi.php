@@ -165,6 +165,12 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                     'temperature' => ['value' => $sensorTemp],
                     'humidity' => ['value' => $sensorHumidity],
                 ],
+            ], [
+                'id' => 'motion1',
+                'name' => 'Bathroom motion',
+                'type' => 'UFP-SENSE',
+                'isOpened' => false,
+                'isMotionDetected' => false,
             ]]),
             'content_type' => 'application/json',
         ];
@@ -316,6 +322,25 @@ foreach ($probe['devices'] ?? [] as $row) {
 }
 if (($garage['status'] ?? '') !== 'Closed · 21.9° · 72% RH' || ($garage['open'] ?? true) !== false) {
     fwrite(STDERR, 'Protect sensor mapping ' . json_encode($garage) . "\n");
+    exit(1);
+}
+if (($garage['has_open'] ?? false) !== true || !empty($garage['has_motion'])) {
+    fwrite(STDERR, 'Garage contact flags ' . json_encode($garage) . "\n");
+    exit(1);
+}
+$bathMotion = null;
+foreach ($probe['devices'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:sensor:motion1') {
+        $bathMotion = $row;
+        break;
+    }
+}
+if ($bathMotion === null
+    || ($bathMotion['has_open'] ?? true) !== false
+    || ($bathMotion['has_motion'] ?? false) !== true
+    || ($bathMotion['open'] ?? null) !== null
+) {
+    fwrite(STDERR, 'Bathroom motion must not report open/closed ' . json_encode($bathMotion) . "\n");
     exit(1);
 }
 $sensorOpen = true;

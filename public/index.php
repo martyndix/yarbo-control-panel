@@ -673,7 +673,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span class="label">Name</span>
                     <input type="text" id="auto-name" maxlength="64" autocomplete="off" placeholder="Front door open 5 min → Porch on">
                 </label>
-                <p class="hint" id="auto-coords-hint" hidden>Sunrise and sunset need a location. The last Yarbo GPS is used when it exists; otherwise enter latitude and longitude.</p>
+                <p class="hint" id="auto-coords-hint" hidden>Sunrise and sunset need a location. This page can fill it from this browser’s GPS. The last Yarbo GPS is used when it exists.</p>
                 <div id="auto-coords" class="auto-coords hidden">
                     <label class="settings-field">
                         <span class="label">Latitude</span>
@@ -683,6 +683,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <span class="label">Longitude</span>
                         <input type="number" id="auto-lon" step="0.0001" min="-180" max="180">
                     </label>
+                    <div class="settings-field auto-geo-field">
+                        <span class="label">This browser</span>
+                        <button type="button" class="btn btn-secondary btn-compact" id="auto-geo">Use my location</button>
+                    </div>
                 </div>
                 <div class="auto-builder">
                     <section class="auto-drop" id="auto-when" data-auto-zone="when" aria-label="When">
@@ -701,7 +705,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </details>
                     <section class="auto-drop" id="auto-then" data-auto-zone="then" aria-label="Then">
                         <h3 class="settings-subtitle">Then</h3>
-                        <p class="hint">Drag lights, scenes, or Unlock here. Reorder by dragging.</p>
+                        <p class="hint">Drag lights, scenes, or Unlock here. Reorder by dragging. Each Then chip can turn off after a delay.</p>
                         <div class="auto-drop-chips" id="auto-then-chips"></div>
                         <label class="settings-field auto-off-after">
                             <span class="label">Turn off after</span>

@@ -337,6 +337,8 @@ final class YarboHome
                     'temperature',
                     'humidity',
                     'motion',
+                    'has_open',
+                    'has_motion',
                 ] as $key) {
                     if (array_key_exists($key, $device)) {
                         $row[$key] = $device[$key];
@@ -1331,9 +1333,14 @@ final class YarboHome
                 'name' => (string) ($device['name'] ?? $id),
                 'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
                 'source' => (string) ($device['source'] ?? ''),
+                'product' => (string) ($device['product'] ?? ''),
                 'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
-                'open' => array_key_exists('open', $device) ? (bool) $device['open'] : null,
-                'motion' => array_key_exists('motion', $device) ? (bool) $device['motion'] : null,
+                'open' => array_key_exists('open', $device) && $device['open'] !== null ? (bool) $device['open'] : null,
+                'motion' => array_key_exists('motion', $device) && $device['motion'] !== null ? (bool) $device['motion'] : null,
+                'has_open' => !empty($device['has_open']) || ((string) ($device['kind'] ?? '') === 'door')
+                    || ((string) ($device['kind'] ?? '') === 'hub'),
+                'has_motion' => !empty($device['has_motion']),
+                'has_dps' => !empty($device['has_dps']),
                 'temperature' => isset($device['temperature']) && is_numeric($device['temperature'])
                     ? (float) $device['temperature']
                     : null,

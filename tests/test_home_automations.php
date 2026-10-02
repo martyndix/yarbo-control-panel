@@ -333,6 +333,31 @@ $auto->delete('a-motion');
 $commands = [];
 @unlink($auto->statePath());
 
+$actionOff = $auto->save([
+    'id' => 'a-chip-off',
+    'name' => '',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'actions' => [['kind' => 'scene', 'id' => 'sc-outdoor', 'command' => 'run', 'off_after_sec' => 120]],
+    'off_after_sec' => 0,
+    'cooldown_sec' => 0,
+    'names' => ['unifi:sensor:s1' => 'Kitchen Sensor', 'scene:sc-outdoor' => 'Outdoor Lights'],
+]);
+assert_true(!empty($actionOff['ok']), 'save per-action off after: ' . json_encode($actionOff));
+assert_true((int) (($actionOff['automation']['actions'][0]['off_after_sec'] ?? 0)) === 120, 'action off_after persisted');
+assert_true(str_contains((string) ($actionOff['automation']['name'] ?? ''), 'off after 2 min'), 'chip timer in name: ' . ($actionOff['automation']['name'] ?? ''));
+$tChip = 1_810_000_000;
+$r = $auto->tick($sense(false), $tChip);
+$r = $auto->tick($sense(true), $tChip + 1);
+assert_true($r['fired'] === ['a-chip-off'], 'chip-off motion fire: ' . json_encode($r));
+$r = $auto->tick($sense(false), $tChip + 119);
+assert_true(($r['turned_off'] ?? []) === [], 'chip off-after must wait 2 min');
+$r = $auto->tick($sense(false), $tChip + 121);
+assert_true(($r['turned_off'] ?? []) === ['a-chip-off'], 'chip off-after must stop: ' . json_encode($r));
+$auto->delete('a-chip-off');
+$commands = [];
+@unlink($auto->statePath());
+
 assert_true(YarboHomeAutomations::hmInWindow('21:00', '20:00', '22:00'), 'window inside');
 assert_true(!YarboHomeAutomations::hmInWindow('19:00', '20:00', '22:00'), 'window before');
 assert_true(YarboHomeAutomations::hmInWindow('23:00', '22:00', '06:00'), 'overnight window');
@@ -366,7 +391,14 @@ assert_true(isset($dash['timezone']['name']) && isset($dash['runner']), 'dashboa
 assert_true(str_contains($js, "['scenes', 'Scenes']"), 'scenes group');
 assert_true(str_contains($js, 'homeAutoReadOffAfter'), 'turn-off-after helper');
 assert_true(str_contains($js, "data-auto-starter=\"motion\""), 'motion starter');
-assert_true(str_contains($index, 'auto-off-after'), 'turn-off-after field');
+assert_true(str_contains($js, 'homeAutoRequestBrowserGps'), 'browser GPS helper');
+assert_true(str_contains($js, 'getCurrentPosition'), 'browser geolocation');
+assert_true(str_contains($index, 'auto-geo'), 'use my location button');
+assert_true(str_contains($js, 'homeAutoCanOpen'), 'capability helper');
+assert_true(str_contains($js, 'homeAutoCanMotion'), 'motion capability helper');
+assert_true(str_contains($js, 'data-auto-then-off'), 'then chip off-after');
+assert_true(str_contains($js, 'homeAutoThenCanOffAfter'), 'then off-after helper');
+assert_true(str_contains($js, 'homeAutoIfStateOptions'), 'only-if states');
 
 $offRoot = sys_get_temp_dir() . '/yarbo-auto-off-' . bin2hex(random_bytes(3));
 mkdir($offRoot . '/data', 0775, true);

@@ -1487,13 +1487,16 @@ final class YarboUnifi
             ?? $this->nestedNumber($row, ['humidity', 'value'])
             ?? $this->nestedNumber($row, ['relativeHumidity'])
             ?? $this->nestedNumber($row, ['humidity']);
+        $name = $this->displayName($row, 'Sensor');
+        $product = (string) ($row['type'] ?? $row['model'] ?? 'Protect sensor');
+        $caps = $this->sensorCapabilityFlags($row, $name, $product, $open);
         $parts = [];
-        if ($open === true) {
+        if ($caps['has_open'] && $open === true) {
             $parts[] = 'Open';
-        } elseif ($open === false) {
+        } elseif ($caps['has_open'] && $open === false) {
             $parts[] = 'Closed';
         }
-        if ($motion) {
+        if ($caps['has_motion'] && $motion) {
             $parts[] = 'Motion';
         }
         if ($leak) {
@@ -1510,17 +1513,19 @@ final class YarboUnifi
         return [
             'id' => self::homeId(self::KIND_SENSOR, $id),
             'native_id' => $id,
-            'name' => $this->displayName($row, 'Sensor'),
+            'name' => $name,
             'kind' => self::KIND_SENSOR,
             'source' => self::SOURCE,
-            'product' => (string) ($row['type'] ?? $row['model'] ?? 'Protect sensor'),
+            'product' => $product,
             'available' => true,
             'on' => $open === true || $motion || $leak,
             'dimmable' => false,
             'colorable' => false,
             'status' => $status,
-            'open' => $open,
-            'motion' => $motion,
+            'open' => $caps['has_open'] ? $open : null,
+            'motion' => $caps['has_motion'] ? $motion : null,
+            'has_open' => $caps['has_open'],
+            'has_motion' => $caps['has_motion'],
             'temperature' => $temp,
             'humidity' => $humidity,
         ];
@@ -2085,6 +2090,50 @@ final class YarboUnifi
         }
 
         return null;
+    }
+
+    /**
+     * Protect often sends isOpened: false on motion-only sensors. Name wins so
+     * Automations do not offer open/closed for a bathroom motion detector.
+     *
+     * @param array<string, mixed> $row
+     * @return array{has_open: bool, has_motion: bool}
+     */
+    private function sensorCapabilityFlags(array $row, string $name, string $product, ?bool $open): array
+    {
+        $blob = trim($product . ' ' . $name);
+        $motionName = preg_match('/motion|occupancy|presence|pir/i', $blob) === 1;
+        $contactName = preg_match('/contact|door|window|magnet|leak/i', $blob) === 1;
+        $hasMotion = $this->sensorReportsMotion($row) || $motionName;
+        $hasOpen = $open !== null;
+        if ($motionName && !$contactName) {
+            $hasOpen = false;
+        }
+
+        return ['has_open' => $hasOpen, 'has_motion' => $hasMotion];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function sensorReportsMotion(array $row): bool
+    {
+        foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
+            if (array_key_exists($key, $row) && $row[$key] !== null && $row[$key] !== '') {
+                return true;
+            }
+        }
+        $stats = $row['stats'] ?? null;
+        if (!is_array($stats)) {
+            return false;
+        }
+        foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
+            if (array_key_exists($key, $stats) && $stats[$key] !== null && $stats[$key] !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function openClosedValue(mixed $value): ?bool

@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.30] - 2026-10-02
+
+### Added
+- Home Automations fills sunrise/sunset **latitude and longitude** from this browser’s GPS when the page loads (and **Use my location**). Saved coords are used by the background runner.
+- Each Then chip has **off after** (stay on, 1–30 min, or 1 hr). If the When fires again, that timer restarts.
+
+### Fixed
+- When and Only if dropdowns only list states the selected device can do. A motion sensor does not show open/closed; a spotlight does not show open/closed.
+
 ## [4.0.29] - 2026-10-02
 
 ### Fixed

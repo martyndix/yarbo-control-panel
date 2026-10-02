@@ -4030,6 +4030,10 @@ body.home-is-reordering {
     max-width: 7.5rem;
 }
 
+.auto-chip [data-auto-then-off] {
+    max-width: 8.8rem;
+}
+
 .auto-chip input[type="number"] {
     width: 3.4rem;
 }
@@ -4069,6 +4073,11 @@ body.home-is-reordering {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
     gap: 0.75rem;
+    align-items: end;
+}
+
+.auto-geo-field .btn {
+    width: 100%;
 }
 
 .auto-coords.hidden {
