@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.19] - 2026-10-02
+
+### Fixed
+- Home **Open / Closed** on Access door controllers now follows the door. 4.0.17 stopped polling Access on every Home refresh so light clicks were not stuck behind GET `/doors`; that left the chip frozen. Home still returns the last inventory immediately, and a background process re-reads Access door position so the next 3-second Home refresh can show Open.
+
 ## [4.0.18] - 2026-10-01
 
 ### Fixed

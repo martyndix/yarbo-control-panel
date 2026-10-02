@@ -398,6 +398,7 @@ final class YarboUnifi
      */
     public function homeRows(): array
     {
+        $this->kickAccessDoorRefresh();
         $config = $this->load();
         if ($config['show_on_home'] === []) {
             return [];
@@ -418,9 +419,89 @@ final class YarboUnifi
     }
 
     /**
+     * Re-read Access doors so Open/Closed on Home stays current.
+     * Called from a background PHP process — never from the Home GET itself.
+     */
+    public function refreshAccessDoors(): void
+    {
+        $this->refreshAccessDoorStatus(2.5, true);
+    }
+
+    /**
+     * Start a background GET /doors so Home Open/Closed can change without
+     * occupying the single-threaded panel (that blocked light clicks in 4.0.15).
+     */
+    private function kickAccessDoorRefresh(): void
+    {
+        if ($this->transport !== null) {
+            return;
+        }
+        $config = $this->load();
+        if ($config['host'] === '' || ($config['access_token'] === '' && $config['protect_api_key'] === '')) {
+            return;
+        }
+        $inventory = $this->readInventory();
+        $at = (int) ($inventory['access_status_at'] ?? 0);
+        if ($at > 0 && (time() - $at) < 4) {
+            return;
+        }
+        $lock = $this->projectRoot . '/data/unifi-dps.lock';
+        if (is_file($lock) && (time() - (int) @filemtime($lock)) < 10) {
+            return;
+        }
+        $script = $this->projectRoot . '/scripts/unifi_dps_refresh.php';
+        if (!is_file($script)) {
+            return;
+        }
+        if (!is_dir($this->projectRoot . '/data')) {
+            @mkdir($this->projectRoot . '/data', 0775, true);
+        }
+        @file_put_contents($lock, (string) time());
+        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $log = $this->projectRoot . '/data/unifi-dps.log';
+        $command = sprintf(
+            'cd %s && %s %s %s >> %s 2>&1 < /dev/null &',
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($php),
+            escapeshellarg($script),
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($log)
+        );
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['file', $log, 'a'],
+            2 => ['file', $log, 'a'],
+        ];
+        $process = proc_open(
+            ['bash', '-c', $command],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot
+        );
+        if (is_resource($process)) {
+            if (isset($pipes[0]) && is_resource($pipes[0])) {
+                fclose($pipes[0]);
+            }
+            proc_close($process);
+        }
+    }
+
+    /**
      * Re-read Access doors so Open/Closed on Home stays current without a full Protect poll.
      */
-    private function refreshAccessDoorStatus(float $timeout): void
+    private function refreshAccessDoorStatus(float $timeout, bool $force = false): void
+    {
+        try {
+            $this->refreshAccessDoorStatusInner($timeout, $force);
+        } finally {
+            $lock = $this->projectRoot . '/data/unifi-dps.lock';
+            if (is_file($lock)) {
+                @unlink($lock);
+            }
+        }
+    }
+
+    private function refreshAccessDoorStatusInner(float $timeout, bool $force): void
     {
         $config = $this->load();
         if ($config['host'] === '' || ($config['access_token'] === '' && $config['protect_api_key'] === '')) {
@@ -428,7 +509,7 @@ final class YarboUnifi
         }
         $inventory = $this->readInventory();
         $at = (int) ($inventory['access_status_at'] ?? 0);
-        if ($at > 0 && (time() - $at) < 5) {
+        if (!$force && $at > 0 && (time() - $at) < 3) {
             return;
         }
         $doorsRes = $this->accessJson($config, '/doors', $timeout);
@@ -1331,26 +1412,26 @@ final class YarboUnifi
      */
     private function doorPositionRaw(array $row): ?string
     {
-        foreach (['door_position_status', 'doorPositionStatus', 'dps_status', 'dpsStatus', 'position_status'] as $key) {
+        foreach (['door_position_status', 'doorPositionStatus', 'dps_status', 'dpsStatus', 'position_status', 'is_opened', 'isOpened'] as $key) {
             if (!array_key_exists($key, $row) || $row[$key] === null) {
                 continue;
             }
-            $value = strtolower(trim((string) $row[$key]));
-            if ($value !== '' && $value !== 'null' && $value !== 'none') {
-                return $value;
+            $normalized = $this->normalizeDoorPosition($row[$key]);
+            if ($normalized !== null) {
+                return $normalized;
             }
         }
         foreach (['extras', 'extra', 'status', 'state'] as $nest) {
             if (!isset($row[$nest]) || !is_array($row[$nest]) || array_is_list($row[$nest])) {
                 continue;
             }
-            foreach (['door_position_status', 'doorPositionStatus', 'dps_status', 'dpsStatus'] as $key) {
+            foreach (['door_position_status', 'doorPositionStatus', 'dps_status', 'dpsStatus', 'is_opened', 'isOpened'] as $key) {
                 if (!array_key_exists($key, $row[$nest]) || $row[$nest][$key] === null) {
                     continue;
                 }
-                $value = strtolower(trim((string) $row[$nest][$key]));
-                if ($value !== '' && $value !== 'null' && $value !== 'none') {
-                    return $value;
+                $normalized = $this->normalizeDoorPosition($row[$nest][$key]);
+                if ($normalized !== null) {
+                    return $normalized;
                 }
             }
         }
@@ -1358,13 +1439,34 @@ final class YarboUnifi
         return null;
     }
 
+    private function normalizeDoorPosition(mixed $raw): ?string
+    {
+        if (is_bool($raw)) {
+            return $raw ? 'open' : 'close';
+        }
+        if (is_int($raw) || is_float($raw)) {
+            if ((int) $raw === 1) {
+                return 'open';
+            }
+            if ((int) $raw === 0) {
+                return 'close';
+            }
+        }
+        $value = strtolower(trim((string) $raw));
+        if ($value === '' || $value === 'null' || $value === 'none' || $value === 'n/a' || $value === 'unknown') {
+            return null;
+        }
+
+        return $value;
+    }
+
     private function dpsLabel(string $dps): string
     {
         $dps = strtolower(trim($dps));
-        if ($dps === 'open') {
+        if (in_array($dps, ['open', 'opened', 'opening', '1', 'true', 'on', 'yes'], true)) {
             return 'Open';
         }
-        if ($dps === 'close' || $dps === 'closed') {
+        if (in_array($dps, ['close', 'closed', 'closing', '0', 'false', 'off', 'no'], true)) {
             return 'Closed';
         }
 

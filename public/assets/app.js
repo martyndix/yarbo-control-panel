@@ -2627,7 +2627,7 @@ function unifiSnapSrc(d, bust) {
 
 function unifiDpsMetaHtml(d, attr) {
     let label = String(d?.dps_label || '').trim()
-        || (d?.dps === 'open' ? 'Open' : (d?.dps === 'close' || d?.dps === 'closed' ? 'Closed' : ''));
+        || (d?.dps === 'open' || d?.dps === 'opened' ? 'Open' : (d?.dps === 'close' || d?.dps === 'closed' ? 'Closed' : ''));
     if (!label && d?.open === true) label = 'Open';
     if (!label && d?.open === false && d?.has_dps) label = 'Closed';
     if (!label) {
@@ -3232,8 +3232,9 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         const meta = card.querySelector('[data-home-dps], [data-home-status]');
         if (meta) {
             const label = dpsLabel
+                || (extras.open === true ? 'Open' : (extras.open === false && (extras.has_dps || extras.dps) ? 'Closed' : ''))
                 || extras.status
-                || (extras.dps === 'open' ? 'Open' : (extras.dps === 'close' || extras.dps === 'closed' ? 'Closed' : meta.textContent));
+                || (extras.dps === 'open' || extras.dps === 'opened' ? 'Open' : (extras.dps === 'close' || extras.dps === 'closed' ? 'Closed' : meta.textContent));
             meta.textContent = label;
             meta.classList.toggle('is-open', extras.open === true || extras.dps === 'open' || label === 'Open');
         }

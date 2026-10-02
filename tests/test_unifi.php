@@ -64,7 +64,8 @@ if ($view['show_on_home'] !== ['unifi:camera:cam1']) {
 }
 
 $calls = [];
-$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls): array {
+$doorDps = 'close';
+$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps): array {
     $calls[] = [$method, $url, $headers, $body];
     if (str_contains($url, '/cameras') && !str_contains($url, '/snapshot')) {
         return [
@@ -175,7 +176,7 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                     'id' => 'door1',
                     'name' => 'Front',
                     'door_lock_relay_status' => 'lock',
-                    'door_position_status' => 'close',
+                    'door_position_status' => $doorDps,
                     'is_bind_hub' => true,
                 ]],
             ]),
@@ -242,6 +243,44 @@ if (($hubRow['dps_label'] ?? '') !== 'Closed' || ($doorRow['dps_label'] ?? '') !
     fwrite(STDERR, 'hub/door missing Closed DPS ' . json_encode([$hubRow, $doorRow]) . "\n");
     exit(1);
 }
+$doorDps = 'open';
+$unifi->refreshAccessDoors();
+$openedInv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+$hubOpen = null;
+$doorOpen = null;
+foreach ($openedInv['hubs'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:hub:7483c2773855') {
+        $hubOpen = $row;
+    }
+}
+foreach ($openedInv['doors'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:door:door1') {
+        $doorOpen = $row;
+    }
+}
+if (($hubOpen['dps_label'] ?? '') !== 'Open' || ($hubOpen['open'] ?? false) !== true) {
+    fwrite(STDERR, 'Access open did not reach the controller tile ' . json_encode($hubOpen) . "\n");
+    exit(1);
+}
+if (($doorOpen['dps_label'] ?? '') !== 'Open') {
+    fwrite(STDERR, 'Access open did not reach the door tile ' . json_encode($doorOpen) . "\n");
+    exit(1);
+}
+$doorDps = 'opened';
+$unifi->refreshAccessDoors();
+$openedWord = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+$hubOpenedWord = null;
+foreach ($openedWord['hubs'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:hub:7483c2773855') {
+        $hubOpenedWord = $row;
+        break;
+    }
+}
+if (($hubOpenedWord['dps_label'] ?? '') !== 'Open') {
+    fwrite(STDERR, 'opened must map to Open ' . json_encode($hubOpenedWord) . "\n");
+    exit(1);
+}
+$doorDps = 'close';
 $floodRow = null;
 foreach ($probe['devices'] ?? [] as $row) {
     if (is_array($row) && ($row['id'] ?? '') === 'unifi:light:light1') {

@@ -11,7 +11,7 @@ Not affiliated with Ubiquiti.
 - Toggle Protect relays (`POST /relays/{id}/outputs/{outputId}/activate`). Relays are dry-contact outputs in Protect, not Access doors.
 - Show Protect sensor status (open/closed, motion, temperature/humidity when the Integration API returns them).
 - Unlock Access doors and **door controllers** (UA Hub / Gate Hub) from the Access OpenAPI (`/api/v1/developer/doors` and `/devices`). Gate Hub three-button mode can send Open / Close / Stop (`control_cmd`).
-- Show **Open / Closed** on the door controller (and door) tile, next to Unlock, from the Access door-position sensor (`door_position_status`). A separate door-position row is still listed if you want it on Home on its own.
+- Show **Open / Closed** on the door controller (and door) tile, next to Unlock, from the Access door-position sensor (`door_position_status`). Home refreshes that in the background so the chip can change without blocking light clicks. A separate door-position row is still listed if you want it on Home on its own.
 - Tick **Show on Home** per device so it behaves like another Home row (camera still, light/relay on/off, door/controller Unlock + position, sensor text). Ticks save as you click.
 
 ## What it cannot do (this version)
@@ -73,4 +73,4 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 ## Rollback
 
-This is panel **4.0.17**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+This is panel **4.0.19**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
