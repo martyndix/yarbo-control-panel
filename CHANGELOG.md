@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.21] - 2026-10-02
+
+### Fixed
+- Protect **UP Sense** tiles (Open/Closed, temperature, humidity) now refresh in the same background job as Access door position. 4.0.19 only re-read Access `GET /doors`, so a Garage-style Protect sensor stayed on `Closed · 21.9° · 72% RH` while you stayed on Home. Access controllers are unchanged.
+- UniFi floodlights now log into UniFi OS with the stored local admin (cookie + CSRF) and PATCH private `lightOnSettings.isLedForceOn` when the public Integration `isLightForceEnabled` response does not confirm the LED. A 200 HTML login page is still ignored. If no local admin is saved and the lamp does not switch, Test UniFi / the click error asks you to add one under Settings → UniFi.
+
 ## [4.0.20] - 2026-10-02
 
 ### Fixed

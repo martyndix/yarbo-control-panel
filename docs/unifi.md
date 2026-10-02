@@ -7,9 +7,9 @@ Not affiliated with Ubiquiti.
 ## What it can do
 
 - List Protect cameras and show JPEG stills on the UniFi page and on Home.
-- Toggle Protect floodlights (`PATCH /proxy/protect/integration/v1/lights/{id}` with `isLightForceEnabled` and `ledLevel` 6; private `isLedForceOn` is a fallback only when it returns JSON, not an HTML login page).
+- Toggle Protect floodlights (`PATCH /proxy/protect/integration/v1/lights/{id}` with `isLightForceEnabled` and `ledLevel` 6). If that does not confirm the LED, the panel logs into UniFi OS with the stored local admin and PATCHes private `lightOnSettings.isLedForceOn` (cookie + CSRF). A Control Plane API key alone cannot authenticate `/proxy/protect/api`; an HTML login page is not treated as success.
 - Toggle Protect relays (`POST /relays/{id}/outputs/{outputId}/activate`). Relays are dry-contact outputs in Protect, not Access doors.
-- Show Protect sensor status (open/closed, motion, temperature/humidity when the Integration API returns them).
+- Show Protect sensor status (open/closed, motion, temperature/humidity). Home re-reads `GET /sensors` in the background so those chips stay live without blocking light clicks.
 - Unlock Access doors and **door controllers** (UA Hub / Gate Hub) from the Access OpenAPI (`/api/v1/developer/doors` and `/devices`). Gate Hub three-button mode can send Open / Close / Stop (`control_cmd`).
 - Show **Open / Closed** on the door controller (and door) tile, next to Unlock, from the Access door-position sensor (`door_position_status`). Home refreshes that in the background so the chip can change without blocking light clicks. A separate door-position row is still listed if you want it on Home on its own.
 - Tick **Show on Home** per device so it behaves like another Home row (camera still, light/relay on/off, door/controller Unlock + position, sensor text). Ticks save as you click.
@@ -35,7 +35,7 @@ Not affiliated with Ubiquiti.
    - `view:device` — list hubs / controllers
    - `edit:space` — remote unlock
    If Test UniFi says `you entered no-man zone` or 0 doors / 0 controllers after pasting the Control Plane key into both fields, recreate the token inside Access and paste only that into Access API token.
-7. Optional Protect local username/password is stored for a later “full access” path if sensors are empty on API-key-only.
+7. Optional **Protect local username/password** is a UniFi OS local admin. Floodlights need this when the public Integration force-on does not light the lamp — the API key cannot log into the private light API.
 8. If Access is **not** hosted on UniFi OS, tick **Access is standalone (port 12445)**. The official OpenAPI host is always `https://CONSOLE:12445` (self-signed cert).
 9. **Test UniFi connection**, then tick devices under **Show on Home**.
 
@@ -63,7 +63,9 @@ The panel also tries UniFi OS proxy paths (`/proxy/access/api/v1/developer` and 
 
 Door list: `GET /doors` (`view:space`). Device/hub list: `GET /devices?refresh=true` (`view:device`). Unlock: `PUT /doors/{id}/unlock` (`edit:space`; POST if the console rejects PUT). Gate Hub: add `?control_cmd=open|close|stop`. Door position is `door_position_status` on each door.
 
-Protect lights: the panel PATCHes the public Integration API `{ "isLightForceEnabled": true, "lightDeviceSettings": { "ledLevel": 6 } }` (`/proxy/protect/integration/v1/lights/{id}` with `X-API-KEY`). That is the API the Control Plane key can use. The private `/proxy/protect/api` `isLedForceOn` path is only used if the public PATCH fails and the private response is JSON — a UniFi OS HTML login page is not treated as success. Off sends `isLightForceEnabled` / `isLedForceOn` false. Relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
+Protect lights: the panel PATCHes the public Integration API `{ "isLightForceEnabled": true, "lightDeviceSettings": { "ledLevel": 6 } }` (`/proxy/protect/integration/v1/lights/{id}` with `X-API-KEY`). If that JSON does not confirm the LED (`isLightOn`), it logs in at `/api/auth/login` with the stored local admin and PATCHes `/proxy/protect/api/lights/{id}` `{ "lightOnSettings": { "isLedForceOn": true }, "lightDeviceSettings": { "ledLevel": 6 } }` with the session cookie and CSRF token. Private PATCH with only the API key is still tried; a UniFi OS HTML login page is not success. Off sends `isLightForceEnabled` / `isLedForceOn` false. Relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
+
+Protect sensors: `GET /proxy/protect/integration/v1/sensors` (`isOpened`, `stats.temperature.value`, `stats.humidity.value`). Home does not poll this on the request that serves the grid; a background process updates `data/unifi-inventory.json` so the next 3-second Home refresh can show Open and new readings. Access `GET /doors` (controller Open/Closed) is a separate poll in that same job.
 
 ## Home
 
@@ -73,4 +75,4 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 ## Rollback
 
-This is panel **4.0.20**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+This is panel **4.0.21**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.

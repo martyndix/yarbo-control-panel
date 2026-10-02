@@ -4,8 +4,9 @@
 declare(strict_types=1);
 
 /**
- * Background Access door-position refresh so Home Open/Closed can update
- * without blocking the single-threaded panel on GET /doors.
+ * Background Access door-position and Protect sensor refresh so Home
+ * Open/Closed, temperature, and humidity can update without blocking the
+ * single-threaded panel.
  */
 
 require dirname(__DIR__) . '/vendor/autoload.php';
