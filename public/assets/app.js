@@ -3081,7 +3081,10 @@ async function homeApi(body, timeoutMs = 20000) {
         }
         const res = await fetchWithTimeout('/api/home.php', {
             method: body ? 'POST' : 'GET',
-            headers: body ? { 'Content-Type': 'application/json' } : undefined,
+            headers: {
+                ...(body ? { 'Content-Type': 'application/json' } : {}),
+                ...clientTimezoneHeaders(),
+            },
             body: body ? JSON.stringify(body) : undefined,
             ...extra,
         }, timeoutMs);
@@ -5088,7 +5091,12 @@ function renderHomeAutomations() {
     const zone = info.name || homeDash.server_timezone || '';
     const clock = info.clock || '';
     if (tz) {
-        if (zone && clock) tz.textContent = `Times use ${zone} (now ${clock}).`;
+        const utc = zone === 'UTC' || zone === 'Etc/UTC';
+        if (utc && clock) {
+            tz.textContent = `Times use UTC (now ${clock}). Pick your local timezone — 21:00 means 21:00 UTC, not your wall clock.`;
+        } else if (utc) {
+            tz.textContent = 'Times use UTC. Pick your local timezone or 21:00 means 21:00 UTC.';
+        } else if (zone && clock) tz.textContent = `Times use ${zone} (now ${clock}).`;
         else if (zone) tz.textContent = `Times use ${zone}.`;
         else tz.textContent = 'Times use this panel’s timezone.';
     }
@@ -5138,10 +5146,12 @@ function renderHomeAutomations() {
     }
     html += rules.map((rule) => {
         const sentence = homeAutoSentence(rule, names);
+        const lastHm = runner.last_fire_hm && runner.last_fire_hm[rule.id];
+        const lastHint = lastHm ? ` Last ran ${lastHm}.` : '';
         return `<article class="auto-row" data-auto-id="${escapeHtml(rule.id)}">
             <div class="auto-row-main">
                 <div class="auto-row-name">${escapeHtml(rule.name || sentence)}</div>
-                <p class="hint">${escapeHtml(sentence)}</p>
+                <p class="hint">${escapeHtml(sentence)}${escapeHtml(lastHint)}</p>
             </div>
             <div class="auto-row-actions">
                 <label class="hint" style="display:flex;gap:0.35rem;align-items:center">
@@ -5659,6 +5669,10 @@ async function homeAutoSave() {
     if (!autoNameLocked) homeAutoSyncName();
     if (autoDraft.trigger?.type === 'device' && homeAutoDurationEvent(autoDraft.trigger.event)) {
         autoDraft.trigger.for_sec = homeAutoReadDuration();
+    }
+    if (autoDraft.trigger?.type === 'time') {
+        const atEl = document.querySelector('#home-automations-editor [data-auto-at]');
+        if (atEl && atEl.value) autoDraft.trigger.at = atEl.value;
     }
     autoDraft.off_after_sec = homeAutoReadOffAfter();
     if (autoDraft.trigger?.type === 'sun' && homeAutoSunNeedsCoords()) {

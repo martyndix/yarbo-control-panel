@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.32] - 2026-10-02
+
+### Fixed
+- Time automations can fire again the same day after a previous attempt (including a leftover “already ran today” from an older build). Saving a rule also clears that mark so a new time can be tested.
+- Opening Home stores this browser’s timezone when the panel clock is still UTC, so 21:00 follows the wall clock without a separate Automations visit.
+- The runner evaluates time rules before UniFi polls, so a slow Protect/Access refresh cannot skip the minute.
+
 ## [4.0.31] - 2026-10-02
 
 ### Fixed

@@ -184,6 +184,16 @@ $utcSave = $auto->save(['timezone' => 'UTC']);
 assert_true(!empty($utcSave['ok']), 'save UTC timezone');
 $utcPub = $auto->timezonePublic();
 assert_true(($utcPub['saved'] ?? true) === false, 'saved UTC must be treated as unsaved: ' . json_encode($utcPub));
+$nameBeforeAdopt = $auto->timezoneName();
+$adopted = $auto->adoptClientTimezone('Europe/Paris');
+if (strcasecmp($nameBeforeAdopt, 'UTC') === 0 || strcasecmp($nameBeforeAdopt, 'Etc/UTC') === 0) {
+    assert_true($adopted && $auto->timezoneName() === 'Europe/Paris', 'UTC panel adopts browser zone: ' . $auto->timezoneName());
+} else {
+    assert_true(!$adopted, 'non-UTC OS zone must not be overwritten by the browser');
+    assert_true($auto->timezoneName() === $nameBeforeAdopt, 'kept OS zone ' . $auto->timezoneName());
+}
+$londonKeep = $auto->adoptClientTimezone('America/New_York');
+assert_true(!$londonKeep, 'saved/OS local zone must not switch to another browser zone');
 $auto->save(['timezone' => 'Europe/London']);
 $seconds = $auto->save([
     'id' => 'a-hm',
@@ -212,6 +222,24 @@ $r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now);
 assert_true($r['fired'] === ['a-time'], 'time rule must fire at 21:30: ' . json_encode($r));
 $r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 5);
 assert_true($r['fired'] === [], 'time rule once per local day');
+$today = $at->format('Y-m-d');
+$stale = json_decode((string) file_get_contents($auto->statePath()), true);
+assert_true(is_array($stale), 'state after time fire');
+$stale['day_slot']['a-time'] = $today;
+file_put_contents($auto->statePath(), json_encode($stale, JSON_UNESCAPED_SLASHES));
+$r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 10);
+assert_true($r['fired'] === ['a-time'], 'date-only day_slot must not block a new slot key: ' . json_encode($r));
+$retimed = $auto->save([
+    'id' => 'a-time',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '21:31', 'days' => [(int) $at->format('w')]],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($retimed['ok']), 'save retimed rule');
+$later = $at->setTime(21, 31)->getTimestamp();
+$r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $later);
+assert_true($r['fired'] === ['a-time'], 'new time same day after save must fire: ' . json_encode($r));
 
 $auto->delete('a-time');
 $commands = [];
@@ -447,6 +475,8 @@ assert_true(str_contains($homePhp, 'automation_save'), 'home.php CRUD');
 $panel = (string) file_get_contents(__DIR__ . '/../scripts/panel.sh');
 assert_true(str_contains($panel, 'home_automations.php'), 'panel.sh must start the sidecar');
 assert_true(str_contains($panel, 'home-automations.log'), 'sidecar writes a log');
+$sidecar = (string) file_get_contents(__DIR__ . '/../scripts/home_automations.php');
+assert_true(strpos($sidecar, 'tick();') < strpos($sidecar, 'refreshUnifiIfDue'), 'time tick must run before UniFi refresh');
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -458,6 +488,9 @@ assert_true(str_contains($js, 'homeAutoDeviceSelectGroups'), 'only-if grouping h
 assert_true(str_contains($js, "['cameras', 'Cameras']"), 'cameras group');
 assert_true(str_contains($js, 'homeAutoEnsureTimezone'), 'timezone adopt helper');
 assert_true(str_contains($js, 'runner.last_error'), 'runner error hint');
+assert_true(str_contains($js, 'last_fire_hm'), 'last ran hint');
+assert_true(str_contains($js, 'clientTimezoneHeaders()'), 'Home sends browser timezone');
+assert_true(str_contains($js, 'Pick your local timezone'), 'UTC wall-clock warning');
 assert_true(str_contains($index, 'auto-timezone'), 'timezone picker');
 assert_true(isset($dash['timezone']['name']) && isset($dash['runner']), 'dashboard exposes timezone and runner');
 assert_true(str_contains($js, "['scenes', 'Scenes']"), 'scenes group');

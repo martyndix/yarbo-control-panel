@@ -30,9 +30,13 @@ function home_automations_tick(YarboHomeAutomations $engine): void
 {
     static $failStreak = 0;
     try {
-        $engine->refreshUnifiIfDue(time(), 5);
         $result = $engine->tick();
-        if (($result['ok'] ?? false)) {
+        $engine->refreshUnifiIfDue(time(), 5);
+        if (($result['ok'] ?? false) && ($result['fired'] ?? []) !== []) {
+            $failStreak = 0;
+            fwrite(STDERR, 'home_automations: fired ' . implode(',', $result['fired'])
+                . ' at ' . (string) ($result['hm'] ?? '') . ' ' . (string) ($result['timezone'] ?? '') . "\n");
+        } elseif (($result['ok'] ?? false)) {
             $failStreak = 0;
         } else {
             $failStreak++;

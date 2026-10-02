@@ -354,6 +354,7 @@ final class YarboHome
         }
         $devices = $this->applyIdOrder($devices, $store['device_order'] ?? []);
         $auto = new YarboHomeAutomations($this->projectRoot);
+        $auto->adoptClientTimezone();
 
         return [
             'ok' => true,

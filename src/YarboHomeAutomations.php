@@ -74,6 +74,25 @@ final class YarboHomeAutomations
         ];
     }
 
+    /**
+     * When the panel clock is still UTC, store the browser zone from Home GET.
+     */
+    public function adoptClientTimezone(?string $raw = null): bool
+    {
+        if (!self::isUtcZone($this->timezoneName())) {
+            return false;
+        }
+        $raw = $raw ?? (string) ($_SERVER['HTTP_X_CLIENT_TIMEZONE'] ?? '');
+        $zone = self::usableTimezone($raw);
+        if ($zone === '') {
+            return false;
+        }
+        $store = $this->load();
+        $store['timezone'] = $zone;
+
+        return $this->write($store);
+    }
+
     public function clockHm(?int $now = null): string
     {
         $now ??= time();
@@ -87,7 +106,7 @@ final class YarboHomeAutomations
     }
 
     /**
-     * @return array{at: int, age_sec: int|null, running: bool, last_error: string, last_fired: list<string>}
+     * @return array{at: int, age_sec: int|null, running: bool, last_error: string, last_fired: list<string>, last_fire_hm: array<string, string>, clock_hm: string, timezone: string}
      */
     public function runnerPublic(): array
     {
@@ -104,12 +123,30 @@ final class YarboHomeAutomations
             }
         }
 
+        $lastFireHm = [];
+        try {
+            $tz = new \DateTimeZone($this->timezoneName());
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('UTC');
+        }
+        foreach (is_array($state['last_fire'] ?? null) ? $state['last_fire'] : [] as $id => $ts) {
+            $id = trim((string) $id);
+            $ts = (int) $ts;
+            if ($id === '' || $ts <= 0) {
+                continue;
+            }
+            $lastFireHm[$id] = (new \DateTimeImmutable('@' . $ts))->setTimezone($tz)->format('H:i');
+        }
+
         return [
             'at' => $at,
             'age_sec' => $age,
             'running' => $at > 0 && $age !== null && $age < 20,
             'last_error' => $errors !== [] ? (string) $errors[0] : (string) ($state['unifi_error'] ?? ''),
             'last_fired' => $fired,
+            'last_fire_hm' => $lastFireHm,
+            'clock_hm' => $this->clockHm(),
+            'timezone' => $this->timezoneName(),
         ];
     }
 
@@ -233,8 +270,12 @@ final class YarboHomeAutomations
         if (!$this->write($store)) {
             return ['ok' => false, 'error' => 'Could not save'];
         }
+        $state = $this->loadState();
+        unset($state['day_slot'][$rule['id']], $state['last_fire'][$rule['id']]);
+        $this->writeState($state);
         $this->syncDelayedForRule($rule);
         $meta['automations'] = $store['automations'];
+        $meta['runner'] = $this->runnerPublic();
 
         return ['ok' => true, 'automation' => $rule] + $meta;
     }
@@ -374,7 +415,7 @@ final class YarboHomeAutomations
             $state['last_fire'][$id] = $now;
             $type = (string) ($rule['trigger']['type'] ?? '');
             if ($type === 'time' || $type === 'sun') {
-                $state['day_slot'][$id] = $today;
+                $state['day_slot'][$id] = $this->slotKey($rule, $today, $hm);
             }
             if (in_array((string) ($rule['trigger']['event'] ?? ''), self::DURATION_EVENTS, true)) {
                 if (!isset($state['held'][$id]) || !is_array($state['held'][$id])) {
@@ -390,10 +431,23 @@ final class YarboHomeAutomations
         $turnedOff = $this->flushDelayed($state, $now, $enabledById, $curr, $errors);
         $state['prev'] = $curr;
         $state['clock'] = $now;
-        $state['last_result'] = ['at' => $now, 'fired' => $fired, 'errors' => $errors];
+        $state['last_result'] = [
+            'at' => $now,
+            'hm' => $hm,
+            'timezone' => $tzName,
+            'fired' => $fired,
+            'errors' => $errors,
+        ];
         $this->writeState($state);
 
-        return ['ok' => $errors === [], 'fired' => $fired, 'turned_off' => $turnedOff, 'errors' => $errors];
+        return [
+            'ok' => $errors === [],
+            'fired' => $fired,
+            'turned_off' => $turnedOff,
+            'errors' => $errors,
+            'hm' => $hm,
+            'timezone' => $tzName,
+        ];
     }
 
     public function refreshUnifiIfDue(int $now, int $everySec = 5): void
@@ -878,7 +932,7 @@ final class YarboHomeAutomations
         $type = (string) ($trigger['type'] ?? '');
         $id = (string) ($rule['id'] ?? '');
         if ($type === 'time') {
-            if (($state['day_slot'][$id] ?? '') === $today) {
+            if (($state['day_slot'][$id] ?? '') === $this->slotKey($rule, $today, $hm)) {
                 return false;
             }
             $days = is_array($trigger['days'] ?? null) ? $trigger['days'] : [];
@@ -891,7 +945,7 @@ final class YarboHomeAutomations
                 || $this->failedTimeRetry($id, $at, $hm, $today, $state);
         }
         if ($type === 'sun') {
-            if (($state['day_slot'][$id] ?? '') === $today) {
+            if (($state['day_slot'][$id] ?? '') === $this->slotKey($rule, $today, $hm)) {
                 return false;
             }
             if ($coords['latitude'] === null || $coords['longitude'] === null) {
@@ -983,6 +1037,31 @@ final class YarboHomeAutomations
         $prevHm = $prev->format('H:i');
 
         return $prevHm < $at && $hm > $at;
+    }
+
+    /**
+     * One fire per local day per time-of-day (or sun event). Older date-only
+     * day_slot values do not match, so a stuck “already ran today” can retry.
+     *
+     * @param array<string, mixed> $rule
+     */
+    private function slotKey(array $rule, string $today, string $hm): string
+    {
+        $trigger = is_array($rule['trigger'] ?? null) ? $rule['trigger'] : [];
+        $type = (string) ($trigger['type'] ?? '');
+        if ($type === 'time') {
+            $at = self::normalizeHm((string) ($trigger['at'] ?? '')) ?? $hm;
+
+            return $today . 'T' . $at;
+        }
+        if ($type === 'sun') {
+            $event = (string) ($trigger['event'] ?? 'sunset');
+            $offset = (int) ($trigger['offset_min'] ?? 0);
+
+            return $today . 'Tsun-' . $event . '-' . $offset;
+        }
+
+        return $today;
     }
 
     /**
