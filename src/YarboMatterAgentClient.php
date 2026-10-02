@@ -112,11 +112,27 @@ final class YarboMatterAgentClient
             return;
         }
         self::$spawnAttempted = true;
-        $probe = $this->post(['op' => 'ping'], 0.4);
-        if (self::agentSupportsColor($probe)) {
-            return;
+        if ($this->portOpen()) {
+            $probe = $this->post(['op' => 'ping'], 1.5);
+            if (self::agentSupportsColor($probe)) {
+                return;
+            }
+            if (($probe['ok'] ?? false) !== true) {
+                return;
+            }
         }
         $this->spawnAgent();
+    }
+
+    public function portOpen(): bool
+    {
+        $fp = @fsockopen($this->host, $this->port, $errno, $errstr, 0.2);
+        if (!is_resource($fp)) {
+            return false;
+        }
+        fclose($fp);
+
+        return true;
     }
 
     private function spawnAgent(): void

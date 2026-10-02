@@ -5147,7 +5147,11 @@ function renderHomeAutomations() {
     html += rules.map((rule) => {
         const sentence = homeAutoSentence(rule, names);
         const lastHm = runner.last_fire_hm && runner.last_fire_hm[rule.id];
-        const lastHint = lastHm ? ` Last ran ${lastHm}.` : ' Not run yet.';
+        const thenErr = String((runner.then_error && runner.then_error[rule.id]) || '').trim();
+        let lastHint = ' Not run yet.';
+        if (lastHm && thenErr) lastHint = ` Tried ${lastHm}. Then failed: ${thenErr}`;
+        else if (lastHm) lastHint = ` Last ran ${lastHm}.`;
+        else if (thenErr) lastHint = ` Then failed: ${thenErr}`;
         return `<article class="auto-row" data-auto-id="${escapeHtml(rule.id)}">
             <div class="auto-row-main">
                 <div class="auto-row-name">${escapeHtml(rule.name || sentence)}</div>

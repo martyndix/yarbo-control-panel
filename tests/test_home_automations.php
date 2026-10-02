@@ -292,8 +292,17 @@ $failState = json_decode((string) file_get_contents($failAuto->statePath()), tru
 $failDay = (new DateTimeImmutable('@' . $now))->setTimezone($tz)->format('Y-m-d');
 assert_true(($failState['day_slot']['a-fail-time'] ?? '') !== $failDay, 'failed Then must not set day_slot');
 assert_true((int) ($failState['last_fire']['a-fail-time'] ?? 0) === $now, 'failed Then still sets last_fire for cooldown');
+assert_true(($failState['then_error']['a-fail-time'] ?? '') === 'device busy', 'failed Then must persist then_error');
+$failPub = $failAuto->runnerPublic();
+assert_true(($failPub['then_error']['a-fail-time'] ?? '') === 'device busy', 'runnerPublic then_error: ' . json_encode($failPub));
+assert_true(($failPub['last_error'] ?? '') === 'device busy', 'sticky last_error from Then: ' . json_encode($failPub));
 $r = $failAuto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 5);
 assert_true($r['fired'] === [] && ($r['errors'] ?? []) === [], 'cooldown must skip failed Then retry');
+$failState = json_decode((string) file_get_contents($failAuto->statePath()), true);
+assert_true(($failState['then_error']['a-fail-time'] ?? '') === 'device busy', 'then_error must survive an empty later tick');
+$failPub = $failAuto->runnerPublic();
+assert_true(($failPub['then_error']['a-fail-time'] ?? '') === 'device busy', 'sticky then_error after empty tick');
+assert_true(($failPub['last_error'] ?? '') === 'device busy', 'sticky last_error after empty tick');
 $okCommands = [];
 $failAuto->setCommandHandler(static function (array $action) use (&$okCommands): array {
     $okCommands[] = $action;
@@ -303,6 +312,10 @@ $failAuto->setCommandHandler(static function (array $action) use (&$okCommands):
 $r = $failAuto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 90);
 assert_true($r['fired'] === ['a-fail-time'], 'failed Then must retry after cooldown even past the minute: ' . json_encode($r));
 assert_true(count($okCommands) === 1, 'retry Then ran once');
+$failState = json_decode((string) file_get_contents($failAuto->statePath()), true);
+assert_true(($failState['then_error']['a-fail-time'] ?? '') === '', 'successful Then must clear then_error');
+$failPub = $failAuto->runnerPublic();
+assert_true(($failPub['then_error']['a-fail-time'] ?? '') === '', 'runnerPublic clears then_error on success');
 $failAuto->delete('a-fail-time');
 $commands = [];
 @unlink($auto->statePath());
@@ -490,6 +503,8 @@ assert_true(str_contains($js, "['cameras', 'Cameras']"), 'cameras group');
 assert_true(str_contains($js, 'homeAutoEnsureTimezone'), 'timezone adopt helper');
 assert_true(str_contains($js, 'runner.last_error'), 'runner error hint');
 assert_true(str_contains($js, 'last_fire_hm'), 'last ran hint');
+assert_true(str_contains($js, 'Then failed:'), 'Then-failed hint');
+assert_true(str_contains($js, 'runner.then_error'), 'per-rule Then error');
 assert_true(str_contains($js, 'clientTimezoneHeaders()'), 'Home sends browser timezone');
 assert_true(str_contains($js, 'Pick your local timezone'), 'UTC wall-clock warning');
 assert_true(str_contains($index, 'auto-timezone'), 'timezone picker');
@@ -541,5 +556,9 @@ assert_true(str_contains($js, 'Last ran stays empty'), 'stale runner copy');
 assert_true(str_contains($js, 'Runner is active'), 'active runner copy');
 assert_true(str_contains($js, 'Not run yet.'), 'not-run-yet copy');
 assert_true(str_contains($index, 'data-panel-version'), 'panel version on the page');
+$matterPhp = (string) file_get_contents(__DIR__ . '/../src/YarboMatterAgentClient.php');
+assert_true(str_contains($matterPhp, 'function portOpen'), 'Matter client checks the listening port');
+$change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.35]'), 'changelog 4.0.35');
 
 echo "test_home_automations.php ok\n";

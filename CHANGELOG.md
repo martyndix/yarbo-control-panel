@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.35] - 2026-10-02
+
+### Fixed
+- A time automation that **Last ran** at the right clock time but did not switch lights was treating a failed Then as a successful run. Automations now keeps that error (Tried HH:MM. Then failed: …) instead of clearing it on the next second, and retries after cooldown.
+- The automations runner no longer kills a Matter agent that is already listening when a short ping times out (for example while Home is talking to the same agent). That restart dropped On/Off so Cooker Hood Then never reached the bulbs.
+
 ## [4.0.34] - 2026-10-02
 
 ### Changed

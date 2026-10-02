@@ -106,7 +106,7 @@ final class YarboHomeAutomations
     }
 
     /**
-     * @return array{at: int, age_sec: int|null, running: bool, last_error: string, last_fired: list<string>, last_fire_hm: array<string, string>, clock_hm: string, timezone: string}
+     * @return array{at: int, age_sec: int|null, running: bool, last_error: string, last_fired: list<string>, last_fire_hm: array<string, string>, then_error: array<string, string>, clock_hm: string, timezone: string}
      */
     public function runnerPublic(): array
     {
@@ -138,13 +138,24 @@ final class YarboHomeAutomations
             $lastFireHm[$id] = (new \DateTimeImmutable('@' . $ts))->setTimezone($tz)->format('H:i');
         }
 
+        $thenError = [];
+        foreach (is_array($state['then_error'] ?? null) ? $state['then_error'] : [] as $id => $err) {
+            $id = trim((string) $id);
+            $err = trim((string) $err);
+            if ($id !== '' && $err !== '') {
+                $thenError[$id] = $err;
+            }
+        }
+        $stickyError = $thenError !== [] ? (string) array_values($thenError)[0] : '';
+
         return [
             'at' => $at,
             'age_sec' => $age,
             'running' => $at > 0 && $age !== null && $age < 20,
-            'last_error' => $errors !== [] ? (string) $errors[0] : (string) ($state['unifi_error'] ?? ''),
+            'last_error' => $stickyError !== '' ? $stickyError : ($errors !== [] ? (string) $errors[0] : (string) ($state['unifi_error'] ?? '')),
             'last_fired' => $fired,
             'last_fire_hm' => $lastFireHm,
+            'then_error' => $thenError,
             'clock_hm' => $this->clockHm(),
             'timezone' => $this->timezoneName(),
         ];
@@ -359,7 +370,7 @@ final class YarboHomeAutomations
             return ['ok' => false, 'error' => 'Could not save'];
         }
         $state = $this->loadState();
-        unset($state['day_slot'][$rule['id']], $state['last_fire'][$rule['id']]);
+        unset($state['day_slot'][$rule['id']], $state['last_fire'][$rule['id']], $state['then_error'][$rule['id']]);
         $this->writeState($state);
         $this->syncDelayedForRule($rule);
         $meta['automations'] = $store['automations'];
@@ -386,7 +397,7 @@ final class YarboHomeAutomations
             return ['ok' => false, 'error' => 'Could not save'];
         }
         $state = $this->loadState();
-        unset($state['held'][$id], $state['last_fire'][$id], $state['day_slot'][$id], $state['delayed'][$id]);
+        unset($state['held'][$id], $state['last_fire'][$id], $state['day_slot'][$id], $state['delayed'][$id], $state['then_error'][$id]);
         $this->writeState($state);
 
         return ['ok' => true, 'automations' => $store['automations']];
@@ -495,10 +506,16 @@ final class YarboHomeAutomations
             }
             $result = $this->runActions($rule['actions'] ?? []);
             if (!($result['ok'] ?? false)) {
-                $errors[] = (string) ($result['error'] ?? 'failed');
+                $err = (string) ($result['error'] ?? 'failed');
+                $errors[] = $err;
                 $state['last_fire'][$id] = $now;
+                if (!isset($state['then_error']) || !is_array($state['then_error'])) {
+                    $state['then_error'] = [];
+                }
+                $state['then_error'][$id] = $err;
                 continue;
             }
+            unset($state['then_error'][$id]);
             $fired[] = $id;
             $state['last_fire'][$id] = $now;
             $type = (string) ($rule['trigger']['type'] ?? '');
@@ -1621,6 +1638,7 @@ final class YarboHomeAutomations
             'prev' => [],
             'held' => [],
             'last_fire' => [],
+            'then_error' => [],
             'day_slot' => [],
             'delayed' => [],
             'clock' => 0,
@@ -1643,6 +1661,7 @@ final class YarboHomeAutomations
             'prev' => is_array($decoded['prev'] ?? null) ? $decoded['prev'] : [],
             'held' => is_array($decoded['held'] ?? null) ? $decoded['held'] : [],
             'last_fire' => is_array($decoded['last_fire'] ?? null) ? $decoded['last_fire'] : [],
+            'then_error' => is_array($decoded['then_error'] ?? null) ? $decoded['then_error'] : [],
             'day_slot' => is_array($decoded['day_slot'] ?? null) ? $decoded['day_slot'] : [],
             'delayed' => is_array($decoded['delayed'] ?? null) ? $decoded['delayed'] : [],
             'clock' => (int) ($decoded['clock'] ?? 0),
