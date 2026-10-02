@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.24] - 2026-10-02
+
+### Changed
+- Access door controllers now rename **Unlock** to **Lock** when the door-position chip is **Open** (and back to Unlock when Closed). Pressing Lock sends Access `PUT /doors/{id}/lock_rule` (`lock_now`, then `lock_early` if the console rejects that type) instead of another unlock. Same on Home and the UniFi page.
+
 ## [4.0.23] - 2026-10-02
 
 ### Fixed

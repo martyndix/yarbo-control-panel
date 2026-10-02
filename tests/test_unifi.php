@@ -30,6 +30,10 @@ if (Yarbo\YarboUnifi::unlockPath('door-1', 'open') !== '/doors/door-1/unlock?con
     fwrite(STDERR, "unlock path " . Yarbo\YarboUnifi::unlockPath('door-1', 'open') . "\n");
     exit(1);
 }
+if (Yarbo\YarboUnifi::lockPath('door-1') !== '/doors/door-1/lock_rule') {
+    fwrite(STDERR, "lock path " . Yarbo\YarboUnifi::lockPath('door-1') . "\n");
+    exit(1);
+}
 
 if (Yarbo\YarboUnifi::flattenAccessItems([[['id' => 'a'], ['id' => 'b']], ['id' => 'c']]) !== [['id' => 'a'], ['id' => 'b'], ['id' => 'c']]) {
     fwrite(STDERR, "flattenAccessItems failed\n");
@@ -209,6 +213,22 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
             ]),
             'content_type' => 'application/json',
         ];
+    }
+    if (str_contains($url, '/lock_rule')) {
+        if ($method !== 'PUT' && $method !== 'POST') {
+            return ['status' => 405, 'body' => '', 'content_type' => '', 'error' => 'method'];
+        }
+        $decoded = json_decode((string) $body, true);
+        $type = is_array($decoded) ? (string) ($decoded['type'] ?? '') : '';
+        if ($type !== 'lock_now' && $type !== 'lock_early') {
+            return [
+                'status' => 400,
+                'body' => json_encode(['code' => 'ERROR', 'msg' => 'invalid type']),
+                'content_type' => 'application/json',
+                'error' => 'invalid type',
+            ];
+        }
+        return ['status' => 200, 'body' => json_encode(['code' => 'SUCCESS']), 'content_type' => 'application/json'];
     }
     if (str_contains($url, '/unlock')) {
         if ($method !== 'PUT' && $method !== 'POST') {
@@ -589,6 +609,73 @@ if (!($hubUnlock['ok'] ?? false)) {
     exit(1);
 }
 
+$lock = $unifi->lockDoor('door1');
+if (!($lock['ok'] ?? false) || empty($lock['locked'])) {
+    fwrite(STDERR, 'lock ' . json_encode($lock) . "\n");
+    exit(1);
+}
+$putLock = false;
+$lockBody = '';
+foreach ($calls as $call) {
+    if (($call[0] ?? '') === 'PUT' && str_contains((string) ($call[1] ?? ''), '/lock_rule')) {
+        $putLock = true;
+        $lockBody = (string) ($call[3] ?? '');
+        break;
+    }
+}
+if (!$putLock) {
+    fwrite(STDERR, "lock did not PUT lock_rule\n");
+    exit(1);
+}
+$lockPayload = json_decode($lockBody, true);
+if (!is_array($lockPayload) || ($lockPayload['type'] ?? '') !== 'lock_now') {
+    fwrite(STDERR, "lock did not send lock_now $lockBody\n");
+    exit(1);
+}
+$hubLock = $unifi->command(['id' => 'unifi:hub:7483c2773855', 'command' => 'lock']);
+if (!($hubLock['ok'] ?? false)) {
+    fwrite(STDERR, 'hub lock ' . json_encode($hubLock) . "\n");
+    exit(1);
+}
+
+$earlyRoot = sys_get_temp_dir() . '/yarbo-unifi-early-' . bin2hex(random_bytes(3));
+mkdir($earlyRoot . '/data', 0775, true);
+$early = new Yarbo\YarboUnifi($earlyRoot);
+if (!$early->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_access_token' => 'access-secret',
+])) {
+    fwrite(STDERR, "early save failed\n");
+    exit(1);
+}
+$earlyTypes = [];
+$early->setTransport(function (string $method, string $url, array $headers, ?string $body) use (&$earlyTypes): array {
+    if (!str_contains($url, '/lock_rule')) {
+        return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'unexpected ' . $url];
+    }
+    $decoded = json_decode((string) $body, true);
+    $type = is_array($decoded) ? (string) ($decoded['type'] ?? '') : '';
+    $earlyTypes[] = $type;
+    if ($type === 'lock_now') {
+        return [
+            'status' => 400,
+            'body' => json_encode(['code' => 'ERROR', 'msg' => 'invalid type lock_now']),
+            'content_type' => 'application/json',
+            'error' => 'invalid type',
+        ];
+    }
+    if ($type === 'lock_early' && ($method === 'PUT' || $method === 'POST')) {
+        return ['status' => 200, 'body' => json_encode(['code' => 'SUCCESS']), 'content_type' => 'application/json'];
+    }
+
+    return ['status' => 400, 'body' => '', 'content_type' => '', 'error' => 'bad lock'];
+});
+$earlyLock = $early->lockDoor('door1');
+if (!($earlyLock['ok'] ?? false) || $earlyTypes !== ['lock_now', 'lock_early']) {
+    fwrite(STDERR, 'lock_early fallback ' . json_encode(['result' => $earlyLock, 'types' => $earlyTypes]) . "\n");
+    exit(1);
+}
+
 $snap = $unifi->snapshotJpeg('cam1');
 if ($snap !== 'JFIF') {
     fwrite(STDERR, "snapshot $snap\n");
@@ -673,6 +760,9 @@ $access->setTransport(function (string $method, string $url, array $headers, ?st
             'content_type' => 'application/json',
         ];
     }
+    if (str_contains($url, ':12445/') && str_contains($url, '/lock_rule')) {
+        return ['status' => 200, 'body' => json_encode(['code' => 'SUCCESS']), 'content_type' => 'application/json'];
+    }
     if (str_contains($url, ':12445/') && str_contains($url, '/unlock')) {
         return ['status' => 200, 'body' => json_encode(['code' => 'SUCCESS']), 'content_type' => 'application/json'];
     }
@@ -698,6 +788,11 @@ if (!$usedStandalone) {
 $accessUnlock = $access->unlockDoor('door1');
 if (!($accessUnlock['ok'] ?? false)) {
     fwrite(STDERR, '12445 unlock ' . json_encode($accessUnlock) . "\n");
+    exit(1);
+}
+$accessLock = $access->lockDoor('door1');
+if (!($accessLock['ok'] ?? false)) {
+    fwrite(STDERR, '12445 lock ' . json_encode($accessLock) . "\n");
     exit(1);
 }
 

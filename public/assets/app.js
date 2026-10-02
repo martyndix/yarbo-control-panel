@@ -2625,6 +2625,54 @@ function unifiSnapSrc(d, bust) {
     return bust ? `${base}&r=${unifiSnapGen}` : base;
 }
 
+function unifiDoorIsOpen(d) {
+    if (!d || typeof d !== 'object') return false;
+    if (d.open === true) return true;
+    if (d.open === false) return false;
+    const label = String(d.dps_label || '').trim();
+    if (/^Open$/i.test(label)) return true;
+    if (/^Closed$/i.test(label)) return false;
+    const dps = String(d.dps || '').toLowerCase();
+    if (dps === 'open' || dps === 'opened') return true;
+    if (dps === 'close' || dps === 'closed') return false;
+    return /(^|[·\s])Open(\s|$)/i.test(String(d.status || ''));
+}
+
+function unifiDoorLockCommand(d) {
+    return unifiDoorIsOpen(d) ? 'lock' : 'unlock';
+}
+
+function unifiDoorLockLabel(d) {
+    return unifiDoorIsOpen(d) ? 'Lock' : 'Unlock';
+}
+
+function unifiDoorLockButtonHtml(d, { home = false } = {}) {
+    const cmd = unifiDoorLockCommand(d);
+    const label = unifiDoorLockLabel(d);
+    if (home) {
+        return `<button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="${cmd}">${escapeHtml(label)}</button>`;
+    }
+    return `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="${cmd}">${escapeHtml(label)}</button>`;
+}
+
+function patchUnifiDoorLockButton(root, d) {
+    if (!root) return;
+    const btn = root.querySelector('[data-unifi-cmd="unlock"], [data-unifi-cmd="lock"], [data-home-unifi-cmd="unlock"], [data-home-unifi-cmd="lock"], [data-home-unifi-unlock]');
+    if (!btn) return;
+    const cmd = unifiDoorLockCommand(d);
+    btn.textContent = unifiDoorLockLabel(d);
+    if (btn.hasAttribute('data-unifi-cmd')) btn.setAttribute('data-unifi-cmd', cmd);
+    if (btn.hasAttribute('data-home-unifi-cmd') || btn.hasAttribute('data-home-unifi-unlock')) {
+        btn.setAttribute('data-home-unifi-cmd', cmd);
+    }
+}
+
+function unifiDoorCommandToast(cmd) {
+    if (cmd === 'lock') return 'Lock sent';
+    if (cmd === 'unlock') return 'Unlock sent';
+    return `${cmd} sent`;
+}
+
 function unifiDpsMetaHtml(d, attr) {
     let label = String(d?.dps_label || '').trim()
         || (d?.dps === 'open' || d?.dps === 'opened' ? 'Open' : (d?.dps === 'close' || d?.dps === 'closed' ? 'Closed' : ''));
@@ -2673,7 +2721,7 @@ function unifiDeviceCardHtml(d) {
                <button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="stop">Stop</button>`
             : '';
         const unlock = bound
-            ? `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="unlock">Unlock</button>`
+            ? unifiDoorLockButtonHtml(d)
             : '';
         const kindLabel = kind === 'hub' ? 'Controller' : 'Door';
         const dps = unifiDpsMetaHtml(d, 'data-unifi-dps');
@@ -2723,6 +2771,7 @@ function patchUnifiWrap(wrap, items, htmlFn) {
         }
         const toggleBtn = el.querySelector('[data-unifi-light], [data-unifi-relay]');
         if (toggleBtn) toggleBtn.textContent = d.on ? 'Off' : 'On';
+        patchUnifiDoorLockButton(el, d);
     });
     [...wrap.querySelectorAll('[data-unifi-id]')].forEach((el) => {
         const id = el.getAttribute('data-unifi-id') || '';
@@ -3222,7 +3271,7 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         if (kelvin && document.activeElement !== kelvin) kelvin.value = String(extras.color_temp);
     }
     const dpsLabel = String(extras.dps_label || '').trim();
-    if (dpsLabel || extras.dps != null || extras.status) {
+    if (dpsLabel || extras.dps != null || extras.open != null || extras.status) {
         const device = homeDeviceRecord(id);
         if (device) {
             if (dpsLabel) device.dps_label = dpsLabel;
@@ -3248,6 +3297,7 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
                     || /^Open\b/i.test(String(label || ''))
             );
         }
+        patchUnifiDoorLockButton(card, device || extras);
     }
 }
 
@@ -3815,7 +3865,7 @@ function homeDeviceActionsHtml(d, bright, color) {
                 : '';
             return `<div class="home-device-actions">
                 ${unifiDpsMetaHtml(d, 'data-home-dps')}
-                <button type="button" class="btn btn-secondary btn-compact" data-home-unifi-unlock>Unlock</button>
+                ${unifiDoorLockButtonHtml(d, { home: true })}
                 ${gate}
             </div>`;
         }
@@ -4405,10 +4455,10 @@ function bindHomeDashboard() {
                     action: 'command',
                     id,
                     command: cmd,
-                    control_cmd: cmd === 'unlock' ? '' : cmd,
+                    control_cmd: (cmd === 'unlock' || cmd === 'lock') ? '' : cmd,
                 });
                 if (!data.ok) throw new Error(data.error || 'Failed');
-                showToast(cmd === 'unlock' ? 'Unlock sent' : `${cmd} sent`, 'success');
+                showToast(unifiDoorCommandToast(cmd), 'success');
                 await loadHomeDashboard();
             } catch (err) {
                 showToast(err.message || 'UniFi command failed', 'error');
@@ -9004,9 +9054,9 @@ document.getElementById('unifi-card')?.addEventListener('click', async (event) =
         const cmd = doorBtn.getAttribute('data-unifi-cmd') || 'unlock';
         doorBtn.disabled = true;
         try {
-            const data = await unifiApi({ action: 'command', id, command: cmd, control_cmd: cmd === 'unlock' ? '' : cmd });
+            const data = await unifiApi({ action: 'command', id, command: cmd, control_cmd: (cmd === 'unlock' || cmd === 'lock') ? '' : cmd });
             if (!data.ok) throw new Error(data.error || 'Failed');
-            showToast(cmd === 'unlock' ? 'Unlock sent' : `${cmd} sent`, 'success');
+            showToast(unifiDoorCommandToast(cmd), 'success');
             await loadUnifiDashboard({ silent: true });
         } catch (err) {
             showToast(err.message || 'UniFi door failed', 'error');

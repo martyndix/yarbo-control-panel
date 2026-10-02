@@ -998,7 +998,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-unifi-test">Test UniFi connection</button>
                             </div>
                             <h3 class="settings-subtitle">Show on Home</h3>
-                            <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Protect floodlights use On/Off to force the LED (not the motion schedule). Protect relays (UL-Relay) are switches, not Access doors. Door controllers (UA Hub / Gate Hub) unlock the bound Access door; <strong>Open / Closed</strong> from a wired door-position sensor shows next to Unlock. If Test shows 0 doors and “permission”, the Access token is missing <code>view:space</code> / <code>view:device</code> — recreate it in Access → Settings → General → Advanced → API Token.</p>
+                            <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Protect floodlights use On/Off to force the LED (not the motion schedule). Protect relays (UL-Relay) are switches, not Access doors. Door controllers (UA Hub / Gate Hub) unlock the bound Access door; when the door is <strong>Open</strong> that button is <strong>Lock</strong>. <strong>Open / Closed</strong> from a wired door-position sensor shows next to it. If Test shows 0 doors and “permission”, the Access token is missing <code>view:space</code> / <code>view:device</code> — recreate it in Access → Settings → General → Advanced → API Token.</p>
                             <div id="settings-unifi-devices" class="unifi-pick"></div>
                         </section>
 
