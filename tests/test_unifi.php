@@ -70,7 +70,9 @@ $lightPublicFail = false;
 $sensorOpen = false;
 $sensorTemp = 21.9;
 $sensorHumidity = 72.0;
-$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps, &$lightPrivateHtml, &$lightPublicFail, &$sensorOpen, &$sensorTemp, &$sensorHumidity): array {
+$liveLightOn = false;
+$liveLightForce = false;
+$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps, &$lightPrivateHtml, &$lightPublicFail, &$sensorOpen, &$sensorTemp, &$sensorHumidity, &$liveLightOn, &$liveLightForce): array {
     $calls[] = [$method, $url, $headers, $body];
     if (str_contains($url, '/cameras') && !str_contains($url, '/snapshot')) {
         return [
@@ -144,8 +146,8 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
             'body' => json_encode(['data' => [[
                 'id' => 'light1',
                 'name' => 'Flood',
-                'isLightOn' => false,
-                'isLightForceEnabled' => false,
+                'isLightOn' => $liveLightOn,
+                'isLightForceEnabled' => $liveLightForce,
                 'lightModeSettings' => ['mode' => 'always'],
             ]]]),
             'content_type' => 'application/json',
@@ -357,6 +359,36 @@ if (($floodRow['on'] ?? true) !== false || ($floodRow['status'] ?? '') !== 'Off'
     fwrite(STDERR, 'schedule always must not count as On ' . json_encode($floodRow) . "\n");
     exit(1);
 }
+$liveLightOn = true;
+$liveLightForce = true;
+$unifi->refreshAccessDoors();
+$appOnInv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+$appOnFlood = null;
+foreach ($appOnInv['lights'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:light:light1') {
+        $appOnFlood = $row;
+        break;
+    }
+}
+if (($appOnFlood['on'] ?? false) !== true || ($appOnFlood['status'] ?? '') !== 'On') {
+    fwrite(STDERR, 'Protect app On did not reach the floodlight tile ' . json_encode($appOnFlood) . "\n");
+    exit(1);
+}
+$liveLightOn = false;
+$liveLightForce = false;
+$unifi->refreshAccessDoors();
+$appOffInv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+$appOffFlood = null;
+foreach ($appOffInv['lights'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:light:light1') {
+        $appOffFlood = $row;
+        break;
+    }
+}
+if (($appOffFlood['on'] ?? true) !== false || ($appOffFlood['status'] ?? '') !== 'Off') {
+    fwrite(STDERR, 'Protect app Off did not reach the floodlight tile ' . json_encode($appOffFlood) . "\n");
+    exit(1);
+}
 
 $light = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
 if (!($light['ok'] ?? false) || empty($light['on'])) {
@@ -505,6 +537,7 @@ $callsBeforeHome = count($calls);
 $unifi->homeRows();
 $homePolledDoors = false;
 $homePolledSensors = false;
+$homePolledLights = false;
 foreach (array_slice($calls, $callsBeforeHome) as $call) {
     if (($call[0] ?? '') !== 'GET') {
         continue;
@@ -516,6 +549,9 @@ foreach (array_slice($calls, $callsBeforeHome) as $call) {
     if (str_contains($url, '/sensors')) {
         $homePolledSensors = true;
     }
+    if (str_contains($url, '/lights')) {
+        $homePolledLights = true;
+    }
 }
 if ($homePolledDoors) {
     fwrite(STDERR, "homeRows must not poll Access doors (that blocks website light commands)\n");
@@ -523,6 +559,10 @@ if ($homePolledDoors) {
 }
 if ($homePolledSensors) {
     fwrite(STDERR, "homeRows must not poll Protect sensors (that blocks website light commands)\n");
+    exit(1);
+}
+if ($homePolledLights) {
+    fwrite(STDERR, "homeRows must not poll Protect lights (that blocks website light commands)\n");
     exit(1);
 }
 
@@ -859,7 +899,7 @@ if (!str_contains($js, '/^Open\\b/i') || !str_contains($js, 'data-home-status'))
     fwrite(STDERR, "Home Protect sensor Open prefix missing\n");
     exit(1);
 }
-if (!str_contains($js, "startsWith('unifi:')") || !str_contains($js, '60000')) {
+if (!str_contains($js, "startsWith('unifi:')") || !str_contains($js, '8000')) {
     fwrite(STDERR, "UniFi Home On/Off sticky missing\n");
     exit(1);
 }
@@ -881,7 +921,8 @@ if (!$sessionUnifi->save([
     exit(1);
 }
 $sessionCalls = [];
-$sessionUnifi->setTransport(function (string $method, string $url, array $headers, ?string $body) use (&$sessionCalls): array {
+$sessionLiveForce = true;
+$sessionUnifi->setTransport(function (string $method, string $url, array $headers, ?string $body) use (&$sessionCalls, &$sessionLiveForce): array {
     $sessionCalls[] = [$method, $url, $headers, $body];
     if ($method === 'POST' && str_contains($url, '/api/auth/login')) {
         $decoded = json_decode((string) $body, true);
@@ -929,6 +970,37 @@ $sessionUnifi->setTransport(function (string $method, string $url, array $header
             'content_type' => 'application/json',
         ];
     }
+    if ($method === 'GET' && str_contains($url, '/proxy/protect/api/lights')) {
+        if (($headers['Cookie'] ?? '') !== 'TOKEN=session-cookie') {
+            return [
+                'status' => 200,
+                'body' => '<html><title>UniFi OS</title></html>',
+                'content_type' => 'text/html',
+            ];
+        }
+        return [
+            'status' => 200,
+            'body' => json_encode([[
+                'id' => 'light1',
+                'name' => 'Flood',
+                'isLightOn' => $sessionLiveForce,
+                'lightOnSettings' => ['isLedForceOn' => $sessionLiveForce],
+            ]]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if ($method === 'GET' && str_contains($url, '/proxy/protect/integration/v1/lights')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([[
+                'id' => 'light1',
+                'name' => 'Flood',
+                'isLightOn' => false,
+                'isLightForceEnabled' => false,
+            ]]),
+            'content_type' => 'application/json',
+        ];
+    }
     if (str_contains($url, '/proxy/protect/')) {
         return ['status' => 200, 'body' => '[]', 'content_type' => 'application/json'];
     }
@@ -962,6 +1034,36 @@ if (!$loggedIn || !$usedSessionCookie) {
 $sessionInv = json_decode((string) file_get_contents($sessionRoot . '/data/unifi-inventory.json'), true);
 if (($sessionInv['light_commands']['light1']['on'] ?? false) !== true) {
     fwrite(STDERR, 'session floodlight did not store On for the web indicator ' . json_encode($sessionInv['light_commands'] ?? null) . "\n");
+    exit(1);
+}
+$sessionInv['light_commands'] = [];
+file_put_contents($sessionRoot . '/data/unifi-inventory.json', json_encode($sessionInv));
+$sessionLiveForce = true;
+$sessionUnifi->refreshAccessDoors();
+$sessionFollow = json_decode((string) file_get_contents($sessionRoot . '/data/unifi-inventory.json'), true);
+$sessionFollowLight = null;
+foreach ($sessionFollow['lights'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:light:light1') {
+        $sessionFollowLight = $row;
+        break;
+    }
+}
+if (($sessionFollowLight['on'] ?? false) !== true) {
+    fwrite(STDERR, 'private GET isLedForceOn from another app did not reach Home ' . json_encode($sessionFollowLight) . "\n");
+    exit(1);
+}
+$sessionLiveForce = false;
+$sessionUnifi->refreshAccessDoors();
+$sessionFollowOff = json_decode((string) file_get_contents($sessionRoot . '/data/unifi-inventory.json'), true);
+$sessionFollowOffLight = null;
+foreach ($sessionFollowOff['lights'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:light:light1') {
+        $sessionFollowOffLight = $row;
+        break;
+    }
+}
+if (($sessionFollowOffLight['on'] ?? true) !== false) {
+    fwrite(STDERR, 'private GET Off from another app did not reach Home ' . json_encode($sessionFollowOffLight) . "\n");
     exit(1);
 }
 
