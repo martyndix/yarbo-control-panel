@@ -656,9 +656,16 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="mail-page-toolbar">
                 <div>
                     <h2 id="home-automations-title">Automations</h2>
-                    <p class="hint settings-page-lead" id="home-automations-tz">Times follow this panel.</p>
+                    <p class="hint settings-page-lead" id="home-automations-tz">Times use this panel’s timezone.</p>
+                    <p class="hint hidden" id="home-automations-runner" role="status"></p>
                 </div>
-                <button type="button" class="btn btn-secondary" id="home-automations-close">Home</button>
+                <div class="auto-tz-controls">
+                    <label class="settings-field auto-tz-field">
+                        <span class="label">Timezone</span>
+                        <select id="auto-timezone" aria-label="Automation timezone"></select>
+                    </label>
+                    <button type="button" class="btn btn-secondary" id="home-automations-close">Home</button>
+                </div>
             </div>
             <div id="home-automations-list" class="auto-list"></div>
             <div id="home-automations-editor" class="auto-editor hidden">

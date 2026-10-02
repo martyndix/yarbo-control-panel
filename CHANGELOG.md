@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.29] - 2026-10-02
+
+### Fixed
+- Home Automations **time** rules use a saved timezone (the browser’s zone when the panel is on UTC) and show **now HH:MM**, so 21:00 means 21:00 local rather than UTC. If a tick skips the exact minute, the rule still fires later that day.
+- The automations page warns when the background runner is not active.
+
+### Changed
+- **Only if → Device is…** is grouped by type (Lights, Sensors, Relays, Doors, and so on) and includes cameras, hidden devices, and UniFi devices that are not on the Home grid. Sensors can be **motion** / **no motion**.
+
 ## [4.0.28] - 2026-10-02
 
 ### Added

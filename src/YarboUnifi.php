@@ -430,6 +430,28 @@ final class YarboUnifi
     }
 
     /**
+     * Every Protect/Access row, including devices not ticked Show on Home.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function allRows(): array
+    {
+        $this->kickAccessDoorRefresh();
+        $rows = [];
+        foreach ($this->dashboardPayload(false)['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = (string) ($device['id'] ?? '');
+            if ($id !== '') {
+                $rows[] = $device;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
      * Re-read Access doors, Protect sensors, and Protect lights so Home stays live.
      * Called from a background PHP process — never from Home GET.
      */

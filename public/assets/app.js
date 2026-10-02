@@ -4650,6 +4650,12 @@ function homeAutoWhenEvents(d) {
         }
         return events;
     }
+    if (d.kind === 'camera' || d.motion != null) {
+        return [
+            ['motion', 'motion'],
+            ['no_motion', 'no motion for'],
+        ];
+    }
     const events = [
         ['turns_on', 'turns on'],
         ['turns_off', 'turns off'],
@@ -4705,8 +4711,26 @@ function homeAutoDefaultThen(d) {
     return { kind: 'device', id: d.id, command: 'on' };
 }
 
+function homeAutoAllDevices() {
+    const seen = {};
+    const out = [];
+    const lists = [
+        homeDash.automation_devices || [],
+        homeDash.devices || [],
+        homeDash.hidden_devices || [],
+    ];
+    lists.forEach((list) => {
+        list.forEach((d) => {
+            if (!d || !d.id || seen[d.id]) return;
+            seen[d.id] = true;
+            out.push(d);
+        });
+    });
+    return out;
+}
+
 function homeAutoDeviceById(id) {
-    return (homeDash.devices || []).find((row) => row.id === id) || null;
+    return homeAutoAllDevices().find((row) => row.id === id) || null;
 }
 
 function homeAutoSceneById(id) {
@@ -4801,6 +4825,79 @@ function homeAutoSunNeedsCoords() {
     return Boolean(coords.needs_coords);
 }
 
+function homeAutoTimezoneList() {
+    let zones = [];
+    try {
+        if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+            zones = Intl.supportedValuesOf('timeZone');
+        }
+    } catch {
+        zones = [];
+    }
+    if (!zones.length) {
+        zones = ['UTC', 'Europe/London', 'Europe/Dublin', 'Europe/Paris', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Australia/Sydney'];
+    }
+    const extra = [homeDash.timezone?.name, homeDash.server_timezone, clientTimezone()].filter(Boolean);
+    extra.forEach((z) => {
+        if (!zones.includes(z)) zones = [z, ...zones];
+    });
+    return zones;
+}
+
+function homeAutoFillTimezoneSelect(selected) {
+    const el = document.getElementById('auto-timezone');
+    if (!el) return;
+    const current = selected || homeDash.timezone?.name || homeDash.server_timezone || clientTimezone() || 'UTC';
+    if (el.dataset.filled !== '1') {
+        el.innerHTML = homeAutoTimezoneList().map((z) =>
+            `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`
+        ).join('');
+        el.dataset.filled = '1';
+    }
+    if (![...el.options].some((o) => o.value === current)) {
+        const opt = document.createElement('option');
+        opt.value = current;
+        opt.textContent = current;
+        el.appendChild(opt);
+    }
+    if (document.activeElement !== el) el.value = current;
+}
+
+async function homeAutoSaveTimezone(zone) {
+    const next = String(zone || '').trim();
+    if (!next) return;
+    try {
+        const data = await homeApi({ action: 'automation_save', timezone: next });
+        if (!data.ok) throw new Error(data.error || 'Could not save timezone');
+        if (data.timezone) homeDash.timezone = data.timezone;
+        if (data.server_timezone) homeDash.server_timezone = data.server_timezone;
+        if (data.runner) homeDash.runner = data.runner;
+        renderHomeAutomations();
+        showToast(`Times now use ${homeDash.timezone?.name || next}`, 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not save timezone', 'error');
+    }
+}
+
+async function homeAutoEnsureTimezone() {
+    const client = clientTimezone();
+    const info = homeDash.timezone || {};
+    if (!client) return;
+    if (info.saved) return;
+    const zone = String(info.name || homeDash.server_timezone || '');
+    if (zone && zone !== 'UTC' && zone !== 'Etc/UTC') return;
+    try {
+        const data = await homeApi({ action: 'automation_save', timezone: client });
+        if (data.ok) {
+            if (data.timezone) homeDash.timezone = data.timezone;
+            if (data.server_timezone) homeDash.server_timezone = data.server_timezone;
+            if (data.runner) homeDash.runner = data.runner;
+        }
+    } catch {
+        // Keep the OS clock; the picker still works.
+    }
+}
+
 function openHomeAutomations({ updateHash = true } = {}) {
     const page = els.homeAutomationsPage;
     if (!page) return;
@@ -4815,7 +4912,10 @@ function openHomeAutomations({ updateHash = true } = {}) {
     }
     autoDraft = null;
     autoNameLocked = false;
-    loadHomeDashboard({ force: true }).catch(() => {});
+    loadHomeDashboard({ force: true }).then(async () => {
+        await homeAutoEnsureTimezone();
+        if (autoPageOpen) renderHomeAutomations();
+    }).catch(() => {});
     renderHomeAutomations();
 }
 
@@ -4834,8 +4934,24 @@ function closeHomeAutomations({ updateHash = true } = {}) {
 
 function renderHomeAutomations() {
     const tz = document.getElementById('home-automations-tz');
-    const zone = homeDash.server_timezone || '';
-    if (tz) tz.textContent = zone ? `Times follow this panel (${zone}).` : 'Times follow this panel.';
+    const info = homeDash.timezone || {};
+    const zone = info.name || homeDash.server_timezone || '';
+    const clock = info.clock || '';
+    if (tz) {
+        if (zone && clock) tz.textContent = `Times use ${zone} (now ${clock}).`;
+        else if (zone) tz.textContent = `Times use ${zone}.`;
+        else tz.textContent = 'Times use this panel’s timezone.';
+    }
+    homeAutoFillTimezoneSelect(zone);
+    const runnerEl = document.getElementById('home-automations-runner');
+    const runner = homeDash.runner || {};
+    if (runnerEl) {
+        const stale = !runner.running;
+        runnerEl.classList.toggle('hidden', !stale);
+        if (stale) {
+            runnerEl.textContent = 'The automations runner is not active. Times will not fire until the panel service is running (Settings → Panel updates, or restart the panel).';
+        }
+    }
     const list = document.getElementById('home-automations-list');
     const editor = document.getElementById('home-automations-editor');
     if (!list || !editor) return;
@@ -4956,7 +5072,7 @@ function homeAutoWhenChipHtml(trigger) {
     if (!trigger) return '<p class="hint">Drop Time, Sunset, a door, or a sensor here.</p>';
     if (trigger.type === 'time') {
         return `<div class="auto-chip auto-chip--clock" data-auto-when>
-            At <input type="time" data-auto-at value="${escapeHtml(trigger.at || '21:00')}">
+            At <input type="time" data-auto-at value="${escapeHtml(trigger.at || '21:00')}" step="60">
             ${homeAutoDayButtons(trigger.days)}
             <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
         </div>`;
@@ -5031,25 +5147,75 @@ function homeAutoIfChipHtml(cond, index) {
             <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
-    const devices = (homeDash.devices || []).filter((d) => d.id !== autoDraft?.trigger?.id);
-    const opts = devices.map((d) => `<option value="${escapeHtml(d.id)}" ${d.id === cond.id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
+    const devices = homeAutoAllDevices().filter((d) => d.id !== autoDraft?.trigger?.id);
+    const groups = homeAutoDeviceSelectGroups(devices);
+    const opts = groups.map((group) =>
+        `<optgroup label="${escapeHtml(group.label)}">${group.items.map((d) =>
+            `<option value="${escapeHtml(d.id)}" ${d.id === cond.id ? 'selected' : ''}>${escapeHtml(d.name || d.id)}</option>`
+        ).join('')}</optgroup>`
+    ).join('');
+    const selected = homeAutoDeviceById(cond.id) || devices[0];
+    const states = homeAutoIfStateOptions(selected);
+    const state = states.some(([v]) => v === cond.state) ? cond.state : (states[0] ? states[0][0] : 'on');
     return `<div class="auto-chip" data-auto-if-i="${index}">
         <select data-auto-if-id>${opts}</select>
         is
         <select data-auto-if-state>
-            <option value="on" ${cond.state === 'on' ? 'selected' : ''}>on</option>
-            <option value="off" ${cond.state === 'off' ? 'selected' : ''}>off</option>
-            <option value="open" ${cond.state === 'open' ? 'selected' : ''}>open</option>
-            <option value="closed" ${cond.state === 'closed' ? 'selected' : ''}>closed</option>
+            ${states.map(([v, label]) =>
+                `<option value="${v}" ${v === state ? 'selected' : ''}>${escapeHtml(label)}</option>`
+            ).join('')}
         </select>
         <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
     </div>`;
 }
 
+function homeAutoIfStateOptions(d) {
+    if (!d) return [['on', 'on'], ['off', 'off']];
+    if (d.kind === 'door' || d.kind === 'hub') {
+        return [['open', 'open'], ['closed', 'closed']];
+    }
+    const states = [['on', 'on'], ['off', 'off']];
+    if (d.kind === 'sensor' || d.open != null) {
+        states.push(['open', 'open'], ['closed', 'closed']);
+    }
+    if (d.kind === 'sensor' || d.kind === 'camera' || d.motion != null) {
+        states.push(['motion', 'motion'], ['no_motion', 'no motion']);
+    }
+    return states;
+}
+
+function homeAutoDeviceSelectGroups(devices) {
+    const order = [
+        ['lights', 'Lights'],
+        ['heaters', 'Heaters'],
+        ['plugs', 'Plugs'],
+        ['switches', 'Switches'],
+        ['relays', 'Relays'],
+        ['sensors', 'Sensors'],
+        ['cameras', 'Cameras'],
+        ['doors', 'Doors'],
+        ['controllers', 'Controllers'],
+        ['vacuums', 'Vacuums'],
+        ['other', 'Other'],
+    ];
+    const buckets = {};
+    order.forEach(([id]) => {
+        buckets[id] = [];
+    });
+    const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+    [...devices].sort(byName).forEach((d) => {
+        const gid = homeAutoDeviceGroupId(d);
+        (buckets[gid] || buckets.other).push(d);
+    });
+    return order
+        .filter(([id]) => (buckets[id] || []).length)
+        .map(([id, label]) => ({ id, label, items: buckets[id] }));
+}
+
 function renderHomeAutoTray() {
     const tray = document.getElementById('auto-tray');
     if (!tray) return;
-    const groups = homeAutoTrayGroups(homeDash.devices || [], homeDash.scenes || []);
+    const groups = homeAutoTrayGroups(homeAutoAllDevices(), homeDash.scenes || []);
     tray.innerHTML = groups.map((group) => (
         `<div class="auto-tray-group" data-auto-group="${escapeHtml(group.id)}">
             <h4 class="auto-tray-label">${escapeHtml(group.label)}</h4>
@@ -5067,6 +5233,8 @@ function homeAutoDeviceGroupId(d) {
                 return 'relays';
             case 'sensor':
                 return 'sensors';
+            case 'camera':
+                return 'cameras';
             case 'door':
                 return 'doors';
             case 'hub':
@@ -5086,6 +5254,8 @@ function homeAutoDeviceGroupId(d) {
             return 'switches';
         case 'sensor':
             return 'sensors';
+        case 'camera':
+            return 'cameras';
         default:
             return 'lights';
     }
@@ -5106,6 +5276,7 @@ function homeAutoTrayGroups(devices, scenes) {
         ['switches', 'Switches'],
         ['relays', 'Relays'],
         ['sensors', 'Sensors'],
+        ['cameras', 'Cameras'],
         ['doors', 'Doors'],
         ['controllers', 'Controllers'],
         ['vacuums', 'Vacuums'],
@@ -5122,7 +5293,7 @@ function homeAutoTrayGroups(devices, scenes) {
         homeAutoTrayChip('sunrise', '', 'Sunrise', 'auto-chip--clock')
     );
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
-    [...devices].filter((d) => d && d.kind !== 'camera').sort(byName).forEach((d) => {
+    [...devices].sort(byName).forEach((d) => {
         const gid = homeAutoDeviceGroupId(d);
         (buckets[gid] || buckets.other).push(homeAutoTrayChip('device', d.id, d.name || d.id));
     });
@@ -5403,12 +5574,13 @@ function bindHomeAutomations() {
             const which = ifAdd.getAttribute('data-auto-if');
             if (which === 'window') autoDraft.conditions.push({ type: 'time_window', start: '08:00', end: '22:00' });
             else {
-                const other = (homeDash.devices || []).find((d) => d.id !== autoDraft.trigger?.id);
+                const other = homeAutoAllDevices().find((d) => d.id !== autoDraft.trigger?.id);
                 if (!other) {
                     showToast('Add another device first', 'error');
                     return;
                 }
-                autoDraft.conditions.push({ type: 'device', id: other.id, state: 'on' });
+                const states = homeAutoIfStateOptions(other);
+                autoDraft.conditions.push({ type: 'device', id: other.id, state: states[0] ? states[0][0] : 'on' });
             }
             renderHomeAutoEditor();
             return;
@@ -5430,6 +5602,10 @@ function bindHomeAutomations() {
         }
     });
     page.addEventListener('change', (event) => {
+        if (event.target.matches('#auto-timezone')) {
+            homeAutoSaveTimezone(event.target.value);
+            return;
+        }
         if (!autoDraft) return;
         if (event.target.matches('[data-auto-at]')) autoDraft.trigger.at = event.target.value;
         if (event.target.matches('[data-auto-sun]')) autoDraft.trigger.event = event.target.value;
@@ -5468,14 +5644,20 @@ function bindHomeAutomations() {
         }
         if (event.target.matches('[data-auto-if-id]')) {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
-            if (autoDraft.conditions[i]) autoDraft.conditions[i].id = event.target.value;
+            if (autoDraft.conditions[i]) {
+                autoDraft.conditions[i].id = event.target.value;
+                const states = homeAutoIfStateOptions(homeAutoDeviceById(event.target.value));
+                if (!states.some(([v]) => v === autoDraft.conditions[i].state)) {
+                    autoDraft.conditions[i].state = states[0] ? states[0][0] : 'on';
+                }
+            }
         }
         if (event.target.matches('[data-auto-if-state]')) {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
         homeAutoSyncName();
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, [data-auto-if-id]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

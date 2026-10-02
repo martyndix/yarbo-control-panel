@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * Home When / Then rules. Times follow the panel OS timezone.
+ * Home When / Then rules. Times use a saved timezone, then the panel OS zone.
  * The runner (scripts/home_automations.php) calls tick(); Home GET only reads disk.
  */
 final class YarboHomeAutomations
@@ -43,8 +43,12 @@ final class YarboHomeAutomations
         $this->commandHandler = $handler;
     }
 
-    public static function timezoneName(): string
+    public function timezoneName(): string
     {
+        $saved = YarboVestaboard::normalizeTimezone((string) ($this->load()['timezone'] ?? ''));
+        if ($saved !== '') {
+            return $saved;
+        }
         $os = YarboVestaboard::osTimezone();
         if ($os !== '') {
             return $os;
@@ -55,13 +59,57 @@ final class YarboHomeAutomations
     }
 
     /**
-     * @return array{latitude: ?float, longitude: ?float, automations: list<array<string, mixed>>}
+     * @return array{name: string, source: string, clock: string, saved: bool}
+     */
+    public function timezonePublic(): array
+    {
+        $name = $this->timezoneName();
+        $saved = YarboVestaboard::normalizeTimezone((string) ($this->load()['timezone'] ?? '')) !== '';
+
+        return [
+            'name' => $name,
+            'source' => $saved ? 'saved' : 'os',
+            'clock' => $this->clockHm(),
+            'saved' => $saved,
+        ];
+    }
+
+    public function clockHm(?int $now = null): string
+    {
+        $now ??= time();
+        try {
+            $tz = new \DateTimeZone($this->timezoneName());
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('UTC');
+        }
+
+        return (new \DateTimeImmutable('@' . $now))->setTimezone($tz)->format('H:i');
+    }
+
+    /**
+     * @return array{at: int, age_sec: int|null, running: bool}
+     */
+    public function runnerPublic(): array
+    {
+        $at = (int) ($this->loadState()['clock'] ?? 0);
+        $age = $at > 0 ? max(0, time() - $at) : null;
+
+        return [
+            'at' => $at,
+            'age_sec' => $age,
+            'running' => $at > 0 && $age !== null && $age < 20,
+        ];
+    }
+
+    /**
+     * @return array{latitude: ?float, longitude: ?float, timezone: string, automations: list<array<string, mixed>>}
      */
     public function load(): array
     {
         $defaults = [
             'latitude' => null,
             'longitude' => null,
+            'timezone' => '',
             'automations' => [],
         ];
         if (!is_file($this->storePath())) {
@@ -87,6 +135,7 @@ final class YarboHomeAutomations
         return [
             'latitude' => $lat,
             'longitude' => $lon,
+            'timezone' => YarboVestaboard::normalizeTimezone((string) ($decoded['timezone'] ?? '')),
             'automations' => $list,
         ];
     }
@@ -121,6 +170,9 @@ final class YarboHomeAutomations
     public function save(array $input): array
     {
         $store = $this->load();
+        if (array_key_exists('timezone', $input)) {
+            $store['timezone'] = YarboVestaboard::normalizeTimezone((string) $input['timezone']);
+        }
         if (array_key_exists('latitude', $input) || array_key_exists('longitude', $input)) {
             if (array_key_exists('latitude', $input)) {
                 $store['latitude'] = self::optionalFloat($input['latitude']);
@@ -129,20 +181,27 @@ final class YarboHomeAutomations
                 $store['longitude'] = self::optionalFloat($input['longitude']);
             }
         }
+        $meta = [
+            'automations' => $store['automations'],
+            'sun_coords' => $this->coordsPublic(),
+            'server_timezone' => $this->timezoneName(),
+            'timezone' => $this->timezonePublic(),
+            'runner' => $this->runnerPublic(),
+        ];
         $hasRule = isset($input['trigger']) || isset($input['actions']) || isset($input['name']) || isset($input['id']);
         if ($hasRule && !isset($input['trigger']) && !isset($input['actions'])) {
             if (!$this->write($store)) {
                 return ['ok' => false, 'error' => 'Could not save'];
             }
 
-            return ['ok' => true, 'automations' => $store['automations'], 'sun_coords' => $this->coordsPublic()];
+            return ['ok' => true] + $meta;
         }
         if (!$hasRule) {
             if (!$this->write($store)) {
                 return ['ok' => false, 'error' => 'Could not save'];
             }
 
-            return ['ok' => true, 'automations' => $store['automations'], 'sun_coords' => $this->coordsPublic()];
+            return ['ok' => true] + $meta;
         }
         $rule = $this->normalizeRule($input, true);
         if ($rule === null) {
@@ -163,8 +222,9 @@ final class YarboHomeAutomations
             return ['ok' => false, 'error' => 'Could not save'];
         }
         $this->syncDelayedForRule($rule);
+        $meta['automations'] = $store['automations'];
 
-        return ['ok' => true, 'automation' => $rule, 'automations' => $store['automations']];
+        return ['ok' => true, 'automation' => $rule] + $meta;
     }
 
     /**
@@ -232,6 +292,10 @@ final class YarboHomeAutomations
         $now ??= time();
         $hub = new YarboHub($this->projectRoot);
         if (!$hub->enabled(YarboHub::MODULE_HOME)) {
+            $state = $this->loadState();
+            $state['clock'] = $now;
+            $this->writeState($state);
+
             return ['ok' => true, 'fired' => [], 'turned_off' => [], 'errors' => []];
         }
         $store = $this->load();
@@ -241,10 +305,9 @@ final class YarboHomeAutomations
         ));
         if ($enabled === []) {
             $state = $this->loadState();
-            if (!empty($state['delayed'])) {
-                $state['delayed'] = [];
-                $this->writeState($state);
-            }
+            $state['delayed'] = [];
+            $state['clock'] = $now;
+            $this->writeState($state);
 
             return ['ok' => true, 'fired' => [], 'turned_off' => [], 'errors' => []];
         }
@@ -254,7 +317,7 @@ final class YarboHomeAutomations
         $prev = is_array($state['prev'] ?? null) ? $state['prev'] : [];
         $fired = [];
         $errors = [];
-        $tzName = self::timezoneName();
+        $tzName = $this->timezoneName();
         try {
             $tz = new \DateTimeZone($tzName);
         } catch (\Exception) {
@@ -312,6 +375,7 @@ final class YarboHomeAutomations
 
         $turnedOff = $this->flushDelayed($state, $now, $enabledById, $curr, $errors);
         $state['prev'] = $curr;
+        $state['clock'] = $now;
         $this->writeState($state);
 
         return ['ok' => $errors === [], 'fired' => $fired, 'turned_off' => $turnedOff, 'errors' => $errors];
@@ -686,7 +750,7 @@ final class YarboHomeAutomations
         }
         $id = trim((string) ($cond['id'] ?? ''));
         $state = strtolower(trim((string) ($cond['state'] ?? '')));
-        if ($id === '' || !in_array($state, ['on', 'off', 'open', 'closed'], true)) {
+        if ($id === '' || !in_array($state, ['on', 'off', 'open', 'closed', 'motion', 'no_motion'], true)) {
             return null;
         }
 
@@ -749,12 +813,12 @@ final class YarboHomeAutomations
             if (($state['day_slot'][$id] ?? '') === $today) {
                 return false;
             }
-            if ($hm !== (string) $trigger['at']) {
+            $days = is_array($trigger['days'] ?? null) ? $trigger['days'] : [];
+            if ($days !== [] && !in_array($dow, $days, true)) {
                 return false;
             }
-            $days = is_array($trigger['days'] ?? null) ? $trigger['days'] : [];
 
-            return $days === [] || in_array($dow, $days, true);
+            return $this->clockReached((string) $trigger['at'], $hm, $today, $state, $now);
         }
         if ($type === 'sun') {
             if (($state['day_slot'][$id] ?? '') === $today) {
@@ -772,7 +836,7 @@ final class YarboHomeAutomations
                 $local->getTimezone()
             );
 
-            return $eventHm !== null && $eventHm === $hm;
+            return $eventHm !== null && $this->clockReached($eventHm, $hm, $today, $state, $now);
         }
         if ($type === 'threshold') {
             $deviceId = (string) ($trigger['id'] ?? '');
@@ -817,6 +881,34 @@ final class YarboHomeAutomations
         }
 
         return $this->edgeFired($event, $prev[$deviceId], $curr[$deviceId]);
+    }
+
+    /**
+     * Exact minute, or catch-up when the sidecar skipped past it on the same local day.
+     *
+     * @param array<string, mixed> $state
+     */
+    private function clockReached(string $at, string $hm, string $today, array $state, int $now): bool
+    {
+        if ($hm === $at) {
+            return true;
+        }
+        $last = (int) ($state['clock'] ?? 0);
+        if ($last <= 0 || $last >= $now) {
+            return false;
+        }
+        try {
+            $tz = new \DateTimeZone($this->timezoneName());
+        } catch (\Exception) {
+            return false;
+        }
+        $prev = (new \DateTimeImmutable('@' . $last))->setTimezone($tz);
+        if ($prev->format('Y-m-d') !== $today) {
+            return false;
+        }
+        $prevHm = $prev->format('H:i');
+
+        return $prevHm < $at && $hm > $at;
     }
 
     /**
@@ -906,6 +998,8 @@ final class YarboHomeAutomations
                     'off' => $row['on'] === false,
                     'open' => $row['open'] === true,
                     'closed' => $row['open'] === false,
+                    'motion' => $row['motion'] === true,
+                    'no_motion' => $row['motion'] === false,
                     default => false,
                 };
                 if (!$ok) {
@@ -1209,6 +1303,7 @@ final class YarboHomeAutomations
             'last_fire' => [],
             'day_slot' => [],
             'delayed' => [],
+            'clock' => 0,
             'unifi_at' => 0,
         ];
         if (!is_file($this->statePath())) {
@@ -1225,6 +1320,7 @@ final class YarboHomeAutomations
             'last_fire' => is_array($decoded['last_fire'] ?? null) ? $decoded['last_fire'] : [],
             'day_slot' => is_array($decoded['day_slot'] ?? null) ? $decoded['day_slot'] : [],
             'delayed' => is_array($decoded['delayed'] ?? null) ? $decoded['delayed'] : [],
+            'clock' => (int) ($decoded['clock'] ?? 0),
             'unifi_at' => (int) ($decoded['unifi_at'] ?? 0),
         ];
     }
@@ -1249,15 +1345,15 @@ final class YarboHomeAutomations
      */
     private function write(array $store): bool
     {
-        unset($store['timezone']);
         $dir = dirname($this->storePath());
         if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
             return false;
         }
         $json = json_encode([
-            'latitude' => $store['latitude'],
-            'longitude' => $store['longitude'],
-            'automations' => $store['automations'],
+            'latitude' => $store['latitude'] ?? null,
+            'longitude' => $store['longitude'] ?? null,
+            'timezone' => YarboVestaboard::normalizeTimezone((string) ($store['timezone'] ?? '')),
+            'automations' => $store['automations'] ?? [],
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
         return $json !== false && file_put_contents($this->storePath(), $json . "\n", LOCK_EX) !== false;
@@ -1282,7 +1378,7 @@ final class YarboHomeAutomations
     private static function normalizeHm(string $value): ?string
     {
         $value = trim($value);
-        if (preg_match('/^(\d{1,2}):(\d{2})$/', $value, $m) !== 1) {
+        if (preg_match('/^(\d{1,2}):(\d{2})(?::\d{2})?$/', $value, $m) !== 1) {
             return null;
         }
         $h = (int) $m[1];

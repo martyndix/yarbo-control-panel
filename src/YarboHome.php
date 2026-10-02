@@ -367,7 +367,10 @@ final class YarboHome
             'setup' => $this->setupStatus(),
             'fabric' => is_array($live['fabric'] ?? null) ? $live['fabric'] : [],
             'automations' => $auto->publicList(),
-            'server_timezone' => YarboHomeAutomations::timezoneName(),
+            'automation_devices' => $this->namedAutomationDevices($store),
+            'server_timezone' => $auto->timezoneName(),
+            'timezone' => $auto->timezonePublic(),
+            'runner' => $auto->runnerPublic(),
             'sun_coords' => $auto->coordsPublic(),
         ];
     }
@@ -1313,7 +1316,7 @@ final class YarboHome
         $devices = $cache !== []
             ? self::overlayDeviceStates($local['devices'], $cache)
             : $local['devices'];
-        $devices = $this->mergeUnifiDevices($devices);
+        $devices = $this->mergeUnifiDevices($devices, true);
         $out = [];
         foreach ($devices as $device) {
             if (!is_array($device)) {
@@ -1338,6 +1341,30 @@ final class YarboHome
                     ? (float) $device['humidity']
                     : null,
             ];
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Full device list for Automations (includes UniFi not shown on Home).
+     *
+     * @param array<string, mixed> $store
+     * @return list<array<string, mixed>>
+     */
+    private function namedAutomationDevices(array $store): array
+    {
+        $out = [];
+        foreach ($this->automationDevices() as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $row['name'] = (string) ($store['names'][$id] ?? $row['name'] ?? $id);
             $out[] = $row;
         }
 
@@ -1512,13 +1539,14 @@ final class YarboHome
      * @param list<array<string, mixed>> $devices
      * @return list<array<string, mixed>>
      */
-    private function mergeUnifiDevices(array $devices): array
+    private function mergeUnifiDevices(array $devices, bool $all = false): array
     {
         if (!(new YarboHub($this->projectRoot))->enabled(YarboHub::MODULE_UNIFI)) {
             return $devices;
         }
         try {
-            $extra = (new YarboUnifi($this->projectRoot))->homeRows();
+            $unifi = new YarboUnifi($this->projectRoot);
+            $extra = $all ? $unifi->allRows() : $unifi->homeRows();
         } catch (\Throwable) {
             return $devices;
         }

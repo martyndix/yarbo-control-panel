@@ -81,12 +81,11 @@ $saved = $auto->save([
     'trigger' => ['type' => 'device', 'id' => 'unifi:hub:door1', 'event' => 'stays_open', 'for_sec' => 300],
     'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
     'names' => ['unifi:hub:door1' => 'Front door', 'unifi:light:porch' => 'Porch'],
-    'timezone' => 'America/New_York',
 ]);
 assert_true(!empty($saved['ok']), 'save duration rule: ' . json_encode($saved));
 assert_true(($saved['automation']['name'] ?? '') === 'Front door open 5 min → Porch on', 'auto-name: ' . ($saved['automation']['name'] ?? ''));
 $disk = json_decode((string) file_get_contents($auto->storePath()), true);
-assert_true(!isset($disk['timezone']), 'must not store a timezone');
+assert_true(!isset($saved['automation']['timezone']), 'rules must not carry a timezone');
 assert_true(($disk['automations'][0]['trigger']['for_sec'] ?? 0) === 300, 'for_sec persisted');
 
 $door = static function (bool $open): array {
@@ -176,7 +175,22 @@ $auto->delete('a-temp');
 $commands = [];
 @unlink($auto->statePath());
 
-$tz = new DateTimeZone(YarboHomeAutomations::timezoneName());
+$tzSave = $auto->save(['timezone' => 'Europe/London']);
+assert_true(!empty($tzSave['ok']), 'save timezone');
+$disk = json_decode((string) file_get_contents($auto->storePath()), true);
+assert_true(($disk['timezone'] ?? '') === 'Europe/London', 'timezone persisted: ' . json_encode($disk['timezone'] ?? null));
+assert_true($auto->timezoneName() === 'Europe/London', 'resolved timezone: ' . $auto->timezoneName());
+$seconds = $auto->save([
+    'id' => 'a-hm',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '21:30:00'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'cooldown_sec' => 0,
+]);
+assert_true(($seconds['automation']['trigger']['at'] ?? '') === '21:30', 'HH:MM:SS normalizes: ' . json_encode($seconds['automation']['trigger'] ?? null));
+$auto->delete('a-hm');
+
+$tz = new DateTimeZone($auto->timezoneName());
 $at = (new DateTimeImmutable('now', $tz))->setTime(21, 30);
 $now = $at->getTimestamp();
 $timeRule = $auto->save([
@@ -195,6 +209,34 @@ $r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 5);
 assert_true($r['fired'] === [], 'time rule once per local day');
 
 $auto->delete('a-time');
+$commands = [];
+@unlink($auto->statePath());
+$skip = $auto->save([
+    'id' => 'a-skip',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '21:30'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($skip['ok']), 'save skip-minute rule');
+$r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now - 60);
+assert_true($r['fired'] === [], 'catch-up must not fire before the time');
+$r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 60);
+assert_true($r['fired'] === ['a-skip'], 'catch-up must fire if the sidecar skipped the minute: ' . json_encode($r));
+$auto->delete('a-skip');
+$commands = [];
+@unlink($auto->statePath());
+$late = $auto->save([
+    'id' => 'a-late',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '21:30'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($late['ok']), 'save late-start rule');
+$r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 60);
+assert_true($r['fired'] === [], 'first tick after the time must not fire every past slot');
+$auto->delete('a-late');
 $commands = [];
 @unlink($auto->statePath());
 
@@ -316,7 +358,11 @@ assert_true(str_contains($js, 'openHomeAutomations'), 'Automations UI');
 assert_true(str_contains($js, 'homeAutoTrayGroups'), 'tray grouping helper');
 assert_true(str_contains($js, "['lights', 'Lights']"), 'lights group');
 assert_true(str_contains($js, "['sensors', 'Sensors']"), 'sensors group');
-assert_true(str_contains($js, "['doors', 'Doors']"), 'doors group');
+assert_true(str_contains($js, 'homeAutoDeviceSelectGroups'), 'only-if grouping helper');
+assert_true(str_contains($js, "['cameras', 'Cameras']"), 'cameras group');
+assert_true(str_contains($js, 'homeAutoEnsureTimezone'), 'timezone adopt helper');
+assert_true(str_contains($index, 'auto-timezone'), 'timezone picker');
+assert_true(isset($dash['timezone']['name']) && isset($dash['runner']), 'dashboard exposes timezone and runner');
 assert_true(str_contains($js, "['scenes', 'Scenes']"), 'scenes group');
 assert_true(str_contains($js, 'homeAutoReadOffAfter'), 'turn-off-after helper');
 assert_true(str_contains($js, "data-auto-starter=\"motion\""), 'motion starter');
