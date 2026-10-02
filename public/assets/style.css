@@ -455,14 +455,17 @@ header h1 {
 }
 
 body.settings-page-open .container,
-body.mail-page-open .container {
+body.mail-page-open .container,
+body.home-automations-open .container {
     max-width: 1100px;
 }
 
 body.settings-page-open .module-switcher,
 body.settings-page-open #panel-sections,
 body.mail-page-open .module-switcher,
-body.mail-page-open #panel-sections {
+body.mail-page-open #panel-sections,
+body.home-automations-open .module-switcher,
+body.home-automations-open #panel-sections {
     display: none;
 }
 
@@ -3886,3 +3889,205 @@ body.home-is-reordering {
 .home-device-actions--camera {
     display: block;
 }
+
+.auto-list {
+    display: grid;
+    gap: 0.65rem;
+}
+
+.auto-starters {
+    display: grid;
+    gap: 0.65rem;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.auto-starter,
+.auto-row {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    text-align: left;
+}
+
+.auto-starter {
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    font: inherit;
+    color: inherit;
+}
+
+.auto-starter:hover,
+.auto-row:hover {
+    border-color: var(--accent);
+}
+
+.auto-starter strong,
+.auto-row-name {
+    font-weight: 650;
+}
+
+.auto-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.auto-row-main {
+    min-width: 0;
+}
+
+.auto-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.auto-editor {
+    display: grid;
+    gap: 1rem;
+}
+
+.auto-editor.hidden,
+.auto-list.hidden {
+    display: none;
+}
+
+.auto-builder {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.auto-drop {
+    padding: 0.85rem 1rem 1rem;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface) 80%, transparent);
+    min-height: 5.5rem;
+}
+
+.auto-drop.is-over {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.auto-drop h3 {
+    margin-top: 0;
+}
+
+.auto-drop-chips,
+.auto-tray {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.auto-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: grab;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.auto-chip select,
+.auto-chip input[type="number"],
+.auto-chip input[type="time"] {
+    font: inherit;
+    font-size: 0.8rem;
+    max-width: 7.5rem;
+}
+
+.auto-chip input[type="number"] {
+    width: 3.4rem;
+}
+
+.auto-chip--clock {
+    border-style: dashed;
+}
+
+.auto-chip-x {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+    padding: 0 0.15rem;
+}
+
+.auto-if {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.5rem 0.85rem 0.75rem;
+}
+
+.auto-if summary {
+    cursor: pointer;
+    font-weight: 650;
+}
+
+.auto-if-add {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.auto-coords {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.75rem;
+}
+
+.auto-coords.hidden {
+    display: none;
+}
+
+.auto-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.auto-days {
+    display: inline-flex;
+    gap: 0.15rem;
+}
+
+.auto-days button {
+    width: 1.6rem;
+    height: 1.6rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+}
+
+.auto-days button.is-on {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+@media (max-width: 720px) {
+    .auto-row {
+        grid-template-columns: 1fr;
+    }
+}
+

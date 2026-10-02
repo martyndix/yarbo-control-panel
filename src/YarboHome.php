@@ -350,6 +350,8 @@ final class YarboHome
             }
         }
         $devices = $this->applyIdOrder($devices, $store['device_order'] ?? []);
+        $auto = new YarboHomeAutomations($this->projectRoot);
+
         return [
             'ok' => true,
             'enabled' => true,
@@ -364,6 +366,9 @@ final class YarboHome
             'paper_devices' => $this->paperDeviceList($store),
             'setup' => $this->setupStatus(),
             'fabric' => is_array($live['fabric'] ?? null) ? $live['fabric'] : [],
+            'automations' => $auto->publicList(),
+            'server_timezone' => YarboHomeAutomations::timezoneName(),
+            'sun_coords' => $auto->coordsPublic(),
         ];
     }
 
@@ -1203,6 +1208,10 @@ final class YarboHome
         if ($ids === []) {
             return ['ok' => false, 'error' => $emptyError];
         }
+        $ids = $this->filterCommandIds($ids, $action);
+        if ($ids === []) {
+            return ['ok' => false, 'error' => 'No controllable devices'];
+        }
         $errors = [];
         foreach ($ids as $id) {
             $payload = ['id' => $id, 'command' => $action];
@@ -1230,6 +1239,137 @@ final class YarboHome
         }
 
         return ['ok' => true];
+    }
+
+    /**
+     * Match the website: sensors/cameras are not On/Off, and Access doors only unlock.
+     */
+    public static function deviceAcceptsCommand(string $id, string $action, ?string $kind = null): bool
+    {
+        $action = strtolower(trim($action));
+        if ($action === 'colour') {
+            $action = 'color';
+        }
+        if ($action === 'kelvin') {
+            $action = 'color_temp';
+        }
+        $parsed = YarboUnifi::parseHomeId($id);
+        if ($parsed !== null) {
+            $kind = $parsed['kind'];
+            if ($kind === YarboUnifi::KIND_SENSOR || $kind === YarboUnifi::KIND_CAMERA) {
+                return false;
+            }
+            if ($kind === YarboUnifi::KIND_DOOR || $kind === YarboUnifi::KIND_HUB) {
+                return in_array($action, ['unlock', 'lock', 'open', 'close', 'stop'], true);
+            }
+            if ($kind === YarboUnifi::KIND_LIGHT || $kind === YarboUnifi::KIND_RELAY) {
+                return in_array($action, ['on', 'off', 'toggle'], true);
+            }
+
+            return false;
+        }
+        $kind = strtolower(trim((string) $kind));
+        if ($kind === '') {
+            $kind = self::KIND_LIGHT;
+        }
+        if (in_array($kind, ['camera', 'sensor', 'door', 'hub'], true)) {
+            return false;
+        }
+
+        return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp'], true);
+    }
+
+    /**
+     * @param list<string> $ids
+     * @return list<string>
+     */
+    public function filterCommandIds(array $ids, string $action): array
+    {
+        $kinds = $this->deviceKindMap();
+        $out = [];
+        foreach ($ids as $id) {
+            $id = trim((string) $id);
+            if ($id === '') {
+                continue;
+            }
+            $kind = $kinds[$id] ?? null;
+            if (self::deviceAcceptsCommand($id, $action, $kind)) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Cache-only device rows for the automations runner (no agent wait).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function automationDevices(): array
+    {
+        $local = $this->localHomeDevices();
+        $cache = $this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json');
+        $devices = $cache !== []
+            ? self::overlayDeviceStates($local['devices'], $cache)
+            : $local['devices'];
+        $devices = $this->mergeUnifiDevices($devices);
+        $out = [];
+        foreach ($devices as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $row = [
+                'id' => $id,
+                'name' => (string) ($device['name'] ?? $id),
+                'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
+                'source' => (string) ($device['source'] ?? ''),
+                'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
+                'open' => array_key_exists('open', $device) ? (bool) $device['open'] : null,
+                'motion' => array_key_exists('motion', $device) ? (bool) $device['motion'] : null,
+                'temperature' => isset($device['temperature']) && is_numeric($device['temperature'])
+                    ? (float) $device['temperature']
+                    : null,
+                'humidity' => isset($device['humidity']) && is_numeric($device['humidity'])
+                    ? (float) $device['humidity']
+                    : null,
+            ];
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function deviceKindMap(): array
+    {
+        $map = [];
+        foreach ($this->load()['last_devices'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '') {
+                $map[$id] = (string) ($row['kind'] ?? self::KIND_LIGHT);
+            }
+        }
+        foreach ($this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json') as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '') {
+                $map[$id] = (string) ($row['kind'] ?? $map[$id] ?? self::KIND_LIGHT);
+            }
+        }
+
+        return $map;
     }
 
     /**

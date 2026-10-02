@@ -75,6 +75,8 @@ const els = {
     mailOpenWrap: document.getElementById('mail-open-wrap'),
     mailUnreadBadge: document.getElementById('mail-unread-badge'),
     mailPage: document.getElementById('mail-page'),
+    homeAutomationsPage: document.getElementById('home-automations-page'),
+    homeAutomationsOpen: document.getElementById('home-automations-open'),
     settingsModal: document.getElementById('settings-page'),
     settingsForm: document.getElementById('settings-form'),
     settingsHost: document.getElementById('settings-host'),
@@ -2852,6 +2854,10 @@ let homeDrag = null;
 const homeExpandedRooms = new Set();
 const homeExpandedGroups = new Set();
 let homeSceneDraft = { id: '', name: '', included: {}, states: {} };
+let autoPageOpen = false;
+let autoDraft = null;
+let autoNameLocked = false;
+let autoDrag = null;
 
 function homeResetSceneDraft() {
     homeSceneDraft = { id: '', name: '', included: {}, states: {} };
@@ -3178,6 +3184,7 @@ async function loadHomeDashboard(opts = {}) {
         } else {
             renderHomeDashboard(data);
         }
+        if (autoPageOpen && !autoDraft) renderHomeAutomations();
         homeLoadAborts = 0;
         ensureHomeStatePoll();
     } catch (err) {
@@ -4588,6 +4595,789 @@ function bindHomeDashboard() {
             }
         }
     });
+    bindHomeAutomations();
+}
+
+function homeAutoHashOpen() {
+    return (location.hash || '').replace(/^#/, '') === 'automations';
+}
+
+function homeAutoNames() {
+    const names = {};
+    (homeDash.devices || []).forEach((d) => {
+        if (d?.id) names[d.id] = d.name || d.id;
+    });
+    (homeDash.scenes || []).forEach((s) => {
+        if (s?.id) names[`scene:${s.id}`] = s.name || 'Scene';
+    });
+    return names;
+}
+
+function homeAutoThenOk(d) {
+    if (!d) return false;
+    if (homeIsUnifi(d)) {
+        const kind = String(d.kind || '');
+        return kind === 'light' || kind === 'relay' || kind === 'door' || kind === 'hub';
+    }
+    const kind = String(d.kind || 'light');
+    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub';
+}
+
+function homeAutoDurationEvent(event) {
+    return ['stays_on', 'stays_off', 'stays_open', 'stays_closed', 'no_motion'].includes(event);
+}
+
+function homeAutoWhenEvents(d) {
+    if (!d) return [];
+    if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub' || d.kind === 'sensor')) {
+        const events = [
+            ['opens', 'opens'],
+            ['closes', 'closes'],
+            ['stays_open', 'is open for'],
+            ['stays_closed', 'is closed for'],
+        ];
+        if (d.kind === 'sensor') {
+            events.push(['motion', 'motion'], ['no_motion', 'no motion for']);
+            if (d.temperature != null) {
+                events.push(['temp_above', 'temperature above'], ['temp_below', 'temperature below']);
+            }
+            if (d.humidity != null) {
+                events.push(['hum_above', 'humidity above'], ['hum_below', 'humidity below']);
+            }
+        }
+        return events;
+    }
+    return [
+        ['turns_on', 'turns on'],
+        ['turns_off', 'turns off'],
+        ['stays_on', 'is on for'],
+        ['stays_off', 'is off for'],
+    ];
+}
+
+function homeAutoThenCommands(d) {
+    if (!d) return [['on', 'On']];
+    if (d.kind === 'scene' || String(d.id || '').startsWith('scene:')) {
+        return [['run', 'Run'], ['stop', 'Off']];
+    }
+    if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub')) {
+        if (d.gate) return [['open', 'Open'], ['close', 'Close'], ['stop', 'Stop']];
+        return [['unlock', 'Unlock']];
+    }
+    const cmds = [['on', 'On'], ['off', 'Off']];
+    if (!homeIsUnifi(d) && d.dimmable) cmds.push(['brightness', 'Brightness']);
+    return cmds;
+}
+
+function homeAutoDefaultWhen(d) {
+    if (!d) return null;
+    if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub' || d.kind === 'sensor')) {
+        return { type: 'device', id: d.id, event: 'opens' };
+    }
+    return { type: 'device', id: d.id, event: 'turns_on' };
+}
+
+function homeAutoDefaultThen(d) {
+    if (!d) return null;
+    if (d.kind === 'scene' || String(d.id || '').startsWith('scene:')) {
+        return { kind: 'scene', id: String(d.id).replace(/^scene:/, ''), command: 'run' };
+    }
+    if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub')) {
+        return { kind: 'device', id: d.id, command: d.gate ? 'open' : 'unlock' };
+    }
+    if (!homeAutoThenOk(d)) return null;
+    return { kind: 'device', id: d.id, command: 'on' };
+}
+
+function homeAutoDeviceById(id) {
+    return (homeDash.devices || []).find((row) => row.id === id) || null;
+}
+
+function homeAutoSceneById(id) {
+    return (homeDash.scenes || []).find((row) => row.id === id) || null;
+}
+
+function homeAutoFormatDuration(sec) {
+    const n = Number(sec) || 0;
+    if (n % 3600 === 0 && n >= 3600) return `${n / 3600} hr`;
+    if (n % 60 === 0 && n >= 60) return `${n / 60} min`;
+    return `${n} sec`;
+}
+
+function homeAutoWhenPhrase(trigger, names) {
+    if (!trigger) return 'When';
+    if (trigger.type === 'time') return trigger.at ? `At ${trigger.at}` : 'At a time';
+    if (trigger.type === 'sun') {
+        const label = trigger.event === 'sunrise' ? 'Sunrise' : 'Sunset';
+        const off = Number(trigger.offset_min || 0);
+        if (!off) return label;
+        return `${label} ${off < 0 ? '' : '+'}${off} min`;
+    }
+    if (trigger.type === 'threshold') {
+        const name = names[trigger.id] || 'Sensor';
+        const unit = trigger.metric === 'humidity' ? '%' : '°';
+        return `${name} ${trigger.metric} ${trigger.op} ${trigger.value}${unit}`;
+    }
+    const name = names[trigger.id] || 'Device';
+    const event = trigger.event || 'turns_on';
+    const labels = {
+        turns_on: 'turns on',
+        turns_off: 'turns off',
+        opens: 'opens',
+        closes: 'closes',
+        motion: 'motion',
+        stays_on: 'on',
+        stays_off: 'off',
+        stays_open: 'open',
+        stays_closed: 'closed',
+        no_motion: 'no motion',
+    };
+    if (homeAutoDurationEvent(event) && trigger.for_sec) {
+        return `${name} ${labels[event] || event} ${homeAutoFormatDuration(trigger.for_sec)}`;
+    }
+    return `${name} ${labels[event] || event}`;
+}
+
+function homeAutoThenPhrase(action, names) {
+    if (action.kind === 'scene') {
+        const name = names[`scene:${action.id}`] || names[action.id] || 'Scene';
+        return action.command === 'stop' ? `${name} off` : name;
+    }
+    const name = names[action.id] || 'Device';
+    if (action.command === 'off') return `${name} off`;
+    if (action.command === 'unlock') return `${name} unlock`;
+    if (action.command === 'brightness') return `${name} ${action.brightness || 100}%`;
+    return `${name} on`;
+}
+
+function homeAutoSentence(rule, names) {
+    const then = (rule.actions || []).map((action) => homeAutoThenPhrase(action, names)).join(', ') || '…';
+    return `${homeAutoWhenPhrase(rule.trigger, names)} → ${then}`;
+}
+
+function homeAutoBlankDraft() {
+    return {
+        id: '',
+        name: '',
+        enabled: true,
+        trigger: null,
+        conditions: [],
+        actions: [],
+        cooldown_sec: 30,
+    };
+}
+
+function homeAutoSyncName() {
+    if (!autoDraft || autoNameLocked) return;
+    autoDraft.name = homeAutoSentence(autoDraft, homeAutoNames());
+    const input = document.getElementById('auto-name');
+    if (input && document.activeElement !== input) input.value = autoDraft.name;
+}
+
+function homeAutoSunNeedsCoords() {
+    const trigger = autoDraft?.trigger;
+    if (!trigger || trigger.type !== 'sun') return false;
+    const coords = homeDash.sun_coords || {};
+    return Boolean(coords.needs_coords);
+}
+
+function openHomeAutomations({ updateHash = true } = {}) {
+    const page = els.homeAutomationsPage;
+    if (!page) return;
+    if (settingsModalOpen) closeSettingsModal();
+    if (mailPageOpen) closeMailPage({ updateHash: false });
+    autoPageOpen = true;
+    page.classList.remove('hidden');
+    document.body.classList.add('home-automations-open');
+    els.homeAutomationsOpen?.setAttribute('aria-expanded', 'true');
+    if (updateHash && location.hash !== '#automations') {
+        history.replaceState(null, '', `${location.pathname}${location.search}#automations`);
+    }
+    autoDraft = null;
+    autoNameLocked = false;
+    loadHomeDashboard({ force: true }).catch(() => {});
+    renderHomeAutomations();
+}
+
+function closeHomeAutomations({ updateHash = true } = {}) {
+    const page = els.homeAutomationsPage;
+    if (!page) return;
+    page.classList.add('hidden');
+    document.body.classList.remove('home-automations-open');
+    autoPageOpen = false;
+    autoDraft = null;
+    els.homeAutomationsOpen?.setAttribute('aria-expanded', 'false');
+    if (updateHash && homeAutoHashOpen()) {
+        history.replaceState(null, '', `${location.pathname}${location.search}`);
+    }
+}
+
+function renderHomeAutomations() {
+    const tz = document.getElementById('home-automations-tz');
+    const zone = homeDash.server_timezone || '';
+    if (tz) tz.textContent = zone ? `Times follow this panel (${zone}).` : 'Times follow this panel.';
+    const list = document.getElementById('home-automations-list');
+    const editor = document.getElementById('home-automations-editor');
+    if (!list || !editor) return;
+    if (autoDraft) {
+        list.classList.add('hidden');
+        editor.classList.remove('hidden');
+        renderHomeAutoEditor();
+        return;
+    }
+    editor.classList.add('hidden');
+    list.classList.remove('hidden');
+    const rules = homeDash.automations || [];
+    const names = homeAutoNames();
+    let html = `<div class="auto-row-actions" style="justify-content:flex-start;margin-bottom:0.35rem">
+        <button type="button" class="btn" data-auto-new>New automation</button>
+    </div>`;
+    if (!rules.length) {
+        html += `<p class="hint">Drag a When and a Then. Or start from one of these.</p>
+        <div class="auto-starters">
+            <button type="button" class="auto-starter" data-auto-starter="sunset"><strong>Lights at sunset</strong><span class="hint">Turn a light on when the sun goes down.</span></button>
+            <button type="button" class="auto-starter" data-auto-starter="timeout"><strong>Off after 30 minutes</strong><span class="hint">If a light stays on, turn it off.</span></button>
+            <button type="button" class="auto-starter" data-auto-starter="door"><strong>Door open 5 minutes</strong><span class="hint">If a door stays open, turn a light on.</span></button>
+        </div>`;
+        list.innerHTML = html;
+        return;
+    }
+    html += rules.map((rule) => {
+        const sentence = homeAutoSentence(rule, names);
+        return `<article class="auto-row" data-auto-id="${escapeHtml(rule.id)}">
+            <div class="auto-row-main">
+                <div class="auto-row-name">${escapeHtml(rule.name || sentence)}</div>
+                <p class="hint">${escapeHtml(sentence)}</p>
+            </div>
+            <div class="auto-row-actions">
+                <label class="hint" style="display:flex;gap:0.35rem;align-items:center">
+                    <input type="checkbox" data-auto-enable ${rule.enabled ? 'checked' : ''}> On
+                </label>
+                <button type="button" class="btn btn-secondary btn-compact" data-auto-edit>Edit</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-auto-del>Delete</button>
+            </div>
+        </article>`;
+    }).join('');
+    html += '<p class="hint">New automations run in the background. You can close this page.</p>';
+    list.innerHTML = html;
+}
+
+function homeAutoDurationParts(sec) {
+    const n = Number(sec) || 300;
+    if (n % 3600 === 0 && n >= 3600) return { value: n / 3600, unit: 3600 };
+    if (n % 60 === 0 && n >= 60) return { value: n / 60, unit: 60 };
+    return { value: n, unit: 1 };
+}
+
+function homeAutoDayButtons(days) {
+    const selected = Array.isArray(days) ? days.map(Number) : [];
+    const all = selected.length === 0;
+    const labels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    return `<span class="auto-days" data-auto-days>${labels.map((label, i) =>
+        `<button type="button" data-day="${i}" class="${all || selected.includes(i) ? 'is-on' : ''}">${label}</button>`
+    ).join('')}</span>`;
+}
+
+function renderHomeAutoEditor() {
+    if (!autoDraft) return;
+    const nameEl = document.getElementById('auto-name');
+    if (nameEl && document.activeElement !== nameEl) nameEl.value = autoDraft.name || '';
+    const needs = homeAutoSunNeedsCoords();
+    document.getElementById('auto-coords-hint')?.toggleAttribute('hidden', !needs);
+    document.getElementById('auto-coords')?.classList.toggle('hidden', !needs);
+    const coords = homeDash.sun_coords || {};
+    const lat = document.getElementById('auto-lat');
+    const lon = document.getElementById('auto-lon');
+    if (lat && document.activeElement !== lat) lat.value = coords.latitude ?? '';
+    if (lon && document.activeElement !== lon) lon.value = coords.longitude ?? '';
+    document.getElementById('auto-when-chips').innerHTML = homeAutoWhenChipHtml(autoDraft.trigger);
+    document.getElementById('auto-then-chips').innerHTML = (autoDraft.actions || []).map((action, i) => homeAutoThenChipHtml(action, i)).join('')
+        || '<p class="hint">Drop a light or scene here.</p>';
+    document.getElementById('auto-if-chips').innerHTML = (autoDraft.conditions || []).map((cond, i) => homeAutoIfChipHtml(cond, i)).join('');
+    if ((autoDraft.conditions || []).length) document.getElementById('auto-if')?.setAttribute('open', '');
+    renderHomeAutoTray();
+}
+
+function homeAutoWhenChipHtml(trigger) {
+    if (!trigger) return '<p class="hint">Drop Time, Sunset, a door, or a sensor here.</p>';
+    if (trigger.type === 'time') {
+        return `<div class="auto-chip auto-chip--clock" data-auto-when>
+            At <input type="time" data-auto-at value="${escapeHtml(trigger.at || '21:00')}">
+            ${homeAutoDayButtons(trigger.days)}
+            <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
+        </div>`;
+    }
+    if (trigger.type === 'sun') {
+        return `<div class="auto-chip auto-chip--clock" data-auto-when>
+            <select data-auto-sun>
+                <option value="sunset" ${trigger.event === 'sunset' ? 'selected' : ''}>Sunset</option>
+                <option value="sunrise" ${trigger.event === 'sunrise' ? 'selected' : ''}>Sunrise</option>
+            </select>
+            <input type="number" data-auto-offset value="${Number(trigger.offset_min || 0)}" step="5"> min
+            <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
+        </div>`;
+    }
+    if (trigger.type === 'threshold') {
+        const d = homeAutoDeviceById(trigger.id);
+        const name = d?.name || trigger.id;
+        return `<div class="auto-chip" data-auto-when>
+            ${escapeHtml(name)}
+            <select data-auto-event>
+                <option value="temp_above" ${trigger.metric === 'temperature' && trigger.op === 'above' ? 'selected' : ''}>temperature above</option>
+                <option value="temp_below" ${trigger.metric === 'temperature' && trigger.op === 'below' ? 'selected' : ''}>temperature below</option>
+                <option value="hum_above" ${trigger.metric === 'humidity' && trigger.op === 'above' ? 'selected' : ''}>humidity above</option>
+                <option value="hum_below" ${trigger.metric === 'humidity' && trigger.op === 'below' ? 'selected' : ''}>humidity below</option>
+            </select>
+            <input type="number" data-auto-thresh value="${escapeHtml(String(trigger.value ?? 22))}" step="0.5">
+            <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
+        </div>`;
+    }
+    const d = homeAutoDeviceById(trigger.id);
+    const name = d?.name || trigger.id;
+    const events = homeAutoWhenEvents(d || { id: trigger.id, kind: 'light' });
+    const eventName = trigger.event || 'turns_on';
+    const dur = homeAutoDurationEvent(eventName) ? homeAutoDurationParts(trigger.for_sec || 300) : null;
+    return `<div class="auto-chip" data-auto-when>
+        ${escapeHtml(name)}
+        <select data-auto-event>${events.map(([v, label]) =>
+            `<option value="${v}" ${v === eventName ? 'selected' : ''}>${label}</option>`
+        ).join('')}</select>
+        ${dur ? `<input type="number" min="1" data-auto-for value="${dur.value}">
+            <select data-auto-for-unit>
+                <option value="1" ${dur.unit === 1 ? 'selected' : ''}>sec</option>
+                <option value="60" ${dur.unit === 60 ? 'selected' : ''}>min</option>
+                <option value="3600" ${dur.unit === 3600 ? 'selected' : ''}>hr</option>
+            </select>` : ''}
+        <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
+    </div>`;
+}
+
+function homeAutoThenChipHtml(action, index) {
+    const isScene = action.kind === 'scene';
+    const d = isScene
+        ? { id: `scene:${action.id}`, kind: 'scene', name: homeAutoSceneById(action.id)?.name || 'Scene' }
+        : homeAutoDeviceById(action.id) || { id: action.id, kind: 'light', name: action.id };
+    const cmds = homeAutoThenCommands(d);
+    const cmd = action.command || (isScene ? 'run' : 'on');
+    return `<div class="auto-chip" draggable="true" data-auto-then="${index}">
+        ${escapeHtml(d.name || action.id)}
+        <select data-auto-cmd>${cmds.map(([v, label]) =>
+            `<option value="${v}" ${v === cmd ? 'selected' : ''}>${label}</option>`
+        ).join('')}</select>
+        ${cmd === 'brightness' ? `<input type="number" min="1" max="100" data-auto-bright value="${Number(action.brightness || 100)}">` : ''}
+        <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
+    </div>`;
+}
+
+function homeAutoIfChipHtml(cond, index) {
+    if (cond.type === 'time_window') {
+        return `<div class="auto-chip auto-chip--clock" data-auto-if-i="${index}">
+            Between <input type="time" data-auto-if-start value="${escapeHtml(cond.start || '08:00')}">
+            and <input type="time" data-auto-if-end value="${escapeHtml(cond.end || '22:00')}">
+            <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
+    const devices = (homeDash.devices || []).filter((d) => d.id !== autoDraft?.trigger?.id);
+    const opts = devices.map((d) => `<option value="${escapeHtml(d.id)}" ${d.id === cond.id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
+    return `<div class="auto-chip" data-auto-if-i="${index}">
+        <select data-auto-if-id>${opts}</select>
+        is
+        <select data-auto-if-state>
+            <option value="on" ${cond.state === 'on' ? 'selected' : ''}>on</option>
+            <option value="off" ${cond.state === 'off' ? 'selected' : ''}>off</option>
+            <option value="open" ${cond.state === 'open' ? 'selected' : ''}>open</option>
+            <option value="closed" ${cond.state === 'closed' ? 'selected' : ''}>closed</option>
+        </select>
+        <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
+    </div>`;
+}
+
+function renderHomeAutoTray() {
+    const tray = document.getElementById('auto-tray');
+    if (!tray) return;
+    const chips = [
+        '<button type="button" class="auto-chip auto-chip--clock" draggable="true" data-auto-tray="time">Time</button>',
+        '<button type="button" class="auto-chip auto-chip--clock" draggable="true" data-auto-tray="sunset">Sunset</button>',
+        '<button type="button" class="auto-chip auto-chip--clock" draggable="true" data-auto-tray="sunrise">Sunrise</button>',
+    ];
+    (homeDash.devices || []).forEach((d) => {
+        if (d.kind === 'camera') return;
+        chips.push(`<button type="button" class="auto-chip" draggable="true" data-auto-tray="device" data-id="${escapeHtml(d.id)}">${escapeHtml(d.name)}</button>`);
+    });
+    (homeDash.scenes || []).forEach((s) => {
+        chips.push(`<button type="button" class="auto-chip" draggable="true" data-auto-tray="scene" data-id="${escapeHtml(s.id)}">${escapeHtml(s.name)}</button>`);
+    });
+    tray.innerHTML = chips.join('');
+}
+
+function homeAutoApplyTray(kind, id, zone) {
+    if (!autoDraft) return;
+    if (kind === 'time' || kind === 'sunset' || kind === 'sunrise') {
+        if (zone === 'then') return;
+        autoDraft.trigger = kind === 'time'
+            ? { type: 'time', at: '21:00' }
+            : { type: 'sun', event: kind, offset_min: 0 };
+        homeAutoSyncName();
+        renderHomeAutoEditor();
+        return;
+    }
+    if (kind === 'scene') {
+        if (zone === 'when') return;
+        const action = homeAutoDefaultThen({ id: `scene:${id}`, kind: 'scene', name: homeAutoSceneById(id)?.name });
+        if (action) autoDraft.actions.push(action);
+        homeAutoSyncName();
+        renderHomeAutoEditor();
+        return;
+    }
+    const d = homeAutoDeviceById(id);
+    if (!d) return;
+    if (zone === 'when' || (zone !== 'then' && !autoDraft.trigger && (d.kind === 'sensor' || d.kind === 'door' || d.kind === 'hub'))) {
+        autoDraft.trigger = homeAutoDefaultWhen(d);
+        homeAutoSyncName();
+        renderHomeAutoEditor();
+        return;
+    }
+    const action = homeAutoDefaultThen(d);
+    if (!action) {
+        if (zone === 'then') showToast('Sensors stay in When', 'error');
+        else {
+            autoDraft.trigger = homeAutoDefaultWhen(d);
+            homeAutoSyncName();
+            renderHomeAutoEditor();
+        }
+        return;
+    }
+    autoDraft.actions.push(action);
+    homeAutoSyncName();
+    renderHomeAutoEditor();
+}
+
+function homeAutoClickTray(kind, id) {
+    if (!autoDraft) return;
+    const d = kind === 'device' ? homeAutoDeviceById(id) : null;
+    if (kind === 'time' || kind === 'sunset' || kind === 'sunrise' || (d && !homeAutoThenOk(d))) {
+        homeAutoApplyTray(kind, id, 'when');
+        return;
+    }
+    if (kind === 'scene') {
+        homeAutoApplyTray(kind, id, 'then');
+        return;
+    }
+    if (!autoDraft.trigger) homeAutoApplyTray(kind, id, 'when');
+    else homeAutoApplyTray(kind, id, 'then');
+}
+
+function homeAutoStartEditor(partial) {
+    autoDraft = { ...homeAutoBlankDraft(), ...partial };
+    if (!Array.isArray(autoDraft.actions)) autoDraft.actions = [];
+    if (!Array.isArray(autoDraft.conditions)) autoDraft.conditions = [];
+    autoNameLocked = Boolean(partial?.name);
+    homeAutoSyncName();
+    renderHomeAutomations();
+    document.getElementById('auto-name')?.focus();
+}
+
+function homeAutoStarter(kind) {
+    const lights = (homeDash.devices || []).filter((d) => homeAutoThenOk(d) && d.kind !== 'door' && d.kind !== 'hub');
+    const light = lights[0];
+    const door = (homeDash.devices || []).find((d) => d.kind === 'door' || d.kind === 'hub');
+    if (kind === 'sunset') {
+        homeAutoStartEditor({
+            trigger: { type: 'sun', event: 'sunset', offset_min: 0 },
+            actions: light ? [homeAutoDefaultThen(light)] : [],
+        });
+        return;
+    }
+    if (kind === 'timeout') {
+        homeAutoStartEditor({
+            trigger: light ? { type: 'device', id: light.id, event: 'stays_on', for_sec: 1800 } : null,
+            actions: light ? [{ kind: 'device', id: light.id, command: 'off' }] : [],
+        });
+        return;
+    }
+    homeAutoStartEditor({
+        trigger: door ? { type: 'device', id: door.id, event: 'stays_open', for_sec: 300 } : null,
+        actions: light ? [homeAutoDefaultThen(light)] : [],
+    });
+}
+
+function homeAutoReadDuration() {
+    const value = Number(document.querySelector('[data-auto-for]')?.value || 5);
+    const unit = Number(document.querySelector('[data-auto-for-unit]')?.value || 60);
+    return Math.max(1, Math.round(value * unit));
+}
+
+function homeAutoApplyEvent(raw) {
+    if (!autoDraft?.trigger) return;
+    if (raw === 'temp_above' || raw === 'temp_below' || raw === 'hum_above' || raw === 'hum_below') {
+        autoDraft.trigger = {
+            type: 'threshold',
+            id: autoDraft.trigger.id,
+            metric: raw.startsWith('hum') ? 'humidity' : 'temperature',
+            op: raw.endsWith('below') ? 'below' : 'above',
+            value: Number(document.querySelector('[data-auto-thresh]')?.value || 22),
+        };
+        return;
+    }
+    const id = autoDraft.trigger.id;
+    autoDraft.trigger = { type: 'device', id, event: raw };
+    if (homeAutoDurationEvent(raw)) autoDraft.trigger.for_sec = homeAutoReadDuration();
+}
+
+async function homeAutoSave() {
+    if (!autoDraft) return;
+    const nameEl = document.getElementById('auto-name');
+    if (nameEl) autoDraft.name = nameEl.value.trim();
+    if (!autoNameLocked) homeAutoSyncName();
+    if (autoDraft.trigger?.type === 'device' && homeAutoDurationEvent(autoDraft.trigger.event)) {
+        autoDraft.trigger.for_sec = homeAutoReadDuration();
+    }
+    if (autoDraft.trigger?.type === 'sun' && homeAutoSunNeedsCoords()) {
+        const lat = Number(document.getElementById('auto-lat')?.value);
+        const lon = Number(document.getElementById('auto-lon')?.value);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            throw new Error('Add latitude and longitude for sunrise and sunset');
+        }
+        await homeApi({ action: 'automation_save', latitude: lat, longitude: lon });
+    }
+    const data = await homeApi({
+        action: 'automation_save',
+        id: autoDraft.id,
+        name: autoDraft.name,
+        enabled: autoDraft.enabled !== false,
+        trigger: autoDraft.trigger,
+        conditions: autoDraft.conditions,
+        actions: autoDraft.actions,
+        cooldown_sec: autoDraft.cooldown_sec || 30,
+        names: homeAutoNames(),
+    });
+    if (!data.ok) throw new Error(data.error || 'Could not save');
+    homeDash.automations = data.automations || homeDash.automations;
+    if (data.sun_coords) homeDash.sun_coords = data.sun_coords;
+    autoDraft = null;
+    showToast('Automation saved', 'success');
+    renderHomeAutomations();
+}
+
+function bindHomeAutomations() {
+    document.getElementById('home-automations-open')?.addEventListener('click', () => {
+        if (autoPageOpen) closeHomeAutomations();
+        else openHomeAutomations();
+    });
+    document.getElementById('home-automations-close')?.addEventListener('click', () => closeHomeAutomations());
+    document.getElementById('auto-cancel')?.addEventListener('click', () => {
+        autoDraft = null;
+        renderHomeAutomations();
+    });
+    document.getElementById('auto-save')?.addEventListener('click', async () => {
+        const btn = document.getElementById('auto-save');
+        if (btn) btn.disabled = true;
+        try {
+            await homeAutoSave();
+        } catch (err) {
+            showToast(err.message || 'Could not save', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    });
+    document.getElementById('auto-name')?.addEventListener('input', () => {
+        autoNameLocked = true;
+        if (autoDraft) autoDraft.name = document.getElementById('auto-name').value;
+    });
+    const page = els.homeAutomationsPage;
+    if (!page || page.dataset.autoBound) return;
+    page.dataset.autoBound = '1';
+    page.addEventListener('click', async (event) => {
+        const starter = event.target.closest('[data-auto-starter]');
+        if (starter) {
+            homeAutoStarter(starter.getAttribute('data-auto-starter'));
+            return;
+        }
+        if (event.target.closest('[data-auto-new]')) {
+            homeAutoStartEditor({});
+            return;
+        }
+        const enable = event.target.closest('[data-auto-enable]');
+        if (enable) {
+            const id = enable.closest('[data-auto-id]')?.getAttribute('data-auto-id');
+            try {
+                const data = await homeApi({ action: 'automation_enable', id, enabled: enable.checked });
+                if (!data.ok) throw new Error(data.error || 'Could not update');
+                homeDash.automations = data.automations || homeDash.automations;
+            } catch (err) {
+                enable.checked = !enable.checked;
+                showToast(err.message || 'Could not update', 'error');
+            }
+            return;
+        }
+        const edit = event.target.closest('[data-auto-edit]');
+        if (edit) {
+            const id = edit.closest('[data-auto-id]')?.getAttribute('data-auto-id');
+            const rule = (homeDash.automations || []).find((row) => row.id === id);
+            if (rule) {
+                homeAutoStartEditor({
+                    ...rule,
+                    actions: [...(rule.actions || [])],
+                    conditions: [...(rule.conditions || [])],
+                });
+            }
+            return;
+        }
+        const del = event.target.closest('[data-auto-del]');
+        if (del) {
+            const id = del.closest('[data-auto-id]')?.getAttribute('data-auto-id');
+            try {
+                const data = await homeApi({ action: 'automation_delete', id });
+                if (!data.ok) throw new Error(data.error || 'Could not delete');
+                homeDash.automations = data.automations || [];
+                renderHomeAutomations();
+            } catch (err) {
+                showToast(err.message || 'Could not delete', 'error');
+            }
+            return;
+        }
+        if (event.target.closest('[data-auto-clear-when]')) {
+            if (autoDraft) autoDraft.trigger = null;
+            homeAutoSyncName();
+            renderHomeAutoEditor();
+            return;
+        }
+        const thenX = event.target.closest('[data-auto-then-x]');
+        if (thenX && autoDraft) {
+            autoDraft.actions.splice(Number(thenX.getAttribute('data-auto-then-x')), 1);
+            homeAutoSyncName();
+            renderHomeAutoEditor();
+            return;
+        }
+        const ifX = event.target.closest('[data-auto-if-x]');
+        if (ifX && autoDraft) {
+            autoDraft.conditions.splice(Number(ifX.getAttribute('data-auto-if-x')), 1);
+            renderHomeAutoEditor();
+            return;
+        }
+        const ifAdd = event.target.closest('[data-auto-if]');
+        if (ifAdd && autoDraft) {
+            const which = ifAdd.getAttribute('data-auto-if');
+            if (which === 'window') autoDraft.conditions.push({ type: 'time_window', start: '08:00', end: '22:00' });
+            else {
+                const other = (homeDash.devices || []).find((d) => d.id !== autoDraft.trigger?.id);
+                if (!other) {
+                    showToast('Add another device first', 'error');
+                    return;
+                }
+                autoDraft.conditions.push({ type: 'device', id: other.id, state: 'on' });
+            }
+            renderHomeAutoEditor();
+            return;
+        }
+        const dayBtn = event.target.closest('[data-day]');
+        if (dayBtn && autoDraft?.trigger?.type === 'time') {
+            const day = Number(dayBtn.getAttribute('data-day'));
+            let current = Array.isArray(autoDraft.trigger.days) ? [...autoDraft.trigger.days] : [0, 1, 2, 3, 4, 5, 6];
+            const idx = current.indexOf(day);
+            if (idx >= 0) current.splice(idx, 1);
+            else current.push(day);
+            autoDraft.trigger.days = current.length === 7 ? undefined : current.sort((a, b) => a - b);
+            renderHomeAutoEditor();
+            return;
+        }
+        const tray = event.target.closest('[data-auto-tray]');
+        if (tray && autoDraft) {
+            homeAutoClickTray(tray.getAttribute('data-auto-tray'), tray.getAttribute('data-id') || '');
+        }
+    });
+    page.addEventListener('change', (event) => {
+        if (!autoDraft) return;
+        if (event.target.matches('[data-auto-at]')) autoDraft.trigger.at = event.target.value;
+        if (event.target.matches('[data-auto-sun]')) autoDraft.trigger.event = event.target.value;
+        if (event.target.matches('[data-auto-offset]')) autoDraft.trigger.offset_min = Number(event.target.value || 0);
+        if (event.target.matches('[data-auto-event]')) homeAutoApplyEvent(event.target.value);
+        if (event.target.matches('[data-auto-for], [data-auto-for-unit]') && autoDraft.trigger) {
+            autoDraft.trigger.for_sec = homeAutoReadDuration();
+        }
+        if (event.target.matches('[data-auto-thresh]') && autoDraft.trigger?.type === 'threshold') {
+            autoDraft.trigger.value = Number(event.target.value);
+        }
+        if (event.target.matches('[data-auto-cmd]')) {
+            const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
+            if (autoDraft.actions[i]) {
+                autoDraft.actions[i].command = event.target.value;
+                if (event.target.value === 'brightness' && autoDraft.actions[i].brightness == null) {
+                    autoDraft.actions[i].brightness = 100;
+                }
+            }
+        }
+        if (event.target.matches('[data-auto-bright]')) {
+            const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
+            if (autoDraft.actions[i]) autoDraft.actions[i].brightness = Number(event.target.value);
+        }
+        if (event.target.matches('[data-auto-if-start]')) {
+            const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
+            if (autoDraft.conditions[i]) autoDraft.conditions[i].start = event.target.value;
+        }
+        if (event.target.matches('[data-auto-if-end]')) {
+            const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
+            if (autoDraft.conditions[i]) autoDraft.conditions[i].end = event.target.value;
+        }
+        if (event.target.matches('[data-auto-if-id]')) {
+            const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
+            if (autoDraft.conditions[i]) autoDraft.conditions[i].id = event.target.value;
+        }
+        if (event.target.matches('[data-auto-if-state]')) {
+            const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
+            if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
+        }
+        homeAutoSyncName();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun]')) renderHomeAutoEditor();
+    });
+    page.addEventListener('dragstart', (event) => {
+        const tray = event.target.closest('[data-auto-tray]');
+        const thenChip = event.target.closest('[data-auto-then]');
+        if (tray) {
+            autoDrag = { kind: tray.getAttribute('data-auto-tray'), id: tray.getAttribute('data-id') || '' };
+            event.dataTransfer?.setData('text/plain', 'auto');
+            return;
+        }
+        if (thenChip) {
+            autoDrag = { kind: 'reorder', index: Number(thenChip.getAttribute('data-auto-then')) };
+            event.dataTransfer?.setData('text/plain', 'auto');
+        }
+    });
+    page.addEventListener('dragend', () => {
+        autoDrag = null;
+        page.querySelectorAll('.auto-drop.is-over').forEach((el) => el.classList.remove('is-over'));
+    });
+    page.addEventListener('dragover', (event) => {
+        const zone = event.target.closest('[data-auto-zone]');
+        if (!zone) return;
+        event.preventDefault();
+        zone.classList.add('is-over');
+    });
+    page.addEventListener('dragleave', (event) => {
+        const zone = event.target.closest('[data-auto-zone]');
+        if (zone && !zone.contains(event.relatedTarget)) zone.classList.remove('is-over');
+    });
+    page.addEventListener('drop', (event) => {
+        const zone = event.target.closest('[data-auto-zone]');
+        if (!zone || !autoDrag) return;
+        event.preventDefault();
+        zone.classList.remove('is-over');
+        const which = zone.getAttribute('data-auto-zone');
+        if (autoDrag.kind === 'reorder' && which === 'then' && autoDraft) {
+            const from = autoDrag.index;
+            const target = event.target.closest('[data-auto-then]');
+            const to = target ? Number(target.getAttribute('data-auto-then')) : autoDraft.actions.length - 1;
+            if (from !== to && autoDraft.actions[from]) {
+                const [item] = autoDraft.actions.splice(from, 1);
+                autoDraft.actions.splice(Math.max(0, to), 0, item);
+                renderHomeAutoEditor();
+            }
+            autoDrag = null;
+            return;
+        }
+        homeAutoApplyTray(autoDrag.kind, autoDrag.id, which);
+        autoDrag = null;
+    });
 }
 
 function lymowCamMode() {
@@ -5917,6 +6707,7 @@ function showSettingsPane(pane, { updateHash = true } = {}) {
 function openSettingsModal(pane) {
     if (!els.settingsModal) return;
     if (mailPageOpen) closeMailPage({ updateHash: false });
+    if (autoPageOpen) closeHomeAutomations({ updateHash: false });
     const alreadyOpen = settingsModalOpen;
     settingsModalOpen = true;
     if (statusAbort) {
@@ -6001,6 +6792,7 @@ function setMailUnreadBadge(count) {
 function openMailPage({ updateHash = true } = {}) {
     if (!els.mailPage || els.mailOpenWrap?.classList.contains('hidden')) return;
     if (settingsModalOpen) closeSettingsModal();
+    if (autoPageOpen) closeHomeAutomations({ updateHash: false });
     const alreadyOpen = mailPageOpen;
     mailPageOpen = true;
     if (statusAbort) {
@@ -8803,9 +9595,11 @@ window.addEventListener('hashchange', () => {
     const pane = settingsHashPane();
     if (pane) openSettingsModal(pane);
     else if (mailHashOpen()) openMailPage({ updateHash: false });
+    else if (homeAutoHashOpen()) openHomeAutomations({ updateHash: false });
     else {
         if (settingsModalOpen) closeSettingsModal();
         if (mailPageOpen) closeMailPage({ updateHash: false });
+        if (autoPageOpen) closeHomeAutomations({ updateHash: false });
     }
 });
 if (els.settingsForm) {
@@ -9179,6 +9973,10 @@ document.addEventListener('keydown', (event) => {
         closeMailPage();
         return;
     }
+    if (els.homeAutomationsPage && !els.homeAutomationsPage.classList.contains('hidden')) {
+        closeHomeAutomations();
+        return;
+    }
     if (mapFullscreen) {
         setMapFullscreen(false);
     }
@@ -9346,4 +10144,6 @@ if (settingsHashPane()) {
     openSettingsModal();
 } else if (mailHashOpen()) {
     fetchPaperMail();
+} else if (homeAutoHashOpen()) {
+    openHomeAutomations({ updateHash: false });
 }

@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.26] - 2026-10-02
+
+### Added
+- Home **Automations**: a When / Then page (drag chips, or tap) for time, sunrise/sunset, device edges, **open/on for X minutes**, and sensor thresholds. Rules are stored in `data/home-automations.json` and run from `scripts/home_automations.php` next to the Vestaboard watcher — not on `php -S`. Times follow the panel OS timezone. Settings → Panel updates restarts the sidecar.
+
+### Fixed
+- Room and group **On/Off** skip UniFi sensors, cameras, and Access doors so a Kitchen sensor no longer returns **That UniFi device is read-only on Home**. If nothing in the room can toggle, Home says **No controllable devices**.
+
 ## [4.0.25] - 2026-10-02
 
 ### Fixed

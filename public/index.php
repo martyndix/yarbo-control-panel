@@ -579,6 +579,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="section-header section-header--simple">
                 <h2>Home</h2>
                 <div class="section-header-actions">
+                    <button type="button" class="btn btn-secondary btn-compact" id="home-automations-open" aria-controls="home-automations-page" aria-expanded="false">Automations</button>
                     <button type="button" class="home-manage-toggle" id="home-manage-toggle" aria-pressed="false" aria-label="Show device settings" title="Rename, rooms, hide, and remove devices">⚙️</button>
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
@@ -649,6 +650,63 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div id="unifi-sensors" class="home-device-grid unifi-device-grid"></div>
         </section>
 
+        </div>
+
+        <div id="home-automations-page" class="mail-page auto-page hidden" role="region" aria-labelledby="home-automations-title">
+            <div class="mail-page-toolbar">
+                <div>
+                    <h2 id="home-automations-title">Automations</h2>
+                    <p class="hint settings-page-lead" id="home-automations-tz">Times follow this panel.</p>
+                </div>
+                <button type="button" class="btn btn-secondary" id="home-automations-close">Home</button>
+            </div>
+            <div id="home-automations-list" class="auto-list"></div>
+            <div id="home-automations-editor" class="auto-editor hidden">
+                <label class="settings-field">
+                    <span class="label">Name</span>
+                    <input type="text" id="auto-name" maxlength="64" autocomplete="off" placeholder="Front door open 5 min → Porch on">
+                </label>
+                <p class="hint" id="auto-coords-hint" hidden>Sunrise and sunset need a location. The last Yarbo GPS is used when it exists; otherwise enter latitude and longitude.</p>
+                <div id="auto-coords" class="auto-coords hidden">
+                    <label class="settings-field">
+                        <span class="label">Latitude</span>
+                        <input type="number" id="auto-lat" step="0.0001" min="-90" max="90">
+                    </label>
+                    <label class="settings-field">
+                        <span class="label">Longitude</span>
+                        <input type="number" id="auto-lon" step="0.0001" min="-180" max="180">
+                    </label>
+                </div>
+                <div class="auto-builder">
+                    <section class="auto-drop" id="auto-when" data-auto-zone="when" aria-label="When">
+                        <h3 class="settings-subtitle">When</h3>
+                        <p class="hint">Drag a sensor, door, Time, or Sunset here. Tap a chip if you cannot drag.</p>
+                        <div class="auto-drop-chips" id="auto-when-chips"></div>
+                    </section>
+                    <details class="auto-if" id="auto-if">
+                        <summary>Only if…</summary>
+                        <p class="hint">Optional. All of these must be true when the When fires.</p>
+                        <div id="auto-if-chips" class="auto-drop-chips"></div>
+                        <div class="auto-if-add">
+                            <button type="button" class="btn btn-secondary btn-compact" data-auto-if="window">Time window</button>
+                            <button type="button" class="btn btn-secondary btn-compact" data-auto-if="device">Device is…</button>
+                        </div>
+                    </details>
+                    <section class="auto-drop" id="auto-then" data-auto-zone="then" aria-label="Then">
+                        <h3 class="settings-subtitle">Then</h3>
+                        <p class="hint">Drag lights, scenes, or Unlock here. Reorder by dragging.</p>
+                        <div class="auto-drop-chips" id="auto-then-chips"></div>
+                    </section>
+                </div>
+                <div class="auto-tray-wrap">
+                    <h3 class="settings-subtitle">Add</h3>
+                    <div id="auto-tray" class="auto-tray"></div>
+                </div>
+                <div class="auto-editor-actions">
+                    <button type="button" class="btn btn-secondary" id="auto-cancel">Cancel</button>
+                    <button type="button" class="btn" id="auto-save">Save</button>
+                </div>
+            </div>
         </div>
 
         <div id="mail-page" class="mail-page hidden" role="region" aria-labelledby="mail-title">

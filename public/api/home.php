@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboHome;
+use Yarbo\YarboHomeAutomations;
 use Yarbo\YarboHub;
 
 $projectRoot = dirname(__DIR__, 2);
@@ -55,6 +56,12 @@ try {
         'scene_off' => $home->stopScene((string) ($input['id'] ?? '')),
         'paper_assign' => $home->assignPaper((string) ($input['tablet_id'] ?? ''), is_array($input['ids'] ?? null) ? $input['ids'] : []),
         'reorder' => $home->reorder($input),
+        'automation_save' => (new YarboHomeAutomations($projectRoot))->save($input),
+        'automation_delete' => (new YarboHomeAutomations($projectRoot))->delete((string) ($input['id'] ?? '')),
+        'automation_enable' => (new YarboHomeAutomations($projectRoot))->setEnabled(
+            (string) ($input['id'] ?? ''),
+            (bool) ($input['enabled'] ?? false)
+        ),
         default => ['ok' => false, 'error' => 'Unknown action'],
     };
 } catch (Throwable $e) {

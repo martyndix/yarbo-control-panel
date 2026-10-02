@@ -28,6 +28,10 @@ cleanup() {
     pkill -P "${VESTABOARD_PID}" 2>/dev/null || true
     kill "${VESTABOARD_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${HOME_AUTOMATIONS_PID:-}" ]]; then
+    pkill -P "${HOME_AUTOMATIONS_PID}" 2>/dev/null || true
+    kill "${HOME_AUTOMATIONS_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${METRICS_PID:-}" ]]; then
     pkill -P "${METRICS_PID}" 2>/dev/null || true
     kill "${METRICS_PID}" 2>/dev/null || true
@@ -77,6 +81,15 @@ echo "==> Starting Vestaboard Note watcher"
   done
 ) &
 VESTABOARD_PID=$!
+
+echo "==> Starting Home automations"
+(
+  while true; do
+    "$PHP_BIN" "${ROOT}/scripts/home_automations.php" && echo "home_automations: reloading" || echo "home_automations: exited, restarting" >&2
+    sleep 1
+  done
+) &
+HOME_AUTOMATIONS_PID=$!
 
 MATTER_PY="${ROOT}/.venv/bin/python"
 if [[ ! -x "$MATTER_PY" ]]; then
