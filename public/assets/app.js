@@ -5103,18 +5103,18 @@ function renderHomeAutomations() {
     homeAutoFillTimezoneSelect(zone);
     const runnerEl = document.getElementById('home-automations-runner');
     const runner = homeDash.runner || {};
+    const panelVer = document.documentElement.getAttribute('data-panel-version') || '';
     if (runnerEl) {
         const stale = !runner.running;
         const err = String(runner.last_error || '').trim();
+        const tick = runner.clock_hm || clock || '';
+        runnerEl.classList.remove('hidden');
         if (stale) {
-            runnerEl.classList.remove('hidden');
-            runnerEl.textContent = 'The automations runner is not active, so times cannot fire and Last ran stays empty. Opening this page starts it — wait a few seconds. If this remains, restart the panel (Settings → Panel updates).';
+            runnerEl.textContent = `Runner is not active${panelVer ? ` (${panelVer})` : ''}, so times cannot fire and Last ran stays empty. Opening this page starts it — wait a few seconds. If this remains, restart the panel (Settings → Panel updates).`;
         } else if (err) {
-            runnerEl.classList.remove('hidden');
-            runnerEl.textContent = err;
+            runnerEl.textContent = `Runner is active${panelVer ? ` (${panelVer})` : ''}. Last tick ${tick || '—'}. ${err}`;
         } else {
-            runnerEl.classList.add('hidden');
-            runnerEl.textContent = '';
+            runnerEl.textContent = `Runner is active${panelVer ? ` (${panelVer})` : ''}. Last tick ${tick || '—'}.`;
         }
     }
     const list = document.getElementById('home-automations-list');
@@ -5147,7 +5147,7 @@ function renderHomeAutomations() {
     html += rules.map((rule) => {
         const sentence = homeAutoSentence(rule, names);
         const lastHm = runner.last_fire_hm && runner.last_fire_hm[rule.id];
-        const lastHint = lastHm ? ` Last ran ${lastHm}.` : '';
+        const lastHint = lastHm ? ` Last ran ${lastHm}.` : ' Not run yet.';
         return `<article class="auto-row" data-auto-id="${escapeHtml(rule.id)}">
             <div class="auto-row-main">
                 <div class="auto-row-name">${escapeHtml(rule.name || sentence)}</div>
@@ -5595,7 +5595,7 @@ function homeAutoStartEditor(partial) {
         }
         return next;
     });
-    autoNameLocked = Boolean(partial?.name);
+    autoNameLocked = Boolean(partial?.name) && partial.name !== homeAutoSentence(partial, homeAutoNames());
     homeAutoSyncName();
     renderHomeAutomations();
     document.getElementById('auto-name')?.focus();

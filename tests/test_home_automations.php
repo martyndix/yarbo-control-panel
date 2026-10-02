@@ -538,5 +538,8 @@ $auto->kickRunner();
 assert_true(!is_file($auto->pidPath()) || (int) trim((string) file_get_contents($auto->pidPath())) === getmypid(), 'kickRunner must not spawn when scripts/ is missing');
 assert_true(str_contains($js, 'autoPageOpen'), 'automations page keeps polling');
 assert_true(str_contains($js, 'Last ran stays empty'), 'stale runner copy');
+assert_true(str_contains($js, 'Runner is active'), 'active runner copy');
+assert_true(str_contains($js, 'Not run yet.'), 'not-run-yet copy');
+assert_true(str_contains($index, 'data-panel-version'), 'panel version on the page');
 
 echo "test_home_automations.php ok\n";

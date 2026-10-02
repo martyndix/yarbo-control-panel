@@ -36,7 +36,7 @@ $panelTitle = \Yarbo\YarboHub::panelTitle((new \Yarbo\YarboHub(dirname(__DIR__))
 $panelTitleSafe = htmlspecialchars($panelTitle, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-panel-version="<?= htmlspecialchars($panelVersion, ENT_QUOTES, 'UTF-8') ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -657,7 +657,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div>
                     <h2 id="home-automations-title">Automations</h2>
                     <p class="hint settings-page-lead" id="home-automations-tz">Times use this panel’s timezone.</p>
-                    <p class="hint hidden" id="home-automations-runner" role="status"></p>
+                    <p class="hint" id="home-automations-runner" role="status">Checking the automations runner…</p>
                 </div>
                 <div class="auto-tz-controls">
                     <label class="settings-field auto-tz-field">

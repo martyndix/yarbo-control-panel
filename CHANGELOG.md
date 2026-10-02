@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.34] - 2026-10-02
+
+### Changed
+- Automations always shows whether the runner is **active** (with panel version and last tick) or not. Each rule shows **Last ran HH:MM** or **Not run yet**.
+
 ## [4.0.33] - 2026-10-02
 
 ### Fixed
