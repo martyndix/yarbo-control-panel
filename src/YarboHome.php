@@ -339,6 +339,7 @@ final class YarboHome
                     'motion',
                     'has_open',
                     'has_motion',
+                    'motion_at',
                 ] as $key) {
                     if (array_key_exists($key, $device)) {
                         $row[$key] = $device[$key];
@@ -1341,6 +1342,9 @@ final class YarboHome
                     || ((string) ($device['kind'] ?? '') === 'hub'),
                 'has_motion' => !empty($device['has_motion']),
                 'has_dps' => !empty($device['has_dps']),
+                'motion_at' => isset($device['motion_at']) && is_numeric($device['motion_at'])
+                    ? (int) $device['motion_at']
+                    : 0,
                 'temperature' => isset($device['temperature']) && is_numeric($device['temperature'])
                     ? (float) $device['temperature']
                     : null,
@@ -1560,25 +1564,32 @@ final class YarboHome
         if ($extra === []) {
             return $devices;
         }
-        $seen = [];
-        foreach ($devices as $row) {
-            if (is_array($row)) {
-                $id = (string) ($row['id'] ?? '');
-                if ($id !== '') {
-                    $seen[$id] = true;
-                }
-            }
-        }
+        $byId = [];
         foreach ($extra as $row) {
             $id = (string) ($row['id'] ?? '');
-            if ($id === '' || isset($seen[$id])) {
+            if ($id === '') {
                 continue;
             }
-            $seen[$id] = true;
-            $devices[] = $row;
+            $byId[$id] = $row;
+        }
+        $out = [];
+        foreach ($devices as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            if ($id !== '' && isset($byId[$id])) {
+                $out[] = $byId[$id];
+                unset($byId[$id]);
+                continue;
+            }
+            $out[] = $row;
+        }
+        foreach ($byId as $row) {
+            $out[] = $row;
         }
 
-        return $devices;
+        return $out;
     }
 
     /**

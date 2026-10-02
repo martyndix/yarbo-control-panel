@@ -3191,6 +3191,11 @@ async function loadHomeDashboard(opts = {}) {
         }
         homeLoadAborts = 0;
         ensureHomeStatePoll();
+        if (!opts.patch) {
+            homeAutoEnsureTimezone().then(() => {
+                if (autoPageOpen) renderHomeAutomations();
+            }).catch(() => {});
+        }
     } catch (err) {
         if (isAbortError(err)) {
             aborted = true;
@@ -5003,6 +5008,8 @@ async function homeAutoSaveTimezone(zone) {
         if (data.timezone) homeDash.timezone = data.timezone;
         if (data.server_timezone) homeDash.server_timezone = data.server_timezone;
         if (data.runner) homeDash.runner = data.runner;
+        const name = String(homeDash.timezone?.name || next);
+        homeAutoTzTried = name !== 'UTC' && name !== 'Etc/UTC';
         renderHomeAutomations();
         showToast(`Times now use ${homeDash.timezone?.name || next}`, 'success');
     } catch (err) {
@@ -5010,16 +5017,27 @@ async function homeAutoSaveTimezone(zone) {
     }
 }
 
+let homeAutoTzTried = false;
+
 async function homeAutoEnsureTimezone() {
+    if (homeAutoTzTried) return;
     const client = clientTimezone();
     const info = homeDash.timezone || {};
     if (!client) return;
-    if (info.saved) return;
     const zone = String(info.name || homeDash.server_timezone || '');
-    if (zone && zone !== 'UTC' && zone !== 'Etc/UTC') return;
+    const savedUtc = zone === 'UTC' || zone === 'Etc/UTC';
+    if (info.saved && !savedUtc) {
+        homeAutoTzTried = true;
+        return;
+    }
+    if (zone && !savedUtc) {
+        homeAutoTzTried = true;
+        return;
+    }
     try {
         const data = await homeApi({ action: 'automation_save', timezone: client });
         if (data.ok) {
+            homeAutoTzTried = true;
             if (data.timezone) homeDash.timezone = data.timezone;
             if (data.server_timezone) homeDash.server_timezone = data.server_timezone;
             if (data.runner) homeDash.runner = data.runner;
@@ -5079,9 +5097,16 @@ function renderHomeAutomations() {
     const runner = homeDash.runner || {};
     if (runnerEl) {
         const stale = !runner.running;
-        runnerEl.classList.toggle('hidden', !stale);
+        const err = String(runner.last_error || '').trim();
         if (stale) {
+            runnerEl.classList.remove('hidden');
             runnerEl.textContent = 'The automations runner is not active. Times will not fire until the panel service is running (Settings → Panel updates, or restart the panel).';
+        } else if (err) {
+            runnerEl.classList.remove('hidden');
+            runnerEl.textContent = err;
+        } else {
+            runnerEl.classList.add('hidden');
+            runnerEl.textContent = '';
         }
     }
     const list = document.getElementById('home-automations-list');

@@ -472,6 +472,21 @@ final class YarboUnifi
         }
     }
 
+    public function refreshProtectSensorsNow(float $timeout = 1.5): void
+    {
+        $this->refreshProtectSensors($timeout);
+    }
+
+    public function refreshAccessDoorsNow(float $timeout = 1.5): void
+    {
+        $this->refreshAccessDoorStatusInner($timeout, true);
+    }
+
+    public function refreshProtectLightsNow(float $timeout = 1.5): void
+    {
+        $this->refreshProtectLights($timeout);
+    }
+
     /**
      * Start a background GET /doors, /sensors, and /lights so Home can follow
      * Protect and Access without occupying the single-threaded panel.
@@ -1476,7 +1491,8 @@ final class YarboUnifi
             return null;
         }
         $open = $this->sensorOpened($row);
-        $motion = $this->truthy($row['isMotionDetected'] ?? $row['is_motion_detected'] ?? $row['motionDetected'] ?? false);
+        $motion = $this->sensorMotionNow($row);
+        $motionAt = $this->sensorMotionAt($row);
         $leak = $this->truthy($row['leakDetected'] ?? $row['is_leaking'] ?? false);
         $temp = $this->nestedNumber($row, ['stats', 'temperature', 'value'])
             ?? $this->nestedNumber($row, ['stats', 'temperature'])
@@ -1526,6 +1542,7 @@ final class YarboUnifi
             'motion' => $caps['has_motion'] ? $motion : null,
             'has_open' => $caps['has_open'],
             'has_motion' => $caps['has_motion'],
+            'motion_at' => $caps['has_motion'] ? $motionAt : 0,
             'temperature' => $temp,
             'humidity' => $humidity,
         ];
@@ -2116,6 +2133,72 @@ final class YarboUnifi
     /**
      * @param array<string, mixed> $row
      */
+    private function sensorMotionNow(array $row): bool
+    {
+        foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
+            if (array_key_exists($key, $row) && $row[$key] !== null && $row[$key] !== '') {
+                return $this->truthy($row[$key]);
+            }
+        }
+        $stats = $row['stats'] ?? null;
+        if (!is_array($stats)) {
+            return false;
+        }
+        foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
+            if (array_key_exists($key, $stats) && $stats[$key] !== null && $stats[$key] !== '') {
+                $value = $stats[$key];
+                if (is_array($value) && array_key_exists('value', $value)) {
+                    $value = $value['value'];
+                }
+
+                return $this->truthy($value);
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function sensorMotionAt(array $row): int
+    {
+        $candidates = [
+            $row['motionDetectedAt'] ?? null,
+            $row['motion_detected_at'] ?? null,
+            $row['lastMotion'] ?? null,
+        ];
+        $stats = $row['stats'] ?? null;
+        if (is_array($stats)) {
+            $candidates[] = $stats['motionDetectedAt'] ?? null;
+            $candidates[] = $stats['motion_detected_at'] ?? null;
+        }
+        foreach ($candidates as $value) {
+            $sec = self::epochSeconds($value);
+            if ($sec > 0) {
+                return $sec;
+            }
+        }
+
+        return 0;
+    }
+
+    private static function epochSeconds(mixed $value): int
+    {
+        if (!is_numeric($value)) {
+            return 0;
+        }
+        $n = (int) $value;
+        if ($n > 1_000_000_000_000) {
+            return intdiv($n, 1000);
+        }
+
+        return $n > 1_000_000_000 ? $n : 0;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
     private function sensorReportsMotion(array $row): bool
     {
         foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
@@ -2125,7 +2208,7 @@ final class YarboUnifi
         }
         $stats = $row['stats'] ?? null;
         if (!is_array($stats)) {
-            return false;
+            return $this->sensorMotionAt($row) > 0;
         }
         foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
             if (array_key_exists($key, $stats) && $stats[$key] !== null && $stats[$key] !== '') {
@@ -2133,7 +2216,7 @@ final class YarboUnifi
             }
         }
 
-        return false;
+        return $this->sensorMotionAt($row) > 0;
     }
 
     private function openClosedValue(mixed $value): ?bool

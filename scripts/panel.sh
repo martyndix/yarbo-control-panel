@@ -83,9 +83,10 @@ echo "==> Starting Vestaboard Note watcher"
 VESTABOARD_PID=$!
 
 echo "==> Starting Home automations"
+mkdir -p "${ROOT}/data"
 (
   while true; do
-    "$PHP_BIN" "${ROOT}/scripts/home_automations.php" && echo "home_automations: reloading" || echo "home_automations: exited, restarting" >&2
+    "$PHP_BIN" "${ROOT}/scripts/home_automations.php" >> "${ROOT}/data/home-automations.log" 2>&1 && echo "home_automations: reloading" || echo "home_automations: exited, restarting" >&2
     sleep 1
   done
 ) &

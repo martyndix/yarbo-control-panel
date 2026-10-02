@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.31] - 2026-10-02
+
+### Fixed
+- Home Automations **time** rules no longer stick on a saved **UTC** timezone. The runner uses the panel OS zone (or the browser’s zone when that is still UTC), so 21:00 means 21:00 local.
+- A time or sunset rule whose Then fails is not marked as fired for the day. It retries after cooldown, including after the exact minute has passed.
+- Motion When uses Protect `motionDetectedAt` as well as the short `isMotionDetected` pulse, and the runner polls sensors about every 2 seconds so a PIR blip is not missed.
+- Live UniFi open/motion overwrites Home’s cached row instead of keeping a stale copy. The Automations page shows the last runner error when a Then fails.
+
 ## [4.0.30] - 2026-10-02
 
 ### Added

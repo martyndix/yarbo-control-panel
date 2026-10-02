@@ -180,6 +180,11 @@ assert_true(!empty($tzSave['ok']), 'save timezone');
 $disk = json_decode((string) file_get_contents($auto->storePath()), true);
 assert_true(($disk['timezone'] ?? '') === 'Europe/London', 'timezone persisted: ' . json_encode($disk['timezone'] ?? null));
 assert_true($auto->timezoneName() === 'Europe/London', 'resolved timezone: ' . $auto->timezoneName());
+$utcSave = $auto->save(['timezone' => 'UTC']);
+assert_true(!empty($utcSave['ok']), 'save UTC timezone');
+$utcPub = $auto->timezonePublic();
+assert_true(($utcPub['saved'] ?? true) === false, 'saved UTC must be treated as unsaved: ' . json_encode($utcPub));
+$auto->save(['timezone' => 'Europe/London']);
 $seconds = $auto->save([
     'id' => 'a-hm',
     'enabled' => true,
@@ -237,6 +242,40 @@ assert_true(!empty($late['ok']), 'save late-start rule');
 $r = $auto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 60);
 assert_true($r['fired'] === [], 'first tick after the time must not fire every past slot');
 $auto->delete('a-late');
+$commands = [];
+@unlink($auto->statePath());
+
+$failAuto = new YarboHomeAutomations($root);
+$failAuto->setCommandHandler(static function (): array {
+    return ['ok' => false, 'error' => 'device busy'];
+});
+$failAuto->save(['timezone' => 'Europe/London']);
+$failSave = $failAuto->save([
+    'id' => 'a-fail-time',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '21:30'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'cooldown_sec' => 30,
+]);
+assert_true(!empty($failSave['ok']), 'save failing time rule');
+$r = $failAuto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now);
+assert_true($r['fired'] === [] && ($r['errors'][0] ?? '') === 'device busy', 'failed Then must not count as fired: ' . json_encode($r));
+$failState = json_decode((string) file_get_contents($failAuto->statePath()), true);
+$failDay = (new DateTimeImmutable('@' . $now))->setTimezone($tz)->format('Y-m-d');
+assert_true(($failState['day_slot']['a-fail-time'] ?? '') !== $failDay, 'failed Then must not set day_slot');
+assert_true((int) ($failState['last_fire']['a-fail-time'] ?? 0) === $now, 'failed Then still sets last_fire for cooldown');
+$r = $failAuto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 5);
+assert_true($r['fired'] === [] && ($r['errors'] ?? []) === [], 'cooldown must skip failed Then retry');
+$okCommands = [];
+$failAuto->setCommandHandler(static function (array $action) use (&$okCommands): array {
+    $okCommands[] = $action;
+
+    return ['ok' => true];
+});
+$r = $failAuto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 90);
+assert_true($r['fired'] === ['a-fail-time'], 'failed Then must retry after cooldown even past the minute: ' . json_encode($r));
+assert_true(count($okCommands) === 1, 'retry Then ran once');
+$failAuto->delete('a-fail-time');
 $commands = [];
 @unlink($auto->statePath());
 
@@ -358,6 +397,37 @@ $auto->delete('a-chip-off');
 $commands = [];
 @unlink($auto->statePath());
 
+$motionAtRule = $auto->save([
+    'id' => 'a-motion-at',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($motionAtRule['ok']), 'save motion_at rule');
+$senseStamp = static function (bool $motion, int $at): array {
+    return [[
+        'id' => 'unifi:sensor:s1',
+        'kind' => 'sensor',
+        'open' => false,
+        'on' => false,
+        'motion' => $motion,
+        'motion_at' => $at,
+    ], [
+        'id' => 'unifi:light:porch',
+        'kind' => 'light',
+        'on' => false,
+    ]];
+};
+$tStamp = 1_820_000_000;
+$r = $auto->tick($senseStamp(false, 0), $tStamp);
+assert_true($r['fired'] === [], 'motion_at idle');
+$r = $auto->tick($senseStamp(false, 1_820_000_040), $tStamp + 1);
+assert_true($r['fired'] === ['a-motion-at'], 'motion_at increase must fire when boolean stays false: ' . json_encode($r));
+$auto->delete('a-motion-at');
+$commands = [];
+@unlink($auto->statePath());
+
 assert_true(YarboHomeAutomations::hmInWindow('21:00', '20:00', '22:00'), 'window inside');
 assert_true(!YarboHomeAutomations::hmInWindow('19:00', '20:00', '22:00'), 'window before');
 assert_true(YarboHomeAutomations::hmInWindow('23:00', '22:00', '06:00'), 'overnight window');
@@ -376,6 +446,7 @@ assert_true(!str_contains($homePhp, 'home_automations.php'), 'home.php must not 
 assert_true(str_contains($homePhp, 'automation_save'), 'home.php CRUD');
 $panel = (string) file_get_contents(__DIR__ . '/../scripts/panel.sh');
 assert_true(str_contains($panel, 'home_automations.php'), 'panel.sh must start the sidecar');
+assert_true(str_contains($panel, 'home-automations.log'), 'sidecar writes a log');
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -386,6 +457,7 @@ assert_true(str_contains($js, "['sensors', 'Sensors']"), 'sensors group');
 assert_true(str_contains($js, 'homeAutoDeviceSelectGroups'), 'only-if grouping helper');
 assert_true(str_contains($js, "['cameras', 'Cameras']"), 'cameras group');
 assert_true(str_contains($js, 'homeAutoEnsureTimezone'), 'timezone adopt helper');
+assert_true(str_contains($js, 'runner.last_error'), 'runner error hint');
 assert_true(str_contains($index, 'auto-timezone'), 'timezone picker');
 assert_true(isset($dash['timezone']['name']) && isset($dash['runner']), 'dashboard exposes timezone and runner');
 assert_true(str_contains($js, "['scenes', 'Scenes']"), 'scenes group');

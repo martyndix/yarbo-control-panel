@@ -45,7 +45,7 @@ final class YarboHomeAutomations
 
     public function timezoneName(): string
     {
-        $saved = YarboVestaboard::normalizeTimezone((string) ($this->load()['timezone'] ?? ''));
+        $saved = self::usableTimezone((string) ($this->load()['timezone'] ?? ''));
         if ($saved !== '') {
             return $saved;
         }
@@ -64,7 +64,7 @@ final class YarboHomeAutomations
     public function timezonePublic(): array
     {
         $name = $this->timezoneName();
-        $saved = YarboVestaboard::normalizeTimezone((string) ($this->load()['timezone'] ?? '')) !== '';
+        $saved = self::usableTimezone((string) ($this->load()['timezone'] ?? '')) !== '';
 
         return [
             'name' => $name,
@@ -87,17 +87,29 @@ final class YarboHomeAutomations
     }
 
     /**
-     * @return array{at: int, age_sec: int|null, running: bool}
+     * @return array{at: int, age_sec: int|null, running: bool, last_error: string, last_fired: list<string>}
      */
     public function runnerPublic(): array
     {
-        $at = (int) ($this->loadState()['clock'] ?? 0);
+        $state = $this->loadState();
+        $at = (int) ($state['clock'] ?? 0);
         $age = $at > 0 ? max(0, time() - $at) : null;
+        $result = is_array($state['last_result'] ?? null) ? $state['last_result'] : [];
+        $errors = is_array($result['errors'] ?? null) ? $result['errors'] : [];
+        $fired = [];
+        foreach (is_array($result['fired'] ?? null) ? $result['fired'] : [] as $id) {
+            $id = trim((string) $id);
+            if ($id !== '') {
+                $fired[] = $id;
+            }
+        }
 
         return [
             'at' => $at,
             'age_sec' => $age,
             'running' => $at > 0 && $age !== null && $age < 20,
+            'last_error' => $errors !== [] ? (string) $errors[0] : (string) ($state['unifi_error'] ?? ''),
+            'last_fired' => $fired,
         ];
     }
 
@@ -355,6 +367,8 @@ final class YarboHomeAutomations
             $result = $this->runActions($rule['actions'] ?? []);
             if (!($result['ok'] ?? false)) {
                 $errors[] = (string) ($result['error'] ?? 'failed');
+                $state['last_fire'][$id] = $now;
+                continue;
             }
             $fired[] = $id;
             $state['last_fire'][$id] = $now;
@@ -376,6 +390,7 @@ final class YarboHomeAutomations
         $turnedOff = $this->flushDelayed($state, $now, $enabledById, $curr, $errors);
         $state['prev'] = $curr;
         $state['clock'] = $now;
+        $state['last_result'] = ['at' => $now, 'fired' => $fired, 'errors' => $errors];
         $this->writeState($state);
 
         return ['ok' => $errors === [], 'fired' => $fired, 'turned_off' => $turnedOff, 'errors' => $errors];
@@ -388,16 +403,37 @@ final class YarboHomeAutomations
             return;
         }
         $state = $this->loadState();
-        $last = (int) ($state['unifi_at'] ?? 0);
-        if ($last > 0 && ($now - $last) < $everySec) {
-            return;
+        $unifi = new YarboUnifi($this->projectRoot);
+        $errors = [];
+        $sensorsAt = (int) ($state['sensors_at'] ?? 0);
+        $doorsAt = (int) ($state['doors_at'] ?? 0);
+        $lightsAt = (int) ($state['lights_at'] ?? 0);
+        if ($sensorsAt <= 0 || ($now - $sensorsAt) >= 2) {
+            try {
+                $unifi->refreshProtectSensorsNow(1.5);
+                $state['sensors_at'] = $now;
+            } catch (\Throwable $e) {
+                $errors[] = $e->getMessage();
+            }
         }
-        try {
-            (new YarboUnifi($this->projectRoot))->refreshAccessDoors();
-        } catch (\Throwable) {
-            // Inventory stays as last written; next tick retries.
+        if ($doorsAt <= 0 || ($now - $doorsAt) >= $everySec) {
+            try {
+                $unifi->refreshAccessDoorsNow(1.5);
+                $state['doors_at'] = $now;
+            } catch (\Throwable $e) {
+                $errors[] = $e->getMessage();
+            }
+        }
+        if ($lightsAt <= 0 || ($now - $lightsAt) >= 15) {
+            try {
+                $unifi->refreshProtectLightsNow(1.5);
+                $state['lights_at'] = $now;
+            } catch (\Throwable $e) {
+                $errors[] = $e->getMessage();
+            }
         }
         $state['unifi_at'] = $now;
+        $state['unifi_error'] = $errors !== [] ? $errors[0] : '';
         $this->writeState($state);
     }
 
@@ -807,6 +843,7 @@ final class YarboHomeAutomations
                 'on' => array_key_exists('on', $row) ? (bool) $row['on'] : null,
                 'open' => array_key_exists('open', $row) ? ($row['open'] === null ? null : (bool) $row['open']) : null,
                 'motion' => array_key_exists('motion', $row) ? ($row['motion'] === null ? null : (bool) $row['motion']) : null,
+                'motion_at' => isset($row['motion_at']) && is_numeric($row['motion_at']) ? (int) $row['motion_at'] : 0,
                 'temperature' => isset($row['temperature']) && is_numeric($row['temperature']) ? (float) $row['temperature'] : null,
                 'humidity' => isset($row['humidity']) && is_numeric($row['humidity']) ? (float) $row['humidity'] : null,
             ];
@@ -848,8 +885,10 @@ final class YarboHomeAutomations
             if ($days !== [] && !in_array($dow, $days, true)) {
                 return false;
             }
+            $at = (string) $trigger['at'];
 
-            return $this->clockReached((string) $trigger['at'], $hm, $today, $state, $now);
+            return $this->clockReached($at, $hm, $today, $state, $now)
+                || $this->failedTimeRetry($id, $at, $hm, $today, $state);
         }
         if ($type === 'sun') {
             if (($state['day_slot'][$id] ?? '') === $today) {
@@ -867,7 +906,10 @@ final class YarboHomeAutomations
                 $local->getTimezone()
             );
 
-            return $eventHm !== null && $this->clockReached($eventHm, $hm, $today, $state, $now);
+            return $eventHm !== null && (
+                $this->clockReached($eventHm, $hm, $today, $state, $now)
+                || $this->failedTimeRetry($id, $eventHm, $hm, $today, $state)
+            );
         }
         if ($type === 'threshold') {
             $deviceId = (string) ($trigger['id'] ?? '');
@@ -921,6 +963,7 @@ final class YarboHomeAutomations
      */
     private function clockReached(string $at, string $hm, string $today, array $state, int $now): bool
     {
+        $at = self::normalizeHm($at) ?? $at;
         if ($hm === $at) {
             return true;
         }
@@ -940,6 +983,34 @@ final class YarboHomeAutomations
         $prevHm = $prev->format('H:i');
 
         return $prevHm < $at && $hm > $at;
+    }
+
+    /**
+     * Then failed at this slot (no day_slot) — retry after cooldown even once the minute has passed.
+     *
+     * @param array<string, mixed> $state
+     */
+    private function failedTimeRetry(string $id, string $at, string $hm, string $today, array $state): bool
+    {
+        $at = self::normalizeHm($at) ?? $at;
+        if ($hm < $at) {
+            return false;
+        }
+        $lastFire = (int) ($state['last_fire'][$id] ?? 0);
+        if ($lastFire <= 0) {
+            return false;
+        }
+        try {
+            $tz = new \DateTimeZone($this->timezoneName());
+        } catch (\Exception) {
+            return false;
+        }
+        $firedAt = (new \DateTimeImmutable('@' . $lastFire))->setTimezone($tz);
+        if ($firedAt->format('Y-m-d') !== $today) {
+            return false;
+        }
+
+        return $firedAt->format('H:i') >= $at;
     }
 
     /**
@@ -995,7 +1066,8 @@ final class YarboHomeAutomations
             'turns_off' => $prev['on'] === true && $curr['on'] === false,
             'opens' => $prev['open'] === false && $curr['open'] === true,
             'closes' => $prev['open'] === true && $curr['open'] === false,
-            'motion' => $prev['motion'] === false && $curr['motion'] === true,
+            'motion' => ($prev['motion'] === false && $curr['motion'] === true)
+                || ((int) ($curr['motion_at'] ?? 0) > 0 && (int) ($curr['motion_at'] ?? 0) > (int) ($prev['motion_at'] ?? 0)),
             default => false,
         };
     }
@@ -1386,6 +1458,11 @@ final class YarboHomeAutomations
             'delayed' => [],
             'clock' => 0,
             'unifi_at' => 0,
+            'sensors_at' => 0,
+            'doors_at' => 0,
+            'lights_at' => 0,
+            'unifi_error' => '',
+            'last_result' => ['at' => 0, 'fired' => [], 'errors' => []],
         ];
         if (!is_file($this->statePath())) {
             return $defaults;
@@ -1403,6 +1480,11 @@ final class YarboHomeAutomations
             'delayed' => is_array($decoded['delayed'] ?? null) ? $decoded['delayed'] : [],
             'clock' => (int) ($decoded['clock'] ?? 0),
             'unifi_at' => (int) ($decoded['unifi_at'] ?? 0),
+            'sensors_at' => (int) ($decoded['sensors_at'] ?? 0),
+            'doors_at' => (int) ($decoded['doors_at'] ?? 0),
+            'lights_at' => (int) ($decoded['lights_at'] ?? 0),
+            'unifi_error' => (string) ($decoded['unifi_error'] ?? ''),
+            'last_result' => is_array($decoded['last_result'] ?? null) ? $decoded['last_result'] : $defaults['last_result'],
         ];
     }
 
@@ -1469,6 +1551,21 @@ final class YarboHomeAutomations
         }
 
         return sprintf('%02d:%02d', $h, $min);
+    }
+
+    private static function isUtcZone(string $zone): bool
+    {
+        return strcasecmp($zone, 'UTC') === 0 || strcasecmp($zone, 'Etc/UTC') === 0;
+    }
+
+    private static function usableTimezone(string $value): string
+    {
+        $zone = YarboVestaboard::normalizeTimezone($value);
+        if ($zone === '' || self::isUtcZone($zone)) {
+            return '';
+        }
+
+        return $zone;
     }
 
     /**

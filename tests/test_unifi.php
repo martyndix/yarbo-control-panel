@@ -171,6 +171,7 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                 'type' => 'UFP-SENSE',
                 'isOpened' => false,
                 'isMotionDetected' => false,
+                'motionDetectedAt' => 1_800_000_000_000,
             ]]),
             'content_type' => 'application/json',
         ];
@@ -339,6 +340,7 @@ if ($bathMotion === null
     || ($bathMotion['has_open'] ?? true) !== false
     || ($bathMotion['has_motion'] ?? false) !== true
     || ($bathMotion['open'] ?? null) !== null
+    || (int) ($bathMotion['motion_at'] ?? 0) !== 1_800_000_000
 ) {
     fwrite(STDERR, 'Bathroom motion must not report open/closed ' . json_encode($bathMotion) . "\n");
     exit(1);
