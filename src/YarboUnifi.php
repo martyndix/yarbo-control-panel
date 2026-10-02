@@ -380,6 +380,10 @@ final class YarboUnifi
                 // Keep last inventory.
             }
         }
+        $pendingCmds = $inventory['light_commands'] ?? [];
+        if (is_array($pendingCmds) && $pendingCmds !== []) {
+            $inventory['light_commands'] = $this->applyPendingLightCommands($inventory['lights'], $pendingCmds);
+        }
         $show = $config['show_on_home'];
 
         return [
@@ -717,7 +721,7 @@ final class YarboUnifi
         $public = $this->protectUrl($config, '/lights/' . rawurlencode($id));
         $headers = $this->protectHeaders($config);
         $last = ['ok' => false, 'error' => 'Protect light failed'];
-        $publicConfirmed = false;
+        $accepted = false;
         $hasCreds = $config['protect_username'] !== '' && $config['protect_password'] !== '';
 
         $publicPayloads = $on
@@ -735,10 +739,8 @@ final class YarboUnifi
                 $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . ($res['status'] ?? 0))];
                 continue;
             }
-            if ($this->protectLightLedConfirmed($res, $on)) {
-                $publicConfirmed = true;
-                break;
-            }
+            $accepted = true;
+            break;
         }
 
         if ($hasCreds) {
@@ -746,13 +748,13 @@ final class YarboUnifi
             if (!($session['ok'] ?? false)) {
                 $last = ['ok' => false, 'error' => (string) ($session['error'] ?? 'UniFi OS login failed')];
                 $this->rememberLightCommand($id, $on, 'https://' . $config['host'] . '/api/auth/login', [
-                    'status' => 0,
+                    'status' => (int) ($session['status'] ?? 0),
                     'body' => $last['error'],
                     'content_type' => 'text/plain',
                     'error' => $last['error'],
                 ]);
             } else {
-                $sessionHeaders = $this->protectSessionHeaders($session);
+                $sessionHeaders = $this->protectSessionHeaders($config, $session);
                 $privatePayloads = $on
                     ? [
                         ['lightOnSettings' => ['isLedForceOn' => true], 'lightDeviceSettings' => ['ledLevel' => 6]],
@@ -763,22 +765,28 @@ final class YarboUnifi
                     ];
                 foreach ($privatePayloads as $payload) {
                     $res = $this->patchProtectLight($private, $sessionHeaders, $payload, 4.0);
+                    if ((int) ($res['status'] ?? 0) === 401) {
+                        $this->clearOsSession();
+                        $session = $this->protectOsLogin($config, true);
+                        if ($session['ok'] ?? false) {
+                            $sessionHeaders = $this->protectSessionHeaders($config, $session);
+                            $res = $this->patchProtectLight($private, $sessionHeaders, $payload, 4.0);
+                        }
+                    }
                     $this->rememberLightCommand($id, $on, $private, $res);
                     if (!$this->protectLightPatchOk($res, $on)) {
                         $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . ($res['status'] ?? 0))];
                         continue;
                     }
-                    if ($this->protectLightLedConfirmed($res, $on)) {
-                        $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
+                    $this->finishLightCommand($id, $on);
 
-                        return ['ok' => true, 'on' => $on];
-                    }
+                    return ['ok' => true, 'on' => $on];
                 }
             }
         }
 
-        if ($publicConfirmed) {
-            $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
+        if ($accepted) {
+            $this->finishLightCommand($id, $on);
 
             return ['ok' => true, 'on' => $on];
         }
@@ -798,11 +806,9 @@ final class YarboUnifi
                 $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . ($res['status'] ?? 0))];
                 continue;
             }
-            if ($this->protectLightLedConfirmed($res, $on)) {
-                $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
+            $this->finishLightCommand($id, $on);
 
-                return ['ok' => true, 'on' => $on];
-            }
+            return ['ok' => true, 'on' => $on];
         }
 
         if (!$hasCreds) {
@@ -868,34 +874,9 @@ final class YarboUnifi
         return true;
     }
 
-    /**
-     * True when the JSON actually reports the LED / force-on bit we asked for.
-     * isLightForceEnabled alone is not enough — that can succeed while the lamp stays off.
-     *
-     * @param array{status?: int, body?: string, content_type?: string} $res
-     */
-    private function protectLightLedConfirmed(array $res, bool $on): bool
+    private function finishLightCommand(string $id, bool $on): void
     {
-        $status = (int) ($res['status'] ?? 0);
-        $body = trim((string) ($res['body'] ?? ''));
-        if ($body === '') {
-            return $status === 204;
-        }
-        $decoded = $this->decodeJson($body);
-        if (!is_array($decoded)) {
-            return false;
-        }
-        if (array_key_exists('isLightOn', $decoded) || array_key_exists('is_light_on', $decoded)) {
-            return $this->truthy($decoded['isLightOn'] ?? $decoded['is_light_on'] ?? false) === $on;
-        }
-        $privateForce = is_array($decoded['lightOnSettings'] ?? null)
-            ? ($decoded['lightOnSettings']['isLedForceOn'] ?? null)
-            : null;
-        if ($privateForce !== null) {
-            return $this->truthy($privateForce) === $on;
-        }
-
-        return false;
+        $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
     }
 
     /**
@@ -922,15 +903,21 @@ final class YarboUnifi
 
     /**
      * @param array<string, mixed> $config
-     * @return array{ok: bool, cookie?: string, csrf?: string, error?: string}
+     * @return array{ok: bool, cookie?: string, csrf?: string, error?: string, status?: int}
      */
-    private function protectOsLogin(array $config): array
+    private function protectOsLogin(array $config, bool $force = false): array
     {
+        if (!$force) {
+            $cached = $this->readOsSession();
+            if ($cached !== null) {
+                return $cached;
+            }
+        }
         $host = (string) $config['host'];
         $username = (string) $config['protect_username'];
         $password = (string) $config['protect_password'];
         if ($host === '' || $username === '' || $password === '') {
-            return ['ok' => false, 'error' => 'Add a local UniFi OS admin under Settings → UniFi'];
+            return ['ok' => false, 'error' => 'Add a local UniFi OS admin under Settings → UniFi', 'status' => 0];
         }
         $url = 'https://' . $host . '/api/auth/login';
         $body = json_encode([
@@ -939,33 +926,54 @@ final class YarboUnifi
             'rememberMe' => true,
         ], JSON_THROW_ON_ERROR);
         $res = $this->request('POST', $url, ['Accept' => 'application/json'], $body, 6.0, false);
+        $status = (int) ($res['status'] ?? 0);
         $ctype = strtolower((string) ($res['content_type'] ?? ''));
         $raw = trim((string) ($res['body'] ?? ''));
         if (str_contains($ctype, 'html') || str_starts_with($raw, '<')) {
-            return ['ok' => false, 'error' => 'UniFi OS login returned the web login page'];
+            $this->clearOsSession();
+
+            return ['ok' => false, 'error' => 'UniFi OS login returned the web login page', 'status' => $status];
         }
-        if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
-            return ['ok' => false, 'error' => $res['error'] ?? ('UniFi OS login HTTP ' . ($res['status'] ?? 0))];
+        if ($status < 200 || $status >= 300) {
+            $this->clearOsSession();
+
+            return ['ok' => false, 'error' => $res['error'] ?? ('UniFi OS login HTTP ' . $status), 'status' => $status];
         }
         $cookie = $this->cookieHeaderFromResponse($res);
         $csrf = $this->csrfFromResponse($res);
-        if ($cookie === '') {
-            return ['ok' => false, 'error' => 'UniFi OS login did not return a session cookie'];
+        foreach ($res['response_headers']['set-cookie'] ?? [] as $line) {
+            $pair = strtolower(trim(explode(';', (string) $line, 2)[0]));
+            if (str_starts_with($pair, 'csrf_token=') || str_starts_with($pair, 'csrf=') || str_starts_with($pair, 'x-csrf-token=')) {
+                $csrf = trim(explode('=', explode(';', (string) $line, 2)[0], 2)[1] ?? $csrf);
+            }
         }
+        if ($cookie === '') {
+            $this->clearOsSession();
 
-        return ['ok' => true, 'cookie' => $cookie, 'csrf' => $csrf];
+            return ['ok' => false, 'error' => 'UniFi OS login did not return a session cookie', 'status' => $status];
+        }
+        $session = ['ok' => true, 'cookie' => $cookie, 'csrf' => $csrf];
+        $this->writeOsSession($session);
+
+        return $session;
     }
 
     /**
+     * @param array<string, mixed> $config
      * @param array{ok: bool, cookie?: string, csrf?: string} $session
      * @return array<string, string>
      */
-    private function protectSessionHeaders(array $session): array
+    private function protectSessionHeaders(array $config, array $session): array
     {
+        $host = (string) ($config['host'] ?? '');
         $headers = [
             'Accept' => 'application/json',
             'Cookie' => (string) ($session['cookie'] ?? ''),
         ];
+        if ($host !== '') {
+            $headers['Origin'] = 'https://' . $host;
+            $headers['Referer'] = 'https://' . $host . '/protect';
+        }
         $csrf = trim((string) ($session['csrf'] ?? ''));
         if ($csrf !== '') {
             $headers['X-CSRF-Token'] = $csrf;
@@ -973,6 +981,63 @@ final class YarboUnifi
         }
 
         return $headers;
+    }
+
+    /**
+     * @return array{ok: bool, cookie: string, csrf: string}|null
+     */
+    private function readOsSession(): ?array
+    {
+        $path = $this->osSessionPath();
+        if (!is_file($path)) {
+            return null;
+        }
+        $decoded = json_decode((string) file_get_contents($path), true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        $at = (int) ($decoded['at'] ?? 0);
+        $cookie = trim((string) ($decoded['cookie'] ?? ''));
+        if ($cookie === '' || $at <= 0 || (time() - $at) > 480) {
+            return null;
+        }
+
+        return [
+            'ok' => true,
+            'cookie' => $cookie,
+            'csrf' => trim((string) ($decoded['csrf'] ?? '')),
+        ];
+    }
+
+    /**
+     * @param array{cookie?: string, csrf?: string} $session
+     */
+    private function writeOsSession(array $session): void
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        $json = json_encode([
+            'cookie' => (string) ($session['cookie'] ?? ''),
+            'csrf' => (string) ($session['csrf'] ?? ''),
+            'at' => time(),
+        ], JSON_THROW_ON_ERROR);
+        file_put_contents($this->osSessionPath(), $json . "\n", LOCK_EX);
+        @chmod($this->osSessionPath(), 0600);
+    }
+
+    private function clearOsSession(): void
+    {
+        $path = $this->osSessionPath();
+        if (is_file($path)) {
+            @unlink($path);
+        }
+    }
+
+    private function osSessionPath(): string
+    {
+        return $this->projectRoot . '/data/unifi-os-session.json';
     }
 
     /**
@@ -2004,7 +2069,7 @@ final class YarboUnifi
                 continue;
             }
             $at = (int) ($cmd['at'] ?? 0);
-            if ($at <= 0 || ($now - $at) > 15) {
+            if ($at <= 0 || ($now - $at) > 300) {
                 continue;
             }
             $keep[$nid] = ['on' => (bool) ($cmd['on'] ?? false), 'at' => $at];
