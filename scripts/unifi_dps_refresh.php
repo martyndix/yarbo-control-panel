@@ -4,9 +4,9 @@
 declare(strict_types=1);
 
 /**
- * Background Access door-position and Protect sensor refresh so Home
- * Open/Closed, temperature, and humidity can update without blocking the
- * single-threaded panel.
+ * Background Access door-position, Protect sensor, and Protect light refresh
+ * so Home Open/Closed, temp/RH, and floodlight On/Off can follow other apps
+ * without blocking the single-threaded panel.
  */
 
 require dirname(__DIR__) . '/vendor/autoload.php';

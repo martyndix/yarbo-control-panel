@@ -430,14 +430,15 @@ final class YarboUnifi
     }
 
     /**
-     * Re-read Access doors and Protect sensors so Home Open/Closed (and temp/RH)
-     * stay current. Called from a background PHP process — never from Home GET.
+     * Re-read Access doors, Protect sensors, and Protect lights so Home stays live.
+     * Called from a background PHP process — never from Home GET.
      */
     public function refreshAccessDoors(): void
     {
         try {
             $this->refreshAccessDoorStatusInner(2.5, true);
             $this->refreshProtectSensors(2.5);
+            $this->refreshProtectLights(2.5);
             $inventory = $this->readInventory();
             $inventory['home_live_at'] = time();
             $this->writeInventory($inventory);
@@ -450,8 +451,8 @@ final class YarboUnifi
     }
 
     /**
-     * Start a background GET /doors and GET /sensors so Home Open/Closed and
-     * Protect readings can change without occupying the single-threaded panel.
+     * Start a background GET /doors, /sensors, and /lights so Home can follow
+     * Protect and Access without occupying the single-threaded panel.
      */
     private function kickAccessDoorRefresh(): void
     {
@@ -466,7 +467,8 @@ final class YarboUnifi
         $at = max(
             (int) ($inventory['home_live_at'] ?? 0),
             (int) ($inventory['access_status_at'] ?? 0),
-            (int) ($inventory['protect_sensors_at'] ?? 0)
+            (int) ($inventory['protect_sensors_at'] ?? 0),
+            (int) ($inventory['protect_lights_at'] ?? 0)
         );
         if ($at > 0 && (time() - $at) < 4) {
             return;
@@ -612,6 +614,95 @@ final class YarboUnifi
         $inventory['sensors'] = array_merge($mapped, $dps);
         $inventory['protect_sensors_at'] = time();
         $this->writeInventory($inventory);
+    }
+
+    /**
+     * Re-read Protect floodlights so On/Off from the UniFi app (or another client)
+     * reaches Home without a blocking GET on the panel request.
+     */
+    private function refreshProtectLights(float $timeout): void
+    {
+        $config = $this->load();
+        if ($config['host'] === '' || $config['protect_api_key'] === '') {
+            return;
+        }
+        $res = $this->protectJson($config, '/lights', $timeout);
+        if (!($res['ok'] ?? false)) {
+            return;
+        }
+        $byId = [];
+        foreach ($res['items'] as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $id = $this->nativeId($item);
+            if ($id === '') {
+                continue;
+            }
+            $byId[$id] = $item;
+        }
+        foreach ($this->protectPrivateLightRows($config, $timeout) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $id = $this->nativeId($item);
+            if ($id === '') {
+                continue;
+            }
+            $byId[$id] = array_merge($byId[$id] ?? [], $item);
+        }
+        $mapped = [];
+        foreach ($byId as $item) {
+            $row = $this->mapLight($item);
+            if ($row !== null) {
+                $mapped[] = $row;
+            }
+        }
+        if ($mapped === []) {
+            return;
+        }
+        $inventory = $this->readInventory();
+        $inventory['lights'] = $mapped;
+        $inventory['protect_lights_at'] = time();
+        $this->writeInventory($inventory);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return list<array<string, mixed>>
+     */
+    private function protectPrivateLightRows(array $config, float $timeout): array
+    {
+        if ($config['protect_username'] === '' || $config['protect_password'] === '') {
+            return [];
+        }
+        $session = $this->protectOsLogin($config);
+        if (!($session['ok'] ?? false)) {
+            return [];
+        }
+        $url = $this->protectPrivateUrl($config, '/lights');
+        $res = $this->request('GET', $url, $this->protectSessionHeaders($config, $session), null, $timeout, false);
+        if ((int) ($res['status'] ?? 0) === 401) {
+            $this->clearOsSession();
+            $session = $this->protectOsLogin($config, true);
+            if (!($session['ok'] ?? false)) {
+                return [];
+            }
+            $res = $this->request('GET', $url, $this->protectSessionHeaders($config, $session), null, $timeout, false);
+        }
+        $ctype = strtolower((string) ($res['content_type'] ?? ''));
+        $body = trim((string) ($res['body'] ?? ''));
+        if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300 || str_contains($ctype, 'html') || str_starts_with($body, '<')) {
+            return [];
+        }
+        $rows = [];
+        foreach ($this->listFromJson($body) as $item) {
+            if (is_array($item)) {
+                $rows[] = $item;
+            }
+        }
+
+        return $rows;
     }
 
     public function snapshotJpeg(string $cameraId): string
@@ -1232,7 +1323,7 @@ final class YarboUnifi
         $out['errors'] = array_values(array_unique(array_filter($out['errors'])));
         $pending = $this->readInventory();
         $out['light_commands'] = $this->applyPendingLightCommands($out['lights'], is_array($pending['light_commands'] ?? null) ? $pending['light_commands'] : []);
-        foreach (['last_light', 'access_status_at', 'protect_sensors_at', 'home_live_at'] as $key) {
+        foreach (['last_light', 'access_status_at', 'protect_sensors_at', 'protect_lights_at', 'home_live_at'] as $key) {
             if (isset($pending[$key])) {
                 $out[$key] = $pending[$key];
             }
@@ -2069,7 +2160,7 @@ final class YarboUnifi
                 continue;
             }
             $at = (int) ($cmd['at'] ?? 0);
-            if ($at <= 0 || ($now - $at) > 300) {
+            if ($at <= 0 || ($now - $at) > 12) {
                 continue;
             }
             $keep[$nid] = ['on' => (bool) ($cmd['on'] ?? false), 'at' => $at];

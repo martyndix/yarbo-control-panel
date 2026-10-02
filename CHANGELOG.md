@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.23] - 2026-10-02
+
+### Fixed
+- UniFi floodlight On/Off on Home now follows the **Protect app** (and other clients). 4.0.22 kept the last website click and did not re-read `GET /lights` while you stayed on Home. A background poll updates the LED state; a short overlay still covers Protect lag after a website click so the green indicator does not snap back.
+
 ## [4.0.22] - 2026-10-02
 
 ### Fixed
