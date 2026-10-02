@@ -67,7 +67,10 @@ $calls = [];
 $doorDps = 'close';
 $lightPrivateHtml = true;
 $lightPublicFail = false;
-$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps, &$lightPrivateHtml, &$lightPublicFail): array {
+$sensorOpen = false;
+$sensorTemp = 21.9;
+$sensorHumidity = 72.0;
+$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps, &$lightPrivateHtml, &$lightPublicFail, &$sensorOpen, &$sensorTemp, &$sensorHumidity): array {
     $calls[] = [$method, $url, $headers, $body];
     if (str_contains($url, '/cameras') && !str_contains($url, '/snapshot')) {
         return [
@@ -149,7 +152,20 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
         ];
     }
     if (str_contains($url, '/sensors')) {
-        return ['status' => 200, 'body' => '[]', 'content_type' => 'application/json'];
+        return [
+            'status' => 200,
+            'body' => json_encode([[
+                'id' => 'sense1',
+                'name' => 'Garage',
+                'type' => 'UFP-SENSE',
+                'isOpened' => $sensorOpen,
+                'stats' => [
+                    'temperature' => ['value' => $sensorTemp],
+                    'humidity' => ['value' => $sensorHumidity],
+                ],
+            ]]),
+            'content_type' => 'application/json',
+        ];
     }
     if ($method === 'POST' && str_contains($url, '/relays/') && str_contains($url, '/activate')) {
         $decoded = json_decode((string) $body, true);
@@ -289,6 +305,46 @@ if (($hubOpenedWord['dps_label'] ?? '') !== 'Open') {
     fwrite(STDERR, 'opened must map to Open ' . json_encode($hubOpenedWord) . "\n");
     exit(1);
 }
+$garage = null;
+foreach ($probe['devices'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:sensor:sense1') {
+        $garage = $row;
+        break;
+    }
+}
+if (($garage['status'] ?? '') !== 'Closed · 21.9° · 72% RH' || ($garage['open'] ?? true) !== false) {
+    fwrite(STDERR, 'Protect sensor mapping ' . json_encode($garage) . "\n");
+    exit(1);
+}
+$sensorOpen = true;
+$sensorTemp = 22.4;
+$sensorHumidity = 65.0;
+$unifi->refreshAccessDoors();
+$senseInv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+$garageLive = null;
+$dpsKept = null;
+foreach ($senseInv['sensors'] ?? [] as $row) {
+    if (!is_array($row)) {
+        continue;
+    }
+    if (($row['id'] ?? '') === 'unifi:sensor:sense1') {
+        $garageLive = $row;
+    }
+    if (($row['id'] ?? '') === 'unifi:sensor:dps-door1') {
+        $dpsKept = $row;
+    }
+}
+if (($garageLive['open'] ?? false) !== true || ($garageLive['status'] ?? '') !== 'Open · 22.4° · 65% RH') {
+    fwrite(STDERR, 'Protect sensor did not update Open/temp/RH ' . json_encode($garageLive) . "\n");
+    exit(1);
+}
+if ($dpsKept === null) {
+    fwrite(STDERR, "Protect sensor refresh dropped Access DPS rows\n");
+    exit(1);
+}
+$sensorOpen = false;
+$sensorTemp = 21.9;
+$sensorHumidity = 72.0;
 $doorDps = 'close';
 $floodRow = null;
 foreach ($probe['devices'] ?? [] as $row) {
@@ -448,14 +504,25 @@ if (!$unifi->setShowOnHome('unifi:hub:7483c2773855', true)) {
 $callsBeforeHome = count($calls);
 $unifi->homeRows();
 $homePolledDoors = false;
+$homePolledSensors = false;
 foreach (array_slice($calls, $callsBeforeHome) as $call) {
-    if (($call[0] ?? '') === 'GET' && str_contains((string) ($call[1] ?? ''), '/doors')) {
+    if (($call[0] ?? '') !== 'GET') {
+        continue;
+    }
+    $url = (string) ($call[1] ?? '');
+    if (str_contains($url, '/doors')) {
         $homePolledDoors = true;
-        break;
+    }
+    if (str_contains($url, '/sensors')) {
+        $homePolledSensors = true;
     }
 }
 if ($homePolledDoors) {
     fwrite(STDERR, "homeRows must not poll Access doors (that blocks website light commands)\n");
+    exit(1);
+}
+if ($homePolledSensors) {
+    fwrite(STDERR, "homeRows must not poll Protect sensors (that blocks website light commands)\n");
     exit(1);
 }
 
@@ -788,8 +855,105 @@ if (!str_contains($js, 'data-home-dps') || !str_contains($js, 'data-unifi-dps') 
     fwrite(STDERR, "door position meta missing from controller actions\n");
     exit(1);
 }
+if (!str_contains($js, '/^Open\\b/i') || !str_contains($js, 'data-home-status')) {
+    fwrite(STDERR, "Home Protect sensor Open prefix missing\n");
+    exit(1);
+}
 if (!str_contains($css, '.home-device-actions .home-device-meta')) {
     fwrite(STDERR, "actions-box meta CSS missing\n");
+    exit(1);
+}
+
+$sessionRoot = sys_get_temp_dir() . '/yarbo-unifi-session-' . bin2hex(random_bytes(3));
+mkdir($sessionRoot . '/data', 0775, true);
+$sessionUnifi = new Yarbo\YarboUnifi($sessionRoot);
+if (!$sessionUnifi->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'protect-secret',
+    'unifi_protect_username' => 'admin',
+    'unifi_protect_password' => 'secret',
+])) {
+    fwrite(STDERR, "session save failed\n");
+    exit(1);
+}
+$sessionCalls = [];
+$sessionUnifi->setTransport(function (string $method, string $url, array $headers, ?string $body) use (&$sessionCalls): array {
+    $sessionCalls[] = [$method, $url, $headers, $body];
+    if ($method === 'POST' && str_contains($url, '/api/auth/login')) {
+        $decoded = json_decode((string) $body, true);
+        if (($decoded['username'] ?? '') !== 'admin' || ($decoded['password'] ?? '') !== 'secret') {
+            return ['status' => 401, 'body' => '{"error":"bad login"}', 'content_type' => 'application/json', 'error' => 'bad login'];
+        }
+        return [
+            'status' => 200,
+            'body' => json_encode(['csrfToken' => 'csrf-token']),
+            'content_type' => 'application/json',
+            'response_headers' => [
+                'set-cookie' => ['TOKEN=session-cookie; Path=/; HttpOnly'],
+                'x-csrf-token' => ['csrf-token'],
+            ],
+        ];
+    }
+    if ($method === 'PATCH' && str_contains($url, '/proxy/protect/integration/v1/lights')) {
+        $decoded = json_decode((string) $body, true);
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'id' => 'light1',
+                'isLightForceEnabled' => (bool) ($decoded['isLightForceEnabled'] ?? false),
+                'isLightOn' => false,
+            ]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if ($method === 'PATCH' && str_contains($url, '/proxy/protect/api/lights')) {
+        if (($headers['Cookie'] ?? '') !== 'TOKEN=session-cookie' || ($headers['X-CSRF-Token'] ?? '') !== 'csrf-token') {
+            return [
+                'status' => 200,
+                'body' => '<html><title>UniFi OS</title></html>',
+                'content_type' => 'text/html',
+            ];
+        }
+        $decoded = json_decode((string) $body, true);
+        $force = (bool) ($decoded['lightOnSettings']['isLedForceOn'] ?? false);
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'id' => 'light1',
+                'isLightOn' => $force,
+                'lightOnSettings' => ['isLedForceOn' => $force],
+            ]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if (str_contains($url, '/proxy/protect/')) {
+        return ['status' => 200, 'body' => '[]', 'content_type' => 'application/json'];
+    }
+
+    return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'unexpected ' . $url];
+});
+$sessionOn = $sessionUnifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
+if (!($sessionOn['ok'] ?? false) || empty($sessionOn['on'])) {
+    fwrite(STDERR, 'session floodlight ' . json_encode($sessionOn) . "\n");
+    exit(1);
+}
+$usedSessionCookie = false;
+$loggedIn = false;
+foreach ($sessionCalls as $call) {
+    if (($call[0] ?? '') === 'POST' && str_contains((string) ($call[1] ?? ''), '/api/auth/login')) {
+        $loggedIn = true;
+    }
+    if (($call[0] ?? '') === 'PATCH' && str_contains((string) ($call[1] ?? ''), '/proxy/protect/api/lights')) {
+        $hdrs = is_array($call[2] ?? null) ? $call[2] : [];
+        $decoded = json_decode((string) ($call[3] ?? ''), true);
+        if (($hdrs['Cookie'] ?? '') === 'TOKEN=session-cookie'
+            && ($decoded['lightOnSettings']['isLedForceOn'] ?? null) === true) {
+            $usedSessionCookie = true;
+        }
+    }
+}
+if (!$loggedIn || !$usedSessionCookie) {
+    fwrite(STDERR, "floodlight did not login and PATCH private isLedForceOn with cookie\n");
     exit(1);
 }
 

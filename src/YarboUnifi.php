@@ -345,6 +345,13 @@ final class YarboUnifi
         if ($ok && $counts['doors'] === 0 && $counts['hubs'] === 0) {
             $message .= ' ' . $this->accessPermissionHint($error, $config);
         }
+        $lastLight = $this->readInventory()['last_light'] ?? null;
+        if (is_array($lastLight) && (int) ($lastLight['status'] ?? 0) >= 400) {
+            $hint = trim((string) ($lastLight['error'] !== '' ? $lastLight['error'] : ($lastLight['body'] ?? '')));
+            if ($hint !== '') {
+                $message .= ' Last floodlight command: ' . (strlen($hint) > 120 ? substr($hint, 0, 117) . '…' : $hint);
+            }
+        }
 
         return [
             'ok' => $ok,
@@ -419,17 +426,28 @@ final class YarboUnifi
     }
 
     /**
-     * Re-read Access doors so Open/Closed on Home stays current.
-     * Called from a background PHP process — never from the Home GET itself.
+     * Re-read Access doors and Protect sensors so Home Open/Closed (and temp/RH)
+     * stay current. Called from a background PHP process — never from Home GET.
      */
     public function refreshAccessDoors(): void
     {
-        $this->refreshAccessDoorStatus(2.5, true);
+        try {
+            $this->refreshAccessDoorStatusInner(2.5, true);
+            $this->refreshProtectSensors(2.5);
+            $inventory = $this->readInventory();
+            $inventory['home_live_at'] = time();
+            $this->writeInventory($inventory);
+        } finally {
+            $lock = $this->projectRoot . '/data/unifi-dps.lock';
+            if (is_file($lock)) {
+                @unlink($lock);
+            }
+        }
     }
 
     /**
-     * Start a background GET /doors so Home Open/Closed can change without
-     * occupying the single-threaded panel (that blocked light clicks in 4.0.15).
+     * Start a background GET /doors and GET /sensors so Home Open/Closed and
+     * Protect readings can change without occupying the single-threaded panel.
      */
     private function kickAccessDoorRefresh(): void
     {
@@ -441,7 +459,11 @@ final class YarboUnifi
             return;
         }
         $inventory = $this->readInventory();
-        $at = (int) ($inventory['access_status_at'] ?? 0);
+        $at = max(
+            (int) ($inventory['home_live_at'] ?? 0),
+            (int) ($inventory['access_status_at'] ?? 0),
+            (int) ($inventory['protect_sensors_at'] ?? 0)
+        );
         if ($at > 0 && (time() - $at) < 4) {
             return;
         }
@@ -483,21 +505,6 @@ final class YarboUnifi
                 fclose($pipes[0]);
             }
             proc_close($process);
-        }
-    }
-
-    /**
-     * Re-read Access doors so Open/Closed on Home stays current without a full Protect poll.
-     */
-    private function refreshAccessDoorStatus(float $timeout, bool $force = false): void
-    {
-        try {
-            $this->refreshAccessDoorStatusInner($timeout, $force);
-        } finally {
-            $lock = $this->projectRoot . '/data/unifi-dps.lock';
-            if (is_file($lock)) {
-                @unlink($lock);
-            }
         }
     }
 
@@ -562,6 +569,44 @@ final class YarboUnifi
             }
         }
         $inventory['access_status_at'] = time();
+        $this->writeInventory($inventory);
+    }
+
+    /**
+     * Re-read Protect UP Sense so Open/Closed, temperature, and humidity stay live.
+     */
+    private function refreshProtectSensors(float $timeout): void
+    {
+        $config = $this->load();
+        if ($config['host'] === '' || $config['protect_api_key'] === '') {
+            return;
+        }
+        $res = $this->protectJson($config, '/sensors', $timeout);
+        if (!($res['ok'] ?? false)) {
+            return;
+        }
+        $mapped = [];
+        foreach ($res['items'] as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $row = $this->mapSensor($item);
+            if ($row !== null) {
+                $mapped[] = $row;
+            }
+        }
+        $inventory = $this->readInventory();
+        $dps = [];
+        foreach ($inventory['sensors'] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if (str_starts_with((string) ($row['native_id'] ?? ''), 'dps-')) {
+                $dps[] = $row;
+            }
+        }
+        $inventory['sensors'] = array_merge($mapped, $dps);
+        $inventory['protect_sensors_at'] = time();
         $this->writeInventory($inventory);
     }
 
@@ -670,38 +715,120 @@ final class YarboUnifi
         }
         $private = $this->protectPrivateUrl($config, '/lights/' . rawurlencode($id));
         $public = $this->protectUrl($config, '/lights/' . rawurlencode($id));
-        // The Control Plane key only authenticates the public Integration API.
-        // /proxy/protect/api needs a session cookie; a 200 HTML login page is
-        // not success. Home Assistant now uses update_light_public /
-        // isLightForceEnabled. mode=always is a schedule, not the LED.
-        $attempts = $on
+        $headers = $this->protectHeaders($config);
+        $last = ['ok' => false, 'error' => 'Protect light failed'];
+        $publicConfirmed = false;
+        $hasCreds = $config['protect_username'] !== '' && $config['protect_password'] !== '';
+
+        $publicPayloads = $on
             ? [
-                [$public, ['isLightForceEnabled' => true, 'lightDeviceSettings' => ['ledLevel' => 6]], 4.0],
-                [$public, ['isLightForceEnabled' => true], 4.0],
-                [$private, ['lightOnSettings' => ['isLedForceOn' => true], 'lightDeviceSettings' => ['ledLevel' => 6]], 2.5],
-                [$private, ['lightOnSettings' => ['isLedForceOn' => true]], 2.5],
+                ['isLightForceEnabled' => true, 'lightDeviceSettings' => ['ledLevel' => 6]],
+                ['isLightForceEnabled' => true],
             ]
             : [
-                [$public, ['isLightForceEnabled' => false], 4.0],
-                [$private, ['lightOnSettings' => ['isLedForceOn' => false]], 2.5],
+                ['isLightForceEnabled' => false],
             ];
-        $last = ['ok' => false, 'error' => 'Protect light failed'];
-        foreach ($attempts as [$url, $payload, $timeout]) {
-            $body = json_encode($payload, JSON_THROW_ON_ERROR);
-            $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, $timeout, false);
-            if ($res['status'] === 404 || $res['status'] === 405) {
-                $res = $this->request('PUT', $url, $this->protectHeaders($config), $body, $timeout, false);
-            }
+        foreach ($publicPayloads as $payload) {
+            $res = $this->patchProtectLight($public, $headers, $payload, 4.0);
+            $this->rememberLightCommand($id, $on, $public, $res);
             if (!$this->protectLightPatchOk($res, $on)) {
                 $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . ($res['status'] ?? 0))];
                 continue;
             }
+            if ($this->protectLightLedConfirmed($res, $on)) {
+                $publicConfirmed = true;
+                break;
+            }
+        }
+
+        if ($hasCreds) {
+            $session = $this->protectOsLogin($config);
+            if (!($session['ok'] ?? false)) {
+                $last = ['ok' => false, 'error' => (string) ($session['error'] ?? 'UniFi OS login failed')];
+                $this->rememberLightCommand($id, $on, 'https://' . $config['host'] . '/api/auth/login', [
+                    'status' => 0,
+                    'body' => $last['error'],
+                    'content_type' => 'text/plain',
+                    'error' => $last['error'],
+                ]);
+            } else {
+                $sessionHeaders = $this->protectSessionHeaders($session);
+                $privatePayloads = $on
+                    ? [
+                        ['lightOnSettings' => ['isLedForceOn' => true], 'lightDeviceSettings' => ['ledLevel' => 6]],
+                        ['lightOnSettings' => ['isLedForceOn' => true]],
+                    ]
+                    : [
+                        ['lightOnSettings' => ['isLedForceOn' => false]],
+                    ];
+                foreach ($privatePayloads as $payload) {
+                    $res = $this->patchProtectLight($private, $sessionHeaders, $payload, 4.0);
+                    $this->rememberLightCommand($id, $on, $private, $res);
+                    if (!$this->protectLightPatchOk($res, $on)) {
+                        $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . ($res['status'] ?? 0))];
+                        continue;
+                    }
+                    if ($this->protectLightLedConfirmed($res, $on)) {
+                        $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
+
+                        return ['ok' => true, 'on' => $on];
+                    }
+                }
+            }
+        }
+
+        if ($publicConfirmed) {
             $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
 
             return ['ok' => true, 'on' => $on];
         }
 
+        $apiKeyPayloads = $on
+            ? [
+                ['lightOnSettings' => ['isLedForceOn' => true], 'lightDeviceSettings' => ['ledLevel' => 6]],
+                ['lightOnSettings' => ['isLedForceOn' => true]],
+            ]
+            : [
+                ['lightOnSettings' => ['isLedForceOn' => false]],
+            ];
+        foreach ($apiKeyPayloads as $payload) {
+            $res = $this->patchProtectLight($private, $headers, $payload, 2.5);
+            $this->rememberLightCommand($id, $on, $private, $res);
+            if (!$this->protectLightPatchOk($res, $on)) {
+                $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . ($res['status'] ?? 0))];
+                continue;
+            }
+            if ($this->protectLightLedConfirmed($res, $on)) {
+                $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
+
+                return ['ok' => true, 'on' => $on];
+            }
+        }
+
+        if (!$hasCreds) {
+            return [
+                'ok' => false,
+                'error' => 'Floodlight LED did not switch. Add a local UniFi OS admin under Settings → UniFi — the API key cannot log into the private light API.',
+            ];
+        }
+
         return $last;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed> $payload
+     * @return array{status: int, body: string, content_type: string, error?: string, response_headers?: array<string, list<string>>}
+     */
+    private function patchProtectLight(string $url, array $headers, array $payload, float $timeout): array
+    {
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+        $res = $this->request('PATCH', $url, $headers, $body, $timeout, false);
+        if ($res['status'] === 404 || $res['status'] === 405) {
+            $res = $this->request('PUT', $url, $headers, $body, $timeout, false);
+        }
+
+        return $res;
     }
 
     /**
@@ -739,6 +866,157 @@ final class YarboUnifi
         }
 
         return true;
+    }
+
+    /**
+     * True when the JSON actually reports the LED / force-on bit we asked for.
+     * isLightForceEnabled alone is not enough — that can succeed while the lamp stays off.
+     *
+     * @param array{status?: int, body?: string, content_type?: string} $res
+     */
+    private function protectLightLedConfirmed(array $res, bool $on): bool
+    {
+        $status = (int) ($res['status'] ?? 0);
+        $body = trim((string) ($res['body'] ?? ''));
+        if ($body === '') {
+            return $status === 204;
+        }
+        $decoded = $this->decodeJson($body);
+        if (!is_array($decoded)) {
+            return false;
+        }
+        if (array_key_exists('isLightOn', $decoded) || array_key_exists('is_light_on', $decoded)) {
+            return $this->truthy($decoded['isLightOn'] ?? $decoded['is_light_on'] ?? false) === $on;
+        }
+        $privateForce = is_array($decoded['lightOnSettings'] ?? null)
+            ? ($decoded['lightOnSettings']['isLedForceOn'] ?? null)
+            : null;
+        if ($privateForce !== null) {
+            return $this->truthy($privateForce) === $on;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array{status?: int, body?: string, content_type?: string, error?: string} $res
+     */
+    private function rememberLightCommand(string $id, bool $on, string $url, array $res): void
+    {
+        $inventory = $this->readInventory();
+        $body = trim((string) ($res['body'] ?? ''));
+        if (strlen($body) > 180) {
+            $body = substr($body, 0, 177) . '…';
+        }
+        $inventory['last_light'] = [
+            'id' => $id,
+            'on' => $on,
+            'url' => $url,
+            'status' => (int) ($res['status'] ?? 0),
+            'body' => $body,
+            'error' => (string) ($res['error'] ?? ''),
+            'at' => time(),
+        ];
+        $this->writeInventory($inventory);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array{ok: bool, cookie?: string, csrf?: string, error?: string}
+     */
+    private function protectOsLogin(array $config): array
+    {
+        $host = (string) $config['host'];
+        $username = (string) $config['protect_username'];
+        $password = (string) $config['protect_password'];
+        if ($host === '' || $username === '' || $password === '') {
+            return ['ok' => false, 'error' => 'Add a local UniFi OS admin under Settings → UniFi'];
+        }
+        $url = 'https://' . $host . '/api/auth/login';
+        $body = json_encode([
+            'username' => $username,
+            'password' => $password,
+            'rememberMe' => true,
+        ], JSON_THROW_ON_ERROR);
+        $res = $this->request('POST', $url, ['Accept' => 'application/json'], $body, 6.0, false);
+        $ctype = strtolower((string) ($res['content_type'] ?? ''));
+        $raw = trim((string) ($res['body'] ?? ''));
+        if (str_contains($ctype, 'html') || str_starts_with($raw, '<')) {
+            return ['ok' => false, 'error' => 'UniFi OS login returned the web login page'];
+        }
+        if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
+            return ['ok' => false, 'error' => $res['error'] ?? ('UniFi OS login HTTP ' . ($res['status'] ?? 0))];
+        }
+        $cookie = $this->cookieHeaderFromResponse($res);
+        $csrf = $this->csrfFromResponse($res);
+        if ($cookie === '') {
+            return ['ok' => false, 'error' => 'UniFi OS login did not return a session cookie'];
+        }
+
+        return ['ok' => true, 'cookie' => $cookie, 'csrf' => $csrf];
+    }
+
+    /**
+     * @param array{ok: bool, cookie?: string, csrf?: string} $session
+     * @return array<string, string>
+     */
+    private function protectSessionHeaders(array $session): array
+    {
+        $headers = [
+            'Accept' => 'application/json',
+            'Cookie' => (string) ($session['cookie'] ?? ''),
+        ];
+        $csrf = trim((string) ($session['csrf'] ?? ''));
+        if ($csrf !== '') {
+            $headers['X-CSRF-Token'] = $csrf;
+            $headers['X-CSRF-TOKEN'] = $csrf;
+        }
+
+        return $headers;
+    }
+
+    /**
+     * @param array{response_headers?: array<string, list<string>>, body?: string} $res
+     */
+    private function cookieHeaderFromResponse(array $res): string
+    {
+        $parts = [];
+        foreach ($res['response_headers']['set-cookie'] ?? [] as $line) {
+            $line = trim((string) $line);
+            if ($line === '') {
+                continue;
+            }
+            $pair = trim(explode(';', $line, 2)[0]);
+            if ($pair !== '' && str_contains($pair, '=')) {
+                $parts[] = $pair;
+            }
+        }
+
+        return implode('; ', $parts);
+    }
+
+    /**
+     * @param array{response_headers?: array<string, list<string>>, body?: string} $res
+     */
+    private function csrfFromResponse(array $res): string
+    {
+        foreach (['x-csrf-token'] as $key) {
+            $values = $res['response_headers'][$key] ?? [];
+            if (is_array($values) && isset($values[0]) && trim((string) $values[0]) !== '') {
+                return trim((string) $values[0]);
+            }
+        }
+        $decoded = $this->decodeJson((string) ($res['body'] ?? ''));
+        if (is_array($decoded)) {
+            foreach (['csrfToken', 'csrf_token', 'x_csrf_token'] as $key) {
+                $value = trim((string) ($decoded[$key] ?? ''));
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -887,8 +1165,13 @@ final class YarboUnifi
             $this->appendAccessInventory($out, $config, $timeout);
         }
         $out['errors'] = array_values(array_unique(array_filter($out['errors'])));
-        $pending = $this->readInventory()['light_commands'] ?? [];
-        $out['light_commands'] = $this->applyPendingLightCommands($out['lights'], is_array($pending) ? $pending : []);
+        $pending = $this->readInventory();
+        $out['light_commands'] = $this->applyPendingLightCommands($out['lights'], is_array($pending['light_commands'] ?? null) ? $pending['light_commands'] : []);
+        foreach (['last_light', 'access_status_at', 'protect_sensors_at', 'home_live_at'] as $key) {
+            if (isset($pending[$key])) {
+                $out[$key] = $pending[$key];
+            }
+        }
 
         return $out;
     }
@@ -1012,12 +1295,17 @@ final class YarboUnifi
         if ($id === '') {
             return null;
         }
-        $open = $this->nullableBool($row['isOpened'] ?? $row['is_opened'] ?? $row['open'] ?? null);
+        $open = $this->sensorOpened($row);
         $motion = $this->truthy($row['isMotionDetected'] ?? $row['is_motion_detected'] ?? $row['motionDetected'] ?? false);
         $leak = $this->truthy($row['leakDetected'] ?? $row['is_leaking'] ?? false);
         $temp = $this->nestedNumber($row, ['stats', 'temperature', 'value'])
+            ?? $this->nestedNumber($row, ['stats', 'temperature'])
+            ?? $this->nestedNumber($row, ['temperature', 'value'])
             ?? $this->nestedNumber($row, ['temperature']);
         $humidity = $this->nestedNumber($row, ['stats', 'humidity', 'value'])
+            ?? $this->nestedNumber($row, ['stats', 'humidity'])
+            ?? $this->nestedNumber($row, ['humidity', 'value'])
+            ?? $this->nestedNumber($row, ['relativeHumidity'])
             ?? $this->nestedNumber($row, ['humidity']);
         $parts = [];
         if ($open === true) {
@@ -1588,6 +1876,63 @@ final class YarboUnifi
 
     /**
      * @param array<string, mixed> $row
+     */
+    private function sensorOpened(array $row): ?bool
+    {
+        $candidates = [
+            $row['isOpened'] ?? null,
+            $row['is_opened'] ?? null,
+            $row['open'] ?? null,
+            $row['opened'] ?? null,
+            $row['isOpen'] ?? null,
+            $row['openStatus'] ?? null,
+            $row['open_status'] ?? null,
+        ];
+        $stats = $row['stats'] ?? null;
+        if (is_array($stats)) {
+            $candidates[] = $stats['isOpened'] ?? null;
+            $candidates[] = $stats['is_opened'] ?? null;
+            $candidates[] = $stats['open'] ?? null;
+            if (is_array($stats['open'] ?? null)) {
+                $candidates[] = $stats['open']['value'] ?? null;
+            }
+        }
+        foreach ($candidates as $value) {
+            $parsed = $this->openClosedValue($value);
+            if ($parsed !== null) {
+                return $parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private function openClosedValue(mixed $value): ?bool
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return $value != 0;
+        }
+        if (is_string($value)) {
+            $s = strtolower(trim($value));
+            if (in_array($s, ['1', 'true', 'yes', 'on', 'open', 'opened'], true)) {
+                return true;
+            }
+            if (in_array($s, ['0', 'false', 'no', 'off', 'close', 'closed'], true)) {
+                return false;
+            }
+        }
+
+        return $this->nullableBool($value);
+    }
+
+    /**
+     * @param array<string, mixed> $row
      * @param list<string> $path
      */
     private function nestedNumber(array $row, array $path): ?float
@@ -2150,7 +2495,7 @@ final class YarboUnifi
 
     /**
      * @param array<string, string> $headers
-     * @return array{status: int, body: string, content_type: string, error?: string}
+     * @return array{status: int, body: string, content_type: string, error?: string, response_headers?: array<string, list<string>>}
      */
     private function request(string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary): array
     {
@@ -2172,6 +2517,7 @@ final class YarboUnifi
             $headerLines[] = 'Content-Type: application/json';
         }
         $verify = $this->load()['verify_tls'];
+        $responseHeaders = [];
         curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
             CURLOPT_RETURNTRANSFER => true,
@@ -2181,6 +2527,16 @@ final class YarboUnifi
             CURLOPT_HTTPHEADER => $headerLines,
             CURLOPT_SSL_VERIFYPEER => $verify,
             CURLOPT_SSL_VERIFYHOST => $verify ? 2 : 0,
+            CURLOPT_HEADERFUNCTION => static function ($ch, string $header) use (&$responseHeaders): int {
+                $len = strlen($header);
+                $parts = explode(':', $header, 2);
+                if (count($parts) === 2) {
+                    $name = strtolower(trim($parts[0]));
+                    $responseHeaders[$name][] = trim($parts[1]);
+                }
+
+                return $len;
+            },
         ]);
         if ($body !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
@@ -2191,15 +2547,15 @@ final class YarboUnifi
         $err = curl_error($ch);
         curl_close($ch);
         if ($raw === false) {
-            return ['status' => $status, 'body' => '', 'content_type' => $ctype, 'error' => $err !== '' ? $err : 'UniFi request failed'];
+            return ['status' => $status, 'body' => '', 'content_type' => $ctype, 'error' => $err !== '' ? $err : 'UniFi request failed', 'response_headers' => $responseHeaders];
         }
         if ($status >= 400) {
             $hint = $binary ? ('HTTP ' . $status) : $this->httpErrorHint((string) $raw, $status);
 
-            return ['status' => $status, 'body' => (string) $raw, 'content_type' => $ctype, 'error' => $hint];
+            return ['status' => $status, 'body' => (string) $raw, 'content_type' => $ctype, 'error' => $hint, 'response_headers' => $responseHeaders];
         }
 
-        return ['status' => $status, 'body' => (string) $raw, 'content_type' => $ctype];
+        return ['status' => $status, 'body' => (string) $raw, 'content_type' => $ctype, 'response_headers' => $responseHeaders];
     }
 
     private function httpErrorHint(string $raw, int $status): string

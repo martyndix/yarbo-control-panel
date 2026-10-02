@@ -2719,7 +2719,7 @@ function patchUnifiWrap(wrap, items, htmlFn) {
         if (status) {
             const label = String(d.dps_label || d.status || '').trim();
             if (label) status.textContent = label;
-            status.classList.toggle('is-open', d.open === true || d.dps === 'open' || label === 'Open');
+            status.classList.toggle('is-open', d.open === true || d.dps === 'open' || d.dps === 'opened' || /^Open\b/i.test(label));
         }
         const toggleBtn = el.querySelector('[data-unifi-light], [data-unifi-relay]');
         if (toggleBtn) toggleBtn.textContent = d.on ? 'Off' : 'On';
@@ -3231,12 +3231,21 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         }
         const meta = card.querySelector('[data-home-dps], [data-home-status]');
         if (meta) {
-            const label = dpsLabel
-                || (extras.open === true ? 'Open' : (extras.open === false && (extras.has_dps || extras.dps) ? 'Closed' : ''))
-                || extras.status
-                || (extras.dps === 'open' || extras.dps === 'opened' ? 'Open' : (extras.dps === 'close' || extras.dps === 'closed' ? 'Closed' : meta.textContent));
+            const isDps = meta.hasAttribute('data-home-dps');
+            const label = isDps
+                ? (dpsLabel
+                    || (extras.open === true ? 'Open' : (extras.open === false && (extras.has_dps || extras.dps) ? 'Closed' : ''))
+                    || extras.status
+                    || (extras.dps === 'open' || extras.dps === 'opened' ? 'Open' : (extras.dps === 'close' || extras.dps === 'closed' ? 'Closed' : meta.textContent)))
+                : (extras.status || dpsLabel || meta.textContent);
             meta.textContent = label;
-            meta.classList.toggle('is-open', extras.open === true || extras.dps === 'open' || label === 'Open');
+            meta.classList.toggle(
+                'is-open',
+                extras.open === true
+                    || extras.dps === 'open'
+                    || extras.dps === 'opened'
+                    || /^Open\b/i.test(String(label || ''))
+            );
         }
     }
 }
@@ -3793,7 +3802,8 @@ function homeDeviceActionsHtml(d, bright, color) {
             </div>`;
         }
         if (kind === 'sensor') {
-            const open = d.open === true || d.status === 'Open';
+            const status = String(d.status || '');
+            const open = d.open === true || /^Open\b/i.test(status);
             return `<div class="home-device-actions"><span class="home-device-meta${open ? ' is-open' : ''}" data-home-status>${escapeHtml(d.status || '—')}</span></div>`;
         }
         if (kind === 'door' || kind === 'hub') {
