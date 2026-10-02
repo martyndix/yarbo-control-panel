@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.20] - 2026-10-02
+
+### Fixed
+- UniFi floodlights now force the LED through Protect’s **public** Integration API (`PATCH /proxy/protect/integration/v1/lights/{id}` with `isLightForceEnabled` and `ledLevel` 6), which is what the Control Plane API key can authenticate. 4.0.17 tried the private `/proxy/protect/api` path first; that endpoint needs a login cookie, often returns the UniFi OS HTML page as HTTP 200, and the panel treated that as success so the real PATCH never ran. HTML/login responses are ignored; the private API remains a fallback only when it returns JSON.
+
 ## [4.0.19] - 2026-10-02
 
 ### Fixed

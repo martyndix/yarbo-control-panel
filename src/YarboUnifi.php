@@ -670,19 +670,20 @@ final class YarboUnifi
         }
         $private = $this->protectPrivateUrl($config, '/lights/' . rawurlencode($id));
         $public = $this->protectUrl($config, '/lights/' . rawurlencode($id));
-        // UF-Floodlight LEDs are driven by the private Protect API
-        // (lightOnSettings.isLedForceOn). The public Integration field
-        // isLightForceEnabled is tried after that. mode=always is a schedule.
+        // The Control Plane key only authenticates the public Integration API.
+        // /proxy/protect/api needs a session cookie; a 200 HTML login page is
+        // not success. Home Assistant now uses update_light_public /
+        // isLightForceEnabled. mode=always is a schedule, not the LED.
         $attempts = $on
             ? [
-                [$private, ['lightOnSettings' => ['isLedForceOn' => true], 'lightDeviceSettings' => ['ledLevel' => 6]], 2.5],
-                [$private, ['lightOnSettings' => ['isLedForceOn' => true]], 2.5],
                 [$public, ['isLightForceEnabled' => true, 'lightDeviceSettings' => ['ledLevel' => 6]], 4.0],
                 [$public, ['isLightForceEnabled' => true], 4.0],
+                [$private, ['lightOnSettings' => ['isLedForceOn' => true], 'lightDeviceSettings' => ['ledLevel' => 6]], 2.5],
+                [$private, ['lightOnSettings' => ['isLedForceOn' => true]], 2.5],
             ]
             : [
-                [$private, ['lightOnSettings' => ['isLedForceOn' => false]], 2.5],
                 [$public, ['isLightForceEnabled' => false], 4.0],
+                [$private, ['lightOnSettings' => ['isLedForceOn' => false]], 2.5],
             ];
         $last = ['ok' => false, 'error' => 'Protect light failed'];
         foreach ($attempts as [$url, $payload, $timeout]) {
@@ -691,8 +692,8 @@ final class YarboUnifi
             if ($res['status'] === 404 || $res['status'] === 405) {
                 $res = $this->request('PUT', $url, $this->protectHeaders($config), $body, $timeout, false);
             }
-            if ($res['status'] < 200 || $res['status'] >= 300) {
-                $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . $res['status'])];
+            if (!$this->protectLightPatchOk($res, $on)) {
+                $last = ['ok' => false, 'error' => $res['error'] ?? ('Protect light HTTP ' . ($res['status'] ?? 0))];
                 continue;
             }
             $this->patchInventoryOn(self::KIND_LIGHT, $id, $on);
@@ -701,6 +702,43 @@ final class YarboUnifi
         }
 
         return $last;
+    }
+
+    /**
+     * @param array{status?: int, body?: string, content_type?: string, error?: string} $res
+     */
+    private function protectLightPatchOk(array $res, bool $on): bool
+    {
+        $status = (int) ($res['status'] ?? 0);
+        if ($status < 200 || $status >= 300) {
+            return false;
+        }
+        $ctype = strtolower((string) ($res['content_type'] ?? ''));
+        $body = trim((string) ($res['body'] ?? ''));
+        if (str_contains($ctype, 'html') || str_starts_with($body, '<')) {
+            return false;
+        }
+        if ($body === '') {
+            return $status === 204;
+        }
+        $decoded = $this->decodeJson($body);
+        if (!is_array($decoded)) {
+            return false;
+        }
+        if (isset($decoded['code']) && !isset($decoded['id']) && !isset($decoded['isLightForceEnabled'])) {
+            return false;
+        }
+        if (array_key_exists('isLightForceEnabled', $decoded) && $this->truthy($decoded['isLightForceEnabled']) !== $on) {
+            return false;
+        }
+        $privateForce = is_array($decoded['lightOnSettings'] ?? null)
+            ? ($decoded['lightOnSettings']['isLedForceOn'] ?? null)
+            : null;
+        if ($privateForce !== null && $this->truthy($privateForce) !== $on) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -2137,7 +2175,7 @@ final class YarboUnifi
         curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_CONNECTTIMEOUT => max(1, (int) floor($timeout)),
             CURLOPT_TIMEOUT => max(2, (int) ceil($timeout)),
             CURLOPT_HTTPHEADER => $headerLines,

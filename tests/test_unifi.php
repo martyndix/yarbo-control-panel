@@ -65,7 +65,9 @@ if ($view['show_on_home'] !== ['unifi:camera:cam1']) {
 
 $calls = [];
 $doorDps = 'close';
-$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps): array {
+$lightPrivateHtml = true;
+$lightPublicFail = false;
+$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps, &$lightPrivateHtml, &$lightPublicFail): array {
     $calls[] = [$method, $url, $headers, $body];
     if (str_contains($url, '/cameras') && !str_contains($url, '/snapshot')) {
         return [
@@ -78,6 +80,13 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
         $decoded = json_decode((string) $body, true);
         $private = str_contains($url, '/proxy/protect/api/lights');
         if ($private) {
+            if ($lightPrivateHtml) {
+                return [
+                    'status' => 200,
+                    'body' => '<html><title>UniFi OS</title></html>',
+                    'content_type' => 'text/html',
+                ];
+            }
             if (!is_array($decoded) || !array_key_exists('isLedForceOn', $decoded['lightOnSettings'] ?? [])) {
                 return [
                     'status' => 400,
@@ -100,7 +109,7 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                 'content_type' => 'application/json',
             ];
         }
-        if (!is_array($decoded) || array_key_exists('lightMode', $decoded) || !array_key_exists('isLightForceEnabled', $decoded)) {
+        if (!is_array($decoded) || array_key_exists('lightMode', $decoded) || !array_key_exists('isLightForceEnabled', $decoded) || $lightPublicFail) {
             return [
                 'status' => 400,
                 'body' => json_encode([
@@ -300,7 +309,7 @@ if (!($light['ok'] ?? false) || empty($light['on'])) {
 }
 $lightPatched = false;
 $lightForceLed = false;
-$firstLight = true;
+$firstJsonLight = true;
 foreach ($calls as $call) {
     if (($call[0] ?? '') !== 'PATCH' || !str_contains((string) ($call[1] ?? ''), '/lights/')) {
         continue;
@@ -311,14 +320,13 @@ foreach ($calls as $call) {
         fwrite(STDERR, "light PATCH must not set the schedule " . json_encode($decoded) . "\n");
         exit(1);
     }
-    if (($decoded['lightOnSettings']['isLedForceOn'] ?? null) === true
-        || (($decoded['isLightForceEnabled'] ?? null) === true && !isset($decoded['lightModeSettings']))) {
+    if (($decoded['isLightForceEnabled'] ?? null) === true && !isset($decoded['lightModeSettings'])) {
         $lightPatched = true;
     }
-    if ($firstLight) {
-        $firstLight = false;
-        if (str_contains($url, '/proxy/protect/api/lights')
-            && ($decoded['lightOnSettings']['isLedForceOn'] ?? null) === true
+    if ($firstJsonLight) {
+        $firstJsonLight = false;
+        if (str_contains($url, '/proxy/protect/integration/v1/lights')
+            && ($decoded['isLightForceEnabled'] ?? null) === true
             && (int) ($decoded['lightDeviceSettings']['ledLevel'] ?? 0) === 6) {
             $lightForceLed = true;
         }
@@ -329,7 +337,7 @@ if (!$lightPatched) {
     exit(1);
 }
 if (!$lightForceLed) {
-    fwrite(STDERR, "light did not PATCH private isLedForceOn with ledLevel first\n");
+    fwrite(STDERR, "light did not PATCH public isLightForceEnabled with ledLevel first\n");
     exit(1);
 }
 
@@ -353,6 +361,35 @@ if (!$lightForceOff) {
     fwrite(STDERR, "light off did not force the LED off\n");
     exit(1);
 }
+
+$lightPublicFail = true;
+$lightPrivateHtml = true;
+$htmlTrap = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
+if ($htmlTrap['ok'] ?? false) {
+    fwrite(STDERR, "HTML login page must not count as floodlight on " . json_encode($htmlTrap) . "\n");
+    exit(1);
+}
+$lightPrivateHtml = false;
+$privateFallback = $unifi->command(['id' => 'unifi:light:light1', 'command' => 'on']);
+if (!($privateFallback['ok'] ?? false) || empty($privateFallback['on'])) {
+    fwrite(STDERR, 'private JSON fallback ' . json_encode($privateFallback) . "\n");
+    exit(1);
+}
+$usedPrivateJson = false;
+foreach (array_reverse($calls) as $call) {
+    if (($call[0] ?? '') !== 'PATCH' || !str_contains((string) ($call[1] ?? ''), '/proxy/protect/api/lights')) {
+        continue;
+    }
+    $decoded = json_decode((string) ($call[3] ?? ''), true);
+    $usedPrivateJson = ($decoded['lightOnSettings']['isLedForceOn'] ?? null) === true;
+    break;
+}
+if (!$usedPrivateJson) {
+    fwrite(STDERR, "public fail should fall back to private isLedForceOn\n");
+    exit(1);
+}
+$lightPublicFail = false;
+$lightPrivateHtml = true;
 
 $relay = $unifi->command(['id' => 'unifi:relay:relay1:1', 'command' => 'on']);
 if (!($relay['ok'] ?? false) || empty($relay['on'])) {
