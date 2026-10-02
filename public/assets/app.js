@@ -2999,7 +2999,8 @@ function homePollBlocked() {
 
 function rememberHomeSticky(id, on) {
     if (!id) return;
-    homeSticky.set(id, { on: Boolean(on), until: Date.now() + COMMAND_QUIET_MS });
+    const ms = String(id).startsWith('unifi:') ? Math.max(COMMAND_QUIET_MS, 60000) : COMMAND_QUIET_MS;
+    homeSticky.set(id, { on: Boolean(on), until: Date.now() + ms });
 }
 
 function homeStickyOn(id) {

@@ -63,7 +63,7 @@ The panel also tries UniFi OS proxy paths (`/proxy/access/api/v1/developer` and 
 
 Door list: `GET /doors` (`view:space`). Device/hub list: `GET /devices?refresh=true` (`view:device`). Unlock: `PUT /doors/{id}/unlock` (`edit:space`; POST if the console rejects PUT). Gate Hub: add `?control_cmd=open|close|stop`. Door position is `door_position_status` on each door.
 
-Protect lights: the panel PATCHes the public Integration API `{ "isLightForceEnabled": true, "lightDeviceSettings": { "ledLevel": 6 } }` (`/proxy/protect/integration/v1/lights/{id}` with `X-API-KEY`). If that JSON does not confirm the LED (`isLightOn`), it logs in at `/api/auth/login` with the stored local admin and PATCHes `/proxy/protect/api/lights/{id}` `{ "lightOnSettings": { "isLedForceOn": true }, "lightDeviceSettings": { "ledLevel": 6 } }` with the session cookie and CSRF token. Private PATCH with only the API key is still tried; a UniFi OS HTML login page is not success. Off sends `isLightForceEnabled` / `isLedForceOn` false. Relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
+Protect lights: the panel PATCHes the public Integration API `{ "isLightForceEnabled": true, "lightDeviceSettings": { "ledLevel": 6 } }` (`/proxy/protect/integration/v1/lights/{id}` with `X-API-KEY`). If a local admin is stored, it also logs in at `/api/auth/login` (session cached) and PATCHes `/proxy/protect/api/lights/{id}` `{ "lightOnSettings": { "isLedForceOn": true } }` with cookie + CSRF. A later HTTP 401 from UniFi OS login does not revert the website On/Off if a force PATCH already succeeded. Home keeps that commanded state so the green indicator matches the lamp. Off sends `isLightForceEnabled` / `isLedForceOn` false. Relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
 
 Protect sensors: `GET /proxy/protect/integration/v1/sensors` (`isOpened`, `stats.temperature.value`, `stats.humidity.value`). Home does not poll this on the request that serves the grid; a background process updates `data/unifi-inventory.json` so the next 3-second Home refresh can show Open and new readings. Access `GET /doors` (controller Open/Closed) is a separate poll in that same job.
 
@@ -75,4 +75,4 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 ## Rollback
 
-This is panel **4.0.21**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+This is panel **4.0.22**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.

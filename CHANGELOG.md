@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.22] - 2026-10-02
+
+### Fixed
+- UniFi floodlight **On/Off on the website** now stays in sync with the lamp. A click that actually switched the light was still returning HTTP 401 from a later UniFi OS login, so the green indicator snapped back. A successful force PATCH now stores On/Off and is returned as success even if a follow-up login is 401. Home keeps that state across refreshes.
+
 ## [4.0.21] - 2026-10-02
 
 ### Fixed

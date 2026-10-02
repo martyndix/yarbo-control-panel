@@ -859,6 +859,10 @@ if (!str_contains($js, '/^Open\\b/i') || !str_contains($js, 'data-home-status'))
     fwrite(STDERR, "Home Protect sensor Open prefix missing\n");
     exit(1);
 }
+if (!str_contains($js, "startsWith('unifi:')") || !str_contains($js, '60000')) {
+    fwrite(STDERR, "UniFi Home On/Off sticky missing\n");
+    exit(1);
+}
 if (!str_contains($css, '.home-device-actions .home-device-meta')) {
     fwrite(STDERR, "actions-box meta CSS missing\n");
     exit(1);
@@ -920,7 +924,6 @@ $sessionUnifi->setTransport(function (string $method, string $url, array $header
             'status' => 200,
             'body' => json_encode([
                 'id' => 'light1',
-                'isLightOn' => $force,
                 'lightOnSettings' => ['isLedForceOn' => $force],
             ]),
             'content_type' => 'application/json',
@@ -954,6 +957,70 @@ foreach ($sessionCalls as $call) {
 }
 if (!$loggedIn || !$usedSessionCookie) {
     fwrite(STDERR, "floodlight did not login and PATCH private isLedForceOn with cookie\n");
+    exit(1);
+}
+$sessionInv = json_decode((string) file_get_contents($sessionRoot . '/data/unifi-inventory.json'), true);
+if (($sessionInv['light_commands']['light1']['on'] ?? false) !== true) {
+    fwrite(STDERR, 'session floodlight did not store On for the web indicator ' . json_encode($sessionInv['light_commands'] ?? null) . "\n");
+    exit(1);
+}
+
+$authFailRoot = sys_get_temp_dir() . '/yarbo-unifi-401-' . bin2hex(random_bytes(3));
+mkdir($authFailRoot . '/data', 0775, true);
+$authFail = new Yarbo\YarboUnifi($authFailRoot);
+if (!$authFail->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'protect-secret',
+    'unifi_protect_username' => 'admin',
+    'unifi_protect_password' => 'secret',
+    'show_on_home' => ['unifi:light:light1'],
+])) {
+    fwrite(STDERR, "401 save failed\n");
+    exit(1);
+}
+$authFail->setTransport(function (string $method, string $url, array $headers, ?string $body): array {
+    if ($method === 'POST' && str_contains($url, '/api/auth/login')) {
+        return ['status' => 401, 'body' => '{"error":"UNAUTHORIZED"}', 'content_type' => 'application/json', 'error' => 'HTTP 401'];
+    }
+    if ($method === 'PATCH' && str_contains($url, '/proxy/protect/integration/v1/lights')) {
+        $decoded = json_decode((string) $body, true);
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'id' => 'light1',
+                'isLightForceEnabled' => (bool) ($decoded['isLightForceEnabled'] ?? false),
+                'isLightOn' => false,
+            ]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if (str_contains($url, '/lights')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([['id' => 'light1', 'name' => 'Flood', 'isLightOn' => false, 'isLightForceEnabled' => false]]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if (str_contains($url, '/proxy/protect/')) {
+        return ['status' => 200, 'body' => '[]', 'content_type' => 'application/json'];
+    }
+
+    return ['status' => 401, 'body' => '', 'content_type' => '', 'error' => 'HTTP 401'];
+});
+$authFail->probe();
+$authFailOn = $authFail->command(['id' => 'unifi:light:light1', 'command' => 'on']);
+if (!($authFailOn['ok'] ?? false) || empty($authFailOn['on'])) {
+    fwrite(STDERR, 'public force then login 401 should still report On ' . json_encode($authFailOn) . "\n");
+    exit(1);
+}
+$authHome = [];
+foreach ($authFail->homeRows() as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $authHome[$row['id']] = $row;
+    }
+}
+if (($authHome['unifi:light:light1']['on'] ?? false) !== true || ($authHome['unifi:light:light1']['status'] ?? '') !== 'On') {
+    fwrite(STDERR, 'Home indicator stayed Off after floodlight On ' . json_encode($authHome['unifi:light:light1'] ?? null) . "\n");
     exit(1);
 }
 
