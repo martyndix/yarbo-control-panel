@@ -3980,10 +3980,29 @@ body.home-is-reordering {
 }
 
 .auto-drop-chips,
-.auto-tray {
+.auto-tray-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 0.45rem;
+}
+
+.auto-tray {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.auto-tray-group {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.auto-tray-label {
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
 }
 
 .auto-chip {

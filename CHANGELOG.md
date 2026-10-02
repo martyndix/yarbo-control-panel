@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.27] - 2026-10-02
+
+### Changed
+- Home Automations **Add** chips are grouped by type (Time, Lights, Sensors, Relays, Doors, Controllers, Scenes, and so on) and sorted by name inside each group.
+
 ## [4.0.26] - 2026-10-02
 
 ### Added

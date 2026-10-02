@@ -248,6 +248,10 @@ $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 assert_true(str_contains($js, 'openHomeAutomations'), 'Automations UI');
+assert_true(str_contains($js, 'homeAutoTrayGroups'), 'tray grouping helper');
+assert_true(str_contains($js, "['lights', 'Lights']"), 'lights group');
+assert_true(str_contains($js, "['sensors', 'Sensors']"), 'sensors group');
+assert_true(str_contains($js, "['doors', 'Doors']"), 'doors group');
 
 $offRoot = sys_get_temp_dir() . '/yarbo-auto-off-' . bin2hex(random_bytes(3));
 mkdir($offRoot . '/data', 0775, true);

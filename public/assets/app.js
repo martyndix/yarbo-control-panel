@@ -4995,19 +4995,89 @@ function homeAutoIfChipHtml(cond, index) {
 function renderHomeAutoTray() {
     const tray = document.getElementById('auto-tray');
     if (!tray) return;
-    const chips = [
-        '<button type="button" class="auto-chip auto-chip--clock" draggable="true" data-auto-tray="time">Time</button>',
-        '<button type="button" class="auto-chip auto-chip--clock" draggable="true" data-auto-tray="sunset">Sunset</button>',
-        '<button type="button" class="auto-chip auto-chip--clock" draggable="true" data-auto-tray="sunrise">Sunrise</button>',
+    const groups = homeAutoTrayGroups(homeDash.devices || [], homeDash.scenes || []);
+    tray.innerHTML = groups.map((group) => (
+        `<div class="auto-tray-group" data-auto-group="${escapeHtml(group.id)}">
+            <h4 class="auto-tray-label">${escapeHtml(group.label)}</h4>
+            <div class="auto-tray-chips">${group.chips.join('')}</div>
+        </div>`
+    )).join('');
+}
+
+function homeAutoDeviceGroupId(d) {
+    if (homeIsUnifi(d)) {
+        switch (String(d.kind || '')) {
+            case 'light':
+                return 'lights';
+            case 'relay':
+                return 'relays';
+            case 'sensor':
+                return 'sensors';
+            case 'door':
+                return 'doors';
+            case 'hub':
+                return 'controllers';
+            default:
+                return 'other';
+        }
+    }
+    switch (String(d.kind || 'light')) {
+        case 'heater':
+            return 'heaters';
+        case 'vacuum':
+            return 'vacuums';
+        case 'plug':
+            return 'plugs';
+        case 'switch':
+            return 'switches';
+        case 'sensor':
+            return 'sensors';
+        default:
+            return 'lights';
+    }
+}
+
+function homeAutoTrayChip(kind, id, name, extraClass) {
+    const cls = extraClass ? `auto-chip ${extraClass}` : 'auto-chip';
+    const idAttr = id ? ` data-id="${escapeHtml(id)}"` : '';
+    return `<button type="button" class="${cls}" draggable="true" data-auto-tray="${escapeHtml(kind)}"${idAttr}>${escapeHtml(name)}</button>`;
+}
+
+function homeAutoTrayGroups(devices, scenes) {
+    const order = [
+        ['time', 'Time'],
+        ['lights', 'Lights'],
+        ['heaters', 'Heaters'],
+        ['plugs', 'Plugs'],
+        ['switches', 'Switches'],
+        ['relays', 'Relays'],
+        ['sensors', 'Sensors'],
+        ['doors', 'Doors'],
+        ['controllers', 'Controllers'],
+        ['vacuums', 'Vacuums'],
+        ['scenes', 'Scenes'],
+        ['other', 'Other'],
     ];
-    (homeDash.devices || []).forEach((d) => {
-        if (d.kind === 'camera') return;
-        chips.push(`<button type="button" class="auto-chip" draggable="true" data-auto-tray="device" data-id="${escapeHtml(d.id)}">${escapeHtml(d.name)}</button>`);
+    const buckets = {};
+    order.forEach(([id]) => {
+        buckets[id] = [];
     });
-    (homeDash.scenes || []).forEach((s) => {
-        chips.push(`<button type="button" class="auto-chip" draggable="true" data-auto-tray="scene" data-id="${escapeHtml(s.id)}">${escapeHtml(s.name)}</button>`);
+    buckets.time.push(
+        homeAutoTrayChip('time', '', 'Time', 'auto-chip--clock'),
+        homeAutoTrayChip('sunset', '', 'Sunset', 'auto-chip--clock'),
+        homeAutoTrayChip('sunrise', '', 'Sunrise', 'auto-chip--clock')
+    );
+    const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+    [...devices].filter((d) => d && d.kind !== 'camera').sort(byName).forEach((d) => {
+        const gid = homeAutoDeviceGroupId(d);
+        (buckets[gid] || buckets.other).push(homeAutoTrayChip('device', d.id, d.name || d.id));
     });
-    tray.innerHTML = chips.join('');
+    [...scenes].sort(byName).forEach((s) => {
+        buckets.scenes.push(homeAutoTrayChip('scene', s.id, s.name || 'Scene'));
+    });
+    return order
+        .filter(([id]) => (buckets[id] || []).length)
+        .map(([id, label]) => ({ id, label, chips: buckets[id] }));
 }
 
 function homeAutoApplyTray(kind, id, zone) {

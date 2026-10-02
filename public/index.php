@@ -700,6 +700,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 </div>
                 <div class="auto-tray-wrap">
                     <h3 class="settings-subtitle">Add</h3>
+                    <p class="hint">Grouped by type. Drag onto When or Then, or tap a chip.</p>
                     <div id="auto-tray" class="auto-tray"></div>
                 </div>
                 <div class="auto-editor-actions">
