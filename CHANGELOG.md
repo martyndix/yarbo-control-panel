@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.45] - 2026-10-03
+
+### Changed
+- Settings → E-paper paired list shows **Online — home network**, **Online — remote**, or **Offline — last seen…**, and last seen as **DD-MMM-YYYY HH:MM:SS** in the companion timezone. Remote is recorded when a poll arrives through the Funnel gate.
+
 ## [4.0.44] - 2026-10-03
 
 ### Fixed

@@ -73,13 +73,14 @@ function device_touch_seen(YarboPaperDevice $devices, array $device, bool $withP
         return;
     }
     $fw = isset($_GET['fw']) ? (string) $_GET['fw'] : null;
+    $remote = \Yarbo\YarboPaperRemote::requestIsRemote($_GET);
     if ($withPower) {
         [$battery, $charging] = device_request_power();
-        $devices->touch($id, $fw, $battery, $charging);
+        $devices->touch($id, $fw, $battery, $charging, $remote);
 
         return;
     }
-    $devices->touch($id, $fw);
+    $devices->touch($id, $fw, null, null, $remote);
 }
 
 if ($method === 'GET' && $action === 'compact') {
@@ -226,7 +227,7 @@ if ($action === 'paper_message') {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
     if ($token !== '') {
-        $devices->touch((string) $device['id']);
+        $devices->touch((string) $device['id'], null, null, null, \Yarbo\YarboPaperRemote::requestIsRemote($_GET));
     }
     json_response($devices->postPaperMessage(
         $device,
@@ -245,7 +246,7 @@ if ($action === 'paper_read') {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
     if ($token !== '') {
-        $devices->touch((string) $device['id']);
+        $devices->touch((string) $device['id'], null, null, null, \Yarbo\YarboPaperRemote::requestIsRemote($_GET));
     }
     json_response($devices->markPaperRead($device, (string) ($input['id'] ?? '')));
 }
@@ -307,7 +308,7 @@ if ($action === 'command') {
     if ($device === null) {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
-    $devices->touch((string) $device['id']);
+    $devices->touch((string) $device['id'], null, null, null, \Yarbo\YarboPaperRemote::requestIsRemote($_GET));
         $cmd = (string) ($input['command'] ?? '');
     if ($cmd === 'home_toggle' || $cmd === 'home_scene') {
         $homeId = (string) ($input['home_id'] ?? $input['id'] ?? '');

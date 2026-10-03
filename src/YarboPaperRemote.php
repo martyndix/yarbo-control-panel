@@ -13,6 +13,7 @@ final class YarboPaperRemote
     public const GATE_PORT = 8089;
     public const PROVIDER_TAILSCALE = 'tailscale';
     public const PROVIDER_CUSTOM = 'custom';
+    public const VIA_HEADER = 'X-Yarbo-Paper-Via';
 
     /** @var list<string> */
     public const GET_ACTIONS = ['compact', 'plans', 'firmware', 'logo'];
@@ -204,6 +205,31 @@ final class YarboPaperRemote
     }
 
     /**
+     * @param array<string, mixed> $query
+     */
+    public static function requestIsRemote(array $query = []): bool
+    {
+        $via = strtolower(trim((string) ($_SERVER['HTTP_X_YARBO_PAPER_VIA'] ?? '')));
+        if ($via === 'remote') {
+            return true;
+        }
+        if (function_exists('getallheaders')) {
+            $got = getallheaders();
+            if (is_array($got)) {
+                foreach ($got as $name => $value) {
+                    if (strtolower((string) $name) === 'x-yarbo-paper-via'
+                        && strtolower(trim((string) $value)) === 'remote') {
+                        return true;
+                    }
+                }
+            }
+        }
+        $q = strtolower(trim((string) ($query['via'] ?? $query['remote'] ?? '')));
+
+        return in_array($q, ['1', 'true', 'yes', 'remote'], true);
+    }
+
+    /**
      * Forward an allowed tablet request to the LAN panel.
      *
      * @param array<string, mixed> $query
@@ -233,6 +259,7 @@ final class YarboPaperRemote
             }
             $hdrs[] = $name . ': ' . $value;
         }
+        $hdrs[] = self::VIA_HEADER . ': remote';
         $method = strtoupper($method);
         $opts = [
             'http' => [

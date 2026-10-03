@@ -558,6 +558,71 @@ final class YarboPaperDevice
     }
 
     /**
+     * Last poll used Funnel / HTTPS remote_url, not the LAN Panel URL.
+     *
+     * @param array<string, mixed> $device
+     */
+    public function deviceIsRemote(array $device): bool
+    {
+        return $this->deviceIsOnline($device) && (($device['last_via'] ?? '') === 'remote');
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     */
+    public function presenceLabel(array $device): string
+    {
+        $via = (string) ($device['last_via'] ?? '');
+        if (!$this->deviceIsOnline($device)) {
+            if ((string) ($device['last_seen_at'] ?? '') === '') {
+                return 'Offline — never seen';
+            }
+            if ($via === 'remote') {
+                return 'Offline — last seen remotely';
+            }
+
+            return 'Offline — last seen on the home network';
+        }
+        if ($via === 'remote') {
+            return 'Online — remote';
+        }
+
+        return 'Online — home network';
+    }
+
+    public function formatLastSeen(?string $iso): string
+    {
+        $iso = trim((string) $iso);
+        if ($iso === '') {
+            return 'Never seen';
+        }
+        $ts = strtotime($iso);
+        if ($ts === false) {
+            return 'Never seen';
+        }
+        $zoneName = YarboVestaboard::normalizeTimezone((string) ($this->publicPrefs()['timezone'] ?? ''));
+        if ($zoneName === '') {
+            $zoneName = 'Europe/Zurich';
+        }
+        try {
+            $dt = (new \DateTimeImmutable('@' . $ts))->setTimezone(new \DateTimeZone($zoneName));
+        } catch (\Exception) {
+            $dt = new \DateTimeImmutable('@' . $ts);
+        }
+        $months = [1 => 'Jan', 2 => 'Feb', 3 => 'Mar', 4 => 'Apr', 5 => 'May', 6 => 'Jun', 7 => 'Jul', 8 => 'Aug', 9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dec'];
+
+        return sprintf(
+            '%02d-%s-%04d %02d:%02d:%02d',
+            (int) $dt->format('d'),
+            $months[(int) $dt->format('n')] ?? $dt->format('M'),
+            (int) $dt->format('Y'),
+            (int) $dt->format('H'),
+            (int) $dt->format('i'),
+            (int) $dt->format('s')
+        );
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
@@ -776,7 +841,7 @@ final class YarboPaperDevice
         return true;
     }
 
-    public function touch(string $id, ?string $fwReported = null, ?int $batteryLevel = null, ?bool $charging = null): void
+    public function touch(string $id, ?string $fwReported = null, ?int $batteryLevel = null, ?bool $charging = null, ?bool $viaRemote = null): void
     {
         $store = $this->load();
         foreach ($store['devices'] as &$device) {
@@ -784,6 +849,9 @@ final class YarboPaperDevice
                 continue;
             }
             $device['last_seen_at'] = gmdate('c');
+            if ($viaRemote !== null) {
+                $device['last_via'] = $viaRemote ? 'remote' : 'lan';
+            }
             if ($fwReported !== null && $fwReported !== '') {
                 $device['fw_reported'] = $fwReported;
                 $inferred = $this->kindFromFirmware($fwReported);
@@ -2588,6 +2656,10 @@ final class YarboPaperDevice
                 'kind_label' => $this->kindLabel(self::KIND_WEB),
                 'created_at' => $device['created_at'] ?? null,
                 'last_seen_at' => $device['last_seen_at'] ?? null,
+                'last_seen_label' => $this->formatLastSeen(isset($device['last_seen_at']) ? (string) $device['last_seen_at'] : null),
+                'last_via' => '',
+                'remote' => false,
+                'presence_label' => 'Online — this computer',
                 'fw_reported' => null,
                 'firmware_latest' => '',
                 'firmware_built' => false,
@@ -2611,6 +2683,10 @@ final class YarboPaperDevice
             'kind_label' => $this->kindLabel($kind),
             'created_at' => $device['created_at'] ?? null,
             'last_seen_at' => $device['last_seen_at'] ?? null,
+            'last_seen_label' => $this->formatLastSeen(isset($device['last_seen_at']) ? (string) $device['last_seen_at'] : null),
+            'last_via' => (string) ($device['last_via'] ?? ''),
+            'remote' => $this->deviceIsRemote($device),
+            'presence_label' => $this->presenceLabel($device),
             'fw_reported' => $device['fw_reported'] ?? null,
             'firmware_latest' => $this->firmwareVersionForKind($kind),
             'firmware_built' => $this->firmwareAvailable($kind),

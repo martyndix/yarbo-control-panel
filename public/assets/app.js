@@ -8341,6 +8341,23 @@ function paperMonoFormPayload() {
     };
 }
 
+function paperLastSeenText(device) {
+    const stamp = device.last_seen_label || device.last_seen_at;
+    if (!stamp || stamp === 'Never seen') return 'Never seen';
+    return `Last seen ${String(stamp)}`;
+}
+
+function paperPresenceHtml(device) {
+    const label = device.presence_label
+        || (device.online ? 'Online — home network' : 'Offline — not seen recently');
+    const cls = [
+        'papermono-presence',
+        device.online ? 'is-online' : 'is-offline',
+        device.remote ? 'is-remote' : '',
+    ].filter(Boolean).join(' ');
+    return `<span class="${cls}">${escapeHtml(label)}</span>`;
+}
+
 function paperOtaUpdateButton(device) {
     const id = escapeHtml(device.id || '');
     if (device.ota_pending) {
@@ -8371,18 +8388,13 @@ function renderPaperOtaPanel(devices) {
     }
     const ready = devices.filter((d) => d.ota_available && d.online && !d.ota_pending);
     els.settingsPaperOtaList.innerHTML = devices.map((device) => {
-        const last = device.last_seen_at
-            ? `Last seen ${escapeHtml(String(device.last_seen_at).replace('T', ' ').replace('Z', ' UTC'))}`
-            : 'Never seen';
+        const last = paperLastSeenText(device);
         const reported = device.fw_reported ? escapeHtml(String(device.fw_reported)) : 'unknown';
         const latest = escapeHtml(String(device.firmware_latest || ''));
-        const status = device.ota_pending
-            ? 'Update queued'
-            : (device.online ? 'Online' : 'Offline');
         return `<div class="papermono-device-row">
             <div class="papermono-device-meta">
                 <p class="papermono-device-ota-name">${escapeHtml(device.name || device.kind_label || 'Tablet')}</p>
-                <p class="hint">${escapeHtml(device.kind_label || '')} · ${escapeHtml(status)} · fw ${reported} → ${latest} · ${escapeHtml(last)}</p>
+                <p class="hint">${escapeHtml(device.kind_label || '')} · ${paperPresenceHtml(device)} · fw ${reported} → ${latest} · ${escapeHtml(last)}</p>
             </div>
             <div class="papermono-device-actions">${paperOtaUpdateButton(device)}</div>
         </div>`;
@@ -8413,19 +8425,16 @@ function renderPaperMonoDevices(devices) {
         return;
     }
     els.papermonoDevices.innerHTML = devices.map((device) => {
-        const last = device.last_seen_at
-            ? `Last seen ${escapeHtml(String(device.last_seen_at).replace('T', ' ').replace('Z', ' UTC'))}`
-            : 'Never seen';
+        const last = paperLastSeenText(device);
         const kindLabel = device.kind_label ? `${escapeHtml(String(device.kind_label))} · ` : '';
         const fw = device.fw_reported ? ` · fw ${escapeHtml(String(device.fw_reported))}` : '';
-        const online = device.online ? 'online' : 'offline';
         const revokeLabel = device.name || device.kind_label || 'companion';
         const id = escapeHtml(device.id);
         const name = escapeHtml(device.name || 'PaperMono');
         return `<div class="papermono-device-row" data-papermono-row="${id}">
             <div class="papermono-device-meta">
                 <p class="papermono-device-ota-name">${name}</p>
-                <p class="hint">${kindLabel}${escapeHtml(online)} · ${paperBatteryHtml(device)} · ${escapeHtml(last)}${fw}</p>
+                <p class="hint">${kindLabel}${paperPresenceHtml(device)} · ${paperBatteryHtml(device)} · ${escapeHtml(last)}${fw}</p>
                 <div class="papermono-device-tools hidden">
                     <label class="settings-field papermono-device-name-field">
                         <span class="label">Tablet name</span>

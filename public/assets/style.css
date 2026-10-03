@@ -2904,6 +2904,45 @@ html[data-theme="light"] .plan-activity {
     margin: 0.15rem 0 0;
 }
 
+.papermono-presence {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.08rem 0.45rem;
+    border-radius: 999px;
+    font-weight: 650;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+}
+
+.papermono-presence.is-online {
+    color: #1d6b3a;
+    background: #e8f6ee;
+    border-color: #7ddea0;
+}
+
+.papermono-presence.is-online.is-remote {
+    color: #0d4f7a;
+    background: #e6f3fb;
+    border-color: #7db8de;
+}
+
+html[data-theme="dark"] .papermono-presence.is-online {
+    color: #7ddea0;
+    background: rgba(125, 222, 160, 0.14);
+    border-color: #3d9a5f;
+}
+
+html[data-theme="dark"] .papermono-presence.is-online.is-remote {
+    color: #8fd0f0;
+    background: rgba(126, 196, 234, 0.14);
+    border-color: #4aa3d8;
+}
+
+.papermono-presence.is-offline {
+    color: var(--muted);
+}
+
 .papermono-battery {
     display: inline-flex;
     align-items: center;
