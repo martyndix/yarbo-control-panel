@@ -4744,7 +4744,7 @@ function homeAutoHashOpen() {
 
 function homeAutoNames() {
     const names = {};
-    (homeDash.devices || []).forEach((d) => {
+    [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])].forEach((d) => {
         if (d?.id) names[d.id] = d.name || d.id;
     });
     (homeDash.scenes || []).forEach((s) => {
@@ -5029,6 +5029,7 @@ function homeAutoWhenPhrase(trigger, names) {
     if (homeAutoDurationEvent(event) && trigger.for_sec) {
         return `${name} ${labels[event] || event} ${homeAutoFormatDuration(trigger.for_sec)}`;
     }
+    if (event === 'motion' && /motion$/i.test(String(name).trim())) return name;
     return `${name} ${labels[event] || event}`;
 }
 

@@ -30,7 +30,7 @@ class H(BaseHTTPRequestHandler):
             body = {}
         time.sleep(2.0)
         if body.get("op") == "ping":
-            result = {"ok": True, "engine": "matter-agent", "version": 16, "features": ["color"]}
+            result = {"ok": True, "engine": "matter-agent", "version": 17, "features": ["color"]}
         else:
             result = {"ok": True, "id": body.get("id"), "on": True}
         data = json.dumps(result).encode()

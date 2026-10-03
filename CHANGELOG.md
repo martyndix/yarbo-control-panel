@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.51] - 2026-10-03
+
+### Fixed
+- Home automations that failed with **Node 12 is not (yet) available** now say which light that is. Node 12 is the Matter id of the Hue Bridge (or other Matter device) the light sits on, not a room. If the Bridge was re-paired under a new id, the panel remaps Home and Automations onto the live node and retries. Names that already end in **motion** no longer read **motion motion**.
+
 ## [4.0.48] - 2026-10-03
 
 ### Fixed
