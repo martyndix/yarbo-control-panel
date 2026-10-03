@@ -2871,7 +2871,6 @@ let autoPageOpen = false;
 let autoDraft = null;
 let autoNameLocked = false;
 let autoDrag = null;
-let homeAutoGeoBusy = false;
 
 function homeResetSceneDraft() {
     homeSceneDraft = { id: '', name: '', included: {}, states: {} };
@@ -5180,8 +5179,13 @@ function homeAutoFollowName() {
     homeAutoSyncName();
 }
 
+function homeAutoUsesSun() {
+    if (homeAutoTriggers().some((trigger) => trigger?.type === 'sun')) return true;
+    return (autoDraft?.conditions || []).some((cond) => cond?.type === 'sun_window');
+}
+
 function homeAutoSunNeedsCoords() {
-    return homeAutoTriggers().some((trigger) => trigger?.type === 'sun') && Boolean((homeDash.sun_coords || {}).needs_coords);
+    return homeAutoUsesSun() && Boolean((homeDash.sun_coords || {}).needs_coords);
 }
 
 function homeAutoHasCoords() {
@@ -5193,60 +5197,52 @@ function homeAutoRoundCoord(n) {
     return Math.round(Number(n) * 10000) / 10000;
 }
 
-async function homeAutoApplyBrowserCoords(lat, lon) {
-    const latitude = homeAutoRoundCoord(lat);
-    const longitude = homeAutoRoundCoord(lon);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-    const latEl = document.getElementById('auto-lat');
-    const lonEl = document.getElementById('auto-lon');
-    if (latEl && document.activeElement !== latEl) latEl.value = String(latitude);
-    if (lonEl && document.activeElement !== lonEl) lonEl.value = String(longitude);
-    homeDash.sun_coords = {
-        ...(homeDash.sun_coords || {}),
-        latitude,
-        longitude,
-        source: 'browser',
-        needs_coords: false,
-    };
-    try {
-        const data = await homeApi({ action: 'automation_save', latitude, longitude });
-        if (data.sun_coords) homeDash.sun_coords = data.sun_coords;
-    } catch {
-        // Fields still hold the browser GPS if save fails.
-    }
-    if (autoDraft) renderHomeAutoEditor();
+function homeAutoFillCoordFields() {
+    const coords = homeDash.sun_coords || {};
+    const lat = document.getElementById('auto-lat');
+    const lon = document.getElementById('auto-lon');
+    if (lat && document.activeElement !== lat) lat.value = coords.latitude ?? '';
+    if (lon && document.activeElement !== lon) lon.value = coords.longitude ?? '';
 }
 
-function homeAutoRequestBrowserGps({ force = false } = {}) {
+function homeAutoCoordsHintText() {
     const coords = homeDash.sun_coords || {};
-    if (!force && homeAutoHasCoords() && !coords.needs_coords) return;
-    const hint = document.getElementById('auto-coords-hint');
-    if (!navigator.geolocation) {
-        if (hint && (force || homeAutoSunNeedsCoords())) {
-            hint.hidden = false;
-            hint.textContent = 'This browser cannot share GPS. Enter latitude and longitude, or use the last Yarbo GPS.';
-        }
-        return;
+    if (coords.needs_coords) {
+        return 'Sunrise and sunset need a location. Use this panel (timezone or the Pi’s public IP), the last Yarbo GPS, or enter latitude and longitude. HTTP pages cannot use this browser’s GPS.';
     }
-    if (homeAutoGeoBusy) return;
-    homeAutoGeoBusy = true;
-    navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-            homeAutoGeoBusy = false;
-            await homeAutoApplyBrowserCoords(pos.coords.latitude, pos.coords.longitude);
-        },
-        (err) => {
-            homeAutoGeoBusy = false;
-            if (!hint) return;
+    const src = coords.source === 'gps'
+        ? 'the last Yarbo GPS'
+        : (coords.source === 'ip'
+            ? 'this panel’s public IP'
+            : (coords.source === 'timezone' ? 'this timezone' : 'the saved coordinates'));
+    return `Sunrise and sunset use ${src}. HTTP pages cannot use this browser’s GPS.`;
+}
+
+async function homeAutoLocatePanel() {
+    const btn = document.getElementById('auto-geo');
+    if (btn) btn.disabled = true;
+    const hint = document.getElementById('auto-coords-hint');
+    try {
+        const data = await homeApi({ action: 'automation_save', locate: true });
+        if (!data.ok) throw new Error(data.error || 'Could not find this panel’s location');
+        if (data.sun_coords) homeDash.sun_coords = data.sun_coords;
+        homeAutoFillCoordFields();
+        if (hint) {
             hint.hidden = false;
-            if (err?.code === 1) {
-                hint.textContent = 'Location permission was denied. Enter latitude and longitude, or allow location for this page.';
-            } else {
-                hint.textContent = 'Could not read this browser’s GPS. Enter latitude and longitude, or try Use my location.';
-            }
-        },
-        { enableHighAccuracy: false, timeout: 10000, maximumAge: 30 * 60 * 1000 }
-    );
+            hint.textContent = homeAutoCoordsHintText();
+        }
+        showToast('Location saved', 'success');
+        if (autoDraft) renderHomeAutoEditor();
+    } catch (err) {
+        if (hint) {
+            hint.hidden = false;
+            hint.textContent = err.message || 'Could not find this panel’s location. Enter latitude and longitude.';
+        }
+        showToast(err.message || 'Could not find location', 'error');
+        throw err;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 function homeAutoTimezoneList() {
@@ -5351,7 +5347,6 @@ function openHomeAutomations({ updateHash = true } = {}) {
     autoNameLocked = false;
     loadHomeDashboard({ force: true }).then(async () => {
         await homeAutoEnsureTimezone();
-        homeAutoRequestBrowserGps();
         if (autoPageOpen) renderHomeAutomations();
     }).catch(() => {});
     renderHomeAutomations();
@@ -5477,24 +5472,14 @@ function renderHomeAutoEditor() {
     homeAutoClampDraft();
     const nameEl = document.getElementById('auto-name');
     if (nameEl && document.activeElement !== nameEl) nameEl.value = autoDraft.name || '';
-    const sun = homeAutoTriggers().some((trigger) => trigger?.type === 'sun');
-    const needs = homeAutoSunNeedsCoords();
+    const sun = homeAutoUsesSun();
     const hint = document.getElementById('auto-coords-hint');
     if (hint) {
         hint.hidden = !sun;
-        if (sun && !needs) {
-            hint.textContent = 'Sunrise and sunset use this location. Use my location to fill it from this browser’s GPS.';
-        } else if (sun) {
-            hint.textContent = 'Sunrise and sunset need a location. This page can fill it from this browser’s GPS. The last Yarbo GPS is used when it exists.';
-        }
+        if (sun) hint.textContent = homeAutoCoordsHintText();
     }
     document.getElementById('auto-coords')?.classList.toggle('hidden', !sun);
-    const coords = homeDash.sun_coords || {};
-    const lat = document.getElementById('auto-lat');
-    const lon = document.getElementById('auto-lon');
-    if (lat && document.activeElement !== lat) lat.value = coords.latitude ?? '';
-    if (lon && document.activeElement !== lon) lon.value = coords.longitude ?? '';
-    if (sun && needs) homeAutoRequestBrowserGps();
+    homeAutoFillCoordFields();
     document.getElementById('auto-when-chips').innerHTML = homeAutoWhenChipsHtml();
     document.getElementById('auto-then-chips').innerHTML = (autoDraft.actions || []).map((action, i) => homeAutoThenChipHtml(action, i)).join('')
         || '<p class="hint">Drop a light or scene here.</p>';
@@ -5668,6 +5653,17 @@ function homeAutoIfChipHtml(cond, index) {
         return `<div class="auto-chip auto-chip--clock" data-auto-if-i="${index}">
             Between <input type="time" data-auto-if-start value="${escapeHtml(cond.start || '08:00')}">
             and <input type="time" data-auto-if-end value="${escapeHtml(cond.end || '22:00')}">
+            <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
+    if (cond.type === 'sun_window') {
+        const start = cond.start === 'sunrise' ? 'sunrise' : 'sunset';
+        const end = cond.end === 'sunset' ? 'sunset' : 'sunrise';
+        const opt = (value, selected) =>
+            `<option value="${value}" ${value === selected ? 'selected' : ''}>${value === 'sunrise' ? 'Sunrise' : 'Sunset'}</option>`;
+        return `<div class="auto-chip auto-chip--clock" data-auto-if-i="${index}">
+            Between <select data-auto-if-sun-start aria-label="Only if from">${opt('sunset', start)}${opt('sunrise', start)}</select>
+            and <select data-auto-if-sun-end aria-label="Only if until">${opt('sunrise', end)}${opt('sunset', end)}</select>
             <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
@@ -6020,13 +6016,17 @@ async function homeAutoSave() {
     homeAutoSetTriggers(homeAutoTriggers());
     homeAutoReadThenLooks();
     autoDraft.off_after_sec = homeAutoReadOffAfter();
-    if (homeAutoTriggers().some((trigger) => trigger.type === 'sun') && homeAutoSunNeedsCoords()) {
+    if (homeAutoUsesSun() && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);
         const lon = Number(document.getElementById('auto-lon')?.value);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-            throw new Error('Add latitude and longitude for sunrise and sunset');
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            await homeApi({ action: 'automation_save', latitude: lat, longitude: lon });
+        } else {
+            await homeAutoLocatePanel();
+            if (homeAutoSunNeedsCoords()) {
+                throw new Error('Add latitude and longitude for sunrise and sunset');
+            }
         }
-        await homeApi({ action: 'automation_save', latitude: lat, longitude: lon });
     }
     const data = await homeApi({
         action: 'automation_save',
@@ -6071,8 +6071,12 @@ function bindHomeAutomations() {
             if (btn) btn.disabled = false;
         }
     });
-    document.getElementById('auto-geo')?.addEventListener('click', () => {
-        homeAutoRequestBrowserGps({ force: true });
+    document.getElementById('auto-geo')?.addEventListener('click', async () => {
+        try {
+            await homeAutoLocatePanel();
+        } catch {
+            // Toast already shown.
+        }
     });
     document.getElementById('auto-name')?.addEventListener('input', () => {
         autoNameLocked = true;
@@ -6168,6 +6172,7 @@ function bindHomeAutomations() {
         if (ifAdd && autoDraft) {
             const which = ifAdd.getAttribute('data-auto-if');
             if (which === 'window') autoDraft.conditions.push({ type: 'time_window', start: '08:00', end: '22:00' });
+            else if (which === 'sun') autoDraft.conditions.push({ type: 'sun_window', start: 'sunset', end: 'sunrise' });
             else {
                 const used = new Set(homeAutoTriggers().map((t) => t.id).filter(Boolean));
                 const other = homeAutoAllDevices().find((d) => !used.has(d.id));
@@ -6284,6 +6289,15 @@ function bindHomeAutomations() {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) autoDraft.conditions[i].end = event.target.value;
         }
+        if (event.target.matches('[data-auto-if-sun-start], [data-auto-if-sun-end]')) {
+            const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
+            const cond = autoDraft.conditions[i];
+            if (cond && cond.type === 'sun_window') {
+                if (event.target.matches('[data-auto-if-sun-start]')) cond.start = event.target.value === 'sunrise' ? 'sunrise' : 'sunset';
+                if (event.target.matches('[data-auto-if-sun-end]')) cond.end = event.target.value === 'sunset' ? 'sunset' : 'sunrise';
+                if (cond.start === cond.end) cond.end = cond.start === 'sunset' ? 'sunrise' : 'sunset';
+            }
+        }
         if (event.target.matches('[data-auto-if-id]')) {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) {
@@ -6303,7 +6317,7 @@ function bindHomeAutomations() {
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, [data-auto-if-id]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

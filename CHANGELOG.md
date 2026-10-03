@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.53] - 2026-10-03
+
+### Added
+- Home Automations **Only if** can be **Sunset / sunrise** (night) or the other way around (day), so a motion When can stay on after dark without a clock window.
+
+### Changed
+- Sunrise and sunset location no longer uses this browser’s GPS (that needs HTTPS). **Use this panel** looks up the Pi’s public IP, or uses this timezone / last Yarbo GPS, or coordinates you enter.
+
 ## [4.0.52] - 2026-10-03
 
 ### Added

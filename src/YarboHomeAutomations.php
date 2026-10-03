@@ -321,6 +321,22 @@ final class YarboHomeAutomations
         if (array_key_exists('timezone', $input)) {
             $store['timezone'] = YarboVestaboard::normalizeTimezone((string) $input['timezone']);
         }
+        if (!empty($input['locate'])) {
+            $found = $this->findPanelCoords();
+            if ($found['latitude'] === null || $found['longitude'] === null) {
+                return [
+                    'ok' => false,
+                    'error' => 'Could not find this panel’s location. Enter latitude and longitude.',
+                    'sun_coords' => $this->coordsPublic(),
+                    'server_timezone' => $this->timezoneName(),
+                    'timezone' => $this->timezonePublic(),
+                    'runner' => $this->runnerPublic(),
+                    'automations' => $store['automations'],
+                ];
+            }
+            $store['latitude'] = $found['latitude'];
+            $store['longitude'] = $found['longitude'];
+        }
         if (array_key_exists('latitude', $input) || array_key_exists('longitude', $input)) {
             if (array_key_exists('latitude', $input)) {
                 $store['latitude'] = self::optionalFloat($input['latitude']);
@@ -341,6 +357,7 @@ final class YarboHomeAutomations
             if (!$this->write($store)) {
                 return ['ok' => false, 'error' => 'Could not save'];
             }
+            $meta['sun_coords'] = $this->coordsPublic();
 
             return ['ok' => true] + $meta;
         }
@@ -348,6 +365,7 @@ final class YarboHomeAutomations
             if (!$this->write($store)) {
                 return ['ok' => false, 'error' => 'Could not save'];
             }
+            $meta['sun_coords'] = $this->coordsPublic();
 
             return ['ok' => true] + $meta;
         }
@@ -515,7 +533,7 @@ final class YarboHomeAutomations
             if (!$eval['should']) {
                 continue;
             }
-            if (!$this->conditionsPass($rule['conditions'] ?? [], $curr, $hm, $dow)) {
+            if (!$this->conditionsPass($rule['conditions'] ?? [], $curr, $hm, $dow, $now, $local, $coords)) {
                 continue;
             }
             if ($inCooldown) {
@@ -1089,6 +1107,15 @@ final class YarboHomeAutomations
 
             return $out;
         }
+        if ($type === 'sun_window') {
+            $start = self::sunEventName((string) ($cond['start'] ?? 'sunset'));
+            $end = self::sunEventName((string) ($cond['end'] ?? 'sunrise'));
+            if ($start === $end) {
+                $end = $start === 'sunset' ? 'sunrise' : 'sunset';
+            }
+
+            return ['type' => 'sun_window', 'start' => $start, 'end' => $end];
+        }
         if ($type !== 'device') {
             return null;
         }
@@ -1618,9 +1645,17 @@ final class YarboHomeAutomations
     /**
      * @param list<array<string, mixed>> $conditions
      * @param array<string, array<string, mixed>> $curr
+     * @param array{latitude: ?float, longitude: ?float, source: ?string} $coords
      */
-    private function conditionsPass(array $conditions, array $curr, string $hm, int $dow): bool
-    {
+    private function conditionsPass(
+        array $conditions,
+        array $curr,
+        string $hm,
+        int $dow,
+        int $now,
+        \DateTimeImmutable $local,
+        array $coords
+    ): bool {
         foreach ($conditions as $cond) {
             $type = (string) ($cond['type'] ?? '');
             if ($type === 'time_window') {
@@ -1629,6 +1664,34 @@ final class YarboHomeAutomations
                     return false;
                 }
                 if (!self::hmInWindow($hm, (string) $cond['start'], (string) $cond['end'])) {
+                    return false;
+                }
+                continue;
+            }
+            if ($type === 'sun_window') {
+                if ($coords['latitude'] === null || $coords['longitude'] === null) {
+                    return false;
+                }
+                $startHm = $this->sunEventHm(
+                    self::sunEventName((string) ($cond['start'] ?? 'sunset')),
+                    $now,
+                    (float) $coords['latitude'],
+                    (float) $coords['longitude'],
+                    0,
+                    $local->getTimezone()
+                );
+                $endHm = $this->sunEventHm(
+                    self::sunEventName((string) ($cond['end'] ?? 'sunrise')),
+                    $now,
+                    (float) $coords['latitude'],
+                    (float) $coords['longitude'],
+                    0,
+                    $local->getTimezone()
+                );
+                if ($startHm === null || $endHm === null) {
+                    return false;
+                }
+                if (!self::hmInWindow($hm, $startHm, $endHm)) {
                     return false;
                 }
                 continue;
@@ -2035,8 +2098,125 @@ final class YarboHomeAutomations
         if ($gps !== null) {
             return $gps + ['source' => 'gps'];
         }
+        $zone = $this->coordsFromTimezone();
+        if ($zone !== null) {
+            return $zone + ['source' => 'timezone'];
+        }
 
         return ['latitude' => null, 'longitude' => null, 'source' => null];
+    }
+
+    /**
+     * @return array{latitude: ?float, longitude: ?float, source: ?string}
+     */
+    public function findPanelCoords(): array
+    {
+        $gps = $this->gpsFromMap();
+        if ($gps !== null) {
+            return $gps + ['source' => 'gps'];
+        }
+        $ip = $this->locateFromPublicIp();
+        if ($ip !== null) {
+            return $ip + ['source' => 'ip'];
+        }
+        $zone = $this->coordsFromTimezone();
+        if ($zone !== null) {
+            return $zone + ['source' => 'timezone'];
+        }
+
+        return ['latitude' => null, 'longitude' => null, 'source' => null];
+    }
+
+    /**
+     * @return array{latitude: float, longitude: float}|null
+     */
+    public function coordsFromTimezone(?string $name = null): ?array
+    {
+        $zone = $name ?? $this->timezoneName();
+        if ($zone === '' || $zone === 'UTC' || str_starts_with($zone, 'Etc/')) {
+            return null;
+        }
+        try {
+            $tz = new \DateTimeZone($zone);
+        } catch (\Exception) {
+            return null;
+        }
+        $loc = $tz->getLocation();
+        if (!is_array($loc)) {
+            return null;
+        }
+        $lat = isset($loc['latitude']) ? (float) $loc['latitude'] : 0.0;
+        $lon = isset($loc['longitude']) ? (float) $loc['longitude'] : 0.0;
+        $cc = (string) ($loc['country_code'] ?? '');
+        if ($cc === '' || $cc === '??' || ($lat == 0.0 && $lon == 0.0)) {
+            return null;
+        }
+
+        return [
+            'latitude' => round($lat, 4),
+            'longitude' => round($lon, 4),
+        ];
+    }
+
+    public static function sunEventName(string $raw): string
+    {
+        return strtolower(trim($raw)) === 'sunrise' ? 'sunrise' : 'sunset';
+    }
+
+    /**
+     * @return array{latitude: float, longitude: float}|null
+     */
+    private function locateFromPublicIp(): ?array
+    {
+        $raw = $this->httpGetShort('http://ip-api.com/json/?fields=status,lat,lon');
+        if ($raw === null) {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded) || ($decoded['status'] ?? '') !== 'success') {
+            return null;
+        }
+        $lat = isset($decoded['lat']) && is_numeric($decoded['lat']) ? (float) $decoded['lat'] : null;
+        $lon = isset($decoded['lon']) && is_numeric($decoded['lon']) ? (float) $decoded['lon'] : null;
+        if ($lat === null || $lon === null || ($lat == 0.0 && $lon == 0.0)) {
+            return null;
+        }
+
+        return [
+            'latitude' => round($lat, 4),
+            'longitude' => round($lon, 4),
+        ];
+    }
+
+    private function httpGetShort(string $url): ?string
+    {
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            if ($ch === false) {
+                return null;
+            }
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 4,
+                CURLOPT_FOLLOWLOCATION => true,
+            ]);
+            $raw = curl_exec($ch);
+            $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if (!is_string($raw) || $raw === '' || $code < 200 || $code >= 300) {
+                return null;
+            }
+
+            return $raw;
+        }
+        $ctx = stream_context_create(['http' => ['timeout' => 4, 'ignore_errors' => true]]);
+        $raw = @file_get_contents($url, false, $ctx);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        return $raw;
     }
 
     /**

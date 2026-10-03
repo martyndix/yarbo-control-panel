@@ -674,7 +674,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <input type="text" id="auto-name" maxlength="64" autocomplete="off" placeholder="Front door open 5 min → Porch on">
                     <span class="hint">Follows When and Then unless you type a name.</span>
                 </label>
-                <p class="hint" id="auto-coords-hint" hidden>Sunrise and sunset need a location. This page can fill it from this browser’s GPS. The last Yarbo GPS is used when it exists.</p>
+                <p class="hint" id="auto-coords-hint" hidden>Sunrise and sunset use this timezone, the last Yarbo GPS, or coordinates you enter. HTTP pages cannot use this browser’s GPS.</p>
                 <div id="auto-coords" class="auto-coords hidden">
                     <label class="settings-field">
                         <span class="label">Latitude</span>
@@ -685,8 +685,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <input type="number" id="auto-lon" step="0.0001" min="-180" max="180">
                     </label>
                     <div class="settings-field auto-geo-field">
-                        <span class="label">This browser</span>
-                        <button type="button" class="btn btn-secondary btn-compact" id="auto-geo">Use my location</button>
+                        <span class="label">This panel</span>
+                        <button type="button" class="btn btn-secondary btn-compact" id="auto-geo">Use this panel</button>
                     </div>
                 </div>
                 <div class="auto-builder">
@@ -701,6 +701,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <div id="auto-if-chips" class="auto-drop-chips"></div>
                         <div class="auto-if-add">
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="window">Time window</button>
+                            <button type="button" class="btn btn-secondary btn-compact" data-auto-if="sun">Sunset / sunrise</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="device">Device is…</button>
                         </div>
                     </details>

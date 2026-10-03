@@ -522,6 +522,53 @@ assert_true($r['fired'] === ['a-sun'], 'sunset+15 must fire: ' . json_encode($r)
 $r = $auto->tick([['id' => 'unifi:light:porch', 'on' => false]], $sunLocal->getTimestamp() + 30);
 assert_true($r['fired'] === [], 'sun once per local day');
 
+$night = $auto->save([
+    'id' => 'a-night',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'conditions' => [['type' => 'sun_window', 'start' => 'sunset', 'end' => 'sunrise']],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+    'names' => ['unifi:sensor:s1' => 'Kitchen Sensor', 'unifi:light:porch' => 'Porch'],
+]);
+assert_true(!empty($night['ok']), 'save sun window: ' . json_encode($night));
+assert_true(($night['automation']['conditions'][0]['start'] ?? '') === 'sunset', 'sun window start');
+assert_true(($night['automation']['conditions'][0]['end'] ?? '') === 'sunrise', 'sun window end');
+$sunsetClock = $auto->sunEventHm('sunset', $now, 51.5, -0.1, 0, $tz);
+$sunriseClock = $auto->sunEventHm('sunrise', $now, 51.5, -0.1, 0, $tz);
+assert_true(is_string($sunsetClock) && is_string($sunriseClock), 'sun window clocks');
+$noonLocal = $at->setTime(12, 0);
+$nightLocal = $at->setTime(22, 0);
+$motionSnap = static function (bool $motion): array {
+    return [
+        ['id' => 'unifi:sensor:s1', 'kind' => 'sensor', 'motion' => $motion, 'on' => false],
+        ['id' => 'unifi:light:porch', 'kind' => 'light', 'on' => false],
+    ];
+};
+$auto->tick($motionSnap(false), $noonLocal->getTimestamp() - 1);
+$r = $auto->tick($motionSnap(true), $noonLocal->getTimestamp());
+assert_true($r['fired'] === [], 'daytime motion must not pass sunset→sunrise: ' . json_encode($r) . " sunset=$sunsetClock sunrise=$sunriseClock");
+$auto->tick($motionSnap(false), $nightLocal->getTimestamp() - 1);
+$r = $auto->tick($motionSnap(true), $nightLocal->getTimestamp());
+assert_true($r['fired'] === ['a-night'], 'night motion must pass sunset→sunrise: ' . json_encode($r) . " sunset=$sunsetClock sunrise=$sunriseClock");
+$auto->delete('a-night');
+$commands = [];
+@unlink($auto->statePath());
+
+$tzRoot = sys_get_temp_dir() . '/yarbo-auto-tzc-' . bin2hex(random_bytes(3));
+mkdir($tzRoot . '/data', 0775, true);
+file_put_contents($tzRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['home' => true],
+], JSON_UNESCAPED_SLASHES));
+$tzCoords = new YarboHomeAutomations($tzRoot);
+$tzCoords->save(['timezone' => 'Europe/Zurich']);
+$fromTz = $tzCoords->coordsPublic();
+assert_true(($fromTz['source'] ?? '') === 'timezone', 'timezone coords: ' . json_encode($fromTz));
+assert_true(abs(($fromTz['latitude'] ?? 0) - 47.3833) < 0.05, 'Zurich lat: ' . json_encode($fromTz));
+assert_true(($fromTz['needs_coords'] ?? true) === false, 'timezone fills needs_coords');
+$found = $tzCoords->coordsFromTimezone('Europe/Zurich');
+assert_true(is_array($found) && abs($found['latitude'] - 47.3833) < 0.05, 'coordsFromTimezone');
+
 $sensorThen = $auto->save([
     'id' => 'a-bad',
     'trigger' => ['type' => 'time', 'at' => '08:00'],
@@ -707,9 +754,12 @@ assert_true(isset($dash['timezone']['name']) && isset($dash['runner']), 'dashboa
 assert_true(str_contains($js, "['scenes', 'Scenes']"), 'scenes group');
 assert_true(str_contains($js, 'homeAutoReadOffAfter'), 'turn-off-after helper');
 assert_true(str_contains($js, "data-auto-starter=\"motion\""), 'motion starter');
-assert_true(str_contains($js, 'homeAutoRequestBrowserGps'), 'browser GPS helper');
-assert_true(str_contains($js, 'getCurrentPosition'), 'browser geolocation');
-assert_true(str_contains($index, 'auto-geo'), 'use my location button');
+assert_true(str_contains($js, 'homeAutoLocatePanel'), 'panel location helper');
+assert_true(str_contains($js, 'sun_window'), 'sunset/sunrise Only if');
+assert_true(str_contains($js, "which === 'sun'"), 'sunset/sunrise Only if handler');
+assert_true(str_contains($index, 'Use this panel'), 'panel location button');
+assert_true(str_contains($index, 'Sunset / sunrise'), 'sun window button');
+assert_true(!str_contains($js, 'getCurrentPosition'), 'HTTP pages must not use browser GPS');
 assert_true(str_contains($js, 'homeAutoCanOpen'), 'capability helper');
 assert_true(str_contains($js, 'homeAutoCanMotion'), 'motion capability helper');
 assert_true(str_contains($js, 'data-auto-then-off'), 'then chip off-after');
@@ -769,5 +819,6 @@ assert_true(str_contains($change, '## [4.0.37]'), 'changelog 4.0.37');
 assert_true(str_contains($change, '## [4.0.39]'), 'changelog 4.0.39');
 assert_true(str_contains($change, '## [4.0.40]'), 'changelog 4.0.40');
 assert_true(str_contains($change, '## [4.0.52]'), 'changelog 4.0.52');
+assert_true(str_contains($change, '## [4.0.53]'), 'changelog 4.0.53');
 
 echo "test_home_automations.php ok\n";
