@@ -5188,15 +5188,6 @@ function homeAutoSunNeedsCoords() {
     return homeAutoUsesSun() && Boolean((homeDash.sun_coords || {}).needs_coords);
 }
 
-function homeAutoHasCoords() {
-    const coords = homeDash.sun_coords || {};
-    return Number.isFinite(Number(coords.latitude)) && Number.isFinite(Number(coords.longitude));
-}
-
-function homeAutoRoundCoord(n) {
-    return Math.round(Number(n) * 10000) / 10000;
-}
-
 function homeAutoFillCoordFields() {
     const coords = homeDash.sun_coords || {};
     const lat = document.getElementById('auto-lat');
@@ -6125,6 +6116,9 @@ function bindHomeAutomations() {
         const del = event.target.closest('[data-auto-del]');
         if (del) {
             const id = del.closest('[data-auto-id]')?.getAttribute('data-auto-id');
+            const rule = (homeDash.automations || []).find((row) => row.id === id);
+            const label = String(rule?.name || 'this automation').trim() || 'this automation';
+            if (!window.confirm(`Delete “${label}”? This cannot be undone.`)) return;
             try {
                 const data = await homeApi({ action: 'automation_delete', id });
                 if (!data.ok) throw new Error(data.error || 'Could not delete');

@@ -734,6 +734,7 @@ assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay'
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 assert_true(str_contains($js, 'openHomeAutomations'), 'Automations UI');
 assert_true(str_contains($js, 'data-auto-copy'), 'Copy as template');
+assert_true(str_contains($js, 'Delete “${label}”? This cannot be undone.'), 'delete confirmation');
 assert_true(str_contains($js, 'homeAutoFollowName'), 'rename when chips change');
 assert_true(str_contains($js, 'homeAutoDraftFromRule'), 'copy clones the rule');
 assert_true(str_contains($index, 'Follows When and Then unless you type a name'), 'name follows hint');
@@ -820,5 +821,6 @@ assert_true(str_contains($change, '## [4.0.39]'), 'changelog 4.0.39');
 assert_true(str_contains($change, '## [4.0.40]'), 'changelog 4.0.40');
 assert_true(str_contains($change, '## [4.0.52]'), 'changelog 4.0.52');
 assert_true(str_contains($change, '## [4.0.53]'), 'changelog 4.0.53');
+assert_true(str_contains($change, '## [4.0.54]'), 'changelog 4.0.54');
 
 echo "test_home_automations.php ok\n";

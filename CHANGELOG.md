@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.54] - 2026-10-03
+
+### Changed
+- Home Automations **Delete** asks for confirmation (with the rule name) so a tap does not remove it immediately.
+
 ## [4.0.53] - 2026-10-03
 
 ### Added
