@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 #include <Preferences.h>
@@ -8,6 +9,7 @@
 #include <ArduinoJson.h>
 #include <M5Unified.h>
 #include "version.h"
+#include "paper_net.h"
 
 // M5Stack PaperColor (https://docs.m5stack.com/en/core/PaperColor)
 // Spectra 6 400x600, no touch. Buttons A/B change page, C sleep/wake.
@@ -21,6 +23,7 @@ Preferences prefs;
 String wifiSsid;
 String wifiPass;
 String panelUrl;
+String remoteUrl;
 String token;
 String deviceName = "Paper Colour";
 String robotName = "";
@@ -28,6 +31,7 @@ String robotName = "";
 uint32_t lastPoll = 0;
 bool otaBusy = false;
 bool otaTriedThisBoot = false;
+bool usingRemote = false;
 String lastError;
 int battery = -1;
 String charging = "—";
@@ -91,6 +95,7 @@ void saveConfig()
     prefs.putString("ssid", wifiSsid);
     prefs.putString("pass", wifiPass);
     prefs.putString("url", panelUrl);
+    prefs.putString("remurl", remoteUrl);
     prefs.putString("token", token);
     prefs.putString("name", deviceName);
     prefs.putString("unlock", unlockPage);
@@ -103,6 +108,7 @@ void loadConfig()
     wifiSsid = prefs.getString("ssid", "");
     wifiPass = prefs.getString("pass", "");
     panelUrl = prefs.getString("url", "");
+    remoteUrl = prefs.getString("remurl", "");
     token = prefs.getString("token", "");
     deviceName = prefs.getString("name", "Paper Colour");
     String unlock = prefs.getString("unlock", unlockPage);
@@ -122,12 +128,13 @@ void applyConfigJson(const String &json)
     wifiSsid = doc["ssid"] | wifiSsid;
     wifiPass = doc["password"] | wifiPass;
     panelUrl = doc["panel_url"] | panelUrl;
+    if (!doc["remote_url"].isNull()) {
+        remoteUrl = doc["remote_url"] | remoteUrl;
+    }
     token = doc["token"] | token;
     deviceName = doc["name"] | deviceName;
-    panelUrl.replace(" ", "");
-    while (panelUrl.endsWith("/")) {
-        panelUrl.remove(panelUrl.length() - 1);
-    }
+    paperNetNormalize(panelUrl);
+    paperNetNormalize(remoteUrl);
     saveConfig();
     Serial.println("CFG_OK");
     Serial.flush();
@@ -184,7 +191,7 @@ String screenKey()
         + (lymowOn ? "1" : "0") + "|" + String(powerwallPct) + "|" + powerwallSolar + "|"
         + powerwallLoad + "|" + String((int) WiFi.status()) + "|" + logoHash + "|"
         + String(screenLocked ? 1 : 0) + "|" + lockScreen + "|" + vestaboardHash + "|"
-        + deviceName + "|" + clockLocal;
+        + deviceName + "|" + clockLocal + "|" + String(usingRemote ? 1 : 0);
 }
 
 bool pageEnabled(int page)
@@ -319,6 +326,9 @@ void drawPager()
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(BL_DATUM);
     String wifi = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Wi-Fi: waiting";
+    if (usingRemote) {
+        wifi = String("R  ") + wifi;
+    }
     M5.Display.drawString(wifi, 16, H - 8);
     M5.Display.setTextDatum(BR_DATUM);
     M5.Display.drawString("keys · pages", W - 16, H - 8);
@@ -750,10 +760,7 @@ bool syncPaperLogo(const String &hash)
         return true;
     }
     HTTPClient http;
-    http.begin(panelUrl + "/api/device.php?action=logo");
-    http.addHeader("X-PaperMono-Token", token);
-    http.setTimeout(12000);
-    int code = http.GET();
+    int code = paperNetGet(http, "/api/device.php?action=logo", 12000);
     if (code != 200) {
         http.end();
         return false;
@@ -810,21 +817,17 @@ void drawOtaScreen()
 
 void runOtaUpdate()
 {
-    if (otaBusy || WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
+    if (otaBusy || WiFi.status() != WL_CONNECTED || (panelUrl.isEmpty() && remoteUrl.isEmpty()) || token.isEmpty()) {
         return;
     }
     otaBusy = true;
     WiFi.setSleep(false);
     drawOtaScreen();
     delay(1200);
-    HTTPUpdate updater(300000);
-    updater.rebootOnUpdate(true);
-    updater.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    String url = panelUrl + "/api/device.php?action=firmware&token=" + token;
-    WiFiClient client;
-    t_httpUpdate_return ret = updater.update(client, url);
+    String path = "/api/device.php?action=firmware&token=" + token;
+    bool ok = paperNetOta(path);
     otaBusy = false;
-    if (ret != HTTP_UPDATE_OK) {
+    if (!ok) {
         lastError = "update failed";
         drawScreen(true);
     }
@@ -842,11 +845,11 @@ bool tabletPluggedIn()
     return false;
 }
 
-static String panelApiUrl(const char *action)
+static String panelApiPath(const char *action)
 {
     tabletBat = M5.Power.getBatteryLevel();
     bool chargingNow = tabletPluggedIn();
-    String url = panelUrl + "/api/device.php?action=";
+    String url = "/api/device.php?action=";
     url += action;
     url += "&fw=";
     url += PAPERMONO_FW_VERSION;
@@ -861,15 +864,12 @@ static String panelApiUrl(const char *action)
 
 bool httpGetStatus()
 {
-    if (WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
+    if (WiFi.status() != WL_CONNECTED || (panelUrl.isEmpty() && remoteUrl.isEmpty()) || token.isEmpty()) {
         return false;
     }
     HTTPClient http;
-    String url = panelApiUrl("compact");
-    http.begin(url);
-    http.addHeader("X-PaperMono-Token", token);
-    http.setTimeout(8000);
-    int code = http.GET();
+    String url = panelApiPath("compact");
+    int code = paperNetGet(http, url);
     String body = http.getString();
     http.end();
     if (code != 200) {
@@ -929,6 +929,14 @@ bool httpGetStatus()
         unlockPage = unlock;
         saveConfig();
     }
+    if (!doc["remote_url"].isNull()) {
+        String ru = doc["remote_url"] | "";
+        paperNetNormalize(ru);
+        if (ru != remoteUrl) {
+            remoteUrl = ru;
+            saveConfig();
+        }
+    }
     clockLocal = doc["clock_local"] | clockLocal;
     clockDate = doc["clock_date"] | clockDate;
     vestaboardHash = doc["vestaboard_hash"] | vestaboardHash;
@@ -954,18 +962,15 @@ bool httpGetStatus()
 
 bool httpGetPlans(bool refresh)
 {
-    if (WiFi.status() != WL_CONNECTED || panelUrl.isEmpty() || token.isEmpty()) {
+    if (WiFi.status() != WL_CONNECTED || (panelUrl.isEmpty() && remoteUrl.isEmpty()) || token.isEmpty()) {
         return false;
     }
     HTTPClient http;
-    String url = panelApiUrl("plans");
+    String url = panelApiPath("plans");
     if (refresh) {
         url += "&refresh=1";
     }
-    http.begin(url);
-    http.addHeader("X-PaperMono-Token", token);
-    http.setTimeout(20000);
-    int code = http.GET();
+    int code = paperNetGet(http, url, 20000);
     String body = http.getString();
     http.end();
     if (code != 200) {
@@ -1015,10 +1020,6 @@ bool httpCommand(const char *cmd, const char *planId = nullptr)
     if (WiFi.status() != WL_CONNECTED) {
         return false;
     }
-    HTTPClient http;
-    http.begin(panelUrl + "/api/device.php");
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("X-PaperMono-Token", token);
     JsonDocument doc;
     doc["action"] = "command";
     doc["command"] = cmd;
@@ -1028,7 +1029,8 @@ bool httpCommand(const char *cmd, const char *planId = nullptr)
     }
     String payload;
     serializeJson(doc, payload);
-    int code = http.POST(payload);
+    HTTPClient http;
+    int code = paperNetPost(http, "/api/device.php", payload);
     String body = http.getString();
     http.end();
     JsonDocument res;

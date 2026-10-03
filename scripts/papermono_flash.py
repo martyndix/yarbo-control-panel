@@ -354,6 +354,8 @@ def extras_from_args(args) -> dict:
         extras["clock_tz"] = args.timezone
     if getattr(args, "vestaboard", None) is not None:
         extras["vestaboard_enabled"] = bool(args.vestaboard)
+    if getattr(args, "remote_url", None) is not None:
+        extras["remote_url"] = str(args.remote_url).rstrip("/")
     return extras
 
 
@@ -463,6 +465,7 @@ def main() -> int:
         p.add_argument("--clock-offset", type=int, default=None)
         p.add_argument("--timezone", default=None)
         p.add_argument("--vestaboard", type=int, default=None)
+        p.add_argument("--remote-url", default=None)
     args = parser.parse_args()
 
     if args.cmd == "ports":

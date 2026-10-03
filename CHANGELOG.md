@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.41] - 2026-10-03
+
+### Added
+- Settings → E-paper **Remote access** lets PaperMono and Paper Colour reach the panel from another Wi-Fi. On the LAN they still use the usual Panel URL first; away they fall back to HTTPS. Built-in **Tailscale Funnel** (free, install on the Pi, one browser login) or paste an HTTPS URL you already have. The Funnel only exposes `/api/device.php` (token required), not Settings. PaperMono firmware **0.1.57** and Paper Colour **0.2.18-colour** pick up `remote_url` on the next poll and show a small **R** when they are on the remote URL. The lock-screen logo uses the same token so it works remotely.
+
 ## [4.0.40] - 2026-10-03
 
 ### Fixed

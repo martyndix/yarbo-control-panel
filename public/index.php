@@ -1195,7 +1195,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.13-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.18-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -1218,9 +1218,38 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <input type="password" id="papermono-wifi-password" name="papermono_wifi_password" autocomplete="new-password" placeholder="2.4 GHz only — these tablets have no 5 GHz">
                             </label>
                             <label class="settings-field">
-                                <span class="label">Panel URL (this server, as the tablet will reach it)</span>
+                                <span class="label">Panel URL (this server, as the tablet will reach it on the LAN)</span>
                                 <input type="url" id="papermono-panel-url" name="papermono_panel_url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:8080">
                             </label>
+                            <h4 class="settings-subtitle">Remote access</h4>
+                            <p class="hint">Turn this on if you take a tablet to another Wi-Fi. On the home LAN it still uses the Panel URL above first. Away, it falls back to HTTPS. The tunnel only exposes the tablet API (<code>/api/device.php</code>), not Settings. Tablets show a small <strong>R</strong> when they are on that remote URL. After an update, queue a Wi-Fi firmware update so existing tablets learn the new URL.</p>
+                            <label class="settings-checkbox"><input type="checkbox" id="papermono-remote-enabled"><span>Allow tablets to reach this panel from another network</span></label>
+                            <div class="papermono-kind-switch paper-remote-provider" role="radiogroup" aria-label="Remote access method">
+                                <label class="papermono-kind-card is-active">
+                                    <input type="radio" name="papermono-remote-provider" value="tailscale" checked>
+                                    <span class="papermono-kind-card-title">Tailscale Funnel</span>
+                                    <span class="papermono-kind-card-meta">Free. Installs on this Pi. One browser login, then enable Funnel in Tailscale.</span>
+                                </label>
+                                <label class="papermono-kind-card">
+                                    <input type="radio" name="papermono-remote-provider" value="custom">
+                                    <span class="papermono-kind-card-title">Existing HTTPS URL</span>
+                                    <span class="papermono-kind-card-meta">Paste a Cloudflare / Tesla public URL you already have</span>
+                                </label>
+                            </div>
+                            <label class="settings-field" id="papermono-remote-url-field">
+                                <span class="label">HTTPS origin</span>
+                                <input type="url" id="papermono-remote-url" name="papermono_remote_url" autocomplete="off" spellcheck="false" placeholder="https://your-host.ts.net">
+                            </label>
+                            <p class="hint" id="papermono-remote-status">Remote access is off.</p>
+                            <p class="hint hidden" id="papermono-remote-auth-wrap">Log in to Tailscale: <a id="papermono-remote-auth" href="#" target="_blank" rel="noopener">Open login</a></p>
+                            <div class="papermono-actions" id="papermono-remote-actions">
+                                <button type="button" class="btn" id="papermono-remote-save">Save remote access</button>
+                                <button type="button" class="btn btn-secondary" id="papermono-remote-install">Install Tailscale</button>
+                                <button type="button" class="btn btn-secondary" id="papermono-remote-login">Log in</button>
+                                <button type="button" class="btn btn-secondary" id="papermono-remote-funnel">Start Funnel</button>
+                            </div>
+                            <p id="papermono-remote-result" class="settings-cloud-result hidden" role="status"></p>
+                            <p class="hint">Funnel: after login, open the <a href="https://login.tailscale.com/admin/acls" target="_blank" rel="noopener">Tailscale ACL editor</a> and allow Funnel (or DNS → Funnel in the admin console). Then Start Funnel. Do not port-forward 8080.</p>
                             <label class="settings-field">
                                 <span class="label">Device name</span>
                                 <input type="text" id="papermono-name" name="papermono_name" value="PaperMono" autocomplete="off">
@@ -1725,7 +1754,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.56 / 0.2.17-colour. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.57 / 0.2.18-colour. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

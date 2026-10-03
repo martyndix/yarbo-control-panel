@@ -630,7 +630,7 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 ## Security
 
 - The Yarbo MQTT broker (port **1883**) has **no authentication**. Anyone on your Wi‑Fi who knows the robot IP can read telemetry and send commands.
-- Keep this control panel on your **LAN only** — do not port-forward port 8080 or 1883 to the internet.
+- Keep this control panel on your **LAN only** — do not port-forward port 8080 or 1883 to the internet. Optional Paper tablet **Remote access** uses an outbound Tailscale Funnel (or an HTTPS URL you already have) that only exposes `/api/device.php` with a pairing token.
 - **Manual drive**: test with **extreme care**. Clear the area of people, pets, and obstacles before using the D-pad; stay ready to release / Stop. Use only on open, flat ground.
 
 ---

@@ -104,7 +104,19 @@ if ($method === 'GET' && $action === 'plans') {
     json_response($devices->compactPlans($refresh, $devices->deviceKind($device)));
 }
 
+if ($method === 'GET' && $action === 'paper_remote') {
+    json_response(['ok' => true] + (new \Yarbo\YarboPaperRemote(dirname(__DIR__, 2)))->publicView());
+}
+
 if ($method === 'GET' && $action === 'logo') {
+    $logoToken = device_token_from_request();
+    if ($logoToken !== '') {
+        $logoDevice = $devices->findByToken($logoToken);
+        if ($logoDevice === null) {
+            json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
+        }
+        device_touch_seen($devices, $logoDevice);
+    }
     $devices->prepareLogoForDevice();
     $path = $devices->logoPath();
     if (!is_file($path)) {
@@ -192,6 +204,16 @@ if ($action === 'ota') {
 
 if ($action === 'prefs') {
     json_response($devices->savePrefs($input));
+}
+
+if ($action === 'paper_remote') {
+    json_response((new \Yarbo\YarboPaperRemote(dirname(__DIR__, 2)))->save($input));
+}
+
+if ($action === 'paper_remote_step') {
+    set_time_limit(180);
+    $step = trim((string) ($input['step'] ?? ''));
+    json_response((new \Yarbo\YarboPaperRemote(dirname(__DIR__, 2)))->runStep($step));
 }
 
 if ($action === 'paper_message') {

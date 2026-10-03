@@ -1265,9 +1265,13 @@ body.modal-open {
 }
 
 .papermono-kind-card-meta {
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     color: var(--muted);
     line-height: 1.35;
+}
+
+.paper-remote-provider {
+    margin-top: 0.75rem;
 }
 
 .papercolor-preview svg {

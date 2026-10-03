@@ -50,6 +50,18 @@ class PaperMonoFlashTests(unittest.TestCase):
         self.assertEqual(body["unlock_page"], "house")
         self.assertEqual(body["brightness"], 80)
 
+    def test_cfg_payload_includes_remote_url(self) -> None:
+        raw = flash.config_payload_bytes(
+            "HomeWiFi",
+            "secret",
+            "http://192.168.1.50:8080",
+            "tok",
+            "Kitchen tablet",
+            {"remote_url": "https://pi.tailxxxxx.ts.net"},
+        )
+        body = json.loads(raw.decode("utf-8")[4:].strip())
+        self.assertEqual(body["remote_url"], "https://pi.tailxxxxx.ts.net")
+
     def test_send_config_succeeds_on_cfg_ok(self) -> None:
         class FakeSer:
             is_open = True

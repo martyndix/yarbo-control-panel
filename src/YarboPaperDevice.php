@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Yarbo;
 
+require_once __DIR__ . '/YarboPaperRemote.php';
+
 /**
  * Paper companion devices: pairing tokens, compact status, USB flash.
  * Hardware: M5Stack PaperMono SKU C153, or PaperColor (Spectra 6, no touch).
@@ -14,9 +16,9 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.56';
+    public const FIRMWARE_VERSION = '0.1.57';
     public const MENU_LABEL_MAX = 20;
-    public const FIRMWARE_VERSION_COLOR = '0.2.17-colour';
+    public const FIRMWARE_VERSION_COLOR = '0.2.18-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const MESSAGE_MAX = 50;
@@ -103,6 +105,7 @@ final class YarboPaperDevice
             'devices' => $this->publicTablets(),
             'web_client' => $this->publicDevice($this->webClient()),
             'prefs' => $this->publicPrefs(),
+            'paper_remote' => (new YarboPaperRemote($this->projectRoot))->publicView(),
         ] + $this->logoPublicView();
     }
 
@@ -980,6 +983,7 @@ final class YarboPaperDevice
             'powerwall_error' => false,
             'lymow_error' => $lyEnabled && $lyWork === 7,
             'ota_pending' => $this->otaPendingActive($forDevice),
+            'remote_url' => (new YarboPaperRemote($this->projectRoot))->tabletOrigin(),
         ] + $this->logoPublicView()
             + $this->prefsCompact($forDevice)
             + $this->vestaboardCompact($vbObj, $vb, $parsed, $online)
@@ -1348,6 +1352,7 @@ final class YarboPaperDevice
             'lock_screen' => (string) $prefs['lock_screen'],
             'unlock_page' => (string) $prefs['unlock_page'],
             'vestaboard_enabled' => !empty($vb['enabled']),
+            'remote_url' => (new YarboPaperRemote($this->projectRoot))->tabletOrigin(),
         ];
         if (isset($clock['clock_offset'])) {
             $out['clock_offset'] = (int) $clock['clock_offset'];
@@ -1372,6 +1377,8 @@ final class YarboPaperDevice
             (string) $fields['unlock_page'],
             '--vestaboard',
             !empty($fields['vestaboard_enabled']) ? '1' : '0',
+            '--remote-url',
+            (string) ($fields['remote_url'] ?? ''),
         ];
         if (isset($fields['clock_offset'])) {
             $args[] = '--clock-offset';

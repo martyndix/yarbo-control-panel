@@ -225,6 +225,16 @@ const els = {
     papermonoSsid: document.getElementById('papermono-ssid'),
     papermonoWifiPassword: document.getElementById('papermono-wifi-password'),
     papermonoPanelUrl: document.getElementById('papermono-panel-url'),
+    papermonoRemoteEnabled: document.getElementById('papermono-remote-enabled'),
+    papermonoRemoteUrl: document.getElementById('papermono-remote-url'),
+    papermonoRemoteStatus: document.getElementById('papermono-remote-status'),
+    papermonoRemoteAuthWrap: document.getElementById('papermono-remote-auth-wrap'),
+    papermonoRemoteAuth: document.getElementById('papermono-remote-auth'),
+    papermonoRemoteResult: document.getElementById('papermono-remote-result'),
+    papermonoRemoteSave: document.getElementById('papermono-remote-save'),
+    papermonoRemoteInstall: document.getElementById('papermono-remote-install'),
+    papermonoRemoteLogin: document.getElementById('papermono-remote-login'),
+    papermonoRemoteFunnel: document.getElementById('papermono-remote-funnel'),
     papermonoName: document.getElementById('papermono-name'),
     papermonoLogo: document.getElementById('papermono-logo'),
     papermonoLogoThumb: document.getElementById('papermono-logo-thumb'),
@@ -8125,6 +8135,140 @@ async function clearPaperLogo() {
     }
 }
 
+function paperRemoteProvider() {
+    const checked = document.querySelector('input[name="papermono-remote-provider"]:checked');
+    return checked?.value === 'custom' ? 'custom' : 'tailscale';
+}
+
+function setPaperRemoteResult(message, type) {
+    if (!els.papermonoRemoteResult) return;
+    if (!message) {
+        els.papermonoRemoteResult.textContent = '';
+        els.papermonoRemoteResult.className = 'settings-cloud-result hidden';
+        return;
+    }
+    els.papermonoRemoteResult.textContent = message;
+    els.papermonoRemoteResult.className = `settings-cloud-result ${type || ''}`.trim();
+    els.papermonoRemoteResult.classList.remove('hidden');
+}
+
+function applyPaperRemoteUi(remote) {
+    if (!remote || typeof remote !== 'object') return;
+    if (els.papermonoRemoteEnabled) {
+        els.papermonoRemoteEnabled.checked = Boolean(remote.enabled);
+    }
+    const provider = remote.provider === 'custom' ? 'custom' : 'tailscale';
+    document.querySelectorAll('input[name="papermono-remote-provider"]').forEach((input) => {
+        input.checked = input.value === provider;
+        input.closest('.papermono-kind-card')?.classList.toggle('is-active', input.checked);
+    });
+    if (els.papermonoRemoteUrl && remote.origin && !els.papermonoRemoteUrl.dataset.dirty) {
+        els.papermonoRemoteUrl.value = remote.origin;
+    } else if (els.papermonoRemoteUrl && !els.papermonoRemoteUrl.value && remote.origin) {
+        els.papermonoRemoteUrl.value = remote.origin;
+    }
+    const ts = remote.tailscale || {};
+    const bits = [];
+    if (!remote.enabled) {
+        bits.push('Remote access is off. Tablets only use the LAN Panel URL.');
+    } else if (remote.tablet_url) {
+        bits.push(`Tablets will try ${remote.tablet_url} after the LAN URL.`);
+    } else {
+        bits.push('Remote is on, but there is no HTTPS origin yet.');
+    }
+    if (provider === 'tailscale') {
+        if (!ts.installed) bits.push('Tailscale is not installed on this host.');
+        else if (!ts.logged_in) bits.push('Tailscale is installed. Click Log in and open the link.');
+        else if (ts.needs_funnel_acl) bits.push('Allow Funnel in the Tailscale admin console, then Start Funnel.');
+        else if (!ts.funnel_on) bits.push('Logged in. Click Start Funnel.');
+        else bits.push('Funnel is on.');
+        if (remote.gate_listening) bits.push('The tablet-only gate is listening.');
+        else if (remote.enabled) bits.push('The tablet-only gate is not listening yet — Save remote access, or restart the panel.');
+    }
+    if (ts.error) bits.push(ts.error);
+    if (els.papermonoRemoteStatus) {
+        els.papermonoRemoteStatus.textContent = bits.join(' ');
+    }
+    if (els.papermonoRemoteAuthWrap && els.papermonoRemoteAuth) {
+        const url = String(ts.auth_url || '');
+        if (url.startsWith('http')) {
+            els.papermonoRemoteAuth.href = url;
+            els.papermonoRemoteAuthWrap.classList.remove('hidden');
+        } else {
+            els.papermonoRemoteAuthWrap.classList.add('hidden');
+        }
+    }
+    const tailscaleOn = provider === 'tailscale';
+    if (els.papermonoRemoteInstall) els.papermonoRemoteInstall.classList.toggle('hidden', !tailscaleOn);
+    if (els.papermonoRemoteLogin) els.papermonoRemoteLogin.classList.toggle('hidden', !tailscaleOn);
+    if (els.papermonoRemoteFunnel) els.papermonoRemoteFunnel.classList.toggle('hidden', !tailscaleOn);
+}
+
+async function savePaperRemote() {
+    const enabled = Boolean(els.papermonoRemoteEnabled?.checked);
+    const provider = paperRemoteProvider();
+    const origin = els.papermonoRemoteUrl?.value.trim() ?? '';
+    setPaperRemoteResult('Saving remote access…');
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'paper_remote', enabled, provider, origin }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not save remote access');
+        if (els.papermonoRemoteUrl) delete els.papermonoRemoteUrl.dataset.dirty;
+        applyPaperRemoteUi(data);
+        setPaperRemoteResult(data.message || (enabled
+            ? 'Remote access saved. Update tablets over Wi-Fi so they learn the URL.'
+            : 'Remote access is off. Tablets keep using the LAN URL.'), 'success');
+        showToast('Remote access saved', 'success');
+    } catch (err) {
+        setPaperRemoteResult(err.message || 'Could not save remote access', 'error');
+    }
+}
+
+async function runPaperRemoteStep(step, button) {
+    if (button) button.disabled = true;
+    const labels = {
+        install: 'Installing Tailscale…',
+        up: 'Starting Tailscale login…',
+        'funnel-on': 'Starting Funnel…',
+        status: 'Refreshing…',
+    };
+    setPaperRemoteResult(labels[step] || 'Working…');
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'paper_remote_step', step }),
+        });
+        const data = await parseJsonResponse(res);
+        applyPaperRemoteUi(data);
+        if (!data.ok && data.error) {
+            throw new Error(data.error);
+        }
+        const ts = data.tailscale || {};
+        if (step === 'install') {
+            setPaperRemoteResult(data.step?.message || data.message || 'Tailscale installed. Click Log in.', 'success');
+        } else if (step === 'up' && ts.auth_url) {
+            setPaperRemoteResult('Open the Tailscale login link, then click Log in again when you are done.', 'success');
+        } else if (step === 'funnel-on' && (data.tablet_url || ts.funnel_on)) {
+            setPaperRemoteResult(`Funnel is on${data.tablet_url ? ` (${data.tablet_url})` : ''}. Save remote access, then update the tablets.`, 'success');
+        } else {
+            setPaperRemoteResult(data.error || data.message || 'Done.', data.error ? 'error' : 'success');
+        }
+        if (els.papermonoRemoteUrl && data.origin) {
+            els.papermonoRemoteUrl.value = data.origin;
+            delete els.papermonoRemoteUrl.dataset.dirty;
+        }
+    } catch (err) {
+        setPaperRemoteResult(err.message || 'Tailscale step failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 function paperMonoFormPayload() {
     const kind = paperMonoSelectedKind();
     return {
@@ -8538,6 +8682,7 @@ async function loadPaperMonoDashboard() {
         applyPaperLogoPreview(data.logo_url || null);
         applyPaperMonoPrefs(data.prefs);
         applyPaperWebClientName(data.web_client);
+        applyPaperRemoteUi(data.paper_remote);
         renderPaperMonoDevices(data.devices);
         setMailCompanionVisible(Array.isArray(data.devices) && data.devices.length > 0);
         ensurePaperPowerPoll();
@@ -10827,6 +10972,28 @@ els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbT
 els.papermonoBuild?.addEventListener('click', (e) => buildPaperMonoFirmware(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));
 els.papermonoConfig?.addEventListener('click', (e) => runPaperMonoUsb('configure_usb', e.currentTarget));
+els.papermonoRemoteSave?.addEventListener('click', () => savePaperRemote());
+els.papermonoRemoteInstall?.addEventListener('click', (e) => runPaperRemoteStep('install', e.currentTarget));
+els.papermonoRemoteLogin?.addEventListener('click', (e) => runPaperRemoteStep('up', e.currentTarget));
+els.papermonoRemoteFunnel?.addEventListener('click', (e) => runPaperRemoteStep('funnel-on', e.currentTarget));
+els.papermonoRemoteUrl?.addEventListener('input', () => {
+    if (els.papermonoRemoteUrl) els.papermonoRemoteUrl.dataset.dirty = '1';
+});
+document.querySelectorAll('input[name="papermono-remote-provider"]').forEach((input) => {
+    input.addEventListener('change', () => {
+        document.querySelectorAll('input[name="papermono-remote-provider"]').forEach((el) => {
+            el.closest('.papermono-kind-card')?.classList.toggle('is-active', el.checked);
+        });
+        applyPaperRemoteUi({
+            enabled: Boolean(els.papermonoRemoteEnabled?.checked),
+            provider: paperRemoteProvider(),
+            origin: els.papermonoRemoteUrl?.value.trim() || '',
+            tablet_url: '',
+            gate_listening: false,
+            tailscale: {},
+        });
+    });
+});
 els.papermonoSetupKit?.addEventListener('click', () => downloadPaperSetupKit());
 els.papermonoLogo?.addEventListener('change', (e) => {
     const file = e.currentTarget?.files?.[0];

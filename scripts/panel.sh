@@ -41,6 +41,7 @@ cleanup() {
   fi
   pkill -f '[s]cripts/matter_agent.py' 2>/dev/null || true
   yarbo_stop_matter_agent 2>/dev/null || true
+  pkill -f '[p]aper_remote_router.php' 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -135,6 +136,13 @@ echo "==> Starting anonymous usage ping"
   done
 ) &
 METRICS_PID=$!
+
+if [[ -f "${ROOT}/scripts/paper_remote.sh" ]]; then
+  if grep -q '"enabled": true' "${ROOT}/data/paper-remote.json" 2>/dev/null; then
+    echo "==> Starting paper remote gate (tablets off-LAN)"
+    bash "${ROOT}/scripts/paper_remote.sh" ensure >/dev/null 2>&1 || true
+  fi
+fi
 
 echo "==> Starting panel on http://${HOST}:${PORT}"
 echo "    Keep this process running. Hard-refresh the browser after start."

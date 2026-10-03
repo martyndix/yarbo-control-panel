@@ -40,4 +40,4 @@ The zip contains the Wi-Fi password and pairing token — keep it private. Full 
 
 Yarbo Home / Status / Health / Plans when the Yarbo module is on. Extra pages for Powerwall and Lymow only when those modules are enabled. **BOARD** is a live 3×15 Vestaboard preview when the Note is enabled. The top line is **YARBO · COLOUR**, **POWERWALL**, **LYMOW**, or **VESTABOARD** for that page (Lymow and Powerwall do not repeat the name). **C** shows the lock screensaver (logo, Vestaboard, or both — chosen in Settings). Optional **header logo** is the same Settings upload as PaperMono (reflash **0.2.11-colour**). Do not expect 15-second redraws — Spectra 6 is a set-and-leave sign.
 
-Compact status is `GET /api/device.php?action=compact`.
+Compact status is `GET /api/device.php?action=compact`. Off-LAN use is the same Settings → E-paper **Remote access** toggle as PaperMono (`docs/papermono.md`). Firmware **0.2.18-colour** tries the LAN URL first, then HTTPS, and shows **R** at the bottom next to the IP when it is on the remote URL.

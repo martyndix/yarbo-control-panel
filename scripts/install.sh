@@ -218,6 +218,9 @@ install_update_sudoers() {
     echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} enable --now docker"
     echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} restart docker"
     echo "${owner} ALL=(ALL) NOPASSWD: ${wrapper}"
+    if [[ -x "${ROOT}/scripts/paper_remote.sh" ]]; then
+      echo "${owner} ALL=(ALL) NOPASSWD: ${ROOT}/scripts/paper_remote.sh"
+    fi
     if [[ -x /usr/sbin/sysctl ]]; then
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.all.disable_ipv6=0"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.default.disable_ipv6=0"
