@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.40] - 2026-10-03
+
+### Fixed
+- Home **Hide** on UniFi floodlight **motion** sensors now works. They move to Hidden (Unhide brings them back) and still fire Automations, instead of staying on the Home grid because they follow the floodlight.
+
 ## [4.0.39] - 2026-10-03
 
 ### Added

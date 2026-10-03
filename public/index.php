@@ -605,7 +605,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div id="home-devices" class="home-device-grid"></div>
             <div id="home-hidden-wrap" class="home-hidden-wrap hidden">
                 <h3 class="settings-subtitle">Hidden</h3>
-                <p class="hint">Hidden lights stay paired (Hue Bridge bulbs cannot be unpaired one at a time). Unhide to show them on Home and PaperMono again.</p>
+                <p class="hint">Hidden devices stay paired and still work in Automations. Unhide to show them on Home and PaperMono again.</p>
                 <div id="home-hidden-devices" class="home-device-grid"></div>
             </div>
             <div id="home-scenes-block" class="home-scenes-block" hidden>

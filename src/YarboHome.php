@@ -705,7 +705,7 @@ final class YarboHome
         if ($id === '') {
             return ['ok' => false, 'error' => 'Pick a device'];
         }
-        if (YarboUnifi::isHomeId($id)) {
+        if (YarboUnifi::isHomeId($id) && !YarboUnifi::isCompanionSensorId($id)) {
             $ok = (new YarboUnifi($this->projectRoot))->setShowOnHome($id, !$hidden);
             if (!$ok) {
                 return ['ok' => false, 'error' => 'Could not update the UniFi Home list'];

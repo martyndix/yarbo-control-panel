@@ -72,6 +72,15 @@ final class YarboUnifi
         return self::parseHomeId($id) !== null;
     }
 
+    public static function isCompanionSensorId(string $id): bool
+    {
+        $parsed = self::parseHomeId($id);
+
+        return $parsed !== null
+            && $parsed['kind'] === self::KIND_SENSOR
+            && str_starts_with($parsed['native_id'], 'pir-');
+    }
+
     public static function normalizeHost(string $value): string
     {
         $value = trim($value);

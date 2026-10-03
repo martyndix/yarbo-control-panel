@@ -689,6 +689,42 @@ if (!in_array('unifi:sensor:pir-light1', $autoIds, true)) {
     exit(1);
 }
 
+$hidePir = $home->hideDevice('unifi:sensor:pir-light1', true);
+if (!($hidePir['ok'] ?? false)) {
+    fwrite(STDERR, 'hide PIR ' . json_encode($hidePir) . "\n");
+    exit(1);
+}
+$afterPirHide = $home->dashboard();
+$afterPirIds = array_column($afterPirHide['devices'] ?? [], 'id');
+$afterPirHidden = array_column($afterPirHide['hidden_devices'] ?? [], 'id');
+$afterPirAuto = array_column($afterPirHide['automation_devices'] ?? [], 'id');
+if (in_array('unifi:sensor:pir-light1', $afterPirIds, true)) {
+    fwrite(STDERR, 'PIR stayed on Home after hide ' . json_encode($afterPirIds) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:sensor:pir-light1', $afterPirHidden, true)) {
+    fwrite(STDERR, 'PIR missing from Hidden after hide ' . json_encode($afterPirHidden) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:sensor:pir-light1', $afterPirAuto, true)) {
+    fwrite(STDERR, 'hidden PIR dropped from Automations ' . json_encode($afterPirAuto) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:light:light1', $afterPirIds, true)) {
+    fwrite(STDERR, 'hiding PIR must leave the floodlight on Home ' . json_encode($afterPirIds) . "\n");
+    exit(1);
+}
+$unhidePir = $home->hideDevice('unifi:sensor:pir-light1', false);
+if (!($unhidePir['ok'] ?? false)) {
+    fwrite(STDERR, 'unhide PIR ' . json_encode($unhidePir) . "\n");
+    exit(1);
+}
+$afterPirShow = array_column($home->dashboard()['devices'] ?? [], 'id');
+if (!in_array('unifi:sensor:pir-light1', $afterPirShow, true)) {
+    fwrite(STDERR, 'PIR missing from Home after unhide ' . json_encode($afterPirShow) . "\n");
+    exit(1);
+}
+
 $hide = $home->hideDevice('unifi:camera:cam1', true);
 if (!($hide['ok'] ?? false)) {
     fwrite(STDERR, 'hide ' . json_encode($hide) . "\n");

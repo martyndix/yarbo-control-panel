@@ -715,5 +715,6 @@ assert_true(str_contains($matterPhp, 'function portOpen'), 'Matter client checks
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.37]'), 'changelog 4.0.37');
 assert_true(str_contains($change, '## [4.0.39]'), 'changelog 4.0.39');
+assert_true(str_contains($change, '## [4.0.40]'), 'changelog 4.0.40');
 
 echo "test_home_automations.php ok\n";
