@@ -107,6 +107,24 @@ def wait_for_usb_reboot(preferred: str) -> str:
     return port
 
 
+def port_identity(path: str):
+    """Identify a USB ACM node so a same-path re-enumerate can force a reopen."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino, getattr(st, "st_rdev", 0))
+
+
+def serial_snippet(text: str, limit: int = 160) -> str:
+    compact = " ".join((text or "").split())
+    if not compact:
+        return "(empty)"
+    if len(compact) > limit:
+        return compact[: limit - 3] + "..."
+    return compact
+
+
 def idle_modem_lines(ser) -> None:
     """Leave USB-Serial/JTAG out of reset, and stop close() from dropping DTR (HUPCL)."""
     for _ in range(2):
@@ -126,16 +144,29 @@ def idle_modem_lines(ser) -> None:
         pass
 
 
+def cdc_host_present(ser) -> None:
+    """Assert DTR after open so USB-OTG CDC TX is not dropped; keep RTS low (no reset)."""
+    try:
+        ser.rts = False
+        ser.dtr = True
+    except Exception:
+        pass
+
+
 def open_app_serial(port: str):
     import serial
 
     ser = serial.Serial()
     ser.port = port
     ser.baudrate = 115200
-    ser.timeout = 1.0
+    ser.timeout = 0.4
     ser.write_timeout = 3
     ser.dsrdtr = False
     ser.rtscts = False
+    try:
+        ser.exclusive = True
+    except Exception:
+        pass
     try:
         ser.dtr = False
         ser.rts = False
@@ -143,6 +174,7 @@ def open_app_serial(port: str):
         pass
     ser.open()
     idle_modem_lines(ser)
+    cdc_host_present(ser)
     return ser
 
 
@@ -156,20 +188,39 @@ def close_serial(ser) -> None:
         pass
 
 
-def read_serial_text(ser, timeout_s: float) -> str:
+def read_serial_text(ser, timeout_s: float, stop: tuple[str, ...] = ("CFG_OK", "CFG_ERR")) -> str:
     buf = ""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            chunk = ser.read(512)
+            waiting = getattr(ser, "in_waiting", 0) or 0
+            chunk = ser.read(waiting or 256)
         except Exception:
             break
         if chunk:
             buf += chunk.decode("utf-8", errors="replace")
-            if "CFG_OK" in buf or "CFG_ERR" in buf:
+            if any(token in buf for token in stop):
                 break
-        elif buf:
-            break
+        else:
+            time.sleep(0.05)
+    return buf
+
+
+def wait_for_app_ready(ser, timeout_s: float = 40.0) -> str:
+    """Wait until loop() is printing PAPER_READY, not just the one-shot at Serial.begin."""
+    buf = ""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        remain = max(0.05, deadline - time.time())
+        buf += read_serial_text(
+            ser,
+            min(0.8, remain),
+            ("CFG_OK", "CFG_ERR", "PAPER_READY"),
+        )
+        if "CFG_OK" in buf or "CFG_ERR" in buf:
+            return buf
+        if buf.count("PAPER_READY") >= 2:
+            return buf
     return buf
 
 
@@ -276,26 +327,57 @@ def send_config(
     last_error = ""
     current = wait_for_serial_port(port, timeout_s=40.0)
     ser = None
-    deadline = time.time() + 90.0
+    opened_port = ""
+    opened_id = None
+    deadline = time.time() + 120.0
     attempt = 0
+    empty_sends = 0
     try:
         while time.time() < deadline:
             attempt += 1
             current = wait_for_serial_port(current, timeout_s=12.0)
-            if ser is None or not getattr(ser, "is_open", False):
+            identity = port_identity(current)
+            try:
+                devices = listed_devices()
+                missing = bool(devices) and current not in devices
+            except Exception:
+                missing = False
+            stale = (
+                ser is None
+                or not getattr(ser, "is_open", False)
+                or opened_port != current
+                or (opened_id is not None and identity is not None and identity != opened_id)
+                or missing
+            )
+            if stale:
+                close_serial(ser)
+                ser = None
                 try:
                     ser = open_app_serial(current)
-                    # Opening ACM often pulses DTR/RTS and reboots USB CDC. Wait for app firmware.
-                    boot = read_serial_text(ser, 8.0)
+                    opened_port = current
+                    opened_id = port_identity(current)
+                    print("Waiting for PAPER_READY (e-paper init, USB CDC) …", file=sys.stderr, flush=True)
+                    boot = wait_for_app_ready(ser, 40.0)
                     if boot:
                         last_ack = boot
-                        if "CFG_OK" in boot:
-                            return {
-                                "ok": True,
-                                "error": None,
-                                "ack": last_ack.strip()[:400],
-                                "port": current,
-                            }
+                    if "CFG_OK" in boot:
+                        return {
+                            "ok": True,
+                            "error": None,
+                            "ack": last_ack.strip()[:400],
+                            "port": current,
+                        }
+                    if boot.count("PAPER_READY") < 2 and "CFG_ERR" not in boot and attempt < 3:
+                        last_error = "no PAPER_READY yet"
+                        print(
+                            f"USB not listening yet ({serial_snippet(boot)}). Reopening …",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        close_serial(ser)
+                        ser = None
+                        time.sleep(1.5)
+                        continue
                 except Exception as exc:
                     last_error = str(exc)
                     close_serial(ser)
@@ -303,12 +385,16 @@ def send_config(
                     time.sleep(1.5)
                     continue
             try:
+                ser.reset_input_buffer()
+            except Exception:
+                pass
+            try:
                 ser.write(b"\n")
                 ser.flush()
-                time.sleep(0.15)
+                time.sleep(0.2)
                 ser.write(payload)
                 ser.flush()
-                last_ack = read_serial_text(ser, 3.0)
+                last_ack = read_serial_text(ser, 8.0)
             except Exception as exc:
                 last_error = str(exc)
                 last_ack = ""
@@ -323,11 +409,23 @@ def send_config(
                     "ack": last_ack.strip()[:400],
                     "port": current,
                 }
+            print(
+                f"No CFG_OK yet (try {attempt}): {serial_snippet(last_ack)}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if not last_ack.strip():
+                empty_sends += 1
+            else:
+                empty_sends = 0
+            if empty_sends >= 2 or "CFG_ERR" in last_ack:
+                close_serial(ser)
+                ser = None
             time.sleep(1.2)
     finally:
         close_serial(ser)
 
-    detail = last_ack.strip()[:200] if last_ack.strip() else (last_error or "empty reply")
+    detail = serial_snippet(last_ack) if last_ack.strip() else (last_error or "empty reply")
     return {
         "ok": False,
         "error": (

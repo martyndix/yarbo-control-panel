@@ -724,6 +724,10 @@ void drawSetup()
     M5.Display.drawString("Keep this cable connected", 16, 330);
     M5.Display.drawString("until CFG_OK.", 16, 352);
     M5.Display.display();
+    while (M5.Display.displayBusy()) {
+        pollSerialConfig();
+        delay(5);
+    }
     lastDrawnKey = "setup";
 }
 
@@ -1130,6 +1134,9 @@ void setup()
 {
     Serial.setRxBufferSize(4096);
     Serial.begin(115200);
+#if defined(ARDUINO_USB_CDC_ON_BOOT)
+    Serial.setTxTimeoutMs(0);
+#endif
     announceUsbReady();
     for (int i = 0; i < 25; i++) {
         pollSerialConfig();
@@ -1138,6 +1145,11 @@ void setup()
     auto cfg = M5.config();
     cfg.clear_display = true;
     M5.begin(cfg);
+    announceUsbReady();
+    for (int i = 0; i < 50; i++) {
+        pollSerialConfig();
+        delay(20);
+    }
     M5.Display.setRotation(0);
     SPIFFS.begin(true);
     loadConfig();

@@ -231,6 +231,23 @@ def wait_for_usb_reboot(preferred: str) -> str:
     return port
 
 
+def port_identity(path: str):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino, getattr(st, "st_rdev", 0))
+
+
+def serial_snippet(text: str, limit: int = 160) -> str:
+    compact = " ".join((text or "").split())
+    if not compact:
+        return "(empty)"
+    if len(compact) > limit:
+        return compact[: limit - 3] + "..."
+    return compact
+
+
 def idle_modem_lines(ser) -> None:
     for _ in range(2):
         try:
@@ -249,16 +266,28 @@ def idle_modem_lines(ser) -> None:
         pass
 
 
+def cdc_host_present(ser) -> None:
+    try:
+        ser.rts = False
+        ser.dtr = True
+    except Exception:
+        pass
+
+
 def open_app_serial(port: str):
     import serial
 
     ser = serial.Serial()
     ser.port = port
     ser.baudrate = 115200
-    ser.timeout = 1.0
+    ser.timeout = 0.4
     ser.write_timeout = 3
     ser.dsrdtr = False
     ser.rtscts = False
+    try:
+        ser.exclusive = True
+    except Exception:
+        pass
     try:
         ser.dtr = False
         ser.rts = False
@@ -266,6 +295,7 @@ def open_app_serial(port: str):
         pass
     ser.open()
     idle_modem_lines(ser)
+    cdc_host_present(ser)
     return ser
 
 
@@ -279,20 +309,34 @@ def close_serial(ser) -> None:
         pass
 
 
-def read_serial_text(ser, timeout_s: float) -> str:
+def read_serial_text(ser, timeout_s: float, stop: tuple[str, ...] = ("CFG_OK", "CFG_ERR")) -> str:
     buf = ""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            chunk = ser.read(512)
+            waiting = getattr(ser, "in_waiting", 0) or 0
+            chunk = ser.read(waiting or 256)
         except Exception:
             break
         if chunk:
             buf += chunk.decode("utf-8", errors="replace")
-            if "CFG_OK" in buf or "CFG_ERR" in buf:
+            if any(token in buf for token in stop):
                 break
-        elif buf:
-            break
+        else:
+            time.sleep(0.05)
+    return buf
+
+
+def wait_for_app_ready(ser, timeout_s: float = 40.0) -> str:
+    buf = ""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        remain = max(0.05, deadline - time.time())
+        buf += read_serial_text(ser, min(0.8, remain), ("CFG_OK", "CFG_ERR", "PAPER_READY"))
+        if "CFG_OK" in buf or "CFG_ERR" in buf:
+            return buf
+        if buf.count("PAPER_READY") >= 2:
+            return buf
     return buf
 
 
@@ -324,20 +368,48 @@ def send_config(port: str, cfg: dict) -> None:
     last_error = ""
     current = wait_for_serial_port(port, timeout_s=40.0)
     ser = None
-    deadline = time.time() + 90.0
+    opened_port = ""
+    opened_id = None
+    deadline = time.time() + 120.0
     attempt = 0
+    empty_sends = 0
     try:
         while time.time() < deadline:
             attempt += 1
             current = wait_for_serial_port(current, timeout_s=12.0)
-            if ser is None or not getattr(ser, "is_open", False):
+            identity = port_identity(current)
+            try:
+                devices = listed_devices()
+                missing = bool(devices) and current not in devices
+            except Exception:
+                missing = False
+            stale = (
+                ser is None
+                or not getattr(ser, "is_open", False)
+                or opened_port != current
+                or (opened_id is not None and identity is not None and identity != opened_id)
+                or missing
+            )
+            if stale:
+                close_serial(ser)
+                ser = None
                 try:
                     ser = open_app_serial(current)
-                    boot = read_serial_text(ser, 8.0)
+                    opened_port = current
+                    opened_id = port_identity(current)
+                    print("Waiting for PAPER_READY (e-paper init, USB CDC) …")
+                    boot = wait_for_app_ready(ser, 40.0)
                     if boot:
                         last_ack = boot
-                        if "CFG_OK" in boot:
-                            return
+                    if "CFG_OK" in boot:
+                        return
+                    if boot.count("PAPER_READY") < 2 and "CFG_ERR" not in boot and attempt < 3:
+                        last_error = "no PAPER_READY yet"
+                        print(f"USB not listening yet ({serial_snippet(boot)}). Reopening …")
+                        close_serial(ser)
+                        ser = None
+                        time.sleep(1.5)
+                        continue
                 except Exception as exc:
                     last_error = str(exc)
                     print(f"USB dropped ({exc}). Waiting for the tablet to reappear …")
@@ -346,12 +418,16 @@ def send_config(port: str, cfg: dict) -> None:
                     time.sleep(1.5)
                     continue
             try:
+                ser.reset_input_buffer()
+            except Exception:
+                pass
+            try:
                 ser.write(b"\n")
                 ser.flush()
-                time.sleep(0.15)
+                time.sleep(0.2)
                 ser.write(payload)
                 ser.flush()
-                last_ack = read_serial_text(ser, 3.0)
+                last_ack = read_serial_text(ser, 8.0)
             except Exception as exc:
                 last_error = str(exc)
                 last_ack = ""
@@ -362,16 +438,22 @@ def send_config(port: str, cfg: dict) -> None:
                 continue
             if "CFG_OK" in last_ack:
                 return
-            print(f"No CFG_OK yet (try {attempt}).")
+            print(f"No CFG_OK yet (try {attempt}): {serial_snippet(last_ack)}")
+            if not last_ack.strip():
+                empty_sends += 1
+            else:
+                empty_sends = 0
+            if empty_sends >= 2 or "CFG_ERR" in last_ack:
+                close_serial(ser)
+                ser = None
             time.sleep(1.2)
     finally:
         close_serial(ser)
-    detail = last_ack.strip()[:200] if last_ack.strip() else (last_error or "(empty)")
+    detail = serial_snippet(last_ack) if last_ack.strip() else (last_error or "(empty)")
     die(
-        "Tablet did not acknowledge config. Unplug USB, short-press power so it shows "
-        "PaperMono setup (not the factory demo, not a blinking red LED), plug in again "
-        "without holding power, wait 5 seconds, then re-run flash.py. Last reply: "
-        + detail
+        "Tablet did not acknowledge config. Leave it on the PaperMono setup screen "
+        "(not the factory demo, not a blinking red LED), USB plugged in, do not hold power, "
+        "then: python3 flash.py --wifi-only. Last reply: " + detail
     )
 
 
@@ -379,6 +461,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Flash this USB setup kit onto a PaperMono or Paper Colour.")
     parser.add_argument("--port", default="", help="Serial port (optional if only one USB device is present)")
     parser.add_argument("--list-ports", action="store_true", help="List USB serial ports and exit")
+    parser.add_argument(
+        "--wifi-only",
+        action="store_true",
+        help="Skip flashing. Push Wi-Fi/config over USB to firmware that is already on the tablet.",
+    )
     args = parser.parse_args()
     ensure_deps()
 
@@ -395,9 +482,14 @@ def main() -> int:
     label = "Paper Colour" if str(cfg.get("kind")) == "papercolor" else "PaperMono"
     print(f"{label} kit for {cfg['name']}")
     print(f"Panel URL: {cfg['panel_url']}")
+    port = pick_port(args.port.strip() or None)
+    if args.wifi_only:
+        print("Skipping flash. USB in, tablet on the setup screen (do not hold power).")
+        send_config(port, cfg)
+        print("Done. Keep USB in until the setup screen clears, then ship the tablet to the site Wi-Fi.")
+        return 0
     hold = "~3 s" if str(cfg.get("kind")) == "papercolor" else "~2 s"
     print(f"Put the tablet in download mode (hold power {hold}), USB-C plugged in.")
-    port = pick_port(args.port.strip() or None)
     flash_firmware(port)
     print("Waiting for the tablet to reboot on USB (e-paper is slow) …")
     port = wait_for_usb_reboot(port)

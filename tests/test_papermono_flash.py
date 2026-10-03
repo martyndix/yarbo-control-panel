@@ -66,12 +66,23 @@ class PaperMonoFlashTests(unittest.TestCase):
         class FakeSer:
             is_open = True
 
+            def write(self, data):
+                return len(data)
+
+            def flush(self):
+                return None
+
+            def reset_input_buffer(self):
+                return None
+
         fake_serial = type(sys)("serial")
         with patch.dict(sys.modules, {"serial": fake_serial}), patch.object(
             flash, "wait_for_serial_port", return_value="/dev/ttyACM0"
+        ), patch.object(flash, "listed_devices", return_value=["/dev/ttyACM0"]), patch.object(
+            flash, "port_identity", return_value=(1, 2, 3)
         ), patch.object(flash, "open_app_serial", return_value=FakeSer()), patch.object(
-            flash, "read_serial_text", return_value="PAPER_READY\nCFG_OK\n"
-        ), patch.object(flash, "close_serial"):
+            flash, "wait_for_app_ready", return_value="PAPER_READY\nPAPER_READY\n"
+        ), patch.object(flash, "read_serial_text", return_value="CFG_OK\n"), patch.object(flash, "close_serial"):
             result = flash.send_config(
                 "/dev/ttyACM0",
                 "HomeWiFi",
@@ -82,6 +93,82 @@ class PaperMonoFlashTests(unittest.TestCase):
             )
         self.assertTrue(result["ok"])
         self.assertIn("CFG_OK", result["ack"])
+
+    def test_read_serial_text_keeps_waiting_after_boot_noise(self) -> None:
+        class Scripted:
+            def __init__(self) -> None:
+                self.chunks = [b"PAPER_READY\n", b"", b"CFG_OK\n"]
+                self.in_waiting = 0
+
+            def read(self, _n):
+                if self.chunks:
+                    return self.chunks.pop(0)
+                return b""
+
+        text = flash.read_serial_text(Scripted(), 1.0)
+        self.assertIn("CFG_OK", text)
+
+    def test_send_config_reopens_until_paper_ready(self) -> None:
+        class FakeSer:
+            def __init__(self) -> None:
+                self.is_open = True
+                self.writes: list[bytes] = []
+
+            def write(self, data):
+                self.writes.append(data)
+                return len(data)
+
+            def flush(self):
+                return None
+
+            def reset_input_buffer(self):
+                return None
+
+        ready = {"n": 0}
+
+        def fake_ready(_ser, timeout_s=40.0):
+            ready["n"] += 1
+            if ready["n"] == 1:
+                return ""
+            return "PAPER_READY\nPAPER_READY\n"
+
+        fake_serial = type(sys)("serial")
+        with patch.dict(sys.modules, {"serial": fake_serial}), patch.object(
+            flash, "wait_for_serial_port", return_value="/dev/ttyACM0"
+        ), patch.object(flash, "listed_devices", return_value=["/dev/ttyACM0"]), patch.object(
+            flash, "port_identity", return_value=(1, 2, 3)
+        ), patch.object(flash, "open_app_serial", return_value=FakeSer()), patch.object(
+            flash, "wait_for_app_ready", side_effect=fake_ready
+        ), patch.object(flash, "read_serial_text", return_value="CFG_OK\n"), patch.object(flash, "close_serial"):
+            result = flash.send_config(
+                "/dev/ttyACM0",
+                "HomeWiFi",
+                "secret",
+                "http://192.168.1.50:8080",
+                "tok",
+                "Kitchen",
+            )
+        self.assertTrue(result["ok"])
+        self.assertGreaterEqual(ready["n"], 2)
+
+    def test_firmware_keeps_listening_after_display_init(self) -> None:
+        mono = (ROOT / "firmware" / "papermono" / "src" / "main.cpp").read_text(encoding="utf-8")
+        color = (ROOT / "firmware" / "papercolor" / "src" / "main.cpp").read_text(encoding="utf-8")
+        for src in (mono, color):
+            self.assertIn("Serial.setTxTimeoutMs(0)", src)
+            self.assertGreaterEqual(src.count("announceUsbReady();"), 3)
+        self.assertIn("while (M5.Display.displayBusy())", color)
+
+    def test_panel_copy_mentions_wifi_only(self) -> None:
+        html = (ROOT / "public" / "index.php").read_text(encoding="utf-8")
+        php = (ROOT / "src" / "YarboPaperDevice.php").read_text(encoding="utf-8")
+        kit = (ROOT / "scripts" / "paper_setup_kit.py").read_text(encoding="utf-8")
+        self.assertIn("flash.py --wifi-only", html)
+        self.assertIn("PAPER_READY", html)
+        self.assertIn("flash.py --wifi-only", php)
+        self.assertIn("--wifi-only", kit)
+        self.assertIn("wait_for_app_ready", kit)
+        self.assertIn("cdc_host_present", kit)
 
 
 if __name__ == "__main__":

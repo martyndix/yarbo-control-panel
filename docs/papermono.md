@@ -88,7 +88,7 @@ On the **same machine that runs the panel**:
    - Optional lock-screen logo (PNG/JPEG). Preview shows on the mocks; the tablet fetches it on the next Wi-Fi poll (no reflash).
 6. Click **Flash firmware & send Wi-Fi**. Leave Settings open. Flash will build first if the binary is missing or stale.
 
-**Send Wi-Fi only** reuses already-flashed firmware and pushes a new `CFG:` line over serial (SSID, password, panel URL, token). After a successful write, esptool resets the ESP32-S3 and USB serial (`/dev/ttyACM0`) drops for a few seconds; the panel waits for it and retries until the tablet replies `CFG_OK`. If that still fails, leave the tablet on the **setup** screen with USB in and click Send Wi-Fi only — do not hold the power button.
+**Send Wi-Fi only** reuses already-flashed firmware and pushes a new `CFG:` line over serial (SSID, password, panel URL, token). After a successful write, esptool resets the ESP32-S3 and USB serial (`/dev/ttyACM0`) drops for a few seconds; the panel waits until the tablet prints **PAPER_READY** (listening after the slow e-paper boot), then retries until it replies `CFG_OK`. If that still fails, leave the tablet on the **setup** screen with USB in and click Send Wi-Fi only — do not hold the power button.
 
 ## Set up away from the panel
 
@@ -115,6 +115,7 @@ The kit is a **factory flash image** at `0x0` (bootloader, partitions, and app) 
 3. Plug the PaperMono in by USB-C. Hold power about **2 seconds** for download mode (red LED blinks). The factory demo can stay on the glass until our firmware boots and does a slow full refresh — unplug, short-press power, and wait. A blinking red LED means it is still in download mode.
 4. If more than one serial device is listed: `python3 flash.py --port /dev/cu.usbmodemXXXX` (`python3 flash.py --list-ports` to list them).
 5. Keep USB in until the setup screen clears, then ship the tablet to the site Wi-Fi.
+6. If flash succeeded but the script loops **No CFG_OK yet**, leave USB in on the **setup** screen (not download mode) and run `python3 flash.py --wifi-only`.
 
 **On Windows:**
 
@@ -123,6 +124,7 @@ The kit is a **factory flash image** at `0x0` (bootloader, partitions, and app) 
 3. If no COM port appears, install the Espressif USB JTAG/serial driver (ESP32-S3 native USB).
 4. Plug USB-C and hold power about **2 seconds** for download mode.
 5. Keep USB in until the setup screen clears, then ship the tablet to the site 2.4 GHz Wi-Fi.
+6. If it loops **No CFG_OK yet** after a successful flash: `py flash.py --wifi-only` with USB in and the setup screen showing.
 
 Later firmware still goes over Wi-Fi: Settings → paired device **Update**. You do not need this kit again unless you wipe the tablet.
 
