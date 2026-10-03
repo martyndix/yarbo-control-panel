@@ -6,7 +6,7 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
-## [4.0.46] - 2026-10-03
+## [4.0.47] - 2026-10-03
 
 ### Fixed
 - Home automations restart the Matter agent when it has died, then retry the Then (scene or light). The runner used to try once per process, so a later crash showed **Matter agent is not running. Restart the panel after enabling Home.**

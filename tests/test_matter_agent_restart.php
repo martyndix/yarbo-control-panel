@@ -40,8 +40,8 @@ if (!str_contains($runner, 'YarboMatterAgentClient.php')) {
     fwrite(STDERR, "automations runner must reload when the Matter client changes\n");
     exit(1);
 }
-if (!str_contains($change, '## [4.0.46]')) {
-    fwrite(STDERR, "changelog 4.0.46 missing\n");
+if (!str_contains($change, '## [4.0.47]')) {
+    fwrite(STDERR, "changelog 4.0.47 missing\n");
     exit(1);
 }
 
