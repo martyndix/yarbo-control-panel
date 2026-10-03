@@ -184,12 +184,12 @@ if (!str_contains($html, 'id="papermono-remote-enabled"')) {
     fwrite(STDERR, "settings remote toggle missing\n");
     exit(1);
 }
-if (!str_contains($html, 'Funnel is not a toggle in the JSON ACL list')) {
+if (!str_contains($html, 'Funnel is not a General access rule')) {
     fwrite(STDERR, "settings funnel help missing\n");
     exit(1);
 }
-if (!str_contains($html, 'Add Funnel to policy')) {
-    fwrite(STDERR, "settings funnel policy button missing\n");
+if (!str_contains($html, 'JSON editor')) {
+    fwrite(STDERR, "settings JSON editor step missing\n");
     exit(1);
 }
 if (!str_contains($html, 'id="papermono-remote-funnel-url-wrap"')) {
@@ -212,16 +212,16 @@ if (!str_contains($js, 'openPaperRemoteUrl')) {
     fwrite(STDERR, "login must try to open the Tailscale URL\n");
     exit(1);
 }
-if (!str_contains($js, 'visual editor → Funnel')) {
-    fwrite(STDERR, "login/funnel result must name the visual Funnel section\n");
+if (!str_contains($js, 'JSON editor')) {
+    fwrite(STDERR, "login/funnel result must name the JSON editor\n");
     exit(1);
 }
-if (!str_contains($sh, 'Add Funnel to policy')) {
-    fwrite(STDERR, "paper_remote.sh must explain Add Funnel to policy\n");
+if (!str_contains($sh, 'JSON editor')) {
+    fwrite(STDERR, "paper_remote.sh must explain JSON editor\n");
     exit(1);
 }
-if (!str_contains($change, '## [4.0.42]')) {
-    fwrite(STDERR, "changelog 4.0.42 missing\n");
+if (!str_contains($change, '## [4.0.43]')) {
+    fwrite(STDERR, "changelog 4.0.43 missing\n");
     exit(1);
 }
 

@@ -155,7 +155,7 @@ status_json() {
     fi
     if printf '%s' "$fs" | grep -qiE 'Access denied|funnel.*not enabled|node attribute|Add Funnel'; then
       needs_acl="true"
-      error="Funnel is not in the JSON ACL list. Open Access controls, find the Funnel section, click Add Funnel to policy. Then Start Funnel again."
+      error="Funnel is not a General access rule. Open Access controls, click JSON editor in the left sidebar, add nodeAttrs funnel, Save. Then Start Funnel again."
     fi
     if [[ "$funnel_on" != "true" ]]; then
       funnel_enable_url="$(first_https "$fs")"
@@ -254,13 +254,13 @@ tailscale_up() {
     $logged = !empty($j["logged_in"]);
     if ($logged) {
       $j["ok"] = true;
-      $j["message"] = "This Pi is already logged in to Tailscale. Funnel is a second switch, not a line in the JSON ACL list. Open Access controls → visual editor → Funnel → Add Funnel to policy, then click Start Funnel.";
+      $j["message"] = "This Pi is already logged in to Tailscale. Funnel is a second switch. Access controls opens Policies (General access rules) — skip that. Click JSON editor in the left sidebar, add nodeAttrs funnel, Save, then click Start Funnel.";
     } elseif ($auth !== "") {
       $j["ok"] = true;
       $j["message"] = "Open this Tailscale login URL on your phone or computer, then click Log in again: " . $auth;
     } else {
       $j["ok"] = false;
-      $j["error"] = "No login page appeared. If this Pi is already logged in, skip to Funnel: Access controls → visual editor → Funnel → Add Funnel to policy. Otherwise run on the Pi: " . (string) ($j["sudo_hint"] ?? "sudo ./scripts/paper_remote.sh up");
+      $j["error"] = "No login page appeared. If this Pi is already logged in, skip to Funnel: Access controls → JSON editor (left sidebar) → add nodeAttrs funnel. Otherwise run on the Pi: " . (string) ($j["sudo_hint"] ?? "sudo ./scripts/paper_remote.sh up");
       if ($cli !== "") {
         $j["error"] .= " CLI: " . $cli;
       }
@@ -304,7 +304,7 @@ funnel_on() {
     return 0
   fi
   local help
-  help=$'Funnel did not start. Login is not enough.\n\n1) Access controls https://login.tailscale.com/admin/acls — Funnel is not a toggle in the JSON ACL list. Switch to the visual editor if you only see JSON. Scroll to Funnel and click Add Funnel to policy. If you only have JSON, add:\n"nodeAttrs": [{ "target": ["autogroup:member"], "attr": ["funnel"] }]\nthen Save.\n\n2) DNS https://login.tailscale.com/admin/dns — turn on MagicDNS and HTTPS Certificates.\n\n3) Click Start Funnel again.'
+  help=$'Funnel did not start. Login is not enough.\n\n1) Access controls https://login.tailscale.com/admin/acls opens Policies (General access rules). Funnel is not a rule there. In the left sidebar click JSON editor. Add:\n"nodeAttrs": [{ "target": ["autogroup:member"], "attr": ["funnel"] }]\nthen Save. Or Definitions → Node attributes → funnel for autogroup:member.\n\n2) DNS https://login.tailscale.com/admin/dns — turn on MagicDNS and HTTPS Certificates.\n\n3) Click Start Funnel again.'
   if [[ -n "$out" ]]; then
     help="$help"$'\n\n'"CLI: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-180)"
   fi

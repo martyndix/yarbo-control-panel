@@ -8213,8 +8213,8 @@ function applyPaperRemoteUi(remote, opts = {}) {
     if (provider === 'tailscale') {
         if (!ts.installed) bits.push('Tailscale is not installed on this host.');
         else if (!ts.logged_in) bits.push('Tailscale is installed. Click Log in. A login link must appear above — if nothing opens, the Pi may already be logged in; skip to Funnel.');
-        else if (ts.needs_funnel_acl) bits.push('Funnel is not a JSON ACL toggle. Open Access controls → visual editor → Funnel → Add Funnel to policy, then Start Funnel.');
-        else if (!ts.funnel_on) bits.push('Logged in. Funnel is still off. Enable it in Access controls (visual editor → Funnel), not the JSON ACL list, then Start Funnel.');
+        else if (ts.needs_funnel_acl) bits.push('Funnel is not a General access rule. Open Access controls → JSON editor (left sidebar), add nodeAttrs funnel, then Start Funnel.');
+        else if (!ts.funnel_on) bits.push('Logged in. Funnel is still off. Open Access controls → JSON editor and add nodeAttrs funnel, then Start Funnel.');
         else bits.push('Funnel is on.');
         if (remote.gate_listening) bits.push('The tablet-only gate is listening.');
         else if (enabled) bits.push('The tablet-only gate is not listening yet — Save remote access, or restart the panel.');
@@ -8295,14 +8295,14 @@ async function runPaperRemoteStep(step, button) {
         if (step === 'up' && authUrl) openPaperRemoteUrl(authUrl);
         if (step === 'funnel-on' && funnelUrl && !ts.funnel_on) openPaperRemoteUrl(funnelUrl);
         const err = String(data.error || stepOut.error || ts.error || '').trim();
-        const funnelHelp = 'Funnel did not start. Login is not enough. Open Access controls → visual editor → Funnel → Add Funnel to policy (not the JSON ACL list). Turn on DNS MagicDNS and HTTPS Certificates. Then Start Funnel again.';
+        const funnelHelp = 'Funnel did not start. Login is not enough. The Access controls page is Policies (General access rules) — Funnel is not there. Click JSON editor in the left sidebar and add "nodeAttrs": [{ "target": ["autogroup:member"], "attr": ["funnel"] }], then Save. Turn on DNS MagicDNS and HTTPS Certificates. Then Start Funnel again.';
         if (step === 'install') {
             setPaperRemoteResult(data.message || stepOut.message || 'Tailscale installed. Click Log in next. A login link must appear — if nothing opens, the Pi may already be logged in.', data.ok === false ? 'error' : 'success');
         } else if (step === 'up') {
             if (authUrl) {
                 setPaperRemoteResult('A Tailscale login page should have opened. If nothing appeared, tap the login link above on your phone or computer, then click Log in again.', 'success');
             } else if (ts.logged_in) {
-                setPaperRemoteResult(data.message || 'This Pi is already logged in. Funnel is a second switch — not in the JSON ACL list. Open Access controls → visual editor → Funnel → Add Funnel to policy, then click Start Funnel.', 'success');
+                setPaperRemoteResult(data.message || 'This Pi is already logged in. Funnel is a second switch. On Access controls, ignore General access rules — click JSON editor in the left sidebar and add nodeAttrs funnel, then click Start Funnel.', 'success');
             } else {
                 setPaperRemoteResult(err || 'No login page appeared. On the Pi run sudo ./scripts/paper_remote.sh up, or skip to Funnel if this machine is already in the Tailscale admin console.', 'error');
             }
@@ -8322,7 +8322,7 @@ async function runPaperRemoteStep(step, button) {
             delete els.papermonoRemoteUrl.dataset.dirty;
         }
     } catch (err) {
-        setPaperRemoteResult(err.message || 'Tailscale step failed. See the Funnel steps below — Funnel is not in the JSON ACL list.', 'error');
+        setPaperRemoteResult(err.message || 'Tailscale step failed. See the Funnel steps below — Funnel is not a General access rule. Use JSON editor → nodeAttrs.', 'error');
     } finally {
         if (button) button.disabled = false;
     }

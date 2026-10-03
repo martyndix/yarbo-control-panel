@@ -1228,7 +1228,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <label class="papermono-kind-card is-active">
                                     <input type="radio" name="papermono-remote-provider" value="tailscale" checked>
                                     <span class="papermono-kind-card-title">Tailscale Funnel</span>
-                                    <span class="papermono-kind-card-meta">Free. Installs on this Pi. Log in, then enable Funnel in Access controls (not the JSON ACL list).</span>
+                                    <span class="papermono-kind-card-meta">Free. Installs on this Pi. Log in, then add Funnel in Access controls → JSON editor (not General access rules).</span>
                                 </label>
                                 <label class="papermono-kind-card">
                                     <input type="radio" name="papermono-remote-provider" value="custom">
@@ -1251,15 +1251,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             <p id="papermono-remote-result" class="settings-cloud-result hidden" role="status"></p>
                             <div id="papermono-remote-funnel-help" class="paper-remote-help">
-                                <p class="hint"><strong>Funnel is not a toggle in the JSON ACL list.</strong> Log in only joins this Pi to your tailnet. Funnel is a second switch. After Log in says this Pi is already logged in, use a phone or computer:</p>
+                                <p class="hint"><strong>Funnel is not a General access rule.</strong> The Access controls link opens <strong>Policies</strong> (Sources / destinations / ports). Do not click Add rule. Funnel is a node attribute. Log in only joins this Pi to your tailnet. Then, on a phone or computer:</p>
                                 <ol class="paper-remote-steps">
-                                    <li><strong>Install Tailscale</strong>, then <strong>Log in</strong>. A login link should appear above and a browser tab should open. If nothing opens, the Pi is often already logged in — skip to Funnel.</li>
-                                    <li>Open <a href="https://login.tailscale.com/admin/acls" target="_blank" rel="noopener">Access controls</a>. Ignore the JSON ACL editor if that is what you landed on. Switch to the <strong>visual editor</strong>, scroll to the <strong>Funnel</strong> section (its own heading, not an ACL rule), and click <strong>Add Funnel to policy</strong>.</li>
-                                    <li>If that button is missing, stay in JSON and add this block next to the other top-level keys (comma after the previous one), then Save:
+                                    <li><strong>Install Tailscale</strong>, then <strong>Log in</strong>. A login link should appear above. If nothing opens, the Pi is often already logged in — skip to Funnel.</li>
+                                    <li>Open <a href="https://login.tailscale.com/admin/acls" target="_blank" rel="noopener">Access controls</a>. In the left sidebar, under Access controls, click <strong>JSON editor</strong> (not Policies, not Add rule).</li>
+                                    <li>Add this block next to the other top-level keys such as <code>grants</code> or <code>acls</code> (comma after the previous block), then Save:
 <pre class="paper-remote-acl">"nodeAttrs": [
   { "target": ["autogroup:member"], "attr": ["funnel"] }
 ]</pre>
-                                    </li>
+                                    If the JSON editor has a Funnel shortcut in its own sidebar, use that instead. Or try <strong>Definitions</strong> → <strong>Node attributes</strong> and add attribute <code>funnel</code> for <code>autogroup:member</code>.</li>
                                     <li>Open <a href="https://login.tailscale.com/admin/dns" target="_blank" rel="noopener">DNS</a> and turn on <strong>MagicDNS</strong> and <strong>HTTPS Certificates</strong> if they are off.</li>
                                     <li>Come back here and click <strong>Start Funnel</strong>. If Tailscale opens an approve link, use it. The HTTPS origin should fill in as <code>https://….ts.net</code>. Then Save remote access and update the tablets. Do not port-forward 8080.</li>
                                 </ol>

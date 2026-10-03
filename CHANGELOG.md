@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.43] - 2026-10-03
+
+### Fixed
+- Settings → E-paper **Remote access** Funnel help matches the current Tailscale admin console. Access controls opens **Policies → General access rules** (not Funnel). Enable Funnel in the left-sidebar **JSON editor** with `nodeAttrs`, or **Definitions → Node attributes**, then DNS **MagicDNS** and **HTTPS Certificates**.
+
 ## [4.0.42] - 2026-10-03
 
 ### Fixed
