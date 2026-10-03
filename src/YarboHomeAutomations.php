@@ -1967,7 +1967,11 @@ final class YarboHomeAutomations
     private function runDeviceLook(YarboHome $home, array $action): array
     {
         $id = (string) ($action['id'] ?? '');
+        $caps = $home->deviceControlCaps($id);
         $kind = strtolower(trim((string) ($action['device_kind'] ?? '')));
+        if ($kind === '') {
+            $kind = $caps['kind'];
+        }
         $isHeater = $kind === 'heater';
         $errors = [];
         $last = ['ok' => true];
@@ -2002,11 +2006,17 @@ final class YarboHomeAutomations
             }
         }
         $hex = trim((string) ($action['hex'] ?? $action['color_hex'] ?? ''));
+        if ($hex !== '' && !$caps['colorable']) {
+            $hex = '';
+        }
         $kelvin = 0;
         if (isset($action['kelvin']) && $action['kelvin'] !== '') {
             $kelvin = (int) $action['kelvin'];
         } elseif (isset($action['color_temp']) && $action['color_temp'] !== '') {
             $kelvin = (int) $action['color_temp'];
+        }
+        if ($kelvin > 0 && !$caps['color_ct']) {
+            $kelvin = 0;
         }
         if ($hex !== '' && YarboHome::deviceAcceptsCommand($id, 'color', $acceptKind)) {
             if (!$sent) {

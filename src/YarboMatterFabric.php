@@ -24,6 +24,19 @@ final class YarboMatterFabric
     private const USER_LABEL = 65;
     private const ATTR_ON_OFF = 0;
     private const ATTR_CURRENT_LEVEL = 0;
+    private const ATTR_CURRENT_HUE = 0;
+    private const ATTR_CURRENT_SATURATION = 1;
+    private const ATTR_CURRENT_X = 3;
+    private const ATTR_CURRENT_Y = 4;
+    private const ATTR_COLOR_TEMP_MIREDS = 7;
+    private const ATTR_COLOR_CAPABILITIES = 0x400A;
+    private const ATTR_CT_PHYSICAL_MIN = 0x400B;
+    private const ATTR_CT_PHYSICAL_MAX = 0x400C;
+    private const ATTR_FEATURE_MAP = 0xFFFC;
+    private const COLOR_CAP_HS = 1;
+    private const COLOR_CAP_EHUE = 2;
+    private const COLOR_CAP_XY = 8;
+    private const COLOR_CAP_CT = 16;
     private const ATTR_DEVICE_TYPES = 0;
     private const ATTR_SERVER_LIST = 1;
     private const ATTR_VENDOR_NAME = 1;
@@ -296,7 +309,6 @@ final class YarboMatterFabric
             }
             if (count($devices) === $before && $nodeId > 0 && $attributes !== []) {
                 $stubKind = self::classifyByName('light', $source, $vendor, $product);
-                $stubLight = $stubKind === 'light';
                 $devices[] = [
                     'id' => $nodeId . ':1',
                     'node_id' => $nodeId,
@@ -311,10 +323,10 @@ final class YarboMatterFabric
                     'brightness' => null,
                     'dimmable' => false,
                     'available' => $available,
-                    'colorable' => $stubLight,
-                    'color_hs' => $stubLight,
-                    'color_xy' => $stubLight,
-                    'color_ct' => $stubLight,
+                    'colorable' => false,
+                    'color_hs' => false,
+                    'color_xy' => false,
+                    'color_ct' => false,
                     'color_hex' => '',
                 ];
             }
@@ -852,15 +864,32 @@ final class YarboMatterFabric
         $extended = in_array(self::DEVTYPE_COLOR_LIGHT, $typeIds, true)
             || in_array(self::DEVTYPE_EXTENDED_COLOR_LIGHT, $typeIds, true);
         $ctType = in_array(self::DEVTYPE_CT_LIGHT, $typeIds, true);
-        $isLight = $kind === 'light';
-        $colorHs = false;
-        $colorXy = false;
-        $colorCt = false;
-        if ($ctType && !$extended) {
-            $colorCt = true;
-        } elseif ($hasCc || $extended || $isLight) {
-            $colorHs = true;
-            $colorXy = true;
+        $colorType = in_array(self::DEVTYPE_COLOR_LIGHT, $typeIds, true);
+        $caps = self::attrNum($attributes, $endpoint, self::COLOR_CONTROL, self::ATTR_COLOR_CAPABILITIES);
+        if ($caps === null) {
+            $caps = self::attrNum($attributes, $endpoint, self::COLOR_CONTROL, self::ATTR_FEATURE_MAP);
+        }
+        $capBits = $caps !== null ? (int) $caps : 0;
+        $hue = self::attrNum($attributes, $endpoint, self::COLOR_CONTROL, self::ATTR_CURRENT_HUE);
+        $x = self::attrNum($attributes, $endpoint, self::COLOR_CONTROL, self::ATTR_CURRENT_X);
+        $ctMin = self::attrNum($attributes, $endpoint, self::COLOR_CONTROL, self::ATTR_CT_PHYSICAL_MIN);
+        $ctMax = self::attrNum($attributes, $endpoint, self::COLOR_CONTROL, self::ATTR_CT_PHYSICAL_MAX);
+        $colorHs = ($capBits & (self::COLOR_CAP_HS | self::COLOR_CAP_EHUE)) !== 0;
+        $colorXy = ($capBits & self::COLOR_CAP_XY) !== 0;
+        $colorCt = ($capBits & self::COLOR_CAP_CT) !== 0;
+        if (!$colorHs && !$colorXy && !$colorCt) {
+            if ($extended) {
+                $colorHs = true;
+                $colorXy = true;
+                $colorCt = true;
+            } elseif ($colorType) {
+                $colorHs = true;
+                $colorXy = true;
+            } elseif ($ctType) {
+                $colorCt = true;
+            } elseif ($hasCc && ($ctMin !== null || $ctMax !== null) && $hue === null && $x === null) {
+                $colorCt = true;
+            }
         }
 
         return [

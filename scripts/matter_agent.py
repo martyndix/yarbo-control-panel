@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 18
+AGENT_VERSION = 19
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
@@ -102,6 +102,7 @@ DEVTYPE_THERMOSTAT = 0x0300
 DEVTYPE_HEATING_COOLING = 0x0301
 DEVTYPE_RVC = 0x0074
 COLOR_CAP_HS = 1 << 0
+COLOR_CAP_EHUE = 1 << 1
 COLOR_CAP_XY = 1 << 3
 COLOR_CAP_CT = 1 << 4
 
@@ -2477,27 +2478,22 @@ def color_payload(attributes: dict[str, Any], endpoint: int, type_ids: list[int]
     has_cc = endpoint_has_cluster(attributes, endpoint, COLOR_CONTROL)
     extended = any(i in (DEVTYPE_COLOR_LIGHT, DEVTYPE_EXTENDED_COLOR_LIGHT) for i in type_ids)
     ct_type = DEVTYPE_CT_LIGHT in type_ids
-    is_light = any(
-        i in (
-            DEVTYPE_ONOFF_LIGHT,
-            DEVTYPE_DIMMABLE_LIGHT,
-            DEVTYPE_COLOR_LIGHT,
-            DEVTYPE_CT_LIGHT,
-            DEVTYPE_EXTENDED_COLOR_LIGHT,
-        )
-        for i in type_ids
-    )
-    color_hs = bool(cap_bits & COLOR_CAP_HS) or hue is not None
-    color_xy = bool(cap_bits & COLOR_CAP_XY) or x is not None
-    color_ct = bool(cap_bits & COLOR_CAP_CT) or mireds is not None
+    color_hs = bool(cap_bits & (COLOR_CAP_HS | COLOR_CAP_EHUE))
+    color_xy = bool(cap_bits & COLOR_CAP_XY)
+    color_ct = bool(cap_bits & COLOR_CAP_CT)
     if not (color_hs or color_xy or color_ct):
-        if ct_type and not extended:
+        if extended:
+            color_hs = True
+            color_xy = True
             color_ct = True
-        elif has_cc or extended or is_light:
-            # Hue Bridge often omits Color Control values until you write them.
-            color_hs = not ct_type
-            color_xy = not ct_type
-            color_ct = bool(ct_type)
+        elif DEVTYPE_COLOR_LIGHT in type_ids:
+            color_hs = True
+            color_xy = True
+        elif ct_type:
+            color_ct = True
+        elif has_cc and (ct_min is not None or ct_max is not None) and hue is None and x is None:
+            # White ambiance: Color Control is present for CT only.
+            color_ct = True
     hex_s = None
     hue_deg = clamp_int((hue or 0) * 360 / 254, 0, 360) if hue is not None else None
     sat_pct = clamp_int((sat or 0) * 100 / 254, 0, 100) if sat is not None else None
@@ -2578,7 +2574,7 @@ def try_color_commands(node_id: int, endpoint: int, attempts: list[tuple[str, di
         last = device_command(node_id, endpoint, COLOR_CONTROL, name, payload)
         if last.get("ok"):
             return last
-        if is_transport_error(last):
+        if is_transport_error(last) or is_unsupported_cluster(last):
             return last
     return last
 
@@ -2625,7 +2621,7 @@ def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, An
     result = try_color_commands(node_id, endpoint, attempts)
     if result.get("ok"):
         return {**result, "on": True, "color_hex": hex_s or None}
-    if is_transport_error(result):
+    if is_transport_error(result) or is_unsupported_cluster(result):
         return result
     fallback: list[tuple[str, dict[str, Any]]] = [
         (
@@ -2650,7 +2646,7 @@ def set_color_temp(node_id: int, endpoint: int, kelvin: int) -> dict[str, Any]:
         **color_transition(True),
     }
     result = device_command(node_id, endpoint, COLOR_CONTROL, "MoveToColorTemperature", payload_on)
-    if result.get("ok") or is_transport_error(result):
+    if result.get("ok") or is_transport_error(result) or is_unsupported_cluster(result):
         return result
     payload_off = {
         "colorTemperatureMireds": kelvin_to_mireds(kelvin),
@@ -2892,10 +2888,10 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "brightness": None,
                     "dimmable": False,
                     "available": available,
-                    "colorable": stub_light,
-                    "color_hs": stub_light,
-                    "color_xy": stub_light,
-                    "color_ct": stub_light,
+                    "colorable": False,
+                    "color_hs": False,
+                    "color_xy": False,
+                    "color_ct": False,
                     "color_hex": "",
                 }
             )

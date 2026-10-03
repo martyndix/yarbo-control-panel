@@ -4883,6 +4883,30 @@ function homeAutoThenCanKelvin(d) {
     return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && d.color_ct && !homeAutoThenCanColor(d));
 }
 
+function homeAutoSanitizeThenLooks() {
+    if (!autoDraft || !Array.isArray(autoDraft.actions)) return;
+    autoDraft.actions = autoDraft.actions.map((action) => {
+        if (!action || action.kind === 'scene') return action;
+        const d = homeAutoDeviceById(action.id);
+        if (!d) return action;
+        const next = { ...action };
+        if (!homeAutoThenCanBright(d)) delete next.brightness;
+        if (!homeAutoThenCanColor(d)) {
+            delete next.hex;
+            delete next.color_hex;
+        }
+        if (!homeAutoThenCanKelvin(d)) {
+            delete next.kelvin;
+            delete next.color_temp;
+        }
+        if (!homeAutoThenCanSetpoint(d)) {
+            delete next.celsius;
+            delete next.heating_setpoint;
+        }
+        return next;
+    });
+}
+
 function homeAutoThenCanSetpoint(d) {
     return Boolean(d && d.kind === 'heater');
 }
@@ -5482,6 +5506,7 @@ function renderHomeAutoEditor() {
 
 function homeAutoClampDraft() {
     if (!autoDraft) return;
+    homeAutoSanitizeThenLooks();
     homeAutoSetTriggers(homeAutoTriggers());
     homeAutoTriggers().forEach((trigger) => {
         if (trigger?.type !== 'device') return;
@@ -6006,6 +6031,7 @@ async function homeAutoSave() {
     });
     homeAutoSetTriggers(homeAutoTriggers());
     homeAutoReadThenLooks();
+    homeAutoSanitizeThenLooks();
     autoDraft.off_after_sec = homeAutoReadOffAfter();
     if (homeAutoUsesSun() && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);

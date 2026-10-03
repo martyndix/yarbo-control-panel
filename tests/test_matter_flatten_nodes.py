@@ -61,6 +61,8 @@ def main() -> int:
     ids = {d["id"] for d in devices}
     if "1:2" not in ids or "1:71" not in ids:
         raise SystemExit(f"missing endpoints {sorted(ids)[:8]}")
+    if any(d.get("colorable") or d.get("color_ct") for d in devices):
+        raise SystemExit(f"Hue OnOff lights must not show colour {devices[0]}")
     named = [d for d in devices if d["name"].startswith("Light ")]
     if len(named) != 70:
         raise SystemExit("Hue names missing")
@@ -171,12 +173,59 @@ def main() -> int:
         raise SystemExit(f"mill panel heater {extra.get('25:1')}")
     if extra.get("31:1", {}).get("kind") != "light" or extra["31:1"].get("name") != "Boiler":
         raise SystemExit(f"Boiler must stay a light {extra.get('31:1')}")
+    if extra["31:1"].get("colorable") or extra["31:1"].get("color_ct"):
+        raise SystemExit(f"Boiler must not show colour {extra.get('31:1')}")
     if agent.name_looks_heater("Boiler"):
         raise SystemExit("Boiler is a light name, not a heater")
     if extra["25:1"].get("on") is not False:
         raise SystemExit(f"mill SystemMode Off must be off {extra['25:1']}")
     if extra["25:1"].get("local_temperature") != 21.4 or extra["25:1"].get("heating_setpoint") != 21.0:
         raise SystemExit(f"mill heater temps {extra['25:1']}")
+
+    white = {
+        "node_id": 40,
+        "available": True,
+        "attributes": {
+            "0/40/3": "Hue white",
+            "1/29/0": [{"deviceType": 0x0101, "revision": 1}],
+            "1/6/0": False,
+            "1/8/0": 80,
+            "1/768/0": 0,
+            "1/768/16394": 0,
+        },
+    }
+    ambiance = {
+        "node_id": 41,
+        "available": True,
+        "attributes": {
+            "0/40/3": "Hue ambiance",
+            "1/29/0": [{"deviceType": 0x010C, "revision": 1}],
+            "1/6/0": False,
+            "1/8/0": 80,
+            "1/768/7": 370,
+            "1/768/16394": 16,
+            "1/768/16395": 153,
+            "1/768/16396": 500,
+        },
+    }
+    rgb = {
+        "node_id": 42,
+        "available": True,
+        "attributes": {
+            "0/40/3": "Hue color",
+            "1/29/0": [{"deviceType": 0x010D, "revision": 1}],
+            "1/6/0": True,
+            "1/8/0": 80,
+            "1/768/16394": 25,
+        },
+    }
+    spec = {d["id"]: d for d in agent.flatten_nodes({"nodes": [white, ambiance, rgb]})}
+    if spec.get("40:1", {}).get("colorable") or spec.get("40:1", {}).get("color_ct"):
+        raise SystemExit(f"dimmable white must not show colour {spec.get('40:1')}")
+    if not spec.get("41:1", {}).get("color_ct") or spec.get("41:1", {}).get("colorable"):
+        raise SystemExit(f"white ambiance must be CT only {spec.get('41:1')}")
+    if not spec.get("42:1", {}).get("colorable"):
+        raise SystemExit(f"extended colour must stay colourable {spec.get('42:1')}")
 
     mill_split = {
         "node_id": 26,

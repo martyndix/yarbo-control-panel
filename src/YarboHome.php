@@ -659,10 +659,23 @@ final class YarboHome
             $body = ['op' => 'command', 'id' => $id, 'action' => $action];
             $result = $agent->request($body, 60.0);
         }
+        $dropColor = [];
+        if (in_array($action, ['color', 'color_temp', 'kelvin'], true) && !($result['ok'] ?? false)
+            && YarboMatterFabric::isUnsupportedCluster((string) ($result['error'] ?? ''))) {
+            $dropColor = $action === 'color'
+                ? ['colorable' => false, 'color_hs' => false, 'color_xy' => false]
+                : ['color_ct' => false];
+            $action = 'on';
+            $body = ['op' => 'command', 'id' => $id, 'action' => 'on'];
+            $result = $agent->request($body, 60.0);
+        }
         if (!($result['ok'] ?? false)) {
             return ['ok' => false, 'error' => $this->friendlyMatterError((string) ($result['error'] ?? 'Command failed'))];
         }
         $patch = $this->commandStatePatch($id, $action, $body, $result);
+        if ($dropColor !== []) {
+            $patch = $dropColor + $patch;
+        }
         if ($patch !== []) {
             $this->patchCachedDeviceState($id, $patch);
         }
@@ -935,6 +948,13 @@ final class YarboHome
             }
             $hex = $this->normalizeHex((string) ($action['color_hex'] ?? ''));
             $kelvin = !empty($action['color_temp']) ? (int) $action['color_temp'] : null;
+            $caps = $this->deviceControlCaps($deviceId);
+            if ($hex !== null && !$caps['colorable']) {
+                $hex = null;
+            }
+            if ($kelvin && !$caps['color_ct']) {
+                $kelvin = null;
+            }
             if (($hex !== null || $kelvin) && !$sent) {
                 $result = $this->command(['id' => $deviceId, 'command' => 'on']);
                 $sent = true;
@@ -1361,6 +1381,45 @@ final class YarboHome
         }
 
         return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp'], true);
+    }
+
+    /**
+     * Live dim/colour flags from the last Matter snapshot. Missing rows look like a plain on/off light.
+     *
+     * @return array{kind: string, dimmable: bool, colorable: bool, color_ct: bool}
+     */
+    public function deviceControlCaps(string $id): array
+    {
+        $id = trim($id);
+        $row = [];
+        foreach ($this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json') as $one) {
+            if (is_array($one) && trim((string) ($one['id'] ?? '')) === $id) {
+                $row = $one;
+                break;
+            }
+        }
+        if ($row === []) {
+            foreach ($this->load()['last_devices'] ?? [] as $one) {
+                if (is_array($one) && trim((string) ($one['id'] ?? '')) === $id) {
+                    $row = $one;
+                    break;
+                }
+            }
+        }
+        if ($row !== []) {
+            $row = YarboMatterFabric::reclassifyRow($row);
+        }
+        $kind = strtolower(trim((string) ($row['kind'] ?? self::KIND_LIGHT)));
+        if ($kind === '') {
+            $kind = self::KIND_LIGHT;
+        }
+
+        return [
+            'kind' => $kind,
+            'dimmable' => !empty($row['dimmable']),
+            'colorable' => !empty($row['colorable']) || !empty($row['color_hs']) || !empty($row['color_xy']),
+            'color_ct' => !empty($row['color_ct']),
+        ];
     }
 
     /**
@@ -1793,6 +1852,11 @@ final class YarboHome
                         $device['color_hex'] = $hex;
                     }
                 }
+                foreach (['dimmable', 'colorable', 'color_hs', 'color_xy', 'color_ct'] as $flag) {
+                    if (array_key_exists($flag, $live)) {
+                        $device[$flag] = (bool) $live[$flag];
+                    }
+                }
                 foreach (['local_temperature', 'heating_setpoint', 'heating_min', 'heating_max'] as $key) {
                     if (!array_key_exists($key, $live) || $live[$key] === null || $live[$key] === '') {
                         continue;
@@ -2151,11 +2215,11 @@ final class YarboHome
                 'bridge' => true,
                 'on' => false,
                 'brightness' => null,
-                'dimmable' => true,
-                'colorable' => true,
-                'color_hs' => true,
-                'color_xy' => true,
-                'color_ct' => true,
+                'dimmable' => false,
+                'colorable' => false,
+                'color_hs' => false,
+                'color_xy' => false,
+                'color_ct' => false,
                 'color_hex' => '',
                 'available' => false,
             ]);

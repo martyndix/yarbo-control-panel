@@ -43,6 +43,66 @@ if (!isset($ids['1:2'], $ids['1:71'])) {
     fwrite(STDERR, "missing Hue endpoints\n");
     exit(1);
 }
+foreach ($devices as $row) {
+    if (!empty($row['colorable']) || !empty($row['color_hs']) || !empty($row['color_ct'])) {
+        fwrite(STDERR, 'Hue OnOff light must not show colour ' . json_encode($row) . "\n");
+        exit(1);
+    }
+}
+
+$white = [
+    'node_id' => 40,
+    'available' => true,
+    'attributes' => [
+        '0/40/3' => 'Hue white',
+        '1/29/0' => [['deviceType' => 0x0101, 'revision' => 1]],
+        '1/6/0' => false,
+        '1/8/0' => 80,
+        '1/768/0' => 0,
+        '1/768/16394' => 0,
+    ],
+];
+$ct = [
+    'node_id' => 41,
+    'available' => true,
+    'attributes' => [
+        '0/40/3' => 'Hue ambiance',
+        '1/29/0' => [['deviceType' => 0x010C, 'revision' => 1]],
+        '1/6/0' => false,
+        '1/8/0' => 80,
+        '1/768/7' => 370,
+        '1/768/16394' => 16,
+        '1/768/16395' => 153,
+        '1/768/16396' => 500,
+    ],
+];
+$rgb = [
+    'node_id' => 42,
+    'available' => true,
+    'attributes' => [
+        '0/40/3' => 'Hue color',
+        '1/29/0' => [['deviceType' => 0x010D, 'revision' => 1]],
+        '1/6/0' => true,
+        '1/8/0' => 80,
+        '1/768/16394' => 25,
+    ],
+];
+$bySpec = [];
+foreach (YarboMatterFabric::flatten([$white, $ct, $rgb]) as $row) {
+    $bySpec[$row['id']] = $row;
+}
+if (!empty($bySpec['40:1']['colorable']) || !empty($bySpec['40:1']['color_ct'])) {
+    fwrite(STDERR, 'dimmable white must not show colour ' . json_encode($bySpec['40:1'] ?? null) . "\n");
+    exit(1);
+}
+if (empty($bySpec['41:1']['color_ct']) || !empty($bySpec['41:1']['colorable'])) {
+    fwrite(STDERR, 'white ambiance must be CT only ' . json_encode($bySpec['41:1'] ?? null) . "\n");
+    exit(1);
+}
+if (empty($bySpec['42:1']['colorable'])) {
+    fwrite(STDERR, 'extended colour must stay colourable ' . json_encode($bySpec['42:1'] ?? null) . "\n");
+    exit(1);
+}
 
 $root = sys_get_temp_dir() . '/yarbo-home-storage-' . bin2hex(random_bytes(3));
 mkdir($root . '/data/matter-server', 0775, true);

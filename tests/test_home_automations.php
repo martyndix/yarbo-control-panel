@@ -890,5 +890,8 @@ assert_true(str_contains($change, '## [4.0.52]'), 'changelog 4.0.52');
 assert_true(str_contains($change, '## [4.0.53]'), 'changelog 4.0.53');
 assert_true(str_contains($change, '## [4.0.54]'), 'changelog 4.0.54');
 assert_true(str_contains($change, '## [4.0.55]'), 'changelog 4.0.55');
+assert_true(str_contains($change, '## [4.0.56]'), 'changelog 4.0.56');
+assert_true(str_contains($js, 'homeAutoSanitizeThenLooks'), 'Then drops colour the bulb cannot do');
+assert_true(str_contains($js, 'homeColorInputsHtml'), 'Home colour controls helper');
 
 echo "test_home_automations.php ok\n";

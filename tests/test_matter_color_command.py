@@ -58,6 +58,23 @@ def main() -> int:
     assert "Unknown Matter command" in str(unknown.get("error") or ""), unknown
     assert "sparkle" in str(unknown.get("error") or ""), unknown
 
+    calls.clear()
+
+    def reject_color(node_id, endpoint, cluster, name, payload):
+        calls.append((node_id, endpoint, cluster, name, payload))
+        if cluster == agent.COLOR_CONTROL:
+            return {"ok": False, "error": "InteractionModelError: UnsupportedCluster (0xc3)"}
+        return {"ok": True}
+
+    agent.device_command = reject_color  # type: ignore[method-assign]
+    rejected = agent.dispatch({"op": "command", "id": "12:4", "action": "color", "hex": "#ffd27a"})
+    assert rejected.get("ok") is False, rejected
+    assert "0xc3" in str(rejected.get("error") or "").lower() or "unsupportedcluster" in str(
+        rejected.get("error") or ""
+    ).lower().replace(" ", ""), rejected
+    color_calls = [call for call in calls if call[2] == agent.COLOR_CONTROL]
+    assert len(color_calls) == 1, calls
+
     print("ok: colour commands are recognized")
     return 0
 

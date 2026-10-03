@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.56] - 2026-10-03
+
+### Fixed
+- Home and Automations only show colour / colour-temperature when the bulb actually supports it. White Hue lights such as **Boiler** no longer get a colour chip (that sent **UnsupportedCluster (0xc3)**). Saved Then colour is ignored for those bulbs, and a colour tap that the bulb rejects still turns the light on.
+
 ## [4.0.55] - 2026-10-03
 
 ### Fixed
