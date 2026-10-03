@@ -29,7 +29,7 @@ class H(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             body = {}
         if body.get("op") == "ping":
-            result = {"ok": True, "engine": "matter-agent", "version": 16, "features": ["color"]}
+            result = {"ok": True, "engine": "matter-agent", "version": 17, "features": ["color"]}
         else:
             result = {"ok": True, "id": body.get("id"), "on": True, "restarted": True}
         data = json.dumps(result).encode()

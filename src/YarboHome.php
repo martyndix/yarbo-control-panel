@@ -653,7 +653,7 @@ final class YarboHome
             $result = $agent->request($body, 60.0);
         }
         if (!($result['ok'] ?? false)) {
-            return ['ok' => false, 'error' => (string) ($result['error'] ?? 'Command failed')];
+            return ['ok' => false, 'error' => $this->friendlyMatterError((string) ($result['error'] ?? 'Command failed'))];
         }
         $patch = $this->commandStatePatch($id, $action, $body, $result);
         if ($patch !== []) {
@@ -661,6 +661,37 @@ final class YarboHome
         }
 
         return ['ok' => true] + $patch;
+    }
+
+    public function friendlyMatterError(string $error): string
+    {
+        if (!preg_match('/Node (\d+) is not \(yet\) available/i', $error, $matches)) {
+            return $error;
+        }
+        $node = (int) $matches[1];
+        $names = [];
+        foreach ($this->load()['names'] as $id => $name) {
+            if (!str_starts_with((string) $id, $node . ':')) {
+                continue;
+            }
+            $label = trim((string) $name);
+            if ($label !== '' && !in_array($label, $names, true)) {
+                $names[] = $label;
+            }
+        }
+        if ($names === []) {
+            $who = 'Matter node ' . $node;
+        } elseif (count($names) === 1) {
+            $who = $names[0];
+        } else {
+            $who = implode(', ', array_slice($names, 0, 3));
+            if (count($names) > 3) {
+                $who .= ' and others';
+            }
+        }
+
+        return $who . ' is not available yet (Matter node ' . $node
+            . '). That number is the Hue Bridge or other Matter device the light sits on, not a room name.';
     }
 
     /**

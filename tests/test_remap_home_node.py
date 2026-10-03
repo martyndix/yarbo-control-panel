@@ -46,6 +46,39 @@ def main() -> int:
         raise SystemExit("scene paper id rewritten")
     if changed < 6:
         raise SystemExit(f"changed {changed}")
+
+    if not agent.looks_like_matter_id("12:5"):
+        raise SystemExit("12:5 should be a Matter id")
+    if agent.looks_like_matter_id("21:00"):
+        raise SystemExit("21:00 is a clock time, not a Matter id")
+    if agent.looks_like_matter_id("unifi:light:x"):
+        raise SystemExit("unifi id rewritten")
+
+    autos = {
+        "automations": [
+            {
+                "name": "At 21:00 → Kitchen",
+                "trigger": {"type": "time", "at": "21:00"},
+                "triggers": [{"type": "time", "at": "21:00"}],
+                "actions": [{"kind": "device", "id": "12:3", "command": "on"}],
+            }
+        ]
+    }
+    n = agent.remap_automations_node_id(autos, 12, 1)
+    if autos["automations"][0]["actions"][0]["id"] != "1:3":
+        raise SystemExit(f"auto action {autos}")
+    if autos["automations"][0]["trigger"]["at"] != "21:00":
+        raise SystemExit("clock time remapped")
+    if n < 1:
+        raise SystemExit(f"auto changed {n}")
+
+    if agent.replacement_node_id(12, present=[1], available=[1]) != 1:
+        raise SystemExit("missing node 12 should map onto the only live node")
+    if agent.replacement_node_id(12, present=[12], available=[]) is not None:
+        raise SystemExit("present-but-unready node must not remap")
+    if agent.replacement_node_id(12, present=[1, 2], available=[1, 2]) is not None:
+        raise SystemExit("two live nodes must not remap")
+
     print("ok")
     return 0
 

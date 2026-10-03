@@ -109,6 +109,7 @@ def main() -> int:
         return {"ok": True}
 
     agent.start_background_recover = lambda: None  # type: ignore[method-assign]
+    agent.recover_unavailable_node = lambda node_id: node_id  # type: ignore[method-assign]
     agent._recover_done.set()
     agent.wait_node_available = lambda node_id, timeout: True  # type: ignore[method-assign]
     retried = agent.command_with_reconnect(13, send_fail_then_ok)

@@ -713,11 +713,14 @@ final class YarboHomeAutomations
             'no_motion' => 'no motion',
         ];
         $phrase = $labels[$event] ?? $event;
+        if ($event === 'motion' && preg_match('/motion$/i', trim($name))) {
+            $phrase = '';
+        }
         if (in_array($event, self::DURATION_EVENTS, true) && $for > 0) {
-            return $name . ' ' . $phrase . ' ' . self::formatDuration($for);
+            return $phrase === '' ? $name . ' ' . self::formatDuration($for) : ($name . ' ' . $phrase . ' ' . self::formatDuration($for));
         }
 
-        return $name . ' ' . $phrase;
+        return $phrase === '' ? $name : ($name . ' ' . $phrase);
     }
 
     /**

@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 16
+AGENT_VERSION = 17
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
@@ -130,6 +130,8 @@ _started_docker = False
 _recovered_storage = False
 _recover_thread_started = False
 _recover_done = threading.Event()
+_recover_lock = threading.Lock()
+_recover_last_at = 0.0
 _restore_lock = threading.Lock()
 _preferred_shared = False
 _live_lock = threading.Lock()
@@ -581,6 +583,216 @@ def persist_remapped_home(old_node: int, new_node: int) -> int:
     return changed
 
 
+def looks_like_matter_id(value: str) -> bool:
+    if not isinstance(value, str) or ":" not in value:
+        return False
+    if value.startswith("unifi:") or value.startswith("scene:"):
+        return False
+    node_s, rest = value.split(":", 1)
+    if not node_s.isdigit() or not rest.isdigit():
+        return False
+    if len(node_s) == 2 and len(rest) == 2:
+        hour = int(node_s)
+        minute = int(rest)
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return False
+    return True
+
+
+def remap_automations_node_id(store: dict[str, Any], old_node: int, new_node: int) -> int:
+    """Rewrite Matter device ids in home-automations.json without touching clock times."""
+    if old_node == new_node or old_node <= 0 or new_node <= 0:
+        return 0
+    changed = 0
+
+    def walk(value: Any) -> Any:
+        nonlocal changed
+        if isinstance(value, dict):
+            items = list(value.items())
+            value.clear()
+            for key, item in items:
+                new_key = key
+                if looks_like_matter_id(str(key)):
+                    rewritten = rewrite_device_id(str(key), old_node, new_node)
+                    if rewritten != key:
+                        changed += 1
+                        new_key = rewritten
+                value[new_key] = walk(item)
+            return value
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                value[index] = walk(item)
+            return value
+        if isinstance(value, str) and looks_like_matter_id(value):
+            rewritten = rewrite_device_id(value, old_node, new_node)
+            if rewritten != value:
+                changed += 1
+            return rewritten
+        return value
+
+    walk(store)
+    return changed
+
+
+def persist_remapped_automations(old_node: int, new_node: int) -> int:
+    path = ROOT / "data" / "home-automations.json"
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return 0
+    if not isinstance(store, dict):
+        return 0
+    changed = remap_automations_node_id(store, old_node, new_node)
+    if changed:
+        path.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
+    return changed
+
+
+def persist_remapped_node(old_node: int, new_node: int) -> int:
+    changed = persist_remapped_home(old_node, new_node)
+    changed += persist_remapped_automations(old_node, new_node)
+    cache = ROOT / "data" / "home-nodes-cache.json"
+    try:
+        blob = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        blob = None
+    if isinstance(blob, dict):
+        devices = blob.get("devices")
+        n = 0
+        if isinstance(devices, list):
+            for row in devices:
+                if not isinstance(row, dict):
+                    continue
+                if "id" in row and looks_like_matter_id(str(row.get("id") or "")):
+                    new_id = rewrite_device_id(str(row.get("id")), old_node, new_node)
+                    if new_id != row.get("id"):
+                        row["id"] = new_id
+                        n += 1
+                try:
+                    if int(row.get("node_id") or 0) == old_node:
+                        row["node_id"] = new_node
+                        n += 1
+                except (TypeError, ValueError):
+                    pass
+        if n:
+            cache.write_text(json.dumps(blob) + "\n", encoding="utf-8")
+            changed += n
+    return changed
+
+
+def names_for_node(node_id: int) -> list[str]:
+    prefix = f"{node_id}:"
+    found: list[str] = []
+    seen: set[str] = set()
+    path = ROOT / "data" / "home.json"
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(store, dict):
+        return []
+    mapping = store.get("names")
+    if isinstance(mapping, dict):
+        for key, label in mapping.items():
+            if str(key).startswith(prefix):
+                name = str(label or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    found.append(name)
+    for row in store.get("last_devices") or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            if int(row.get("node_id") or 0) != node_id:
+                continue
+        except (TypeError, ValueError):
+            continue
+        name = str(row.get("name") or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            found.append(name)
+    return found
+
+
+def friendly_unavailable_error(node_id: int, raw: Any = "") -> str:
+    names = names_for_node(node_id)
+    if len(names) == 1:
+        who = names[0]
+    elif names:
+        who = ", ".join(names[:3])
+        if len(names) > 3:
+            who += " and others"
+    else:
+        who = f"Matter node {node_id}"
+    detail = (
+        f"{who} is not available yet (Matter node {node_id}). "
+        "That number is the Hue Bridge or other Matter device the light sits on, not a room name."
+    )
+    extra = str(raw or "").strip()
+    if extra and extra.lower() not in detail.lower():
+        return detail
+    return detail
+
+
+def live_present_and_available() -> tuple[list[int], list[int]]:
+    rpc = matter_rpc("get_nodes", timeout=8.0, channel=CMD_CHANNEL)
+    if not rpc.get("ok"):
+        return [], []
+    present: list[int] = []
+    available: list[int] = []
+    for node in nodes_from_result(rpc.get("result")):
+        if not isinstance(node, dict):
+            continue
+        try:
+            node_id = int(node.get("node_id") or node.get("nodeId") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+        if node_id <= 0:
+            continue
+        present.append(node_id)
+        if node.get("available"):
+            available.append(node_id)
+    return present, available
+
+
+def replacement_node_id(
+    wanted: int,
+    present: list[int] | None = None,
+    available: list[int] | None = None,
+) -> int | None:
+    """If the saved node is gone and exactly one other Matter node is live, use that."""
+    if wanted <= 0:
+        return None
+    if present is None or available is None:
+        present, available = live_present_and_available()
+    if wanted in available:
+        return None
+    if wanted in present:
+        return None
+    others = [node_id for node_id in available if node_id != wanted]
+    if len(others) == 1:
+        return others[0]
+    return None
+
+
+def recover_unavailable_node(node_id: int) -> int:
+    """Interview the saved node, or remap Home + automations onto the live Hue node."""
+    replacement = replacement_node_id(node_id)
+    if replacement:
+        persist_remapped_node(node_id, replacement)
+        print(f"matter: remapped node {node_id} -> {replacement} (live fabric)", flush=True)
+        return replacement
+    interview_node_ids([node_id])
+    if wait_node_available(node_id, 15.0):
+        return node_id
+    replacement = replacement_node_id(node_id)
+    if replacement:
+        persist_remapped_node(node_id, replacement)
+        print(f"matter: remapped node {node_id} -> {replacement} after interview", flush=True)
+        return replacement
+    return node_id
+
+
 def node_ids_from_home_store() -> list[int]:
     ids: set[int] = set()
     home = ROOT / "data" / "home.json"
@@ -860,15 +1072,29 @@ def command_in_flight() -> bool:
 def command_with_reconnect(node_id: int, send) -> dict[str, Any]:
     begin_command()
     try:
-        result = send()
+        result = _invoke_send(send, node_id)
         if result.get("ok") or not node_unavailable(result):
             return result
         start_background_recover()
-        _recover_done.wait(timeout=45.0)
-        wait_node_available(node_id, 5.0)
-        return send()
+        use_id = recover_unavailable_node(node_id)
+        _recover_done.wait(timeout=20.0)
+        wait_node_available(use_id, 8.0)
+        result = _invoke_send(send, use_id)
+        if result.get("ok") or not node_unavailable(result):
+            return result
+        return {
+            "ok": False,
+            "error": friendly_unavailable_error(use_id, result.get("error")),
+        }
     finally:
         end_command()
+
+
+def _invoke_send(send, node_id: int) -> dict[str, Any]:
+    try:
+        return send(node_id)
+    except TypeError:
+        return send()
 
 
 def docker_data_mount() -> str:
@@ -1031,11 +1257,16 @@ def recover_docker_storage() -> str:
 
 
 def start_background_recover() -> None:
-    global _recover_thread_started
-    if _recover_thread_started:
-        return
-    _recover_thread_started = True
-    _recover_done.clear()
+    global _recover_thread_started, _recover_last_at
+    now = time.time()
+    with _recover_lock:
+        if _recover_thread_started and not _recover_done.is_set():
+            return
+        if _recover_thread_started and (now - _recover_last_at) < 60.0:
+            return
+        _recover_thread_started = True
+        _recover_last_at = now
+        _recover_done.clear()
     threading.Thread(target=_background_recover, daemon=True).start()
 
 
@@ -2298,11 +2529,12 @@ def color_payload(attributes: dict[str, Any], endpoint: int, type_ids: list[int]
 
 
 def device_command(node_id: int, endpoint: int, cluster: int, name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    def send() -> dict[str, Any]:
+    def send(nid: int | None = None) -> dict[str, Any]:
+        use = node_id if nid is None else nid
         rpc = matter_rpc(
             "device_command",
             {
-                "node_id": node_id,
+                "node_id": use,
                 "endpoint_id": endpoint,
                 "cluster_id": cluster,
                 "command_name": name,
@@ -2803,11 +3035,12 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 rpc = set_heater_power(node_id, endpoint, bool(on))
             else:
 
-                def send_onoff() -> dict[str, Any]:
+                def send_onoff(nid: int | None = None) -> dict[str, Any]:
+                    use = node_id if nid is None else nid
                     return matter_rpc(
                         "device_command",
                         {
-                            "node_id": node_id,
+                            "node_id": use,
                             "endpoint_id": endpoint,
                             "cluster_id": ON_OFF,
                             "command_name": name if action != "toggle" else ("On" if on else "Off"),

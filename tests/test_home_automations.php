@@ -25,6 +25,7 @@ file_put_contents($root . '/data/hub-config.json', json_encode([
 file_put_contents($root . '/data/home.json', json_encode([
     'names' => [
         '1:2' => 'Lamp',
+        '12:3' => 'Garage lights',
         'unifi:sensor:s1' => 'Kitchen Sensor',
         'unifi:light:porch' => 'Porch',
         'unifi:hub:door1' => 'Front door',
@@ -615,6 +616,16 @@ $commands = [];
 assert_true(YarboHomeAutomations::hmInWindow('21:00', '20:00', '22:00'), 'window inside');
 assert_true(!YarboHomeAutomations::hmInWindow('19:00', '20:00', '22:00'), 'window before');
 assert_true(YarboHomeAutomations::hmInWindow('23:00', '22:00', '06:00'), 'overnight window');
+assert_true(
+    YarboHomeAutomations::whenPhrase(
+        ['type' => 'device', 'id' => 'unifi:sensor:g', 'event' => 'motion'],
+        ['unifi:sensor:g' => 'New Garage motion']
+    ) === 'New Garage motion',
+    'do not append motion onto a name that already ends with motion'
+);
+$nodeErr = $home->friendlyMatterError('Node 12 is not (yet) available.');
+assert_true(str_contains($nodeErr, 'Garage lights'), 'node error names the light: ' . $nodeErr);
+assert_true(str_contains($nodeErr, 'Matter node 12'), 'node error keeps the node id: ' . $nodeErr);
 
 $dash = $home->dashboard();
 assert_true(isset($dash['automations']) && isset($dash['server_timezone']), 'dashboard exposes automations');
@@ -644,7 +655,7 @@ assert_true(str_contains($js, "['sensors', 'Sensors']"), 'sensors group');
 assert_true(str_contains($js, 'homeAutoDeviceSelectGroups'), 'only-if grouping helper');
 assert_true(str_contains($js, "['cameras', 'Cameras']"), 'cameras group');
 assert_true(str_contains($js, 'homeAutoEnsureTimezone'), 'timezone adopt helper');
-assert_true(str_contains($js, 'runner.last_error'), 'runner error hint');
+assert_true(str_contains($js, "event === 'motion'"), 'live When phrase must not say motion motion');
 assert_true(str_contains($js, 'last_fire_hm'), 'last ran hint');
 assert_true(str_contains($js, 'Then failed:'), 'Then-failed hint');
 assert_true(str_contains($js, 'runner.then_error'), 'per-rule Then error');
