@@ -1260,8 +1260,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
   { "target": ["autogroup:member"], "attr": ["funnel"] }
 ]</pre>
                                     If the JSON editor has a Funnel shortcut in its own sidebar, use that instead. Or try <strong>Definitions</strong> → <strong>Node attributes</strong> and add attribute <code>funnel</code> for <code>autogroup:member</code>.</li>
-                                    <li>Open <a href="https://login.tailscale.com/admin/dns" target="_blank" rel="noopener">DNS</a> and turn on <strong>MagicDNS</strong> and <strong>HTTPS Certificates</strong> if they are off.</li>
-                                    <li>Come back here and click <strong>Start Funnel</strong>. If Tailscale opens an approve link, use it. The HTTPS origin should fill in as <code>https://….ts.net</code>. Then Save remote access and update the tablets. Do not port-forward 8080.</li>
+                                    <li>Open <a href="https://login.tailscale.com/admin/dns" target="_blank" rel="noopener">DNS</a> and turn on <strong>MagicDNS</strong>, <strong>HTTPS Certificates</strong>, and <strong>Funnel</strong> if that page has a Funnel switch.</li>
+                                    <li>Come back here and click <strong>Start Funnel</strong>. If Tailscale opens an approve link, use it. If this page says no output, on the Pi run <code>sudo ./scripts/paper_remote.sh funnel-on</code> and read the Tailscale error. Then tick Allow tablets, Save remote access, and update the tablets. Do not port-forward 8080.</li>
                                 </ol>
                             </div>
                             <label class="settings-field">

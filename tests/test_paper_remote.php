@@ -220,8 +220,20 @@ if (!str_contains($sh, 'JSON editor')) {
     fwrite(STDERR, "paper_remote.sh must explain JSON editor\n");
     exit(1);
 }
-if (!str_contains($change, '## [4.0.43]')) {
-    fwrite(STDERR, "changelog 4.0.43 missing\n");
+if (!str_contains($change, '## [4.0.44]')) {
+    fwrite(STDERR, "changelog 4.0.44 missing\n");
+    exit(1);
+}
+if (str_contains($phpSrc = file_get_contents(__DIR__ . '/../src/YarboPaperRemote.php') ?: '', '2>/dev/null')) {
+    fwrite(STDERR, "paper remote PHP must not hide Tailscale stderr\n");
+    exit(1);
+}
+if (!str_contains($sh, '--yes') || !str_contains($sh, 'http://127.0.0.1')) {
+    fwrite(STDERR, "funnel-on must use --yes and proxy 127.0.0.1\n");
+    exit(1);
+}
+if (str_contains($phpSrc, 'Command produced no output')) {
+    fwrite(STDERR, "generic no-output error must be replaced\n");
     exit(1);
 }
 

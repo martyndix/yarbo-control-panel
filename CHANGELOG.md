@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.44] - 2026-10-03
+
+### Fixed
+- Settings → E-paper **Start Funnel** no longer fails with **Command produced no output**. The Pi now runs `tailscale funnel --bg --yes` to `http://127.0.0.1:8089` (with sudo when the panel is allowed), always returns the Tailscale error, and tells you to run `sudo ./scripts/paper_remote.sh funnel-on` on the Pi if the web button still cannot start it.
+
 ## [4.0.43] - 2026-10-03
 
 ### Fixed

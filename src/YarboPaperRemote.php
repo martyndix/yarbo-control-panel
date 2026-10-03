@@ -538,24 +538,74 @@ final class YarboPaperRemote
     private function runScript(string $step): ?array
     {
         $script = $this->scriptPath();
-        $cmd = 'bash ' . escapeshellarg($script) . ' ' . escapeshellarg($step) . ' 2>/dev/null';
+        $cmd = 'bash ' . escapeshellarg($script) . ' ' . escapeshellarg($step) . ' 2>&1';
         $out = [];
         $code = 0;
         exec($cmd, $out, $code);
         $raw = trim(implode("\n", $out));
+        $decoded = $this->decodeScriptOutput($raw);
+
+        return $decoded ?? [
+            'ok' => false,
+            'error' => $this->emptyScriptError($raw, $code),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function decodeScriptOutput(string $raw): ?array
+    {
         if ($raw === '') {
-            return ['ok' => $code === 0, 'error' => $code === 0 ? '' : 'Command produced no output'];
+            return null;
         }
         $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            return [
-                'ok' => $code === 0,
-                'error' => $code === 0 ? '' : substr($raw, 0, 400),
-                'log' => substr($raw, 0, 800),
-            ];
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+        $lines = preg_split('/\r\n|\n|\r/', $raw) ?: [];
+        for ($i = count($lines) - 1; $i >= 0; $i--) {
+            $line = trim($lines[$i]);
+            if ($line === '' || $line[0] !== '{') {
+                continue;
+            }
+            $decoded = json_decode($line, true);
+            if (is_array($decoded)) {
+                if (count($lines) > 1) {
+                    $decoded['log'] = substr($raw, 0, 800);
+                }
+
+                return $decoded;
+            }
         }
 
-        return $decoded;
+        return [
+            'ok' => false,
+            'error' => substr($raw, 0, 400),
+            'log' => substr($raw, 0, 800),
+        ];
+    }
+
+    private function emptyScriptError(string $raw, int $code): string
+    {
+        $hint = 'sudo ' . $this->scriptPath() . ' funnel-on';
+        $logPath = $this->projectRoot . '/data/paper-remote.log';
+        $log = '';
+        if (is_file($logPath) && is_readable($logPath)) {
+            $lines = @file($logPath, FILE_IGNORE_NEW_LINES);
+            if (is_array($lines) && $lines !== []) {
+                $log = trim(implode(' ', array_slice($lines, -8)));
+            }
+        }
+        $error = 'Start Funnel produced no JSON (exit ' . $code . '). On the Pi run: ' . $hint;
+        if ($raw !== '') {
+            $error .= ' Output: ' . substr($raw, 0, 240);
+        }
+        if ($log !== '') {
+            $error .= ' Log: ' . substr($log, 0, 240);
+        }
+
+        return $error;
     }
 
     private static function asBool(mixed $value): bool

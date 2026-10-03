@@ -8295,7 +8295,7 @@ async function runPaperRemoteStep(step, button) {
         if (step === 'up' && authUrl) openPaperRemoteUrl(authUrl);
         if (step === 'funnel-on' && funnelUrl && !ts.funnel_on) openPaperRemoteUrl(funnelUrl);
         const err = String(data.error || stepOut.error || ts.error || '').trim();
-        const funnelHelp = 'Funnel did not start. Login is not enough. The Access controls page is Policies (General access rules) — Funnel is not there. Click JSON editor in the left sidebar and add "nodeAttrs": [{ "target": ["autogroup:member"], "attr": ["funnel"] }], then Save. Turn on DNS MagicDNS and HTTPS Certificates. Then Start Funnel again.';
+        const funnelHelp = 'Funnel did not start. On the Pi run: sudo ./scripts/paper_remote.sh funnel-on — that prints the real Tailscale error (often needs sudo). DNS MagicDNS, HTTPS Certificates, and Funnel if shown, must be on.';
         if (step === 'install') {
             setPaperRemoteResult(data.message || stepOut.message || 'Tailscale installed. Click Log in next. A login link must appear — if nothing opens, the Pi may already be logged in.', data.ok === false ? 'error' : 'success');
         } else if (step === 'up') {
@@ -8310,7 +8310,8 @@ async function runPaperRemoteStep(step, button) {
             if (data.tablet_url || ts.funnel_on) {
                 setPaperRemoteResult(`Funnel is on${data.tablet_url ? ` (${data.tablet_url})` : ''}. Save remote access, then update the tablets.`, 'success');
             } else {
-                setPaperRemoteResult(err || funnelHelp, 'error');
+                const hint = String(ts.sudo_hint || stepOut.sudo_hint || '').trim();
+                setPaperRemoteResult((err || funnelHelp) + (hint && !(err || '').includes(hint) ? `\n${hint}` : ''), 'error');
             }
         } else if (!data.ok) {
             setPaperRemoteResult(err || funnelHelp, 'error');

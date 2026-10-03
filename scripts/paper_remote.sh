@@ -14,6 +14,9 @@ LOG_FILE="${ROOT}/data/paper-remote.log"
 ROUTER="${ROOT}/scripts/paper_remote_router.php"
 
 mkdir -p "${ROOT}/data"
+if ! touch "$LOG_FILE" 2>/dev/null; then
+  LOG_FILE="/tmp/yarbo-paper-remote.log"
+fi
 
 json_escape() {
   php -r 'echo json_encode($argv[1] ?? "");' "$1"
@@ -41,9 +44,11 @@ gate_pid() {
 
 gate_listening() {
   if command -v ss >/dev/null 2>&1; then
-    ss -lnt 2>/dev/null | grep -q ":${GATE_PORT} " && return 0
+    if ss -lnt 2>/dev/null | grep -q ":${GATE_PORT} "; then
+      return 0
+    fi
   fi
-  python3 - "$GATE_PORT" <<'PY' 2>/dev/null && return 0
+  if python3 - "$GATE_PORT" <<'PY' 2>/dev/null; then
 import socket, sys
 s = socket.socket()
 s.settimeout(0.2)
@@ -55,7 +60,21 @@ except Exception:
 finally:
     s.close()
 PY
+    return 0
+  fi
   return 1
+}
+
+append_log() {
+  printf '%s\n' "$1" >>"$LOG_FILE" 2>/dev/null || true
+}
+
+run_with_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 25 "$@"
+  else
+    "$@"
+  fi
 }
 
 start_gate() {
@@ -71,8 +90,11 @@ start_gate() {
     emit '{"ok":false,"error":"paper_remote_router.php missing"}'
     return 1
   fi
+  set +e
   YARBO_PANEL_PORT="${PANEL_PORT}" "$PHP_BIN" -d max_execution_time=180 -S "127.0.0.1:${GATE_PORT}" "$ROUTER" >>"$LOG_FILE" 2>&1 &
-  echo $! > "$PID_FILE"
+  local php_pid=$!
+  set -e
+  echo "$php_pid" > "$PID_FILE" 2>/dev/null || true
   sleep 0.3
   if gate_listening; then
     emit '{"ok":true,"gate":true,"message":"Remote gate listening on 127.0.0.1:'"${GATE_PORT}"'"}'
@@ -270,28 +292,46 @@ tailscale_up() {
 }
 
 funnel_on() {
+  set +e
+  if [[ "${EUID}" -ne 0 ]] && sudo -n true 2>/dev/null; then
+    exec sudo -n "$0" funnel-on
+  fi
   local ts
   ts="$(tailscale_bin)"
   if [[ -z "$ts" ]]; then
     emit '{"ok":false,"error":"Install Tailscale first"}'
     return 1
   fi
-  start_gate >/dev/null || true
-  local out
-  set +e
-  out="$("$ts" funnel --bg "${GATE_PORT}" 2>&1)"
-  local code=$?
-  set -e
-  printf '%s\n' "$out" >>"$LOG_FILE"
+  start_gate >/dev/null 2>/dev/null
+  local target="http://127.0.0.1:${GATE_PORT}"
+  local out=""
+  local extra=""
+  local code=1
+  out="$(run_with_timeout "$ts" funnel --bg --yes --https=443 "$target" 2>&1)"
+  code=$?
+  if [[ $code -ne 0 ]]; then
+    extra="$(run_with_timeout "$ts" funnel --bg --yes "$target" 2>&1)"
+    code=$?
+    out="${out}"$'\n'"${extra}"
+  fi
+  if [[ $code -ne 0 ]]; then
+    extra="$(run_with_timeout "$ts" funnel --bg --yes "${GATE_PORT}" 2>&1)"
+    code=$?
+    out="${out}"$'\n'"${extra}"
+  fi
+  append_log "$out"
   local from_out
   from_out="$(first_https "$out")"
   local st
   st="$(status_json)"
+  if [[ -z "$st" ]]; then
+    st='{"ok":false}'
+  fi
   if [[ -n "$from_out" ]]; then
     st="$(printf '%s' "$st" | php -r '
       $j = json_decode(stream_get_contents(STDIN), true);
       if (!is_array($j)) {
-        exit;
+        $j = [];
       }
       $j["funnel_enable_url"] = $argv[1];
       echo json_encode($j) . "\n";
@@ -299,14 +339,25 @@ funnel_on() {
   fi
   local on
   on="$(printf '%s' "$st" | php -r '$j=json_decode(stream_get_contents(STDIN), true); echo !empty($j["funnel_on"]) ? "1" : "0";')"
-  if [[ "$on" == "1" && $code -eq 0 ]]; then
-    emit "$st"
+  if [[ "$on" == "1" ]]; then
+    php -r '
+      $j = json_decode($argv[1], true);
+      if (!is_array($j)) {
+        $j = [];
+      }
+      $j["ok"] = true;
+      $j["funnel_on"] = true;
+      $j["message"] = "Funnel is on. Tick Allow tablets to reach this panel, then Save remote access.";
+      echo json_encode($j) . "\n";
+    ' "$st"
     return 0
   fi
   local help
-  help=$'Funnel did not start. Login is not enough.\n\n1) Access controls https://login.tailscale.com/admin/acls opens Policies (General access rules). Funnel is not a rule there. In the left sidebar click JSON editor. Add:\n"nodeAttrs": [{ "target": ["autogroup:member"], "attr": ["funnel"] }]\nthen Save. Or Definitions → Node attributes → funnel for autogroup:member.\n\n2) DNS https://login.tailscale.com/admin/dns — turn on MagicDNS and HTTPS Certificates.\n\n3) Click Start Funnel again.'
+  help=$'Funnel did not start.\n\nOn the Pi run:\nsudo '"${ROOT}"$'/scripts/paper_remote.sh funnel-on\n\nIf nodeAttrs and DNS are already on, that command prints the real Tailscale error (often needs sudo). On DNS, MagicDNS, HTTPS Certificates, and Funnel if that page has a Funnel switch, must be on.'
   if [[ -n "$out" ]]; then
-    help="$help"$'\n\n'"CLI: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-180)"
+    help="$help"$'\n\n'"CLI: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-240)"
+  elif [[ $code -eq 124 ]]; then
+    help="$help"$'\n\n'"CLI timed out waiting for Tailscale."
   fi
   php -r '
     $j = json_decode($argv[1], true);
@@ -314,10 +365,10 @@ funnel_on() {
       $j = [];
     }
     $j["ok"] = false;
-    $j["needs_funnel_acl"] = true;
     $j["error"] = $argv[2];
+    $j["sudo_hint"] = $argv[3];
     echo json_encode($j) . "\n";
-  ' "$st" "$help"
+  ' "$st" "$help" "sudo ${ROOT}/scripts/paper_remote.sh funnel-on"
   return 1
 }
 
@@ -331,12 +382,12 @@ funnel_off() {
 }
 
 ensure() {
-  start_gate >/dev/null || true
+  start_gate >/dev/null 2>/dev/null || true
   local ts
   ts="$(tailscale_bin)"
   if [[ -n "$ts" ]]; then
     if "$ts" status >/dev/null 2>&1; then
-      "$ts" funnel --bg "${GATE_PORT}" >>"$LOG_FILE" 2>&1 || true
+      "$ts" funnel --bg --yes --https=443 "http://127.0.0.1:${GATE_PORT}" >>"$LOG_FILE" 2>&1 || true
     fi
   fi
   status_json
