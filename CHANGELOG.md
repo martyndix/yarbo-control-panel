@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.39] - 2026-10-03
+
+### Added
+- Home Automations **Then → On** can set how a device comes on: **brightness** and **colour** (or colour temperature) on lights that have those, and **setpoint** on heaters. UniFi floodlights stay On/Off. The chip stores that look, and the runner applies it the same way a scene does.
+
 ## [4.0.37] - 2026-10-03
 
 ### Added

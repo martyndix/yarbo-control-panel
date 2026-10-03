@@ -4094,10 +4094,21 @@ body.home-is-reordering {
 
 .auto-chip select,
 .auto-chip input[type="number"],
-.auto-chip input[type="time"] {
+.auto-chip input[type="time"],
+.auto-chip input[type="color"] {
     font: inherit;
     font-size: 0.8rem;
     max-width: 7.5rem;
+}
+
+.auto-chip input[type="color"] {
+    width: 1.7rem;
+    height: 1.35rem;
+    max-width: 1.7rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    background: transparent;
+    cursor: pointer;
 }
 
 .auto-chip [data-auto-then-off] {
@@ -4106,6 +4117,14 @@ body.home-is-reordering {
 
 .auto-chip input[type="number"] {
     width: 3.4rem;
+}
+
+.auto-chip .auto-then-set {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1rem;
+    color: var(--muted);
+    font-size: 0.8rem;
 }
 
 .auto-chip--clock {

@@ -4856,9 +4856,55 @@ function homeAutoThenCommands(d) {
         if (d.gate) return [['open', 'Open'], ['close', 'Close'], ['stop', 'Stop']];
         return [['unlock', 'Unlock']];
     }
-    const cmds = [['on', 'On'], ['off', 'Off']];
-    if (!homeIsUnifi(d) && d.dimmable) cmds.push(['brightness', 'Brightness']);
-    return cmds;
+    return [['on', 'On'], ['off', 'Off']];
+}
+
+function homeAutoThenCanBright(d) {
+    return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && d.kind !== 'vacuum' && d.dimmable);
+}
+
+function homeAutoThenCanColor(d) {
+    return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && (d.colorable || d.color_hs || d.color_xy));
+}
+
+function homeAutoThenCanKelvin(d) {
+    return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && d.color_ct && !homeAutoThenCanColor(d));
+}
+
+function homeAutoThenCanSetpoint(d) {
+    return Boolean(d && d.kind === 'heater');
+}
+
+function homeAutoThenShowsLook(cmd) {
+    return !['off', 'stop', 'unlock', 'lock', 'open', 'close'].includes(String(cmd || 'on'));
+}
+
+function homeAutoThenParamsHtml(d, action, cmd) {
+    if (!homeAutoThenShowsLook(cmd)) return '';
+    let html = '';
+    if (homeAutoThenCanBright(d)) {
+        const n = Number(action.brightness ?? d.brightness ?? 100);
+        const bright = Number.isFinite(n) && n > 0 ? n : 100;
+        html += `<label class="auto-then-set"><input type="number" min="1" max="100" data-auto-bright value="${bright}" aria-label="Brightness" title="Brightness">%</label>`;
+    }
+    if (homeAutoThenCanColor(d)) {
+        const hex = action.hex || action.color_hex || d.color_hex || '#ffd27a';
+        html += `<input type="color" data-auto-hex value="${escapeHtml(hex)}" aria-label="Colour" title="Colour">`;
+    } else if (homeAutoThenCanKelvin(d)) {
+        const min = Number(d.color_temp_min || 2000);
+        const max = Number(d.color_temp_max || 6500);
+        const kelvinRaw = Number(action.kelvin ?? action.color_temp ?? d.color_temp ?? 2700);
+        const kelvin = Number.isFinite(kelvinRaw) ? kelvinRaw : 2700;
+        html += `<label class="auto-then-set"><input type="number" min="${min}" max="${max}" step="50" data-auto-kelvin value="${kelvin}" aria-label="Colour temperature" title="Colour temperature (K)">K</label>`;
+    }
+    if (homeAutoThenCanSetpoint(d)) {
+        const min = Number(d.heating_min ?? 5);
+        const max = Number(d.heating_max ?? 35);
+        const setRaw = Number(action.celsius ?? action.heating_setpoint ?? d.heating_setpoint ?? 21);
+        const set = Number.isFinite(setRaw) ? setRaw : 21;
+        html += `<label class="auto-then-set"><input type="number" min="${min}" max="${max}" step="0.5" data-auto-celsius value="${escapeHtml(String(set))}" aria-label="Heating setpoint">°</label>`;
+    }
+    return html;
 }
 
 function homeAutoDefaultWhen(d) {
@@ -4885,7 +4931,15 @@ function homeAutoDefaultThen(d) {
         return { kind: 'device', id: d.id, command: d.gate ? 'open' : 'unlock' };
     }
     if (!homeAutoThenOk(d)) return null;
-    return { kind: 'device', id: d.id, command: 'on' };
+    const action = { kind: 'device', id: d.id, command: 'on', device_kind: d.kind || 'light' };
+    if (homeAutoThenCanBright(d)) {
+        const n = Number(d.brightness);
+        action.brightness = Number.isFinite(n) && n > 0 ? n : 100;
+    }
+    if (homeAutoThenCanColor(d)) action.hex = d.color_hex || '#ffd27a';
+    if (homeAutoThenCanKelvin(d)) action.kelvin = Number(d.color_temp || 2700);
+    if (homeAutoThenCanSetpoint(d)) action.celsius = Number(d.heating_setpoint ?? 21);
+    return action;
 }
 
 function homeAutoAllDevices() {
@@ -4896,11 +4950,21 @@ function homeAutoAllDevices() {
         homeDash.devices || [],
         homeDash.hidden_devices || [],
     ];
+    const overlay = ['dimmable', 'colorable', 'color_hs', 'color_xy', 'color_ct', 'color_hex', 'color_temp',
+        'color_temp_min', 'color_temp_max', 'brightness', 'kind', 'heating_setpoint', 'heating_min', 'heating_max',
+        'has_thermostat', 'product', 'name'];
     lists.forEach((list) => {
         list.forEach((d) => {
-            if (!d || !d.id || seen[d.id]) return;
-            seen[d.id] = true;
-            out.push(d);
+            if (!d || !d.id) return;
+            if (seen[d.id]) {
+                overlay.forEach((key) => {
+                    if (d[key] != null && d[key] !== '') seen[d.id][key] = d[key];
+                });
+                return;
+            }
+            const row = { ...d };
+            seen[d.id] = row;
+            out.push(row);
         });
     });
     return out;
@@ -4955,6 +5019,36 @@ function homeAutoWhenPhrase(trigger, names) {
     return `${name} ${labels[event] || event}`;
 }
 
+function homeAutoThenLookIndex(el) {
+    return Number(el.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
+}
+
+function homeAutoApplyThenLook(el) {
+    if (!autoDraft || !el) return;
+    const action = autoDraft.actions?.[homeAutoThenLookIndex(el)];
+    if (!action) return;
+    if (el.matches('[data-auto-bright]')) {
+        const n = Number(el.value);
+        if (Number.isFinite(n)) action.brightness = Math.max(1, Math.min(100, Math.round(n)));
+    }
+    if (el.matches('[data-auto-hex]')) action.hex = el.value;
+    if (el.matches('[data-auto-kelvin]')) {
+        const n = Number(el.value);
+        if (Number.isFinite(n)) action.kelvin = Math.round(n);
+    }
+    if (el.matches('[data-auto-celsius]')) {
+        const n = Number(el.value);
+        if (Number.isFinite(n)) action.celsius = n;
+    }
+}
+
+function homeAutoReadThenLooks() {
+    if (!autoDraft) return;
+    document.querySelectorAll('#auto-then-chips [data-auto-bright], #auto-then-chips [data-auto-hex], #auto-then-chips [data-auto-kelvin], #auto-then-chips [data-auto-celsius]').forEach((el) => {
+        homeAutoApplyThenLook(el);
+    });
+}
+
 function homeAutoThenPhrase(action, names) {
     if (action.kind === 'scene') {
         const name = names[`scene:${action.id}`] || names[action.id] || 'Scene';
@@ -4966,7 +5060,13 @@ function homeAutoThenPhrase(action, names) {
     const name = names[action.id] || 'Device';
     if (action.command === 'off') return `${name} off`;
     if (action.command === 'unlock') return `${name} unlock`;
-    if (action.command === 'brightness') {
+    if (action.celsius != null || action.heating_setpoint != null) {
+        let text = `${name} ${action.celsius ?? action.heating_setpoint}°`;
+        const off = Number(action.off_after_sec || 0);
+        if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+        return text;
+    }
+    if (action.brightness != null || action.command === 'brightness') {
         let text = `${name} ${action.brightness || 100}%`;
         const off = Number(action.off_after_sec || 0);
         if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
@@ -5495,6 +5595,7 @@ function homeAutoThenChipHtml(action, index) {
         : homeAutoDeviceById(action.id) || { id: action.id, kind: 'light', name: action.id };
     const cmds = homeAutoThenCommands(d);
     const cmd = action.command || (isScene ? 'run' : 'on');
+    if (cmd === 'brightness' && !cmds.some(([v]) => v === 'brightness')) cmds.push(['brightness', 'Brightness']);
     const canOff = homeAutoThenCanOffAfter({ ...action, command: cmd });
     const offSec = canOff ? Number(action.off_after_sec || 0) : 0;
     const offHtml = canOff
@@ -5507,7 +5608,7 @@ function homeAutoThenChipHtml(action, index) {
         <select data-auto-cmd>${cmds.map(([v, label]) =>
             `<option value="${v}" ${v === cmd ? 'selected' : ''}>${label}</option>`
         ).join('')}</select>
-        ${cmd === 'brightness' ? `<input type="number" min="1" max="100" data-auto-bright value="${Number(action.brightness || 100)}">` : ''}
+        ${homeAutoThenParamsHtml(d, action, cmd)}
         ${offHtml}
         <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
     </div>`;
@@ -5864,6 +5965,7 @@ async function homeAutoSave() {
         }
     });
     homeAutoSetTriggers(homeAutoTriggers());
+    homeAutoReadThenLooks();
     autoDraft.off_after_sec = homeAutoReadOffAfter();
     if (homeAutoTriggers().some((trigger) => trigger.type === 'sun') && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);
@@ -6048,6 +6150,12 @@ function bindHomeAutomations() {
             homeAutoClickTray(tray.getAttribute('data-auto-tray'), tray.getAttribute('data-id') || '');
         }
     });
+    page.addEventListener('input', (event) => {
+        if (!autoDraft) return;
+        if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
+            homeAutoApplyThenLook(event.target);
+        }
+    });
     page.addEventListener('change', (event) => {
         if (event.target.matches('#auto-timezone')) {
             homeAutoSaveTimezone(event.target.value);
@@ -6112,9 +6220,8 @@ function bindHomeAutomations() {
                 if (secs.length && secs.every((s) => s === secs[0])) autoDraft.off_after_sec = secs[0];
             }
         }
-        if (event.target.matches('[data-auto-bright]')) {
-            const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
-            if (autoDraft.actions[i]) autoDraft.actions[i].brightness = Number(event.target.value);
+        if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
+            homeAutoApplyThenLook(event.target);
         }
         if (event.target.matches('[data-auto-if-start]')) {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
@@ -6150,6 +6257,10 @@ function bindHomeAutomations() {
             return;
         }
         if (thenChip) {
+            if (event.target.closest('input, select, button, label')) {
+                event.preventDefault();
+                return;
+            }
             autoDrag = { kind: 'reorder', index: Number(thenChip.getAttribute('data-auto-then')) };
             event.dataTransfer?.setData('text/plain', 'auto');
         }

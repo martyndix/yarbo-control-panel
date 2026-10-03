@@ -705,7 +705,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </details>
                     <section class="auto-drop" id="auto-then" data-auto-zone="then" aria-label="Then">
                         <h3 class="settings-subtitle">Then</h3>
-                        <p class="hint">Drag lights, scenes, or Unlock here. Reorder by dragging. Each Then chip can turn off after a delay.</p>
+                        <p class="hint">Drag lights, scenes, or Unlock here. Reorder by dragging. On can set brightness, colour, or temperature when the device has those.</p>
                         <div class="auto-drop-chips" id="auto-then-chips"></div>
                         <label class="settings-field auto-off-after">
                             <span class="label">Turn off after</span>

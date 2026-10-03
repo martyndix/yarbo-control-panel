@@ -18,7 +18,7 @@ final class YarboHomeAutomations
     ];
     private const DEVICE_COMMANDS = [
         'on', 'off', 'toggle', 'unlock', 'lock', 'open', 'close', 'stop',
-        'brightness', 'color', 'color_temp',
+        'brightness', 'color', 'color_temp', 'setpoint',
     ];
 
     /** @var callable|null */
@@ -730,12 +730,15 @@ final class YarboHomeAutomations
         } else {
             $name = $names[(string) ($action['id'] ?? '')] ?? 'Device';
             $cmd = (string) ($action['command'] ?? 'on');
-            if ($cmd === 'brightness' && isset($action['brightness'])) {
-                $text = $name . ' ' . (int) $action['brightness'] . '%';
-            } elseif ($cmd === 'off') {
+            if ($cmd === 'off') {
                 $text = $name . ' off';
             } elseif ($cmd === 'unlock') {
                 $text = $name . ' unlock';
+            } elseif (isset($action['celsius']) || isset($action['heating_setpoint'])) {
+                $deg = $action['celsius'] ?? $action['heating_setpoint'];
+                $text = $name . ' ' . rtrim(rtrim(number_format((float) $deg, 1, '.', ''), '0'), '.') . '°';
+            } elseif (isset($action['brightness'])) {
+                $text = $name . ' ' . (int) $action['brightness'] . '%';
             } else {
                 $text = $name . ' on';
             }
@@ -963,22 +966,40 @@ final class YarboHomeAutomations
         if ($id === '' || !in_array($cmd, self::DEVICE_COMMANDS, true)) {
             return null;
         }
+        $deviceKind = strtolower(trim((string) ($action['device_kind'] ?? '')));
+        if (!in_array($deviceKind, ['light', 'heater', 'plug', 'switch', 'vacuum', 'relay'], true)) {
+            $deviceKind = '';
+        }
         $accept = $cmd === 'lock' ? 'unlock' : $cmd;
-        if (!YarboHome::deviceAcceptsCommand($id, $accept, null)) {
+        if (!YarboHome::deviceAcceptsCommand($id, $accept, $deviceKind !== '' ? $deviceKind : null)) {
             return null;
         }
         $out = ['kind' => 'device', 'id' => $id, 'command' => $cmd];
-        if ($cmd === 'brightness' && array_key_exists('brightness', $action)) {
-            $out['brightness'] = max(1, min(100, (int) $action['brightness']));
+        if ($deviceKind !== '') {
+            $out['device_kind'] = $deviceKind;
         }
-        if ($cmd === 'color') {
-            $hex = trim((string) ($action['hex'] ?? $action['color_hex'] ?? ''));
-            if ($hex !== '') {
-                $out['hex'] = $hex;
+        if (in_array($cmd, ['on', 'brightness', 'color', 'color_temp', 'setpoint'], true)) {
+            if (array_key_exists('brightness', $action) && $action['brightness'] !== null && $action['brightness'] !== '') {
+                $out['brightness'] = max(1, min(100, (int) $action['brightness']));
             }
-        }
-        if ($cmd === 'color_temp' && array_key_exists('kelvin', $action)) {
-            $out['kelvin'] = max(1500, min(8000, (int) $action['kelvin']));
+            $hex = trim((string) ($action['hex'] ?? $action['color_hex'] ?? ''));
+            if ($hex !== '' && $hex[0] !== '#') {
+                $hex = '#' . $hex;
+            }
+            if (preg_match('/^#([0-9a-fA-F]{3})$/', $hex, $short)) {
+                $out['hex'] = '#' . strtolower($short[1][0] . $short[1][0] . $short[1][1] . $short[1][1] . $short[1][2] . $short[1][2]);
+            } elseif (preg_match('/^#([0-9a-fA-F]{6})$/', $hex, $full)) {
+                $out['hex'] = '#' . strtolower($full[1]);
+            }
+            if (array_key_exists('kelvin', $action) && $action['kelvin'] !== null && $action['kelvin'] !== '') {
+                $out['kelvin'] = max(1500, min(8000, (int) $action['kelvin']));
+            } elseif (array_key_exists('color_temp', $action) && $action['color_temp'] !== null && $action['color_temp'] !== '') {
+                $out['kelvin'] = max(1500, min(8000, (int) $action['color_temp']));
+            }
+            $celsius = $action['celsius'] ?? $action['heating_setpoint'] ?? $action['setpoint'] ?? null;
+            if ($celsius !== null && $celsius !== '') {
+                $out['celsius'] = max(5.0, min(35.0, (float) $celsius));
+            }
         }
 
         return $out + self::actionOffAfter($action);
@@ -1799,18 +1820,102 @@ final class YarboHomeAutomations
         if ($cmd === 'lock') {
             $cmd = 'unlock';
         }
+        if (in_array($cmd, ['on', 'brightness', 'color', 'color_temp', 'setpoint'], true)) {
+            return $this->runDeviceLook($home, $action);
+        }
         $payload = ['id' => (string) $action['id'], 'command' => $cmd];
-        if ($cmd === 'brightness' && isset($action['brightness'])) {
-            $payload['brightness'] = (int) $action['brightness'];
-        }
-        if ($cmd === 'color' && isset($action['hex'])) {
-            $payload['hex'] = $action['hex'];
-        }
-        if ($cmd === 'color_temp' && isset($action['kelvin'])) {
-            $payload['kelvin'] = (int) $action['kelvin'];
-        }
 
         return $home->command($payload);
+    }
+
+    /**
+     * On, plus brightness / colour / setpoint when the Then chip stored them.
+     *
+     * @param array<string, mixed> $action
+     * @return array<string, mixed>
+     */
+    private function runDeviceLook(YarboHome $home, array $action): array
+    {
+        $id = (string) ($action['id'] ?? '');
+        $kind = strtolower(trim((string) ($action['device_kind'] ?? '')));
+        $isHeater = $kind === 'heater';
+        $errors = [];
+        $last = ['ok' => true];
+        $celsius = $action['celsius'] ?? $action['heating_setpoint'] ?? null;
+        if ($isHeater) {
+            if ($celsius !== null && $celsius !== '') {
+                $last = $home->command([
+                    'id' => $id,
+                    'command' => 'setpoint',
+                    'celsius' => (float) $celsius,
+                ]);
+            } else {
+                $last = $home->command(['id' => $id, 'command' => 'on']);
+            }
+            if (!($last['ok'] ?? false)) {
+                return ['ok' => false, 'error' => (string) ($last['error'] ?? 'failed')];
+            }
+
+            return $last;
+        }
+        $acceptKind = $kind !== '' ? $kind : null;
+        $sent = false;
+        if (isset($action['brightness']) && YarboHome::deviceAcceptsCommand($id, 'brightness', $acceptKind)) {
+            $last = $home->command([
+                'id' => $id,
+                'command' => 'brightness',
+                'brightness' => (int) $action['brightness'],
+            ]);
+            $sent = true;
+            if (!($last['ok'] ?? false)) {
+                $errors[] = (string) ($last['error'] ?? 'failed');
+            }
+        }
+        $hex = trim((string) ($action['hex'] ?? $action['color_hex'] ?? ''));
+        $kelvin = 0;
+        if (isset($action['kelvin']) && $action['kelvin'] !== '') {
+            $kelvin = (int) $action['kelvin'];
+        } elseif (isset($action['color_temp']) && $action['color_temp'] !== '') {
+            $kelvin = (int) $action['color_temp'];
+        }
+        if ($hex !== '' && YarboHome::deviceAcceptsCommand($id, 'color', $acceptKind)) {
+            if (!$sent) {
+                $last = $home->command(['id' => $id, 'command' => 'on']);
+                $sent = true;
+                if (!($last['ok'] ?? false)) {
+                    $errors[] = (string) ($last['error'] ?? 'failed');
+                }
+            }
+            $last = $home->command(['id' => $id, 'command' => 'color', 'hex' => $hex]);
+            $sent = true;
+            if (!($last['ok'] ?? false)) {
+                $errors[] = (string) ($last['error'] ?? 'failed');
+            }
+        } elseif ($kelvin > 0 && YarboHome::deviceAcceptsCommand($id, 'color_temp', $acceptKind)) {
+            if (!$sent) {
+                $last = $home->command(['id' => $id, 'command' => 'on']);
+                $sent = true;
+                if (!($last['ok'] ?? false)) {
+                    $errors[] = (string) ($last['error'] ?? 'failed');
+                }
+            }
+            $last = $home->command(['id' => $id, 'command' => 'color_temp', 'kelvin' => $kelvin]);
+            $sent = true;
+            if (!($last['ok'] ?? false)) {
+                $errors[] = (string) ($last['error'] ?? 'failed');
+            }
+        }
+        if (!$sent) {
+            $last = $home->command(['id' => $id, 'command' => 'on']);
+            if (!($last['ok'] ?? false)) {
+                $errors[] = (string) ($last['error'] ?? 'failed');
+            }
+        }
+        if ($errors !== []) {
+            return ['ok' => false, 'error' => $errors[0]];
+        }
+
+        return $last;
     }
 
     /**
@@ -1832,7 +1937,7 @@ final class YarboHomeAutomations
                 $curr[$id] = ['on' => null, 'open' => null, 'motion' => null, 'temperature' => null, 'humidity' => null];
             }
             $cmd = (string) ($action['command'] ?? '');
-            if ($cmd === 'on') {
+            if (in_array($cmd, ['on', 'brightness', 'color', 'color_temp', 'setpoint'], true)) {
                 $curr[$id]['on'] = true;
             } elseif ($cmd === 'off') {
                 $curr[$id]['on'] = false;

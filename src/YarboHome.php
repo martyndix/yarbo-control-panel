@@ -1392,6 +1392,34 @@ final class YarboHome
                     ? (float) $device['humidity']
                     : null,
                 'companion_of' => (string) ($device['companion_of'] ?? ''),
+                'dimmable' => !empty($device['dimmable']),
+                'colorable' => !empty($device['colorable']),
+                'color_hs' => !empty($device['color_hs']),
+                'color_xy' => !empty($device['color_xy']),
+                'color_ct' => !empty($device['color_ct']),
+                'color_hex' => (string) ($device['color_hex'] ?? ''),
+                'brightness' => isset($device['brightness']) && is_numeric($device['brightness'])
+                    ? (int) $device['brightness']
+                    : null,
+                'color_temp' => isset($device['color_temp']) && is_numeric($device['color_temp'])
+                    ? (int) $device['color_temp']
+                    : null,
+                'color_temp_min' => isset($device['color_temp_min']) && is_numeric($device['color_temp_min'])
+                    ? (int) $device['color_temp_min']
+                    : null,
+                'color_temp_max' => isset($device['color_temp_max']) && is_numeric($device['color_temp_max'])
+                    ? (int) $device['color_temp_max']
+                    : null,
+                'has_thermostat' => !empty($device['has_thermostat']),
+                'heating_setpoint' => isset($device['heating_setpoint']) && is_numeric($device['heating_setpoint'])
+                    ? (float) $device['heating_setpoint']
+                    : null,
+                'heating_min' => isset($device['heating_min']) && is_numeric($device['heating_min'])
+                    ? (float) $device['heating_min']
+                    : null,
+                'heating_max' => isset($device['heating_max']) && is_numeric($device['heating_max'])
+                    ? (float) $device['heating_max']
+                    : null,
             ];
             $out[] = $row;
         }

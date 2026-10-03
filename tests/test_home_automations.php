@@ -205,6 +205,89 @@ $auto->delete('a-and');
 $commands = [];
 @unlink($auto->statePath());
 
+$look = $auto->save([
+    'id' => 'a-look',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'actions' => [[
+        'kind' => 'device',
+        'id' => '1:2',
+        'command' => 'on',
+        'device_kind' => 'light',
+        'brightness' => 40,
+        'hex' => '#FFD27A',
+        'off_after_sec' => 300,
+    ]],
+    'names' => ['unifi:sensor:s1' => 'Kitchen Sensor', '1:2' => 'Lamp'],
+]);
+assert_true(!empty($look['ok']), 'save Then look: ' . json_encode($look));
+$lookAction = $look['automation']['actions'][0] ?? [];
+assert_true(($lookAction['command'] ?? '') === 'on', 'look stays On');
+assert_true(($lookAction['device_kind'] ?? '') === 'light', 'look keeps device_kind');
+assert_true(($lookAction['brightness'] ?? 0) === 40, 'look brightness persisted');
+assert_true(($lookAction['hex'] ?? '') === '#ffd27a', 'look hex normalized: ' . json_encode($lookAction));
+assert_true(
+    YarboHomeAutomations::thenPhrase($lookAction, ['1:2' => 'Lamp']) === 'Lamp 40%, off after 5 min',
+    'look phrase: ' . YarboHomeAutomations::thenPhrase($lookAction, ['1:2' => 'Lamp'])
+);
+$auto->tick([
+    ['id' => 'unifi:sensor:s1', 'kind' => 'sensor', 'motion' => false, 'on' => false],
+    ['id' => '1:2', 'kind' => 'light', 'on' => false],
+], $t0 + 800);
+$r = $auto->tick([
+    ['id' => 'unifi:sensor:s1', 'kind' => 'sensor', 'motion' => true, 'motion_at' => $t0 + 801, 'on' => true],
+    ['id' => '1:2', 'kind' => 'light', 'on' => false],
+], $t0 + 801);
+assert_true($r['fired'] === ['a-look'], 'look rule fires: ' . json_encode($r));
+assert_true(($commands[0]['brightness'] ?? 0) === 40, 'fired look keeps brightness: ' . json_encode($commands));
+assert_true(($commands[0]['hex'] ?? '') === '#ffd27a', 'fired look keeps hex');
+$auto->delete('a-look');
+$commands = [];
+@unlink($auto->statePath());
+
+$heatThen = $auto->save([
+    'id' => 'a-heat',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '07:00'],
+    'actions' => [[
+        'kind' => 'device',
+        'id' => '1:9',
+        'command' => 'on',
+        'device_kind' => 'heater',
+        'celsius' => 21.5,
+    ]],
+    'names' => ['1:9' => 'Hall heater'],
+]);
+assert_true(!empty($heatThen['ok']), 'save heater Then: ' . json_encode($heatThen));
+$heatAction = $heatThen['automation']['actions'][0] ?? [];
+assert_true(($heatAction['device_kind'] ?? '') === 'heater', 'heater kind persisted');
+assert_true(($heatAction['celsius'] ?? 0) === 21.5, 'heater celsius persisted: ' . json_encode($heatAction));
+assert_true(!isset($heatAction['brightness']), 'heater Then must not store brightness');
+assert_true(
+    YarboHomeAutomations::thenPhrase($heatAction, ['1:9' => 'Hall heater']) === 'Hall heater 21.5°',
+    'heater phrase'
+);
+$porchLook = $auto->save([
+    'id' => 'a-heat-bad',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '07:01'],
+    'actions' => [[
+        'kind' => 'device',
+        'id' => 'unifi:light:porch',
+        'command' => 'on',
+        'brightness' => 80,
+        'hex' => 'not-a-colour',
+    ]],
+]);
+$porchAction = $porchLook['automation']['actions'][0] ?? [];
+assert_true(($porchAction['command'] ?? '') === 'on', 'UniFi floodlight Then stays On');
+assert_true(($porchAction['brightness'] ?? 0) === 80, 'extras may persist but runner ignores unsupported');
+assert_true(!isset($porchAction['hex']), 'invalid hex dropped: ' . json_encode($porchAction));
+$auto->delete('a-heat');
+$auto->delete('a-heat-bad');
+$commands = [];
+@unlink($auto->statePath());
+
 $thresh = $auto->save([
     'id' => 'a-temp',
     'enabled' => true,
@@ -580,6 +663,12 @@ assert_true(str_contains($js, 'homeAutoCanMotion'), 'motion capability helper');
 assert_true(str_contains($js, 'data-auto-then-off'), 'then chip off-after');
 assert_true(str_contains($js, 'homeAutoThenCanOffAfter'), 'then off-after helper');
 assert_true(str_contains($js, 'homeAutoIfStateOptions'), 'only-if states');
+assert_true(str_contains($js, 'homeAutoThenParamsHtml'), 'Then look controls helper');
+assert_true(str_contains($js, 'data-auto-hex'), 'Then colour picker');
+assert_true(str_contains($js, 'data-auto-celsius'), 'Then heater setpoint');
+assert_true(str_contains($js, 'data-auto-kelvin'), 'Then colour temperature');
+assert_true(str_contains($js, 'homeAutoApplyThenLook'), 'Then look change helper');
+assert_true(str_contains($index, 'On can set brightness, colour, or temperature'), 'Then look hint');
 
 $offRoot = sys_get_temp_dir() . '/yarbo-auto-off-' . bin2hex(random_bytes(3));
 mkdir($offRoot . '/data', 0775, true);
@@ -625,5 +714,6 @@ $matterPhp = (string) file_get_contents(__DIR__ . '/../src/YarboMatterAgentClien
 assert_true(str_contains($matterPhp, 'function portOpen'), 'Matter client checks the listening port');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.37]'), 'changelog 4.0.37');
+assert_true(str_contains($change, '## [4.0.39]'), 'changelog 4.0.39');
 
 echo "test_home_automations.php ok\n";
