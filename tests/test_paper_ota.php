@@ -133,5 +133,15 @@ if (!str_contains($change, '## [4.0.48]')) {
     fwrite(STDERR, "changelog 4.0.48 missing\n");
     exit(1);
 }
+if (!str_contains($change, '## [4.0.50]')) {
+    fwrite(STDERR, "changelog 4.0.50 missing\n");
+    exit(1);
+}
+$flash = file_get_contents(__DIR__ . '/../scripts/papermono_flash.py');
+$kit = file_get_contents(__DIR__ . '/../scripts/paper_setup_kit.py');
+if ($flash === false || $kit === false || !str_contains($flash, 'wait_for_app_ready') || !str_contains($kit, '--wifi-only')) {
+    fwrite(STDERR, "USB helpers must wait for PAPER_READY and support --wifi-only\n");
+    exit(1);
+}
 
 echo "ok\n";
