@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.48] - 2026-10-03
+
+### Fixed
+- PaperMono **Update** no longer sits on **Updating…** while the tablet keeps polling on the old firmware. While an update is queued, compact status is a tiny JSON (`ota_pending` + `firmware_latest`) so 0.1.56 can start the download before its 8-second timeout, and the firmware GET serves the binary instead of a 503. Reboot the tablet if it already tried once this boot.
+
 ## [4.0.47] - 2026-10-03
 
 ### Fixed

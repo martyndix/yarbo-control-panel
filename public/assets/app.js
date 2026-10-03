@@ -8434,6 +8434,10 @@ function renderPaperMonoDevices(devices) {
         const last = paperLastSeenText(device);
         const kindLabel = device.kind_label ? `${escapeHtml(String(device.kind_label))} · ` : '';
         const fw = device.fw_reported ? ` · fw ${escapeHtml(String(device.fw_reported))}` : '';
+        const otaWait = device.ota_pending && device.fw_reported && device.firmware_latest
+            && String(device.fw_reported) !== String(device.firmware_latest)
+            ? `<p class="hint">Waiting for ${escapeHtml(String(device.name || 'the tablet'))} to install ${escapeHtml(String(device.firmware_latest))}. If it keeps polling on ${escapeHtml(String(device.fw_reported))}, reboot it once — that build only tries an update once per boot.</p>`
+            : '';
         const revokeLabel = device.name || device.kind_label || 'companion';
         const id = escapeHtml(device.id);
         const name = escapeHtml(device.name || 'PaperMono');
@@ -8441,6 +8445,7 @@ function renderPaperMonoDevices(devices) {
             <div class="papermono-device-meta">
                 <p class="papermono-device-ota-name">${name}</p>
                 <p class="hint">${kindLabel}${paperPresenceHtml(device)} · ${paperBatteryHtml(device)} · ${escapeHtml(last)}${fw}</p>
+                ${otaWait}
                 <div class="papermono-device-tools hidden">
                     <label class="settings-field papermono-device-name-field">
                         <span class="label">Tablet name</span>

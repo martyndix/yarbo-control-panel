@@ -138,11 +138,16 @@ if ($method === 'GET' && $action === 'firmware') {
     }
     $kind = $devices->deviceKind($device);
     $path = $devices->firmwarePath($kind);
-    if (!$devices->firmwareReadyForOta($kind)) {
+    if (!$devices->firmwareAvailable($kind)) {
         json_response([
             'ok' => false,
             'error' => 'Build firmware on the E-paper page first, then press Update. The tablet cannot wait for a compile.',
         ], 503);
+    }
+    ignore_user_abort(true);
+    @ini_set('zlib.output_compression', '0');
+    while (ob_get_level() > 0) {
+        ob_end_clean();
     }
     $devices->markOtaServed((string) ($device['id'] ?? ''));
     $version = $devices->firmwareVersionForKind($kind);
@@ -153,6 +158,8 @@ if ($method === 'GET' && $action === 'firmware') {
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('X-PaperMono-Version: ' . $version);
     header('Content-Length: ' . (string) filesize($path));
+    header('Connection: close');
+    header('Cache-Control: no-store');
     readfile($path);
     exit;
 }

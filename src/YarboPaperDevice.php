@@ -924,12 +924,9 @@ final class YarboPaperDevice
         if (is_array($forDevice) && $this->otaPendingActive($forDevice)) {
             return [
                 'ok' => true,
-                'yarbo_ok' => false,
-                'connection_type' => 'MQTT',
-                'connection_status' => 'OTA',
+                'ota_pending' => true,
                 'firmware_latest' => $latest,
-                'error_code' => 0,
-            ] + $this->companionCompact(null, false, $forDevice);
+            ];
         }
         $agent = YarboMqttAgentClient::fromEnv();
         $result = $agent->telemetry(4.0, false);

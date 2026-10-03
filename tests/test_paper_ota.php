@@ -57,6 +57,22 @@ if (empty($afterServe['ota_pending'])) {
     exit(1);
 }
 
+$pendingDev = $devices->findByToken('aabbccddeeff0011aabbccddeeff0011');
+$compact = $devices->compactStatus('papermono', $pendingDev);
+$compactJson = json_encode($compact);
+if (($compact['ota_pending'] ?? false) !== true || ($compact['firmware_latest'] ?? '') !== Yarbo\YarboPaperDevice::FIRMWARE_VERSION) {
+    fwrite(STDERR, 'ota compact ' . $compactJson . "\n");
+    exit(1);
+}
+if (isset($compact['home_items']) || isset($compact['hub']) || isset($compact['powerwall_pct'])) {
+    fwrite(STDERR, "ota compact must stay tiny, got {$compactJson}\n");
+    exit(1);
+}
+if ($compactJson === false || strlen($compactJson) > 120) {
+    fwrite(STDERR, "ota compact too large {$compactJson}\n");
+    exit(1);
+}
+
 $devices->touch('tab1', Yarbo\YarboPaperDevice::FIRMWARE_VERSION, 85, true, false);
 $done = null;
 foreach ($devices->publicTablets() as $row) {
@@ -101,16 +117,20 @@ if (str_contains($chunk[1], 'buildFirmware')) {
     fwrite(STDERR, "firmware GET must not compile during the tablet download\n");
     exit(1);
 }
-if (!str_contains($chunk[1], 'firmwareReadyForOta')) {
-    fwrite(STDERR, "firmware GET must require a current binary\n");
+if (!str_contains($chunk[1], 'firmwareAvailable')) {
+    fwrite(STDERR, "firmware GET must serve an existing binary without compiling\n");
     exit(1);
 }
-if (!str_contains($js, 'once per boot')) {
-    fwrite(STDERR, "Update button should mention once per boot\n");
+if (str_contains($chunk[1], 'firmwareReadyForOta')) {
+    fwrite(STDERR, "firmware GET must not 503 for a stale-but-present binary during download\n");
     exit(1);
 }
-if (!str_contains($change, '## [4.0.46]')) {
-    fwrite(STDERR, "changelog 4.0.46 missing\n");
+if (!str_contains($js, 'once per boot') || !str_contains($js, 'Waiting for')) {
+    fwrite(STDERR, "paired list must tell you to reboot if Updating sits on the old firmware\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.48]')) {
+    fwrite(STDERR, "changelog 4.0.48 missing\n");
     exit(1);
 }
 
