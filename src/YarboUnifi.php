@@ -675,33 +675,12 @@ final class YarboUnifi
         if ($config['host'] === '' || $config['protect_api_key'] === '') {
             return;
         }
-        $res = $this->protectJson($config, '/lights', $timeout);
-        if (!($res['ok'] ?? false)) {
+        $items = $this->collectProtectLightItems($config, $timeout);
+        if ($items === []) {
             return;
         }
-        $byId = [];
-        foreach ($res['items'] as $item) {
-            if (!is_array($item)) {
-                continue;
-            }
-            $id = $this->nativeId($item);
-            if ($id === '') {
-                continue;
-            }
-            $byId[$id] = $item;
-        }
-        foreach ($this->protectPrivateLightRows($config, $timeout) as $item) {
-            if (!is_array($item)) {
-                continue;
-            }
-            $id = $this->nativeId($item);
-            if ($id === '') {
-                continue;
-            }
-            $byId[$id] = array_merge($byId[$id] ?? [], $item);
-        }
         $mapped = [];
-        foreach ($byId as $item) {
+        foreach ($items as $item) {
             $row = $this->mapLight($item);
             if ($row !== null) {
                 $mapped[] = $row;
@@ -718,7 +697,7 @@ final class YarboUnifi
                 $keep[] = $row;
             }
         }
-        $inventory['sensors'] = array_merge($keep, $this->mapLightPirSensors(array_values($byId)));
+        $inventory['sensors'] = array_merge($keep, $this->mapLightPirSensors($items));
         $inventory['protect_lights_at'] = time();
         $this->writeInventory($inventory);
     }
@@ -1346,9 +1325,31 @@ final class YarboUnifi
         $pirSensors = [];
         if ($config['protect_api_key'] !== '') {
             foreach (['cameras' => '/cameras', 'lights' => '/lights', 'sensors' => '/sensors', 'relays' => '/relays'] as $key => $path) {
+                if ($key === 'lights') {
+                    $lightItems = $this->collectProtectLightItems($config, $timeout);
+                    $rows = [];
+                    foreach ($lightItems as $item) {
+                        $mapped = $this->mapLight($item);
+                        if ($mapped !== null) {
+                            $rows[] = $mapped;
+                        }
+                        $pir = $this->mapLightPirSensor($item);
+                        if ($pir !== null) {
+                            $pirSensors[] = $pir;
+                        }
+                    }
+                    $out[$key] = $rows;
+                    if ($rows === []) {
+                        $res = $this->protectJson($config, $path, $timeout);
+                        if (!($res['ok'] ?? false)) {
+                            $out['errors'][] = (string) ($res['error'] ?? 'Protect lights failed');
+                        }
+                    }
+                    continue;
+                }
                 $res = $this->protectJson($config, $path, $timeout);
                 if (!($res['ok'] ?? false)) {
-                    if ($key === 'cameras' || $key === 'lights') {
+                    if ($key === 'cameras') {
                         $out['errors'][] = (string) ($res['error'] ?? ('Protect ' . $key . ' failed'));
                     }
                     continue;
@@ -1366,17 +1367,10 @@ final class YarboUnifi
                     }
                     $mapped = match ($key) {
                         'cameras' => $this->mapCamera($item),
-                        'lights' => $this->mapLight($item),
                         default => $this->mapSensor($item),
                     };
                     if ($mapped !== null) {
                         $rows[] = $mapped;
-                    }
-                    if ($key === 'lights') {
-                        $pir = $this->mapLightPirSensor($item);
-                        if ($pir !== null) {
-                            $pirSensors[] = $pir;
-                        }
                     }
                 }
                 $out[$key] = $rows;
@@ -1395,7 +1389,7 @@ final class YarboUnifi
             }
         }
 
-        return $out;
+        return $this->ensureLightPirSensors($out);
     }
 
     /**
@@ -1405,6 +1399,7 @@ final class YarboUnifi
      */
     public function catalogFromInventory(array $inventory, array $showOnHome): array
     {
+        $inventory = $this->ensureLightPirSensors($inventory);
         $show = array_fill_keys($showOnHome, true);
         $out = [];
         foreach (['cameras', 'lights', 'sensors', 'relays', 'doors', 'hubs'] as $group) {
@@ -1491,6 +1486,8 @@ final class YarboUnifi
         }
         // isLightOn is the LED. mode=always is only the Protect schedule (often "when dark").
         $on = $force || $this->truthy($row['isLightOn'] ?? $row['is_light_on'] ?? false);
+        $motion = $this->sensorMotionNow($row);
+        $motionAt = $this->sensorMotionAt($row);
 
         return [
             'id' => self::homeId(self::KIND_LIGHT, $id),
@@ -1504,6 +1501,8 @@ final class YarboUnifi
             'dimmable' => false,
             'colorable' => false,
             'status' => $on ? 'On' : 'Off',
+            'motion' => $motion,
+            'motion_at' => $motionAt,
         ];
     }
 
@@ -1516,7 +1515,7 @@ final class YarboUnifi
      */
     private function mapLightPirSensor(array $row): ?array
     {
-        $id = $this->nativeId($row);
+        $id = $this->lightNativeId($row);
         if ($id === '') {
             return null;
         }
@@ -1574,6 +1573,120 @@ final class YarboUnifi
     {
         return str_starts_with((string) ($row['native_id'] ?? ''), 'pir-')
             || str_starts_with((string) ($row['id'] ?? ''), 'unifi:sensor:pir-');
+    }
+
+    /**
+     * Public /lights plus the unofficial private list, merged by native id.
+     *
+     * @param array<string, mixed> $config
+     * @return list<array<string, mixed>>
+     */
+    private function collectProtectLightItems(array $config, float $timeout): array
+    {
+        $byId = [];
+        $res = $this->protectJson($config, '/lights', $timeout);
+        if (($res['ok'] ?? false) && is_array($res['items'] ?? null)) {
+            foreach ($res['items'] as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $id = $this->nativeId($item);
+                if ($id === '') {
+                    continue;
+                }
+                $byId[$id] = $item;
+            }
+        }
+        foreach ($this->protectPrivateLightRows($config, $timeout) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $id = $this->nativeId($item);
+            if ($id === '') {
+                continue;
+            }
+            $byId[$id] = array_merge($byId[$id] ?? [], $item);
+        }
+
+        return array_values($byId);
+    }
+
+    /**
+     * Cached lights must still grow a PIR row after an update, without waiting
+     * for the next Protect /lights poll.
+     *
+     * @param array<string, mixed> $inventory
+     * @return array<string, mixed>
+     */
+    private function ensureLightPirSensors(array $inventory): array
+    {
+        $keep = [];
+        $existing = [];
+        foreach ($inventory['sensors'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if ($this->isLightPirSensor($row)) {
+                $id = (string) ($row['id'] ?? '');
+                if ($id !== '') {
+                    $existing[$id] = $row;
+                }
+                continue;
+            }
+            $keep[] = $row;
+        }
+        $pir = [];
+        foreach ($inventory['lights'] ?? [] as $light) {
+            if (!is_array($light)) {
+                continue;
+            }
+            $fresh = $this->mapLightPirSensor($light);
+            if ($fresh === null) {
+                continue;
+            }
+            $id = (string) ($fresh['id'] ?? '');
+            if ($id !== '' && isset($existing[$id])) {
+                $row = $existing[$id];
+                $row['companion_of'] = $fresh['companion_of'];
+                $row['has_motion'] = true;
+                $row['product'] = $row['product'] ?? $fresh['product'];
+                if (trim((string) ($row['name'] ?? '')) === '') {
+                    $row['name'] = $fresh['name'];
+                }
+                $pir[] = $row;
+                unset($existing[$id]);
+                continue;
+            }
+            $pir[] = $fresh;
+        }
+        foreach ($existing as $row) {
+            $pir[] = $row;
+        }
+        $inventory['sensors'] = array_merge($keep, $pir);
+
+        return $inventory;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function lightNativeId(array $row): string
+    {
+        $native = trim((string) ($row['native_id'] ?? ''));
+        if ($native !== '' && !str_starts_with($native, 'pir-')) {
+            $parsed = self::parseHomeId($native);
+            if ($parsed !== null) {
+                return ($parsed['kind'] ?? '') === self::KIND_LIGHT ? (string) $parsed['native_id'] : '';
+            }
+
+            return $native;
+        }
+        $parsed = self::parseHomeId((string) ($row['id'] ?? ''));
+        if ($parsed !== null) {
+            return ($parsed['kind'] ?? '') === self::KIND_LIGHT ? (string) $parsed['native_id'] : '';
+        }
+
+        return $this->nativeId($row);
     }
 
     /**
@@ -2498,7 +2611,7 @@ final class YarboUnifi
             }
         }
 
-        return $decoded;
+        return $this->ensureLightPirSensors($decoded);
     }
 
     /**
@@ -2510,6 +2623,7 @@ final class YarboUnifi
         if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
             return;
         }
+        $inventory = $this->ensureLightPirSensors($inventory);
         $json = json_encode($inventory, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json !== false) {
             file_put_contents($this->inventoryPath(), $json . "\n", LOCK_EX);

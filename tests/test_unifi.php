@@ -282,6 +282,25 @@ if (($pirRow['motion'] ?? false) !== true || ($pirRow['name'] ?? '') !== 'Flood 
     fwrite(STDERR, 'floodlight PIR motion ' . json_encode($pirRow) . "\n");
     exit(1);
 }
+$staleCatalog = $unifi->catalogFromInventory([
+    'cameras' => [],
+    'lights' => [[
+        'id' => 'unifi:light:light1',
+        'native_id' => 'light1',
+        'name' => 'Flood',
+        'kind' => 'light',
+        'source' => 'unifi',
+    ]],
+    'sensors' => [],
+    'relays' => [],
+    'doors' => [],
+    'hubs' => [],
+], ['unifi:light:light1']);
+$staleIds = array_column($staleCatalog, 'id');
+if (!in_array('unifi:sensor:pir-light1', $staleIds, true)) {
+    fwrite(STDERR, 'catalog must synthesize PIR from cached lights ' . json_encode($staleIds) . "\n");
+    exit(1);
+}
 $hubRow = null;
 $doorRow = null;
 foreach ($probe['devices'] ?? [] as $row) {
@@ -658,6 +677,24 @@ if (!in_array('unifi:camera:cam1', $ids, true) || !in_array('unifi:light:light1'
 }
 if (!in_array('unifi:sensor:pir-light1', $ids, true)) {
     fwrite(STDERR, 'floodlight PIR must follow the light onto Home ' . json_encode($ids) . "\n");
+    exit(1);
+}
+$invPath = $root . '/data/unifi-inventory.json';
+$inv = json_decode((string) file_get_contents($invPath), true);
+if (!is_array($inv)) {
+    fwrite(STDERR, "inventory missing after probe\n");
+    exit(1);
+}
+$inv['sensors'] = array_values(array_filter(
+    is_array($inv['sensors'] ?? null) ? $inv['sensors'] : [],
+    static function ($row): bool {
+        return !is_array($row) || !str_starts_with((string) ($row['id'] ?? ''), 'unifi:sensor:pir-');
+    }
+));
+file_put_contents($invPath, json_encode($inv, JSON_UNESCAPED_SLASHES));
+$staleHome = array_column($unifi->homeRows(), 'id');
+if (!in_array('unifi:sensor:pir-light1', $staleHome, true)) {
+    fwrite(STDERR, 'stale inventory must still grow floodlight PIR ' . json_encode($staleHome) . "\n");
     exit(1);
 }
 
