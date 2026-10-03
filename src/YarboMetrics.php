@@ -105,7 +105,7 @@ final class YarboMetrics
         $paper = new YarboPaperDevice($this->projectRoot);
         $mono = 0;
         $colour = 0;
-        foreach ($paper->publicDevices() as $device) {
+        foreach ($paper->publicTablets() as $device) {
             if (($device['kind'] ?? '') === YarboPaperDevice::KIND_COLOR) {
                 $colour++;
             } else {
@@ -123,7 +123,6 @@ final class YarboMetrics
                 'lymow' => !empty($modules[YarboHub::MODULE_LYMOW]),
                 'home' => !empty($modules[YarboHub::MODULE_HOME]),
                 'unifi' => !empty($modules[YarboHub::MODULE_UNIFI]),
-            ],
                 'vestaboard' => !empty($vb['enabled']),
             ],
             'paper' => [

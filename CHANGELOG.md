@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.49] - 2026-10-03
+
+### Fixed
+- Anonymous install pings work again on 4.0. Adding UniFi left a syntax error in the ping payload, so every 4.0 panel failed to check in and the public installs list stayed on **3.0.70**. Vestaboard, Home, and UniFi flags are inside `modules` again, and the ping counts hardware tablets only (not the desktop MAIL client). Opening the panel (or the next daily ping) reports **4.0.49**.
+
 ## [4.0.48] - 2026-10-03
 
 ### Fixed
