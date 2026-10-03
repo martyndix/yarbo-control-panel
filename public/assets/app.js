@@ -8361,15 +8361,21 @@ function paperPresenceHtml(device) {
 function paperOtaUpdateButton(device) {
     const id = escapeHtml(device.id || '');
     if (device.ota_pending) {
-        return `<button type="button" class="btn btn-compact" disabled>Updating…</button>`;
+        return `<button type="button" class="btn btn-compact" disabled title="Keep the tablet on Wi-Fi. It only tries once per boot — reboot it if this sits here.">Updating…</button>`;
     }
-    if (!device.ota_available) {
+    const latest = String(device.firmware_latest || '');
+    const reported = String(device.fw_reported || '');
+    const outdated = latest !== '' && reported !== latest;
+    if (!outdated) {
         return '';
     }
     if (!device.online) {
         return `<button type="button" class="btn btn-secondary btn-compact" disabled title="Tablet not seen recently">Update</button>`;
     }
-    return `<button type="button" class="btn btn-compact" data-papermono-ota="${id}">Update</button>`;
+    const title = device.ota_available
+        ? 'Push firmware over Wi-Fi'
+        : 'Build firmware on the E-paper page first, then press Update';
+    return `<button type="button" class="btn btn-compact" data-papermono-ota="${id}" title="${escapeHtml(title)}">Update</button>`;
 }
 
 function bindPaperOtaButtons(root) {

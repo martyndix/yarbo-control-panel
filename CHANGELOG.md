@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.46] - 2026-10-03
+
+### Fixed
+- Settings → E-paper **Update** no longer sits on **Updating…** then returns to **Update** while the tablet is still on the old firmware. The panel keeps the queue until the tablet reports the new version (or 15 minutes), does not compile during the Wi-Fi download, and tells you to **Build firmware** first if that binary is missing or stale. 0.1.56 only tries an update once per boot — reboot the tablet if the first try failed.
+
 ## [4.0.45] - 2026-10-03
 
 ### Changed

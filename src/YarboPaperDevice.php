@@ -21,6 +21,7 @@ final class YarboPaperDevice
     public const FIRMWARE_VERSION_COLOR = '0.2.18-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
+    public const OTA_PENDING_TTL_S = 900;
     public const MESSAGE_MAX = 50;
     public const MESSAGE_CHARS = 180;
     public const MESSAGE_TTL_S = 604800;
@@ -65,6 +66,14 @@ final class YarboPaperDevice
         $path = $this->firmwarePath($kind);
 
         return is_file($path) && filesize($path) > 1024;
+    }
+
+    /**
+     * Wi-Fi Update must serve the current app image, not start a PlatformIO build.
+     */
+    public function firmwareReadyForOta(?string $kind = null): bool
+    {
+        return $this->firmwareAvailable($kind) && !$this->firmwareNeedsBuild($kind);
     }
 
     public function firmwareFlashAvailable(?string $kind = null): bool
@@ -455,10 +464,10 @@ final class YarboPaperDevice
             $kind = $this->deviceKind($device);
             $latest = $this->firmwareVersionForKind($kind);
             $label = (string) ($device['name'] ?? $this->kindLabel($kind));
-            if (!$this->firmwareAvailable($kind)) {
+            if (!$this->firmwareReadyForOta($kind)) {
                 return [
                     'ok' => false,
-                    'error' => 'Build firmware for ' . $this->kindLabel($kind) . ' first.',
+                    'error' => 'Build ' . $this->kindLabel($kind) . ' firmware on the E-paper page first, then press Update. A stale or missing binary cannot be pushed over Wi-Fi.',
                 ];
             }
             if (!$this->deviceIsOnline($device)) {
@@ -808,17 +817,15 @@ final class YarboPaperDevice
         if ($reported !== '' && $reported === $latest) {
             return true;
         }
-        if (!empty($device['ota_served_at'])) {
-            return true;
-        }
         $requestedAt = strtotime((string) ($device['ota_requested_at'] ?? '')) ?: 0;
 
-        return $requestedAt > 0 && (time() - $requestedAt) >= 180;
+        return $requestedAt > 0 && (time() - $requestedAt) >= self::OTA_PENDING_TTL_S;
     }
 
     /**
-     * Settings UI and compact ota_pending: keep showing Updating until the
-     * tablet has polled after a binary was served, or it is already on latest.
+     * Keep Updating until the tablet reports the latest firmware, or the
+     * queue times out. Serving a binary is not enough — 0.1.56 only tries
+     * OTA once per boot, and a failed download must still look queued.
      *
      * @param array<string, mixed>|null $device
      */
@@ -827,18 +834,8 @@ final class YarboPaperDevice
         if (!is_array($device) || empty($device['ota_pending'])) {
             return false;
         }
-        $reported = (string) ($device['fw_reported'] ?? '');
-        $latest = $this->firmwareVersionForKind($this->deviceKind($device));
-        if ($reported !== '' && $reported === $latest) {
-            return false;
-        }
-        $servedAt = strtotime((string) ($device['ota_served_at'] ?? '')) ?: 0;
-        $seenAt = strtotime((string) ($device['last_seen_at'] ?? '')) ?: 0;
-        if ($servedAt > 0 && $seenAt >= $servedAt) {
-            return false;
-        }
 
-        return true;
+        return !$this->shouldDropOtaPending($device);
     }
 
     public function touch(string $id, ?string $fwReported = null, ?int $batteryLevel = null, ?bool $charging = null, ?bool $viaRemote = null): void
@@ -924,6 +921,16 @@ final class YarboPaperDevice
     public function compactStatus(?string $kind = null, ?array $forDevice = null): array
     {
         $latest = $this->firmwareVersionForKind($kind);
+        if (is_array($forDevice) && $this->otaPendingActive($forDevice)) {
+            return [
+                'ok' => true,
+                'yarbo_ok' => false,
+                'connection_type' => 'MQTT',
+                'connection_status' => 'OTA',
+                'firmware_latest' => $latest,
+                'error_code' => 0,
+            ] + $this->companionCompact(null, false, $forDevice);
+        }
         $agent = YarboMqttAgentClient::fromEnv();
         $result = $agent->telemetry(4.0, false);
         $raw = $result['raw'] ?? null;
@@ -2692,7 +2699,7 @@ final class YarboPaperDevice
             'firmware_built' => $this->firmwareAvailable($kind),
             'online' => $this->deviceIsOnline($device),
             'ota_pending' => $this->otaPendingActive($device),
-            'ota_available' => $this->firmwareAvailable($kind)
+            'ota_available' => $this->firmwareReadyForOta($kind)
                 && (string) ($device['fw_reported'] ?? '') !== $this->firmwareVersionForKind($kind),
             'battery_level' => $battery,
             'is_charging' => $charging,

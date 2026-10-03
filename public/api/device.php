@@ -137,21 +137,12 @@ if ($method === 'GET' && $action === 'firmware') {
         json_response(['ok' => false, 'error' => 'Invalid PaperMono token'], 401);
     }
     $kind = $devices->deviceKind($device);
-    if ($devices->firmwareNeedsBuild($kind)) {
-        $build = $devices->buildFirmware($kind, true);
-        if (!($build['ok'] ?? false) && !$devices->firmwareAvailable($kind)) {
-            json_response([
-                'ok' => false,
-                'error' => (string) ($build['error'] ?? 'Firmware binary is not built yet.'),
-            ], 503);
-        }
-    }
     $path = $devices->firmwarePath($kind);
-    if (!$devices->firmwareAvailable($kind)) {
+    if (!$devices->firmwareReadyForOta($kind)) {
         json_response([
             'ok' => false,
-            'error' => 'Firmware binary is not built yet. Use Settings → e-paper companions to flash after building.',
-        ], 404);
+            'error' => 'Build firmware on the E-paper page first, then press Update. The tablet cannot wait for a compile.',
+        ], 503);
     }
     $devices->markOtaServed((string) ($device['id'] ?? ''));
     $version = $devices->firmwareVersionForKind($kind);
