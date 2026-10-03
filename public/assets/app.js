@@ -8152,27 +8152,33 @@ function setPaperRemoteResult(message, type) {
     els.papermonoRemoteResult.classList.remove('hidden');
 }
 
-function applyPaperRemoteUi(remote) {
+function applyPaperRemoteUi(remote, opts = {}) {
     if (!remote || typeof remote !== 'object') return;
-    if (els.papermonoRemoteEnabled) {
-        els.papermonoRemoteEnabled.checked = Boolean(remote.enabled);
+    const applyForm = opts.form !== false && !els.papermonoRemoteEnabled?.dataset.dirty;
+    if (applyForm) {
+        if (els.papermonoRemoteEnabled) {
+            els.papermonoRemoteEnabled.checked = Boolean(remote.enabled);
+        }
+        const provider = remote.provider === 'custom' ? 'custom' : 'tailscale';
+        document.querySelectorAll('input[name="papermono-remote-provider"]').forEach((input) => {
+            input.checked = input.value === provider;
+            input.closest('.papermono-kind-card')?.classList.toggle('is-active', input.checked);
+        });
+        if (els.papermonoRemoteUrl && remote.origin && !els.papermonoRemoteUrl.dataset.dirty) {
+            els.papermonoRemoteUrl.value = remote.origin;
+        } else if (els.papermonoRemoteUrl && !els.papermonoRemoteUrl.value && remote.origin) {
+            els.papermonoRemoteUrl.value = remote.origin;
+        }
     }
-    const provider = remote.provider === 'custom' ? 'custom' : 'tailscale';
-    document.querySelectorAll('input[name="papermono-remote-provider"]').forEach((input) => {
-        input.checked = input.value === provider;
-        input.closest('.papermono-kind-card')?.classList.toggle('is-active', input.checked);
-    });
-    if (els.papermonoRemoteUrl && remote.origin && !els.papermonoRemoteUrl.dataset.dirty) {
-        els.papermonoRemoteUrl.value = remote.origin;
-    } else if (els.papermonoRemoteUrl && !els.papermonoRemoteUrl.value && remote.origin) {
-        els.papermonoRemoteUrl.value = remote.origin;
-    }
+    const provider = paperRemoteProvider();
+    const enabled = Boolean(els.papermonoRemoteEnabled?.checked);
+    const origin = els.papermonoRemoteUrl?.value.trim() || remote.origin || '';
     const ts = remote.tailscale || {};
     const bits = [];
-    if (!remote.enabled) {
+    if (!enabled) {
         bits.push('Remote access is off. Tablets only use the LAN Panel URL.');
-    } else if (remote.tablet_url) {
-        bits.push(`Tablets will try ${remote.tablet_url} after the LAN URL.`);
+    } else if (remote.tablet_url || origin) {
+        bits.push(`Tablets will try ${remote.tablet_url || origin} after the LAN URL.`);
     } else {
         bits.push('Remote is on, but there is no HTTPS origin yet.');
     }
@@ -8183,7 +8189,7 @@ function applyPaperRemoteUi(remote) {
         else if (!ts.funnel_on) bits.push('Logged in. Click Start Funnel.');
         else bits.push('Funnel is on.');
         if (remote.gate_listening) bits.push('The tablet-only gate is listening.');
-        else if (remote.enabled) bits.push('The tablet-only gate is not listening yet — Save remote access, or restart the panel.');
+        else if (enabled) bits.push('The tablet-only gate is not listening yet — Save remote access, or restart the panel.');
     }
     if (ts.error) bits.push(ts.error);
     if (els.papermonoRemoteStatus) {
@@ -8218,7 +8224,8 @@ async function savePaperRemote() {
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Could not save remote access');
         if (els.papermonoRemoteUrl) delete els.papermonoRemoteUrl.dataset.dirty;
-        applyPaperRemoteUi(data);
+        if (els.papermonoRemoteEnabled) delete els.papermonoRemoteEnabled.dataset.dirty;
+        applyPaperRemoteUi(data, { form: true });
         setPaperRemoteResult(data.message || (enabled
             ? 'Remote access saved. Update tablets over Wi-Fi so they learn the URL.'
             : 'Remote access is off. Tablets keep using the LAN URL.'), 'success');
@@ -8665,12 +8672,12 @@ function ensurePaperPowerPoll() {
         if (!settingsModalOpen) return;
         const pane = document.querySelector('[data-settings-pane="papermono"]');
         if (pane?.classList.contains('is-active')) {
-            loadPaperMonoDashboard();
+            loadPaperMonoDashboard({ applyRemoteForm: false });
         }
     }, 15000);
 }
 
-async function loadPaperMonoDashboard() {
+async function loadPaperMonoDashboard(opts = {}) {
     if (els.papermonoPanelUrl && !els.papermonoPanelUrl.value) {
         els.papermonoPanelUrl.value = window.location.origin;
     }
@@ -8682,7 +8689,7 @@ async function loadPaperMonoDashboard() {
         applyPaperLogoPreview(data.logo_url || null);
         applyPaperMonoPrefs(data.prefs);
         applyPaperWebClientName(data.web_client);
-        applyPaperRemoteUi(data.paper_remote);
+        applyPaperRemoteUi(data.paper_remote, { form: opts.applyRemoteForm !== false });
         renderPaperMonoDevices(data.devices);
         setMailCompanionVisible(Array.isArray(data.devices) && data.devices.length > 0);
         ensurePaperPowerPoll();
@@ -10978,6 +10985,9 @@ els.papermonoRemoteLogin?.addEventListener('click', (e) => runPaperRemoteStep('u
 els.papermonoRemoteFunnel?.addEventListener('click', (e) => runPaperRemoteStep('funnel-on', e.currentTarget));
 els.papermonoRemoteUrl?.addEventListener('input', () => {
     if (els.papermonoRemoteUrl) els.papermonoRemoteUrl.dataset.dirty = '1';
+});
+els.papermonoRemoteEnabled?.addEventListener('change', () => {
+    if (els.papermonoRemoteEnabled) els.papermonoRemoteEnabled.dataset.dirty = '1';
 });
 document.querySelectorAll('input[name="papermono-remote-provider"]').forEach((input) => {
     input.addEventListener('change', () => {
