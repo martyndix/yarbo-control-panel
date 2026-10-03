@@ -92,6 +92,43 @@ $disk = json_decode((string) file_get_contents($auto->storePath()), true);
 assert_true(!isset($saved['automation']['timezone']), 'rules must not carry a timezone');
 assert_true(($disk['automations'][0]['trigger']['for_sec'] ?? 0) === 300, 'for_sec persisted');
 
+$named = $auto->save([
+    'id' => 'a-named',
+    'name' => '',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:hub:door1', 'event' => 'stays_open', 'for_sec' => 300],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'names' => ['unifi:hub:door1' => 'Front door', 'unifi:light:porch' => 'Porch'],
+]);
+assert_true(($named['automation']['name'] ?? '') === 'Front door open 5 min → Porch on', 'template auto-name: ' . ($named['automation']['name'] ?? ''));
+$renamed = $auto->save([
+    'id' => 'a-named',
+    'name' => (string) ($named['automation']['name'] ?? ''),
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:hub:door1', 'event' => 'opens'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'names' => ['unifi:hub:door1' => 'Front door', 'unifi:light:porch' => 'Porch'],
+]);
+assert_true(($renamed['automation']['name'] ?? '') === 'Front door opens → Porch on', 'edit auto-name follows When: ' . ($renamed['automation']['name'] ?? ''));
+$customKept = $auto->save([
+    'id' => 'a-named',
+    'name' => 'Porch night',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:hub:door1', 'event' => 'opens'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'names' => ['unifi:hub:door1' => 'Front door', 'unifi:light:porch' => 'Porch'],
+]);
+assert_true(($customKept['automation']['name'] ?? '') === 'Porch night', 'typed name kept: ' . ($customKept['automation']['name'] ?? ''));
+assert_true(YarboHomeAutomations::nameLooksGenerated('Front door opens → Porch on', $renamed['automation'] ?? [], [
+    'unifi:hub:door1' => 'Front door',
+    'unifi:light:porch' => 'Porch',
+]), 'generated name is detected');
+assert_true(!YarboHomeAutomations::nameLooksGenerated('Porch night', $renamed['automation'] ?? [], [
+    'unifi:hub:door1' => 'Front door',
+    'unifi:light:porch' => 'Porch',
+]), 'typed name is not treated as generated');
+$auto->delete('a-named');
+
 $door = static function (bool $open): array {
     return [[
         'id' => 'unifi:hub:door1',
@@ -649,6 +686,10 @@ $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 assert_true(str_contains($js, 'openHomeAutomations'), 'Automations UI');
+assert_true(str_contains($js, 'data-auto-copy'), 'Copy as template');
+assert_true(str_contains($js, 'homeAutoFollowName'), 'rename when chips change');
+assert_true(str_contains($js, 'homeAutoDraftFromRule'), 'copy clones the rule');
+assert_true(str_contains($index, 'Follows When and Then unless you type a name'), 'name follows hint');
 assert_true(str_contains($js, 'homeAutoTrayGroups'), 'tray grouping helper');
 assert_true(str_contains($js, "['lights', 'Lights']"), 'lights group');
 assert_true(str_contains($js, "['sensors', 'Sensors']"), 'sensors group');
@@ -727,5 +768,6 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.37]'), 'changelog 4.0.37');
 assert_true(str_contains($change, '## [4.0.39]'), 'changelog 4.0.39');
 assert_true(str_contains($change, '## [4.0.40]'), 'changelog 4.0.40');
+assert_true(str_contains($change, '## [4.0.52]'), 'changelog 4.0.52');
 
 echo "test_home_automations.php ok\n";

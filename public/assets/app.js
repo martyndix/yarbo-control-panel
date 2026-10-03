@@ -5101,6 +5101,35 @@ function homeAutoSentence(rule, names) {
     return text;
 }
 
+function homeAutoNameLooksAuto(name, rule) {
+    const n = String(name || '').trim();
+    if (!n || n === 'Automation') return true;
+    const sentence = homeAutoSentence(rule, homeAutoNames());
+    if (n === sentence) return true;
+    return n.length >= 64 && sentence.startsWith(n);
+}
+
+function homeAutoCloneValue(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function homeAutoDraftFromRule(rule, asCopy = false) {
+    const triggers = homeAutoTriggers(rule).map((row) => homeAutoCloneValue(row));
+    return {
+        ...homeAutoBlankDraft(),
+        id: asCopy ? '' : (rule.id || ''),
+        name: asCopy ? '' : (rule.name || ''),
+        enabled: rule.enabled !== false,
+        trigger: triggers[0] || null,
+        triggers,
+        when_match: homeAutoWhenMatch(rule),
+        conditions: (rule.conditions || []).map((row) => homeAutoCloneValue(row)),
+        actions: (rule.actions || []).map((row) => homeAutoCloneValue(row)),
+        off_after_sec: Number(rule.off_after_sec || 0),
+        cooldown_sec: Number(rule.cooldown_sec || 30),
+    };
+}
+
 function homeAutoTriggers(rule = autoDraft) {
     if (!rule) return [];
     if (Array.isArray(rule.triggers) && rule.triggers.length) return rule.triggers.filter(Boolean);
@@ -5143,7 +5172,12 @@ function homeAutoSyncName() {
     if (!autoDraft || autoNameLocked) return;
     autoDraft.name = homeAutoSentence(autoDraft, homeAutoNames());
     const input = document.getElementById('auto-name');
-    if (input && document.activeElement !== input) input.value = autoDraft.name;
+    if (input) input.value = autoDraft.name;
+}
+
+function homeAutoFollowName() {
+    autoNameLocked = false;
+    homeAutoSyncName();
 }
 
 function homeAutoSunNeedsCoords() {
@@ -5413,6 +5447,7 @@ function renderHomeAutomations() {
                     <input type="checkbox" data-auto-enable ${rule.enabled ? 'checked' : ''}> On
                 </label>
                 <button type="button" class="btn btn-secondary btn-compact" data-auto-edit>Edit</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-auto-copy>Copy</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-auto-del>Delete</button>
             </div>
         </article>`;
@@ -5808,7 +5843,7 @@ function homeAutoApplyTray(kind, id, zone) {
         homeAutoApplyWhen(kind === 'time'
             ? { type: 'time', at: '21:00' }
             : { type: 'sun', event: kind, offset_min: 0 });
-        homeAutoSyncName();
+        homeAutoFollowName();
         renderHomeAutoEditor();
         return;
     }
@@ -5824,7 +5859,7 @@ function homeAutoApplyTray(kind, id, zone) {
             }
             autoDraft.actions.push(action);
         }
-        homeAutoSyncName();
+        homeAutoFollowName();
         renderHomeAutoEditor();
         return;
     }
@@ -5832,7 +5867,7 @@ function homeAutoApplyTray(kind, id, zone) {
     if (!d) return;
     if (zone === 'when' || (zone !== 'then' && !homeAutoTriggers().length && (d.kind === 'sensor' || d.kind === 'door' || d.kind === 'hub'))) {
         homeAutoApplyWhen(homeAutoDefaultWhen(d));
-        homeAutoSyncName();
+        homeAutoFollowName();
         renderHomeAutoEditor();
         return;
     }
@@ -5841,7 +5876,7 @@ function homeAutoApplyTray(kind, id, zone) {
         if (zone === 'then') showToast('Sensors stay in When', 'error');
         else {
             homeAutoApplyWhen(homeAutoDefaultWhen(d));
-            homeAutoSyncName();
+            homeAutoFollowName();
             renderHomeAutoEditor();
         }
         return;
@@ -5850,7 +5885,7 @@ function homeAutoApplyTray(kind, id, zone) {
         action.off_after_sec = Number(autoDraft.off_after_sec);
     }
     autoDraft.actions.push(action);
-    homeAutoSyncName();
+    homeAutoFollowName();
     renderHomeAutoEditor();
 }
 
@@ -5869,8 +5904,13 @@ function homeAutoClickTray(kind, id) {
     else homeAutoApplyTray(kind, id, 'then');
 }
 
-function homeAutoStartEditor(partial) {
+function homeAutoStartEditor(partial, options = {}) {
+    const asCopy = Boolean(options.asCopy);
     autoDraft = { ...homeAutoBlankDraft(), ...partial };
+    if (asCopy) {
+        autoDraft.id = '';
+        autoDraft.name = '';
+    }
     if (!Array.isArray(autoDraft.actions)) autoDraft.actions = [];
     if (!Array.isArray(autoDraft.conditions)) autoDraft.conditions = [];
     homeAutoSetTriggers(homeAutoTriggers(autoDraft));
@@ -5883,10 +5923,9 @@ function homeAutoStartEditor(partial) {
         }
         return next;
     });
-    autoNameLocked = Boolean(partial?.name) && partial.name !== homeAutoSentence(partial, homeAutoNames());
+    autoNameLocked = !asCopy && Boolean(partial?.name) && !homeAutoNameLooksAuto(partial.name, autoDraft);
     homeAutoSyncName();
     renderHomeAutomations();
-    document.getElementById('auto-name')?.focus();
 }
 
 function homeAutoStarter(kind) {
@@ -6069,15 +6108,14 @@ function bindHomeAutomations() {
         if (edit) {
             const id = edit.closest('[data-auto-id]')?.getAttribute('data-auto-id');
             const rule = (homeDash.automations || []).find((row) => row.id === id);
-            if (rule) {
-                homeAutoStartEditor({
-                    ...rule,
-                    actions: [...(rule.actions || [])],
-                    conditions: [...(rule.conditions || [])],
-                    triggers: homeAutoTriggers(rule).map((t) => ({ ...t })),
-                    when_match: homeAutoWhenMatch(rule),
-                });
-            }
+            if (rule) homeAutoStartEditor(homeAutoDraftFromRule(rule));
+            return;
+        }
+        const copy = event.target.closest('[data-auto-copy]');
+        if (copy) {
+            const id = copy.closest('[data-auto-id]')?.getAttribute('data-auto-id');
+            const rule = (homeDash.automations || []).find((row) => row.id === id);
+            if (rule) homeAutoStartEditor(homeAutoDraftFromRule(rule, true), { asCopy: true });
             return;
         }
         const del = event.target.closest('[data-auto-del]');
@@ -6102,21 +6140,21 @@ function bindHomeAutomations() {
                 else list.splice(0, 1);
                 homeAutoSetTriggers(list);
             }
-            homeAutoSyncName();
+            homeAutoFollowName();
             renderHomeAutoEditor();
             return;
         }
         const whenMatch = event.target.closest('[data-auto-when-match]');
         if (whenMatch && autoDraft) {
             autoDraft.when_match = whenMatch.getAttribute('data-auto-when-match') === 'all' ? 'all' : 'any';
-            homeAutoSyncName();
+            homeAutoFollowName();
             renderHomeAutoEditor();
             return;
         }
         const thenX = event.target.closest('[data-auto-then-x]');
         if (thenX && autoDraft) {
             autoDraft.actions.splice(Number(thenX.getAttribute('data-auto-then-x')), 1);
-            homeAutoSyncName();
+            homeAutoFollowName();
             renderHomeAutoEditor();
             return;
         }
@@ -6168,6 +6206,7 @@ function bindHomeAutomations() {
         if (!autoDraft) return;
         if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
             homeAutoApplyThenLook(event.target);
+            homeAutoFollowName();
         }
     });
     page.addEventListener('change', (event) => {
@@ -6259,7 +6298,11 @@ function bindHomeAutomations() {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
-        homeAutoSyncName();
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, [data-auto-thresh], [data-auto-cmd], [data-auto-then-off], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
+            homeAutoFollowName();
+        } else {
+            homeAutoSyncName();
+        }
         if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, [data-auto-if-id]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {

@@ -355,6 +355,23 @@ final class YarboHomeAutomations
         if ($rule === null) {
             return ['ok' => false, 'error' => 'An automation needs a When and at least one Then'];
         }
+        $names = [];
+        foreach (is_array($input['names'] ?? null) ? $input['names'] : [] as $id => $label) {
+            $names[(string) $id] = (string) $label;
+        }
+        $previous = null;
+        foreach ($store['automations'] as $existing) {
+            if (($existing['id'] ?? '') === $rule['id']) {
+                $previous = $existing;
+                break;
+            }
+        }
+        if ($previous !== null && self::nameLooksGenerated((string) ($input['name'] ?? ''), $previous, $names)) {
+            $fresh = YarboHub::normalizeDisplayName(self::sentence($rule, $names), 64);
+            if ($fresh !== '') {
+                $rule['name'] = $fresh;
+            }
+        }
         $found = false;
         foreach ($store['automations'] as $i => $existing) {
             if (($existing['id'] ?? '') === $rule['id']) {
@@ -618,6 +635,26 @@ final class YarboHomeAutomations
         }
 
         return $text;
+    }
+
+    /**
+     * True when the name is the generated sentence (or empty), so an edit can rename it.
+     *
+     * @param array<string, mixed> $rule
+     * @param array<string, string> $names
+     */
+    public static function nameLooksGenerated(?string $name, array $rule, array $names = []): bool
+    {
+        $name = YarboHub::normalizeDisplayName((string) $name, 64);
+        if ($name === '' || $name === 'Automation') {
+            return true;
+        }
+        $sentence = YarboHub::normalizeDisplayName(self::sentence($rule, $names), 64);
+        if ($name === $sentence) {
+            return true;
+        }
+
+        return strlen($name) >= 64 && str_starts_with($sentence, $name);
     }
 
     /**

@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.52] - 2026-10-03
+
+### Added
+- Home Automations **Copy** starts a new rule from an existing one so you can change the When or Then without rebuilding it.
+
+### Changed
+- The automation name follows When and Then when you edit, the same way it does on first create, unless you type a name yourself.
+
 ## [4.0.51] - 2026-10-03
 
 ### Fixed

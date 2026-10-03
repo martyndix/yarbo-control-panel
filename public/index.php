@@ -672,6 +672,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <label class="settings-field">
                     <span class="label">Name</span>
                     <input type="text" id="auto-name" maxlength="64" autocomplete="off" placeholder="Front door open 5 min → Porch on">
+                    <span class="hint">Follows When and Then unless you type a name.</span>
                 </label>
                 <p class="hint" id="auto-coords-hint" hidden>Sunrise and sunset need a location. This page can fill it from this browser’s GPS. The last Yarbo GPS is used when it exists.</p>
                 <div id="auto-coords" class="auto-coords hidden">
