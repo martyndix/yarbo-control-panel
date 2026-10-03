@@ -469,8 +469,14 @@ final class YarboPaperRemote
 
     private function syncSidecar(bool $enabled): void
     {
-        $this->runScript($enabled ? 'ensure' : 'stop-gate');
-        if (!$enabled) {
+        $cfg = $this->load();
+        if ($enabled && $cfg['provider'] === self::PROVIDER_TAILSCALE) {
+            $this->runScript('ensure');
+
+            return;
+        }
+        $this->runScript('stop-gate');
+        if (!$enabled || $cfg['provider'] !== self::PROVIDER_TAILSCALE) {
             $this->runScript('funnel-off');
         }
     }
