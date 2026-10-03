@@ -151,13 +151,28 @@ def main() -> int:
             "1/1026/0": 2140,
         },
     }
-    extra = {d["id"]: d for d in agent.flatten_nodes({"nodes": [light_heater, light_vacuum, mill_heater]})}
+    boiler_light = {
+        "node_id": 31,
+        "available": True,
+        "attributes": {
+            "0/40/3": "Boiler",
+            "1/29/0": [{"deviceType": 0x0100, "revision": 1}],
+            "1/6/0": False,
+            "1/8/0": 254,
+            "1/57/5": "Boiler",
+        },
+    }
+    extra = {d["id"]: d for d in agent.flatten_nodes({"nodes": [light_heater, light_vacuum, mill_heater, boiler_light]})}
     if extra.get("23:1", {}).get("kind") != "heater" or extra["23:1"].get("colorable") or extra["23:1"].get("dimmable"):
         raise SystemExit(f"light-typed heater {extra.get('23:1')}")
     if extra.get("24:1", {}).get("kind") != "vacuum" or extra["24:1"].get("colorable"):
         raise SystemExit(f"light-typed vacuum {extra.get('24:1')}")
     if extra.get("25:1", {}).get("kind") != "heater" or extra["25:1"].get("colorable") or extra["25:1"].get("dimmable"):
         raise SystemExit(f"mill panel heater {extra.get('25:1')}")
+    if extra.get("31:1", {}).get("kind") != "light" or extra["31:1"].get("name") != "Boiler":
+        raise SystemExit(f"Boiler must stay a light {extra.get('31:1')}")
+    if agent.name_looks_heater("Boiler"):
+        raise SystemExit("Boiler is a light name, not a heater")
     if extra["25:1"].get("on") is not False:
         raise SystemExit(f"mill SystemMode Off must be off {extra['25:1']}")
     if extra["25:1"].get("local_temperature") != 21.4 or extra["25:1"].get("heating_setpoint") != 21.0:

@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 17
+AGENT_VERSION = 18
 STICKY_HOLD = 4.0
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
@@ -3081,6 +3081,16 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             return rpc
         if action == "brightness":
             pct = max(0, min(100, int(body.get("brightness") or 0)))
+            on = pct > 0
+            if live_kind(device_id) == "heater":
+                rpc = set_heater_power(node_id, endpoint, on)
+                if rpc.get("ok"):
+                    patch = {"on": bool(rpc.get("on", on))}
+                    if rpc.get("system_mode") is not None:
+                        patch["system_mode"] = rpc["system_mode"]
+                    patch_live_device(device_id, patch, sticky=True)
+                    rpc = {**rpc, "id": device_id, "on": bool(rpc.get("on", on))}
+                return rpc
             level = int(round(pct * 254 / 100))
             rpc = device_command(
                 node_id,
@@ -3095,8 +3105,25 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 },
             )
             if rpc.get("ok"):
-                patch_live_device(device_id, {"on": pct > 0, "brightness": pct}, sticky=True)
-                rpc = {**rpc, "id": device_id, "on": pct > 0, "brightness": pct}
+                patch_live_device(device_id, {"on": on, "brightness": pct}, sticky=True)
+                rpc = {**rpc, "id": device_id, "on": on, "brightness": pct}
+                return rpc
+            if is_unsupported_cluster(rpc):
+                name = "On" if on else "Off"
+                onoff = device_command(node_id, endpoint, ON_OFF, name, {})
+                if onoff.get("ok"):
+                    patch_live_device(device_id, {"on": on}, sticky=True)
+                    return {"ok": True, "id": device_id, "on": on}
+                if is_unsupported_cluster(onoff):
+                    heater = set_heater_power(node_id, endpoint, on)
+                    if heater.get("ok"):
+                        patch = {"on": bool(heater.get("on", on))}
+                        if heater.get("system_mode") is not None:
+                            patch["system_mode"] = heater["system_mode"]
+                        patch_live_device(device_id, patch, sticky=True)
+                        return {**heater, "id": device_id, "on": bool(heater.get("on", on))}
+                    return heater
+                return onoff
             return rpc
         if action in COLOR_ACTIONS:
             rpc = set_color(node_id, endpoint, body)

@@ -73,6 +73,16 @@ def main() -> int:
     assert any(command == "device_command" for command, _ in calls), calls
     assert not any(command == "write_attribute" for command, _ in calls), calls
 
+    agent._live_devices = [{"id": "31:1", "kind": "light", "name": "Boiler", "on": False, "dimmable": True}]
+    calls.clear()
+    bright = agent.dispatch({"op": "command", "id": "31:1", "action": "brightness", "brightness": 100})
+    assert bright.get("ok") is True, bright
+    assert bright.get("on") is True, bright
+    clusters = [args.get("cluster_id") for command, args in calls if command == "device_command"]
+    assert agent.LEVEL_CONTROL in clusters, calls
+    assert agent.ON_OFF in clusters, calls
+    assert not any(command == "write_attribute" for command, _ in calls), calls
+
     print("ok: heater commands use Thermostat SystemMode")
     return 0
 

@@ -543,23 +543,22 @@ final class YarboHomeAutomations
                 continue;
             }
             $result = $this->runActions($rule['actions'] ?? []);
+            $state['last_fire'][$id] = $now;
             if (!($result['ok'] ?? false)) {
                 $err = (string) ($result['error'] ?? 'failed');
                 $errors[] = $err;
-                $state['last_fire'][$id] = $now;
                 if (!isset($state['then_error']) || !is_array($state['then_error'])) {
                     $state['then_error'] = [];
                 }
                 $state['then_error'][$id] = $err;
-                continue;
+            } else {
+                unset($state['then_error'][$id]);
+                $fired[] = $id;
+                $this->markFiredSlots($state, $id, $rule, $eval['matched'], $today, $hm);
+                $this->markDurationFired($state, $id, $rule, $eval['matched']);
+                $curr = $this->applyActionSnapshot($curr, $rule['actions'] ?? []);
             }
-            unset($state['then_error'][$id]);
-            $fired[] = $id;
-            $state['last_fire'][$id] = $now;
-            $this->markFiredSlots($state, $id, $rule, $eval['matched'], $today, $hm);
-            $this->markDurationFired($state, $id, $rule, $eval['matched']);
             $this->queueOffAfter($state, $rule, $now);
-            $curr = $this->applyActionSnapshot($curr, $rule['actions'] ?? []);
         }
 
         $turnedOff = $this->flushDelayed($state, $now, $enabledById, $curr, $errors);
@@ -1727,11 +1726,13 @@ final class YarboHomeAutomations
     private function runActions(array $actions): array
     {
         $home = new YarboHome($this->projectRoot);
+        $store = $home->load();
+        $names = is_array($store['names'] ?? null) ? $store['names'] : [];
         $errors = [];
         foreach ($actions as $action) {
             $result = $this->runOneAction($home, $action);
             if (!($result['ok'] ?? false)) {
-                $errors[] = (string) ($result['error'] ?? 'failed');
+                $errors[] = $this->namedActionError($action, (string) ($result['error'] ?? 'failed'), $names);
             }
         }
         if ($errors !== []) {
@@ -1739,6 +1740,29 @@ final class YarboHomeAutomations
         }
 
         return ['ok' => true];
+    }
+
+    /**
+     * @param array<string, mixed> $action
+     * @param array<string, string> $names
+     */
+    private function namedActionError(array $action, string $error, array $names): string
+    {
+        $error = trim($error);
+        if ($error === '') {
+            $error = 'failed';
+        }
+        if (($action['kind'] ?? '') === 'scene') {
+            $label = $names['scene:' . ($action['id'] ?? '')] ?? $names[(string) ($action['id'] ?? '')] ?? '';
+        } else {
+            $label = $names[(string) ($action['id'] ?? '')] ?? '';
+        }
+        $label = trim((string) $label);
+        if ($label === '' || str_contains($error, $label)) {
+            return $error;
+        }
+
+        return $label . ': ' . $error;
     }
 
     /**

@@ -26,6 +26,7 @@ file_put_contents($root . '/data/home.json', json_encode([
     'names' => [
         '1:2' => 'Lamp',
         '12:3' => 'Garage lights',
+        '31:1' => 'Boiler',
         'unifi:sensor:s1' => 'Kitchen Sensor',
         'unifi:light:porch' => 'Porch',
         'unifi:hub:door1' => 'Front door',
@@ -468,22 +469,22 @@ $failSave = $failAuto->save([
 ]);
 assert_true(!empty($failSave['ok']), 'save failing time rule');
 $r = $failAuto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now);
-assert_true($r['fired'] === [] && ($r['errors'][0] ?? '') === 'device busy', 'failed Then must not count as fired: ' . json_encode($r));
+assert_true($r['fired'] === [] && ($r['errors'][0] ?? '') === 'Porch: device busy', 'failed Then must not count as fired: ' . json_encode($r));
 $failState = json_decode((string) file_get_contents($failAuto->statePath()), true);
 $failDay = (new DateTimeImmutable('@' . $now))->setTimezone($tz)->format('Y-m-d');
 assert_true(($failState['day_slot']['a-fail-time'] ?? '') !== $failDay, 'failed Then must not set day_slot');
 assert_true((int) ($failState['last_fire']['a-fail-time'] ?? 0) === $now, 'failed Then still sets last_fire for cooldown');
-assert_true(($failState['then_error']['a-fail-time'] ?? '') === 'device busy', 'failed Then must persist then_error');
+assert_true(($failState['then_error']['a-fail-time'] ?? '') === 'Porch: device busy', 'failed Then must persist then_error');
 $failPub = $failAuto->runnerPublic();
-assert_true(($failPub['then_error']['a-fail-time'] ?? '') === 'device busy', 'runnerPublic then_error: ' . json_encode($failPub));
-assert_true(($failPub['last_error'] ?? '') === 'device busy', 'sticky last_error from Then: ' . json_encode($failPub));
+assert_true(($failPub['then_error']['a-fail-time'] ?? '') === 'Porch: device busy', 'runnerPublic then_error: ' . json_encode($failPub));
+assert_true(($failPub['last_error'] ?? '') === 'Porch: device busy', 'sticky last_error from Then: ' . json_encode($failPub));
 $r = $failAuto->tick([['id' => 'unifi:light:porch', 'on' => true]], $now + 5);
 assert_true($r['fired'] === [] && ($r['errors'] ?? []) === [], 'cooldown must skip failed Then retry');
 $failState = json_decode((string) file_get_contents($failAuto->statePath()), true);
-assert_true(($failState['then_error']['a-fail-time'] ?? '') === 'device busy', 'then_error must survive an empty later tick');
+assert_true(($failState['then_error']['a-fail-time'] ?? '') === 'Porch: device busy', 'then_error must survive an empty later tick');
 $failPub = $failAuto->runnerPublic();
-assert_true(($failPub['then_error']['a-fail-time'] ?? '') === 'device busy', 'sticky then_error after empty tick');
-assert_true(($failPub['last_error'] ?? '') === 'device busy', 'sticky last_error after empty tick');
+assert_true(($failPub['then_error']['a-fail-time'] ?? '') === 'Porch: device busy', 'sticky then_error after empty tick');
+assert_true(($failPub['last_error'] ?? '') === 'Porch: device busy', 'sticky last_error after empty tick');
 $okCommands = [];
 $failAuto->setCommandHandler(static function (array $action) use (&$okCommands): array {
     $okCommands[] = $action;
@@ -500,6 +501,72 @@ assert_true(($failPub['then_error']['a-fail-time'] ?? '') === '', 'runnerPublic 
 $failAuto->delete('a-fail-time');
 $commands = [];
 @unlink($auto->statePath());
+
+$partialRoot = sys_get_temp_dir() . '/yarbo-auto-partial-' . bin2hex(random_bytes(3));
+mkdir($partialRoot . '/data', 0775, true);
+file_put_contents($partialRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true],
+    'active_module' => 'home',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($partialRoot . '/data/home.json', json_encode([
+    'names' => [
+        '31:1' => 'Boiler',
+        'unifi:light:porch' => 'Porch',
+    ],
+    'room_defs' => [],
+    'rooms' => [],
+    'group_defs' => [],
+    'groups' => [],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [
+        ['id' => '31:1', 'name' => 'Boiler', 'kind' => 'light', 'on' => false, 'dimmable' => true],
+    ],
+], JSON_UNESCAPED_SLASHES));
+$partial = new YarboHomeAutomations($partialRoot);
+$partialCmds = [];
+$partial->setCommandHandler(static function (array $action) use (&$partialCmds): array {
+    $partialCmds[] = $action;
+    if (($action['id'] ?? '') === '31:1') {
+        return ['ok' => false, 'error' => 'InteractionModelError: UnsupportedCluster (0xc3)'];
+    }
+
+    return ['ok' => true];
+});
+$partial->save(['timezone' => $auto->timezoneName()]);
+$partialSave = $partial->save([
+    'id' => 'a-garage-open',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '21:30'],
+    'actions' => [
+        [
+            'kind' => 'device',
+            'id' => '31:1',
+            'command' => 'on',
+            'device_kind' => 'light',
+            'brightness' => 100,
+            'off_after_sec' => 900,
+        ],
+        [
+            'kind' => 'device',
+            'id' => 'unifi:light:porch',
+            'command' => 'on',
+            'off_after_sec' => 900,
+        ],
+    ],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($partialSave['ok']), 'save garage Then: ' . json_encode($partialSave));
+$r = $partial->tick([['id' => 'unifi:light:porch', 'on' => false], ['id' => '31:1', 'kind' => 'light', 'on' => false]], $now);
+assert_true($r['fired'] === [], 'partial Then must not count as fired: ' . json_encode($r));
+assert_true(str_contains((string) ($r['errors'][0] ?? ''), 'Boiler'), 'Then error names Boiler: ' . json_encode($r));
+assert_true(str_contains((string) ($r['errors'][0] ?? ''), '0xc3'), 'Then error keeps 0xc3: ' . json_encode($r));
+assert_true(count($partialCmds) === 2, 'rest of Then still runs: ' . json_encode($partialCmds));
+$partialState = json_decode((string) file_get_contents($partial->statePath()), true);
+$delayed = $partialState['delayed']['a-garage-open'] ?? null;
+assert_true(is_array($delayed) && $delayed !== [], 'off-after still queues when one Then fails: ' . json_encode($delayed));
 
 $auto->save(['latitude' => 51.5, 'longitude' => -0.1]);
 $coords = $auto->coordsPublic();
@@ -822,5 +889,6 @@ assert_true(str_contains($change, '## [4.0.40]'), 'changelog 4.0.40');
 assert_true(str_contains($change, '## [4.0.52]'), 'changelog 4.0.52');
 assert_true(str_contains($change, '## [4.0.53]'), 'changelog 4.0.53');
 assert_true(str_contains($change, '## [4.0.54]'), 'changelog 4.0.54');
+assert_true(str_contains($change, '## [4.0.55]'), 'changelog 4.0.55');
 
 echo "test_home_automations.php ok\n";

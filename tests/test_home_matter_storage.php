@@ -364,4 +364,27 @@ if (($cachedMill['kind'] ?? '') !== 'heater' || !empty($cachedMill['colorable'])
     exit(1);
 }
 
+$boilerLight = YarboMatterFabric::reclassifyRow([
+    'id' => '31:1',
+    'name' => 'Boiler',
+    'kind' => 'light',
+    'dimmable' => true,
+]);
+if (($boilerLight['kind'] ?? '') !== 'light') {
+    fwrite(STDERR, 'Boiler is a light name, not a heater ' . json_encode($boilerLight) . "\n");
+    exit(1);
+}
+if (YarboMatterFabric::nameLooksHeater('Boiler') || YarboMatterFabric::nameLooksHeater('furnace')) {
+    fwrite(STDERR, "Boiler/furnace must not classify as a heater\n");
+    exit(1);
+}
+if (!YarboMatterFabric::nameLooksHeater('Hall heater') || !YarboMatterFabric::nameLooksHeater('Mill Wi-Fi Panel Heater Gen4')) {
+    fwrite(STDERR, "heater names must still match\n");
+    exit(1);
+}
+if (!YarboMatterFabric::isUnsupportedCluster('InteractionModelError: UnsupportedCluster (0xc3)')) {
+    fwrite(STDERR, "0xc3 must be recognized\n");
+    exit(1);
+}
+
 echo "ok\n";

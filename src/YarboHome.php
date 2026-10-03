@@ -652,6 +652,13 @@ final class YarboHome
             $agent->forceRestart();
             $result = $agent->request($body, 60.0);
         }
+        if ($action === 'brightness' && !($result['ok'] ?? false)
+            && YarboMatterFabric::isUnsupportedCluster((string) ($result['error'] ?? ''))) {
+            $pct = (int) ($body['brightness'] ?? 0);
+            $action = $pct > 0 ? 'on' : 'off';
+            $body = ['op' => 'command', 'id' => $id, 'action' => $action];
+            $result = $agent->request($body, 60.0);
+        }
         if (!($result['ok'] ?? false)) {
             return ['ok' => false, 'error' => $this->friendlyMatterError((string) ($result['error'] ?? 'Command failed'))];
         }
@@ -1494,6 +1501,7 @@ final class YarboHome
             }
             $id = trim((string) ($row['id'] ?? ''));
             if ($id !== '') {
+                $row = YarboMatterFabric::reclassifyRow($row);
                 $map[$id] = (string) ($row['kind'] ?? self::KIND_LIGHT);
             }
         }
@@ -1503,6 +1511,7 @@ final class YarboHome
             }
             $id = trim((string) ($row['id'] ?? ''));
             if ($id !== '') {
+                $row = YarboMatterFabric::reclassifyRow($row);
                 $map[$id] = (string) ($row['kind'] ?? $map[$id] ?? self::KIND_LIGHT);
             }
         }

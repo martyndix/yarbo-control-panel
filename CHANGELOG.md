@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.55] - 2026-10-03
+
+### Fixed
+- Home automations Then **Boiler 100%** (and other lights that are not actually dimmable) no longer fail with **UnsupportedCluster (0xc3)**. Brightness falls back to On/Off, the rest of the Then still runs, Off after still turns those lights back off, and the error names the device.
+
 ## [4.0.54] - 2026-10-03
 
 ### Changed

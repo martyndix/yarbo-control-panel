@@ -504,6 +504,13 @@ final class YarboMatterFabric
         return $kind === '' ? 'light' : $kind;
     }
 
+    public static function isUnsupportedCluster(string $error): bool
+    {
+        $norm = strtolower(str_replace([' ', '_'], '', $error));
+
+        return str_contains($norm, 'unsupportedcluster') || str_contains($norm, '0xc3');
+    }
+
     /**
      * @param array<string, mixed> $row
      * @return array<string, mixed>
