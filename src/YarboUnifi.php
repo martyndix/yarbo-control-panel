@@ -421,7 +421,8 @@ final class YarboUnifi
                 continue;
             }
             $id = (string) ($device['id'] ?? '');
-            if ($id !== '' && isset($wanted[$id])) {
+            $companionOf = (string) ($device['companion_of'] ?? '');
+            if ($id !== '' && (isset($wanted[$id]) || ($companionOf !== '' && isset($wanted[$companionOf])))) {
                 $rows[] = $device;
             }
         }
@@ -640,15 +641,26 @@ final class YarboUnifi
         }
         $inventory = $this->readInventory();
         $dps = [];
+        $keptPir = [];
         foreach ($inventory['sensors'] as $row) {
             if (!is_array($row)) {
                 continue;
             }
             if (str_starts_with((string) ($row['native_id'] ?? ''), 'dps-')) {
                 $dps[] = $row;
+            } elseif ($this->isLightPirSensor($row)) {
+                $keptPir[] = $row;
             }
         }
-        $inventory['sensors'] = array_merge($mapped, $dps);
+        $pir = $keptPir;
+        $lights = $this->protectJson($config, '/lights', $timeout);
+        if (($lights['ok'] ?? false) && is_array($lights['items'] ?? null)) {
+            $freshPir = $this->mapLightPirSensors($lights['items']);
+            if ($freshPir !== [] || ($inventory['lights'] ?? []) === []) {
+                $pir = $freshPir;
+            }
+        }
+        $inventory['sensors'] = array_merge($mapped, $dps, $pir);
         $inventory['protect_sensors_at'] = time();
         $this->writeInventory($inventory);
     }
@@ -700,6 +712,13 @@ final class YarboUnifi
         }
         $inventory = $this->readInventory();
         $inventory['lights'] = $mapped;
+        $keep = [];
+        foreach ($inventory['sensors'] ?? [] as $row) {
+            if (is_array($row) && !$this->isLightPirSensor($row)) {
+                $keep[] = $row;
+            }
+        }
+        $inventory['sensors'] = array_merge($keep, $this->mapLightPirSensors(array_values($byId)));
         $inventory['protect_lights_at'] = time();
         $this->writeInventory($inventory);
     }
@@ -1324,6 +1343,7 @@ final class YarboUnifi
             'hubs' => [],
             'errors' => [],
         ];
+        $pirSensors = [];
         if ($config['protect_api_key'] !== '') {
             foreach (['cameras' => '/cameras', 'lights' => '/lights', 'sensors' => '/sensors', 'relays' => '/relays'] as $key => $path) {
                 $res = $this->protectJson($config, $path, $timeout);
@@ -1352,10 +1372,17 @@ final class YarboUnifi
                     if ($mapped !== null) {
                         $rows[] = $mapped;
                     }
+                    if ($key === 'lights') {
+                        $pir = $this->mapLightPirSensor($item);
+                        if ($pir !== null) {
+                            $pirSensors[] = $pir;
+                        }
+                    }
                 }
                 $out[$key] = $rows;
             }
         }
+        $out['sensors'] = array_merge($out['sensors'], $pirSensors);
         if ($config['access_token'] !== '' || $config['protect_api_key'] !== '') {
             $this->appendAccessInventory($out, $config, $timeout);
         }
@@ -1478,6 +1505,75 @@ final class YarboUnifi
             'colorable' => false,
             'status' => $on ? 'On' : 'Off',
         ];
+    }
+
+    /**
+     * Floodlight PIR as its own sensor, so Automations can use motion without
+     * mixing it up with the light's On/Off Then.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private function mapLightPirSensor(array $row): ?array
+    {
+        $id = $this->nativeId($row);
+        if ($id === '') {
+            return null;
+        }
+        $motion = $this->sensorMotionNow($row);
+        $motionAt = $this->sensorMotionAt($row);
+        $name = $this->displayName($row, 'Light') . ' motion';
+
+        return [
+            'id' => self::homeId(self::KIND_SENSOR, 'pir-' . $id),
+            'native_id' => 'pir-' . $id,
+            'name' => $name,
+            'kind' => self::KIND_SENSOR,
+            'source' => self::SOURCE,
+            'product' => 'Floodlight motion',
+            'companion_of' => self::homeId(self::KIND_LIGHT, $id),
+            'available' => true,
+            'on' => $motion,
+            'dimmable' => false,
+            'colorable' => false,
+            'status' => $motion ? 'Motion' : 'OK',
+            'open' => null,
+            'motion' => $motion,
+            'has_open' => false,
+            'has_motion' => true,
+            'motion_at' => $motionAt,
+            'temperature' => null,
+            'humidity' => null,
+        ];
+    }
+
+    /**
+     * @param list<mixed> $items
+     * @return list<array<string, mixed>>
+     */
+    private function mapLightPirSensors(array $items): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $row = $this->mapLightPirSensor($item);
+            if ($row !== null) {
+                $out[] = $row;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function isLightPirSensor(array $row): bool
+    {
+        return str_starts_with((string) ($row['native_id'] ?? ''), 'pir-')
+            || str_starts_with((string) ($row['id'] ?? ''), 'unifi:sensor:pir-');
     }
 
     /**
@@ -2135,7 +2231,7 @@ final class YarboUnifi
      */
     private function sensorMotionNow(array $row): bool
     {
-        foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
+        foreach (['isMotionDetected', 'is_motion_detected', 'isPirMotionDetected', 'is_pir_motion_detected', 'motionDetected', 'motion'] as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null && $row[$key] !== '') {
                 return $this->truthy($row[$key]);
             }
@@ -2144,7 +2240,7 @@ final class YarboUnifi
         if (!is_array($stats)) {
             return false;
         }
-        foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
+        foreach (['isMotionDetected', 'is_motion_detected', 'isPirMotionDetected', 'is_pir_motion_detected', 'motionDetected', 'motion'] as $key) {
             if (array_key_exists($key, $stats) && $stats[$key] !== null && $stats[$key] !== '') {
                 $value = $stats[$key];
                 if (is_array($value) && array_key_exists('value', $value)) {
@@ -2167,6 +2263,10 @@ final class YarboUnifi
             $row['motionDetectedAt'] ?? null,
             $row['motion_detected_at'] ?? null,
             $row['lastMotion'] ?? null,
+            $row['last_motion'] ?? null,
+            $row['pirMotionDetectedAt'] ?? null,
+            $row['lastPirMotion'] ?? null,
+            $row['last_pir_motion'] ?? null,
         ];
         $stats = $row['stats'] ?? null;
         if (is_array($stats)) {
@@ -2201,7 +2301,7 @@ final class YarboUnifi
      */
     private function sensorReportsMotion(array $row): bool
     {
-        foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
+        foreach (['isMotionDetected', 'is_motion_detected', 'isPirMotionDetected', 'is_pir_motion_detected', 'motionDetected', 'motion'] as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null && $row[$key] !== '') {
                 return true;
             }
@@ -2210,7 +2310,7 @@ final class YarboUnifi
         if (!is_array($stats)) {
             return $this->sensorMotionAt($row) > 0;
         }
-        foreach (['isMotionDetected', 'is_motion_detected', 'motionDetected', 'motion'] as $key) {
+        foreach (['isMotionDetected', 'is_motion_detected', 'isPirMotionDetected', 'is_pir_motion_detected', 'motionDetected', 'motion'] as $key) {
             if (array_key_exists($key, $stats) && $stats[$key] !== null && $stats[$key] !== '') {
                 return true;
             }

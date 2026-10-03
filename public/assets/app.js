@@ -4980,11 +4980,34 @@ function homeAutoThenPhrase(action, names) {
 
 function homeAutoSentence(rule, names) {
     const then = (rule.actions || []).map((action) => homeAutoThenPhrase(action, names)).join(', ') || '…';
-    let text = `${homeAutoWhenPhrase(rule.trigger, names)} → ${then}`;
+    let text = `${homeAutoWhenJoinPhrase(rule, names)} → ${then}`;
     const actionOff = (rule.actions || []).some((action) => Number(action.off_after_sec || 0) > 0);
     const off = Number(rule.off_after_sec || 0);
     if (!actionOff && off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
     return text;
+}
+
+function homeAutoTriggers(rule = autoDraft) {
+    if (!rule) return [];
+    if (Array.isArray(rule.triggers) && rule.triggers.length) return rule.triggers.filter(Boolean);
+    return rule.trigger ? [rule.trigger] : [];
+}
+
+function homeAutoWhenMatch(rule = autoDraft) {
+    return String(rule?.when_match || 'any') === 'all' ? 'all' : 'any';
+}
+
+function homeAutoSetTriggers(list) {
+    if (!autoDraft) return;
+    autoDraft.triggers = (list || []).filter(Boolean);
+    autoDraft.trigger = autoDraft.triggers[0] || null;
+    if (autoDraft.triggers.length < 2) autoDraft.when_match = autoDraft.when_match === 'all' ? 'all' : 'any';
+}
+
+function homeAutoWhenJoinPhrase(rule, names) {
+    const parts = homeAutoTriggers(rule).map((trigger) => homeAutoWhenPhrase(trigger, names));
+    if (!parts.length) return 'When';
+    return parts.join(homeAutoWhenMatch(rule) === 'all' ? ' and ' : ' or ');
 }
 
 function homeAutoBlankDraft() {
@@ -4993,6 +5016,8 @@ function homeAutoBlankDraft() {
         name: '',
         enabled: true,
         trigger: null,
+        triggers: [],
+        when_match: 'any',
         conditions: [],
         actions: [],
         off_after_sec: 0,
@@ -5008,10 +5033,7 @@ function homeAutoSyncName() {
 }
 
 function homeAutoSunNeedsCoords() {
-    const trigger = autoDraft?.trigger;
-    if (!trigger || trigger.type !== 'sun') return false;
-    const coords = homeDash.sun_coords || {};
-    return Boolean(coords.needs_coords);
+    return homeAutoTriggers().some((trigger) => trigger?.type === 'sun') && Boolean((homeDash.sun_coords || {}).needs_coords);
 }
 
 function homeAutoHasCoords() {
@@ -5306,7 +5328,7 @@ function renderHomeAutoEditor() {
     homeAutoClampDraft();
     const nameEl = document.getElementById('auto-name');
     if (nameEl && document.activeElement !== nameEl) nameEl.value = autoDraft.name || '';
-    const sun = autoDraft.trigger?.type === 'sun';
+    const sun = homeAutoTriggers().some((trigger) => trigger?.type === 'sun');
     const needs = homeAutoSunNeedsCoords();
     const hint = document.getElementById('auto-coords-hint');
     if (hint) {
@@ -5324,7 +5346,7 @@ function renderHomeAutoEditor() {
     if (lat && document.activeElement !== lat) lat.value = coords.latitude ?? '';
     if (lon && document.activeElement !== lon) lon.value = coords.longitude ?? '';
     if (sun && needs) homeAutoRequestBrowserGps();
-    document.getElementById('auto-when-chips').innerHTML = homeAutoWhenChipHtml(autoDraft.trigger);
+    document.getElementById('auto-when-chips').innerHTML = homeAutoWhenChipsHtml();
     document.getElementById('auto-then-chips').innerHTML = (autoDraft.actions || []).map((action, i) => homeAutoThenChipHtml(action, i)).join('')
         || '<p class="hint">Drop a light or scene here.</p>';
     document.getElementById('auto-if-chips').innerHTML = (autoDraft.conditions || []).map((cond, i) => homeAutoIfChipHtml(cond, i)).join('');
@@ -5335,19 +5357,21 @@ function renderHomeAutoEditor() {
 
 function homeAutoClampDraft() {
     if (!autoDraft) return;
-    if (autoDraft.trigger?.type === 'device') {
-        const d = homeAutoDeviceById(autoDraft.trigger.id);
-        const events = homeAutoWhenEvents(d || { id: autoDraft.trigger.id, kind: 'light' });
+    homeAutoSetTriggers(homeAutoTriggers());
+    homeAutoTriggers().forEach((trigger) => {
+        if (trigger?.type !== 'device') return;
+        const d = homeAutoDeviceById(trigger.id);
+        const events = homeAutoWhenEvents(d || { id: trigger.id, kind: 'light' });
         const allowed = events.map(([v]) => v);
-        if (allowed.length && !allowed.includes(autoDraft.trigger.event)) {
-            autoDraft.trigger.event = allowed[0];
-            if (homeAutoDurationEvent(autoDraft.trigger.event)) {
-                autoDraft.trigger.for_sec = autoDraft.trigger.for_sec || 300;
+        if (allowed.length && !allowed.includes(trigger.event)) {
+            trigger.event = allowed[0];
+            if (homeAutoDurationEvent(trigger.event)) {
+                trigger.for_sec = trigger.for_sec || 300;
             } else {
-                delete autoDraft.trigger.for_sec;
+                delete trigger.for_sec;
             }
         }
-    }
+    });
     (autoDraft.conditions || []).forEach((cond) => {
         if (!cond || cond.type === 'time_window') return;
         const states = homeAutoIfStateOptions(homeAutoDeviceById(cond.id));
@@ -5389,29 +5413,50 @@ function homeAutoSyncOffAfterFields() {
     }
 }
 
-function homeAutoWhenChipHtml(trigger) {
-    if (!trigger) return '<p class="hint">Drop Time, Sunset, a door, or a sensor here.</p>';
+function homeAutoWhenChipsHtml() {
+    const triggers = homeAutoTriggers();
+    if (!triggers.length) return '<p class="hint">Drop Time, Sunset, a door, or a sensor here. You can add more than one.</p>';
+    const match = homeAutoWhenMatch();
+    const join = match === 'all' ? 'and' : 'or';
+    let html = '';
+    if (triggers.length > 1) {
+        html += `<div class="auto-when-join">
+            <button type="button" data-auto-when-match="any" class="${match === 'any' ? 'is-on' : ''}">Any (or)</button>
+            <button type="button" data-auto-when-match="all" class="${match === 'all' ? 'is-on' : ''}">All (and)</button>
+        </div>`;
+    }
+    html += triggers.map((trigger, i) => {
+        const chip = homeAutoWhenChipHtml(trigger, i);
+        if (i === 0) return chip;
+        return `<span class="auto-when-op">${join}</span>${chip}`;
+    }).join('');
+    return html;
+}
+
+function homeAutoWhenChipHtml(trigger, index = 0) {
+    if (!trigger) return '';
+    const iAttr = `data-auto-when-i="${index}"`;
     if (trigger.type === 'time') {
-        return `<div class="auto-chip auto-chip--clock" data-auto-when>
+        return `<div class="auto-chip auto-chip--clock" data-auto-when ${iAttr}>
             At <input type="time" data-auto-at value="${escapeHtml(trigger.at || '21:00')}" step="60">
             ${homeAutoDayButtons(trigger.days)}
-            <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
+            <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
     if (trigger.type === 'sun') {
-        return `<div class="auto-chip auto-chip--clock" data-auto-when>
+        return `<div class="auto-chip auto-chip--clock" data-auto-when ${iAttr}>
             <select data-auto-sun>
                 <option value="sunset" ${trigger.event === 'sunset' ? 'selected' : ''}>Sunset</option>
                 <option value="sunrise" ${trigger.event === 'sunrise' ? 'selected' : ''}>Sunrise</option>
             </select>
             <input type="number" data-auto-offset value="${Number(trigger.offset_min || 0)}" step="5"> min
-            <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
+            <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
     if (trigger.type === 'threshold') {
         const d = homeAutoDeviceById(trigger.id);
         const name = d?.name || trigger.id;
-        return `<div class="auto-chip" data-auto-when>
+        return `<div class="auto-chip" data-auto-when ${iAttr}>
             ${escapeHtml(name)}
             <select data-auto-event>
                 <option value="temp_above" ${trigger.metric === 'temperature' && trigger.op === 'above' ? 'selected' : ''}>temperature above</option>
@@ -5420,7 +5465,7 @@ function homeAutoWhenChipHtml(trigger) {
                 <option value="hum_below" ${trigger.metric === 'humidity' && trigger.op === 'below' ? 'selected' : ''}>humidity below</option>
             </select>
             <input type="number" data-auto-thresh value="${escapeHtml(String(trigger.value ?? 22))}" step="0.5">
-            <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
+            <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
     const d = homeAutoDeviceById(trigger.id);
@@ -5428,7 +5473,7 @@ function homeAutoWhenChipHtml(trigger) {
     const events = homeAutoWhenEvents(d || { id: trigger.id, kind: 'light' });
     const eventName = trigger.event || 'turns_on';
     const dur = homeAutoDurationEvent(eventName) ? homeAutoDurationParts(trigger.for_sec || 300) : null;
-    return `<div class="auto-chip" data-auto-when>
+    return `<div class="auto-chip" data-auto-when ${iAttr}>
         ${escapeHtml(name)}
         <select data-auto-event>${events.map(([v, label]) =>
             `<option value="${v}" ${v === eventName ? 'selected' : ''}>${label}</option>`
@@ -5439,7 +5484,7 @@ function homeAutoWhenChipHtml(trigger) {
                 <option value="60" ${dur.unit === 60 ? 'selected' : ''}>min</option>
                 <option value="3600" ${dur.unit === 3600 ? 'selected' : ''}>hr</option>
             </select>` : ''}
-        <button type="button" class="auto-chip-x" data-auto-clear-when aria-label="Remove">✕</button>
+        <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
     </div>`;
 }
 
@@ -5634,13 +5679,20 @@ function homeAutoTrayGroups(devices, scenes) {
         .map(([id, label]) => ({ id, label, chips: buckets[id] }));
 }
 
+function homeAutoApplyWhen(trigger) {
+    if (!autoDraft || !trigger) return;
+    const list = homeAutoTriggers();
+    list.push(trigger);
+    homeAutoSetTriggers(list);
+}
+
 function homeAutoApplyTray(kind, id, zone) {
     if (!autoDraft) return;
     if (kind === 'time' || kind === 'sunset' || kind === 'sunrise') {
         if (zone === 'then') return;
-        autoDraft.trigger = kind === 'time'
+        homeAutoApplyWhen(kind === 'time'
             ? { type: 'time', at: '21:00' }
-            : { type: 'sun', event: kind, offset_min: 0 };
+            : { type: 'sun', event: kind, offset_min: 0 });
         homeAutoSyncName();
         renderHomeAutoEditor();
         return;
@@ -5663,8 +5715,8 @@ function homeAutoApplyTray(kind, id, zone) {
     }
     const d = homeAutoDeviceById(id);
     if (!d) return;
-    if (zone === 'when' || (zone !== 'then' && !autoDraft.trigger && (d.kind === 'sensor' || d.kind === 'door' || d.kind === 'hub'))) {
-        autoDraft.trigger = homeAutoDefaultWhen(d);
+    if (zone === 'when' || (zone !== 'then' && !homeAutoTriggers().length && (d.kind === 'sensor' || d.kind === 'door' || d.kind === 'hub'))) {
+        homeAutoApplyWhen(homeAutoDefaultWhen(d));
         homeAutoSyncName();
         renderHomeAutoEditor();
         return;
@@ -5673,7 +5725,7 @@ function homeAutoApplyTray(kind, id, zone) {
     if (!action) {
         if (zone === 'then') showToast('Sensors stay in When', 'error');
         else {
-            autoDraft.trigger = homeAutoDefaultWhen(d);
+            homeAutoApplyWhen(homeAutoDefaultWhen(d));
             homeAutoSyncName();
             renderHomeAutoEditor();
         }
@@ -5698,7 +5750,7 @@ function homeAutoClickTray(kind, id) {
         homeAutoApplyTray(kind, id, 'then');
         return;
     }
-    if (!autoDraft.trigger) homeAutoApplyTray(kind, id, 'when');
+    if (!homeAutoTriggers().length) homeAutoApplyTray(kind, id, 'when');
     else homeAutoApplyTray(kind, id, 'then');
 }
 
@@ -5706,6 +5758,8 @@ function homeAutoStartEditor(partial) {
     autoDraft = { ...homeAutoBlankDraft(), ...partial };
     if (!Array.isArray(autoDraft.actions)) autoDraft.actions = [];
     if (!Array.isArray(autoDraft.conditions)) autoDraft.conditions = [];
+    homeAutoSetTriggers(homeAutoTriggers(autoDraft));
+    autoDraft.when_match = homeAutoWhenMatch(autoDraft);
     const ruleOff = Number(autoDraft.off_after_sec || 0);
     autoDraft.actions = autoDraft.actions.map((action) => {
         const next = { ...action };
@@ -5758,27 +5812,40 @@ function homeAutoStarter(kind) {
     });
 }
 
-function homeAutoReadDuration() {
-    const value = Number(document.querySelector('[data-auto-for]')?.value || 5);
-    const unit = Number(document.querySelector('[data-auto-for-unit]')?.value || 60);
+function homeAutoReadDuration(root = document) {
+    const value = Number(root.querySelector('[data-auto-for]')?.value || 5);
+    const unit = Number(root.querySelector('[data-auto-for-unit]')?.value || 60);
     return Math.max(1, Math.round(value * unit));
 }
 
-function homeAutoApplyEvent(raw) {
-    if (!autoDraft?.trigger) return;
+function homeAutoTriggerIndex(el) {
+    const chip = el?.closest?.('[data-auto-when-i]');
+    const i = Number(chip?.getAttribute('data-auto-when-i') ?? 0);
+    return Number.isFinite(i) ? i : 0;
+}
+
+function homeAutoApplyEvent(raw, index = 0) {
+    const list = homeAutoTriggers();
+    const trigger = list[index];
+    if (!trigger) return;
     if (raw === 'temp_above' || raw === 'temp_below' || raw === 'hum_above' || raw === 'hum_below') {
-        autoDraft.trigger = {
+        list[index] = {
             type: 'threshold',
-            id: autoDraft.trigger.id,
+            id: trigger.id,
             metric: raw.startsWith('hum') ? 'humidity' : 'temperature',
             op: raw.endsWith('below') ? 'below' : 'above',
-            value: Number(document.querySelector('[data-auto-thresh]')?.value || 22),
+            value: Number(document.querySelector(`[data-auto-when-i="${index}"] [data-auto-thresh]`)?.value || 22),
         };
+        homeAutoSetTriggers(list);
         return;
     }
-    const id = autoDraft.trigger.id;
-    autoDraft.trigger = { type: 'device', id, event: raw };
-    if (homeAutoDurationEvent(raw)) autoDraft.trigger.for_sec = homeAutoReadDuration();
+    const id = trigger.id;
+    list[index] = { type: 'device', id, event: raw };
+    if (homeAutoDurationEvent(raw)) {
+        const chip = document.querySelector(`[data-auto-when-i="${index}"]`);
+        list[index].for_sec = homeAutoReadDuration(chip || document);
+    }
+    homeAutoSetTriggers(list);
 }
 
 async function homeAutoSave() {
@@ -5786,15 +5853,19 @@ async function homeAutoSave() {
     const nameEl = document.getElementById('auto-name');
     if (nameEl) autoDraft.name = nameEl.value.trim();
     if (!autoNameLocked) homeAutoSyncName();
-    if (autoDraft.trigger?.type === 'device' && homeAutoDurationEvent(autoDraft.trigger.event)) {
-        autoDraft.trigger.for_sec = homeAutoReadDuration();
-    }
-    if (autoDraft.trigger?.type === 'time') {
-        const atEl = document.querySelector('#home-automations-editor [data-auto-at]');
-        if (atEl && atEl.value) autoDraft.trigger.at = atEl.value;
-    }
+    homeAutoTriggers().forEach((trigger, i) => {
+        const chip = document.querySelector(`#home-automations-editor [data-auto-when-i="${i}"]`);
+        if (trigger.type === 'device' && homeAutoDurationEvent(trigger.event)) {
+            trigger.for_sec = homeAutoReadDuration(chip || document);
+        }
+        if (trigger.type === 'time') {
+            const atEl = chip?.querySelector('[data-auto-at]');
+            if (atEl && atEl.value) trigger.at = atEl.value;
+        }
+    });
+    homeAutoSetTriggers(homeAutoTriggers());
     autoDraft.off_after_sec = homeAutoReadOffAfter();
-    if (autoDraft.trigger?.type === 'sun' && homeAutoSunNeedsCoords()) {
+    if (homeAutoTriggers().some((trigger) => trigger.type === 'sun') && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);
         const lon = Number(document.getElementById('auto-lon')?.value);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
@@ -5808,6 +5879,8 @@ async function homeAutoSave() {
         name: autoDraft.name,
         enabled: autoDraft.enabled !== false,
         trigger: autoDraft.trigger,
+        triggers: autoDraft.triggers,
+        when_match: autoDraft.when_match,
         conditions: autoDraft.conditions,
         actions: autoDraft.actions,
         off_after_sec: autoDraft.off_after_sec || 0,
@@ -5885,6 +5958,8 @@ function bindHomeAutomations() {
                     ...rule,
                     actions: [...(rule.actions || [])],
                     conditions: [...(rule.conditions || [])],
+                    triggers: homeAutoTriggers(rule).map((t) => ({ ...t })),
+                    when_match: homeAutoWhenMatch(rule),
                 });
             }
             return;
@@ -5902,8 +5977,22 @@ function bindHomeAutomations() {
             }
             return;
         }
-        if (event.target.closest('[data-auto-clear-when]')) {
-            if (autoDraft) autoDraft.trigger = null;
+        if (event.target.closest('[data-auto-clear-when]') || event.target.hasAttribute?.('data-auto-clear-when')) {
+            const x = event.target.closest('[data-auto-clear-when]');
+            if (autoDraft && x) {
+                const list = homeAutoTriggers();
+                const i = Number(x.getAttribute('data-auto-clear-when'));
+                if (Number.isFinite(i)) list.splice(i, 1);
+                else list.splice(0, 1);
+                homeAutoSetTriggers(list);
+            }
+            homeAutoSyncName();
+            renderHomeAutoEditor();
+            return;
+        }
+        const whenMatch = event.target.closest('[data-auto-when-match]');
+        if (whenMatch && autoDraft) {
+            autoDraft.when_match = whenMatch.getAttribute('data-auto-when-match') === 'all' ? 'all' : 'any';
             homeAutoSyncName();
             renderHomeAutoEditor();
             return;
@@ -5926,7 +6015,8 @@ function bindHomeAutomations() {
             const which = ifAdd.getAttribute('data-auto-if');
             if (which === 'window') autoDraft.conditions.push({ type: 'time_window', start: '08:00', end: '22:00' });
             else {
-                const other = homeAutoAllDevices().find((d) => d.id !== autoDraft.trigger?.id);
+                const used = new Set(homeAutoTriggers().map((t) => t.id).filter(Boolean));
+                const other = homeAutoAllDevices().find((d) => !used.has(d.id));
                 if (!other) {
                     showToast('Add another device first', 'error');
                     return;
@@ -5938,14 +6028,19 @@ function bindHomeAutomations() {
             return;
         }
         const dayBtn = event.target.closest('[data-day]');
-        if (dayBtn && autoDraft?.trigger?.type === 'time') {
-            const day = Number(dayBtn.getAttribute('data-day'));
-            let current = Array.isArray(autoDraft.trigger.days) ? [...autoDraft.trigger.days] : [0, 1, 2, 3, 4, 5, 6];
-            const idx = current.indexOf(day);
-            if (idx >= 0) current.splice(idx, 1);
-            else current.push(day);
-            autoDraft.trigger.days = current.length === 7 ? undefined : current.sort((a, b) => a - b);
-            renderHomeAutoEditor();
+        if (dayBtn && autoDraft) {
+            const i = homeAutoTriggerIndex(dayBtn);
+            const list = homeAutoTriggers();
+            if (list[i]?.type === 'time') {
+                const day = Number(dayBtn.getAttribute('data-day'));
+                let current = Array.isArray(list[i].days) ? [...list[i].days] : [0, 1, 2, 3, 4, 5, 6];
+                const idx = current.indexOf(day);
+                if (idx >= 0) current.splice(idx, 1);
+                else current.push(day);
+                list[i].days = current.length === 7 ? undefined : current.sort((a, b) => a - b);
+                homeAutoSetTriggers(list);
+                renderHomeAutoEditor();
+            }
             return;
         }
         const tray = event.target.closest('[data-auto-tray]');
@@ -5959,20 +6054,41 @@ function bindHomeAutomations() {
             return;
         }
         if (!autoDraft) return;
-        if (event.target.matches('[data-auto-at]')) autoDraft.trigger.at = event.target.value;
-        if (event.target.matches('[data-auto-sun]')) autoDraft.trigger.event = event.target.value;
-        if (event.target.matches('[data-auto-offset]')) autoDraft.trigger.offset_min = Number(event.target.value || 0);
-        if (event.target.matches('[data-auto-event]')) homeAutoApplyEvent(event.target.value);
-        if (event.target.matches('[data-auto-for], [data-auto-for-unit]') && autoDraft.trigger) {
-            autoDraft.trigger.for_sec = homeAutoReadDuration();
+        if (event.target.matches('[data-auto-at]')) {
+            const i = homeAutoTriggerIndex(event.target);
+            const list = homeAutoTriggers();
+            if (list[i]) list[i].at = event.target.value;
+            homeAutoSetTriggers(list);
+        }
+        if (event.target.matches('[data-auto-sun]')) {
+            const i = homeAutoTriggerIndex(event.target);
+            const list = homeAutoTriggers();
+            if (list[i]) list[i].event = event.target.value;
+            homeAutoSetTriggers(list);
+        }
+        if (event.target.matches('[data-auto-offset]')) {
+            const i = homeAutoTriggerIndex(event.target);
+            const list = homeAutoTriggers();
+            if (list[i]) list[i].offset_min = Number(event.target.value || 0);
+            homeAutoSetTriggers(list);
+        }
+        if (event.target.matches('[data-auto-event]')) homeAutoApplyEvent(event.target.value, homeAutoTriggerIndex(event.target));
+        if (event.target.matches('[data-auto-for], [data-auto-for-unit]')) {
+            const i = homeAutoTriggerIndex(event.target);
+            const list = homeAutoTriggers();
+            if (list[i]) list[i].for_sec = homeAutoReadDuration(event.target.closest('[data-auto-when]') || document);
+            homeAutoSetTriggers(list);
         }
         if (event.target.matches('#auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit')) {
             autoDraft.off_after_sec = homeAutoReadOffAfter();
             homeAutoApplyOffAfterToActions(autoDraft.off_after_sec);
             homeAutoSyncOffAfterFields();
         }
-        if (event.target.matches('[data-auto-thresh]') && autoDraft.trigger?.type === 'threshold') {
-            autoDraft.trigger.value = Number(event.target.value);
+        if (event.target.matches('[data-auto-thresh]')) {
+            const i = homeAutoTriggerIndex(event.target);
+            const list = homeAutoTriggers();
+            if (list[i]?.type === 'threshold') list[i].value = Number(event.target.value);
+            homeAutoSetTriggers(list);
         }
         if (event.target.matches('[data-auto-cmd]')) {
             const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);

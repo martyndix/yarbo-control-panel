@@ -349,6 +349,7 @@ final class YarboHome
                     'has_open',
                     'has_motion',
                     'motion_at',
+                    'companion_of',
                 ] as $key) {
                     if (array_key_exists($key, $device)) {
                         $row[$key] = $device[$key];
@@ -1390,6 +1391,7 @@ final class YarboHome
                 'humidity' => isset($device['humidity']) && is_numeric($device['humidity'])
                     ? (float) $device['humidity']
                     : null,
+                'companion_of' => (string) ($device['companion_of'] ?? ''),
             ];
             $out[] = $row;
         }

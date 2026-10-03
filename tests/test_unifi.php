@@ -72,7 +72,8 @@ $sensorTemp = 21.9;
 $sensorHumidity = 72.0;
 $liveLightOn = false;
 $liveLightForce = false;
-$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps, &$lightPrivateHtml, &$lightPublicFail, &$sensorOpen, &$sensorTemp, &$sensorHumidity, &$liveLightOn, &$liveLightForce): array {
+$livePirMotion = true;
+$unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps, &$lightPrivateHtml, &$lightPublicFail, &$sensorOpen, &$sensorTemp, &$sensorHumidity, &$liveLightOn, &$liveLightForce, &$livePirMotion): array {
     $calls[] = [$method, $url, $headers, $body];
     if (str_contains($url, '/cameras') && !str_contains($url, '/snapshot')) {
         return [
@@ -148,6 +149,8 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                 'name' => 'Flood',
                 'isLightOn' => $liveLightOn,
                 'isLightForceEnabled' => $liveLightForce,
+                'isPirMotionDetected' => $livePirMotion,
+                'lastMotion' => $livePirMotion ? 1_800_000_100_000 : 1_800_000_000_000,
                 'lightModeSettings' => ['mode' => 'always'],
             ]]]),
             'content_type' => 'application/json',
@@ -258,6 +261,25 @@ if (($probe['counts']['hubs'] ?? 0) !== 1 || ($probe['counts']['relays'] ?? 0) !
 $probeIds = array_column($probe['devices'] ?? [], 'id');
 if (!in_array('unifi:hub:7483c2773855', $probeIds, true) || !in_array('unifi:sensor:dps-door1', $probeIds, true) || !in_array('unifi:relay:relay1:1', $probeIds, true)) {
     fwrite(STDERR, 'access extras ' . json_encode($probeIds) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:sensor:pir-light1', $probeIds, true)) {
+    fwrite(STDERR, 'floodlight PIR missing from catalog ' . json_encode($probeIds) . "\n");
+    exit(1);
+}
+$pirRow = null;
+foreach ($probe['devices'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:sensor:pir-light1') {
+        $pirRow = $row;
+        break;
+    }
+}
+if (($pirRow['kind'] ?? '') !== 'sensor' || ($pirRow['has_motion'] ?? false) !== true || ($pirRow['companion_of'] ?? '') !== 'unifi:light:light1') {
+    fwrite(STDERR, 'floodlight PIR row ' . json_encode($pirRow) . "\n");
+    exit(1);
+}
+if (($pirRow['motion'] ?? false) !== true || ($pirRow['name'] ?? '') !== 'Flood motion') {
+    fwrite(STDERR, 'floodlight PIR motion ' . json_encode($pirRow) . "\n");
     exit(1);
 }
 $hubRow = null;
@@ -634,6 +656,10 @@ if (!in_array('unifi:camera:cam1', $ids, true) || !in_array('unifi:light:light1'
     fwrite(STDERR, 'homeRows ' . json_encode($ids) . "\n");
     exit(1);
 }
+if (!in_array('unifi:sensor:pir-light1', $ids, true)) {
+    fwrite(STDERR, 'floodlight PIR must follow the light onto Home ' . json_encode($ids) . "\n");
+    exit(1);
+}
 
 $hub = new Yarbo\YarboHub($root);
 if (!$hub->save(['modules' => ['yarbo' => false, 'home' => true, 'unifi' => true, 'powerwall' => false, 'lymow' => false]])) {
@@ -651,6 +677,15 @@ $dash = $home->dashboard();
 $homeIds = array_column($dash['devices'] ?? [], 'id');
 if (!in_array('unifi:camera:cam1', $homeIds, true) || !in_array('unifi:light:light1', $homeIds, true)) {
     fwrite(STDERR, 'home dash ' . json_encode($homeIds) . json_encode($dash) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:sensor:pir-light1', $homeIds, true)) {
+    fwrite(STDERR, 'home dash missing floodlight PIR ' . json_encode($homeIds) . "\n");
+    exit(1);
+}
+$autoIds = array_column($dash['automation_devices'] ?? [], 'id');
+if (!in_array('unifi:sensor:pir-light1', $autoIds, true)) {
+    fwrite(STDERR, 'automations missing floodlight PIR ' . json_encode($autoIds) . "\n");
     exit(1);
 }
 

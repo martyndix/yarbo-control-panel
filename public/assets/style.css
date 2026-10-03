@@ -4023,6 +4023,39 @@ body.home-is-reordering {
     gap: 0.45rem;
 }
 
+.auto-when-join {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    margin-bottom: 0.15rem;
+}
+
+.auto-when-join button {
+    font: inherit;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+}
+
+.auto-when-join button.is-on {
+    border-color: var(--accent);
+    color: var(--text);
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
+.auto-when-op {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 650;
+    text-transform: lowercase;
+    align-self: center;
+}
+
 .auto-tray {
     display: grid;
     gap: 0.85rem;

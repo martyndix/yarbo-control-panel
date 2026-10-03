@@ -148,6 +148,63 @@ $auto->delete('a-edge');
 $commands = [];
 @unlink($auto->statePath());
 
+$orRule = $auto->save([
+    'id' => 'a-or',
+    'enabled' => true,
+    'when_match' => 'any',
+    'triggers' => [
+        ['type' => 'device', 'id' => 'unifi:sensor:pir-a', 'event' => 'motion'],
+        ['type' => 'device', 'id' => 'unifi:sensor:pir-b', 'event' => 'motion'],
+    ],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($orRule['ok']), 'save OR when: ' . json_encode($orRule));
+assert_true(count($orRule['automation']['triggers'] ?? []) === 2, 'OR keeps both Whens');
+assert_true(($orRule['automation']['when_match'] ?? '') === 'any', 'OR match');
+$pirSnap = static function (bool $a, bool $b, int $aAt = 0, int $bAt = 0): array {
+    return [
+        ['id' => 'unifi:sensor:pir-a', 'kind' => 'sensor', 'motion' => $a, 'motion_at' => $aAt, 'on' => $a],
+        ['id' => 'unifi:sensor:pir-b', 'kind' => 'sensor', 'motion' => $b, 'motion_at' => $bAt, 'on' => $b],
+        ['id' => 'unifi:light:porch', 'kind' => 'light', 'on' => false],
+    ];
+};
+$auto->tick($pirSnap(false, false), $t0);
+$r = $auto->tick($pirSnap(true, false, $t0 + 1), $t0 + 1);
+assert_true($r['fired'] === ['a-or'], 'OR fires when the first PIR edges: ' . json_encode($r));
+$r = $auto->tick($pirSnap(false, false), $t0 + 2);
+$r = $auto->tick($pirSnap(false, true, 0, $t0 + 3), $t0 + 3);
+assert_true($r['fired'] === ['a-or'], 'OR fires when the second PIR edges: ' . json_encode($r));
+
+$auto->delete('a-or');
+$commands = [];
+@unlink($auto->statePath());
+
+$andRule = $auto->save([
+    'id' => 'a-and',
+    'enabled' => true,
+    'when_match' => 'all',
+    'triggers' => [
+        ['type' => 'device', 'id' => 'unifi:sensor:pir-a', 'event' => 'motion'],
+        ['type' => 'device', 'id' => 'unifi:sensor:pir-b', 'event' => 'motion'],
+    ],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+    'names' => ['unifi:sensor:pir-a' => 'Drive motion', 'unifi:sensor:pir-b' => 'Porch motion', 'unifi:light:porch' => 'Porch'],
+]);
+assert_true(!empty($andRule['ok']), 'save AND when');
+assert_true(str_contains((string) ($andRule['automation']['name'] ?? ''), ' and '), 'AND sentence uses and: ' . ($andRule['automation']['name'] ?? ''));
+$auto->tick($pirSnap(true, false, $t0, 0), $t0);
+$r = $auto->tick($pirSnap(true, true, $t0, $t0 + 1), $t0 + 1);
+assert_true($r['fired'] === ['a-and'], 'AND fires when both detect and one just edged: ' . json_encode($r));
+$r = $auto->tick($pirSnap(true, false, $t0, 0), $t0 + 2);
+$r = $auto->tick($pirSnap(true, false, $t0 + 3, 0), $t0 + 3);
+assert_true($r['fired'] === [], 'AND must not fire when only one PIR is detecting: ' . json_encode($r));
+
+$auto->delete('a-and');
+$commands = [];
+@unlink($auto->statePath());
+
 $thresh = $auto->save([
     'id' => 'a-temp',
     'enabled' => true,
@@ -557,6 +614,9 @@ assert_true(!is_file($auto->pidPath()) || (int) trim((string) file_get_contents(
 assert_true(str_contains($js, 'homeHeaterActionsHtml'), 'heater On/Off and setpoint controls');
 assert_true(str_contains($js, 'data-home-setpoint'), 'heater setpoint input');
 assert_true(str_contains($js, 'data-home-room-temp'), 'heater room temperature');
+assert_true(str_contains($js, 'Any (or)'), 'multiple When Any chip');
+assert_true(str_contains($js, 'All (and)'), 'multiple When All chip');
+assert_true(str_contains($js, 'homeAutoApplyWhen'), 'When chips append');
 assert_true(str_contains($js, 'Last ran stays empty'), 'stale runner copy');
 assert_true(str_contains($js, 'Runner is active'), 'active runner copy');
 assert_true(str_contains($js, 'Not run yet.'), 'not-run-yet copy');
@@ -564,6 +624,6 @@ assert_true(str_contains($index, 'data-panel-version'), 'panel version on the pa
 $matterPhp = (string) file_get_contents(__DIR__ . '/../src/YarboMatterAgentClient.php');
 assert_true(str_contains($matterPhp, 'function portOpen'), 'Matter client checks the listening port');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
-assert_true(str_contains($change, '## [4.0.36]'), 'changelog 4.0.36');
+assert_true(str_contains($change, '## [4.0.37]'), 'changelog 4.0.37');
 
 echo "test_home_automations.php ok\n";

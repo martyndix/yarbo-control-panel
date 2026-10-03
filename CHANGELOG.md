@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.37] - 2026-10-03
+
+### Added
+- Home Automations **When** can have more than one condition, joined with **Any (or)** or **All (and)**. Drop extra Time, Sunset, or sensor chips onto When.
+- UniFi Protect **floodlights** expose a companion **motion** sensor (the built-in PIR) as well as the light. It appears on Home with the floodlight and in Automations under Sensors.
+
 ## [4.0.36] - 2026-10-02
 
 ### Fixed

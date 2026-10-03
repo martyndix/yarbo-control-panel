@@ -336,8 +336,8 @@ final class YarboHomeAutomations
             'timezone' => $this->timezonePublic(),
             'runner' => $this->runnerPublic(),
         ];
-        $hasRule = isset($input['trigger']) || isset($input['actions']) || isset($input['name']) || isset($input['id']);
-        if ($hasRule && !isset($input['trigger']) && !isset($input['actions'])) {
+        $hasRule = isset($input['trigger']) || isset($input['triggers']) || isset($input['actions']) || isset($input['name']) || isset($input['id']);
+        if ($hasRule && !isset($input['trigger']) && !isset($input['triggers']) && !isset($input['actions'])) {
             if (!$this->write($store)) {
                 return ['ok' => false, 'error' => 'Could not save'];
             }
@@ -490,9 +490,9 @@ final class YarboHomeAutomations
             $cooldown = (int) ($rule['cooldown_sec'] ?? 30);
             $lastFire = (int) (($state['last_fire'][$id] ?? 0));
             $inCooldown = $cooldown > 0 && $lastFire > 0 && ($now - $lastFire) < $cooldown;
-            $should = $this->triggerMatches($rule, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords);
-            $this->updateHeld($state, $id, $rule, $curr, $now, $should);
-            if (!$should) {
+            $eval = $this->evaluateTriggers($rule, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords);
+            $this->updateHeld($state, $id, $rule, $curr, $now);
+            if (!$eval['should']) {
                 continue;
             }
             if (!$this->conditionsPass($rule['conditions'] ?? [], $curr, $hm, $dow)) {
@@ -518,17 +518,8 @@ final class YarboHomeAutomations
             unset($state['then_error'][$id]);
             $fired[] = $id;
             $state['last_fire'][$id] = $now;
-            $type = (string) ($rule['trigger']['type'] ?? '');
-            if ($type === 'time' || $type === 'sun') {
-                $state['day_slot'][$id] = $this->slotKey($rule, $today, $hm);
-            }
-            if (in_array((string) ($rule['trigger']['event'] ?? ''), self::DURATION_EVENTS, true)) {
-                if (!isset($state['held'][$id]) || !is_array($state['held'][$id])) {
-                    $state['held'][$id] = ['since' => $now, 'fired' => true];
-                } else {
-                    $state['held'][$id]['fired'] = true;
-                }
-            }
+            $this->markFiredSlots($state, $id, $rule, $eval['matched'], $today, $hm);
+            $this->markDurationFired($state, $id, $rule, $eval['matched']);
             $this->queueOffAfter($state, $rule, $now);
             $curr = $this->applyActionSnapshot($curr, $rule['actions'] ?? []);
         }
@@ -601,7 +592,7 @@ final class YarboHomeAutomations
      */
     public static function sentence(array $rule, array $names = []): string
     {
-        $when = self::whenPhrase($rule['trigger'] ?? [], $names);
+        $when = self::whenJoinPhrase($rule, $names);
         $thenParts = [];
         foreach (is_array($rule['actions'] ?? null) ? $rule['actions'] : [] as $action) {
             if (!is_array($action)) {
@@ -624,6 +615,48 @@ final class YarboHomeAutomations
         }
 
         return $text;
+    }
+
+    /**
+     * @param array<string, mixed> $rule
+     * @param array<string, string> $names
+     */
+    public static function whenJoinPhrase(array $rule, array $names = []): string
+    {
+        $parts = [];
+        foreach (self::triggersOf($rule) as $trigger) {
+            $parts[] = self::whenPhrase($trigger, $names);
+        }
+        if ($parts === []) {
+            return 'When';
+        }
+        $join = self::whenMatch($rule) === 'all' ? ' and ' : ' or ';
+
+        return implode($join, $parts);
+    }
+
+    /**
+     * @param array<string, mixed> $rule
+     * @return list<array<string, mixed>>
+     */
+    public static function triggersOf(array $rule): array
+    {
+        $out = [];
+        foreach (is_array($rule['triggers'] ?? null) ? $rule['triggers'] : [] as $row) {
+            if (is_array($row)) {
+                $out[] = $row;
+            }
+        }
+        if ($out === [] && is_array($rule['trigger'] ?? null)) {
+            $out[] = $rule['trigger'];
+        }
+
+        return $out;
+    }
+
+    public static function whenMatch(array $rule): string
+    {
+        return strtolower(trim((string) ($rule['when_match'] ?? 'any'))) === 'all' ? 'all' : 'any';
     }
 
     /**
@@ -741,7 +774,24 @@ final class YarboHomeAutomations
         if ($id === '') {
             $id = 'a' . bin2hex(random_bytes(4));
         }
-        $trigger = $this->normalizeTrigger(is_array($row['trigger'] ?? null) ? $row['trigger'] : null);
+        $triggers = [];
+        foreach (is_array($row['triggers'] ?? null) ? $row['triggers'] : [] as $one) {
+            if (!is_array($one)) {
+                continue;
+            }
+            $norm = $this->normalizeTrigger($one);
+            if ($norm !== null) {
+                $triggers[] = $norm;
+            }
+        }
+        if ($triggers === []) {
+            $one = $this->normalizeTrigger(is_array($row['trigger'] ?? null) ? $row['trigger'] : null);
+            if ($one !== null) {
+                $triggers[] = $one;
+            }
+        }
+        $trigger = $triggers[0] ?? null;
+        $whenMatch = strtolower(trim((string) ($row['when_match'] ?? 'any'))) === 'all' ? 'all' : 'any';
         $actions = [];
         foreach (is_array($row['actions'] ?? null) ? $row['actions'] : [] as $action) {
             if (!is_array($action)) {
@@ -780,6 +830,8 @@ final class YarboHomeAutomations
         if ($name === '' && $trigger !== null) {
             $name = YarboHub::normalizeDisplayName(self::sentence([
                 'trigger' => $trigger,
+                'triggers' => $triggers,
+                'when_match' => $whenMatch,
                 'actions' => $actions,
                 'off_after_sec' => $offAfter,
             ], $names), 64);
@@ -800,6 +852,8 @@ final class YarboHomeAutomations
             'name' => $name,
             'enabled' => array_key_exists('enabled', $row) ? (bool) $row['enabled'] : true,
             'trigger' => $trigger,
+            'triggers' => $triggers,
+            'when_match' => $whenMatch,
             'conditions' => $conditions,
             'actions' => $actions,
             'off_after_sec' => $offAfter,
@@ -1017,8 +1071,9 @@ final class YarboHomeAutomations
      * @param array<string, array<string, mixed>> $curr
      * @param array<string, mixed> $state
      * @param array{latitude: ?float, longitude: ?float, source: ?string} $coords
+     * @return array{should: bool, matched: list<int>}
      */
-    private function triggerMatches(
+    private function evaluateTriggers(
         array $rule,
         array $prev,
         array $curr,
@@ -1029,15 +1084,56 @@ final class YarboHomeAutomations
         string $hm,
         int $dow,
         array $coords
-    ): bool {
-        $trigger = is_array($rule['trigger'] ?? null) ? $rule['trigger'] : null;
-        if ($trigger === null) {
-            return false;
+    ): array {
+        $triggers = self::triggersOf($rule);
+        if ($triggers === []) {
+            return ['should' => false, 'matched' => []];
         }
-        $type = (string) ($trigger['type'] ?? '');
         $id = (string) ($rule['id'] ?? '');
+        $matched = [];
+        $true = [];
+        foreach ($triggers as $i => $trigger) {
+            if ($this->triggerMatches($trigger, $id, $i, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords)) {
+                $matched[] = $i;
+            }
+            if ($this->triggerCurrentlyTrue($trigger, $id, $i, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords)) {
+                $true[] = $i;
+            }
+        }
+        if (self::whenMatch($rule) === 'all') {
+            return [
+                'should' => count($true) === count($triggers) && $matched !== [],
+                'matched' => $matched,
+            ];
+        }
+
+        return ['should' => $matched !== [], 'matched' => $matched];
+    }
+
+    /**
+     * @param array<string, mixed> $trigger
+     * @param array<string, array<string, mixed>> $prev
+     * @param array<string, array<string, mixed>> $curr
+     * @param array<string, mixed> $state
+     * @param array{latitude: ?float, longitude: ?float, source: ?string} $coords
+     */
+    private function triggerMatches(
+        array $trigger,
+        string $id,
+        int $index,
+        array $prev,
+        array $curr,
+        array $state,
+        int $now,
+        \DateTimeImmutable $local,
+        string $today,
+        string $hm,
+        int $dow,
+        array $coords
+    ): bool {
+        $type = (string) ($trigger['type'] ?? '');
         if ($type === 'time') {
-            if (($state['day_slot'][$id] ?? '') === $this->slotKey($rule, $today, $hm)) {
+            if ($this->daySlotUsed($state, $id, $this->slotKeyForTrigger($trigger, $today, $hm))) {
                 return false;
             }
             $days = is_array($trigger['days'] ?? null) ? $trigger['days'] : [];
@@ -1050,7 +1146,7 @@ final class YarboHomeAutomations
                 || $this->failedTimeRetry($id, $at, $hm, $today, $state);
         }
         if ($type === 'sun') {
-            if (($state['day_slot'][$id] ?? '') === $this->slotKey($rule, $today, $hm)) {
+            if ($this->daySlotUsed($state, $id, $this->slotKeyForTrigger($trigger, $today, $hm))) {
                 return false;
             }
             if ($coords['latitude'] === null || $coords['longitude'] === null) {
@@ -1096,7 +1192,7 @@ final class YarboHomeAutomations
         $deviceId = (string) ($trigger['id'] ?? '');
         $event = (string) ($trigger['event'] ?? '');
         if (in_array($event, self::DURATION_EVENTS, true)) {
-            $held = is_array($state['held'][$id] ?? null) ? $state['held'][$id] : null;
+            $held = $this->heldBuckets($state, $id)[$index] ?? null;
             if ($held === null || !empty($held['fired'])) {
                 return false;
             }
@@ -1113,6 +1209,87 @@ final class YarboHomeAutomations
         }
 
         return $this->edgeFired($event, $prev[$deviceId], $curr[$deviceId]);
+    }
+
+    /**
+     * State of a When for AND: currently true, not only the rising edge.
+     *
+     * @param array<string, mixed> $trigger
+     * @param array<string, array<string, mixed>> $prev
+     * @param array<string, array<string, mixed>> $curr
+     * @param array<string, mixed> $state
+     * @param array{latitude: ?float, longitude: ?float, source: ?string} $coords
+     */
+    private function triggerCurrentlyTrue(
+        array $trigger,
+        string $id,
+        int $index,
+        array $prev,
+        array $curr,
+        array $state,
+        int $now,
+        \DateTimeImmutable $local,
+        string $today,
+        string $hm,
+        int $dow,
+        array $coords
+    ): bool {
+        $type = (string) ($trigger['type'] ?? '');
+        if ($type === 'time') {
+            $days = is_array($trigger['days'] ?? null) ? $trigger['days'] : [];
+            if ($days !== [] && !in_array($dow, $days, true)) {
+                return false;
+            }
+
+            return $this->clockReached((string) $trigger['at'], $hm, $today, $state, $now);
+        }
+        if ($type === 'sun') {
+            if ($coords['latitude'] === null || $coords['longitude'] === null) {
+                return false;
+            }
+            $eventHm = $this->sunEventHm(
+                (string) $trigger['event'],
+                $now,
+                (float) $coords['latitude'],
+                (float) $coords['longitude'],
+                (int) ($trigger['offset_min'] ?? 0),
+                $local->getTimezone()
+            );
+
+            return $eventHm !== null && $this->clockReached($eventHm, $hm, $today, $state, $now);
+        }
+        if ($type === 'threshold') {
+            $deviceId = (string) ($trigger['id'] ?? '');
+            $metric = (string) ($trigger['metric'] ?? 'temperature');
+            $op = (string) ($trigger['op'] ?? 'above');
+            $value = (float) ($trigger['value'] ?? 0);
+            $currVal = $curr[$deviceId][$metric] ?? null;
+            if (!is_float($currVal) && !is_int($currVal)) {
+                return false;
+            }
+            $currVal = (float) $currVal;
+
+            return $op === 'below' ? $currVal < $value : $currVal > $value;
+        }
+        $deviceId = (string) ($trigger['id'] ?? '');
+        $event = (string) ($trigger['event'] ?? '');
+        $row = $curr[$deviceId] ?? null;
+        if (in_array($event, self::DURATION_EVENTS, true)) {
+            return $this->triggerMatches($trigger, $id, $index, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords);
+        }
+        if ($row === null) {
+            return false;
+        }
+
+        return match ($event) {
+            'turns_on' => $row['on'] === true,
+            'turns_off' => $row['on'] === false,
+            'opens' => $row['open'] === true,
+            'closes' => $row['open'] === false,
+            'motion' => $row['motion'] === true
+                || ((int) ($row['motion_at'] ?? 0) > 0 && (int) ($row['motion_at'] ?? 0) > (int) ($prev[$deviceId]['motion_at'] ?? 0)),
+            default => false,
+        };
     }
 
     /**
@@ -1148,11 +1325,10 @@ final class YarboHomeAutomations
      * One fire per local day per time-of-day (or sun event). Older date-only
      * day_slot values do not match, so a stuck “already ran today” can retry.
      *
-     * @param array<string, mixed> $rule
+     * @param array<string, mixed> $trigger
      */
-    private function slotKey(array $rule, string $today, string $hm): string
+    private function slotKeyForTrigger(array $trigger, string $today, string $hm): string
     {
-        $trigger = is_array($rule['trigger'] ?? null) ? $rule['trigger'] : [];
         $type = (string) ($trigger['type'] ?? '');
         if ($type === 'time') {
             $at = self::normalizeHm((string) ($trigger['at'] ?? '')) ?? $hm;
@@ -1167,6 +1343,71 @@ final class YarboHomeAutomations
         }
 
         return $today;
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     */
+    private function daySlotSet(array $state, string $id): array
+    {
+        $raw = $state['day_slot'][$id] ?? null;
+        if (is_string($raw) && $raw !== '') {
+            return [$raw => true];
+        }
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $key => $value) {
+            if (is_string($key) && $key !== '' && $value) {
+                $out[$key] = true;
+            } elseif (is_string($value) && $value !== '') {
+                $out[$value] = true;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     */
+    private function daySlotUsed(array $state, string $id, string $key): bool
+    {
+        return isset($this->daySlotSet($state, $id)[$key]);
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     * @param array<string, mixed> $rule
+     * @param list<int> $matched
+     */
+    private function markFiredSlots(
+        array &$state,
+        string $id,
+        array $rule,
+        array $matched,
+        string $today,
+        string $hm
+    ): void {
+        $triggers = self::triggersOf($rule);
+        $slots = $this->daySlotSet($state, $id);
+        $wrote = false;
+        foreach ($matched as $i) {
+            $trigger = $triggers[$i] ?? null;
+            if (!is_array($trigger)) {
+                continue;
+            }
+            $type = (string) ($trigger['type'] ?? '');
+            if ($type !== 'time' && $type !== 'sun') {
+                continue;
+            }
+            $slots[$this->slotKeyForTrigger($trigger, $today, $hm)] = true;
+            $wrote = true;
+        }
+        if ($wrote) {
+            $state['day_slot'][$id] = $slots;
+        }
     }
 
     /**
@@ -1199,25 +1440,79 @@ final class YarboHomeAutomations
 
     /**
      * @param array<string, mixed> $state
+     * @return array<int, array<string, mixed>>
+     */
+    private function heldBuckets(array $state, string $id): array
+    {
+        $raw = $state['held'][$id] ?? null;
+        if (!is_array($raw)) {
+            return [];
+        }
+        if (isset($raw['since'])) {
+            return [0 => $raw];
+        }
+        $out = [];
+        foreach ($raw as $key => $row) {
+            if (is_array($row)) {
+                $out[(int) $key] = $row;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $state
      * @param array<string, mixed> $rule
      * @param array<string, array<string, mixed>> $curr
      */
-    private function updateHeld(array &$state, string $id, array $rule, array $curr, int $now, bool $justFired): void
+    private function updateHeld(array &$state, string $id, array $rule, array $curr, int $now): void
     {
-        $trigger = is_array($rule['trigger'] ?? null) ? $rule['trigger'] : null;
-        if ($trigger === null || !in_array((string) ($trigger['event'] ?? ''), self::DURATION_EVENTS, true)) {
-            return;
+        $buckets = $this->heldBuckets($state, $id);
+        $keep = [];
+        foreach (self::triggersOf($rule) as $i => $trigger) {
+            $event = (string) ($trigger['event'] ?? '');
+            if (!in_array($event, self::DURATION_EVENTS, true)) {
+                continue;
+            }
+            $deviceId = (string) ($trigger['id'] ?? '');
+            if (!$this->durationActive($event, $curr[$deviceId] ?? null)) {
+                continue;
+            }
+            $prev = $buckets[$i] ?? null;
+            $keep[$i] = is_array($prev) ? $prev : ['since' => $now, 'fired' => false];
         }
-        $deviceId = (string) ($trigger['id'] ?? '');
-        $event = (string) $trigger['event'];
-        $active = $this->durationActive($event, $curr[$deviceId] ?? null);
-        if (!$active) {
+        if ($keep === []) {
             unset($state['held'][$id]);
-
-            return;
+        } else {
+            $state['held'][$id] = $keep;
         }
-        if (!isset($state['held'][$id]) || !is_array($state['held'][$id])) {
-            $state['held'][$id] = ['since' => $now, 'fired' => $justFired];
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     * @param array<string, mixed> $rule
+     * @param list<int> $matched
+     */
+    private function markDurationFired(array &$state, string $id, array $rule, array $matched): void
+    {
+        $triggers = self::triggersOf($rule);
+        $buckets = $this->heldBuckets($state, $id);
+        $wrote = false;
+        foreach ($matched as $i) {
+            $event = (string) (($triggers[$i]['event'] ?? ''));
+            if (!in_array($event, self::DURATION_EVENTS, true)) {
+                continue;
+            }
+            if (!isset($buckets[$i]) || !is_array($buckets[$i])) {
+                $buckets[$i] = ['since' => time(), 'fired' => true];
+            } else {
+                $buckets[$i]['fired'] = true;
+            }
+            $wrote = true;
+        }
+        if ($wrote) {
+            $state['held'][$id] = $buckets;
         }
     }
 

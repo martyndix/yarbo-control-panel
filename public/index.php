@@ -691,7 +691,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div class="auto-builder">
                     <section class="auto-drop" id="auto-when" data-auto-zone="when" aria-label="When">
                         <h3 class="settings-subtitle">When</h3>
-                        <p class="hint">Drag a sensor, door, Time, or Sunset here. Tap a chip if you cannot drag.</p>
+                        <p class="hint">Drag a sensor, door, Time, or Sunset here. Drop more than one, then pick Any (or) or All (and). Tap a chip if you cannot drag.</p>
                         <div class="auto-drop-chips" id="auto-when-chips"></div>
                     </section>
                     <details class="auto-if" id="auto-if">
