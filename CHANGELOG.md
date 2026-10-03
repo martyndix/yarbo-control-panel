@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.42] - 2026-10-03
+
+### Fixed
+- Settings → E-paper **Remote access** no longer reports **Done** after Log in or Start Funnel with no next step. Log in shows (and tries to open) the Tailscale URL, or says the Pi is already logged in. Start Funnel explains that Funnel is **not** in the JSON ACL editor: **Access controls** → visual editor → **Funnel** → **Add Funnel to policy** (or paste `nodeAttrs`), then DNS **MagicDNS** and **HTTPS Certificates**.
+
 ## [4.0.41] - 2026-10-03
 
 ### Added

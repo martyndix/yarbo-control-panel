@@ -230,6 +230,9 @@ const els = {
     papermonoRemoteStatus: document.getElementById('papermono-remote-status'),
     papermonoRemoteAuthWrap: document.getElementById('papermono-remote-auth-wrap'),
     papermonoRemoteAuth: document.getElementById('papermono-remote-auth'),
+    papermonoRemoteFunnelUrlWrap: document.getElementById('papermono-remote-funnel-url-wrap'),
+    papermonoRemoteFunnelUrl: document.getElementById('papermono-remote-funnel-url'),
+    papermonoRemoteFunnelHelp: document.getElementById('papermono-remote-funnel-help'),
     papermonoRemoteResult: document.getElementById('papermono-remote-result'),
     papermonoRemoteSave: document.getElementById('papermono-remote-save'),
     papermonoRemoteInstall: document.getElementById('papermono-remote-install'),
@@ -8152,6 +8155,31 @@ function setPaperRemoteResult(message, type) {
     els.papermonoRemoteResult.classList.remove('hidden');
 }
 
+function paperRemoteHttpUrl(value) {
+    const url = String(value || '').trim();
+    return /^https?:\/\//i.test(url) ? url : '';
+}
+
+function showPaperRemoteLink(wrapEl, linkEl, url) {
+    if (!wrapEl || !linkEl) return;
+    if (url) {
+        linkEl.href = url;
+        linkEl.textContent = url;
+        wrapEl.classList.remove('hidden');
+        return;
+    }
+    wrapEl.classList.add('hidden');
+}
+
+function openPaperRemoteUrl(url) {
+    if (!url) return;
+    try {
+        window.open(url, '_blank', 'noopener');
+    } catch (err) {
+        // Popup blocked — the visible link stays on the page.
+    }
+}
+
 function applyPaperRemoteUi(remote, opts = {}) {
     if (!remote || typeof remote !== 'object') return;
     const applyForm = opts.form !== false && !els.papermonoRemoteEnabled?.dataset.dirty;
@@ -8184,9 +8212,9 @@ function applyPaperRemoteUi(remote, opts = {}) {
     }
     if (provider === 'tailscale') {
         if (!ts.installed) bits.push('Tailscale is not installed on this host.');
-        else if (!ts.logged_in) bits.push('Tailscale is installed. Click Log in and open the link.');
-        else if (ts.needs_funnel_acl) bits.push('Allow Funnel in the Tailscale admin console, then Start Funnel.');
-        else if (!ts.funnel_on) bits.push('Logged in. Click Start Funnel.');
+        else if (!ts.logged_in) bits.push('Tailscale is installed. Click Log in. A login link must appear above — if nothing opens, the Pi may already be logged in; skip to Funnel.');
+        else if (ts.needs_funnel_acl) bits.push('Funnel is not a JSON ACL toggle. Open Access controls → visual editor → Funnel → Add Funnel to policy, then Start Funnel.');
+        else if (!ts.funnel_on) bits.push('Logged in. Funnel is still off. Enable it in Access controls (visual editor → Funnel), not the JSON ACL list, then Start Funnel.');
         else bits.push('Funnel is on.');
         if (remote.gate_listening) bits.push('The tablet-only gate is listening.');
         else if (enabled) bits.push('The tablet-only gate is not listening yet — Save remote access, or restart the panel.');
@@ -8195,14 +8223,12 @@ function applyPaperRemoteUi(remote, opts = {}) {
     if (els.papermonoRemoteStatus) {
         els.papermonoRemoteStatus.textContent = bits.join(' ');
     }
-    if (els.papermonoRemoteAuthWrap && els.papermonoRemoteAuth) {
-        const url = String(ts.auth_url || '');
-        if (url.startsWith('http')) {
-            els.papermonoRemoteAuth.href = url;
-            els.papermonoRemoteAuthWrap.classList.remove('hidden');
-        } else {
-            els.papermonoRemoteAuthWrap.classList.add('hidden');
-        }
+    showPaperRemoteLink(els.papermonoRemoteAuthWrap, els.papermonoRemoteAuth, paperRemoteHttpUrl(ts.auth_url));
+    showPaperRemoteLink(els.papermonoRemoteFunnelUrlWrap, els.papermonoRemoteFunnelUrl, paperRemoteHttpUrl(ts.funnel_enable_url));
+    if (els.papermonoRemoteFunnelHelp) {
+        const needFunnel = provider === 'tailscale' && Boolean(ts.installed)
+            && (Boolean(ts.needs_funnel_acl) || (Boolean(ts.logged_in) && !ts.funnel_on));
+        els.papermonoRemoteFunnelHelp.classList.toggle('is-needed', needFunnel);
     }
     const tailscaleOn = provider === 'tailscale';
     if (els.papermonoRemoteInstall) els.papermonoRemoteInstall.classList.toggle('hidden', !tailscaleOn);
@@ -8251,26 +8277,52 @@ async function runPaperRemoteStep(step, button) {
             body: JSON.stringify({ action: 'paper_remote_step', step }),
         });
         const data = await parseJsonResponse(res);
+        const stepOut = data.step && typeof data.step === 'object' ? data.step : {};
+        const ts = Object.assign({}, data.tailscale || {}, {
+            auth_url: paperRemoteHttpUrl((data.tailscale || {}).auth_url) || paperRemoteHttpUrl(stepOut.auth_url),
+            funnel_enable_url: paperRemoteHttpUrl((data.tailscale || {}).funnel_enable_url)
+                || paperRemoteHttpUrl(stepOut.funnel_enable_url),
+            logged_in: Boolean((data.tailscale || {}).logged_in || stepOut.logged_in),
+            funnel_on: Boolean((data.tailscale || {}).funnel_on || stepOut.funnel_on),
+            needs_funnel_acl: Boolean((data.tailscale || {}).needs_funnel_acl || stepOut.needs_funnel_acl),
+            installed: Boolean((data.tailscale || {}).installed || stepOut.installed),
+            error: String((data.tailscale || {}).error || stepOut.error || data.error || ''),
+        });
+        data.tailscale = ts;
         applyPaperRemoteUi(data);
-        if (!data.ok && data.error) {
-            throw new Error(data.error);
-        }
-        const ts = data.tailscale || {};
+        const authUrl = paperRemoteHttpUrl(ts.auth_url);
+        const funnelUrl = paperRemoteHttpUrl(ts.funnel_enable_url);
+        if (step === 'up' && authUrl) openPaperRemoteUrl(authUrl);
+        if (step === 'funnel-on' && funnelUrl && !ts.funnel_on) openPaperRemoteUrl(funnelUrl);
+        const err = String(data.error || stepOut.error || ts.error || '').trim();
+        const funnelHelp = 'Funnel did not start. Login is not enough. Open Access controls → visual editor → Funnel → Add Funnel to policy (not the JSON ACL list). Turn on DNS MagicDNS and HTTPS Certificates. Then Start Funnel again.';
         if (step === 'install') {
-            setPaperRemoteResult(data.step?.message || data.message || 'Tailscale installed. Click Log in.', 'success');
-        } else if (step === 'up' && ts.auth_url) {
-            setPaperRemoteResult('Open the Tailscale login link, then click Log in again when you are done.', 'success');
-        } else if (step === 'funnel-on' && (data.tablet_url || ts.funnel_on)) {
-            setPaperRemoteResult(`Funnel is on${data.tablet_url ? ` (${data.tablet_url})` : ''}. Save remote access, then update the tablets.`, 'success');
+            setPaperRemoteResult(data.message || stepOut.message || 'Tailscale installed. Click Log in next. A login link must appear — if nothing opens, the Pi may already be logged in.', data.ok === false ? 'error' : 'success');
+        } else if (step === 'up') {
+            if (authUrl) {
+                setPaperRemoteResult('A Tailscale login page should have opened. If nothing appeared, tap the login link above on your phone or computer, then click Log in again.', 'success');
+            } else if (ts.logged_in) {
+                setPaperRemoteResult(data.message || 'This Pi is already logged in. Funnel is a second switch — not in the JSON ACL list. Open Access controls → visual editor → Funnel → Add Funnel to policy, then click Start Funnel.', 'success');
+            } else {
+                setPaperRemoteResult(err || 'No login page appeared. On the Pi run sudo ./scripts/paper_remote.sh up, or skip to Funnel if this machine is already in the Tailscale admin console.', 'error');
+            }
+        } else if (step === 'funnel-on') {
+            if (data.tablet_url || ts.funnel_on) {
+                setPaperRemoteResult(`Funnel is on${data.tablet_url ? ` (${data.tablet_url})` : ''}. Save remote access, then update the tablets.`, 'success');
+            } else {
+                setPaperRemoteResult(err || funnelHelp, 'error');
+            }
+        } else if (!data.ok) {
+            setPaperRemoteResult(err || funnelHelp, 'error');
         } else {
-            setPaperRemoteResult(data.error || data.message || 'Done.', data.error ? 'error' : 'success');
+            setPaperRemoteResult(data.message || err || 'Continue the numbered Funnel steps below.', err ? 'error' : 'success');
         }
         if (els.papermonoRemoteUrl && data.origin) {
             els.papermonoRemoteUrl.value = data.origin;
             delete els.papermonoRemoteUrl.dataset.dirty;
         }
     } catch (err) {
-        setPaperRemoteResult(err.message || 'Tailscale step failed', 'error');
+        setPaperRemoteResult(err.message || 'Tailscale step failed. See the Funnel steps below — Funnel is not in the JSON ACL list.', 'error');
     } finally {
         if (button) button.disabled = false;
     }

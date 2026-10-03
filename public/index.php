@@ -1228,7 +1228,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <label class="papermono-kind-card is-active">
                                     <input type="radio" name="papermono-remote-provider" value="tailscale" checked>
                                     <span class="papermono-kind-card-title">Tailscale Funnel</span>
-                                    <span class="papermono-kind-card-meta">Free. Installs on this Pi. One browser login, then enable Funnel in Tailscale.</span>
+                                    <span class="papermono-kind-card-meta">Free. Installs on this Pi. Log in, then enable Funnel in Access controls (not the JSON ACL list).</span>
                                 </label>
                                 <label class="papermono-kind-card">
                                     <input type="radio" name="papermono-remote-provider" value="custom">
@@ -1241,7 +1241,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <input type="url" id="papermono-remote-url" name="papermono_remote_url" autocomplete="off" spellcheck="false" placeholder="https://your-host.ts.net">
                             </label>
                             <p class="hint" id="papermono-remote-status">Remote access is off.</p>
-                            <p class="hint hidden" id="papermono-remote-auth-wrap">Log in to Tailscale: <a id="papermono-remote-auth" href="#" target="_blank" rel="noopener">Open login</a></p>
+                            <p class="hint hidden paper-remote-link" id="papermono-remote-auth-wrap">Tailscale login — open this on your phone or computer (this Pi has no browser): <a id="papermono-remote-auth" href="#" target="_blank" rel="noopener">Open login</a></p>
+                            <p class="hint hidden paper-remote-link" id="papermono-remote-funnel-url-wrap">Tailscale wants a browser click to turn Funnel on: <a id="papermono-remote-funnel-url" href="#" target="_blank" rel="noopener">Open Funnel approval</a></p>
                             <div class="papermono-actions" id="papermono-remote-actions">
                                 <button type="button" class="btn" id="papermono-remote-save">Save remote access</button>
                                 <button type="button" class="btn btn-secondary" id="papermono-remote-install">Install Tailscale</button>
@@ -1249,7 +1250,20 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="papermono-remote-funnel">Start Funnel</button>
                             </div>
                             <p id="papermono-remote-result" class="settings-cloud-result hidden" role="status"></p>
-                            <p class="hint">Funnel: after login, open the <a href="https://login.tailscale.com/admin/acls" target="_blank" rel="noopener">Tailscale ACL editor</a> and allow Funnel (or DNS → Funnel in the admin console). Then Start Funnel. Do not port-forward 8080.</p>
+                            <div id="papermono-remote-funnel-help" class="paper-remote-help">
+                                <p class="hint"><strong>Funnel is not a toggle in the JSON ACL list.</strong> Log in only joins this Pi to your tailnet. Funnel is a second switch. After Log in says this Pi is already logged in, use a phone or computer:</p>
+                                <ol class="paper-remote-steps">
+                                    <li><strong>Install Tailscale</strong>, then <strong>Log in</strong>. A login link should appear above and a browser tab should open. If nothing opens, the Pi is often already logged in — skip to Funnel.</li>
+                                    <li>Open <a href="https://login.tailscale.com/admin/acls" target="_blank" rel="noopener">Access controls</a>. Ignore the JSON ACL editor if that is what you landed on. Switch to the <strong>visual editor</strong>, scroll to the <strong>Funnel</strong> section (its own heading, not an ACL rule), and click <strong>Add Funnel to policy</strong>.</li>
+                                    <li>If that button is missing, stay in JSON and add this block next to the other top-level keys (comma after the previous one), then Save:
+<pre class="paper-remote-acl">"nodeAttrs": [
+  { "target": ["autogroup:member"], "attr": ["funnel"] }
+]</pre>
+                                    </li>
+                                    <li>Open <a href="https://login.tailscale.com/admin/dns" target="_blank" rel="noopener">DNS</a> and turn on <strong>MagicDNS</strong> and <strong>HTTPS Certificates</strong> if they are off.</li>
+                                    <li>Come back here and click <strong>Start Funnel</strong>. If Tailscale opens an approve link, use it. The HTTPS origin should fill in as <code>https://….ts.net</code>. Then Save remote access and update the tablets. Do not port-forward 8080.</li>
+                                </ol>
+                            </div>
                             <label class="settings-field">
                                 <span class="label">Device name</span>
                                 <input type="text" id="papermono-name" name="papermono_name" value="PaperMono" autocomplete="off">

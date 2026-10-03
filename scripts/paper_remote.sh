@@ -97,27 +97,30 @@ stop_gate() {
 
 ts_json_field() {
   local key="$1"
-  python3 - "$key" <<'PY' 2>/dev/null || true
-import json, sys
-key = sys.argv[1]
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-cur = data
-for part in key.split("."):
-    if isinstance(cur, dict) and part in cur:
-        cur = cur[part]
-    else:
-        cur = ""
-        break
-if cur is True:
-    print("true")
-elif cur is False or cur is None:
-    print("")
-else:
-    print(cur)
-PY
+  php -r '
+    $d = json_decode(stream_get_contents(STDIN), true);
+    if (!is_array($d)) {
+      exit;
+    }
+    $cur = $d;
+    foreach (explode(".", $argv[1]) as $part) {
+      if (!is_array($cur) || !array_key_exists($part, $cur)) {
+        exit;
+      }
+      $cur = $cur[$part];
+    }
+    if ($cur === true) {
+      echo "true";
+    } elseif ($cur === false || $cur === null) {
+      echo "";
+    } elseif (is_scalar($cur)) {
+      echo (string) $cur;
+    }
+  ' "$key"
+}
+
+first_https() {
+  printf '%s' "$1" | grep -oE 'https://[^[:space:]"'\'']+' | head -n1 || true
 }
 
 status_json() {
@@ -128,6 +131,8 @@ status_json() {
   local funnel_on="false"
   local needs_acl="false"
   local error=""
+  local backend=""
+  local funnel_enable_url=""
   local ts
   ts="$(tailscale_bin)"
   if [[ -n "$ts" ]]; then
@@ -135,7 +140,6 @@ status_json() {
     local st
     st="$("$ts" status --json 2>/dev/null || true)"
     if [[ -n "$st" ]]; then
-      local backend
       backend="$(printf '%s' "$st" | ts_json_field BackendState)"
       auth_url="$(printf '%s' "$st" | ts_json_field AuthURL)"
       dns_name="$(printf '%s' "$st" | ts_json_field Self.DNSName)"
@@ -149,9 +153,12 @@ status_json() {
     if printf '%s' "$fs" | grep -qiE 'https://|Funnel on|:443'; then
       funnel_on="true"
     fi
-    if printf '%s' "$fs" | grep -qiE 'Access denied|funnel.*not enabled|node attribute'; then
+    if printf '%s' "$fs" | grep -qiE 'Access denied|funnel.*not enabled|node attribute|Add Funnel'; then
       needs_acl="true"
-      error="Enable Funnel in the Tailscale admin console, then click Start Funnel."
+      error="Funnel is not in the JSON ACL list. Open Access controls, find the Funnel section, click Add Funnel to policy. Then Start Funnel again."
+    fi
+    if [[ "$funnel_on" != "true" ]]; then
+      funnel_enable_url="$(first_https "$fs")"
     fi
   fi
   local gate="false"
@@ -162,10 +169,12 @@ status_json() {
   printf '"ok":true,'
   printf '"installed":%s,' "$installed"
   printf '"logged_in":%s,' "$logged_in"
+  printf '"backend":%s,' "$(json_escape "$backend")"
   printf '"auth_url":%s,' "$(json_escape "$auth_url")"
   printf '"dns_name":%s,' "$(json_escape "$dns_name")"
   printf '"funnel_on":%s,' "$funnel_on"
   printf '"needs_funnel_acl":%s,' "$needs_acl"
+  printf '"funnel_enable_url":%s,' "$(json_escape "$funnel_enable_url")"
   printf '"gate":%s,' "$gate"
   printf '"gate_port":%s,' "$GATE_PORT"
   printf '"error":%s,' "$(json_escape "$error")"
@@ -214,9 +223,50 @@ tailscale_up() {
       exec sudo -n "$0" up
     fi
   fi
-  # timeout so we return an auth URL instead of hanging the Settings request
-  "$ts" up --timeout=8s >>"$LOG_FILE" 2>&1 || true
-  status_json
+  local out
+  set +e
+  out="$("$ts" up --timeout=8s 2>&1)"
+  set -e
+  printf '%s\n' "$out" >>"$LOG_FILE"
+  local from_out
+  from_out="$(first_https "$out")"
+  local st
+  st="$(status_json)"
+  if [[ -n "$from_out" ]]; then
+    st="$(printf '%s' "$st" | php -r '
+      $j = json_decode(stream_get_contents(STDIN), true);
+      if (!is_array($j)) {
+        exit;
+      }
+      if (($j["auth_url"] ?? "") === "") {
+        $j["auth_url"] = $argv[1];
+      }
+      echo json_encode($j) . "\n";
+    ' "$from_out")"
+  fi
+  php -r '
+    $j = json_decode($argv[1], true);
+    if (!is_array($j)) {
+      $j = [];
+    }
+    $cli = trim($argv[2]);
+    $auth = trim((string) ($j["auth_url"] ?? ""));
+    $logged = !empty($j["logged_in"]);
+    if ($logged) {
+      $j["ok"] = true;
+      $j["message"] = "This Pi is already logged in to Tailscale. Funnel is a second switch, not a line in the JSON ACL list. Open Access controls → visual editor → Funnel → Add Funnel to policy, then click Start Funnel.";
+    } elseif ($auth !== "") {
+      $j["ok"] = true;
+      $j["message"] = "Open this Tailscale login URL on your phone or computer, then click Log in again: " . $auth;
+    } else {
+      $j["ok"] = false;
+      $j["error"] = "No login page appeared. If this Pi is already logged in, skip to Funnel: Access controls → visual editor → Funnel → Add Funnel to policy. Otherwise run on the Pi: " . (string) ($j["sudo_hint"] ?? "sudo ./scripts/paper_remote.sh up");
+      if ($cli !== "") {
+        $j["error"] .= " CLI: " . $cli;
+      }
+    }
+    echo json_encode($j) . "\n";
+  ' "$st" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-180)"
 }
 
 funnel_on() {
@@ -233,15 +283,42 @@ funnel_on() {
   local code=$?
   set -e
   printf '%s\n' "$out" >>"$LOG_FILE"
-  if [[ $code -ne 0 ]]; then
-    if printf '%s' "$out" | grep -qiE 'Access denied|not enabled|node attribute|Funnel is not'; then
-      emit '{"ok":false,"needs_funnel_acl":true,"error":"Enable Funnel for this tailnet (Tailscale admin console → DNS / Access controls), then click Start Funnel again."}'
-      return 1
-    fi
-    emit "{\"ok\":false,\"error\":$(json_escape "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-240)")}"
-    return 1
+  local from_out
+  from_out="$(first_https "$out")"
+  local st
+  st="$(status_json)"
+  if [[ -n "$from_out" ]]; then
+    st="$(printf '%s' "$st" | php -r '
+      $j = json_decode(stream_get_contents(STDIN), true);
+      if (!is_array($j)) {
+        exit;
+      }
+      $j["funnel_enable_url"] = $argv[1];
+      echo json_encode($j) . "\n";
+    ' "$from_out")"
   fi
-  status_json
+  local on
+  on="$(printf '%s' "$st" | php -r '$j=json_decode(stream_get_contents(STDIN), true); echo !empty($j["funnel_on"]) ? "1" : "0";')"
+  if [[ "$on" == "1" && $code -eq 0 ]]; then
+    emit "$st"
+    return 0
+  fi
+  local help
+  help=$'Funnel did not start. Login is not enough.\n\n1) Access controls https://login.tailscale.com/admin/acls — Funnel is not a toggle in the JSON ACL list. Switch to the visual editor if you only see JSON. Scroll to Funnel and click Add Funnel to policy. If you only have JSON, add:\n"nodeAttrs": [{ "target": ["autogroup:member"], "attr": ["funnel"] }]\nthen Save.\n\n2) DNS https://login.tailscale.com/admin/dns — turn on MagicDNS and HTTPS Certificates.\n\n3) Click Start Funnel again.'
+  if [[ -n "$out" ]]; then
+    help="$help"$'\n\n'"CLI: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-180)"
+  fi
+  php -r '
+    $j = json_decode($argv[1], true);
+    if (!is_array($j)) {
+      $j = [];
+    }
+    $j["ok"] = false;
+    $j["needs_funnel_acl"] = true;
+    $j["error"] = $argv[2];
+    echo json_encode($j) . "\n";
+  ' "$st" "$help"
+  return 1
 }
 
 funnel_off() {

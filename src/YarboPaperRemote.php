@@ -160,14 +160,7 @@ final class YarboPaperRemote
                 }
             }
         } else {
-            $view['tailscale'] = [
-                'installed' => false,
-                'logged_in' => false,
-                'auth_url' => '',
-                'dns_name' => '',
-                'funnel_on' => false,
-                'error' => '',
-            ];
+            $view['tailscale'] = self::emptyTailscaleStatus();
         }
 
         return $view;
@@ -289,13 +282,14 @@ final class YarboPaperRemote
             return ['ok' => false, 'error' => 'scripts/paper_remote.sh is missing.'];
         }
         $result = $this->runScript($step);
-        if ($step === 'funnel-on' || $step === 'ensure' || $step === 'status' || $step === 'up') {
-            $view = $this->publicView(true);
+        if ($step === 'funnel-on' || $step === 'ensure' || $step === 'status' || $step === 'up' || $step === 'install') {
+            $view = $this->publicView($step !== 'install');
             if (is_array($result)) {
-                $view['step'] = $result;
+                $view = $this->mergeScriptResult($view, $result);
             }
+            $ok = is_array($result) ? (!isset($result['ok']) || !empty($result['ok'])) : false;
 
-            return ['ok' => !isset($result['ok']) || !empty($result['ok'])] + $view;
+            return ['ok' => $ok] + $view;
         }
 
         return is_array($result) ? $result + $this->publicView(false) : ['ok' => false, 'error' => 'No response'] + $this->publicView(false);
@@ -321,38 +315,14 @@ final class YarboPaperRemote
     {
         $script = $this->scriptPath();
         if (!is_file($script)) {
-            return [
-                'installed' => false,
-                'logged_in' => false,
-                'auth_url' => '',
-                'dns_name' => '',
-                'funnel_on' => false,
-                'error' => 'paper_remote.sh missing',
-            ];
+            return self::emptyTailscaleStatus('paper_remote.sh missing');
         }
         $result = $this->runScript('status');
         if (!is_array($result)) {
-            return [
-                'installed' => false,
-                'logged_in' => false,
-                'auth_url' => '',
-                'dns_name' => '',
-                'funnel_on' => false,
-                'error' => 'Could not read Tailscale status',
-            ];
+            return self::emptyTailscaleStatus('Could not read Tailscale status');
         }
 
-        return [
-            'installed' => !empty($result['installed']),
-            'logged_in' => !empty($result['logged_in']),
-            'auth_url' => (string) ($result['auth_url'] ?? ''),
-            'dns_name' => (string) ($result['dns_name'] ?? ''),
-            'funnel_on' => !empty($result['funnel_on']),
-            'needs_funnel_acl' => !empty($result['needs_funnel_acl']),
-            'error' => (string) ($result['error'] ?? ''),
-            'login_hint' => (string) ($result['login_hint'] ?? ''),
-            'sudo_hint' => (string) ($result['sudo_hint'] ?? ''),
-        ];
+        return $this->tailscaleFromScript($result);
     }
 
     public function normalizeOrigin(string $origin): string
@@ -479,6 +449,87 @@ final class YarboPaperRemote
         if (!$enabled || $cfg['provider'] !== self::PROVIDER_TAILSCALE) {
             $this->runScript('funnel-off');
         }
+    }
+
+    /**
+     * Keep login / Funnel URLs from the step stdout when a later status probe is empty.
+     *
+     * @param array<string, mixed> $view
+     * @param array<string, mixed> $result
+     * @return array<string, mixed>
+     */
+    private function mergeScriptResult(array $view, array $result): array
+    {
+        $view['step'] = $result;
+        $ts = $this->tailscaleFromScript(array_merge(
+            is_array($view['tailscale'] ?? null) ? $view['tailscale'] : [],
+            $result
+        ));
+        foreach (['auth_url', 'funnel_enable_url', 'dns_name', 'backend', 'login_hint', 'sudo_hint'] as $key) {
+            $value = trim((string) ($result[$key] ?? ''));
+            if ($value !== '') {
+                $ts[$key] = $value;
+            }
+        }
+        foreach (['logged_in', 'funnel_on', 'needs_funnel_acl', 'installed'] as $key) {
+            if (!empty($result[$key])) {
+                $ts[$key] = true;
+            }
+        }
+        $stepError = trim((string) ($result['error'] ?? ''));
+        if ($stepError !== '') {
+            $ts['error'] = $stepError;
+            $view['error'] = $stepError;
+        }
+        $message = trim((string) ($result['message'] ?? ''));
+        if ($message !== '') {
+            $view['message'] = $message;
+        }
+        $view['tailscale'] = $ts;
+
+        return $view;
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     * @return array<string, mixed>
+     */
+    private function tailscaleFromScript(array $result): array
+    {
+        $status = self::emptyTailscaleStatus();
+        $status['installed'] = !empty($result['installed']);
+        $status['logged_in'] = !empty($result['logged_in']);
+        $status['auth_url'] = (string) ($result['auth_url'] ?? '');
+        $status['dns_name'] = (string) ($result['dns_name'] ?? '');
+        $status['funnel_on'] = !empty($result['funnel_on']);
+        $status['needs_funnel_acl'] = !empty($result['needs_funnel_acl']);
+        $status['funnel_enable_url'] = (string) ($result['funnel_enable_url'] ?? '');
+        $status['backend'] = (string) ($result['backend'] ?? '');
+        $status['error'] = (string) ($result['error'] ?? '');
+        $status['login_hint'] = (string) ($result['login_hint'] ?? '');
+        $status['sudo_hint'] = (string) ($result['sudo_hint'] ?? '');
+
+        return $status;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function emptyTailscaleStatus(string $error = ''): array
+    {
+        return [
+            'installed' => false,
+            'logged_in' => false,
+            'auth_url' => '',
+            'dns_name' => '',
+            'funnel_on' => false,
+            'needs_funnel_acl' => false,
+            'funnel_enable_url' => '',
+            'backend' => '',
+            'error' => $error,
+            'login_hint' => '',
+            'sudo_hint' => '',
+        ];
     }
 
     /**

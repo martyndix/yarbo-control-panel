@@ -184,5 +184,54 @@ if (!str_contains($html, 'id="papermono-remote-enabled"')) {
     fwrite(STDERR, "settings remote toggle missing\n");
     exit(1);
 }
+if (!str_contains($html, 'Funnel is not a toggle in the JSON ACL list')) {
+    fwrite(STDERR, "settings funnel help missing\n");
+    exit(1);
+}
+if (!str_contains($html, 'Add Funnel to policy')) {
+    fwrite(STDERR, "settings funnel policy button missing\n");
+    exit(1);
+}
+if (!str_contains($html, 'id="papermono-remote-funnel-url-wrap"')) {
+    fwrite(STDERR, "funnel approval link wrap missing\n");
+    exit(1);
+}
+
+$js = file_get_contents(__DIR__ . '/../public/assets/app.js');
+$sh = file_get_contents(__DIR__ . '/../scripts/paper_remote.sh');
+$change = file_get_contents(__DIR__ . '/../CHANGELOG.md');
+if ($js === false || $sh === false || $change === false) {
+    fwrite(STDERR, "missing panel sources\n");
+    exit(1);
+}
+if (str_contains($js, "|| 'Done.'")) {
+    fwrite(STDERR, "paper remote must not report Done with no next step\n");
+    exit(1);
+}
+if (!str_contains($js, 'openPaperRemoteUrl')) {
+    fwrite(STDERR, "login must try to open the Tailscale URL\n");
+    exit(1);
+}
+if (!str_contains($js, 'visual editor → Funnel')) {
+    fwrite(STDERR, "login/funnel result must name the visual Funnel section\n");
+    exit(1);
+}
+if (!str_contains($sh, 'Add Funnel to policy')) {
+    fwrite(STDERR, "paper_remote.sh must explain Add Funnel to policy\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.42]')) {
+    fwrite(STDERR, "changelog 4.0.42 missing\n");
+    exit(1);
+}
+
+$missingScript = new Yarbo\YarboPaperRemote($root . '/no-script');
+$emptyTs = $missingScript->tailscaleStatus();
+foreach (['auth_url', 'funnel_enable_url', 'needs_funnel_acl', 'backend'] as $key) {
+    if (!array_key_exists($key, $emptyTs)) {
+        fwrite(STDERR, "tailscale status missing {$key}\n");
+        exit(1);
+    }
+}
 
 echo "ok\n";
