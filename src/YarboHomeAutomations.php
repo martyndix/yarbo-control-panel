@@ -450,6 +450,9 @@ final class YarboHomeAutomations
 
             return ['ok' => true, 'fired' => [], 'turned_off' => [], 'errors' => []];
         }
+        if ($this->commandHandler === null) {
+            YarboMatterAgentClient::fromEnv()->ensureStarted();
+        }
         $store = $this->load();
         $enabled = array_values(array_filter(
             $store['automations'],

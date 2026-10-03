@@ -7,8 +7,10 @@ namespace Yarbo;
 final class YarboMatterAgentClient
 {
     public const MIN_VERSION = 16;
+    private const SPAWN_COOLDOWN_S = 3.0;
 
     private static bool $spawnAttempted = false;
+    private static float $lastSpawnAt = 0.0;
 
     public function __construct(
         private readonly string $host = '127.0.0.1',
@@ -33,7 +35,13 @@ final class YarboMatterAgentClient
             $this->ensureStarted();
         }
 
-        return $this->post($body, $timeoutSeconds);
+        $result = $this->post($body, $timeoutSeconds);
+        if ($spawn && $this->shouldRestartDeadAgent($result)) {
+            $this->forceRestart();
+            $result = $this->post($body, $timeoutSeconds);
+        }
+
+        return $result;
     }
 
     /**
@@ -58,7 +66,7 @@ final class YarboMatterAgentClient
         $url = sprintf('http://%s:%d/', $this->host, $this->port);
         $raw = @file_get_contents($url, false, $ctx);
         if (!is_string($raw) || $raw === '') {
-            return ['ok' => false, 'error' => 'Matter agent is not running. Restart the panel after enabling Home.'];
+            return ['ok' => false, 'error' => 'Matter agent is not running'];
         }
         $decoded = json_decode($raw, true);
 
@@ -99,20 +107,36 @@ final class YarboMatterAgentClient
         return $error !== '' && str_contains($error, 'unknown matter command');
     }
 
+    public static function isNotRunningError(array $result): bool
+    {
+        $error = strtolower((string) ($result['error'] ?? ''));
+
+        return $error !== '' && str_contains($error, 'matter agent is not running');
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     */
+    private function shouldRestartDeadAgent(array $result): bool
+    {
+        return self::isNotRunningError($result) && !$this->portOpen();
+    }
+
     public function forceRestart(): void
     {
         self::$spawnAttempted = false;
+        self::$lastSpawnAt = 0.0;
         $this->stopAgentProcesses();
         $this->ensureStarted();
     }
 
     public function ensureStarted(): void
     {
-        if (self::$spawnAttempted) {
-            return;
-        }
-        self::$spawnAttempted = true;
         if ($this->portOpen()) {
+            if (self::$spawnAttempted) {
+                return;
+            }
+            self::$spawnAttempted = true;
             $probe = $this->post(['op' => 'ping'], 1.5);
             if (self::agentSupportsColor($probe)) {
                 return;
@@ -120,7 +144,15 @@ final class YarboMatterAgentClient
             if (($probe['ok'] ?? false) !== true) {
                 return;
             }
+            $this->spawnAgent();
+
+            return;
         }
+        $now = microtime(true);
+        if (self::$spawnAttempted && self::$lastSpawnAt > 0 && ($now - self::$lastSpawnAt) < self::SPAWN_COOLDOWN_S) {
+            return;
+        }
+        self::$spawnAttempted = true;
         $this->spawnAgent();
     }
 
@@ -138,10 +170,14 @@ final class YarboMatterAgentClient
     private function spawnAgent(): void
     {
         $root = dirname(__DIR__);
-        $script = $root . '/scripts/matter_agent.py';
+        $override = getenv('YARBO_MATTER_AGENT_SCRIPT');
+        $script = is_string($override) && $override !== '' && is_file($override)
+            ? $override
+            : $root . '/scripts/matter_agent.py';
         if (!is_file($script)) {
             return;
         }
+        self::$lastSpawnAt = microtime(true);
         $this->stopAgentProcesses();
         $log = $root . '/data/matter-agent.log';
         if (!is_dir($root . '/data')) {
