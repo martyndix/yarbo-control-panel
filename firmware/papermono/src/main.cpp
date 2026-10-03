@@ -3463,6 +3463,9 @@ void setup()
 {
     Serial.setRxBufferSize(4096);
     Serial.begin(115200);
+#if defined(ARDUINO_USB_CDC_ON_BOOT)
+    Serial.setTxTimeoutMs(0);
+#endif
     announceUsbReady();
     for (int i = 0; i < 25; i++) {
         pollSerialConfig();
@@ -3471,6 +3474,11 @@ void setup()
     auto cfg = M5.config();
     cfg.clear_display = false;
     M5.begin(cfg);
+    announceUsbReady();
+    for (int i = 0; i < 50; i++) {
+        pollSerialConfig();
+        delay(20);
+    }
     M5.Display.setRotation(0);
     M5.Display.setAutoDisplay(false);
     M5.BtnPWR.setHoldThresh(1500);

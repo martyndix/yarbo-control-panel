@@ -2119,6 +2119,8 @@ final class YarboPaperDevice
             . "3. Plug the tablet in by USB-C. Hold power {$hold} for download mode (red LED blinks).\n"
             . "4. If more than one serial device: python3 flash.py --port /dev/cu.usbmodemXXXX\n"
             . "   List ports: python3 flash.py --list-ports\n"
+            . "5. If it flashed but loops No CFG_OK yet: leave USB in on the setup screen\n"
+            . "   (do not hold power) and run: python3 flash.py --wifi-only\n"
             . "\n"
             . "Windows\n"
             . "1. Install Python from python.org and tick Add python.exe to PATH.\n"
@@ -2126,6 +2128,7 @@ final class YarboPaperDevice
             . "   That also creates .venv and installs esptool. Or: py flash.py --port COM3\n"
             . "3. If no COM port appears, install Espressif USB JTAG/serial (ESP32-S3 native USB).\n"
             . "4. Plug USB-C, hold power {$hold} for download mode.\n"
+            . "5. If it flashed but loops No CFG_OK yet: py flash.py --wifi-only\n"
             . "\n"
             . "Keep USB in until the setup screen clears, then ship the tablet to the site 2.4 GHz Wi-Fi.\n"
             . "Later firmware updates go over Wi-Fi from the panel (Settings → paired device Update).\n";
