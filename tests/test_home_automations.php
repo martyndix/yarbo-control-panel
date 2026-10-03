@@ -617,6 +617,8 @@ assert_true(str_contains($js, 'data-home-room-temp'), 'heater room temperature')
 assert_true(str_contains($js, 'Any (or)'), 'multiple When Any chip');
 assert_true(str_contains($js, 'All (and)'), 'multiple When All chip');
 assert_true(str_contains($js, 'homeAutoApplyWhen'), 'When chips append');
+assert_true(str_contains($js, 'homeAutoCompanionPir'), 'floodlight PIR When target');
+assert_true(str_contains($js, 'autoDropZone'), 'When zone targeting');
 assert_true(str_contains($js, 'Last ran stays empty'), 'stale runner copy');
 assert_true(str_contains($js, 'Runner is active'), 'active runner copy');
 assert_true(str_contains($js, 'Not run yet.'), 'not-run-yet copy');
@@ -624,6 +626,6 @@ assert_true(str_contains($index, 'data-panel-version'), 'panel version on the pa
 $matterPhp = (string) file_get_contents(__DIR__ . '/../src/YarboMatterAgentClient.php');
 assert_true(str_contains($matterPhp, 'function portOpen'), 'Matter client checks the listening port');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
-assert_true(str_contains($change, '## [4.0.37]'), 'changelog 4.0.37');
+assert_true(str_contains($change, '## [4.0.38]'), 'changelog 4.0.38');
 
 echo "test_home_automations.php ok\n";

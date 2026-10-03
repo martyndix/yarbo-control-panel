@@ -2858,6 +2858,8 @@ let autoPageOpen = false;
 let autoDraft = null;
 let autoNameLocked = false;
 let autoDrag = null;
+let autoDropped = false;
+let autoDropZone = '';
 let homeAutoGeoBusy = false;
 
 function homeResetSceneDraft() {
@@ -4989,8 +4991,26 @@ function homeAutoSentence(rule, names) {
 
 function homeAutoTriggers(rule = autoDraft) {
     if (!rule) return [];
-    if (Array.isArray(rule.triggers) && rule.triggers.length) return rule.triggers.filter(Boolean);
+    const raw = rule.triggers;
+    const list = Array.isArray(raw)
+        ? raw
+        : (raw && typeof raw === 'object' ? Object.values(raw) : []);
+    const filtered = list.filter(Boolean);
+    if (filtered.length) return filtered;
     return rule.trigger ? [rule.trigger] : [];
+}
+
+function homeAutoCompanionPir(d) {
+    if (!d?.id) return null;
+    return homeAutoAllDevices().find((row) => row
+        && String(row.companion_of || '') === String(d.id)
+        && homeAutoCanMotion(row)) || null;
+}
+
+function homeAutoWhenTarget(d) {
+    if (!d) return d;
+    if (homeAutoCanMotion(d)) return d;
+    return homeAutoCompanionPir(d) || d;
 }
 
 function homeAutoWhenMatch(rule = autoDraft) {
@@ -5351,6 +5371,8 @@ function renderHomeAutoEditor() {
         || '<p class="hint">Drop a light or scene here.</p>';
     document.getElementById('auto-if-chips').innerHTML = (autoDraft.conditions || []).map((cond, i) => homeAutoIfChipHtml(cond, i)).join('');
     if ((autoDraft.conditions || []).length) document.getElementById('auto-if')?.setAttribute('open', '');
+    document.getElementById('auto-when')?.classList.toggle('is-target', autoDropZone === 'when');
+    document.getElementById('auto-then')?.classList.toggle('is-target', autoDropZone === 'then');
     homeAutoSyncOffAfterFields();
     renderHomeAutoTray();
 }
@@ -5716,7 +5738,7 @@ function homeAutoApplyTray(kind, id, zone) {
     const d = homeAutoDeviceById(id);
     if (!d) return;
     if (zone === 'when' || (zone !== 'then' && !homeAutoTriggers().length && (d.kind === 'sensor' || d.kind === 'door' || d.kind === 'hub'))) {
-        homeAutoApplyWhen(homeAutoDefaultWhen(d));
+        homeAutoApplyWhen(homeAutoDefaultWhen(homeAutoWhenTarget(d)));
         homeAutoSyncName();
         renderHomeAutoEditor();
         return;
@@ -5725,7 +5747,7 @@ function homeAutoApplyTray(kind, id, zone) {
     if (!action) {
         if (zone === 'then') showToast('Sensors stay in When', 'error');
         else {
-            homeAutoApplyWhen(homeAutoDefaultWhen(d));
+            homeAutoApplyWhen(homeAutoDefaultWhen(homeAutoWhenTarget(d)));
             homeAutoSyncName();
             renderHomeAutoEditor();
         }
@@ -5750,12 +5772,15 @@ function homeAutoClickTray(kind, id) {
         homeAutoApplyTray(kind, id, 'then');
         return;
     }
-    if (!homeAutoTriggers().length) homeAutoApplyTray(kind, id, 'when');
-    else homeAutoApplyTray(kind, id, 'then');
+    const zone = autoDropZone === 'when' || autoDropZone === 'then'
+        ? autoDropZone
+        : (homeAutoTriggers().length ? 'then' : 'when');
+    homeAutoApplyTray(kind, id, zone);
 }
 
 function homeAutoStartEditor(partial) {
     autoDraft = { ...homeAutoBlankDraft(), ...partial };
+    autoDropZone = '';
     if (!Array.isArray(autoDraft.actions)) autoDraft.actions = [];
     if (!Array.isArray(autoDraft.conditions)) autoDraft.conditions = [];
     homeAutoSetTriggers(homeAutoTriggers(autoDraft));
@@ -5997,6 +6022,12 @@ function bindHomeAutomations() {
             renderHomeAutoEditor();
             return;
         }
+        const zonePick = event.target.closest('[data-auto-zone]');
+        if (zonePick && autoDraft && !event.target.closest('[data-auto-tray], button, select, input, [data-auto-when], [data-auto-then], [data-auto-if-i]')) {
+            autoDropZone = zonePick.getAttribute('data-auto-zone') === 'then' ? 'then' : 'when';
+            renderHomeAutoEditor();
+            return;
+        }
         const thenX = event.target.closest('[data-auto-then-x]');
         if (thenX && autoDraft) {
             autoDraft.actions.splice(Number(thenX.getAttribute('data-auto-then-x')), 1);
@@ -6144,6 +6175,7 @@ function bindHomeAutomations() {
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');
         const thenChip = event.target.closest('[data-auto-then]');
+        autoDropped = false;
         if (tray) {
             autoDrag = { kind: tray.getAttribute('data-auto-tray'), id: tray.getAttribute('data-id') || '' };
             event.dataTransfer?.setData('text/plain', 'auto');
@@ -6155,8 +6187,14 @@ function bindHomeAutomations() {
         }
     });
     page.addEventListener('dragend', () => {
+        const drag = autoDrag;
+        const dropped = autoDropped;
         autoDrag = null;
+        autoDropped = false;
         page.querySelectorAll('.auto-drop.is-over').forEach((el) => el.classList.remove('is-over'));
+        if (!dropped && drag && drag.kind !== 'reorder' && autoDraft) {
+            homeAutoClickTray(drag.kind, drag.id);
+        }
     });
     page.addEventListener('dragover', (event) => {
         const zone = event.target.closest('[data-auto-zone]');
@@ -6183,9 +6221,12 @@ function bindHomeAutomations() {
                 autoDraft.actions.splice(Math.max(0, to), 0, item);
                 renderHomeAutoEditor();
             }
+            autoDropped = true;
             autoDrag = null;
             return;
         }
+        autoDropped = true;
+        if (which === 'when' || which === 'then') autoDropZone = which;
         homeAutoApplyTray(autoDrag.kind, autoDrag.id, which);
         autoDrag = null;
     });

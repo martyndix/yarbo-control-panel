@@ -4007,7 +4007,8 @@ body.home-is-reordering {
     min-height: 5.5rem;
 }
 
-.auto-drop.is-over {
+.auto-drop.is-over,
+.auto-drop.is-target {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }

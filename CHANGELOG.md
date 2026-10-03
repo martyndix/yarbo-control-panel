@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.38] - 2026-10-03
+
+### Fixed
+- Home Automations **When** now keeps extra conditions: tap **When**, then tap another Time or sensor. Floodlights dropped or tapped onto When use their **motion** sensor.
+- UniFi floodlight **motion** sensors are created from the light list even when Protect has not been re-tested, so `{Floodlight} motion` shows on Home and under Automations → Sensors.
+
 ## [4.0.37] - 2026-10-03
 
 ### Added
