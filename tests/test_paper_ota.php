@@ -133,8 +133,8 @@ if (!str_contains($change, '## [4.0.48]')) {
     fwrite(STDERR, "changelog 4.0.48 missing\n");
     exit(1);
 }
-if (!str_contains($change, '## [4.0.49]')) {
-    fwrite(STDERR, "changelog 4.0.49 missing\n");
+if (!str_contains($change, '## [4.0.50]')) {
+    fwrite(STDERR, "changelog 4.0.50 missing\n");
     exit(1);
 }
 $flash = file_get_contents(__DIR__ . '/../scripts/papermono_flash.py');

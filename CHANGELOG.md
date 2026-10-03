@@ -6,7 +6,7 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
-## [4.0.49] - 2026-10-03
+## [4.0.50] - 2026-10-03
 
 ### Fixed
 - PaperMono / Paper Colour USB setup no longer loops **No CFG_OK yet** after esptool’s RTS reset. The helper waits for **PAPER_READY** (the tablet listening after e-paper init), reopens USB CDC when the port re-enumerates under the same `/dev/ttyACM*` name, and keeps reading past boot noise instead of giving up on the first pause. The laptop kit can skip a second flash with `python3 flash.py --wifi-only` (setup screen, USB in, do not hold power).
