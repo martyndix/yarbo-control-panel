@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.57] - 2026-10-04
+
+### Fixed
+- PaperMono HOUSE now shows assigned UniFi Access **doors** (Garage, Gates, Utility), not only Matter lights and scenes. Firmware **0.1.58** draws a door glyph on those tiles. Invert follows the door position sensor (filled when **Open**, empty when **Closed**), not lock state. Tap still sends Unlock.
+
 ## [4.0.56] - 2026-10-03
 
 ### Fixed

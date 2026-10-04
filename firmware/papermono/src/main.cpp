@@ -644,6 +644,21 @@ void drawFittedLabel(int cx, int cy, int maxW, const String &text, uint16_t fg, 
     M5.Display.drawString(clipLabelToWidth(text, maxW), cx, cy);
 }
 
+void drawDoorGlyph(int x, int y, int h, uint16_t fg)
+{
+    int w = (h * 5) / 8;
+    if (w < 12) {
+        w = 12;
+    }
+    M5.Display.drawRect(x, y, w, h, fg);
+    M5.Display.drawRect(x + 1, y + 1, w - 2, h - 2, fg);
+    int knob = h / 10;
+    if (knob < 2) {
+        knob = 2;
+    }
+    M5.Display.fillCircle(x + w - 3 - knob, y + h / 2, knob, fg);
+}
+
 void drawButton(int x, int y, int w, int h, const String &label, bool invert)
 {
     uint16_t bg = invert ? TFT_BLACK : TFT_WHITE;
@@ -1194,10 +1209,25 @@ void drawHousePage(bool forceFull)
         int x, y, w, h;
         houseButtonRect(i, x, y, w, h);
         String label = homeNames[i];
+        bool door = homeKinds[i] == "door" || homeKinds[i] == "hub";
         if (homeKinds[i] == "scene") {
             label = "*" + label;
         }
-        drawButton(x, y, w, h, label, homeOnState[i]);
+        uint16_t bg = homeOnState[i] ? TFT_BLACK : TFT_WHITE;
+        uint16_t fg = homeOnState[i] ? TFT_WHITE : TFT_BLACK;
+        M5.Display.fillRoundRect(x, y, w, h, 12, bg);
+        M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
+        int padL = door ? 40 : 12;
+        drawFittedLabel(x + padL + (w - padL) / 2, y + h / 2, w - padL - 12, label, fg, bg);
+        if (door) {
+            int glyphH = h > 48 ? 28 : h - 20;
+            if (glyphH < 16) {
+                glyphH = 16;
+            }
+            drawDoorGlyph(x + 10, y + (h - glyphH) / 2, glyphH, fg);
+        }
+        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+        M5.Display.setTextDatum(TL_DATUM);
     }
     drawPager();
     finishEpdFrame();

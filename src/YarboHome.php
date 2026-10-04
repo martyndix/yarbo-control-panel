@@ -2286,6 +2286,7 @@ final class YarboHome
         }
         $store = $this->load();
         $live = $this->devicesWithLiveState();
+        $live['devices'] = $this->mergeUnifiDevices($live['devices'], true);
         $byId = [];
         foreach ($live['devices'] as $device) {
             if (!is_array($device)) {
@@ -2295,13 +2296,7 @@ final class YarboHome
             if ($id === '' || in_array($id, $store['hidden'], true)) {
                 continue;
             }
-            $byId[$id] = [
-                'id' => $id,
-                'name' => $store['names'][$id] ?? (string) ($device['name'] ?? $id),
-                'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
-                'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
-                'brightness' => isset($device['brightness']) ? (int) $device['brightness'] : null,
-            ];
+            $byId[$id] = $this->paperItemFromDevice($device, $store);
         }
         foreach ($store['scenes'] as $scene) {
             if (!is_array($scene)) {
@@ -2337,6 +2332,31 @@ final class YarboHome
     }
 
     /**
+     * @param array<string, mixed> $device
+     * @param array<string, mixed> $store
+     * @return array{id: string, name: string, kind: string, on: bool}
+     */
+    private function paperItemFromDevice(array $device, array $store): array
+    {
+        $id = (string) ($device['id'] ?? '');
+        $kind = strtolower(trim((string) ($device['kind'] ?? self::KIND_LIGHT)));
+        if ($kind === '') {
+            $kind = self::KIND_LIGHT;
+        }
+        $on = YarboMatterFabric::attrBool($device['on'] ?? false);
+        if ($kind === 'door' || $kind === 'hub') {
+            $on = ($device['open'] ?? null) === true;
+        }
+
+        return [
+            'id' => $id,
+            'name' => $store['names'][$id] ?? (string) ($device['name'] ?? $id),
+            'kind' => $kind,
+            'on' => $on,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function paperCommand(string $id): array
@@ -2344,6 +2364,11 @@ final class YarboHome
         $id = trim($id);
         if (str_starts_with($id, 'scene:')) {
             return $this->toggleScene(substr($id, 6));
+        }
+        $parsed = YarboUnifi::parseHomeId($id);
+        if ($parsed !== null
+            && ($parsed['kind'] === YarboUnifi::KIND_DOOR || $parsed['kind'] === YarboUnifi::KIND_HUB)) {
+            return $this->command(['id' => $id, 'command' => 'unlock']);
         }
 
         return $this->command(['id' => $id, 'command' => 'toggle']);
