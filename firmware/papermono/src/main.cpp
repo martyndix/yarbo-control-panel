@@ -28,6 +28,8 @@
 Preferences prefs;
 String wifiSsid;
 String wifiPass;
+String guestSsid;
+String guestPass;
 String panelUrl;
 String remoteUrl;
 String token;
@@ -134,6 +136,17 @@ bool ntpStarted = false;
 uint32_t lastNtpTry = 0;
 bool offConfirm = false;
 bool kbNumbers = false;
+bool kbShift = false;
+int wifiUi = PAPERMONO_WIFI_IDLE;
+int wifiTryStage = 0;
+uint32_t wifiTryAt = 0;
+uint32_t lastHomeLook = 0;
+String wifiScanSsid[PAPERMONO_WIFI_SCAN_MAX];
+bool wifiScanOpen[PAPERMONO_WIFI_SCAN_MAX];
+int wifiScanCount = 0;
+bool wifiScanBusy = false;
+String wifiPickSsid;
+String wifiDraft;
 String radioDraft = "";
 int radioToIndex = 0;
 int radioUi = PAPERMONO_RADIO_INBOX;
@@ -211,6 +224,12 @@ void paintRadioDraft(int x, int y);
 void updateRadioDraft();
 void applyDeviceOffTap(int x);
 void applyRadioHit(int hit);
+void wifiStartHome();
+void wifiStartGuest();
+void wifiService();
+void startWifiScan();
+void saveGuestWifi();
+void clearGuestWifi();
 bool httpGetPlans(bool refresh);
 
 void saveConfig()
@@ -218,6 +237,8 @@ void saveConfig()
     prefs.begin("yarbo", false);
     prefs.putString("ssid", wifiSsid);
     prefs.putString("pass", wifiPass);
+    prefs.putString("gssid", guestSsid);
+    prefs.putString("gpass", guestPass);
     prefs.putString("url", panelUrl);
     prefs.putString("remurl", remoteUrl);
     prefs.putString("token", token);
@@ -237,6 +258,8 @@ void loadConfig()
     prefs.begin("yarbo", true);
     wifiSsid = prefs.getString("ssid", "");
     wifiPass = prefs.getString("pass", "");
+    guestSsid = prefs.getString("gssid", "");
+    guestPass = prefs.getString("gpass", "");
     panelUrl = prefs.getString("url", "");
     remoteUrl = prefs.getString("remurl", "");
     token = prefs.getString("token", "");
@@ -325,8 +348,7 @@ void pollSerialConfig()
             if (line.startsWith("CFG:")) {
                 applyConfigJson(line.substring(4));
                 if (wifiSsid.length()) {
-                    WiFi.disconnect(true, false);
-                    WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+                    wifiStartHome();
                 }
                 applyFrontlight(lightOn);
             }
@@ -334,6 +356,158 @@ void pollSerialConfig()
         } else if (c != '\r' && line.length() < 1600) {
             line += c;
         }
+    }
+}
+
+void wifiBegin(const String &ssid, const String &pass)
+{
+    if (!ssid.length()) {
+        return;
+    }
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true, false);
+    delay(40);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+}
+
+void wifiStartGuest()
+{
+    if (!guestSsid.length()) {
+        wifiTryStage = 0;
+        return;
+    }
+    wifiTryStage = 2;
+    wifiTryAt = millis();
+    lastError = "joining " + guestSsid;
+    wifiBegin(guestSsid, guestPass);
+}
+
+void wifiStartHome()
+{
+    if (!wifiSsid.length()) {
+        wifiStartGuest();
+        return;
+    }
+    wifiTryStage = 1;
+    wifiTryAt = millis();
+    lastError = "joining " + wifiSsid;
+    wifiBegin(wifiSsid, wifiPass);
+}
+
+bool wifiHomeSsidVisible()
+{
+    if (!wifiSsid.length() || otaBusy || wifiUi != PAPERMONO_WIFI_IDLE) {
+        return false;
+    }
+    int n = WiFi.scanNetworks(false, false);
+    bool found = false;
+    for (int i = 0; i < n; i++) {
+        if (WiFi.SSID(i) == wifiSsid) {
+            found = true;
+            break;
+        }
+    }
+    WiFi.scanDelete();
+    return found;
+}
+
+void wifiService()
+{
+    if (otaBusy || wifiUi != PAPERMONO_WIFI_IDLE) {
+        return;
+    }
+    uint32_t now = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiTryStage = 0;
+        if (lastError.startsWith("joining ")) {
+            lastError = "";
+        }
+        if (wifiSsid.length() && guestSsid.length() && WiFi.SSID() == guestSsid
+            && now - lastHomeLook > PAPERMONO_WIFI_HOME_LOOK_MS) {
+            lastHomeLook = now;
+            if (wifiHomeSsidVisible()) {
+                wifiStartHome();
+            }
+        }
+        return;
+    }
+    if (!wifiSsid.length() && !guestSsid.length()) {
+        return;
+    }
+    if (wifiTryStage == 0) {
+        wifiStartHome();
+        return;
+    }
+    if (now - wifiTryAt < PAPERMONO_WIFI_TRY_MS) {
+        return;
+    }
+    if (wifiTryStage == 1 && guestSsid.length()) {
+        wifiStartGuest();
+        return;
+    }
+    wifiStartHome();
+}
+
+void startWifiScan()
+{
+    wifiUi = PAPERMONO_WIFI_SCAN;
+    wifiScanCount = 0;
+    wifiScanBusy = true;
+    offConfirm = false;
+    drawScreen(true);
+    int n = WiFi.scanNetworks(false, false);
+    wifiScanCount = 0;
+    for (int i = 0; i < n && wifiScanCount < PAPERMONO_WIFI_SCAN_MAX; i++) {
+        String ssid = WiFi.SSID(i);
+        if (!ssid.length()) {
+            continue;
+        }
+        if (wifiSsid.length() && ssid == wifiSsid) {
+            continue;
+        }
+        bool dup = false;
+        for (int j = 0; j < wifiScanCount; j++) {
+            if (wifiScanSsid[j] == ssid) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            continue;
+        }
+        wifiScanSsid[wifiScanCount] = ssid;
+        wifiScanOpen[wifiScanCount] = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
+        wifiScanCount++;
+    }
+    WiFi.scanDelete();
+    wifiScanBusy = false;
+    drawScreen(true);
+}
+
+void saveGuestWifi()
+{
+    guestSsid = wifiPickSsid;
+    guestPass = wifiDraft;
+    saveConfig();
+    wifiUi = PAPERMONO_WIFI_IDLE;
+    wifiDraft = "";
+    wifiPickSsid = "";
+    kbNumbers = false;
+    kbShift = false;
+    if (WiFi.status() != WL_CONNECTED) {
+        wifiStartGuest();
+    }
+}
+
+void clearGuestWifi()
+{
+    bool onGuest = guestSsid.length() && WiFi.SSID() == guestSsid;
+    guestSsid = "";
+    guestPass = "";
+    saveConfig();
+    wifiUi = PAPERMONO_WIFI_IDLE;
+    if (onGuest) {
+        wifiStartHome();
     }
 }
 
@@ -388,6 +562,9 @@ String screenKey()
         + lockScreen + "|" + clockLocal + "|" + String(unreadCount) + "|" + vestaboardHash + "|"
         + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
         + radioDraft + "|" + String(radioToIndex) + "|" + String(kbNumbers ? 1 : 0) + "|"
+        + String(kbShift ? 1 : 0) + "|" + String(wifiUi) + "|" + guestSsid + "|" + wifiPickSsid + "|"
+        + wifiDraft + "|" + String(wifiScanCount) + "|" + String(wifiScanBusy ? 1 : 0) + "|"
+        + WiFi.SSID() + "|"
         + String(inboxCount) + "|" + String(radioUi) + "|" + String(radioViewIndex) + "|"
         + String(homeOn ? 1 : 0) + "|" + String(homeCount)
         + "|" + String(menuOpen ? 1 : 0) + "|" + String(lastYarboPage)
@@ -1017,6 +1194,7 @@ void openMenu()
 {
     menuOpen = true;
     offConfirm = false;
+    wifiUi = PAPERMONO_WIFI_IDLE;
     noteActivity();
     drawScreen(true);
 }
@@ -1943,6 +2121,7 @@ void enterLock()
     screenLocked = true;
     menuOpen = false;
     offConfirm = false;
+    wifiUi = PAPERMONO_WIFI_IDLE;
     lastLight = millis();
     applyFrontlight(true);
     drawLockScreen(true);
@@ -1987,12 +2166,17 @@ const char *kbRow(int row)
         if (row == 1) return "-/:;()$&@\"";
         return ".,?!'#+=";
     }
+    if (wifiUi == PAPERMONO_WIFI_PASS && !kbShift) {
+        if (row == 0) return "qwertyuiop";
+        if (row == 1) return "asdfghjkl";
+        return "zxcvbnm";
+    }
     if (row == 0) return "QWERTYUIOP";
     if (row == 1) return "ASDFGHJKL";
     return "ZXCVBNM";
 }
 
-void drawKeyboard(int y0)
+void drawKeyboard(int y0, bool wifiKeys)
 {
     int W = M5.Display.width();
     M5.Display.setFont(&fonts::Font2);
@@ -2016,10 +2200,18 @@ void drawKeyboard(int y0)
     M5.Display.setFont(&fonts::Font0);
     int y = y0 + 3 * PAPERMONO_KB_ROW;
     int ah = PAPERMONO_KB_ACTION;
-    drawButton(8, y, 100, ah, kbNumbers ? "ABC" : "123", false);
-    drawButton(116, y, 160, ah, "SPACE", false);
-    drawButton(284, y, 90, ah, "DEL", false);
-    drawButton(382, y, 90, ah, "SEND", true);
+    if (wifiKeys) {
+        drawButton(8, y, 72, ah, kbShift ? "AB" : "ab", kbShift);
+        drawButton(86, y, 72, ah, kbNumbers ? "ABC" : "123", false);
+        drawButton(164, y, 108, ah, "SPACE", false);
+        drawButton(278, y, 80, ah, "DEL", false);
+        drawButton(364, y, 108, ah, "SAVE", true);
+    } else {
+        drawButton(8, y, 100, ah, kbNumbers ? "ABC" : "123", false);
+        drawButton(116, y, 160, ah, "SPACE", false);
+        drawButton(284, y, 90, ah, "DEL", false);
+        drawButton(382, y, 90, ah, "SEND", true);
+    }
 }
 
 void drawRadioCompose(bool forceFull)
@@ -2048,7 +2240,7 @@ void drawRadioCompose(bool forceFull)
         bool on = radioToIndex == i;
         drawButton(12 + i * pw, PAPERMONO_PEER_Y, pw - 8, 56, lab, on);
     }
-    drawKeyboard(PAPERMONO_KB_Y0);
+    drawKeyboard(PAPERMONO_KB_Y0, false);
     drawPager();
     finishEpdFrame();
 }
@@ -2206,8 +2398,80 @@ void drawRadioPage(bool forceFull)
     drawRadioInbox(forceFull);
 }
 
+void drawWifiScanPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("Travel Wi-Fi (2.4 GHz)", 16, 100);
+    drawButton(16, 136, 216, 48, "SCAN", true);
+    drawButton(248, 136, 216, 48, "CANCEL", false);
+    if (wifiScanBusy) {
+        M5.Display.setTextSize(3);
+        M5.Display.drawString("Scanning...", 16, 220);
+    } else if (wifiScanCount == 0) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("No other networks found.", 16, 220);
+        M5.Display.drawString("Tap SCAN to try again.", 16, 256);
+    } else {
+        for (int i = 0; i < wifiScanCount; i++) {
+            int y = 200 + i * 84;
+            String lab = wifiScanSsid[i];
+            if (wifiScanOpen[i]) {
+                lab += "  open";
+            }
+            drawButton(16, y, 448, 72, lab, false);
+        }
+    }
+    drawPager();
+    finishEpdFrame();
+}
+
+void drawWifiPassPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.setTextSize(2);
+    String title = wifiPickSsid.length() ? wifiPickSsid : String("Password");
+    M5.Display.drawString(clipLabelToWidth(title, 300), 16, 100);
+    drawButton(320, 92, 144, 44, "CANCEL", false);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString("Password", 16, 148);
+    String shown;
+    int n = wifiDraft.length();
+    if (n == 0) {
+        shown = "(empty = open)";
+    } else {
+        for (int i = 0; i < n - 1; i++) {
+            shown += '*';
+        }
+        shown += wifiDraft[n - 1];
+    }
+    M5.Display.setTextSize(3);
+    M5.Display.setFont(&fonts::Font2);
+    M5.Display.drawString(clipLabelToWidth(shown, M5.Display.width() - 32), 16, 184);
+    M5.Display.setFont(&fonts::Font0);
+    drawKeyboard(PAPERMONO_KB_Y0, true);
+    drawPager();
+    finishEpdFrame();
+}
+
 void drawDevicePage(bool forceFull)
 {
+    if (wifiUi == PAPERMONO_WIFI_SCAN) {
+        drawWifiScanPage(forceFull);
+        return;
+    }
+    if (wifiUi == PAPERMONO_WIFI_PASS) {
+        drawWifiPassPage(forceFull);
+        return;
+    }
     beginEpdFrame(forceFull);
     M5.Display.fillScreen(TFT_WHITE);
     drawHeader();
@@ -2220,6 +2484,15 @@ void drawDevicePage(bool forceFull)
     M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), 16, 200);
     M5.Display.setTextSize(2);
     M5.Display.drawString(clockDate, 16, 268);
+    String nowSsid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("Not connected");
+    M5.Display.drawString("Wi-Fi  " + clipLabelToWidth(nowSsid, 360), 16, 312);
+    if (guestSsid.length()) {
+        M5.Display.drawString("Travel  " + clipLabelToWidth(guestSsid, 240), 16, 348);
+        drawButton(320, 336, 144, 44, "CLEAR", false);
+    } else {
+        M5.Display.drawString("No travel Wi-Fi saved.", 16, 348);
+    }
+    drawButton(16, 396, 448, 72, "REMOTE WIFI", true);
     int H = M5.Display.height();
     int offY = H - 200;
     int offH = 120;
@@ -2840,7 +3113,7 @@ bool sendRadioMessage()
     return ok;
 }
 
-int keyboardHit(int x, int y)
+int keyboardHit(int x, int y, bool wifiKeys)
 {
     int y0 = PAPERMONO_KB_Y0;
     int rowH = PAPERMONO_KB_ROW;
@@ -2849,6 +3122,13 @@ int keyboardHit(int x, int y)
         return -1;
     }
     if (y >= y0 + 3 * rowH) {
+        if (wifiKeys) {
+            if (x < 84) return 104;
+            if (x < 160) return 100;
+            if (x < 274) return 101;
+            if (x < 360) return 102;
+            return 103;
+        }
         if (x < 114) return 100;
         if (x < 280) return 101;
         if (x < 378) return 102;
@@ -2966,7 +3246,7 @@ void handleRadioTouch(int x, int y)
         }
         return;
     }
-    int hit = keyboardHit(x, y);
+    int hit = keyboardHit(x, y, false);
     if (hit >= 0) {
         applyRadioHit(hit);
     }
@@ -2987,8 +3267,119 @@ void applyDeviceOffTap(int x)
     }
 }
 
+void applyWifiHit(int hit)
+{
+    if (hit == 104) {
+        kbShift = !kbShift;
+        if (kbShift) {
+            kbNumbers = false;
+        }
+        drawScreen(false);
+        return;
+    }
+    if (hit == 100) {
+        kbNumbers = !kbNumbers;
+        if (kbNumbers) {
+            kbShift = false;
+        }
+        drawScreen(false);
+        return;
+    }
+    if (hit == 101) {
+        if (wifiDraft.length() < PAPERMONO_WIFI_PASS_MAX) {
+            wifiDraft += ' ';
+        }
+        drawScreen(false);
+        return;
+    }
+    if (hit == 102) {
+        if (wifiDraft.length()) {
+            wifiDraft.remove(wifiDraft.length() - 1);
+        }
+        drawScreen(false);
+        return;
+    }
+    if (hit == 103) {
+        if (!wifiPickSsid.length()) {
+            return;
+        }
+        saveGuestWifi();
+        drawScreen(true);
+        return;
+    }
+    int row = hit / 32;
+    int col = hit % 32;
+    const char *keys = kbRow(row);
+    if (col < (int) strlen(keys) && wifiDraft.length() < PAPERMONO_WIFI_PASS_MAX) {
+        wifiDraft += keys[col];
+        if (kbShift) {
+            kbShift = false;
+        }
+        drawScreen(false);
+    }
+}
+
+void handleWifiScanTouch(int x, int y)
+{
+    if (y >= 128 && y <= 192) {
+        if (x < 240) {
+            startWifiScan();
+        } else {
+            wifiUi = PAPERMONO_WIFI_IDLE;
+            drawScreen(true);
+        }
+        return;
+    }
+    if (wifiScanBusy || wifiScanCount == 0) {
+        return;
+    }
+    for (int i = 0; i < wifiScanCount; i++) {
+        int by = 200 + i * 84;
+        if (y >= by && y <= by + 72) {
+            wifiPickSsid = wifiScanSsid[i];
+            wifiDraft = "";
+            kbNumbers = false;
+            kbShift = false;
+            if (wifiScanOpen[i]) {
+                saveGuestWifi();
+                drawScreen(true);
+                return;
+            }
+            wifiUi = PAPERMONO_WIFI_PASS;
+            drawScreen(true);
+            return;
+        }
+    }
+}
+
 void handleDeviceTouch(int x, int y)
 {
+    if (wifiUi == PAPERMONO_WIFI_SCAN) {
+        handleWifiScanTouch(x, y);
+        return;
+    }
+    if (wifiUi == PAPERMONO_WIFI_PASS) {
+        if (y >= 88 && y <= 140 && x >= 300) {
+            wifiUi = PAPERMONO_WIFI_SCAN;
+            wifiDraft = "";
+            drawScreen(true);
+            return;
+        }
+        int hit = keyboardHit(x, y, true);
+        if (hit >= 0) {
+            applyWifiHit(hit);
+        }
+        return;
+    }
+    if (guestSsid.length() && y >= 330 && y <= 388 && x >= 310) {
+        clearGuestWifi();
+        drawScreen(true);
+        return;
+    }
+    if (y >= 390 && y <= 476) {
+        startWifiScan();
+        return;
+    }
     int H = M5.Display.height();
     int offY = H - 200;
     if (y >= offY - 10 && y <= H - 40) {
@@ -3309,6 +3700,9 @@ void showPage(int page, bool loadPlansIfNeeded)
         lastYarboPage = currentPage;
     }
     offConfirm = false;
+    if (currentPage != PAPERMONO_PAGE_DEVICE) {
+        wifiUi = PAPERMONO_WIFI_IDLE;
+    }
     noteActivity();
     if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
         httpGetPlans(false);
@@ -3525,8 +3919,7 @@ void setup()
         currentPage = firstEnabledPage();
     }
     if (wifiSsid.length()) {
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+        wifiStartHome();
         drawScreen(false);
     } else {
         drawSetup();
@@ -3539,8 +3932,7 @@ void loop()
     pollSerialConfig();
     if (cfgLeaveSetup && wifiSsid.length()) {
         cfgLeaveSetup = false;
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+        wifiStartHome();
         drawScreen(true);
     }
     if (wifiSsid.isEmpty()) {
@@ -3556,6 +3948,7 @@ void loop()
     loraService();
     rgbTick();
     refreshTabletPower(false);
+    wifiService();
     if (WiFi.status() == WL_CONNECTED) {
         ensureNtp();
     }
@@ -3623,7 +4016,7 @@ void loop()
     }
 
     now = millis();
-    if (!otaBusy && !screenLocked && WiFi.status() == WL_CONNECTED
+    if (!otaBusy && !screenLocked && wifiUi == PAPERMONO_WIFI_IDLE && WiFi.status() == WL_CONNECTED
         && now - lastActivity > (uint32_t) lockAfterS * 1000) {
         enterLock();
     }

@@ -159,7 +159,7 @@ foreach ([
     'paperNetGet',
     'PAPER_ISRG_ROOT_X1',
     'drawString("R"',
-    '#define PAPERMONO_FW_VERSION "0.1.58"',
+    '#define PAPERMONO_FW_VERSION "0.1.59"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {

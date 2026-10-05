@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.58] - 2026-10-05
+
+### Added
+- PaperMono **DEVICE** can save a second **travel Wi-Fi** (scan nearby 2.4 GHz, type the password). That does not change the home SSID from USB flash. The tablet still joins home first; the travel network is used only when home is missing. Firmware **0.1.59**. Settings → E-paper **Remote access** (Funnel) is still required to reach the panel off the LAN.
+
 ## [4.0.57] - 2026-10-04
 
 ### Fixed
