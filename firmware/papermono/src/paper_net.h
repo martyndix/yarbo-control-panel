@@ -1,5 +1,6 @@
 #pragma once
 
+#include <WiFi.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -43,6 +44,7 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 extern String panelUrl;
 extern String remoteUrl;
 extern String token;
+extern String wifiSsid;
 extern bool usingRemote;
 
 static WiFiClient paperNetPlain;
@@ -59,6 +61,25 @@ inline void paperNetNormalize(String &url)
     while (url.endsWith("/")) {
         url.remove(url.length() - 1);
     }
+}
+
+/* Home LAN IP is unreachable on travel Wi-Fi. ESP32 connect() to that subnet
+ * can hang far past HTTPClient's timeout, so Funnel never runs (no R). */
+inline bool paperNetLanReachable()
+{
+    if (!panelUrl.length()) {
+        return false;
+    }
+    if (!remoteUrl.length() || remoteUrl == panelUrl) {
+        return true;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+        return false;
+    }
+    if (wifiSsid.length() && WiFi.SSID() != wifiSsid) {
+        return false;
+    }
+    return true;
 }
 
 inline bool paperNetBeginBase(HTTPClient &http, const String &base, const String &pathQuery, int timeoutMs)
@@ -82,13 +103,14 @@ inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs =
 {
     usingRemote = false;
     int lanMs = remoteUrl.length() ? 2000 : remoteMs;
-    if (panelUrl.length() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
+    if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
         http.addHeader("X-PaperMono-Token", token);
         int code = http.GET();
         if (code == 200) {
             return code;
         }
         http.end();
+        paperNetPlain.stop();
     }
     if (remoteUrl.length() && remoteUrl != panelUrl) {
         if (paperNetBeginBase(http, remoteUrl, pathQuery, remoteMs)) {
@@ -107,7 +129,7 @@ inline int paperNetPost(HTTPClient &http, const String &pathQuery, const String 
 {
     usingRemote = false;
     int lanMs = remoteUrl.length() ? 2000 : remoteMs;
-    if (panelUrl.length() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
+    if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
         http.addHeader("Content-Type", "application/json");
         http.addHeader("X-PaperMono-Token", token);
         int code = http.POST(payload);
@@ -115,6 +137,7 @@ inline int paperNetPost(HTTPClient &http, const String &pathQuery, const String 
             return code;
         }
         http.end();
+        paperNetPlain.stop();
     }
     if (remoteUrl.length() && remoteUrl != panelUrl) {
         if (paperNetBeginBase(http, remoteUrl, pathQuery, remoteMs)) {
@@ -136,7 +159,7 @@ inline bool paperNetOta(const String &pathQuery)
     updater.rebootOnUpdate(true);
     updater.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     t_httpUpdate_return ret = HTTP_UPDATE_FAILED;
-    if (panelUrl.length()) {
+    if (paperNetLanReachable()) {
         String url = panelUrl + pathQuery;
         if (paperNetIsHttps(panelUrl)) {
             paperNetSecure.setCACert(PAPER_ISRG_ROOT_X1);
@@ -148,6 +171,7 @@ inline bool paperNetOta(const String &pathQuery)
             usingRemote = false;
             return true;
         }
+        paperNetPlain.stop();
     }
     if (remoteUrl.length() && remoteUrl != panelUrl) {
         String url = remoteUrl + pathQuery;

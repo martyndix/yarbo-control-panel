@@ -157,9 +157,11 @@ foreach ([
     'bool usingRemote = false;',
     'prefs.putString("remurl", remoteUrl);',
     'paperNetGet',
+    'paperNetLanReachable',
+    'WiFi.SSID() != wifiSsid',
     'PAPER_ISRG_ROOT_X1',
     'drawString("R"',
-    '#define PAPERMONO_FW_VERSION "0.1.61"',
+    '#define PAPERMONO_FW_VERSION "0.1.62"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {
@@ -172,6 +174,8 @@ foreach ([
     'bool usingRemote = false;',
     'wifi = String("R  ") + wifi',
     'paperNetGet',
+    'paperNetLanReachable',
+    'WiFi.SSID() != wifiSsid',
     '#define PAPERMONO_FW_VERSION "0.2.18-colour"',
 ] as $needle) {
     $hay = $color . "\n" . file_get_contents(__DIR__ . '/../firmware/papercolor/src/paper_net.h') . "\n" . $cver;

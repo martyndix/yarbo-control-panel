@@ -582,7 +582,6 @@ void waitEpdReady()
         if (applyPendingPages()) {
             redrawQueued = true;
         }
-        serviceTouchQueue();
         delay(5);
     }
 }
@@ -603,6 +602,12 @@ void finishEpdFrame()
 {
     M5.Display.endWrite();
     M5.Display.display();
+    /* displayBusy() can stay false for a few ms after display(). Starting
+     * another refresh in that window overlaps waveforms (mottled/dark panel). */
+    uint32_t t0 = millis();
+    while (!M5.Display.displayBusy() && (millis() - t0) < 80) {
+        delay(1);
+    }
 }
 
 String pageName(int page)
@@ -4027,7 +4032,7 @@ void setup()
     }
     if (wifiSsid.length()) {
         wifiStartHome();
-        drawScreen(false);
+        drawScreen(true);
     } else {
         drawSetup();
     }

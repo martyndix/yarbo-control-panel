@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.61] - 2026-10-05
+
+### Fixed
+- PaperMono on travel Wi-Fi no longer tries the home LAN IP first. That connect could hang past the HTTP timeout, so Funnel never ran: no **R**, empty Vestaboard, and door Unlock did nothing. Firmware **0.1.62** uses Funnel when the joined SSID is not home. E-paper waits for the panel BUSY flag after `display()` and does not run HOUSE HTTP during a refresh (overlapping waveforms mottled and darkened the screen). Boot uses one full refresh to clear that ghosting.
+
 ## [4.0.60] - 2026-10-05
 
 ### Changed
