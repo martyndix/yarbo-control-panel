@@ -18,8 +18,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.63"'), 'firmware 0.1.63');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.63';"), 'panel firmware pin 0.1.63');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.64"'), 'firmware 0.1.64');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.64';"), 'panel firmware pin 0.1.64');
 assert_true(str_contains($ver, '#define PAPERMONO_WIFI_SCAN'), 'wifi scan UI constant');
 assert_true(str_contains($ver, '#define PAPERMONO_WIFI_SCAN_MS 400'), 'longer dwell per channel');
 assert_true(str_contains($fw, 'prefs.putString("gssid", guestSsid)'), 'guest SSID NVS');
@@ -48,7 +48,13 @@ assert_true(str_contains($docs, 'does not overwrite USB'), 'docs home credential
 assert_true(str_contains($docs, 'USB-flashed **Home**'), 'docs Home vs Travel labels');
 assert_true(str_contains($change, '## [4.0.58]'), 'changelog 4.0.58');
 assert_true(str_contains($change, '## [4.0.59]'), 'changelog 4.0.59');
-assert_true(str_contains($change, '## [4.0.62]'), 'changelog 4.0.62');
-assert_true(str_contains($html, 'firmware 0.1.63'), 'settings hint 0.1.63');
+assert_true(str_contains($change, '## [4.0.63]'), 'changelog 4.0.63');
+assert_true(str_contains($html, 'firmware 0.1.64'), 'settings hint 0.1.64');
+assert_true(str_contains($fw, 'void wifiRetryLast()'), 'drop retries last AP');
+assert_true(str_contains($fw, 'WiFi.setAutoReconnect(true)'), 'driver auto-reconnect stays on');
+assert_true(str_contains($fw, 'WiFi.persistent(false)'), 'STA creds are not rewritten in NVS');
+assert_true(str_contains($ver, '#define PAPERMONO_WIFI_GRACE_MS 2000'), 'grace before forcing a rejoin');
+assert_true(str_contains($fw, "else if (WiFi.status() != WL_CONNECTED) {\n                wifiStartGuest();"), 'travel rejoin after home look scan');
+assert_true(!str_contains($fw, 'WiFi.disconnect(true, false)'), 'begin must not power the radio off');
 
 echo "test_paper_guest_wifi.php ok\n";

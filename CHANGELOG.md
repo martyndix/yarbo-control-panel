@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.63] - 2026-10-05
+
+### Fixed
+- PaperMono reconnects after a dropped AP instead of sitting idle or always retrying home first. Firmware **0.1.64** keeps the radio on, gives the driver a short chance to resume, then rejoins the last network (travel when away, home at home) before trying the other. A periodic look for the home SSID that knocks travel off is followed by an immediate travel rejoin.
+
 ## [4.0.62] - 2026-10-05
 
 ### Fixed

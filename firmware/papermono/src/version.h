@@ -1,6 +1,6 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.1.63"
+#define PAPERMONO_FW_VERSION "0.1.64"
 /* Status poll. Do not go much faster: SSD1677 must not stream partial refreshes. */
 #define PAPERMONO_LOGO_PX 160
 #define PAPERMONO_POLL_MS 15000
@@ -42,5 +42,7 @@
 #define PAPERMONO_WIFI_PASS_MAX 63
 #define PAPERMONO_WIFI_SSID_MAX 32
 #define PAPERMONO_WIFI_TRY_MS 12000
+#define PAPERMONO_WIFI_FAIL_MS 4000
+#define PAPERMONO_WIFI_GRACE_MS 2000
 #define PAPERMONO_WIFI_HOME_LOOK_MS 300000UL
 #define PAPERMONO_WIFI_SCAN_MS 400

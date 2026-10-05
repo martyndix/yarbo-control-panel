@@ -139,7 +139,10 @@ bool kbNumbers = false;
 bool kbShift = false;
 int wifiUi = PAPERMONO_WIFI_IDLE;
 int wifiTryStage = 0;
+int wifiLastOk = 0;
 uint32_t wifiTryAt = 0;
+uint32_t wifiLostAt = 0;
+bool wifiEverUp = false;
 uint32_t lastHomeLook = 0;
 String wifiScanSsid[PAPERMONO_WIFI_SCAN_MAX];
 bool wifiScanOpen[PAPERMONO_WIFI_SCAN_MAX];
@@ -384,9 +387,15 @@ void wifiBegin(const String &ssid, const String &pass)
     if (!ssid.length()) {
         return;
     }
+    WiFi.persistent(false);
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect(true, false);
-    delay(40);
+    wl_status_t st = WiFi.status();
+    if (st == WL_CONNECTED || st == WL_CONNECT_FAILED || st == WL_CONNECTION_LOST) {
+        WiFi.disconnect(false, false);
+        delay(40);
+    }
     WiFi.begin(ssid.c_str(), pass.c_str());
 }
 
@@ -414,6 +423,19 @@ void wifiStartHome()
     wifiBegin(wifiSsid, wifiPass);
 }
 
+void wifiRetryLast()
+{
+    if (wifiLastOk == 2 && guestSsid.length()) {
+        wifiStartGuest();
+        return;
+    }
+    if (wifiSsid.length()) {
+        wifiStartHome();
+        return;
+    }
+    wifiStartGuest();
+}
+
 bool wifiHomeSsidVisible()
 {
     if (!wifiSsid.length() || otaBusy || wifiUi != PAPERMONO_WIFI_IDLE) {
@@ -439,14 +461,25 @@ void wifiService()
     uint32_t now = millis();
     if (WiFi.status() == WL_CONNECTED) {
         wifiTryStage = 0;
+        wifiLostAt = 0;
+        wifiEverUp = true;
         if (lastError.startsWith("joining ")) {
             lastError = "";
         }
-        if (wifiSsid.length() && guestSsid.length() && WiFi.SSID() == guestSsid
+        String ssid = WiFi.SSID();
+        if (wifiSsid.length() && ssid == wifiSsid) {
+            wifiLastOk = 1;
+        } else if (guestSsid.length() && ssid == guestSsid) {
+            wifiLastOk = 2;
+        }
+        if (wifiSsid.length() && guestSsid.length() && ssid == guestSsid
             && now - lastHomeLook > PAPERMONO_WIFI_HOME_LOOK_MS) {
             lastHomeLook = now;
-            if (wifiHomeSsidVisible()) {
+            bool found = wifiHomeSsidVisible();
+            if (found) {
                 wifiStartHome();
+            } else if (WiFi.status() != WL_CONNECTED) {
+                wifiStartGuest();
             }
         }
         return;
@@ -454,18 +487,32 @@ void wifiService()
     if (!wifiSsid.length() && !guestSsid.length()) {
         return;
     }
+    if (wifiLostAt == 0) {
+        wifiLostAt = now;
+    }
     if (wifiTryStage == 0) {
-        wifiStartHome();
+        if (wifiEverUp && now - wifiLostAt < PAPERMONO_WIFI_GRACE_MS) {
+            return;
+        }
+        wifiRetryLast();
         return;
     }
-    if (now - wifiTryAt < PAPERMONO_WIFI_TRY_MS) {
+    wl_status_t st = WiFi.status();
+    uint32_t wait = (st == WL_NO_SSID_AVAIL || st == WL_CONNECT_FAILED)
+        ? PAPERMONO_WIFI_FAIL_MS
+        : PAPERMONO_WIFI_TRY_MS;
+    if (now - wifiTryAt < wait) {
         return;
     }
     if (wifiTryStage == 1 && guestSsid.length()) {
         wifiStartGuest();
         return;
     }
-    wifiStartHome();
+    if (wifiTryStage == 2 && wifiSsid.length()) {
+        wifiStartHome();
+        return;
+    }
+    wifiRetryLast();
 }
 
 void wifiCollectScanHits(int n)
