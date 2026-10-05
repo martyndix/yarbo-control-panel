@@ -17,8 +17,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.62"'), 'firmware 0.1.62');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.62';"), 'panel firmware pin 0.1.62');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.63"'), 'firmware 0.1.63');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.63';"), 'panel firmware pin 0.1.63');
 assert_true(str_contains($fw, 'void waitEpdReady()'), 'wait for e-paper BUSY');
 assert_true(str_contains($fw, 'void serviceTouchQueue()'), 'touch handled as a queue');
 if (!preg_match('/void waitEpdReady\(\)\n\{\n(?:.*\n)*?\}\n\n/', $fw, $wait)) {
@@ -37,6 +37,6 @@ if (!preg_match('/void showPage\(int page, bool loadPlansIfNeeded\)\n\{[\s\S]*?\
 assert_true(str_contains($show[0], 'drawScreen(false)'), 'showPage uses fast update');
 assert_true(!str_contains($show[0], 'drawScreen(true)'), 'showPage must not force a full refresh');
 assert_true(str_contains($docs, 'A/B is taken while the panel is still refreshing'), 'docs mention A/B during refresh');
-assert_true(str_contains($change, '## [4.0.61]'), 'changelog 4.0.61');
+assert_true(str_contains($change, '## [4.0.62]'), 'changelog 4.0.62');
 
 echo "test_paper_epd_nav.php ok\n";

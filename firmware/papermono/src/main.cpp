@@ -258,6 +258,15 @@ void saveConfig()
     prefs.end();
 }
 
+/* Travel Wi-Fi only. Never rewrite USB home ssid/pass. */
+void saveGuestWifiPrefs()
+{
+    prefs.begin("yarbo", false);
+    prefs.putString("gssid", guestSsid);
+    prefs.putString("gpass", guestPass);
+    prefs.end();
+}
+
 void loadConfig()
 {
     prefs.begin("yarbo", true);
@@ -324,8 +333,14 @@ void applyConfigJson(const String &json)
         Serial.println("CFG_ERR");
         return;
     }
-    wifiSsid = doc["ssid"] | wifiSsid;
-    wifiPass = doc["password"] | wifiPass;
+    if (!doc["ssid"].isNull()) {
+        String nextSsid = doc["ssid"] | "";
+        nextSsid.trim();
+        if (nextSsid.length()) {
+            wifiSsid = nextSsid;
+            wifiPass = doc["password"] | wifiPass;
+        }
+    }
     panelUrl = doc["panel_url"] | panelUrl;
     if (!doc["remote_url"].isNull()) {
         remoteUrl = doc["remote_url"] | remoteUrl;
@@ -552,7 +567,7 @@ void saveGuestWifi()
 {
     guestSsid = wifiPickSsid;
     guestPass = wifiDraft;
-    saveConfig();
+    saveGuestWifiPrefs();
     wifiUi = PAPERMONO_WIFI_IDLE;
     wifiDraft = "";
     wifiPickSsid = "";
@@ -568,7 +583,7 @@ void clearGuestWifi()
     bool onGuest = guestSsid.length() && WiFi.SSID() == guestSsid;
     guestSsid = "";
     guestPass = "";
-    saveConfig();
+    saveGuestWifiPrefs();
     wifiUi = PAPERMONO_WIFI_IDLE;
     if (onGuest) {
         wifiStartHome();
@@ -2586,8 +2601,8 @@ void drawDevicePage(bool forceFull)
     M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), 16, 200);
     M5.Display.setTextSize(2);
     M5.Display.drawString(clockDate, 16, 268);
-    String nowSsid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("Not connected");
-    M5.Display.drawString("Wi-Fi  " + clipLabelToWidth(nowSsid, 360), 16, 312);
+    String homeLab = wifiSsid.length() ? wifiSsid : String("(USB flash)");
+    M5.Display.drawString("Home  " + clipLabelToWidth(homeLab, 360), 16, 312);
     if (guestSsid.length()) {
         M5.Display.drawString("Travel  " + clipLabelToWidth(guestSsid, 240), 16, 348);
         drawButton(320, 336, 144, 44, "CLEAR", false);

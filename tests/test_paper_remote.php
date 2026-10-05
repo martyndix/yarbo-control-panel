@@ -159,9 +159,10 @@ foreach ([
     'paperNetGet',
     'paperNetLanReachable',
     'WiFi.SSID() != wifiSsid',
+    'guestSsid.length() && WiFi.SSID() == guestSsid',
     'PAPER_ISRG_ROOT_X1',
     'drawString("R"',
-    '#define PAPERMONO_FW_VERSION "0.1.62"',
+    '#define PAPERMONO_FW_VERSION "0.1.63"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {

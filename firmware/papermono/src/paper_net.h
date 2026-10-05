@@ -45,6 +45,7 @@ extern String panelUrl;
 extern String remoteUrl;
 extern String token;
 extern String wifiSsid;
+extern String guestSsid;
 extern bool usingRemote;
 
 static WiFiClient paperNetPlain;
@@ -74,6 +75,9 @@ inline bool paperNetLanReachable()
         return true;
     }
     if (WiFi.status() != WL_CONNECTED) {
+        return false;
+    }
+    if (guestSsid.length() && WiFi.SSID() == guestSsid) {
         return false;
     }
     if (wifiSsid.length() && WiFi.SSID() != wifiSsid) {

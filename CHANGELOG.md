@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.62] - 2026-10-05
+
+### Fixed
+- PaperMono **DEVICE** shows the USB-flashed **Home** SSID separately from **Travel**. The old **Wi-Fi** line was the network you are on now, so travel looked like it had replaced home. Saving or clearing travel only writes `gssid`/`gpass`. Firmware **0.1.63**.
+
 ## [4.0.61] - 2026-10-05
 
 ### Fixed
