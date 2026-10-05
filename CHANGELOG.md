@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.59] - 2026-10-05
+
+### Fixed
+- PaperMono **REMOTE WIFI** scan no longer returns empty while the tablet is away and still trying the home SSID. Firmware **0.1.60** stops that join, dwells ~400 ms per 2.4 GHz channel (and scans twice if needed), then lists nearby networks. **TYPE** lets you enter an SSID if the list is still empty. Funnel **Remote access** is still required to reach the panel.
+
 ## [4.0.58] - 2026-10-05
 
 ### Added

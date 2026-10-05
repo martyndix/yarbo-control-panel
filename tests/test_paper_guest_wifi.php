@@ -18,14 +18,18 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.59"'), 'firmware 0.1.59');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.59';"), 'panel firmware pin 0.1.59');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.60"'), 'firmware 0.1.60');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.60';"), 'panel firmware pin 0.1.60');
 assert_true(str_contains($ver, '#define PAPERMONO_WIFI_SCAN'), 'wifi scan UI constant');
+assert_true(str_contains($ver, '#define PAPERMONO_WIFI_SCAN_MS 400'), 'longer dwell per channel');
 assert_true(str_contains($fw, 'prefs.putString("gssid", guestSsid)'), 'guest SSID NVS');
 assert_true(str_contains($fw, 'prefs.putString("gpass", guestPass)'), 'guest password NVS');
 assert_true(str_contains($fw, 'prefs.getString("gssid", "")'), 'load guest SSID');
 assert_true(str_contains($fw, 'REMOTE WIFI'), 'DEVICE remote wifi button');
 assert_true(str_contains($fw, 'void startWifiScan()'), 'scan nearby APs');
+assert_true(str_contains($fw, 'void wifiAbortJoin()'), 'scan stops the home join first');
+assert_true(str_contains($fw, 'WiFi.scanNetworks(false, true, false, PAPERMONO_WIFI_SCAN_MS)'), 'full 2.4 GHz dwell');
+assert_true(str_contains($fw, 'drawButton(168, 136, 144, 48, "TYPE", false)'), 'type SSID when scan is empty');
 assert_true(str_contains($fw, 'void saveGuestWifi()'), 'save guest without touching home');
 assert_true(str_contains($fw, 'void wifiStartHome()'), 'prefer home SSID');
 assert_true(str_contains($fw, 'void wifiStartGuest()'), 'fall back to guest SSID');
@@ -38,6 +42,7 @@ assert_true(str_contains($fw, 'wifiSsid = doc["ssid"] | wifiSsid'), 'USB CFG sti
 assert_true(str_contains($docs, 'REMOTE WIFI'), 'docs DEVICE remote wifi');
 assert_true(str_contains($docs, 'does not overwrite USB'), 'docs home credentials stay');
 assert_true(str_contains($change, '## [4.0.58]'), 'changelog 4.0.58');
-assert_true(str_contains($html, 'firmware 0.1.59'), 'settings hint 0.1.59');
+assert_true(str_contains($change, '## [4.0.59]'), 'changelog 4.0.59');
+assert_true(str_contains($html, 'firmware 0.1.60'), 'settings hint 0.1.60');
 
 echo "test_paper_guest_wifi.php ok\n";

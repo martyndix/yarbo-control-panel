@@ -145,7 +145,7 @@ Tablets on another Wi-Fi cannot see `http://192.168.x.x:8080`. Settings → E-pa
 
 Do **not** port-forward 8080. The tablet tries the LAN URL first (~2 s), then HTTPS. Firmware **0.1.57** / **0.2.18-colour** stores `remote_url` from compact (or USB CFG). Queue a Wi-Fi **Update** after this panel version so existing tablets learn it. A small **R** (like phone roaming) appears next to Wi-Fi when the last successful poll used the remote URL.
 
-On PaperMono **DEVICE**, **REMOTE WIFI** (firmware **0.1.59**) stores a second 2.4 GHz network for when the flashed home SSID is not there. It does not overwrite USB `CFG:` credentials. Turn on **Remote access** before you leave so Funnel HTTPS is already on the tablet.
+On PaperMono **DEVICE**, **REMOTE WIFI** (firmware **0.1.60**) stores a second 2.4 GHz network for when the flashed home SSID is not there. Scan leaves the home join so hotel/cafe networks can show (several seconds). **TYPE** enters the name if scan finds nothing. It does not overwrite USB `CFG:` credentials. Turn on **Remote access** before you leave so Funnel HTTPS is already on the tablet.
 
 ## Limits
 
