@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.60] - 2026-10-05
+
+### Changed
+- PaperMono page changes use the fast e-paper update, and a tap is handled as soon as you can see the button — it no longer waits for the refresh to finish. Firmware **0.1.61**. A full refresh still runs every 10 updates so the panel stays healthy.
+
 ## [4.0.59] - 2026-10-05
 
 ### Fixed

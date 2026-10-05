@@ -172,6 +172,8 @@ volatile uint8_t pwrOffEvent = 0;
 volatile int touchQX = 0;
 volatile int touchQY = 0;
 volatile uint8_t touchQ = 0;
+bool inDraw = false;
+bool redrawQueued = false;
 
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
@@ -188,6 +190,9 @@ bool homeOnState[PAPERMONO_HOME_MAX];
 int homeCount = 0;
 
 void drawScreen(bool forceFull);
+void serviceTouchQueue();
+void waitEpdReady();
+bool applyPendingPages();
 void drawVestaboardGrid(int x, int y, int cell, int gap);
 void enterLock();
 void exitLock();
@@ -528,7 +533,7 @@ void startWifiScan()
     wifiScanCount = 0;
     wifiScanBusy = true;
     offConfirm = false;
-    drawScreen(true);
+    drawScreen(false);
     wifiAbortJoin();
     wifiScanCount = 0;
     wifiCollectScanHits(wifiScanRadio());
@@ -540,7 +545,7 @@ void startWifiScan()
     if (restore && restoreSsid.length()) {
         wifiBegin(restoreSsid, restorePass);
     }
-    drawScreen(true);
+    drawScreen(false);
 }
 
 void saveGuestWifi()
@@ -570,6 +575,18 @@ void clearGuestWifi()
     }
 }
 
+void waitEpdReady()
+{
+    while (M5.Display.displayBusy()) {
+        pollSerialConfig();
+        if (applyPendingPages()) {
+            redrawQueued = true;
+        }
+        serviceTouchQueue();
+        delay(5);
+    }
+}
+
 void beginEpdFrame(bool forceQuality)
 {
     while (M5.Display.displayBusy()) {
@@ -586,10 +603,6 @@ void finishEpdFrame()
 {
     M5.Display.endWrite();
     M5.Display.display();
-    while (M5.Display.displayBusy()) {
-        pollSerialConfig();
-        delay(5);
-    }
 }
 
 String pageName(int page)
@@ -1255,7 +1268,7 @@ void openMenu()
     offConfirm = false;
     wifiUi = PAPERMONO_WIFI_IDLE;
     noteActivity();
-    drawScreen(true);
+    drawScreen(false);
 }
 
 void handleMenuTouch(int x, int y)
@@ -2183,8 +2196,7 @@ void enterLock()
     wifiUi = PAPERMONO_WIFI_IDLE;
     lastLight = millis();
     applyFrontlight(true);
-    drawLockScreen(true);
-    lastDrawnKey = screenKey();
+    drawScreen(false);
 }
 
 void exitLock()
@@ -2199,7 +2211,7 @@ void exitLock()
     if (currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {
         httpGetPlans(false);
     }
-    drawScreen(true);
+    drawScreen(false);
 }
 
 void drawBoardPage(bool forceFull)
@@ -2599,76 +2611,65 @@ void drawDevicePage(bool forceFull)
 
 void drawScreen(bool forceFull)
 {
+    if (inDraw) {
+        redrawQueued = true;
+        return;
+    }
+    inDraw = true;
+    do {
+        redrawQueued = false;
+        waitEpdReady();
+        serviceTouchQueue();
+    } while (redrawQueued);
     if (screenLocked) {
         String key = screenKey();
-        if (!forceFull && key == lastDrawnKey) {
-            return;
+        if (forceFull || key != lastDrawnKey) {
+            drawLockScreen(forceFull);
+            lastDrawnKey = screenKey();
         }
-        drawLockScreen(forceFull);
-        lastDrawnKey = screenKey();
-        return;
-    }
-    if (menuOpen) {
+    } else if (menuOpen) {
         String key = screenKey();
-        if (!forceFull && key == lastDrawnKey) {
-            return;
+        if (forceFull || key != lastDrawnKey) {
+            drawMenuPage(forceFull);
+            lastDrawnKey = screenKey();
         }
-        drawMenuPage(forceFull);
-        lastDrawnKey = screenKey();
-        return;
-    }
-    String key = screenKey();
-    if (!forceFull && key == lastDrawnKey) {
-        return;
-    }
-    if (currentPage == PAPERMONO_PAGE_BOARD) {
-        currentPage = PAPERMONO_PAGE_NOTE;
-    }
-    if (!pageEnabled(currentPage)) {
-        currentPage = firstEnabledPage();
-    }
-    if (currentPage == PAPERMONO_PAGE_STATUS) {
-        drawStatusPage(forceFull);
-    } else if (currentPage == PAPERMONO_PAGE_HEALTH) {
-        drawHealthPage(forceFull);
-    } else if (currentPage == PAPERMONO_PAGE_PLANS) {
-        drawPlansPage(forceFull);
-    } else if (currentPage == PAPERMONO_PAGE_NOTE) {
-        if (!pageEnabled(PAPERMONO_PAGE_NOTE)) {
-            currentPage = firstEnabledPage();
-            drawHome(forceFull);
-        } else {
-            drawNotePage(forceFull);
-        }
-    } else if (currentPage == PAPERMONO_PAGE_POWERWALL) {
-        if (!pageEnabled(PAPERMONO_PAGE_POWERWALL)) {
-            currentPage = firstEnabledPage();
-            drawScreen(forceFull);
-            return;
-        }
-        drawPowerwallPage(forceFull);
-    } else if (currentPage == PAPERMONO_PAGE_LYMOW) {
-        if (!pageEnabled(PAPERMONO_PAGE_LYMOW)) {
-            currentPage = firstEnabledPage();
-            drawHome(forceFull);
-        } else {
-            drawLymowPage(forceFull);
-        }
-    } else if (currentPage == PAPERMONO_PAGE_RADIO) {
-        drawRadioPage(forceFull);
-    } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
-        drawDevicePage(forceFull);
-    } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
-        if (!pageEnabled(PAPERMONO_PAGE_HOUSE)) {
-            currentPage = firstEnabledPage();
-            drawScreen(forceFull);
-            return;
-        }
-        drawHousePage(forceFull);
     } else {
-        drawHome(forceFull);
+        if (currentPage == PAPERMONO_PAGE_BOARD) {
+            currentPage = PAPERMONO_PAGE_NOTE;
+        }
+        if (!pageEnabled(currentPage)) {
+            currentPage = firstEnabledPage();
+        }
+        String key = screenKey();
+        if (forceFull || key != lastDrawnKey) {
+            if (currentPage == PAPERMONO_PAGE_STATUS) {
+                drawStatusPage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_HEALTH) {
+                drawHealthPage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_PLANS) {
+                drawPlansPage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_NOTE) {
+                drawNotePage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_POWERWALL) {
+                drawPowerwallPage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_LYMOW) {
+                drawLymowPage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_RADIO) {
+                drawRadioPage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
+                drawDevicePage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
+                drawHousePage(forceFull);
+            } else {
+                drawHome(forceFull);
+            }
+            lastDrawnKey = screenKey();
+        }
     }
-    lastDrawnKey = screenKey();
+    inDraw = false;
+    if (redrawQueued) {
+        drawScreen(false);
+    }
 }
 
 void drawSetup()
@@ -2787,7 +2788,7 @@ void openInboxFromLock()
     menuOpen = false;
     noteActivity();
     applyFrontlight(true);
-    drawScreen(true);
+    drawScreen(false);
     lastDrawnKey = screenKey();
 }
 
@@ -3263,7 +3264,7 @@ void handleRadioTouch(int x, int y)
     if (radioUi == PAPERMONO_RADIO_INBOX) {
         if (y >= 88 && y <= 140 && x >= 300) {
             radioUi = PAPERMONO_RADIO_COMPOSE;
-            drawScreen(true);
+            drawScreen(false);
             return;
         }
         if (inboxCount == 0) {
@@ -3284,7 +3285,7 @@ void handleRadioTouch(int x, int y)
                 }
                 refreshUnreadLed();
                 radioUi = PAPERMONO_RADIO_VIEW;
-                drawScreen(true);
+                drawScreen(false);
             }
         }
         return;
@@ -3293,7 +3294,7 @@ void handleRadioTouch(int x, int y)
         if (y >= 88 && y <= 140 && x < 180) {
             radioUi = PAPERMONO_RADIO_INBOX;
             radioViewIndex = -1;
-            drawScreen(true);
+            drawScreen(false);
             return;
         }
         if (y >= 88 && y <= 140 && x >= 300) {
@@ -3311,14 +3312,14 @@ void handleRadioTouch(int x, int y)
                 }
             }
             radioUi = PAPERMONO_RADIO_COMPOSE;
-            drawScreen(true);
+            drawScreen(false);
             return;
         }
         return;
     }
     if (y >= 88 && y <= 140 && x >= 300) {
         radioUi = PAPERMONO_RADIO_INBOX;
-        drawScreen(true);
+        drawScreen(false);
         return;
     }
     int n = min(4, peerCount + 1);
@@ -3396,14 +3397,14 @@ void applyWifiHit(int hit)
             kbNumbers = false;
             kbShift = false;
             wifiUi = PAPERMONO_WIFI_PASS;
-            drawScreen(true);
+            drawScreen(false);
             return;
         }
         if (!wifiPickSsid.length()) {
             return;
         }
         saveGuestWifi();
-        drawScreen(true);
+        drawScreen(false);
         return;
     }
     int row = hit / 32;
@@ -3429,10 +3430,10 @@ void handleWifiScanTouch(int x, int y)
             wifiPickSsid = "";
             kbNumbers = false;
             kbShift = false;
-            drawScreen(true);
+            drawScreen(false);
         } else {
             wifiUi = PAPERMONO_WIFI_IDLE;
-            drawScreen(true);
+            drawScreen(false);
         }
         return;
     }
@@ -3448,11 +3449,11 @@ void handleWifiScanTouch(int x, int y)
             kbShift = false;
             if (wifiScanOpen[i]) {
                 saveGuestWifi();
-                drawScreen(true);
+                drawScreen(false);
                 return;
             }
             wifiUi = PAPERMONO_WIFI_PASS;
-            drawScreen(true);
+            drawScreen(false);
             return;
         }
     }
@@ -3468,7 +3469,7 @@ void handleDeviceTouch(int x, int y)
         if (y >= 88 && y <= 140 && x >= 300) {
             wifiUi = PAPERMONO_WIFI_SCAN;
             wifiDraft = "";
-            drawScreen(true);
+            drawScreen(false);
             return;
         }
         int hit = keyboardHit(x, y, true);
@@ -3479,7 +3480,7 @@ void handleDeviceTouch(int x, int y)
     }
     if (guestSsid.length() && y >= 330 && y <= 388 && x >= 310) {
         clearGuestWifi();
-        drawScreen(true);
+        drawScreen(false);
         return;
     }
     if (y >= 390 && y <= 476) {
@@ -3813,7 +3814,7 @@ void showPage(int page, bool loadPlansIfNeeded)
     if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
         httpGetPlans(false);
     }
-    drawScreen(true);
+    drawScreen(false);
 }
 
 void nextPage()
@@ -3860,9 +3861,9 @@ bool applyPendingPages()
 void flushPageButtons()
 {
     if (applyPendingPages()) {
-        drawScreen(true);
+        drawScreen(false);
         if (applyPendingPages()) {
-            drawScreen(true);
+            drawScreen(false);
         }
     }
 }
@@ -4033,13 +4034,62 @@ void setup()
     xTaskCreate(inputTask, "btns", 4096, nullptr, 4, nullptr);
 }
 
+void serviceTouchQueue()
+{
+    if (!touchQ) {
+        return;
+    }
+    int tx = touchQX;
+    int ty = touchQY;
+    touchQ = 0;
+    uint32_t now = millis();
+    if (screenLocked) {
+        lastLight = now;
+        if (!lightOn) {
+            applyFrontlight(true);
+        }
+        handleLockTouch(tx, ty);
+        return;
+    }
+    noteActivity();
+    if (tapOnPadlock(tx, ty)) {
+        enterLock();
+    } else if (menuOpen) {
+        handleMenuTouch(tx, ty);
+    } else if (tapOnMenuChip(tx, ty)) {
+        openMenu();
+    } else if (currentPage == PAPERMONO_PAGE_HOME) {
+        int which = homeButtonAt(tx, ty);
+        if (which == 1) {
+            runCommand("stop");
+        } else if (which == 2) {
+            runCommand("return_to_dock");
+        } else if (which == 3) {
+            runCommand(state == "active" ? "pause" : "resume");
+        } else if (which == 4) {
+            lightsOn = !lightsOn;
+            runCommand(lightsOn ? "lights_on" : "lights_off");
+        }
+    } else if (currentPage == PAPERMONO_PAGE_PLANS) {
+        handlePlansTouch(tx, ty);
+    } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
+        handleHouseTouch(tx, ty);
+    } else if (currentPage == PAPERMONO_PAGE_NOTE) {
+        handleNoteTouch(tx, ty);
+    } else if (currentPage == PAPERMONO_PAGE_RADIO) {
+        handleRadioTouch(tx, ty);
+    } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
+        handleDeviceTouch(tx, ty);
+    }
+}
+
 void loop()
 {
     pollSerialConfig();
     if (cfgLeaveSetup && wifiSsid.length()) {
         cfgLeaveSetup = false;
         wifiStartHome();
-        drawScreen(true);
+        drawScreen(false);
     }
     if (wifiSsid.isEmpty()) {
         static uint32_t lastReady = 0;
@@ -4072,54 +4122,7 @@ void loop()
     }
 
     uint32_t now = millis();
-
-    int tx = 0;
-    int ty = 0;
-    if (touchQ) {
-        tx = touchQX;
-        ty = touchQY;
-        touchQ = 0;
-        if (screenLocked) {
-            lastLight = now;
-            if (!lightOn) {
-                applyFrontlight(true);
-            }
-            handleLockTouch(tx, ty);
-        } else {
-            noteActivity();
-            if (tapOnPadlock(tx, ty)) {
-                enterLock();
-            } else if (menuOpen) {
-                handleMenuTouch(tx, ty);
-            } else if (tapOnMenuChip(tx, ty)) {
-                openMenu();
-            } else {
-                if (currentPage == PAPERMONO_PAGE_HOME) {
-                    int which = homeButtonAt(tx, ty);
-                    if (which == 1) {
-                        runCommand("stop");
-                    } else if (which == 2) {
-                        runCommand("return_to_dock");
-                    } else if (which == 3) {
-                        runCommand(state == "active" ? "pause" : "resume");
-                    } else if (which == 4) {
-                        lightsOn = !lightsOn;
-                        runCommand(lightsOn ? "lights_on" : "lights_off");
-                    }
-                } else if (currentPage == PAPERMONO_PAGE_PLANS) {
-                    handlePlansTouch(tx, ty);
-                } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
-                    handleHouseTouch(tx, ty);
-                } else if (currentPage == PAPERMONO_PAGE_NOTE) {
-                    handleNoteTouch(tx, ty);
-                } else if (currentPage == PAPERMONO_PAGE_RADIO) {
-                    handleRadioTouch(tx, ty);
-                } else if (currentPage == PAPERMONO_PAGE_DEVICE) {
-                    handleDeviceTouch(tx, ty);
-                }
-            }
-        }
-    }
+    serviceTouchQueue();
 
     now = millis();
     if (!otaBusy && !screenLocked && wifiUi == PAPERMONO_WIFI_IDLE && WiFi.status() == WL_CONNECTED

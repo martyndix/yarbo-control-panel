@@ -59,6 +59,7 @@ The SSD1677 panel is easy to damage if driven badly. Firmware follows these rule
 - After about **10 fast refreshes**, run **one full-screen refresh** to clear ghosting. Draw the whole frame, then one `display()` — do not refresh per letter or widget.
 - **Do not** stream uninterrupted partial refreshes (DC imbalance can permanently damage the panel).
 - Skip a redraw when status has not changed.
+- A tap or A/B is taken while the panel is still refreshing; the next screen waits for that waveform, then draws once (intermediate pages are skipped). Navigation uses the fast update; a full refresh still runs after about 10 fast ones.
 - Use the panel’s built-in OTP waveforms (M5GFX `epd_quality` / `epd_fastest`). Do not load custom LUTs unless you know DC balance.
 - Keep the device out of direct sun and strong UV; heat and UV can ruin the film.
 - Status poll is 15 seconds, not a tight loop.
