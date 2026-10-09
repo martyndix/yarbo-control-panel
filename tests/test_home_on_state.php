@@ -176,6 +176,18 @@ assert_true(($byName['Lamp']['on'] ?? true) === false, 'dashboard lamp should be
 assert_true(($byName['Downlight']['on'] ?? true) === false, 'dashboard downlight should be off');
 assert_true(($dash['rooms'][0]['on'] ?? true) === false, 'room should be off when lights are off');
 assert_true(($dash['scenes'][0]['on'] ?? true) === false, 'sticky scene id must not keep scene green');
+$hideLamp = $home->hideDevice('1:2', true);
+assert_true(($hideLamp['ok'] ?? false) === true, 'hide lamp');
+$afterHide = $home->dashboard();
+$afterHideIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $afterHide['devices'] ?? []);
+$afterHiddenIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $afterHide['hidden_devices'] ?? []);
+assert_true(!in_array('1:2', $afterHideIds, true), 'hidden lamp must leave the Home grid');
+assert_true(in_array('1:2', $afterHiddenIds, true), 'hidden lamp must appear under Hidden');
+$unhideLamp = $home->hideDevice('1:2', false);
+assert_true(($unhideLamp['ok'] ?? false) === true, 'unhide lamp');
+$afterShow = $home->dashboard();
+$afterShowIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $afterShow['devices'] ?? []);
+assert_true(in_array('1:2', $afterShowIds, true), 'unhidden lamp must return to Home');
 
 file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
     'v' => 5,
@@ -404,6 +416,8 @@ assert_true(str_contains($homePhp, "['op' => 'states'], 2.5, false)"), 'live mil
 assert_true(str_contains($homePhp, 'unionDeviceLists'), 'pairing merges the new node into last_devices');
 assert_true(str_contains($js, "btn.textContent = 'Adding…'"), 'Add device shows Adding while pairing');
 assert_true(str_contains($js, 'loadHomeDashboard({ force: true })'), 'pairing reloads Home even if a poll is in flight');
+assert_true(str_contains($js, 'applyHomeHiddenLocal(id, true)'), 'Hide must move the tile without a full page refresh');
+assert_true(str_contains($js, 'await reloadHomeList()'), 'Hide must force-reload Home');
 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(

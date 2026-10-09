@@ -3218,7 +3218,7 @@ async function loadHomeDashboard(opts = {}) {
         if (opts.patch && !homeManageOpen && !homeDrag && document.querySelector('#home-devices [data-home-id]')) {
             patchHomeDashboard(data);
         } else {
-            renderHomeDashboard(data);
+            renderHomeDashboard(data, { replace: Boolean(opts.replace || opts.force) });
         }
         if (autoPageOpen) {
             if (autoDraft) renderHomeAutoTray();
@@ -3263,6 +3263,32 @@ async function loadHomeDashboard(opts = {}) {
             homeLoadBusy = false;
         }
     }
+}
+
+async function reloadHomeList() {
+    await loadHomeDashboard({ force: true, replace: true });
+}
+
+function applyHomeHiddenLocal(id, hidden) {
+    if (!homeDash || !id) return;
+    const vis = [...(homeDash.devices || [])];
+    const hidList = [...(homeDash.hidden_devices || [])];
+    if (hidden) {
+        const idx = vis.findIndex((d) => d.id === id);
+        if (idx < 0) return;
+        const row = { ...vis[idx], hidden: true };
+        vis.splice(idx, 1);
+        homeDash.devices = vis;
+        homeDash.hidden_devices = [...hidList.filter((d) => d.id !== id), row];
+    } else {
+        const idx = hidList.findIndex((d) => d.id === id);
+        if (idx < 0) return;
+        const row = { ...hidList[idx], hidden: false };
+        hidList.splice(idx, 1);
+        homeDash.hidden_devices = hidList;
+        homeDash.devices = [...vis.filter((d) => d.id !== id), row];
+    }
+    renderHomeDashboard(homeDash, { replace: true });
 }
 
 function homeCardIsWatching() {
@@ -3378,18 +3404,28 @@ function setHomeDeviceOn(id, on) {
     patchHomeDeviceVisual(id, on);
 }
 
+function homeDomIds(sel) {
+    return [...document.querySelectorAll(sel)]
+        .map((el) => el.getAttribute('data-home-id') || '')
+        .filter(Boolean);
+}
+
+function homeSameIds(a, b) {
+    return a.length === b.length && a.every((id) => b.includes(id));
+}
+
 function patchHomeDashboard(data) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
-    const shown = [...document.querySelectorAll('#home-devices [data-home-id], #home-hidden-devices [data-home-id]')]
-        .map((el) => el.getAttribute('data-home-id') || '')
-        .filter(Boolean);
-    const next = [...(data.devices || []), ...(data.hidden_devices || [])];
-    const nextIds = new Set(next.map((d) => String(d.id || '')).filter(Boolean));
-    if (shown.length !== nextIds.size || shown.some((id) => !nextIds.has(id))) {
-        renderHomeDashboard(data);
+    const shownVisible = homeDomIds('#home-devices [data-home-id]');
+    const shownHidden = homeDomIds('#home-hidden-devices [data-home-id]');
+    const nextVisible = (data.devices || []).map((d) => String(d.id || '')).filter(Boolean);
+    const nextHidden = (data.hidden_devices || []).map((d) => String(d.id || '')).filter(Boolean);
+    if (!homeSameIds(shownVisible, nextVisible) || !homeSameIds(shownHidden, nextHidden)) {
+        renderHomeDashboard(data, { replace: true });
         return;
     }
+    const next = [...(data.devices || []), ...(data.hidden_devices || [])];
     next.forEach((d) => {
         const sticky = homeStickyOn(d.id);
         if (sticky !== null) d.on = sticky;
@@ -4064,10 +4100,12 @@ function homeSceneMemberRowHtml(d) {
     </div>`;
 }
 
-function renderHomeDashboard(data) {
+function renderHomeDashboard(data, opts = {}) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
-    const naming = document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new], [data-home-color], [data-home-kelvin], [data-home-setpoint]');
+    const naming = opts.replace
+        ? null
+        : document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new], [data-home-color], [data-home-kelvin], [data-home-setpoint]');
     if (homeDrag) return;
     const card = document.getElementById('home-card');
     const devices = data.devices || [];
@@ -4459,7 +4497,7 @@ function bindHomeDashboard() {
                 const data = await homeApi({ action: 'forget', node_id: Number(nodeId) }, 30000);
                 if (!data.ok) throw new Error(data.error || 'Could not remove');
                 showToast(data.message || 'Removed', 'success');
-                await loadHomeDashboard();
+                await reloadHomeList();
             } catch (err) {
                 showToast(err.message || 'Could not remove', 'error');
                 forget.disabled = false;
@@ -4468,12 +4506,14 @@ function bindHomeDashboard() {
         }
         const hide = event.target.closest('[data-home-hide]');
         if (hide) {
+            const id = hide.getAttribute('data-home-hide') || '';
             hide.disabled = true;
             try {
-                const data = await homeApi({ action: 'hide', id: hide.getAttribute('data-home-hide') });
+                const data = await homeApi({ action: 'hide', id });
                 if (!data.ok) throw new Error(data.error || 'Could not hide');
                 showToast(data.message || 'Hidden', 'success');
-                await loadHomeDashboard();
+                applyHomeHiddenLocal(id, true);
+                await reloadHomeList();
             } catch (err) {
                 showToast(err.message || 'Could not hide', 'error');
                 hide.disabled = false;
@@ -4482,12 +4522,14 @@ function bindHomeDashboard() {
         }
         const unhide = event.target.closest('[data-home-unhide]');
         if (unhide) {
+            const id = unhide.getAttribute('data-home-unhide') || '';
             unhide.disabled = true;
             try {
-                const data = await homeApi({ action: 'unhide', id: unhide.getAttribute('data-home-unhide') });
+                const data = await homeApi({ action: 'unhide', id });
                 if (!data.ok) throw new Error(data.error || 'Could not unhide');
                 showToast(data.message || 'Shown again', 'success');
-                await loadHomeDashboard();
+                applyHomeHiddenLocal(id, false);
+                await reloadHomeList();
             } catch (err) {
                 showToast(err.message || 'Could not unhide', 'error');
                 unhide.disabled = false;
@@ -4509,7 +4551,8 @@ function bindHomeDashboard() {
                 }
                 if (!data.ok) throw new Error(data.error || 'Could not remove');
                 showToast(data.message || 'Removed', 'success');
-                await loadHomeDashboard();
+                if (data.hidden || data.needs_hide) applyHomeHiddenLocal(id, true);
+                await reloadHomeList();
             } catch (err) {
                 showToast(err.message || 'Could not remove', 'error');
                 removeBtn.disabled = false;

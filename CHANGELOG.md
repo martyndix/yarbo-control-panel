@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.72] - 2026-10-09
+
+### Fixed
+- Home **Hide** (and Unhide) updates the list immediately. The device was already hidden on the Pi; the page only showed it after a refresh because manage mode does not poll and a poll would not move a row from Home to Hidden.
+
 ## [4.0.71] - 2026-10-09
 
 ### Fixed
