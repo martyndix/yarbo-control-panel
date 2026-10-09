@@ -4267,6 +4267,7 @@ async function sendHomeDeviceToggle(id, button, forceOn) {
             action: 'command',
             id,
             command: nextOn ? 'on' : 'off',
+            kind: device?.kind || '',
         }, heater ? HOME_HEATER_TIMEOUT_MS : 25000);
         if (!data.ok) throw new Error(data.error || 'Failed');
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
@@ -4305,6 +4306,7 @@ async function sendHomeHeaterSetpoint(id, celsius, input) {
             id,
             command: 'setpoint',
             celsius,
+            kind: device?.kind || 'heater',
         }, HOME_HEATER_TIMEOUT_MS);
         if (!data.ok) throw new Error(data.error || 'Failed');
         if (data.heating_setpoint != null && device) device.heating_setpoint = data.heating_setpoint;

@@ -355,6 +355,11 @@ assert_true(str_contains($js, 'data-unifi-cmd="unlock"'), 'Lock is a label; the 
 assert_true(!str_contains($js, 'function unifiDoorLockCommand'), 'door tiles must not send a lock command');
 assert_true(str_contains($js, 'patchUnifiDoorLockButton'), 'Home must rename Unlock to Lock when Open/Closed patches');
 assert_true(str_contains($js, 'unifiDoorLockButtonHtml(d, { home: true })'), 'Home door actions must use the live Unlock/Lock label');
+assert_true(str_contains($js, "kind: device?.kind || ''"), 'Home On/Off command must send device kind');
+assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'Home heater setpoint must send heater kind');
+$homePhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
+assert_true(str_contains($homePhp, "\$body['kind'] = \$kind"), 'PHP Home command must pass kind to the Matter agent');
+assert_true(str_contains($homePhp, "\$input['kind'] ?? \$input['device_kind']"), 'PHP Home command reads kind from the page');
 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(

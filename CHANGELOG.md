@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.65] - 2026-10-09
+
+### Fixed
+- Home heater On/Off and temperature from this page now write the Matter thermostat (Heat, then Auto if the heater rejects Heat). Apple Home already updated the tiles; panel taps were sending On/Off or treating a CHIP ConstraintError as success, so Mill heaters never changed. The command includes the heater kind, failed writes are no longer reported as OK, and a slow write is not aborted by resetting the Matter websocket.
+
 ## [4.0.64] - 2026-10-09
 
 ### Added

@@ -619,6 +619,13 @@ final class YarboHome
         }
         $agent = YarboMatterAgentClient::fromEnv();
         $body = ['op' => 'command', 'id' => $id, 'action' => $action];
+        $kind = strtolower(trim((string) ($input['kind'] ?? $input['device_kind'] ?? '')));
+        if ($kind === '') {
+            $kind = $this->deviceKindMap()[$id] ?? '';
+        }
+        if ($kind !== '') {
+            $body['kind'] = $kind;
+        }
         if ($action === 'brightness' && array_key_exists('brightness', $input)) {
             $body['brightness'] = (int) $input['brightness'];
         }
@@ -1920,6 +1927,9 @@ final class YarboHome
                 $patch['heating_setpoint'] = $celsius;
             }
             $patch['on'] = true;
+        }
+        if (array_key_exists('system_mode', $result) && $result['system_mode'] !== null && $result['system_mode'] !== '') {
+            $patch['system_mode'] = (int) $result['system_mode'];
         }
 
         return $patch;

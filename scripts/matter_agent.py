@@ -41,8 +41,9 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 19
+AGENT_VERSION = 20
 STICKY_HOLD = 4.0
+STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
 POLL_CHANNEL = "poll"
@@ -90,7 +91,13 @@ ATTR_MAX_HEAT_SETPOINT = 0x0016
 ATTR_SYSTEM_MODE = 0x001C
 ATTR_MEASURED_TEMP = 0
 SYSTEM_MODE_OFF = 0
+SYSTEM_MODE_AUTO = 1
 SYSTEM_MODE_HEAT = 4
+CHIP_STATUS_SUCCESS = 0
+CHIP_STATUS_FAILURE = 1
+CHIP_STATUS_CONSTRAINT = 0x87
+CHIP_STATUS_UNSUPPORTED_WRITE = 0x88
+CHIP_STATUS_UNSUPPORTED_CLUSTER = 0xC3
 DEVTYPE_AGGREGATOR = 0x000E
 DEVTYPE_BRIDGED_NODE = 0x0013
 DEVTYPE_ONOFF_LIGHT = 0x0100
@@ -1334,10 +1341,15 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
             prev = previous.get(device_id)
             patched_at = float((prev or {}).get("_patched_at") or 0)
             if prev is not None and patched_at > 0 and (now - patched_at) < STICKY_HOLD:
-                for key in ("on", "brightness", "color_hex", "hue", "saturation", "color_temp"):
-                    if key in prev:
-                        item[key] = prev[key]
+                keys = prev.get("_sticky_keys") or STICKY_STATE_KEYS
+                for key in keys:
+                    name = str(key)
+                    if name.startswith("_"):
+                        continue
+                    if name in prev:
+                        item[name] = prev[name]
                 item["_patched_at"] = patched_at
+                item["_sticky_keys"] = [str(key) for key in keys if not str(key).startswith("_")]
             merged.append(item)
         if merged:
             _live_devices = merged
@@ -1818,6 +1830,7 @@ def matter_rpc(
     timeout: float = 20.0,
     channel: str = CMD_CHANNEL,
     listen: bool = True,
+    retries: int = 2,
 ) -> dict[str, Any]:
     if command == "start_listening":
         channel = LISTEN_CHANNEL
@@ -1830,7 +1843,8 @@ def matter_rpc(
     if args:
         payload["args"] = args
     last_err: Exception | str | None = None
-    for attempt in range(2):
+    attempt_count = max(1, int(retries))
+    for attempt in range(attempt_count):
         message_id = uuid.uuid4().hex[:12]
         payload["message_id"] = message_id
         waiter: dict[str, Any] = {
@@ -1851,7 +1865,9 @@ def matter_rpc(
                 last_err = "Matter server timed out"
                 with _pending_lock:
                     _pending.pop(message_id, None)
-                reset_ws(channel)
+                # A late CHIP write can still land; killing the socket aborts it.
+                if attempt + 1 < attempt_count:
+                    reset_ws(channel)
                 continue
             with _pending_lock:
                 _pending.pop(message_id, None)
@@ -2709,60 +2725,186 @@ def thermostat_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, A
     }
 
 
+def write_status_code(result: Any) -> int:
+    """CHIP Interaction Model status from a write_attribute result (0 = success)."""
+    if result is None or result is True:
+        return CHIP_STATUS_SUCCESS
+    if isinstance(result, dict):
+        for key in ("status", "Status", "statusCode", "StatusCode", "IMStatus"):
+            if key not in result:
+                continue
+            val = result[key]
+            if isinstance(val, dict):
+                for nested in ("value", "status", "Status", "0"):
+                    if nested in val and isinstance(val[nested], (int, float)):
+                        return int(val[nested])
+                name = str(val.get("name") or val.get("Name") or "").lower()
+                if name == "success":
+                    return CHIP_STATUS_SUCCESS
+                if "constraint" in name:
+                    return CHIP_STATUS_CONSTRAINT
+                if "unsupportedcluster" in name.replace(" ", ""):
+                    return CHIP_STATUS_UNSUPPORTED_CLUSTER
+            if isinstance(val, (int, float)):
+                return int(val)
+            if isinstance(val, str):
+                text = val.strip().lower()
+                if text in ("0", "success", "ok"):
+                    return CHIP_STATUS_SUCCESS
+                if "constraint" in text or "0x87" in text:
+                    return CHIP_STATUS_CONSTRAINT
+                if "unsupportedcluster" in text.replace(" ", "") or "0xc3" in text:
+                    return CHIP_STATUS_UNSUPPORTED_CLUSTER
+                try:
+                    return int(text, 0)
+                except ValueError:
+                    return CHIP_STATUS_FAILURE
+        return CHIP_STATUS_SUCCESS
+    if isinstance(result, (list, tuple)):
+        if not result:
+            return CHIP_STATUS_SUCCESS
+        codes: list[int] = []
+        for item in result:
+            if isinstance(item, dict):
+                codes.append(write_status_code(item))
+            elif isinstance(item, (list, tuple)) and item:
+                codes.append(write_status_code(item[-1]))
+            else:
+                codes.append(write_status_code(item))
+        return next((code for code in codes if code), CHIP_STATUS_SUCCESS)
+    return CHIP_STATUS_SUCCESS
+
+
+def write_status_error(status: int) -> str:
+    names = {
+        CHIP_STATUS_FAILURE: "Failure",
+        CHIP_STATUS_CONSTRAINT: "ConstraintError",
+        CHIP_STATUS_UNSUPPORTED_WRITE: "UnsupportedWrite",
+        CHIP_STATUS_UNSUPPORTED_CLUSTER: "UnsupportedCluster",
+        0x85: "InvalidValue",
+        0x86: "UnsupportedAttribute",
+    }
+    label = names.get(int(status), "Error")
+    return f"{label} (0x{int(status):02x})"
+
+
 def write_attribute(node_id: int, endpoint: int, cluster: int, attr: int, value: Any) -> dict[str, Any]:
-    def send() -> dict[str, Any]:
+    def send(nid: int | None = None) -> dict[str, Any]:
+        use = node_id if nid is None else nid
         rpc = matter_rpc(
             "write_attribute",
             {
-                "node_id": node_id,
+                "node_id": use,
                 "attribute_path": f"{endpoint}/{cluster}/{attr}",
                 "value": value,
             },
-            timeout=12.0,
+            timeout=25.0,
+            retries=1,
         )
-        return rpc if not rpc.get("ok") else {"ok": True}
+        if not rpc.get("ok"):
+            return rpc
+        status = write_status_code(rpc.get("result"))
+        if status:
+            return {"ok": False, "error": write_status_error(status), "status": status}
+        return {"ok": True}
 
     return command_with_reconnect(node_id, send)
 
 
 def is_unsupported_cluster(result: dict[str, Any]) -> bool:
+    if int(result.get("status") or 0) == CHIP_STATUS_UNSUPPORTED_CLUSTER:
+        return True
     err = str(result.get("error") or "").lower().replace(" ", "")
     return "unsupportedcluster" in err or "0xc3" in err
 
 
-def live_kind(device_id: str) -> str:
+def is_mode_rejected(result: dict[str, Any]) -> bool:
+    status = int(result.get("status") or 0)
+    if status in (
+        CHIP_STATUS_CONSTRAINT,
+        CHIP_STATUS_UNSUPPORTED_WRITE,
+        CHIP_STATUS_FAILURE,
+        0x85,
+        0x86,
+    ):
+        return True
+    err = str(result.get("error") or "").lower().replace(" ", "")
+    return any(
+        token in err
+        for token in (
+            "constraint",
+            "0x87",
+            "unsupportedwrite",
+            "0x88",
+            "invalid",
+            "unsupportedattribute",
+            "0x86",
+        )
+    )
+
+
+def live_row(device_id: str) -> dict[str, Any] | None:
     row = next((item for item in current_live_devices() if str(item.get("id") or "") == device_id), None)
-    if not isinstance(row, dict):
-        return ""
-    return str(row.get("kind") or "")
+    return row if isinstance(row, dict) else None
+
+
+def live_kind(device_id: str, hinted: str = "") -> str:
+    hint = str(hinted or "").strip().lower()
+    row = live_row(device_id)
+    kind = str((row or {}).get("kind") or "").strip().lower()
+    if hint == "heater" or kind == "heater":
+        return "heater"
+    if row is not None:
+        if (
+            row.get("has_thermostat")
+            or row.get("heating_setpoint") is not None
+            or row.get("system_mode") is not None
+        ):
+            return "heater"
+        labels = " ".join(str(row.get(key) or "") for key in ("name", "product", "vendor", "source"))
+        if name_looks_heater(labels):
+            return "heater"
+    return kind or hint
 
 
 def set_heater_power(node_id: int, endpoint: int, on: bool) -> dict[str, Any]:
-    mode = SYSTEM_MODE_HEAT if on else SYSTEM_MODE_OFF
-    thermo = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, mode)
-    if thermo.get("ok"):
-        return {"ok": True, "on": on, "system_mode": mode}
-    if is_transport_error(thermo) and not is_unsupported_cluster(thermo):
-        return thermo
-    name = "On" if on else "Off"
-    onoff = device_command(node_id, endpoint, ON_OFF, name, {})
-    if onoff.get("ok"):
-        return {"ok": True, "on": on}
-    if is_unsupported_cluster(onoff) and not thermo.get("ok"):
-        return {"ok": False, "error": str(thermo.get("error") or onoff.get("error") or "Heater command failed")}
-    return onoff if not thermo.get("ok") else thermo
+    modes = [SYSTEM_MODE_HEAT, SYSTEM_MODE_AUTO] if on else [SYSTEM_MODE_OFF]
+    last: dict[str, Any] = {"ok": False, "error": "Heater command failed"}
+    for mode in modes:
+        last = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, mode)
+        if last.get("ok"):
+            return {"ok": True, "on": on, "system_mode": mode}
+        if is_transport_error(last) and not is_unsupported_cluster(last):
+            return last
+        if is_unsupported_cluster(last):
+            break
+        if not on or not is_mode_rejected(last):
+            break
+    if is_unsupported_cluster(last):
+        name = "On" if on else "Off"
+        onoff = device_command(node_id, endpoint, ON_OFF, name, {})
+        if onoff.get("ok"):
+            return {"ok": True, "on": on}
+        return {
+            "ok": False,
+            "error": str(last.get("error") or onoff.get("error") or "Heater command failed"),
+        }
+    return last
 
 
 def set_heater_setpoint(node_id: int, endpoint: int, celsius: float) -> dict[str, Any]:
     celsius = max(5.0, min(35.0, float(celsius)))
     hundredths = int(round(celsius * 100))
+    power = set_heater_power(node_id, endpoint, True)
+    if not power.get("ok") and is_transport_error(power):
+        return power
     rpc = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_OCCUPIED_HEATING_SETPOINT, hundredths)
     if not rpc.get("ok"):
         return rpc
-    power = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_HEAT)
-    if not power.get("ok") and not is_unsupported_cluster(power) and is_transport_error(power):
-        return power
-    return {"ok": True, "on": True, "heating_setpoint": round(celsius, 1)}
+    out: dict[str, Any] = {"ok": True, "on": True, "heating_setpoint": round(celsius, 1)}
+    if power.get("system_mode") is not None:
+        out["system_mode"] = power["system_mode"]
+    return out
 
 
 def endpoint_looks_vacuum(attributes: dict[str, Any], endpoint: int) -> bool:
@@ -3015,7 +3157,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         action = str(body.get("action") or body.get("command") or "").strip().lower()
         if action in ("on", "off", "toggle"):
             name = {"on": "On", "off": "Off", "toggle": "Toggle"}[action]
-            heater = live_kind(device_id) == "heater"
+            heater = live_kind(device_id, str(body.get("kind") or body.get("device_kind") or "")) == "heater"
             on: bool | None
             if action == "on":
                 on = True
@@ -3068,17 +3210,16 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 return {"ok": False, "error": "Set a heating temperature"}
             rpc = set_heater_setpoint(node_id, endpoint, celsius)
             if rpc.get("ok"):
-                patch_live_device(
-                    device_id,
-                    {"on": True, "heating_setpoint": rpc.get("heating_setpoint")},
-                    sticky=True,
-                )
+                patch = {"on": True, "heating_setpoint": rpc.get("heating_setpoint")}
+                if rpc.get("system_mode") is not None:
+                    patch["system_mode"] = rpc["system_mode"]
+                patch_live_device(device_id, patch, sticky=True)
                 rpc = {**rpc, "id": device_id}
             return rpc
         if action == "brightness":
             pct = max(0, min(100, int(body.get("brightness") or 0)))
             on = pct > 0
-            if live_kind(device_id) == "heater":
+            if live_kind(device_id, str(body.get("kind") or body.get("device_kind") or "")) == "heater":
                 rpc = set_heater_power(node_id, endpoint, on)
                 if rpc.get("ok"):
                     patch = {"on": bool(rpc.get("on", on))}

@@ -24,7 +24,7 @@ def main() -> int:
     agent = load_agent()
     calls: list[tuple] = []
 
-    def fake_rpc(command, args=None, timeout=20.0, channel="", listen=True):
+    def fake_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
         calls.append((command, args or {}))
         if command == "write_attribute":
             return {"ok": True}
@@ -40,7 +40,13 @@ def main() -> int:
     ping = agent.dispatch({"op": "ping"})
     assert ping.get("ok") is True, ping
     assert ping.get("version") == agent.AGENT_VERSION, ping
+    assert ping.get("version") == 20, ping
     assert "thermostat" in (ping.get("features") or []), ping
+
+    assert agent.write_status_code(None) == 0
+    assert agent.write_status_code([{"Status": 0}]) == 0
+    assert agent.write_status_code([{"status": 0x87}]) == 0x87
+    assert agent.write_status_code([{"Path": "1/513/28", "Status": {"name": "ConstraintError"}}]) == 0x87
 
     calls.clear()
     on = agent.dispatch({"op": "command", "id": "25:1", "action": "on"})
@@ -65,6 +71,11 @@ def main() -> int:
     assert setp.get("heating_setpoint") == 22.0, setp
     set_paths = [str(args.get("attribute_path") or "") for command, args in calls if command == "write_attribute"]
     assert any(path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_OCCUPIED_HEATING_SETPOINT}") for path in set_paths), set_paths
+    assert any(
+        str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
+        for command, args in calls
+        if command == "write_attribute"
+    ), calls
 
     agent._live_devices = [{"id": "12:4", "kind": "light", "on": False}]
     calls.clear()
@@ -82,6 +93,117 @@ def main() -> int:
     assert agent.LEVEL_CONTROL in clusters, calls
     assert agent.ON_OFF in clusters, calls
     assert not any(command == "write_attribute" for command, _ in calls), calls
+
+    def heat_rejected(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "write_attribute":
+            path = str((args or {}).get("attribute_path") or "")
+            value = (args or {}).get("value")
+            if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}") and value == agent.SYSTEM_MODE_HEAT:
+                return {"ok": False, "error": "InteractionModelError: ConstraintError (0x87)"}
+            if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}") and value == agent.SYSTEM_MODE_AUTO:
+                return {"ok": True, "result": [{"status": 0}]}
+            if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_OCCUPIED_HEATING_SETPOINT}"):
+                return {"ok": True, "result": [{"Status": 0}]}
+            return {"ok": True}
+        if command == "device_command":
+            return {"ok": False, "error": "InteractionModelError: UnsupportedCluster (0xc3)"}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = heat_rejected  # type: ignore[method-assign]
+    agent._live_devices = [{"id": "26:2", "kind": "heater", "on": False}]
+    calls.clear()
+    auto_on = agent.dispatch({"op": "command", "id": "26:2", "action": "on"})
+    assert auto_on.get("ok") is True, auto_on
+    assert auto_on.get("on") is True, auto_on
+    mode_values = [
+        args.get("value")
+        for command, args in calls
+        if command == "write_attribute"
+        and str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
+    ]
+    assert mode_values == [agent.SYSTEM_MODE_HEAT, agent.SYSTEM_MODE_AUTO], mode_values
+    assert not any(command == "device_command" for command, _ in calls), calls
+
+    agent._live_devices = []
+    calls.clear()
+    hinted = agent.dispatch({"op": "command", "id": "26:2", "action": "on", "kind": "heater"})
+    assert hinted.get("ok") is True, hinted
+    assert any(command == "write_attribute" for command, _ in calls), calls
+    assert not any(command == "device_command" for command, _ in calls), calls
+
+    agent._live_devices = [
+        {
+            "id": "27:1",
+            "name": "Mill Wi-Fi Panel Heater Gen4",
+            "kind": "light",
+            "has_thermostat": True,
+            "heating_setpoint": 21.0,
+            "on": False,
+        }
+    ]
+    calls.clear()
+    inferred = agent.dispatch({"op": "command", "id": "27:1", "action": "off"})
+    assert inferred.get("ok") is True, inferred
+    off_mode = [
+        args.get("value")
+        for command, args in calls
+        if command == "write_attribute"
+        and str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
+    ]
+    assert off_mode == [agent.SYSTEM_MODE_OFF], off_mode
+    assert not any(command == "device_command" for command, _ in calls), calls
+
+    def status_failed(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "write_attribute":
+            return {"ok": True, "result": [{"path": "2/513/28", "status": 0x87}]}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = status_failed  # type: ignore[method-assign]
+    agent._live_devices = [{"id": "26:2", "kind": "heater", "on": False}]
+    calls.clear()
+    rejected = agent.set_heater_power(26, 2, True)
+    assert rejected.get("ok") is False, rejected
+    assert "0x87" in str(rejected.get("error") or ""), rejected
+
+    def setpoint_ok(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "write_attribute":
+            path = str((args or {}).get("attribute_path") or "")
+            value = (args or {}).get("value")
+            if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}") and value == agent.SYSTEM_MODE_HEAT:
+                return {"ok": False, "error": "ConstraintError (0x87)"}
+            return {"ok": True, "result": [{"status": 0}]}
+        return {"ok": False, "error": "no"}
+
+    agent.matter_rpc = setpoint_ok  # type: ignore[method-assign]
+    calls.clear()
+    warmed = agent.dispatch({"op": "command", "id": "26:2", "action": "setpoint", "celsius": 19.5})
+    assert warmed.get("ok") is True, warmed
+    assert warmed.get("heating_setpoint") == 19.5, warmed
+    assert warmed.get("system_mode") == agent.SYSTEM_MODE_AUTO, warmed
+
+    import time as time_mod
+
+    agent._live_devices = [
+        {
+            "id": "26:2",
+            "kind": "heater",
+            "on": True,
+            "heating_setpoint": 19.5,
+            "system_mode": agent.SYSTEM_MODE_AUTO,
+            "_patched_at": time_mod.time(),
+            "_sticky_keys": ["on", "heating_setpoint", "system_mode"],
+        }
+    ]
+    agent.remember_live_devices(
+        [{"id": "26:2", "kind": "heater", "on": False, "heating_setpoint": 21.0, "system_mode": 0}]
+    )
+    held = agent.current_live_devices()
+    assert held and held[0].get("on") is True, held
+    assert held[0].get("heating_setpoint") == 19.5, held
+    assert held[0].get("system_mode") == agent.SYSTEM_MODE_AUTO, held
 
     print("ok: heater commands use Thermostat SystemMode")
     return 0
