@@ -662,6 +662,12 @@ final class YarboHome
             if ($celsius !== null) {
                 $body['celsius'] = max(5.0, min(35.0, (float) $celsius));
             }
+            if ($action === 'on' || $action === 'toggle') {
+                $body['mode'] = 'heat';
+            }
+        }
+        if (in_array($action, ['setpoint', 'temperature', 'heating_setpoint'], true)) {
+            $body['mode'] = 'heat';
         }
         $timeout = $kind === self::KIND_HEATER ? 80.0 : 60.0;
         $result = $agent->request($body, $timeout);

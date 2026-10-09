@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 21
+AGENT_VERSION = 22
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2888,6 +2888,26 @@ def heater_setpoint_celsius(device_id: str, hinted: Any = None) -> float:
     return 21.0
 
 
+def write_heater_setpoint(
+    node_id: int, endpoint: int, celsius: float
+) -> dict[str, Any]:
+    hundredths = int(round(max(5.0, min(35.0, float(celsius))) * 100))
+    return write_attribute(
+        node_id,
+        endpoint,
+        THERMOSTAT,
+        ATTR_OCCUPIED_HEATING_SETPOINT,
+        hundredths,
+        reconnect=False,
+    )
+
+
+def write_heater_heat(node_id: int, endpoint: int) -> dict[str, Any]:
+    return write_attribute(
+        node_id, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_HEAT, reconnect=False
+    )
+
+
 def set_heater_power(
     node_id: int,
     endpoint: int,
@@ -2895,6 +2915,11 @@ def set_heater_power(
     celsius: Any = None,
     device_id: str = "",
 ) -> dict[str, Any]:
+    """On writes Heat (never Auto/Cool), then the occupied-heating setpoint.
+
+    Apple Home heat-only heaters reject Cool/Auto. Off only writes SystemMode Off.
+    """
+
     def send(nid: int | None = None) -> dict[str, Any]:
         use = node_id if nid is None else nid
         if not on:
@@ -2909,45 +2934,35 @@ def set_heater_power(
                     return {"ok": True, "on": False}
             return off
         target = heater_setpoint_celsius(device_id, celsius)
-        hundredths = int(round(target * 100))
-        setpoint = write_attribute(
-            use,
-            endpoint,
-            THERMOSTAT,
-            ATTR_OCCUPIED_HEATING_SETPOINT,
-            hundredths,
-            reconnect=False,
-        )
-        if not setpoint.get("ok") and is_transport_error(setpoint):
-            return setpoint
-        heat = write_attribute(
-            use, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_HEAT, reconnect=False
-        )
+        heat = write_heater_heat(use, endpoint)
         if heat.get("ok"):
-            out: dict[str, Any] = {
+            write_heater_setpoint(use, endpoint, target)
+            return {
                 "ok": True,
                 "on": True,
                 "system_mode": SYSTEM_MODE_HEAT,
                 "heating_setpoint": round(target, 1),
             }
-            return out
-        if is_transport_error(heat) or not is_mode_rejected(heat):
-            if is_unsupported_cluster(heat):
-                onoff = device_command(use, endpoint, ON_OFF, "On", {})
-                if onoff.get("ok"):
-                    return {"ok": True, "on": True, "heating_setpoint": round(target, 1)}
+        if is_unsupported_cluster(heat):
+            onoff = device_command(use, endpoint, ON_OFF, "On", {})
+            if onoff.get("ok"):
+                write_heater_setpoint(use, endpoint, target)
+                return {"ok": True, "on": True, "heating_setpoint": round(target, 1)}
             return heat
-        auto = write_attribute(
-            use, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_AUTO, reconnect=False
-        )
-        if auto.get("ok"):
+        if is_transport_error(heat) and not is_mode_rejected(heat):
+            return heat
+        setpoint = write_heater_setpoint(use, endpoint, target)
+        if not setpoint.get("ok") and is_transport_error(setpoint):
+            return heat
+        retry = write_heater_heat(use, endpoint)
+        if retry.get("ok"):
             return {
                 "ok": True,
                 "on": True,
-                "system_mode": SYSTEM_MODE_AUTO,
+                "system_mode": SYSTEM_MODE_HEAT,
                 "heating_setpoint": round(target, 1),
             }
-        return auto if auto.get("error") else heat
+        return retry if retry.get("error") else heat
 
     return command_with_reconnect(node_id, send)
 
@@ -3228,7 +3243,11 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 if hinted is None:
                     hinted = body.get("setpoint")
                 rpc = set_heater_power(
-                    node_id, endpoint, bool(on), celsius=hinted, device_id=device_id
+                    node_id,
+                    endpoint,
+                    bool(on),
+                    celsius=hinted,
+                    device_id=device_id,
                 )
             else:
 
@@ -3263,6 +3282,8 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 out["on"] = bool(rpc.get("on", on))
             if rpc.get("heating_setpoint") is not None:
                 out["heating_setpoint"] = rpc["heating_setpoint"]
+            if rpc.get("system_mode") is not None:
+                out["system_mode"] = rpc["system_mode"]
             return out
         if action in ("setpoint", "temperature", "heating_setpoint"):
             try:

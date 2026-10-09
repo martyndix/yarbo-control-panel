@@ -357,6 +357,7 @@ assert_true(str_contains($js, 'patchUnifiDoorLockButton'), 'Home must rename Unl
 assert_true(str_contains($js, 'unifiDoorLockButtonHtml(d, { home: true })'), 'Home door actions must use the live Unlock/Lock label');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'Home On/Off command must send device kind');
 assert_true(str_contains($js, 'celsius: Number(device.heating_setpoint)'), 'heater On sends the current heating temperature');
+assert_true(str_contains($js, "mode: 'heat'"), 'heater On sends Heat mode, not Auto');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'Home heater setpoint must send heater kind');
 $homePhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 assert_true(str_contains($homePhp, "\$body['kind'] = \$kind"), 'PHP Home command must pass kind to the Matter agent');

@@ -40,7 +40,7 @@ def main() -> int:
     ping = agent.dispatch({"op": "ping"})
     assert ping.get("ok") is True, ping
     assert ping.get("version") == agent.AGENT_VERSION, ping
-    assert ping.get("version") == 21, ping
+    assert ping.get("version") == 22, ping
     assert "thermostat" in (ping.get("features") or []), ping
 
     assert agent.write_status_code(None) == 0
@@ -55,13 +55,18 @@ def main() -> int:
     assert on.get("heating_setpoint") == 21.0, on
     writes = [args for command, args in calls if command == "write_attribute"]
     assert len(writes) >= 2, calls
-    set_path = str(writes[0].get("attribute_path") or "")
-    mode_path = str(writes[1].get("attribute_path") or "")
-    assert set_path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_OCCUPIED_HEATING_SETPOINT}"), writes
-    assert writes[0].get("value") == 2100, writes
+    mode_path = str(writes[0].get("attribute_path") or "")
+    set_path = str(writes[1].get("attribute_path") or "")
     assert mode_path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}"), writes
-    assert writes[1].get("value") == agent.SYSTEM_MODE_HEAT, writes
+    assert writes[0].get("value") == agent.SYSTEM_MODE_HEAT, writes
+    assert set_path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_OCCUPIED_HEATING_SETPOINT}"), writes
+    assert writes[1].get("value") == 2100, writes
     assert not any(command == "device_command" for command, _ in calls), calls
+    assert not any(
+        args.get("value") == agent.SYSTEM_MODE_AUTO
+        for command, args in calls
+        if command == "write_attribute"
+    ), calls
 
     calls.clear()
     off = agent.dispatch({"op": "command", "id": "25:1", "action": "off"})
@@ -103,15 +108,20 @@ def main() -> int:
     assert agent.ON_OFF in clusters, calls
     assert not any(command == "write_attribute" for command, _ in calls), calls
 
-    def heat_rejected(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+    heat_tries = {"n": 0}
+
+    def heat_then_setpoint(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
         calls.append((command, args or {}))
         if command == "write_attribute":
             path = str((args or {}).get("attribute_path") or "")
             value = (args or {}).get("value")
             if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}") and value == agent.SYSTEM_MODE_HEAT:
-                return {"ok": False, "error": "InteractionModelError: ConstraintError (0x87)"}
-            if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}") and value == agent.SYSTEM_MODE_AUTO:
+                heat_tries["n"] += 1
+                if heat_tries["n"] == 1:
+                    return {"ok": False, "error": "InteractionModelError: ConstraintError (0x87)"}
                 return {"ok": True, "result": [{"status": 0}]}
+            if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}") and value == agent.SYSTEM_MODE_AUTO:
+                return {"ok": False, "error": "must not write Auto"}
             if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_OCCUPIED_HEATING_SETPOINT}"):
                 return {"ok": True, "result": [{"Status": 0}]}
             return {"ok": True}
@@ -119,19 +129,21 @@ def main() -> int:
             return {"ok": False, "error": "InteractionModelError: UnsupportedCluster (0xc3)"}
         return {"ok": True, "result": None}
 
-    agent.matter_rpc = heat_rejected  # type: ignore[method-assign]
-    agent._live_devices = [{"id": "26:2", "kind": "heater", "on": False}]
+    agent.matter_rpc = heat_then_setpoint  # type: ignore[method-assign]
+    agent._live_devices = [{"id": "26:2", "kind": "heater", "on": False, "heating_setpoint": 20.0}]
     calls.clear()
-    auto_on = agent.dispatch({"op": "command", "id": "26:2", "action": "on"})
-    assert auto_on.get("ok") is True, auto_on
-    assert auto_on.get("on") is True, auto_on
+    heat_on = agent.dispatch({"op": "command", "id": "26:2", "action": "on", "mode": "heat", "celsius": 20})
+    assert heat_on.get("ok") is True, heat_on
+    assert heat_on.get("on") is True, heat_on
+    assert heat_on.get("system_mode") == agent.SYSTEM_MODE_HEAT, heat_on
     mode_values = [
         args.get("value")
         for command, args in calls
         if command == "write_attribute"
         and str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
     ]
-    assert mode_values == [agent.SYSTEM_MODE_HEAT, agent.SYSTEM_MODE_AUTO], mode_values
+    assert mode_values == [agent.SYSTEM_MODE_HEAT, agent.SYSTEM_MODE_HEAT], mode_values
+    assert agent.SYSTEM_MODE_AUTO not in mode_values, mode_values
     assert not any(command == "device_command" for command, _ in calls), calls
 
     agent._live_devices = []
@@ -176,22 +188,18 @@ def main() -> int:
     assert rejected.get("ok") is False, rejected
     assert "0x87" in str(rejected.get("error") or ""), rejected
 
-    def setpoint_ok(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
-        calls.append((command, args or {}))
-        if command == "write_attribute":
-            path = str((args or {}).get("attribute_path") or "")
-            value = (args or {}).get("value")
-            if path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}") and value == agent.SYSTEM_MODE_HEAT:
-                return {"ok": False, "error": "ConstraintError (0x87)"}
-            return {"ok": True, "result": [{"status": 0}]}
-        return {"ok": False, "error": "no"}
-
-    agent.matter_rpc = setpoint_ok  # type: ignore[method-assign]
+    heat_tries["n"] = 0
+    agent.matter_rpc = heat_then_setpoint  # type: ignore[method-assign]
     calls.clear()
-    warmed = agent.dispatch({"op": "command", "id": "26:2", "action": "setpoint", "celsius": 19.5})
+    warmed = agent.dispatch({"op": "command", "id": "26:2", "action": "setpoint", "celsius": 19.5, "mode": "heat"})
     assert warmed.get("ok") is True, warmed
     assert warmed.get("heating_setpoint") == 19.5, warmed
-    assert warmed.get("system_mode") == agent.SYSTEM_MODE_AUTO, warmed
+    assert warmed.get("system_mode") == agent.SYSTEM_MODE_HEAT, warmed
+    assert not any(
+        args.get("value") == agent.SYSTEM_MODE_AUTO
+        for command, args in calls
+        if command == "write_attribute"
+    ), calls
 
     import time as time_mod
 

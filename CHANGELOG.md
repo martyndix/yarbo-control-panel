@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.67] - 2026-10-09
+
+### Fixed
+- Home heater **On** writes Thermostat **Heat** only (the same Heat mode Apple Home needs). It no longer falls through to **Auto**, which these heaters cannot use because they do not cool. Heat is written first, then the occupied-heating temperature. Off still only sets Off.
+
 ## [4.0.66] - 2026-10-09
 
 ### Fixed
