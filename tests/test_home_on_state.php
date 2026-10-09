@@ -356,10 +356,13 @@ assert_true(!str_contains($js, 'function unifiDoorLockCommand'), 'door tiles mus
 assert_true(str_contains($js, 'patchUnifiDoorLockButton'), 'Home must rename Unlock to Lock when Open/Closed patches');
 assert_true(str_contains($js, 'unifiDoorLockButtonHtml(d, { home: true })'), 'Home door actions must use the live Unlock/Lock label');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'Home On/Off command must send device kind');
+assert_true(str_contains($js, 'celsius: Number(device.heating_setpoint)'), 'heater On sends the current heating temperature');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'Home heater setpoint must send heater kind');
 $homePhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 assert_true(str_contains($homePhp, "\$body['kind'] = \$kind"), 'PHP Home command must pass kind to the Matter agent');
 assert_true(str_contains($homePhp, "\$input['kind'] ?? \$input['device_kind']"), 'PHP Home command reads kind from the page');
+assert_true(str_contains($homePhp, 'cachedDeviceSetpoint'), 'heater On uses the last heating temperature');
+assert_true(str_contains($homePhp, '? 80.0 : 60.0'), 'heater Matter writes get a longer PHP wait');
 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(

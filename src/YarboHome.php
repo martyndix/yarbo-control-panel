@@ -654,10 +654,20 @@ final class YarboHome
             }
             $body['celsius'] = max(5.0, min(35.0, (float) $celsius));
         }
-        $result = $agent->request($body, 60.0);
+        if (in_array($action, ['on', 'off', 'toggle'], true) && $kind === self::KIND_HEATER) {
+            $celsius = $input['celsius'] ?? $input['setpoint'] ?? $input['temperature'] ?? null;
+            if ($celsius === null || $celsius === '') {
+                $celsius = $this->cachedDeviceSetpoint($id);
+            }
+            if ($celsius !== null) {
+                $body['celsius'] = max(5.0, min(35.0, (float) $celsius));
+            }
+        }
+        $timeout = $kind === self::KIND_HEATER ? 80.0 : 60.0;
+        $result = $agent->request($body, $timeout);
         if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
             $agent->forceRestart();
-            $result = $agent->request($body, 60.0);
+            $result = $agent->request($body, $timeout);
         }
         if ($action === 'brightness' && !($result['ok'] ?? false)
             && YarboMatterFabric::isUnsupportedCluster((string) ($result['error'] ?? ''))) {
@@ -1927,6 +1937,11 @@ final class YarboHome
                 $patch['heating_setpoint'] = $celsius;
             }
             $patch['on'] = true;
+        } elseif ($action === 'on') {
+            $celsius = self::optionalCelsius($result['heating_setpoint'] ?? $body['celsius'] ?? null);
+            if ($celsius !== null) {
+                $patch['heating_setpoint'] = $celsius;
+            }
         }
         if (array_key_exists('system_mode', $result) && $result['system_mode'] !== null && $result['system_mode'] !== '') {
             $patch['system_mode'] = (int) $result['system_mode'];
@@ -1945,6 +1960,30 @@ final class YarboHome
         foreach ($this->load()['last_devices'] ?? [] as $row) {
             if (is_array($row) && (string) ($row['id'] ?? '') === $id && array_key_exists('on', $row)) {
                 return YarboMatterFabric::attrBool($row['on']);
+            }
+        }
+
+        return null;
+    }
+
+    private function cachedDeviceSetpoint(string $id): ?float
+    {
+        foreach ($this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json') as $row) {
+            if (!is_array($row) || (string) ($row['id'] ?? '') !== $id) {
+                continue;
+            }
+            $celsius = self::optionalCelsius($row['heating_setpoint'] ?? null);
+            if ($celsius !== null) {
+                return $celsius;
+            }
+        }
+        foreach ($this->load()['last_devices'] ?? [] as $row) {
+            if (!is_array($row) || (string) ($row['id'] ?? '') !== $id) {
+                continue;
+            }
+            $celsius = self::optionalCelsius($row['heating_setpoint'] ?? null);
+            if ($celsius !== null) {
+                return $celsius;
             }
         }
 

@@ -35,12 +35,12 @@ def main() -> int:
         return {"ok": True, "result": None}
 
     agent.matter_rpc = fake_rpc  # type: ignore[method-assign]
-    agent._live_devices = [{"id": "25:1", "kind": "heater", "on": False}]
+    agent._live_devices = [{"id": "25:1", "kind": "heater", "on": False, "heating_setpoint": 21.0}]
 
     ping = agent.dispatch({"op": "ping"})
     assert ping.get("ok") is True, ping
     assert ping.get("version") == agent.AGENT_VERSION, ping
-    assert ping.get("version") == 20, ping
+    assert ping.get("version") == 21, ping
     assert "thermostat" in (ping.get("features") or []), ping
 
     assert agent.write_status_code(None) == 0
@@ -49,14 +49,18 @@ def main() -> int:
     assert agent.write_status_code([{"Path": "1/513/28", "Status": {"name": "ConstraintError"}}]) == 0x87
 
     calls.clear()
-    on = agent.dispatch({"op": "command", "id": "25:1", "action": "on"})
+    on = agent.dispatch({"op": "command", "id": "25:1", "action": "on", "celsius": 21})
     assert on.get("ok") is True, on
     assert on.get("on") is True, on
+    assert on.get("heating_setpoint") == 21.0, on
     writes = [args for command, args in calls if command == "write_attribute"]
-    assert writes, calls
-    path = str(writes[0].get("attribute_path") or "")
-    assert path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}"), writes
-    assert writes[0].get("value") == agent.SYSTEM_MODE_HEAT, writes
+    assert len(writes) >= 2, calls
+    set_path = str(writes[0].get("attribute_path") or "")
+    mode_path = str(writes[1].get("attribute_path") or "")
+    assert set_path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_OCCUPIED_HEATING_SETPOINT}"), writes
+    assert writes[0].get("value") == 2100, writes
+    assert mode_path.endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}"), writes
+    assert writes[1].get("value") == agent.SYSTEM_MODE_HEAT, writes
     assert not any(command == "device_command" for command, _ in calls), calls
 
     calls.clear()
@@ -64,6 +68,11 @@ def main() -> int:
     assert off.get("ok") is True, off
     off_writes = [args for command, args in calls if command == "write_attribute"]
     assert off_writes and off_writes[0].get("value") == agent.SYSTEM_MODE_OFF, off_writes
+    assert not any(
+        str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_OCCUPIED_HEATING_SETPOINT}")
+        for command, args in calls
+        if command == "write_attribute"
+    ), calls
 
     calls.clear()
     setp = agent.dispatch({"op": "command", "id": "25:1", "action": "setpoint", "celsius": 22})

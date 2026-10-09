@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.66] - 2026-10-09
+
+### Fixed
+- Home heater **On** now writes the occupied-heating setpoint and **Heat** together, the same as picking Heat (not Cool/Auto) in Apple Home. Off only sets SystemMode Off. A slow Matter write no longer shows **Matter agent is not running** while the agent is still listening — that was PHP timing out the HTTP read.
+
 ## [4.0.65] - 2026-10-09
 
 ### Fixed

@@ -15,6 +15,10 @@ if (YarboMatterAgentClient::isNotRunningError(['ok' => false, 'error' => 'Hue ti
     fwrite(STDERR, "isNotRunningError should ignore other errors\n");
     exit(1);
 }
+if (YarboMatterAgentClient::isNotRunningError(['ok' => false, 'error' => 'Matter command timed out'])) {
+    fwrite(STDERR, "a live-agent timeout must not look like a dead agent\n");
+    exit(1);
+}
 
 $src = file_get_contents(__DIR__ . '/../src/YarboMatterAgentClient.php');
 $auto = file_get_contents(__DIR__ . '/../src/YarboHomeAutomations.php');

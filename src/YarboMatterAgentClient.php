@@ -6,7 +6,7 @@ namespace Yarbo;
 
 final class YarboMatterAgentClient
 {
-    public const MIN_VERSION = 20;
+    public const MIN_VERSION = 21;
     private const SPAWN_COOLDOWN_S = 3.0;
 
     private static bool $spawnAttempted = false;
@@ -66,6 +66,10 @@ final class YarboMatterAgentClient
         $url = sprintf('http://%s:%d/', $this->host, $this->port);
         $raw = @file_get_contents($url, false, $ctx);
         if (!is_string($raw) || $raw === '') {
+            if ($this->portOpen()) {
+                return ['ok' => false, 'error' => 'Matter command timed out'];
+            }
+
             return ['ok' => false, 'error' => 'Matter agent is not running'];
         }
         $decoded = json_decode($raw, true);

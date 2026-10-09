@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 20
+AGENT_VERSION = 21
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1865,9 +1865,7 @@ def matter_rpc(
                 last_err = "Matter server timed out"
                 with _pending_lock:
                     _pending.pop(message_id, None)
-                # A late CHIP write can still land; killing the socket aborts it.
-                if attempt + 1 < attempt_count:
-                    reset_ws(channel)
+                reset_ws(channel)
                 continue
             with _pending_lock:
                 _pending.pop(message_id, None)
@@ -2788,7 +2786,15 @@ def write_status_error(status: int) -> str:
     return f"{label} (0x{int(status):02x})"
 
 
-def write_attribute(node_id: int, endpoint: int, cluster: int, attr: int, value: Any) -> dict[str, Any]:
+def write_attribute(
+    node_id: int,
+    endpoint: int,
+    cluster: int,
+    attr: int,
+    value: Any,
+    *,
+    reconnect: bool = True,
+) -> dict[str, Any]:
     def send(nid: int | None = None) -> dict[str, Any]:
         use = node_id if nid is None else nid
         rpc = matter_rpc(
@@ -2798,7 +2804,7 @@ def write_attribute(node_id: int, endpoint: int, cluster: int, attr: int, value:
                 "attribute_path": f"{endpoint}/{cluster}/{attr}",
                 "value": value,
             },
-            timeout=25.0,
+            timeout=18.0,
             retries=1,
         )
         if not rpc.get("ok"):
@@ -2808,6 +2814,8 @@ def write_attribute(node_id: int, endpoint: int, cluster: int, attr: int, value:
             return {"ok": False, "error": write_status_error(status), "status": status}
         return {"ok": True}
 
+    if not reconnect:
+        return send()
     return command_with_reconnect(node_id, send)
 
 
@@ -2867,44 +2875,90 @@ def live_kind(device_id: str, hinted: str = "") -> str:
     return kind or hint
 
 
-def set_heater_power(node_id: int, endpoint: int, on: bool) -> dict[str, Any]:
-    modes = [SYSTEM_MODE_HEAT, SYSTEM_MODE_AUTO] if on else [SYSTEM_MODE_OFF]
-    last: dict[str, Any] = {"ok": False, "error": "Heater command failed"}
-    for mode in modes:
-        last = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, mode)
-        if last.get("ok"):
-            return {"ok": True, "on": on, "system_mode": mode}
-        if is_transport_error(last) and not is_unsupported_cluster(last):
-            return last
-        if is_unsupported_cluster(last):
-            break
-        if not on or not is_mode_rejected(last):
-            break
-    if is_unsupported_cluster(last):
-        name = "On" if on else "Off"
-        onoff = device_command(node_id, endpoint, ON_OFF, name, {})
-        if onoff.get("ok"):
-            return {"ok": True, "on": on}
-        return {
-            "ok": False,
-            "error": str(last.get("error") or onoff.get("error") or "Heater command failed"),
-        }
-    return last
+def heater_setpoint_celsius(device_id: str, hinted: Any = None) -> float:
+    for raw in (hinted, (live_row(device_id) or {}).get("heating_setpoint")):
+        if raw is None or raw == "":
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return max(5.0, min(35.0, value))
+    return 21.0
 
 
-def set_heater_setpoint(node_id: int, endpoint: int, celsius: float) -> dict[str, Any]:
-    celsius = max(5.0, min(35.0, float(celsius)))
-    hundredths = int(round(celsius * 100))
-    power = set_heater_power(node_id, endpoint, True)
-    if not power.get("ok") and is_transport_error(power):
-        return power
-    rpc = write_attribute(node_id, endpoint, THERMOSTAT, ATTR_OCCUPIED_HEATING_SETPOINT, hundredths)
-    if not rpc.get("ok"):
-        return rpc
-    out: dict[str, Any] = {"ok": True, "on": True, "heating_setpoint": round(celsius, 1)}
-    if power.get("system_mode") is not None:
-        out["system_mode"] = power["system_mode"]
-    return out
+def set_heater_power(
+    node_id: int,
+    endpoint: int,
+    on: bool,
+    celsius: Any = None,
+    device_id: str = "",
+) -> dict[str, Any]:
+    def send(nid: int | None = None) -> dict[str, Any]:
+        use = node_id if nid is None else nid
+        if not on:
+            off = write_attribute(
+                use, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_OFF, reconnect=False
+            )
+            if off.get("ok"):
+                return {"ok": True, "on": False, "system_mode": SYSTEM_MODE_OFF}
+            if is_unsupported_cluster(off):
+                onoff = device_command(use, endpoint, ON_OFF, "Off", {})
+                if onoff.get("ok"):
+                    return {"ok": True, "on": False}
+            return off
+        target = heater_setpoint_celsius(device_id, celsius)
+        hundredths = int(round(target * 100))
+        setpoint = write_attribute(
+            use,
+            endpoint,
+            THERMOSTAT,
+            ATTR_OCCUPIED_HEATING_SETPOINT,
+            hundredths,
+            reconnect=False,
+        )
+        if not setpoint.get("ok") and is_transport_error(setpoint):
+            return setpoint
+        heat = write_attribute(
+            use, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_HEAT, reconnect=False
+        )
+        if heat.get("ok"):
+            out: dict[str, Any] = {
+                "ok": True,
+                "on": True,
+                "system_mode": SYSTEM_MODE_HEAT,
+                "heating_setpoint": round(target, 1),
+            }
+            return out
+        if is_transport_error(heat) or not is_mode_rejected(heat):
+            if is_unsupported_cluster(heat):
+                onoff = device_command(use, endpoint, ON_OFF, "On", {})
+                if onoff.get("ok"):
+                    return {"ok": True, "on": True, "heating_setpoint": round(target, 1)}
+            return heat
+        auto = write_attribute(
+            use, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_AUTO, reconnect=False
+        )
+        if auto.get("ok"):
+            return {
+                "ok": True,
+                "on": True,
+                "system_mode": SYSTEM_MODE_AUTO,
+                "heating_setpoint": round(target, 1),
+            }
+        return auto if auto.get("error") else heat
+
+    return command_with_reconnect(node_id, send)
+
+
+def set_heater_setpoint(
+    node_id: int,
+    endpoint: int,
+    celsius: float,
+    device_id: str = "",
+) -> dict[str, Any]:
+    return set_heater_power(node_id, endpoint, True, celsius=celsius, device_id=device_id)
 
 
 def endpoint_looks_vacuum(attributes: dict[str, Any], endpoint: int) -> bool:
@@ -3170,7 +3224,12 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 )
                 on = (not attr_bool(current.get("on"))) if current is not None else True
             if heater:
-                rpc = set_heater_power(node_id, endpoint, bool(on))
+                hinted = body.get("celsius")
+                if hinted is None:
+                    hinted = body.get("setpoint")
+                rpc = set_heater_power(
+                    node_id, endpoint, bool(on), celsius=hinted, device_id=device_id
+                )
             else:
 
                 def send_onoff(nid: int | None = None) -> dict[str, Any]:
@@ -3196,10 +3255,14 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 patch = {"on": bool(rpc.get("on", on))}
                 if rpc.get("system_mode") is not None:
                     patch["system_mode"] = rpc["system_mode"]
+                if rpc.get("heating_setpoint") is not None:
+                    patch["heating_setpoint"] = rpc["heating_setpoint"]
                 patch_live_device(device_id, patch, sticky=True)
             out: dict[str, Any] = {"ok": True, "id": device_id}
             if on is not None:
                 out["on"] = bool(rpc.get("on", on))
+            if rpc.get("heating_setpoint") is not None:
+                out["heating_setpoint"] = rpc["heating_setpoint"]
             return out
         if action in ("setpoint", "temperature", "heating_setpoint"):
             try:
@@ -3208,7 +3271,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 celsius = 0.0
             if celsius <= 0:
                 return {"ok": False, "error": "Set a heating temperature"}
-            rpc = set_heater_setpoint(node_id, endpoint, celsius)
+            rpc = set_heater_setpoint(node_id, endpoint, celsius, device_id=device_id)
             if rpc.get("ok"):
                 patch = {"on": True, "heating_setpoint": rpc.get("heating_setpoint")}
                 if rpc.get("system_mode") is not None:
@@ -3220,7 +3283,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             pct = max(0, min(100, int(body.get("brightness") or 0)))
             on = pct > 0
             if live_kind(device_id, str(body.get("kind") or body.get("device_kind") or "")) == "heater":
-                rpc = set_heater_power(node_id, endpoint, on)
+                rpc = set_heater_power(node_id, endpoint, on, device_id=device_id)
                 if rpc.get("ok"):
                     patch = {"on": bool(rpc.get("on", on))}
                     if rpc.get("system_mode") is not None:

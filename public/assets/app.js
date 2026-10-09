@@ -4245,7 +4245,8 @@ async function saveHomeGroupName(input) {
 }
 
 function homeCommandErrorMessage(err, fallback, heater = false) {
-    if (isAbortError(err)) {
+    const msg = String(err?.message || '');
+    if (isAbortError(err) || (heater && /timed out|timeout|not running/i.test(msg))) {
         return heater
             ? 'Heater is still changing — try again in a moment'
             : 'That command timed out. Try again.';
@@ -4268,6 +4269,9 @@ async function sendHomeDeviceToggle(id, button, forceOn) {
             id,
             command: nextOn ? 'on' : 'off',
             kind: device?.kind || '',
+            ...(heater && nextOn && device?.heating_setpoint != null
+                ? { celsius: Number(device.heating_setpoint) }
+                : {}),
         }, heater ? HOME_HEATER_TIMEOUT_MS : 25000);
         if (!data.ok) throw new Error(data.error || 'Failed');
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
