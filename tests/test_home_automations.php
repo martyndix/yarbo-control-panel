@@ -357,6 +357,154 @@ $auto->delete('a-temp');
 $commands = [];
 @unlink($auto->statePath());
 
+$pwRow = YarboHomeAutomations::powerwallSnapshotRow([
+    'battery_percent' => 80,
+    'grid_w' => -1200,
+    'solar_w' => 3100,
+    'load_w' => 900,
+]);
+assert_true(($pwRow['id'] ?? '') === YarboHomeAutomations::POWERWALL_ID, 'powerwall snapshot id');
+assert_true(($pwRow['battery'] ?? 0) === 80.0, 'powerwall battery');
+assert_true(($pwRow['export'] ?? 0) === 1200.0, 'export is abs of negative grid');
+assert_true(($pwRow['solar'] ?? 0) === 3100.0, 'powerwall solar');
+$importRow = YarboHomeAutomations::powerwallSnapshotRow(['grid_w' => 400, 'battery_percent' => 50]);
+assert_true(($importRow['export'] ?? -1) === 0.0, 'import is not export');
+assert_true(YarboHomeAutomations::thresholdUnit('export') === 'W', 'export unit W');
+assert_true(YarboHomeAutomations::thresholdUnit('battery') === '%', 'battery unit %');
+assert_true(YarboHomeAutomations::normalizeHoldSec(0) === 0, 'hold none');
+assert_true(YarboHomeAutomations::normalizeHoldSec(90) === 120, 'hold rounds to minutes');
+assert_true(YarboHomeAutomations::normalizeHoldSec(400) === 300, 'hold max 5 min');
+assert_true(
+    YarboHomeAutomations::whenPhrase([
+        'type' => 'threshold',
+        'id' => 'powerwall',
+        'metric' => 'export',
+        'op' => 'above',
+        'value' => 500,
+    ]) === 'Powerwall export above 500W',
+    'powerwall export phrase'
+);
+
+$holdAnd = $auto->save([
+    'id' => 'a-pw-hold',
+    'enabled' => true,
+    'when_match' => 'all',
+    'triggers' => [
+        ['type' => 'threshold', 'id' => 'unifi:sensor:s1', 'metric' => 'temperature', 'op' => 'below', 'value' => 18],
+        ['type' => 'threshold', 'id' => 'powerwall', 'metric' => 'battery', 'op' => 'above', 'value' => 50],
+        ['type' => 'threshold', 'id' => 'powerwall', 'metric' => 'export', 'op' => 'above', 'value' => 200],
+    ],
+    'actions' => [[
+        'kind' => 'device',
+        'id' => '1:9',
+        'command' => 'setpoint',
+        'device_kind' => 'heater',
+        'celsius' => 21,
+    ]],
+    'hold_sec' => 60,
+    'cooldown_sec' => 30,
+]);
+assert_true(!empty($holdAnd['ok']), 'save powerwall hold rule: ' . json_encode($holdAnd));
+assert_true(($holdAnd['automation']['hold_sec'] ?? 0) === 60, 'hold_sec persisted');
+assert_true(($holdAnd['automation']['cooldown_sec'] ?? 0) === 60, 'cooldown at least hold');
+assert_true(
+    str_contains(YarboHomeAutomations::sentence($holdAnd['automation'] ?? []), 'wait 1 min'),
+    'sentence includes wait: ' . YarboHomeAutomations::sentence($holdAnd['automation'] ?? [])
+);
+$combo = static function (float $temp, float $battery, float $export): array {
+    return [
+        [
+            'id' => 'unifi:sensor:s1',
+            'kind' => 'sensor',
+            'temperature' => $temp,
+            'on' => false,
+            'open' => false,
+        ],
+        [
+            'id' => 'powerwall',
+            'kind' => 'powerwall',
+            'battery' => $battery,
+            'export' => $export,
+            'solar' => 0,
+            'load' => 0,
+        ],
+    ];
+};
+$commands = [];
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0);
+assert_true($r['fired'] === [], 'hold must not fire on first true tick');
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 59);
+assert_true($r['fired'] === [], 'hold must wait the full minute');
+$r = $auto->tick($combo(16.0, 50.0, 500.0), $t0 + 60);
+assert_true($r['fired'] === ['a-pw-hold'], 'inclusive battery 50 and hold elapsed: ' . json_encode($r));
+assert_true(($commands[0]['celsius'] ?? 0) === 21.0, 'heater setpoint then: ' . json_encode($commands));
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 61);
+assert_true($r['fired'] === [], 'still true must not re-fire after hold');
+$auto->tick($combo(16.0, 80.0, 0.0), $t0 + 62);
+$commands = [];
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 63);
+assert_true($r['fired'] === [], 'drop resets hold');
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 122);
+assert_true($r['fired'] === [], 'new hold still waiting');
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 123);
+assert_true($r['fired'] === ['a-pw-hold'], 'hold fires again after reset: ' . json_encode($r));
+$auto->delete('a-pw-hold');
+
+$midDrop = $auto->save([
+    'id' => 'a-pw-drop',
+    'enabled' => true,
+    'when_match' => 'all',
+    'triggers' => [
+        ['type' => 'threshold', 'id' => 'powerwall', 'metric' => 'battery', 'op' => 'above', 'value' => 50],
+        ['type' => 'threshold', 'id' => 'powerwall', 'metric' => 'export', 'op' => 'above', 'value' => 200],
+    ],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'hold_sec' => 60,
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($midDrop['ok']), 'save drop-during-hold rule');
+@unlink($auto->statePath());
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0);
+assert_true($r['fired'] === [], 'start hold');
+$r = $auto->tick($combo(16.0, 80.0, 0.0), $t0 + 30);
+assert_true($r['fired'] === [], 'export drop during hold');
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 31);
+assert_true($r['fired'] === [], 're-arm after drop');
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 60);
+assert_true($r['fired'] === [], 'original minute must not fire after reset');
+$r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 91);
+assert_true($r['fired'] === ['a-pw-drop'], 'hold completes from re-arm: ' . json_encode($r));
+
+$onlyIf = $auto->save([
+    'id' => 'a-pw-if',
+    'enabled' => true,
+    'trigger' => ['type' => 'threshold', 'id' => 'unifi:sensor:s1', 'metric' => 'temperature', 'op' => 'below', 'value' => 18],
+    'conditions' => [[
+        'type' => 'threshold',
+        'id' => 'powerwall',
+        'metric' => 'battery',
+        'op' => 'above',
+        'value' => 50,
+    ]],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($onlyIf['ok']), 'save only-if powerwall: ' . json_encode($onlyIf));
+assert_true(($onlyIf['automation']['conditions'][0]['metric'] ?? '') === 'battery', 'only-if battery persisted');
+@unlink($auto->statePath());
+$auto->tick($combo(20.0, 80.0, 0.0), $t0);
+$r = $auto->tick($combo(16.0, 40.0, 0.0), $t0 + 1);
+assert_true($r['fired'] === [], 'temp cross without battery must not fire');
+$auto->tick($combo(20.0, 80.0, 0.0), $t0 + 2);
+$r = $auto->tick($combo(16.0, 80.0, 0.0), $t0 + 3);
+assert_true($r['fired'] === ['a-pw-if'], 'temp cross with battery only-if: ' . json_encode($r));
+
+$auto->delete('a-pw-hold');
+$auto->delete('a-pw-drop');
+$auto->delete('a-pw-if');
+$commands = [];
+@unlink($auto->statePath());
+
 $tzSave = $auto->save(['timezone' => 'Europe/London']);
 assert_true(!empty($tzSave['ok']), 'save timezone');
 $disk = json_decode((string) file_get_contents($auto->storePath()), true);
@@ -897,6 +1045,15 @@ assert_true(str_contains($change, '## [4.0.59]'), 'changelog 4.0.59');
 assert_true(str_contains($change, '## [4.0.60]'), 'changelog 4.0.60');
 assert_true(str_contains($change, '## [4.0.61]'), 'changelog 4.0.61');
 assert_true(str_contains($change, '## [4.0.63]'), 'changelog 4.0.63');
+assert_true(str_contains($change, '## [4.0.64]'), 'changelog 4.0.64');
+assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout');
+assert_true(str_contains($js, 'queueHomeHeaterSetpoint'), 'heater setpoint debounce');
+assert_true(str_contains($js, 'Heater is still changing'), 'heater abort toast');
+assert_true(str_contains($js, 'HOME_AUTO_POWERWALL_ID'), 'powerwall automation id');
+assert_true(str_contains($js, 'homeAutoPowerwallTrigger'), 'powerwall When helper');
+assert_true(str_contains($js, 'auto-hold-sec'), 'trigger delay field in JS');
+assert_true(str_contains($index, 'id="auto-hold-sec"'), 'trigger delay select');
+assert_true(str_contains($index, 'data-auto-if="powerwall"'), 'only-if Powerwall button');
 assert_true(str_contains($js, 'homeAutoSanitizeThenLooks'), 'Then drops colour the bulb cannot do');
 assert_true(str_contains($js, 'homeColorInputsHtml'), 'Home colour controls helper');
 

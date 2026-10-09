@@ -2869,6 +2869,13 @@ const homeExpandedGroups = new Set();
 let homeSceneDraft = { id: '', name: '', included: {}, states: {} };
 let autoPageOpen = false;
 let autoDraft = null;
+const HOME_AUTO_POWERWALL_ID = 'powerwall';
+const HOME_AUTO_PW_METRICS = {
+    battery: { label: 'battery', unit: '%', step: 1, value: 50 },
+    export: { label: 'export', unit: 'W', step: 50, value: 500 },
+    solar: { label: 'solar', unit: 'W', step: 50, value: 200 },
+    load: { label: 'load', unit: 'W', step: 50, value: 1000 },
+};
 let autoNameLocked = false;
 let autoDrag = null;
 
@@ -3044,6 +3051,11 @@ const HOME_CONTROL_ACTIONS = new Set(['command', 'room_command', 'group_command'
 let homeAbort = null;
 let homeControlBusy = 0;
 const homeSticky = new Map();
+const homeHeaterSetpointTimers = new Map();
+const homeHeaterPending = new Map();
+const homeHeaterBusy = new Set();
+const HOME_HEATER_TIMEOUT_MS = 90000;
+const HOME_HEATER_DEBOUNCE_MS = 450;
 
 function abortPanelGets() {
     if (statusAbort) {
@@ -4232,12 +4244,22 @@ async function saveHomeGroupName(input) {
     }
 }
 
+function homeCommandErrorMessage(err, fallback, heater = false) {
+    if (isAbortError(err)) {
+        return heater
+            ? 'Heater is still changing — try again in a moment'
+            : 'That command timed out. Try again.';
+    }
+    return err?.message || fallback;
+}
+
 async function sendHomeDeviceToggle(id, button, forceOn) {
     const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
     const device = homeDeviceRecord(id);
     if (!homeDeviceCanToggle(device || { id })) return;
     const currentlyOn = card?.classList.contains('is-on') || Boolean(device?.on);
     const nextOn = typeof forceOn === 'boolean' ? forceOn : !currentlyOn;
+    const heater = device?.kind === 'heater';
     setHomeDeviceOn(id, nextOn);
     if (button) button.disabled = true;
     try {
@@ -4245,23 +4267,37 @@ async function sendHomeDeviceToggle(id, button, forceOn) {
             action: 'command',
             id,
             command: nextOn ? 'on' : 'off',
-        }, 25000);
+        }, heater ? HOME_HEATER_TIMEOUT_MS : 25000);
         if (!data.ok) throw new Error(data.error || 'Failed');
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
     } catch (err) {
         setHomeDeviceOn(id, currentlyOn);
-        showToast(err.message || 'Home command failed', 'error');
+        showToast(homeCommandErrorMessage(err, 'Home command failed', heater), 'error');
     } finally {
         if (button) button.disabled = false;
     }
 }
 
+function queueHomeHeaterSetpoint(id, celsius, input) {
+    const prev = homeHeaterSetpointTimers.get(id);
+    if (prev) clearTimeout(prev);
+    homeHeaterSetpointTimers.set(id, setTimeout(() => {
+        homeHeaterSetpointTimers.delete(id);
+        sendHomeHeaterSetpoint(id, celsius, input);
+    }, HOME_HEATER_DEBOUNCE_MS));
+}
+
 async function sendHomeHeaterSetpoint(id, celsius, input) {
+    if (homeHeaterBusy.has(id)) {
+        homeHeaterPending.set(id, { celsius, input });
+        return;
+    }
     const device = homeDeviceRecord(id);
     const previous = device?.heating_setpoint;
     const currentlyOn = Boolean(device?.on);
     if (device) device.heating_setpoint = celsius;
     setHomeDeviceOn(id, true);
+    homeHeaterBusy.add(id);
     if (input) input.disabled = true;
     try {
         const data = await homeApi({
@@ -4269,7 +4305,7 @@ async function sendHomeHeaterSetpoint(id, celsius, input) {
             id,
             command: 'setpoint',
             celsius,
-        }, 25000);
+        }, HOME_HEATER_TIMEOUT_MS);
         if (!data.ok) throw new Error(data.error || 'Failed');
         if (data.heating_setpoint != null && device) device.heating_setpoint = data.heating_setpoint;
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
@@ -4278,9 +4314,15 @@ async function sendHomeHeaterSetpoint(id, celsius, input) {
         if (device) device.heating_setpoint = previous;
         if (input && previous != null) input.value = String(previous);
         setHomeDeviceOn(id, currentlyOn);
-        showToast(err.message || 'Could not set temperature', 'error');
+        showToast(homeCommandErrorMessage(err, 'Could not set temperature', true), 'error');
     } finally {
+        homeHeaterBusy.delete(id);
         if (input) input.disabled = false;
+        const pending = homeHeaterPending.get(id);
+        if (pending) {
+            homeHeaterPending.delete(id);
+            sendHomeHeaterSetpoint(id, pending.celsius, pending.input);
+        }
     }
 }
 
@@ -4697,7 +4739,7 @@ function bindHomeDashboard() {
                 showToast('Set a heating temperature', 'error');
                 return;
             }
-            await sendHomeHeaterSetpoint(setpoint.getAttribute('data-home-setpoint') || '', celsius, setpoint);
+            queueHomeHeaterSetpoint(setpoint.getAttribute('data-home-setpoint') || '', celsius, setpoint);
             return;
         }
         const color = event.target.closest('[data-home-color]');
@@ -4749,6 +4791,7 @@ function homeAutoNames() {
     (homeDash.scenes || []).forEach((s) => {
         if (s?.id) names[`scene:${s.id}`] = s.name || 'Scene';
     });
+    names[HOME_AUTO_POWERWALL_ID] = 'Powerwall';
     return names;
 }
 
@@ -5031,8 +5074,9 @@ function homeAutoWhenPhrase(trigger, names) {
         return `${label} ${off < 0 ? '' : '+'}${off} min`;
     }
     if (trigger.type === 'threshold') {
-        const name = names[trigger.id] || 'Sensor';
-        const unit = trigger.metric === 'humidity' ? '%' : '°';
+        const pw = trigger.id === HOME_AUTO_POWERWALL_ID;
+        const name = pw ? 'Powerwall' : (names[trigger.id] || 'Sensor');
+        const unit = homeAutoThresholdUnit(trigger.metric);
         return `${name} ${trigger.metric} ${trigger.op} ${trigger.value}${unit}`;
     }
     const name = names[trigger.id] || 'Device';
@@ -5115,9 +5159,40 @@ function homeAutoThenPhrase(action, names) {
     return text;
 }
 
+function homeAutoThresholdUnit(metric) {
+    if (metric === 'humidity' || metric === 'battery') return '%';
+    if (metric === 'export' || metric === 'solar' || metric === 'load') return 'W';
+    return '°';
+}
+
+function homeAutoPowerwallOn() {
+    if (!lastHub?.modules) return true;
+    return Boolean(lastHub.modules.powerwall);
+}
+
+function homeAutoPowerwallTrigger(metric, op = 'above', value) {
+    const key = HOME_AUTO_PW_METRICS[metric] ? metric : 'battery';
+    const spec = HOME_AUTO_PW_METRICS[key];
+    const n = Number(value);
+    return {
+        type: 'threshold',
+        id: HOME_AUTO_POWERWALL_ID,
+        metric: key,
+        op: op === 'below' ? 'below' : 'above',
+        value: Number.isFinite(n) ? n : spec.value,
+    };
+}
+
+function homeAutoIsPowerwallThreshold(row) {
+    return row?.type === 'threshold' && row.id === HOME_AUTO_POWERWALL_ID;
+}
+
 function homeAutoSentence(rule, names) {
     const then = (rule.actions || []).map((action) => homeAutoThenPhrase(action, names)).join(', ') || '…';
-    let text = `${homeAutoWhenJoinPhrase(rule, names)} → ${then}`;
+    const hold = Number(rule.hold_sec || 0);
+    let text = hold > 0
+        ? `${homeAutoWhenJoinPhrase(rule, names)} (wait ${homeAutoFormatDuration(hold)}) → ${then}`
+        : `${homeAutoWhenJoinPhrase(rule, names)} → ${then}`;
     const actionOff = (rule.actions || []).some((action) => Number(action.off_after_sec || 0) > 0);
     const off = Number(rule.off_after_sec || 0);
     if (!actionOff && off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
@@ -5150,6 +5225,7 @@ function homeAutoDraftFromRule(rule, asCopy = false) {
         actions: (rule.actions || []).map((row) => homeAutoCloneValue(row)),
         off_after_sec: Number(rule.off_after_sec || 0),
         cooldown_sec: Number(rule.cooldown_sec || 30),
+        hold_sec: Number(rule.hold_sec || 0),
     };
 }
 
@@ -5188,6 +5264,7 @@ function homeAutoBlankDraft() {
         actions: [],
         off_after_sec: 0,
         cooldown_sec: 30,
+        hold_sec: 0,
     };
 }
 
@@ -5500,6 +5577,9 @@ function renderHomeAutoEditor() {
         || '<p class="hint">Drop a light or scene here.</p>';
     document.getElementById('auto-if-chips').innerHTML = (autoDraft.conditions || []).map((cond, i) => homeAutoIfChipHtml(cond, i)).join('');
     if ((autoDraft.conditions || []).length) document.getElementById('auto-if')?.setAttribute('open', '');
+    const pwIf = document.querySelector('#home-automations-editor [data-auto-if="powerwall"]');
+    if (pwIf) pwIf.classList.toggle('hidden', !homeAutoPowerwallOn());
+    homeAutoSyncHoldField();
     homeAutoSyncOffAfterFields();
     renderHomeAutoTray();
 }
@@ -5523,12 +5603,18 @@ function homeAutoClampDraft() {
         }
     });
     (autoDraft.conditions || []).forEach((cond) => {
-        if (!cond || cond.type === 'time_window') return;
+        if (!cond || cond.type !== 'device') return;
         const states = homeAutoIfStateOptions(homeAutoDeviceById(cond.id));
         if (states.length && !states.some(([v]) => v === cond.state)) {
             cond.state = states[0][0];
         }
     });
+}
+
+function homeAutoSyncHoldField() {
+    if (!autoDraft) return;
+    const el = document.getElementById('auto-hold-sec');
+    if (el && document.activeElement !== el) el.value = String(Number(autoDraft.hold_sec || 0));
 }
 
 function homeAutoOffAfterParts(sec) {
@@ -5565,7 +5651,7 @@ function homeAutoSyncOffAfterFields() {
 
 function homeAutoWhenChipsHtml() {
     const triggers = homeAutoTriggers();
-    if (!triggers.length) return '<p class="hint">Drop Time, Sunset, a door, or a sensor here. You can add more than one.</p>';
+    if (!triggers.length) return '<p class="hint">Drop Time, Sunset, a door, a sensor, or Powerwall here. You can add more than one.</p>';
     const match = homeAutoWhenMatch();
     const join = match === 'all' ? 'and' : 'or';
     let html = '';
@@ -5604,6 +5690,26 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
         </div>`;
     }
     if (trigger.type === 'threshold') {
+        if (homeAutoIsPowerwallThreshold(trigger)) {
+            const metric = HOME_AUTO_PW_METRICS[trigger.metric] ? trigger.metric : 'battery';
+            const spec = HOME_AUTO_PW_METRICS[metric];
+            const op = trigger.op === 'below' ? 'below' : 'above';
+            return `<div class="auto-chip auto-chip--powerwall" data-auto-when ${iAttr}>
+                Powerwall
+                <select data-auto-pw-metric aria-label="Powerwall value">
+                    ${Object.entries(HOME_AUTO_PW_METRICS).map(([id, row]) =>
+                        `<option value="${id}" ${id === metric ? 'selected' : ''}>${row.label}</option>`
+                    ).join('')}
+                </select>
+                <select data-auto-pw-op aria-label="Above or below">
+                    <option value="above" ${op === 'above' ? 'selected' : ''}>above</option>
+                    <option value="below" ${op === 'below' ? 'selected' : ''}>below</option>
+                </select>
+                <input type="number" data-auto-thresh value="${escapeHtml(String(trigger.value ?? spec.value))}" step="${spec.step}">
+                ${escapeHtml(spec.unit)}
+                <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
+            </div>`;
+        }
         const d = homeAutoDeviceById(trigger.id);
         const name = d?.name || trigger.id;
         return `<div class="auto-chip" data-auto-when ${iAttr}>
@@ -5669,6 +5775,26 @@ function homeAutoIfChipHtml(cond, index) {
         return `<div class="auto-chip auto-chip--clock" data-auto-if-i="${index}">
             Between <input type="time" data-auto-if-start value="${escapeHtml(cond.start || '08:00')}">
             and <input type="time" data-auto-if-end value="${escapeHtml(cond.end || '22:00')}">
+            <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
+    if (homeAutoIsPowerwallThreshold(cond)) {
+        const metric = HOME_AUTO_PW_METRICS[cond.metric] ? cond.metric : 'battery';
+        const spec = HOME_AUTO_PW_METRICS[metric];
+        const op = cond.op === 'below' ? 'below' : 'above';
+        return `<div class="auto-chip auto-chip--powerwall" data-auto-if-i="${index}">
+            Powerwall
+            <select data-auto-if-pw-metric aria-label="Powerwall value">
+                ${Object.entries(HOME_AUTO_PW_METRICS).map(([id, row]) =>
+                    `<option value="${id}" ${id === metric ? 'selected' : ''}>${row.label}</option>`
+                ).join('')}
+            </select>
+            <select data-auto-if-pw-op aria-label="Above or below">
+                <option value="above" ${op === 'above' ? 'selected' : ''}>above</option>
+                <option value="below" ${op === 'below' ? 'selected' : ''}>below</option>
+            </select>
+            <input type="number" data-auto-if-thresh value="${escapeHtml(String(cond.value ?? spec.value))}" step="${spec.step}">
+            ${escapeHtml(spec.unit)}
             <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
@@ -5806,6 +5932,7 @@ function homeAutoTrayChip(kind, id, name, extraClass) {
 function homeAutoTrayGroups(devices, scenes) {
     const order = [
         ['time', 'Time'],
+        ['powerwall', 'Powerwall'],
         ['lights', 'Lights'],
         ['heaters', 'Heaters'],
         ['plugs', 'Plugs'],
@@ -5828,6 +5955,11 @@ function homeAutoTrayGroups(devices, scenes) {
         homeAutoTrayChip('sunset', '', 'Sunset', 'auto-chip--clock'),
         homeAutoTrayChip('sunrise', '', 'Sunrise', 'auto-chip--clock')
     );
+    if (homeAutoPowerwallOn()) {
+        Object.entries(HOME_AUTO_PW_METRICS).forEach(([id, row]) => {
+            buckets.powerwall.push(homeAutoTrayChip('powerwall', id, row.label, 'auto-chip--powerwall'));
+        });
+    }
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
     [...devices].sort(byName).forEach((d) => {
         const gid = homeAutoDeviceGroupId(d);
@@ -5855,6 +5987,16 @@ function homeAutoApplyTray(kind, id, zone) {
         homeAutoApplyWhen(kind === 'time'
             ? { type: 'time', at: '21:00' }
             : { type: 'sun', event: kind, offset_min: 0 });
+        homeAutoFollowName();
+        renderHomeAutoEditor();
+        return;
+    }
+    if (kind === 'powerwall') {
+        if (zone === 'then') {
+            showToast('Powerwall goes in When or Only if', 'error');
+            return;
+        }
+        homeAutoApplyWhen(homeAutoPowerwallTrigger(id || 'battery'));
         homeAutoFollowName();
         renderHomeAutoEditor();
         return;
@@ -5904,7 +6046,7 @@ function homeAutoApplyTray(kind, id, zone) {
 function homeAutoClickTray(kind, id) {
     if (!autoDraft) return;
     const d = kind === 'device' ? homeAutoDeviceById(id) : null;
-    if (kind === 'time' || kind === 'sunset' || kind === 'sunrise' || (d && !homeAutoThenOk(d))) {
+    if (kind === 'time' || kind === 'sunset' || kind === 'sunrise' || kind === 'powerwall' || (d && !homeAutoThenOk(d))) {
         homeAutoApplyTray(kind, id, 'when');
         return;
     }
@@ -6028,11 +6170,21 @@ async function homeAutoSave() {
             const atEl = chip?.querySelector('[data-auto-at]');
             if (atEl && atEl.value) trigger.at = atEl.value;
         }
+        if (homeAutoIsPowerwallThreshold(trigger)) {
+            const metric = chip?.querySelector('[data-auto-pw-metric]')?.value || trigger.metric;
+            const op = chip?.querySelector('[data-auto-pw-op]')?.value || trigger.op;
+            const value = Number(chip?.querySelector('[data-auto-thresh]')?.value);
+            Object.assign(trigger, homeAutoPowerwallTrigger(metric, op, Number.isFinite(value) ? value : trigger.value));
+        } else if (trigger.type === 'threshold') {
+            const value = Number(chip?.querySelector('[data-auto-thresh]')?.value);
+            if (Number.isFinite(value)) trigger.value = value;
+        }
     });
     homeAutoSetTriggers(homeAutoTriggers());
     homeAutoReadThenLooks();
     homeAutoSanitizeThenLooks();
     autoDraft.off_after_sec = homeAutoReadOffAfter();
+    autoDraft.hold_sec = Math.max(0, Number(document.getElementById('auto-hold-sec')?.value || autoDraft.hold_sec || 0));
     if (homeAutoUsesSun() && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);
         const lon = Number(document.getElementById('auto-lon')?.value);
@@ -6057,6 +6209,7 @@ async function homeAutoSave() {
         actions: autoDraft.actions,
         off_after_sec: autoDraft.off_after_sec || 0,
         cooldown_sec: autoDraft.cooldown_sec || 30,
+        hold_sec: Number(autoDraft.hold_sec || 0),
         names: homeAutoNames(),
     });
     if (!data.ok) throw new Error(data.error || 'Could not save');
@@ -6193,6 +6346,13 @@ function bindHomeAutomations() {
             const which = ifAdd.getAttribute('data-auto-if');
             if (which === 'window') autoDraft.conditions.push({ type: 'time_window', start: '08:00', end: '22:00' });
             else if (which === 'sun') autoDraft.conditions.push({ type: 'sun_window', start: 'sunset', end: 'sunrise' });
+            else if (which === 'powerwall') {
+                if (!homeAutoPowerwallOn()) {
+                    showToast('Turn on the Powerwall module first', 'error');
+                    return;
+                }
+                autoDraft.conditions.push(homeAutoPowerwallTrigger('battery'));
+            }
             else {
                 const used = new Set(homeAutoTriggers().map((t) => t.id).filter(Boolean));
                 const other = homeAutoAllDevices().find((d) => !used.has(d.id));
@@ -6270,11 +6430,37 @@ function bindHomeAutomations() {
             homeAutoApplyOffAfterToActions(autoDraft.off_after_sec);
             homeAutoSyncOffAfterFields();
         }
+        if (event.target.matches('#auto-hold-sec')) {
+            autoDraft.hold_sec = Math.max(0, Number(event.target.value || 0));
+        }
+        if (event.target.matches('[data-auto-pw-metric], [data-auto-pw-op]')) {
+            const i = homeAutoTriggerIndex(event.target);
+            const list = homeAutoTriggers();
+            if (list[i]?.type === 'threshold') {
+                const chip = event.target.closest('[data-auto-when-i]');
+                const metric = chip?.querySelector('[data-auto-pw-metric]')?.value || list[i].metric || 'battery';
+                const op = chip?.querySelector('[data-auto-pw-op]')?.value || list[i].op || 'above';
+                const value = Number(chip?.querySelector('[data-auto-thresh]')?.value);
+                list[i] = homeAutoPowerwallTrigger(metric, op, Number.isFinite(value) ? value : undefined);
+                homeAutoSetTriggers(list);
+            }
+        }
         if (event.target.matches('[data-auto-thresh]')) {
             const i = homeAutoTriggerIndex(event.target);
             const list = homeAutoTriggers();
             if (list[i]?.type === 'threshold') list[i].value = Number(event.target.value);
             homeAutoSetTriggers(list);
+        }
+        if (event.target.matches('[data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-if-thresh]')) {
+            const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
+            const cond = autoDraft.conditions[i];
+            if (homeAutoIsPowerwallThreshold(cond)) {
+                const chip = event.target.closest('[data-auto-if-i]');
+                const metric = chip?.querySelector('[data-auto-if-pw-metric]')?.value || cond.metric || 'battery';
+                const op = chip?.querySelector('[data-auto-if-pw-op]')?.value || cond.op || 'above';
+                const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
+                autoDraft.conditions[i] = homeAutoPowerwallTrigger(metric, op, Number.isFinite(value) ? value : undefined);
+            }
         }
         if (event.target.matches('[data-auto-cmd]')) {
             const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
@@ -6332,12 +6518,12 @@ function bindHomeAutomations() {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
-        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, [data-auto-thresh], [data-auto-cmd], [data-auto-then-off], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-then-off], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
             homeAutoFollowName();
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

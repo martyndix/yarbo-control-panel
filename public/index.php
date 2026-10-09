@@ -692,8 +692,20 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div class="auto-builder">
                     <section class="auto-drop" id="auto-when" data-auto-zone="when" aria-label="When">
                         <h3 class="settings-subtitle">When</h3>
-                        <p class="hint">Drag a sensor, door, Time, or Sunset here. Drop more than one, then pick Any (or) or All (and). Tap a chip if you cannot drag.</p>
+                        <p class="hint">Drag a sensor, door, Time, Sunset, or Powerwall here. Drop more than one, then pick Any (or) or All (and). Tap a chip if you cannot drag.</p>
                         <div class="auto-drop-chips" id="auto-when-chips"></div>
+                        <label class="settings-field auto-hold">
+                            <span class="label">Trigger delay</span>
+                            <select id="auto-hold-sec" aria-label="Trigger delay">
+                                <option value="0">None</option>
+                                <option value="60">1 min</option>
+                                <option value="120">2 min</option>
+                                <option value="180">3 min</option>
+                                <option value="240">4 min</option>
+                                <option value="300">5 min</option>
+                            </select>
+                            <span class="hint">When (and Only if) must stay true this long, then Then runs. If it drops, the wait starts over.</span>
+                        </label>
                     </section>
                     <details class="auto-if" id="auto-if">
                         <summary>Only if…</summary>
@@ -702,6 +714,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <div class="auto-if-add">
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="window">Time window</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="sun">Sunset / sunrise</button>
+                            <button type="button" class="btn btn-secondary btn-compact" data-auto-if="powerwall">Powerwall</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="device">Device is…</button>
                         </div>
                     </details>

@@ -20,6 +20,10 @@ final class YarboHomeAutomations
         'on', 'off', 'toggle', 'unlock', 'lock', 'open', 'close', 'stop',
         'brightness', 'color', 'color_temp', 'setpoint',
     ];
+    public const POWERWALL_ID = 'powerwall';
+    public const POWERWALL_METRICS = ['battery', 'export', 'solar', 'load'];
+    public const HOLD_MIN_SEC = 60;
+    public const HOLD_MAX_SEC = 300;
 
     /** @var callable|null */
     private $commandHandler;
@@ -405,7 +409,12 @@ final class YarboHomeAutomations
             return ['ok' => false, 'error' => 'Could not save'];
         }
         $state = $this->loadState();
-        unset($state['day_slot'][$rule['id']], $state['last_fire'][$rule['id']], $state['then_error'][$rule['id']]);
+        unset(
+            $state['day_slot'][$rule['id']],
+            $state['last_fire'][$rule['id']],
+            $state['then_error'][$rule['id']],
+            $state['hold'][$rule['id']]
+        );
         $this->writeState($state);
         $this->syncDelayedForRule($rule);
         $meta['automations'] = $store['automations'];
@@ -432,7 +441,7 @@ final class YarboHomeAutomations
             return ['ok' => false, 'error' => 'Could not save'];
         }
         $state = $this->loadState();
-        unset($state['held'][$id], $state['last_fire'][$id], $state['day_slot'][$id], $state['delayed'][$id], $state['then_error'][$id]);
+        unset($state['held'][$id], $state['hold'][$id], $state['last_fire'][$id], $state['day_slot'][$id], $state['delayed'][$id], $state['then_error'][$id]);
         $this->writeState($state);
 
         return ['ok' => true, 'automations' => $store['automations']];
@@ -501,7 +510,7 @@ final class YarboHomeAutomations
 
             return ['ok' => true, 'fired' => [], 'turned_off' => [], 'errors' => []];
         }
-        $rows = $snapshot ?? (new YarboHome($this->projectRoot))->automationDevices();
+        $rows = $snapshot ?? $this->liveSnapshot();
         $curr = $this->indexSnapshot($rows);
         $state = $this->loadState();
         $prev = is_array($state['prev'] ?? null) ? $state['prev'] : [];
@@ -530,10 +539,22 @@ final class YarboHomeAutomations
             $inCooldown = $cooldown > 0 && $lastFire > 0 && ($now - $lastFire) < $cooldown;
             $eval = $this->evaluateTriggers($rule, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords);
             $this->updateHeld($state, $id, $rule, $curr, $now);
-            if (!$eval['should']) {
-                continue;
+            $conditionsOk = $this->conditionsPass($rule['conditions'] ?? [], $curr, $hm, $dow, $now, $local, $coords);
+            $holdSec = (int) ($rule['hold_sec'] ?? 0);
+            if ($holdSec > 0) {
+                $armed = $this->whenLevelTrue($rule, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords)
+                    && $conditionsOk;
+                $should = $this->holdShouldFire($state, $id, $armed, $holdSec, $now);
+                $matched = $eval['matched'];
+                if ($should && $matched === []) {
+                    $matched = $this->currentlyTrueIndexes($rule, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords);
+                }
+            } else {
+                $should = $eval['should'] && $conditionsOk;
+                $matched = $eval['matched'];
+                $this->clearHold($state, $id);
             }
-            if (!$this->conditionsPass($rule['conditions'] ?? [], $curr, $hm, $dow, $now, $local, $coords)) {
+            if (!$should) {
                 continue;
             }
             if ($inCooldown) {
@@ -544,6 +565,7 @@ final class YarboHomeAutomations
             }
             $result = $this->runActions($rule['actions'] ?? []);
             $state['last_fire'][$id] = $now;
+            $this->markHoldFired($state, $id);
             if (!($result['ok'] ?? false)) {
                 $err = (string) ($result['error'] ?? 'failed');
                 $errors[] = $err;
@@ -554,8 +576,8 @@ final class YarboHomeAutomations
             } else {
                 unset($state['then_error'][$id]);
                 $fired[] = $id;
-                $this->markFiredSlots($state, $id, $rule, $eval['matched'], $today, $hm);
-                $this->markDurationFired($state, $id, $rule, $eval['matched']);
+                $this->markFiredSlots($state, $id, $rule, $matched, $today, $hm);
+                $this->markDurationFired($state, $id, $rule, $matched);
                 $curr = $this->applyActionSnapshot($curr, $rule['actions'] ?? []);
             }
             $this->queueOffAfter($state, $rule, $now);
@@ -624,6 +646,290 @@ final class YarboHomeAutomations
         $this->writeState($state);
     }
 
+    public function refreshPowerwallIfDue(int $now, int $everySec = 12): void
+    {
+        $hub = new YarboHub($this->projectRoot);
+        if (!$hub->enabled(YarboHub::MODULE_POWERWALL)) {
+            return;
+        }
+        $state = $this->loadState();
+        $at = (int) ($state['powerwall_at'] ?? 0);
+        if ($at > 0 && ($now - $at) < $everySec) {
+            return;
+        }
+        try {
+            (new YarboPowerwall($this->projectRoot))->refreshIfStale();
+        } catch (\Throwable) {
+        }
+        $state['powerwall_at'] = $now;
+        $this->writeState($state);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function liveSnapshot(): array
+    {
+        $rows = (new YarboHome($this->projectRoot))->automationDevices();
+        $pw = $this->powerwallLiveRow();
+        if ($pw !== null) {
+            $rows[] = $pw;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Cached Powerwall numbers for When / Only-if. Does not call Tesla.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function powerwallLiveRow(): ?array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        if (!$hub->enabled(YarboHub::MODULE_POWERWALL)) {
+            return null;
+        }
+
+        return self::powerwallSnapshotRow(
+            (new YarboPowerwall($this->projectRoot))->dashboardPayload(false)
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>|null
+     */
+    public static function powerwallSnapshotRow(array $data): ?array
+    {
+        $battery = isset($data['battery_percent']) && is_numeric($data['battery_percent'])
+            ? (float) $data['battery_percent']
+            : null;
+        $solar = isset($data['solar_w']) && is_numeric($data['solar_w']) ? (float) $data['solar_w'] : null;
+        $load = isset($data['load_w']) && is_numeric($data['load_w']) ? (float) $data['load_w'] : null;
+        $grid = isset($data['grid_w']) && is_numeric($data['grid_w']) ? (float) $data['grid_w'] : null;
+        if ($battery === null && $solar === null && $load === null && $grid === null) {
+            return null;
+        }
+
+        return [
+            'id' => self::POWERWALL_ID,
+            'kind' => 'powerwall',
+            'name' => 'Powerwall',
+            'battery' => $battery,
+            'export' => $grid === null ? null : ($grid < 0 ? abs($grid) : 0.0),
+            'solar' => $solar,
+            'load' => $load,
+        ];
+    }
+
+    public static function normalizeHoldSec(mixed $raw): int
+    {
+        $sec = (int) $raw;
+        if ($sec <= 0) {
+            return 0;
+        }
+        $sec = (int) (round($sec / 60) * 60);
+        if ($sec < self::HOLD_MIN_SEC) {
+            $sec = self::HOLD_MIN_SEC;
+        }
+        if ($sec > self::HOLD_MAX_SEC) {
+            $sec = self::HOLD_MAX_SEC;
+        }
+
+        return $sec;
+    }
+
+    public static function thresholdUnit(string $metric): string
+    {
+        return match ($metric) {
+            'humidity', 'battery' => '%',
+            'export', 'solar', 'load' => 'W',
+            default => '°',
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private function normalizeThreshold(array $row): ?array
+    {
+        $id = trim((string) ($row['id'] ?? ''));
+        $metric = strtolower(trim((string) ($row['metric'] ?? 'temperature')));
+        if ($id === self::POWERWALL_ID) {
+            if (!in_array($metric, self::POWERWALL_METRICS, true)) {
+                $metric = 'battery';
+            }
+        } elseif ($metric !== 'temperature' && $metric !== 'humidity') {
+            $metric = 'temperature';
+        }
+        $op = strtolower(trim((string) ($row['op'] ?? 'above')));
+        if ($op !== 'above' && $op !== 'below') {
+            $op = 'above';
+        }
+        if ($id === '' || !is_numeric($row['value'] ?? null)) {
+            return null;
+        }
+
+        return [
+            'type' => 'threshold',
+            'id' => $id,
+            'metric' => $metric,
+            'op' => $op,
+            'value' => (float) $row['value'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $trigger
+     * @param array<string, array<string, mixed>> $rows
+     */
+    private function thresholdValue(array $trigger, array $rows): ?float
+    {
+        $id = (string) ($trigger['id'] ?? '');
+        $metric = (string) ($trigger['metric'] ?? 'temperature');
+        $val = $rows[$id][$metric] ?? null;
+        if (!is_float($val) && !is_int($val)) {
+            return null;
+        }
+
+        return (float) $val;
+    }
+
+    /**
+     * Powerwall metrics use >= / <= so a battery sitting at 80% still matches "above 50".
+     *
+     * @param array<string, mixed> $trigger
+     */
+    private function thresholdCompare(array $trigger, float $curr): bool
+    {
+        $op = (string) ($trigger['op'] ?? 'above');
+        $value = (float) ($trigger['value'] ?? 0);
+        $inclusive = in_array((string) ($trigger['metric'] ?? ''), self::POWERWALL_METRICS, true);
+        if ($op === 'below') {
+            return $inclusive ? $curr <= $value : $curr < $value;
+        }
+
+        return $inclusive ? $curr >= $value : $curr > $value;
+    }
+
+    /**
+     * @param array<string, mixed> $rule
+     * @param array<string, array<string, mixed>> $prev
+     * @param array<string, array<string, mixed>> $curr
+     * @param array<string, mixed> $state
+     * @param array{latitude: ?float, longitude: ?float, source: ?string} $coords
+     */
+    private function whenLevelTrue(
+        array $rule,
+        array $prev,
+        array $curr,
+        array $state,
+        int $now,
+        \DateTimeImmutable $local,
+        string $today,
+        string $hm,
+        int $dow,
+        array $coords
+    ): bool {
+        $indexes = $this->currentlyTrueIndexes($rule, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords);
+        if ($indexes === []) {
+            return false;
+        }
+        if (self::whenMatch($rule) === 'all') {
+            return count($indexes) === count(self::triggersOf($rule));
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $rule
+     * @param array<string, array<string, mixed>> $prev
+     * @param array<string, array<string, mixed>> $curr
+     * @param array<string, mixed> $state
+     * @param array{latitude: ?float, longitude: ?float, source: ?string} $coords
+     * @return list<int>
+     */
+    private function currentlyTrueIndexes(
+        array $rule,
+        array $prev,
+        array $curr,
+        array $state,
+        int $now,
+        \DateTimeImmutable $local,
+        string $today,
+        string $hm,
+        int $dow,
+        array $coords
+    ): array {
+        $id = (string) ($rule['id'] ?? '');
+        $matched = [];
+        foreach (self::triggersOf($rule) as $i => $trigger) {
+            if ($this->triggerCurrentlyTrue($trigger, $id, $i, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords)) {
+                $matched[] = $i;
+            }
+        }
+
+        return $matched;
+    }
+
+    /**
+     * Stay-true delay: When (and Only if) must remain true for hold_sec, then fire once.
+     *
+     * @param array<string, mixed> $state
+     */
+    private function holdShouldFire(array &$state, string $id, bool $armed, int $holdSec, int $now): bool
+    {
+        if ($id === '' || $holdSec <= 0) {
+            $this->clearHold($state, $id);
+
+            return false;
+        }
+        if (!$armed) {
+            $this->clearHold($state, $id);
+
+            return false;
+        }
+        if (!isset($state['hold']) || !is_array($state['hold'])) {
+            $state['hold'] = [];
+        }
+        $row = is_array($state['hold'][$id] ?? null) ? $state['hold'][$id] : [];
+        $since = (int) ($row['since'] ?? 0);
+        if ($since <= 0) {
+            $state['hold'][$id] = ['since' => $now, 'fired' => false];
+
+            return false;
+        }
+        if (!empty($row['fired'])) {
+            return false;
+        }
+
+        return ($now - $since) >= $holdSec;
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     */
+    private function markHoldFired(array &$state, string $id): void
+    {
+        if ($id === '' || !isset($state['hold'][$id]) || !is_array($state['hold'][$id])) {
+            return;
+        }
+        $state['hold'][$id]['fired'] = true;
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     */
+    private function clearHold(array &$state, string $id): void
+    {
+        if ($id !== '') {
+            unset($state['hold'][$id]);
+        }
+    }
+
     /**
      * @param array<string, mixed> $rule
      */
@@ -638,7 +944,10 @@ final class YarboHomeAutomations
             $thenParts[] = self::thenPhrase($action, $names);
         }
         $then = $thenParts !== [] ? implode(', ', $thenParts) : '…';
-        $text = $when . ' → ' . $then;
+        $hold = (int) ($rule['hold_sec'] ?? 0);
+        $text = $hold > 0
+            ? $when . ' (wait ' . self::formatDuration($hold) . ') → ' . $then
+            : $when . ' → ' . $then;
         $actionOff = false;
         foreach (is_array($rule['actions'] ?? null) ? $rule['actions'] : [] as $action) {
             if (is_array($action) && (int) ($action['off_after_sec'] ?? 0) > 0) {
@@ -743,11 +1052,14 @@ final class YarboHomeAutomations
             return $label . ' ' . ($offset < 0 ? '-' : '+') . $abs . ' min';
         }
         if ($type === 'threshold') {
-            $name = $names[(string) ($trigger['id'] ?? '')] ?? 'Sensor';
+            $id = (string) ($trigger['id'] ?? '');
+            $name = $id === self::POWERWALL_ID
+                ? 'Powerwall'
+                : ($names[$id] ?? 'Sensor');
             $metric = (string) ($trigger['metric'] ?? 'temperature');
             $op = (string) ($trigger['op'] ?? 'above');
             $value = $trigger['value'] ?? '';
-            $unit = $metric === 'humidity' ? '%' : '°';
+            $unit = self::thresholdUnit($metric);
 
             return $name . ' ' . $metric . ' ' . $op . ' ' . $value . $unit;
         }
@@ -889,6 +1201,17 @@ final class YarboHomeAutomations
         if ($offAfter > 86400) {
             $offAfter = 86400;
         }
+        $cooldown = (int) ($row['cooldown_sec'] ?? 30);
+        if ($cooldown < 0) {
+            $cooldown = 0;
+        }
+        if ($cooldown > 86400) {
+            $cooldown = 86400;
+        }
+        $hold = self::normalizeHoldSec($row['hold_sec'] ?? 0);
+        if ($hold > $cooldown) {
+            $cooldown = $hold;
+        }
         $name = YarboHub::normalizeDisplayName((string) ($row['name'] ?? ''), 64);
         if ($name === '' && $trigger !== null) {
             $name = YarboHub::normalizeDisplayName(self::sentence([
@@ -897,17 +1220,11 @@ final class YarboHomeAutomations
                 'when_match' => $whenMatch,
                 'actions' => $actions,
                 'off_after_sec' => $offAfter,
+                'hold_sec' => $hold,
             ], $names), 64);
         }
         if ($name === '') {
             $name = 'Automation';
-        }
-        $cooldown = (int) ($row['cooldown_sec'] ?? 30);
-        if ($cooldown < 0) {
-            $cooldown = 0;
-        }
-        if ($cooldown > 86400) {
-            $cooldown = 86400;
         }
 
         return [
@@ -921,6 +1238,7 @@ final class YarboHomeAutomations
             'actions' => $actions,
             'off_after_sec' => $offAfter,
             'cooldown_sec' => $cooldown,
+            'hold_sec' => $hold,
         ];
     }
 
@@ -958,26 +1276,7 @@ final class YarboHomeAutomations
             return ['type' => 'sun', 'event' => $event, 'offset_min' => $offset];
         }
         if ($type === 'threshold') {
-            $id = trim((string) ($trigger['id'] ?? ''));
-            $metric = strtolower(trim((string) ($trigger['metric'] ?? 'temperature')));
-            if ($metric !== 'temperature' && $metric !== 'humidity') {
-                $metric = 'temperature';
-            }
-            $op = strtolower(trim((string) ($trigger['op'] ?? 'above')));
-            if ($op !== 'above' && $op !== 'below') {
-                $op = 'above';
-            }
-            if ($id === '' || !is_numeric($trigger['value'] ?? null)) {
-                return null;
-            }
-
-            return [
-                'type' => 'threshold',
-                'id' => $id,
-                'metric' => $metric,
-                'op' => $op,
-                'value' => (float) $trigger['value'],
-            ];
+            return $this->normalizeThreshold($trigger);
         }
         if ($type !== 'device') {
             return null;
@@ -1115,6 +1414,9 @@ final class YarboHomeAutomations
 
             return ['type' => 'sun_window', 'start' => $start, 'end' => $end];
         }
+        if ($type === 'threshold') {
+            return $this->normalizeThreshold($cond);
+        }
         if ($type !== 'device') {
             return null;
         }
@@ -1150,6 +1452,9 @@ final class YarboHomeAutomations
                 'temperature' => isset($row['temperature']) && is_numeric($row['temperature']) ? (float) $row['temperature'] : null,
                 'humidity' => isset($row['humidity']) && is_numeric($row['humidity']) ? (float) $row['humidity'] : null,
             ];
+            foreach (self::POWERWALL_METRICS as $metric) {
+                $out[$id][$metric] = isset($row[$metric]) && is_numeric($row[$metric]) ? (float) $row[$metric] : null;
+            }
         }
 
         return $out;
@@ -1257,27 +1562,16 @@ final class YarboHomeAutomations
             );
         }
         if ($type === 'threshold') {
-            $deviceId = (string) ($trigger['id'] ?? '');
-            $metric = (string) ($trigger['metric'] ?? 'temperature');
-            $op = (string) ($trigger['op'] ?? 'above');
-            $value = (float) ($trigger['value'] ?? 0);
-            $currVal = $curr[$deviceId][$metric] ?? null;
-            $prevVal = $prev[$deviceId][$metric] ?? null;
-            if (!is_float($currVal) && !is_int($currVal)) {
+            $currVal = $this->thresholdValue($trigger, $curr);
+            $prevVal = $this->thresholdValue($trigger, $prev);
+            if ($currVal === null || !$this->thresholdCompare($trigger, $currVal)) {
                 return false;
             }
-            $currVal = (float) $currVal;
-            $nowMatch = $op === 'below' ? $currVal < $value : $currVal > $value;
-            if (!$nowMatch) {
+            if ($prevVal === null) {
                 return false;
             }
-            if (!is_float($prevVal) && !is_int($prevVal)) {
-                return false;
-            }
-            $prevVal = (float) $prevVal;
-            $wasMatch = $op === 'below' ? $prevVal < $value : $prevVal > $value;
 
-            return !$wasMatch;
+            return !$this->thresholdCompare($trigger, $prevVal);
         }
         $deviceId = (string) ($trigger['id'] ?? '');
         $event = (string) ($trigger['event'] ?? '');
@@ -1349,17 +1643,9 @@ final class YarboHomeAutomations
             return $eventHm !== null && $this->clockReached($eventHm, $hm, $today, $state, $now);
         }
         if ($type === 'threshold') {
-            $deviceId = (string) ($trigger['id'] ?? '');
-            $metric = (string) ($trigger['metric'] ?? 'temperature');
-            $op = (string) ($trigger['op'] ?? 'above');
-            $value = (float) ($trigger['value'] ?? 0);
-            $currVal = $curr[$deviceId][$metric] ?? null;
-            if (!is_float($currVal) && !is_int($currVal)) {
-                return false;
-            }
-            $currVal = (float) $currVal;
+            $currVal = $this->thresholdValue($trigger, $curr);
 
-            return $op === 'below' ? $currVal < $value : $currVal > $value;
+            return $currVal !== null && $this->thresholdCompare($trigger, $currVal);
         }
         $deviceId = (string) ($trigger['id'] ?? '');
         $event = (string) ($trigger['event'] ?? '');
@@ -1691,6 +1977,13 @@ final class YarboHomeAutomations
                     return false;
                 }
                 if (!self::hmInWindow($hm, $startHm, $endHm)) {
+                    return false;
+                }
+                continue;
+            }
+            if ($type === 'threshold') {
+                $currVal = $this->thresholdValue($cond, $curr);
+                if ($currVal === null || !$this->thresholdCompare($cond, $currVal)) {
                     return false;
                 }
                 continue;
@@ -2294,11 +2587,13 @@ final class YarboHomeAutomations
         $defaults = [
             'prev' => [],
             'held' => [],
+            'hold' => [],
             'last_fire' => [],
             'then_error' => [],
             'day_slot' => [],
             'delayed' => [],
             'clock' => 0,
+            'powerwall_at' => 0,
             'unifi_at' => 0,
             'sensors_at' => 0,
             'doors_at' => 0,
@@ -2317,11 +2612,13 @@ final class YarboHomeAutomations
         return [
             'prev' => is_array($decoded['prev'] ?? null) ? $decoded['prev'] : [],
             'held' => is_array($decoded['held'] ?? null) ? $decoded['held'] : [],
+            'hold' => is_array($decoded['hold'] ?? null) ? $decoded['hold'] : [],
             'last_fire' => is_array($decoded['last_fire'] ?? null) ? $decoded['last_fire'] : [],
             'then_error' => is_array($decoded['then_error'] ?? null) ? $decoded['then_error'] : [],
             'day_slot' => is_array($decoded['day_slot'] ?? null) ? $decoded['day_slot'] : [],
             'delayed' => is_array($decoded['delayed'] ?? null) ? $decoded['delayed'] : [],
             'clock' => (int) ($decoded['clock'] ?? 0),
+            'powerwall_at' => (int) ($decoded['powerwall_at'] ?? 0),
             'unifi_at' => (int) ($decoded['unifi_at'] ?? 0),
             'sensors_at' => (int) ($decoded['sensors_at'] ?? 0),
             'doors_at' => (int) ($decoded['doors_at'] ?? 0),

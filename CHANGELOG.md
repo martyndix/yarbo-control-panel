@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.64] - 2026-10-09
+
+### Added
+- Home Automations can use **Powerwall** battery %, export W, solar W, and house load W as When chips (All-and with a room temperature, for example) or **Only if**. Export is grid export as positive watts. The runner reads the Powerwall cache, not a live Tesla call every second.
+- Automations **Trigger delay** 1–5 minutes: When (and Only if) must stay true that long, then Then runs. If it drops, the wait starts over. Cooldown is at least as long as the delay so heaters do not chatter.
+
+### Fixed
+- Home heater On/Off and setpoint no longer abort after 25 seconds with **Fetch is aborted**. Those commands wait up to 90 seconds (Matter writes both heat and occupied-heating), setpoint changes debounce while you click the stepper, and a timeout shows a short retry message instead of the raw abort text.
+
 ## [4.0.63] - 2026-10-05
 
 ### Fixed
