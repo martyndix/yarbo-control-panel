@@ -258,7 +258,7 @@ final class YarboHome
         // Device names and rooms still come from disk so a hung agent cannot freeze the panel.
         $live = $this->devicesWithLiveState();
         $live['devices'] = $this->mergeUnifiDevices($live['devices']);
-        $store = $this->load();
+        $store = $this->adoptLoneHeaterIds($this->load(), $live['devices']);
         $hidden = array_fill_keys($store['hidden'], true);
         $devices = [];
         $hiddenDevices = [];
@@ -1845,6 +1845,17 @@ final class YarboHome
         if ($byId === []) {
             return $devices;
         }
+        $heatersByNode = [];
+        foreach ($byId as $liveId => $live) {
+            if (!self::liveRowLooksHeater($live)) {
+                continue;
+            }
+            $nid = self::rowNodeId($live, $liveId);
+            if ($nid > 0) {
+                $heatersByNode[$nid][] = $liveId;
+            }
+        }
+        $used = [];
         $out = [];
         foreach ($devices as $device) {
             if (!is_array($device)) {
@@ -1852,54 +1863,145 @@ final class YarboHome
             }
             $id = (string) ($device['id'] ?? '');
             if ($id !== '' && isset($byId[$id])) {
-                $live = $byId[$id];
-                if (array_key_exists('on', $live)) {
-                    $device['on'] = YarboMatterFabric::attrBool($live['on']);
+                $out[] = self::copyLiveDeviceFields($device, $byId[$id]);
+                $used[$id] = true;
+                continue;
+            }
+            $nid = self::rowNodeId($device, $id);
+            $candidates = $heatersByNode[$nid] ?? [];
+            $unused = [];
+            foreach ($candidates as $liveId) {
+                if (!isset($used[$liveId])) {
+                    $unused[] = $liveId;
                 }
-                if (array_key_exists('brightness', $live)) {
-                    $device['brightness'] = $live['brightness'] === null || $live['brightness'] === ''
-                        ? null
-                        : (int) $live['brightness'];
-                }
-                if (array_key_exists('available', $live)) {
-                    $device['available'] = (bool) $live['available'];
-                }
-                foreach (['hue', 'saturation', 'color_temp'] as $key) {
-                    if (array_key_exists($key, $live) && $live[$key] !== null && $live[$key] !== '') {
-                        $device[$key] = $live[$key];
-                    }
-                }
-                if (array_key_exists('color_hex', $live)) {
-                    $hex = trim((string) ($live['color_hex'] ?? ''));
-                    if ($hex !== '') {
-                        $device['color_hex'] = $hex;
-                    }
-                }
-                foreach (['dimmable', 'colorable', 'color_hs', 'color_xy', 'color_ct'] as $flag) {
-                    if (array_key_exists($flag, $live)) {
-                        $device[$flag] = (bool) $live[$flag];
-                    }
-                }
-                foreach (['local_temperature', 'heating_setpoint', 'heating_min', 'heating_max'] as $key) {
-                    if (!array_key_exists($key, $live) || $live[$key] === null || $live[$key] === '') {
-                        continue;
-                    }
-                    $celsius = self::optionalCelsius($live[$key]);
-                    if ($celsius !== null) {
-                        $device[$key] = $celsius;
-                    }
-                }
-                if (array_key_exists('has_thermostat', $live)) {
-                    $device['has_thermostat'] = (bool) $live['has_thermostat'];
-                }
-                if (array_key_exists('system_mode', $live) && $live['system_mode'] !== null && $live['system_mode'] !== '') {
-                    $device['system_mode'] = (int) $live['system_mode'];
-                }
+            }
+            if (self::cachedRowLooksHeater($device) && $nid > 0 && count($candidates) === 1 && $unused !== []) {
+                $liveId = $unused[0];
+                $used[$liveId] = true;
+                $out[] = $byId[$liveId];
+                continue;
             }
             $out[] = $device;
         }
+        foreach ($byId as $liveId => $live) {
+            if (!isset($used[$liveId])) {
+                $out[] = $live;
+            }
+        }
 
         return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    public static function liveRowLooksHeater(array $row): bool
+    {
+        if (strtolower(trim((string) ($row['kind'] ?? ''))) === self::KIND_HEATER) {
+            return true;
+        }
+
+        return array_key_exists('has_thermostat', $row)
+            || array_key_exists('heating_setpoint', $row)
+            || array_key_exists('local_temperature', $row)
+            || array_key_exists('system_mode', $row);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    public static function cachedRowLooksHeater(array $row): bool
+    {
+        if (self::liveRowLooksHeater($row)) {
+            return true;
+        }
+        $labels = strtolower(trim(implode(' ', [
+            (string) ($row['name'] ?? ''),
+            (string) ($row['product'] ?? ''),
+            (string) ($row['vendor'] ?? ''),
+            (string) ($row['source'] ?? ''),
+        ])));
+
+        return YarboMatterFabric::nameLooksHeater($labels);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    public static function rowNodeId(array $row, string $id = ''): int
+    {
+        $nid = (int) ($row['node_id'] ?? 0);
+        if ($nid > 0) {
+            return $nid;
+        }
+        $id = $id !== '' ? $id : trim((string) ($row['id'] ?? ''));
+        if (!str_contains($id, ':')) {
+            return 0;
+        }
+
+        return (int) explode(':', $id, 2)[0];
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     * @param array<string, mixed> $live
+     * @return array<string, mixed>
+     */
+    public static function copyLiveDeviceFields(array $device, array $live): array
+    {
+        if (array_key_exists('on', $live)) {
+            $device['on'] = YarboMatterFabric::attrBool($live['on']);
+        }
+        if (array_key_exists('brightness', $live)) {
+            $device['brightness'] = $live['brightness'] === null || $live['brightness'] === ''
+                ? null
+                : (int) $live['brightness'];
+        }
+        if (array_key_exists('available', $live)) {
+            $device['available'] = (bool) $live['available'];
+        }
+        foreach (['hue', 'saturation', 'color_temp'] as $key) {
+            if (array_key_exists($key, $live) && $live[$key] !== null && $live[$key] !== '') {
+                $device[$key] = $live[$key];
+            }
+        }
+        if (array_key_exists('color_hex', $live)) {
+            $hex = trim((string) ($live['color_hex'] ?? ''));
+            if ($hex !== '') {
+                $device['color_hex'] = $hex;
+            }
+        }
+        foreach (['dimmable', 'colorable', 'color_hs', 'color_xy', 'color_ct'] as $flag) {
+            if (array_key_exists($flag, $live)) {
+                $device[$flag] = (bool) $live[$flag];
+            }
+        }
+        foreach (['local_temperature', 'heating_setpoint', 'heating_min', 'heating_max'] as $key) {
+            if (!array_key_exists($key, $live) || $live[$key] === null || $live[$key] === '') {
+                continue;
+            }
+            $celsius = self::optionalCelsius($live[$key]);
+            if ($celsius !== null) {
+                $device[$key] = $celsius;
+            }
+        }
+        if (array_key_exists('has_thermostat', $live)) {
+            $device['has_thermostat'] = (bool) $live['has_thermostat'];
+        }
+        if (array_key_exists('system_mode', $live) && $live['system_mode'] !== null && $live['system_mode'] !== '') {
+            $device['system_mode'] = (int) $live['system_mode'];
+        }
+        if (array_key_exists('kind', $live) && trim((string) $live['kind']) !== '') {
+            $device['kind'] = (string) $live['kind'];
+        }
+        if (array_key_exists('endpoint', $live) && $live['endpoint'] !== null && $live['endpoint'] !== '') {
+            $device['endpoint'] = (int) $live['endpoint'];
+        }
+        if (array_key_exists('node_id', $live) && (int) $live['node_id'] > 0) {
+            $device['node_id'] = (int) $live['node_id'];
+        }
+
+        return $device;
     }
 
     /**
@@ -2284,8 +2386,77 @@ final class YarboHome
     }
 
     /**
+     * Mill split nodes change id from node:1 (OnOff) to node:2 (thermostat).
+     * Copy name/room/group/hidden from the old endpoint when this node has one heater.
+     *
+     * @param array<string, mixed> $store
      * @param list<array<string, mixed>> $devices
+     * @return array<string, mixed>
      */
+    public function adoptLoneHeaterIds(array $store, array $devices): array
+    {
+        $byNode = [];
+        foreach ($devices as $device) {
+            if (!is_array($device) || !self::liveRowLooksHeater($device)) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            $nid = self::rowNodeId($device, $id);
+            if ($id === '' || $nid <= 0) {
+                continue;
+            }
+            $byNode[$nid][] = $id;
+        }
+        $changed = false;
+        foreach ($byNode as $nid => $ids) {
+            $ids = array_values(array_unique($ids));
+            if (count($ids) !== 1) {
+                continue;
+            }
+            $newId = $ids[0];
+            $prefix = $nid . ':';
+            foreach (['names', 'rooms', 'groups'] as $key) {
+                $map = is_array($store[$key] ?? null) ? $store[$key] : [];
+                if (isset($map[$newId])) {
+                    continue;
+                }
+                foreach ($map as $oldId => $val) {
+                    if (is_string($oldId) && str_starts_with($oldId, $prefix) && $oldId !== $newId) {
+                        $store[$key][$newId] = $val;
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+            $hidden = is_array($store['hidden'] ?? null) ? $store['hidden'] : [];
+            if (!in_array($newId, $hidden, true)) {
+                foreach ($hidden as $i => $oldId) {
+                    if (is_string($oldId) && str_starts_with($oldId, $prefix) && $oldId !== $newId) {
+                        $store['hidden'][$i] = $newId;
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+            $order = is_array($store['device_order'] ?? null) ? $store['device_order'] : [];
+            if (!in_array($newId, $order, true)) {
+                foreach ($order as $i => $oldId) {
+                    if (is_string($oldId) && str_starts_with($oldId, $prefix) && $oldId !== $newId) {
+                        $store['device_order'][$i] = $newId;
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if ($changed) {
+            $store['hidden'] = $this->normalizeIdList($store['hidden'] ?? []);
+            $this->write($store);
+        }
+
+        return $store;
+    }
+
     private function rememberDevices(array $devices): void
     {
         $slim = $this->normalizeLastDevices($devices);

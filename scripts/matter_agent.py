@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 23
+AGENT_VERSION = 24
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2807,6 +2807,8 @@ def write_attribute(
     value: Any,
     *,
     reconnect: bool = True,
+    timeout: float = 18.0,
+    retries: int = 1,
 ) -> dict[str, Any]:
     def send(nid: int | None = None) -> dict[str, Any]:
         use = node_id if nid is None else nid
@@ -2817,8 +2819,8 @@ def write_attribute(
                 "attribute_path": f"{endpoint}/{cluster}/{attr}",
                 "value": value,
             },
-            timeout=18.0,
-            retries=1,
+            timeout=timeout,
+            retries=retries,
         )
         if not rpc.get("ok"):
             return rpc
@@ -2915,10 +2917,60 @@ def write_heater_setpoint(
     )
 
 
-def write_heater_heat(node_id: int, endpoint: int) -> dict[str, Any]:
+def write_heater_heat(node_id: int, endpoint: int, timeout: float = 18.0) -> dict[str, Any]:
     return write_attribute(
-        node_id, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_HEAT, reconnect=False
+        node_id,
+        endpoint,
+        THERMOSTAT,
+        ATTR_SYSTEM_MODE,
+        SYSTEM_MODE_HEAT,
+        reconnect=False,
+        timeout=timeout,
+        retries=1,
     )
+
+
+def row_node_endpoint(row: dict[str, Any]) -> tuple[int, int]:
+    try:
+        nid = int(row.get("node_id") or 0)
+        ep = int(row.get("endpoint") or 0)
+    except (TypeError, ValueError):
+        nid, ep = 0, 0
+    if nid <= 0 or ep <= 0:
+        try:
+            node_s, ep_s = str(row.get("id") or "").split(":", 1)
+            nid, ep = int(node_s), int(ep_s)
+        except (TypeError, ValueError):
+            return 0, 0
+    return nid, ep
+
+
+def row_looks_heater(row: dict[str, Any]) -> bool:
+    kind = str(row.get("kind") or "").strip().lower()
+    if kind == "heater":
+        return True
+    return bool(
+        row.get("has_thermostat")
+        or row.get("heating_setpoint") is not None
+        or row.get("local_temperature") is not None
+        or row.get("system_mode") is not None
+    )
+
+
+def resolve_heater_endpoint(node_id: int, preferred: int) -> int:
+    """Cached tiles may still be node:1 while flatten keeps the thermostat on EP2."""
+    matches: list[int] = []
+    for row in current_live_devices():
+        if not isinstance(row, dict) or not row_looks_heater(row):
+            continue
+        nid, ep = row_node_endpoint(row)
+        if nid == node_id and ep > 0 and ep not in matches:
+            matches.append(ep)
+    if preferred in matches:
+        return preferred
+    if matches:
+        return matches[0]
+    return preferred
 
 
 def heater_onoff_endpoints(node_id: int, thermo_ep: int) -> list[int]:
@@ -2929,17 +2981,7 @@ def heater_onoff_endpoints(node_id: int, thermo_ep: int) -> list[int]:
     for row in current_live_devices():
         if not isinstance(row, dict):
             continue
-        try:
-            nid = int(row.get("node_id") or 0)
-            ep = int(row.get("endpoint") or 0)
-        except (TypeError, ValueError):
-            nid, ep = 0, 0
-        if nid <= 0 or ep <= 0:
-            try:
-                node_s, ep_s = str(row.get("id") or "").split(":", 1)
-                nid, ep = int(node_s), int(ep_s)
-            except (TypeError, ValueError):
-                continue
+        nid, ep = row_node_endpoint(row)
         if nid == node_id and ep > 0 and ep != thermo_ep and ep not in found:
             found.append(ep)
     return found
@@ -2953,7 +2995,7 @@ def heater_thermo_endpoints(preferred: int) -> list[int]:
     return order
 
 
-def write_heater_onoff(node_id: int, endpoint: int, on: bool) -> dict[str, Any]:
+def write_heater_onoff(node_id: int, endpoint: int, on: bool, timeout: float = 4.0) -> dict[str, Any]:
     rpc = matter_rpc(
         "device_command",
         {
@@ -2963,7 +3005,7 @@ def write_heater_onoff(node_id: int, endpoint: int, on: bool) -> dict[str, Any]:
             "command_name": "On" if on else "Off",
             "payload": {},
         },
-        timeout=12.0,
+        timeout=timeout,
         retries=1,
     )
     return rpc if not rpc.get("ok") else {"ok": True}
@@ -2971,11 +3013,12 @@ def write_heater_onoff(node_id: int, endpoint: int, on: bool) -> dict[str, Any]:
 
 def pulse_heater_siblings(node_id: int, thermo_ep: int, on: bool) -> None:
     for endpoint in heater_onoff_endpoints(node_id, thermo_ep):
-        result = write_heater_onoff(node_id, endpoint, on)
-        if result.get("ok"):
-            return
-        if is_transport_error(result) and not is_unsupported_cluster(result):
-            return
+        result = write_heater_onoff(node_id, endpoint, on, timeout=4.0)
+        if result.get("ok") or is_unsupported_cluster(result):
+            if result.get("ok"):
+                return
+            continue
+        return
 
 
 def set_heater_power(
@@ -2985,70 +3028,74 @@ def set_heater_power(
     celsius: Any = None,
     device_id: str = "",
 ) -> dict[str, Any]:
-    """On writes Heat (never Auto/Cool), then the occupied-heating setpoint.
+    """On writes Heat on the thermostat endpoint, then the occupied-heating setpoint.
 
-    Apple Home heat-only heaters reject Cool/Auto. Off only writes SystemMode Off.
+    Mill split nodes cache as node:1 (OnOff) while the thermostat is on EP2.
+    Heat on the wrong endpoint times out; resolve the live thermostat first.
     """
 
     def send(nid: int | None = None) -> dict[str, Any]:
         use = node_id if nid is None else nid
+        thermo = resolve_heater_endpoint(use, endpoint)
+        endpoints = heater_thermo_endpoints(thermo)
         last: dict[str, Any] = {"ok": False, "error": "Heater command failed"}
         if not on:
-            for ep in heater_thermo_endpoints(endpoint):
+            for i, ep in enumerate(endpoints):
                 last = write_attribute(
-                    use, ep, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_OFF, reconnect=False
+                    use,
+                    ep,
+                    THERMOSTAT,
+                    ATTR_SYSTEM_MODE,
+                    SYSTEM_MODE_OFF,
+                    reconnect=False,
+                    timeout=18.0 if i == 0 else 5.0,
+                    retries=1,
                 )
                 if last.get("ok"):
                     pulse_heater_siblings(use, ep, False)
                     return {"ok": True, "on": False, "system_mode": SYSTEM_MODE_OFF}
-                if is_unsupported_cluster(last) or is_mode_rejected(last):
+                if is_unsupported_cluster(last) or is_mode_rejected(last) or is_transport_error(last):
                     continue
-                if is_transport_error(last):
-                    return last
-            onoff = write_heater_onoff(use, endpoint, False)
+                return last
+            onoff = write_heater_onoff(use, thermo, False)
+            pulse_heater_siblings(use, thermo, False)
             if onoff.get("ok"):
-                pulse_heater_siblings(use, endpoint, False)
                 return {"ok": True, "on": False}
-            pulse_heater_siblings(use, endpoint, False)
             return last
         target = heater_setpoint_celsius(device_id, celsius)
-        # Mill Gen4 keeps the power relay on a hidden sibling. Heat is
-        # rejected or ignored until that OnOff endpoint is On (Apple Home
-        # writes both). Pulse first, then Heat on the thermostat endpoint.
-        pulse_heater_siblings(use, endpoint, True)
-        for ep in heater_thermo_endpoints(endpoint):
-            heat = write_heater_heat(use, ep)
+        for i, ep in enumerate(endpoints):
+            wait = 18.0 if i == 0 else 5.0
+            heat = write_heater_heat(use, ep, timeout=wait)
             last = heat
             if heat.get("ok"):
                 write_heater_setpoint(use, ep, target)
-                if ep != endpoint:
-                    pulse_heater_siblings(use, ep, True)
+                pulse_heater_siblings(use, ep, True)
                 return {
                     "ok": True,
                     "on": True,
                     "system_mode": SYSTEM_MODE_HEAT,
                     "heating_setpoint": round(target, 1),
                 }
-            if is_transport_error(heat) and not is_unsupported_cluster(heat) and not is_mode_rejected(heat):
-                return heat
             if is_mode_rejected(heat):
                 setpoint = write_heater_setpoint(use, ep, target)
                 if setpoint.get("ok") or not is_transport_error(setpoint):
-                    retry = write_heater_heat(use, ep)
+                    retry = write_heater_heat(use, ep, timeout=wait)
                     last = retry
                     if retry.get("ok"):
-                        if ep != endpoint:
-                            pulse_heater_siblings(use, ep, True)
+                        pulse_heater_siblings(use, ep, True)
                         return {
                             "ok": True,
                             "on": True,
                             "system_mode": SYSTEM_MODE_HEAT,
                             "heating_setpoint": round(target, 1),
                         }
-        onoff = write_heater_onoff(use, endpoint, True)
+            if is_unsupported_cluster(heat) or is_mode_rejected(heat) or is_transport_error(heat):
+                continue
+            return heat
+        onoff = write_heater_onoff(use, thermo, True)
         if onoff.get("ok"):
-            pulse_heater_siblings(use, endpoint, True)
-            write_heater_setpoint(use, endpoint, target)
+            pulse_heater_siblings(use, thermo, True)
+            write_heater_setpoint(use, thermo, target)
             return {"ok": True, "on": True, "heating_setpoint": round(target, 1)}
         return last
 

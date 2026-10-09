@@ -4261,7 +4261,9 @@ async function sendHomeDeviceToggle(id, button, forceOn) {
     const currentlyOn = card?.classList.contains('is-on') || Boolean(device?.on);
     const nextOn = typeof forceOn === 'boolean' ? forceOn : !currentlyOn;
     const heater = device?.kind === 'heater';
-    setHomeDeviceOn(id, nextOn);
+    if (!heater) {
+        setHomeDeviceOn(id, nextOn);
+    }
     if (button) button.disabled = true;
     try {
         const data = await homeApi({
@@ -4280,8 +4282,9 @@ async function sendHomeDeviceToggle(id, button, forceOn) {
         }, heater ? HOME_HEATER_TIMEOUT_MS : 25000);
         if (!data.ok) throw new Error(data.error || 'Failed');
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
+        else if (!heater) setHomeDeviceOn(id, nextOn);
     } catch (err) {
-        setHomeDeviceOn(id, currentlyOn);
+        if (!heater) setHomeDeviceOn(id, currentlyOn);
         showToast(homeCommandErrorMessage(err, 'Home command failed', heater), 'error');
     } finally {
         if (button) button.disabled = false;
@@ -4306,7 +4309,6 @@ async function sendHomeHeaterSetpoint(id, celsius, input) {
     const previous = device?.heating_setpoint;
     const currentlyOn = Boolean(device?.on);
     if (device) device.heating_setpoint = celsius;
-    setHomeDeviceOn(id, true);
     homeHeaterBusy.add(id);
     if (input) input.disabled = true;
     try {

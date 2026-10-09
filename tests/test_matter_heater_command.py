@@ -40,7 +40,7 @@ def main() -> int:
     ping = agent.dispatch({"op": "ping"})
     assert ping.get("ok") is True, ping
     assert ping.get("version") == agent.AGENT_VERSION, ping
-    assert ping.get("version") == 23, ping
+    assert ping.get("version") == 24, ping
     assert "thermostat" in (ping.get("features") or []), ping
 
     assert agent.write_status_code(None) == 0
@@ -88,6 +88,21 @@ def main() -> int:
         and str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
     ]
     assert mill_heat and mill_heat[0].get("value") == agent.SYSTEM_MODE_HEAT, mill_heat
+    assert str(mill_heat[0].get("attribute_path") or "").startswith("2/"), mill_heat
+
+    agent._live_devices = [
+        {"id": "26:2", "node_id": 26, "endpoint": 2, "kind": "heater", "on": False, "heating_setpoint": 21.0, "has_thermostat": True}
+    ]
+    calls.clear()
+    aliased = agent.dispatch({"op": "command", "id": "26:1", "action": "on", "kind": "heater", "celsius": 21})
+    assert aliased.get("ok") is True, aliased
+    aliased_heat = [
+        str(args.get("attribute_path") or "")
+        for command, args in calls
+        if command == "write_attribute"
+        and str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
+    ]
+    assert aliased_heat and aliased_heat[0].startswith("2/"), calls
 
     agent._live_devices = [{"id": "25:1", "kind": "heater", "on": False, "heating_setpoint": 21.0}]
     calls.clear()

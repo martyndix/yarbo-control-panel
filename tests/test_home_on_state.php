@@ -88,6 +88,31 @@ $heaterLive = YarboHome::overlayDeviceStates(
 assert_true(($heaterLive[0]['on'] ?? false) === true, 'overlay must copy heater on');
 assert_true(($heaterLive[0]['local_temperature'] ?? 0) === 21.4, 'overlay must copy room temp');
 assert_true(($heaterLive[0]['heating_setpoint'] ?? 0) === 22.0, 'overlay must copy setpoint');
+$millSplit = YarboHome::overlayDeviceStates(
+    [['id' => '26:1', 'node_id' => 26, 'endpoint' => 1, 'name' => 'Hall', 'kind' => 'heater', 'on' => false]],
+    [[
+        'id' => '26:2',
+        'node_id' => 26,
+        'endpoint' => 2,
+        'name' => 'Mill Wi-Fi Panel Heater Gen4',
+        'kind' => 'heater',
+        'on' => false,
+        'has_thermostat' => true,
+        'local_temperature' => 21.9,
+        'heating_setpoint' => 5.0,
+    ]]
+);
+assert_true(count($millSplit) === 1, 'mill split must not keep both OnOff and thermostat rows');
+assert_true(($millSplit[0]['id'] ?? '') === '26:2', 'mill split overlay must use the thermostat endpoint');
+$extraMill = YarboHome::overlayDeviceStates(
+    [['id' => '25:1', 'kind' => 'heater', 'on' => false]],
+    [
+        ['id' => '25:1', 'kind' => 'heater', 'on' => true, 'has_thermostat' => true],
+        ['id' => '28:2', 'node_id' => 28, 'endpoint' => 2, 'kind' => 'heater', 'on' => false, 'has_thermostat' => true],
+    ]
+);
+$extraIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $extraMill);
+assert_true(in_array('25:1', $extraIds, true) && in_array('28:2', $extraIds, true), 'overlay must add live mill heaters the cache omitted');
 
 $root = sys_get_temp_dir() . '/yarbo-home-on-' . bin2hex(random_bytes(3));
 mkdir($root . '/data/matter-server', 0775, true);
@@ -355,6 +380,7 @@ assert_true(str_contains($js, 'data-unifi-cmd="unlock"'), 'Lock is a label; the 
 assert_true(!str_contains($js, 'function unifiDoorLockCommand'), 'door tiles must not send a lock command');
 assert_true(str_contains($js, 'patchUnifiDoorLockButton'), 'Home must rename Unlock to Lock when Open/Closed patches');
 assert_true(str_contains($js, 'unifiDoorLockButtonHtml(d, { home: true })'), 'Home door actions must use the live Unlock/Lock label');
+assert_true(str_contains($js, "if (!heater) {\n        setHomeDeviceOn(id, nextOn);"), 'heater On must wait for Matter before showing On');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'Home On/Off command must send device kind');
 assert_true(str_contains($js, 'celsius: Number(device.heating_setpoint)'), 'heater On sends the current heating temperature');
 assert_true(str_contains($js, "mode: 'heat'"), 'heater On sends Heat mode, not Auto');

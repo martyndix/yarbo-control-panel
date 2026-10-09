@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.69] - 2026-10-09
+
+### Fixed
+- All eight Mill Gen4 heaters should now appear: live thermostat endpoints that the cache still had as `node:1` (or omitted) are merged in. A node with one heater keeps its name and room when the id moves from endpoint 1 to 2.
+- The two ungrouped Mill heaters no longer flash **On** and then **Heater is still changing**. The page was writing Heat to the hidden On/Off endpoint, which timed out. On now writes Heat on the live thermostat endpoint, and the tile stays Off until that write succeeds.
+
 ## [4.0.68] - 2026-10-09
 
 ### Fixed
