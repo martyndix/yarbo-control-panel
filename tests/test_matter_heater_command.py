@@ -40,7 +40,7 @@ def main() -> int:
     ping = agent.dispatch({"op": "ping"})
     assert ping.get("ok") is True, ping
     assert ping.get("version") == agent.AGENT_VERSION, ping
-    assert ping.get("version") == 22, ping
+    assert ping.get("version") == 23, ping
     assert "thermostat" in (ping.get("features") or []), ping
 
     assert agent.write_status_code(None) == 0
@@ -68,6 +68,28 @@ def main() -> int:
         if command == "write_attribute"
     ), calls
 
+    agent._live_devices = [
+        {"id": "26:2", "node_id": 26, "endpoint": 2, "kind": "heater", "on": False, "heating_setpoint": 21.0}
+    ]
+    calls.clear()
+    mill = agent.dispatch({"op": "command", "id": "26:2", "action": "on", "celsius": 21})
+    assert mill.get("ok") is True, mill
+    mill_onoff = [
+        args
+        for command, args in calls
+        if command == "device_command" and args.get("cluster_id") == agent.ON_OFF
+    ]
+    assert mill_onoff and int(mill_onoff[0].get("endpoint_id") or 0) == 1, calls
+    assert mill_onoff[0].get("command_name") == "On", mill_onoff
+    mill_heat = [
+        args
+        for command, args in calls
+        if command == "write_attribute"
+        and str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
+    ]
+    assert mill_heat and mill_heat[0].get("value") == agent.SYSTEM_MODE_HEAT, mill_heat
+
+    agent._live_devices = [{"id": "25:1", "kind": "heater", "on": False, "heating_setpoint": 21.0}]
     calls.clear()
     off = agent.dispatch({"op": "command", "id": "25:1", "action": "off"})
     assert off.get("ok") is True, off
@@ -142,16 +164,27 @@ def main() -> int:
         if command == "write_attribute"
         and str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
     ]
-    assert mode_values == [agent.SYSTEM_MODE_HEAT, agent.SYSTEM_MODE_HEAT], mode_values
+    assert mode_values[0] == agent.SYSTEM_MODE_HEAT, mode_values
     assert agent.SYSTEM_MODE_AUTO not in mode_values, mode_values
-    assert not any(command == "device_command" for command, _ in calls), calls
+    onoff = [
+        args
+        for command, args in calls
+        if command == "device_command" and args.get("cluster_id") == agent.ON_OFF
+    ]
+    assert onoff and int(onoff[0].get("endpoint_id") or 0) == 1, calls
+    assert onoff[0].get("command_name") == "On", onoff
 
     agent._live_devices = []
     calls.clear()
     hinted = agent.dispatch({"op": "command", "id": "26:2", "action": "on", "kind": "heater"})
     assert hinted.get("ok") is True, hinted
     assert any(command == "write_attribute" for command, _ in calls), calls
-    assert not any(command == "device_command" for command, _ in calls), calls
+    hinted_onoff = [
+        args
+        for command, args in calls
+        if command == "device_command" and args.get("cluster_id") == agent.ON_OFF
+    ]
+    assert hinted_onoff and int(hinted_onoff[0].get("endpoint_id") or 0) == 1, calls
 
     agent._live_devices = [
         {
@@ -179,6 +212,8 @@ def main() -> int:
         calls.append((command, args or {}))
         if command == "write_attribute":
             return {"ok": True, "result": [{"path": "2/513/28", "status": 0x87}]}
+        if command == "device_command":
+            return {"ok": False, "error": "InteractionModelError: UnsupportedCluster (0xc3)"}
         return {"ok": True, "result": None}
 
     agent.matter_rpc = status_failed  # type: ignore[method-assign]

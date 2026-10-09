@@ -3055,7 +3055,39 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
 }
 
 .home-card--manage .home-device:not(.home-device--hidden) {
-    grid-template-columns: auto minmax(0, 1fr) minmax(5.5rem, auto) minmax(5.5rem, auto) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) minmax(6.5rem, auto) minmax(6.5rem, auto) auto;
+    grid-template-areas:
+        "handle label label label manage"
+        "handle room group actions manage";
+}
+
+.home-card--manage .home-device:not(.home-device--hidden) > .home-reorder-controls {
+    grid-area: handle;
+    align-self: start;
+}
+
+.home-card--manage .home-device:not(.home-device--hidden) > .home-device-label {
+    grid-area: label;
+    min-width: 0;
+}
+
+.home-card--manage .home-device:not(.home-device--hidden) > .home-device-room-select {
+    grid-area: room;
+}
+
+.home-card--manage .home-device:not(.home-device--hidden) > .home-device-group-select {
+    grid-area: group;
+}
+
+.home-card--manage .home-device:not(.home-device--hidden) > .home-device-actions {
+    grid-area: actions;
+    min-width: 0;
+    justify-content: flex-end;
+}
+
+.home-card--manage .home-device:not(.home-device--hidden) > .home-device-manage {
+    grid-area: manage;
+    align-self: start;
 }
 
 .home-device.is-on {
@@ -3116,7 +3148,8 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
 
 .home-device-name-input {
     width: 100%;
-    min-width: 0;
+    min-width: 8rem;
+    flex: 1 1 8rem;
     margin: 0;
     padding: 0.12rem 0.4rem;
     border: 1px solid var(--border);
@@ -3886,13 +3919,12 @@ body.home-is-reordering {
     }
 
     .home-card--manage .home-device:not(.home-device--hidden) {
-        grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .home-card--manage .home-device:not(.home-device--hidden) .home-device-actions,
-    .home-card--manage .home-device:not(.home-device--hidden) .home-device-room-select,
-    .home-card--manage .home-device:not(.home-device--hidden) .home-device-group-select {
-        grid-column: 1 / -1;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas:
+            "handle label manage"
+            "handle room manage"
+            "handle group manage"
+            "handle actions manage";
     }
 
     .home-card--manage .home-room {

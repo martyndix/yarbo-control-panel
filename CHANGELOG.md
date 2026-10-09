@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.68] - 2026-10-09
+
+### Fixed
+- Home **⚙️** edit rows keep a visible name box on its own row. Heater On/Off, brightness, and Hide/Remove no longer shrink the name field to nothing (only “He” from **Heater** showed).
+- Two Mill panel heaters that Apple Home could control but this page could not: those nodes keep On/Off on a hidden sibling endpoint (usually endpoint 1) while the thermostat is on another. On now turns that sibling On first, then writes Heat and the setpoint (Off writes Off, then sibling Off).
+
 ## [4.0.67] - 2026-10-09
 
 ### Fixed

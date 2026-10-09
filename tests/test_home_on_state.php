@@ -370,5 +370,8 @@ assert_true(
     str_contains($css, '.home-device-actions .home-device-meta'),
     'sensor-style meta next to Unlock must be visible in the actions box'
 );
+assert_true(str_contains($css, 'grid-area: label'), 'manage name box sits in its own grid area');
+assert_true(str_contains($css, 'handle label label label manage'), 'manage name row is not shared with heater controls');
+assert_true(str_contains($css, 'flex: 1 1 8rem'), 'manage name input can grow once it has a row');
 
 echo "ok\n";

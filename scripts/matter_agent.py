@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 22
+AGENT_VERSION = 23
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2060,6 +2060,19 @@ def apply_attribute_event(data: Any) -> None:
         return
     endpoint, cluster, attr = parts
     device_id = f"{node_id}:{endpoint}"
+    if cluster in (THERMOSTAT, TEMP_MEASUREMENT) and live_row(device_id) is None:
+        for row in current_live_devices():
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("kind") or "") != "heater":
+                continue
+            try:
+                nid = int(row.get("node_id") or 0)
+            except (TypeError, ValueError):
+                nid = 0
+            if nid == node_id or str(row.get("id") or "").startswith(f"{node_id}:"):
+                device_id = str(row.get("id") or device_id)
+                break
     fields: dict[str, Any] = {}
     if cluster == ON_OFF and attr == ATTR_ON_OFF:
         fields["on"] = attr_bool(value)
@@ -2908,6 +2921,63 @@ def write_heater_heat(node_id: int, endpoint: int) -> dict[str, Any]:
     )
 
 
+def heater_onoff_endpoints(node_id: int, thermo_ep: int) -> list[int]:
+    """Mill split nodes keep OnOff on a sibling (usually EP1) that flatten hides."""
+    found: list[int] = []
+    if thermo_ep != 1:
+        found.append(1)
+    for row in current_live_devices():
+        if not isinstance(row, dict):
+            continue
+        try:
+            nid = int(row.get("node_id") or 0)
+            ep = int(row.get("endpoint") or 0)
+        except (TypeError, ValueError):
+            nid, ep = 0, 0
+        if nid <= 0 or ep <= 0:
+            try:
+                node_s, ep_s = str(row.get("id") or "").split(":", 1)
+                nid, ep = int(node_s), int(ep_s)
+            except (TypeError, ValueError):
+                continue
+        if nid == node_id and ep > 0 and ep != thermo_ep and ep not in found:
+            found.append(ep)
+    return found
+
+
+def heater_thermo_endpoints(preferred: int) -> list[int]:
+    order = [preferred]
+    for extra in (1, 2, 3):
+        if extra not in order:
+            order.append(extra)
+    return order
+
+
+def write_heater_onoff(node_id: int, endpoint: int, on: bool) -> dict[str, Any]:
+    rpc = matter_rpc(
+        "device_command",
+        {
+            "node_id": node_id,
+            "endpoint_id": endpoint,
+            "cluster_id": ON_OFF,
+            "command_name": "On" if on else "Off",
+            "payload": {},
+        },
+        timeout=12.0,
+        retries=1,
+    )
+    return rpc if not rpc.get("ok") else {"ok": True}
+
+
+def pulse_heater_siblings(node_id: int, thermo_ep: int, on: bool) -> None:
+    for endpoint in heater_onoff_endpoints(node_id, thermo_ep):
+        result = write_heater_onoff(node_id, endpoint, on)
+        if result.get("ok"):
+            return
+        if is_transport_error(result) and not is_unsupported_cluster(result):
+            return
+
+
 def set_heater_power(
     node_id: int,
     endpoint: int,
@@ -2922,47 +2992,65 @@ def set_heater_power(
 
     def send(nid: int | None = None) -> dict[str, Any]:
         use = node_id if nid is None else nid
+        last: dict[str, Any] = {"ok": False, "error": "Heater command failed"}
         if not on:
-            off = write_attribute(
-                use, endpoint, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_OFF, reconnect=False
-            )
-            if off.get("ok"):
-                return {"ok": True, "on": False, "system_mode": SYSTEM_MODE_OFF}
-            if is_unsupported_cluster(off):
-                onoff = device_command(use, endpoint, ON_OFF, "Off", {})
-                if onoff.get("ok"):
-                    return {"ok": True, "on": False}
-            return off
-        target = heater_setpoint_celsius(device_id, celsius)
-        heat = write_heater_heat(use, endpoint)
-        if heat.get("ok"):
-            write_heater_setpoint(use, endpoint, target)
-            return {
-                "ok": True,
-                "on": True,
-                "system_mode": SYSTEM_MODE_HEAT,
-                "heating_setpoint": round(target, 1),
-            }
-        if is_unsupported_cluster(heat):
-            onoff = device_command(use, endpoint, ON_OFF, "On", {})
+            for ep in heater_thermo_endpoints(endpoint):
+                last = write_attribute(
+                    use, ep, THERMOSTAT, ATTR_SYSTEM_MODE, SYSTEM_MODE_OFF, reconnect=False
+                )
+                if last.get("ok"):
+                    pulse_heater_siblings(use, ep, False)
+                    return {"ok": True, "on": False, "system_mode": SYSTEM_MODE_OFF}
+                if is_unsupported_cluster(last) or is_mode_rejected(last):
+                    continue
+                if is_transport_error(last):
+                    return last
+            onoff = write_heater_onoff(use, endpoint, False)
             if onoff.get("ok"):
-                write_heater_setpoint(use, endpoint, target)
-                return {"ok": True, "on": True, "heating_setpoint": round(target, 1)}
-            return heat
-        if is_transport_error(heat) and not is_mode_rejected(heat):
-            return heat
-        setpoint = write_heater_setpoint(use, endpoint, target)
-        if not setpoint.get("ok") and is_transport_error(setpoint):
-            return heat
-        retry = write_heater_heat(use, endpoint)
-        if retry.get("ok"):
-            return {
-                "ok": True,
-                "on": True,
-                "system_mode": SYSTEM_MODE_HEAT,
-                "heating_setpoint": round(target, 1),
-            }
-        return retry if retry.get("error") else heat
+                pulse_heater_siblings(use, endpoint, False)
+                return {"ok": True, "on": False}
+            pulse_heater_siblings(use, endpoint, False)
+            return last
+        target = heater_setpoint_celsius(device_id, celsius)
+        # Mill Gen4 keeps the power relay on a hidden sibling. Heat is
+        # rejected or ignored until that OnOff endpoint is On (Apple Home
+        # writes both). Pulse first, then Heat on the thermostat endpoint.
+        pulse_heater_siblings(use, endpoint, True)
+        for ep in heater_thermo_endpoints(endpoint):
+            heat = write_heater_heat(use, ep)
+            last = heat
+            if heat.get("ok"):
+                write_heater_setpoint(use, ep, target)
+                if ep != endpoint:
+                    pulse_heater_siblings(use, ep, True)
+                return {
+                    "ok": True,
+                    "on": True,
+                    "system_mode": SYSTEM_MODE_HEAT,
+                    "heating_setpoint": round(target, 1),
+                }
+            if is_transport_error(heat) and not is_unsupported_cluster(heat) and not is_mode_rejected(heat):
+                return heat
+            if is_mode_rejected(heat):
+                setpoint = write_heater_setpoint(use, ep, target)
+                if setpoint.get("ok") or not is_transport_error(setpoint):
+                    retry = write_heater_heat(use, ep)
+                    last = retry
+                    if retry.get("ok"):
+                        if ep != endpoint:
+                            pulse_heater_siblings(use, ep, True)
+                        return {
+                            "ok": True,
+                            "on": True,
+                            "system_mode": SYSTEM_MODE_HEAT,
+                            "heating_setpoint": round(target, 1),
+                        }
+        onoff = write_heater_onoff(use, endpoint, True)
+        if onoff.get("ok"):
+            pulse_heater_siblings(use, endpoint, True)
+            write_heater_setpoint(use, endpoint, target)
+            return {"ok": True, "on": True, "heating_setpoint": round(target, 1)}
+        return last
 
     return command_with_reconnect(node_id, send)
 
