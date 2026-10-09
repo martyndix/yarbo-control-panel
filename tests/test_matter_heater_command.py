@@ -40,7 +40,7 @@ def main() -> int:
     ping = agent.dispatch({"op": "ping"})
     assert ping.get("ok") is True, ping
     assert ping.get("version") == agent.AGENT_VERSION, ping
-    assert ping.get("version") == 24, ping
+    assert ping.get("version") == 25, ping
     assert "thermostat" in (ping.get("features") or []), ping
 
     assert agent.write_status_code(None) == 0
@@ -134,6 +134,62 @@ def main() -> int:
     assert light.get("ok") is True, light
     assert any(command == "device_command" for command, _ in calls), calls
     assert not any(command == "write_attribute" for command, _ in calls), calls
+
+    mill_split_attrs = {
+        "0/40/3": "Mill Wi-Fi Panel Heater Gen4",
+        "1/29/0": [{"deviceType": 0x0100, "revision": 1}],
+        "1/6/0": True,
+        "2/29/0": [{"deviceType": 0x0300, "revision": 1}],
+        "2/513/0": 2190,
+        "2/513/18": 500,
+        "2/513/28": 0,
+    }
+
+    def mill_node_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 26, "available": True, "attributes": mill_split_attrs}}
+        if command == "write_attribute":
+            return {"ok": True}
+        if command == "device_command":
+            if (args or {}).get("cluster_id") == agent.ON_OFF:
+                return {"ok": True}
+            return {"ok": False, "error": "InteractionModelError: UnsupportedCluster (0xc3)"}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = mill_node_rpc  # type: ignore[method-assign]
+    agent._live_devices = []
+    calls.clear()
+    from_node = agent.dispatch({"op": "command", "id": "26:1", "action": "on", "kind": "heater", "celsius": 21})
+    assert from_node.get("ok") is True, from_node
+    from_paths = [
+        str(args.get("attribute_path") or "")
+        for command, args in calls
+        if command == "write_attribute"
+        and str(args.get("attribute_path") or "").endswith(f"/{agent.THERMOSTAT}/{agent.ATTR_SYSTEM_MODE}")
+    ]
+    assert from_paths and from_paths[0].startswith("2/"), calls
+
+    def hue_unsup(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "device_command":
+            return {"ok": False, "error": "InteractionModelError: UnsupportedCluster (0xc3)"}
+        if command == "write_attribute":
+            return {"ok": False, "error": "must not write Heat on a Hue bulb"}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = hue_unsup  # type: ignore[method-assign]
+    agent._live_devices = [{"id": "1:96", "kind": "light", "name": "BSB003 96", "on": False, "dimmable": True}]
+    calls.clear()
+    hue = agent.dispatch({"op": "command", "id": "1:96", "action": "on"})
+    assert hue.get("ok") is False, hue
+    assert not any(command == "write_attribute" for command, _ in calls), calls
+    calls.clear()
+    hue_b = agent.dispatch({"op": "command", "id": "1:96", "action": "brightness", "brightness": 80})
+    assert hue_b.get("ok") is False, hue_b
+    assert not any(command == "write_attribute" for command, _ in calls), calls
+
+    agent.matter_rpc = fake_rpc  # type: ignore[method-assign]
 
     agent._live_devices = [{"id": "31:1", "kind": "light", "name": "Boiler", "on": False, "dimmable": True}]
     calls.clear()

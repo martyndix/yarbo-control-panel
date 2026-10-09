@@ -708,6 +708,9 @@ final class YarboHome
 
     public function friendlyMatterError(string $error): string
     {
+        if (YarboMatterFabric::isUnsupportedCluster($error)) {
+            return 'This device does not support that control';
+        }
         if (!preg_match('/Node (\d+) is not \(yet\) available/i', $error, $matches)) {
             return $error;
         }
@@ -1811,7 +1814,7 @@ final class YarboHome
     private function agentDeviceStates(): array
     {
         $agent = YarboMatterAgentClient::fromEnv();
-        $result = $agent->request(['op' => 'states'], 0.8, false);
+        $result = $agent->request(['op' => 'states'], 2.5, false);
         if (($result['ok'] ?? false) !== true) {
             return [];
         }
@@ -1884,7 +1887,21 @@ final class YarboHome
             $out[] = $device;
         }
         foreach ($byId as $liveId => $live) {
-            if (!isset($used[$liveId])) {
+            if (isset($used[$liveId]) || !self::liveRowLooksHeater($live)) {
+                continue;
+            }
+            $nid = self::rowNodeId($live, $liveId);
+            $already = false;
+            foreach ($out as $existing) {
+                if (!is_array($existing) || !self::liveRowLooksHeater($existing)) {
+                    continue;
+                }
+                if ($nid > 0 && self::rowNodeId($existing) === $nid) {
+                    $already = true;
+                    break;
+                }
+            }
+            if (!$already) {
                 $out[] = $live;
             }
         }
@@ -1900,11 +1917,13 @@ final class YarboHome
         if (strtolower(trim((string) ($row['kind'] ?? ''))) === self::KIND_HEATER) {
             return true;
         }
+        if (!empty($row['has_thermostat'])) {
+            return true;
+        }
 
-        return array_key_exists('has_thermostat', $row)
-            || array_key_exists('heating_setpoint', $row)
-            || array_key_exists('local_temperature', $row)
-            || array_key_exists('system_mode', $row);
+        return self::optionalCelsius($row['heating_setpoint'] ?? null) !== null
+            || self::optionalCelsius($row['local_temperature'] ?? null) !== null
+            || (isset($row['system_mode']) && $row['system_mode'] !== null && $row['system_mode'] !== '');
     }
 
     /**

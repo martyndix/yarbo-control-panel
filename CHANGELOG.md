@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.70] - 2026-10-09
+
+### Fixed
+- Hue bulbs such as **BSB003 96 / 100** no longer show **UnsupportedCluster**. Home was dumping leftover live endpoints onto the list, then a failed On/Off retried as heater Heat.
+- Ungrouped Mill heaters: On writes Heat on the thermostat cluster from `get_node` (usually endpoint 2), not the cached On/Off endpoint. Extra mill thermostat rows are merged in without copying Hue leftovers.
+
 ## [4.0.69] - 2026-10-09
 
 ### Fixed

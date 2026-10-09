@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 24
+AGENT_VERSION = 25
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2973,6 +2973,46 @@ def resolve_heater_endpoint(node_id: int, preferred: int) -> int:
     return preferred
 
 
+def node_attributes(node_id: int) -> dict[str, Any]:
+    rpc = matter_rpc("get_node", {"node_id": node_id}, timeout=6.0, retries=1, channel=CMD_CHANNEL)
+    result = rpc.get("result") if rpc.get("ok") else None
+    if not isinstance(result, dict):
+        return {}
+    attrs = result.get("attributes")
+    if isinstance(attrs, dict):
+        return attrs
+    inner = result.get("node")
+    if isinstance(inner, dict) and isinstance(inner.get("attributes"), dict):
+        return inner["attributes"]
+    return {}
+
+
+def thermostat_endpoints_from_node(node_id: int) -> list[int]:
+    attrs = node_attributes(node_id)
+    if not attrs:
+        return []
+    found: list[int] = []
+    for ep in sorted(endpoint_ids(attrs)):
+        if ep != 0 and endpoint_looks_heater(attrs, ep) and ep not in found:
+            found.append(ep)
+    return found
+
+
+def heater_write_endpoints(node_id: int, preferred: int) -> list[int]:
+    """Prefer endpoints that actually have Thermostat. Do not Heat the OnOff sibling first."""
+    order: list[int] = []
+    for ep in thermostat_endpoints_from_node(node_id):
+        if ep > 0 and ep not in order:
+            order.append(ep)
+    live = resolve_heater_endpoint(node_id, preferred)
+    for ep in (live, preferred):
+        if ep > 0 and ep not in order:
+            order.append(ep)
+    if order:
+        return order
+    return heater_thermo_endpoints(preferred)
+
+
 def heater_onoff_endpoints(node_id: int, thermo_ep: int) -> list[int]:
     """Mill split nodes keep OnOff on a sibling (usually EP1) that flatten hides."""
     found: list[int] = []
@@ -3036,8 +3076,8 @@ def set_heater_power(
 
     def send(nid: int | None = None) -> dict[str, Any]:
         use = node_id if nid is None else nid
-        thermo = resolve_heater_endpoint(use, endpoint)
-        endpoints = heater_thermo_endpoints(thermo)
+        endpoints = heater_write_endpoints(use, endpoint)
+        thermo = endpoints[0] if endpoints else endpoint
         last: dict[str, Any] = {"ok": False, "error": "Heater command failed"}
         if not on:
             for i, ep in enumerate(endpoints):
@@ -3401,8 +3441,6 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     )
 
                 rpc = command_with_reconnect(node_id, send_onoff)
-                if not rpc.get("ok") and is_unsupported_cluster(rpc):
-                    rpc = set_heater_power(node_id, endpoint, bool(on))
             if not rpc.get("ok"):
                 return rpc
             if on is not None:
@@ -3470,15 +3508,6 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 if onoff.get("ok"):
                     patch_live_device(device_id, {"on": on}, sticky=True)
                     return {"ok": True, "id": device_id, "on": on}
-                if is_unsupported_cluster(onoff):
-                    heater = set_heater_power(node_id, endpoint, on)
-                    if heater.get("ok"):
-                        patch = {"on": bool(heater.get("on", on))}
-                        if heater.get("system_mode") is not None:
-                            patch["system_mode"] = heater["system_mode"]
-                        patch_live_device(device_id, patch, sticky=True)
-                        return {**heater, "id": device_id, "on": bool(heater.get("on", on))}
-                    return heater
                 return onoff
             return rpc
         if action in COLOR_ACTIONS:

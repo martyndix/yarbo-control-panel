@@ -113,6 +113,16 @@ $extraMill = YarboHome::overlayDeviceStates(
 );
 $extraIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $extraMill);
 assert_true(in_array('25:1', $extraIds, true) && in_array('28:2', $extraIds, true), 'overlay must add live mill heaters the cache omitted');
+$noHue = YarboHome::overlayDeviceStates(
+    [['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => true]],
+    [
+        ['id' => '1:2', 'kind' => 'light', 'on' => false],
+        ['id' => '1:96', 'name' => 'BSB003 96', 'kind' => 'light', 'on' => true, 'dimmable' => true],
+        ['id' => '1:100', 'name' => 'BSB003 100', 'kind' => 'light', 'on' => true, 'dimmable' => true],
+    ]
+);
+$noHueIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $noHue);
+assert_true(!in_array('1:96', $noHueIds, true) && !in_array('1:100', $noHueIds, true), 'overlay must not dump leftover Hue endpoints');
 
 $root = sys_get_temp_dir() . '/yarbo-home-on-' . bin2hex(random_bytes(3));
 mkdir($root . '/data/matter-server', 0775, true);
@@ -390,6 +400,7 @@ assert_true(str_contains($homePhp, "\$body['kind'] = \$kind"), 'PHP Home command
 assert_true(str_contains($homePhp, "\$input['kind'] ?? \$input['device_kind']"), 'PHP Home command reads kind from the page');
 assert_true(str_contains($homePhp, 'cachedDeviceSetpoint'), 'heater On uses the last heating temperature');
 assert_true(str_contains($homePhp, '? 80.0 : 60.0'), 'heater Matter writes get a longer PHP wait');
+assert_true(str_contains($homePhp, "['op' => 'states'], 2.5, false)"), 'live mill list waits long enough for states');
 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(
