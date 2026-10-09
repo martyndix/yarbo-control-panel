@@ -1212,7 +1212,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.18-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.19-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -1686,9 +1686,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <text x="24" y="180" font-family="ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" fill="#111">81%</text>
                                         <text x="24" y="248" font-family="ui-monospace, monospace" font-size="22" fill="#111">Solar      1.2 kW</text>
                                         <text x="24" y="288" font-family="ui-monospace, monospace" font-size="22" fill="#111">Draw       0.4 kW</text>
+                                        <text x="24" y="328" font-family="ui-monospace, monospace" font-size="22" fill="#111">Grid       Export 0.8 kW</text>
+                                        <text x="24" y="368" font-family="ui-monospace, monospace" font-size="22" fill="#111">Battery    Charge 0.4 kW</text>
                                         <text x="24" y="792" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#444">WALL page when Powerwall is on</text>
                                     </svg>
-                                    <figcaption>Powerwall — house battery, solar, and draw</figcaption>
+                                    <figcaption>Powerwall — charge, solar, draw, grid, and battery flow</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="setup">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono setup screen mock, portrait">
@@ -1762,8 +1764,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <text x="20" y="160" font-family="ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="700" fill="#111">81%</text>
                                         <text x="20" y="210" font-family="ui-monospace, monospace" font-size="16" fill="#111">Solar     1.2 kW</text>
                                         <text x="20" y="238" font-family="ui-monospace, monospace" font-size="16" fill="#111">Draw      0.4 kW</text>
+                                        <text x="20" y="266" font-family="ui-monospace, monospace" font-size="16" fill="#111">Grid      Export 0.8 kW</text>
+                                        <text x="20" y="294" font-family="ui-monospace, monospace" font-size="16" fill="#111">Battery   Charge 0.4 kW</text>
                                     </svg>
-                                    <figcaption>Powerwall — shown when the Powerwall module is on</figcaption>
+                                    <figcaption>Powerwall — charge, solar, draw, grid, and battery flow</figcaption>
                                 </figure>
                                 <figure class="papermono-preview papercolor-preview" data-preview-for="setup">
                                     <svg viewBox="0 0 400 600" role="img" aria-label="Paper Colour first-boot setup mock">
@@ -1785,7 +1789,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.64 / 0.2.18-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.65 / 0.2.19-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

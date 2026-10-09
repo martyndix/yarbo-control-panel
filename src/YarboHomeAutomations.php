@@ -774,6 +774,17 @@ final class YarboHomeAutomations
         };
     }
 
+    public static function powerwallMetricLabel(string $metric): string
+    {
+        return match ($metric) {
+            'battery' => 'Battery',
+            'export' => 'Export',
+            'solar' => 'Solar',
+            'load' => 'Load',
+            default => $metric,
+        };
+    }
+
     /**
      * @param array<string, mixed> $row
      * @return array<string, mixed>|null
@@ -1087,8 +1098,9 @@ final class YarboHomeAutomations
             $op = (string) ($trigger['op'] ?? 'above');
             $value = $trigger['value'] ?? '';
             $unit = self::thresholdUnit($metric);
+            $metricLabel = $id === self::POWERWALL_ID ? self::powerwallMetricLabel($metric) : $metric;
 
-            return $name . ' ' . $metric . ' ' . $op . ' ' . $value . $unit;
+            return $name . ' ' . $metricLabel . ' ' . $op . ' ' . $value . $unit;
         }
         $name = $names[(string) ($trigger['id'] ?? '')] ?? 'Device';
         $event = (string) ($trigger['event'] ?? 'turns_on');

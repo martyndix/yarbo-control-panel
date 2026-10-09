@@ -381,7 +381,7 @@ assert_true(
         'metric' => 'export',
         'op' => 'above',
         'value' => 500,
-    ]) === 'Powerwall export above 500W',
+    ]) === 'Powerwall Export above 500W',
     'powerwall export phrase'
 );
 
@@ -1117,6 +1117,7 @@ assert_true(str_contains($change, '## [4.0.70]'), 'changelog 4.0.70');
 assert_true(str_contains($change, '## [4.0.71]'), 'changelog 4.0.71');
 assert_true(str_contains($change, '## [4.0.72]'), 'changelog 4.0.72');
 assert_true(str_contains($change, '## [4.0.73]'), 'changelog 4.0.73');
+assert_true(str_contains($change, '## [4.0.74]'), 'changelog 4.0.74');
 assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');
@@ -1137,6 +1138,11 @@ assert_true(str_contains($js, 'queueHomeHeaterSetpoint'), 'heater setpoint debou
 assert_true(str_contains($js, 'Heater is still changing'), 'heater abort toast');
 assert_true(str_contains($js, 'HOME_AUTO_POWERWALL_ID'), 'powerwall automation id');
 assert_true(str_contains($js, 'homeAutoPowerwallTrigger'), 'powerwall When helper');
+assert_true(str_contains($js, "battery: { label: 'Battery'"), 'Powerwall Battery chip capital');
+assert_true(str_contains($js, "export: { label: 'Export'"), 'Powerwall Export chip capital');
+assert_true(str_contains($js, "solar: { label: 'Solar'"), 'Powerwall Solar chip capital');
+assert_true(str_contains($js, "load: { label: 'Load'"), 'Powerwall Load chip capital');
+assert_true(YarboHomeAutomations::powerwallMetricLabel('export') === 'Export', 'export metric label');
 assert_true(str_contains($js, 'auto-hold-sec'), 'trigger delay field in JS');
 assert_true(str_contains($index, 'id="auto-hold-sec"'), 'trigger delay select');
 assert_true(str_contains($index, 'When no longer true'), 'turn off when When is false');

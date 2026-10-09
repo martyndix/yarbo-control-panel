@@ -17,8 +17,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.64"'), 'firmware 0.1.64');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.64';"), 'panel firmware pin 0.1.64');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.65"'), 'firmware 0.1.65');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.65';"), 'panel firmware pin 0.1.65');
 assert_true(str_contains($fw, 'void waitEpdReady()'), 'wait for e-paper BUSY');
 assert_true(str_contains($fw, 'void serviceTouchQueue()'), 'touch handled as a queue');
 if (!preg_match('/void waitEpdReady\(\)\n\{\n(?:.*\n)*?\}\n\n/', $fw, $wait)) {

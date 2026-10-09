@@ -626,8 +626,24 @@ final class YarboPowerwall
             'load_label' => $this->formatW($loadW),
             'solar_label' => $this->formatW($solarW),
             'grid_label' => $this->formatW($gridW),
+            'grid_flow_label' => self::formatFlowLabel($gridW, 'Import', 'Export'),
             'battery_label' => ($pct = self::normalizeBatteryPercent($percent)) !== null ? $pct . '%' : '—',
+            'battery_flow_label' => self::formatFlowLabel($batteryW, 'Discharge', 'Charge'),
         ];
+    }
+
+    /**
+     * Tesla live_status / Gateway aggregates: grid import and battery discharge are positive.
+     */
+    public static function formatFlowLabel(float $watts, string $positive, string $negative): string
+    {
+        $w = (int) round($watts);
+        if (abs($w) < 10) {
+            return 'Idle';
+        }
+        $verb = $w > 0 ? $positive : $negative;
+
+        return $verb . ' ' . abs($w) . 'W';
     }
 
     private function formatW(float $watts): string

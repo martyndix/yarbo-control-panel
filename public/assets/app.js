@@ -2871,10 +2871,10 @@ let autoPageOpen = false;
 let autoDraft = null;
 const HOME_AUTO_POWERWALL_ID = 'powerwall';
 const HOME_AUTO_PW_METRICS = {
-    battery: { label: 'battery', unit: '%', step: 1, value: 50 },
-    export: { label: 'export', unit: 'W', step: 50, value: 500 },
-    solar: { label: 'solar', unit: 'W', step: 50, value: 200 },
-    load: { label: 'load', unit: 'W', step: 50, value: 1000 },
+    battery: { label: 'Battery', unit: '%', step: 1, value: 50 },
+    export: { label: 'Export', unit: 'W', step: 50, value: 500 },
+    solar: { label: 'Solar', unit: 'W', step: 50, value: 200 },
+    load: { label: 'Load', unit: 'W', step: 50, value: 1000 },
 };
 let autoNameLocked = false;
 let autoDrag = null;

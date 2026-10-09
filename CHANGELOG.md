@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.74] - 2026-10-09
+
+### Added
+- PaperMono and Paper Colour **POWERWALL** pages show Grid (Import / Export / Idle) and Battery flow (Charge / Discharge / Idle) next to Solar and Draw. Firmware **0.1.65** / **0.2.19-colour**.
+- Home Automations Powerwall chips use a capital letter like Time: **Battery**, **Export**, **Solar**, **Load**.
+
 ## [4.0.73] - 2026-10-09
 
 ### Added

@@ -16,9 +16,9 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.64';
+    public const FIRMWARE_VERSION = '0.1.65';
     public const MENU_LABEL_MAX = 20;
-    public const FIRMWARE_VERSION_COLOR = '0.2.18-colour';
+    public const FIRMWARE_VERSION_COLOR = '0.2.19-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const OTA_PENDING_TTL_S = 900;
@@ -1045,6 +1045,8 @@ final class YarboPaperDevice
             'powerwall_pct' => isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : -1,
             'powerwall_solar' => (string) ($pw['solar_label'] ?? '—'),
             'powerwall_load' => (string) ($pw['load_label'] ?? '—'),
+            'powerwall_grid' => self::powerwallFlowLabel($pw, 'grid_w', 'grid_flow_label', 'Import', 'Export'),
+            'powerwall_battery' => self::powerwallFlowLabel($pw, 'battery_w', 'battery_flow_label', 'Discharge', 'Charge'),
             'powerwall_ok' => !empty($pw['ok']) || !empty($pw['online']),
             'lymow_ok' => !empty($ly['ok']) || !empty($ly['online']),
             'lymow_battery' => isset($ly['battery']) ? (int) $ly['battery'] : -1,
@@ -1071,6 +1073,27 @@ final class YarboPaperDevice
         );
 
         return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $pw
+     */
+    private static function powerwallFlowLabel(
+        array $pw,
+        string $wattsKey,
+        string $labelKey,
+        string $positive,
+        string $negative
+    ): string {
+        $ready = (string) ($pw[$labelKey] ?? '');
+        if ($ready !== '') {
+            return $ready;
+        }
+        if (!isset($pw[$wattsKey]) || !is_numeric($pw[$wattsKey])) {
+            return '—';
+        }
+
+        return YarboPowerwall::formatFlowLabel((float) $pw[$wattsKey], $positive, $negative);
     }
 
     /**

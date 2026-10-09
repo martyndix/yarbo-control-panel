@@ -72,6 +72,8 @@ bool lymowOn = false;
 int powerwallPct = -1;
 String powerwallSolar = "—";
 String powerwallLoad = "—";
+String powerwallGrid = "—";
+String powerwallBattery = "—";
 String lymowName = "";
 int lymowBattery = -1;
 String lymowState = "—";
@@ -697,6 +699,7 @@ String screenKey()
         + (vestaboardOn ? "1" : "0") + "|" + (yarboOn ? "1" : "0") + "|" + (powerwallOn ? "1" : "0") + "|"
         + (lymowOn ? "1" : "0") + "|" + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
         + String(powerwallPct) + "|" + powerwallSolar + "|" + powerwallLoad + "|"
+        + powerwallGrid + "|" + powerwallBattery + "|"
         + String((int) WiFi.status()) + "|" + logoHash + "|" + String(screenLocked ? 1 : 0) + "|"
         + lockScreen + "|" + clockLocal + "|" + String(unreadCount) + "|" + vestaboardHash + "|"
         + deviceName + "|" + String(tabletBat) + "|" + String(offConfirm ? 1 : 0) + "|"
@@ -1677,9 +1680,11 @@ void drawPowerwallPage(bool forceFull)
     M5.Display.drawString(bat, 16, 108);
     drawKv("Solar", powerwallSolar, 220);
     drawKv("Draw", powerwallLoad, 260);
+    drawKv("Grid", powerwallGrid, 300);
+    drawKv("Battery", powerwallBattery, 340);
     if (lastError.length()) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString(lastError.substring(0, 28), 16, 320);
+        M5.Display.drawString(lastError.substring(0, 28), 16, 400);
     }
     drawPager();
     finishEpdFrame();
@@ -3704,6 +3709,8 @@ bool httpGetStatus()
     powerwallPct = doc["powerwall_pct"] | powerwallPct;
     powerwallSolar = doc["powerwall_solar"] | powerwallSolar;
     powerwallLoad = doc["powerwall_load"] | powerwallLoad;
+    powerwallGrid = doc["powerwall_grid"] | powerwallGrid;
+    powerwallBattery = doc["powerwall_battery"] | powerwallBattery;
     lymowName = doc["lymow_name"] | lymowName;
     lymowBattery = doc["lymow_battery"] | lymowBattery;
     lymowState = doc["lymow_state"] | lymowState;
