@@ -413,7 +413,9 @@ final class YarboHomeAutomations
             $state['day_slot'][$rule['id']],
             $state['last_fire'][$rule['id']],
             $state['then_error'][$rule['id']],
-            $state['hold'][$rule['id']]
+            $state['hold'][$rule['id']],
+            $state['latched'][$rule['id']],
+            $state['release'][$rule['id']]
         );
         $this->writeState($state);
         $this->syncDelayedForRule($rule);
@@ -441,7 +443,7 @@ final class YarboHomeAutomations
             return ['ok' => false, 'error' => 'Could not save'];
         }
         $state = $this->loadState();
-        unset($state['held'][$id], $state['hold'][$id], $state['last_fire'][$id], $state['day_slot'][$id], $state['delayed'][$id], $state['then_error'][$id]);
+        unset($state['held'][$id], $state['hold'][$id], $state['last_fire'][$id], $state['day_slot'][$id], $state['delayed'][$id], $state['then_error'][$id], $state['latched'][$id], $state['release'][$id]);
         $this->writeState($state);
 
         return ['ok' => true, 'automations' => $store['automations']];
@@ -505,6 +507,8 @@ final class YarboHomeAutomations
         if ($enabled === []) {
             $state = $this->loadState();
             $state['delayed'] = [];
+            $state['latched'] = [];
+            $state['release'] = [];
             $state['clock'] = $now;
             $this->writeState($state);
 
@@ -579,11 +583,19 @@ final class YarboHomeAutomations
                 $this->markFiredSlots($state, $id, $rule, $matched, $today, $hm);
                 $this->markDurationFired($state, $id, $rule, $matched);
                 $curr = $this->applyActionSnapshot($curr, $rule['actions'] ?? []);
+                if (!empty($rule['off_when_false']) && $this->offActions($rule['actions'] ?? []) !== []) {
+                    $state['latched'][$id] = true;
+                    unset($state['release'][$id]);
+                }
             }
             $this->queueOffAfter($state, $rule, $now);
         }
 
-        $turnedOff = $this->flushDelayed($state, $now, $enabledById, $curr, $errors);
+        $released = $this->releaseWhenFalse($state, $enabled, $enabledById, $prev, $curr, $now, $local, $today, $hm, $dow, $coords, $errors);
+        $turnedOff = array_values(array_unique(array_merge(
+            $released,
+            $this->flushDelayed($state, $now, $enabledById, $curr, $errors)
+        )));
         $state['prev'] = $curr;
         $state['clock'] = $now;
         $state['last_result'] = [
@@ -721,6 +733,19 @@ final class YarboHomeAutomations
             'solar' => $solar,
             'load' => $load,
         ];
+    }
+
+    private static function truthy(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return $value != 0;
+        }
+        $text = strtolower(trim((string) $value));
+
+        return in_array($text, ['1', 'true', 'yes', 'on'], true);
     }
 
     public static function normalizeHoldSec(mixed $raw): int
@@ -956,7 +981,9 @@ final class YarboHomeAutomations
             }
         }
         $offAfter = (int) ($rule['off_after_sec'] ?? 0);
-        if (!$actionOff && $offAfter > 0) {
+        if (!empty($rule['off_when_false'])) {
+            $text .= ', then off when no longer true';
+        } elseif (!$actionOff && $offAfter > 0) {
             $text .= ', off after ' . self::formatDuration($offAfter);
         }
 
@@ -1212,6 +1239,16 @@ final class YarboHomeAutomations
         if ($hold > $cooldown) {
             $cooldown = $hold;
         }
+        $offWhenFalse = self::truthy($row['off_when_false'] ?? false);
+        if ($offWhenFalse) {
+            $offAfter = 0;
+            foreach ($actions as $i => $action) {
+                if (isset($action['off_after_sec'])) {
+                    unset($actions[$i]['off_after_sec']);
+                }
+            }
+            $actions = array_values($actions);
+        }
         $name = YarboHub::normalizeDisplayName((string) ($row['name'] ?? ''), 64);
         if ($name === '' && $trigger !== null) {
             $name = YarboHub::normalizeDisplayName(self::sentence([
@@ -1220,6 +1257,7 @@ final class YarboHomeAutomations
                 'when_match' => $whenMatch,
                 'actions' => $actions,
                 'off_after_sec' => $offAfter,
+                'off_when_false' => $offWhenFalse,
                 'hold_sec' => $hold,
             ], $names), 64);
         }
@@ -1237,6 +1275,7 @@ final class YarboHomeAutomations
             'conditions' => $conditions,
             'actions' => $actions,
             'off_after_sec' => $offAfter,
+            'off_when_false' => $offWhenFalse,
             'cooldown_sec' => $cooldown,
             'hold_sec' => $hold,
         ];
@@ -2176,6 +2215,105 @@ final class YarboHomeAutomations
      * @param list<string> $errors
      * @return list<string>
      */
+    /**
+     * After Then has run, turn those devices/scenes off once When (and Only if) stays false.
+     *
+     * @param array<string, mixed> $state
+     * @param list<array<string, mixed>> $enabled
+     * @param array<string, array<string, mixed>> $enabledById
+     * @param array<string, array<string, mixed>> $prev
+     * @param array<string, array<string, mixed>> $curr
+     * @param array{latitude: ?float, longitude: ?float, source: ?string} $coords
+     * @param list<string> $errors
+     * @return list<string>
+     */
+    private function releaseWhenFalse(
+        array &$state,
+        array $enabled,
+        array $enabledById,
+        array $prev,
+        array &$curr,
+        int $now,
+        \DateTimeImmutable $local,
+        string $today,
+        string $hm,
+        int $dow,
+        array $coords,
+        array &$errors
+    ): array {
+        if (!isset($state['latched']) || !is_array($state['latched'])) {
+            $state['latched'] = [];
+        }
+        if (!isset($state['release']) || !is_array($state['release'])) {
+            $state['release'] = [];
+        }
+        foreach (array_keys($state['latched']) as $id) {
+            $id = (string) $id;
+            if (!isset($enabledById[$id]) || empty($enabledById[$id]['off_when_false'])) {
+                unset($state['latched'][$id], $state['release'][$id]);
+            }
+        }
+        $turnedOff = [];
+        foreach ($enabled as $rule) {
+            if (!is_array($rule) || empty($rule['off_when_false'])) {
+                continue;
+            }
+            $id = (string) ($rule['id'] ?? '');
+            if ($id === '' || empty($state['latched'][$id])) {
+                unset($state['release'][$id]);
+                continue;
+            }
+            $armed = $this->whenLevelTrue($rule, $prev, $curr, $state, $now, $local, $today, $hm, $dow, $coords)
+                && $this->conditionsPass($rule['conditions'] ?? [], $curr, $hm, $dow, $now, $local, $coords);
+            if ($armed) {
+                unset($state['release'][$id]);
+                continue;
+            }
+            $holdSec = (int) ($rule['hold_sec'] ?? 0);
+            if (!$this->releaseShouldFire($state, $id, $holdSec, $now)) {
+                continue;
+            }
+            $offs = $this->offActions($rule['actions'] ?? []);
+            unset($state['latched'][$id], $state['release'][$id], $state['delayed'][$id]);
+            if ($offs === []) {
+                continue;
+            }
+            $result = $this->runActions($offs);
+            if (!($result['ok'] ?? false)) {
+                $errors[] = (string) ($result['error'] ?? 'failed');
+            }
+            $curr = $this->applyActionSnapshot($curr, $offs);
+            $turnedOff[] = $id;
+        }
+
+        return $turnedOff;
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     */
+    private function releaseShouldFire(array &$state, string $id, int $holdSec, int $now): bool
+    {
+        if (!isset($state['release']) || !is_array($state['release'])) {
+            $state['release'] = [];
+        }
+        $since = (int) (($state['release'][$id]['since'] ?? 0));
+        if ($since <= 0) {
+            $state['release'][$id] = ['since' => $now];
+
+            return $holdSec <= 0;
+        }
+
+        return $holdSec <= 0 || ($now - $since) >= $holdSec;
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     * @param array<string, array<string, mixed>> $enabledById
+     * @param array<string, array<string, mixed>> $curr
+     * @param list<string> $errors
+     * @return list<string>
+     */
     private function flushDelayed(array &$state, int $now, array $enabledById, array &$curr, array &$errors): array
     {
         $turnedOff = [];
@@ -2588,6 +2726,8 @@ final class YarboHomeAutomations
             'prev' => [],
             'held' => [],
             'hold' => [],
+            'latched' => [],
+            'release' => [],
             'last_fire' => [],
             'then_error' => [],
             'day_slot' => [],
@@ -2613,6 +2753,8 @@ final class YarboHomeAutomations
             'prev' => is_array($decoded['prev'] ?? null) ? $decoded['prev'] : [],
             'held' => is_array($decoded['held'] ?? null) ? $decoded['held'] : [],
             'hold' => is_array($decoded['hold'] ?? null) ? $decoded['hold'] : [],
+            'latched' => is_array($decoded['latched'] ?? null) ? $decoded['latched'] : [],
+            'release' => is_array($decoded['release'] ?? null) ? $decoded['release'] : [],
             'last_fire' => is_array($decoded['last_fire'] ?? null) ? $decoded['last_fire'] : [],
             'then_error' => is_array($decoded['then_error'] ?? null) ? $decoded['then_error'] : [],
             'day_slot' => is_array($decoded['day_slot'] ?? null) ? $decoded['day_slot'] : [],

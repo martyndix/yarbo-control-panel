@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.73] - 2026-10-09
+
+### Added
+- Home Automations **Turn off after → When no longer true**: after Then runs, those lights, heaters, or scenes turn off once When (and Only if) has been false for the trigger delay. A brief solar dip does not chatter; the same 1–5 minute wait applies both ways. Stay on and Timer are unchanged.
+
 ## [4.0.72] - 2026-10-09
 
 ### Fixed

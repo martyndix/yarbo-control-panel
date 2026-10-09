@@ -728,6 +728,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <span class="auto-off-after-row">
                                 <select id="auto-off-after-enabled" aria-label="Turn off after">
                                     <option value="0">Stay on</option>
+                                    <option value="false">When no longer true</option>
                                     <option value="1">Timer</option>
                                 </select>
                                 <span id="auto-off-after-fields" class="auto-off-after-fields hidden">
@@ -739,7 +740,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </select>
                                 </span>
                             </span>
-                            <span class="hint">Optional. After Then runs, turn those lights or the scene off. If this fires again, the timer restarts.</span>
+                            <span class="hint" id="auto-off-after-hint">Optional. After Then runs, turn those lights or the scene off. If this fires again, the timer restarts.</span>
                         </label>
                     </section>
                 </div>

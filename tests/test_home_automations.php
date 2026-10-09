@@ -474,6 +474,68 @@ $r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 60);
 assert_true($r['fired'] === [], 'original minute must not fire after reset');
 $r = $auto->tick($combo(16.0, 80.0, 500.0), $t0 + 91);
 assert_true($r['fired'] === ['a-pw-drop'], 'hold completes from re-arm: ' . json_encode($r));
+$auto->delete('a-pw-drop');
+
+$release = $auto->save([
+    'id' => 'a-pw-release',
+    'enabled' => true,
+    'when_match' => 'all',
+    'triggers' => [
+        ['type' => 'threshold', 'id' => 'powerwall', 'metric' => 'solar', 'op' => 'above', 'value' => 2000],
+        ['type' => 'threshold', 'id' => 'powerwall', 'metric' => 'battery', 'op' => 'above', 'value' => 80],
+    ],
+    'actions' => [[
+        'kind' => 'device',
+        'id' => '1:9',
+        'command' => 'on',
+        'device_kind' => 'heater',
+        'celsius' => 22,
+    ]],
+    'hold_sec' => 60,
+    'cooldown_sec' => 0,
+    'off_when_false' => true,
+]);
+assert_true(!empty($release['ok']), 'save off-when-false: ' . json_encode($release));
+assert_true(!empty($release['automation']['off_when_false']), 'off_when_false persisted');
+assert_true(($release['automation']['off_after_sec'] ?? 1) === 0, 'when-false clears the timer');
+assert_true(
+    str_contains(YarboHomeAutomations::sentence($release['automation'] ?? []), 'then off when no longer true'),
+    'sentence names when-false: ' . YarboHomeAutomations::sentence($release['automation'] ?? [])
+);
+$sol = static function (float $solar, float $battery): array {
+    return [[
+        'id' => 'powerwall',
+        'kind' => 'powerwall',
+        'battery' => $battery,
+        'export' => 0,
+        'solar' => $solar,
+        'load' => 0,
+    ]];
+};
+@unlink($auto->statePath());
+$commands = [];
+$r = $auto->tick($sol(2500, 90), $t0);
+assert_true($r['fired'] === [], 'on-hold must wait');
+$r = $auto->tick($sol(2500, 90), $t0 + 60);
+assert_true($r['fired'] === ['a-pw-release'], 'Then on after 1 min true: ' . json_encode($r));
+assert_true(($commands[0]['command'] ?? '') === 'on', 'Then turns heater on: ' . json_encode($commands));
+$commands = [];
+$r = $auto->tick($sol(100, 90), $t0 + 61);
+assert_true(($r['turned_off'] ?? []) === [] && $commands === [], 'solar drop starts the off wait');
+$r = $auto->tick($sol(2500, 90), $t0 + 90);
+assert_true(($r['turned_off'] ?? []) === [] && $commands === [], 'solar back cancels off');
+$r = $auto->tick($sol(100, 90), $t0 + 91);
+assert_true(($r['turned_off'] ?? []) === [], 'new off wait after another drop');
+$commands = [];
+$r = $auto->tick($sol(100, 90), $t0 + 150);
+assert_true(($r['turned_off'] ?? []) === [], 'off wait is not done at 59s');
+$r = $auto->tick($sol(100, 90), $t0 + 151);
+assert_true(($r['turned_off'] ?? []) === ['a-pw-release'], 'off after 1 min false: ' . json_encode($r));
+assert_true(($commands[0]['command'] ?? '') === 'off', 'releases heater Off: ' . json_encode($commands));
+$commands = [];
+$r = $auto->tick($sol(100, 90), $t0 + 152);
+assert_true(($r['turned_off'] ?? []) === [] && $commands === [], 'must not off twice');
+$auto->delete('a-pw-release');
 
 $onlyIf = $auto->save([
     'id' => 'a-pw-if',
@@ -1054,6 +1116,7 @@ assert_true(str_contains($change, '## [4.0.69]'), 'changelog 4.0.69');
 assert_true(str_contains($change, '## [4.0.70]'), 'changelog 4.0.70');
 assert_true(str_contains($change, '## [4.0.71]'), 'changelog 4.0.71');
 assert_true(str_contains($change, '## [4.0.72]'), 'changelog 4.0.72');
+assert_true(str_contains($change, '## [4.0.73]'), 'changelog 4.0.73');
 assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');
@@ -1076,6 +1139,9 @@ assert_true(str_contains($js, 'HOME_AUTO_POWERWALL_ID'), 'powerwall automation i
 assert_true(str_contains($js, 'homeAutoPowerwallTrigger'), 'powerwall When helper');
 assert_true(str_contains($js, 'auto-hold-sec'), 'trigger delay field in JS');
 assert_true(str_contains($index, 'id="auto-hold-sec"'), 'trigger delay select');
+assert_true(str_contains($index, 'When no longer true'), 'turn off when When is false');
+assert_true(str_contains($js, 'homeAutoReadOffWhenFalse'), 'off-when-false reader');
+assert_true(str_contains($js, 'off_when_false: Boolean(autoDraft.off_when_false)'), 'save sends off_when_false');
 assert_true(str_contains($index, 'data-auto-if="powerwall"'), 'only-if Powerwall button');
 assert_true(str_contains($js, 'homeAutoSanitizeThenLooks'), 'Then drops colour the bulb cannot do');
 assert_true(str_contains($js, 'homeColorInputsHtml'), 'Home colour controls helper');

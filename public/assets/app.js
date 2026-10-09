@@ -5252,7 +5252,8 @@ function homeAutoSentence(rule, names) {
         : `${homeAutoWhenJoinPhrase(rule, names)} → ${then}`;
     const actionOff = (rule.actions || []).some((action) => Number(action.off_after_sec || 0) > 0);
     const off = Number(rule.off_after_sec || 0);
-    if (!actionOff && off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+    if (rule.off_when_false) text += ', then off when no longer true';
+    else if (!actionOff && off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
     return text;
 }
 
@@ -5281,6 +5282,7 @@ function homeAutoDraftFromRule(rule, asCopy = false) {
         conditions: (rule.conditions || []).map((row) => homeAutoCloneValue(row)),
         actions: (rule.actions || []).map((row) => homeAutoCloneValue(row)),
         off_after_sec: Number(rule.off_after_sec || 0),
+        off_when_false: Boolean(rule.off_when_false),
         cooldown_sec: Number(rule.cooldown_sec || 30),
         hold_sec: Number(rule.hold_sec || 0),
     };
@@ -5320,6 +5322,7 @@ function homeAutoBlankDraft() {
         conditions: [],
         actions: [],
         off_after_sec: 0,
+        off_when_false: false,
         cooldown_sec: 30,
         hold_sec: 0,
     };
@@ -5689,16 +5692,29 @@ function homeAutoReadOffAfter() {
     return Math.max(1, Math.round(value * unit));
 }
 
+function homeAutoReadOffWhenFalse() {
+    return document.getElementById('auto-off-after-enabled')?.value === 'false';
+}
+
 function homeAutoSyncOffAfterFields() {
     if (!autoDraft) return;
     const enabled = document.getElementById('auto-off-after-enabled');
     const valueEl = document.getElementById('auto-off-after-value');
     const unitEl = document.getElementById('auto-off-after-unit');
     const fields = document.getElementById('auto-off-after-fields');
+    const hint = document.getElementById('auto-off-after-hint');
+    const whenFalse = Boolean(autoDraft.off_when_false);
     const sec = Number(autoDraft.off_after_sec || 0);
-    const on = sec > 0;
-    if (enabled && document.activeElement !== enabled) enabled.value = on ? '1' : '0';
+    const on = !whenFalse && sec > 0;
+    if (enabled && document.activeElement !== enabled) {
+        enabled.value = whenFalse ? 'false' : (on ? '1' : '0');
+    }
     fields?.classList.toggle('hidden', !on);
+    if (hint) {
+        hint.textContent = whenFalse
+            ? 'Turns off what Then turned on once When (and Only if) is no longer true. Trigger delay applies both ways, so a brief dip does not chatter.'
+            : 'Optional. After Then runs, turn those lights or the scene off. If this fires again, the timer restarts.';
+    }
     if (on) {
         const parts = homeAutoOffAfterParts(sec);
         if (valueEl && document.activeElement !== valueEl) valueEl.value = String(parts.value);
@@ -5809,7 +5825,7 @@ function homeAutoThenChipHtml(action, index) {
     const cmds = homeAutoThenCommands(d);
     const cmd = action.command || (isScene ? 'run' : 'on');
     if (cmd === 'brightness' && !cmds.some(([v]) => v === 'brightness')) cmds.push(['brightness', 'Brightness']);
-    const canOff = homeAutoThenCanOffAfter({ ...action, command: cmd });
+    const canOff = homeAutoThenCanOffAfter({ ...action, command: cmd }) && !autoDraft?.off_when_false;
     const offSec = canOff ? Number(action.off_after_sec || 0) : 0;
     const offHtml = canOff
         ? `<select data-auto-then-off aria-label="Turn off after">${homeAutoOffAfterChoices(offSec).map(([v, label]) =>
@@ -6240,7 +6256,8 @@ async function homeAutoSave() {
     homeAutoSetTriggers(homeAutoTriggers());
     homeAutoReadThenLooks();
     homeAutoSanitizeThenLooks();
-    autoDraft.off_after_sec = homeAutoReadOffAfter();
+    autoDraft.off_when_false = homeAutoReadOffWhenFalse();
+    autoDraft.off_after_sec = autoDraft.off_when_false ? 0 : homeAutoReadOffAfter();
     autoDraft.hold_sec = Math.max(0, Number(document.getElementById('auto-hold-sec')?.value || autoDraft.hold_sec || 0));
     if (homeAutoUsesSun() && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);
@@ -6265,6 +6282,7 @@ async function homeAutoSave() {
         conditions: autoDraft.conditions,
         actions: autoDraft.actions,
         off_after_sec: autoDraft.off_after_sec || 0,
+        off_when_false: Boolean(autoDraft.off_when_false),
         cooldown_sec: autoDraft.cooldown_sec || 30,
         hold_sec: Number(autoDraft.hold_sec || 0),
         names: homeAutoNames(),
@@ -6483,7 +6501,8 @@ function bindHomeAutomations() {
             homeAutoSetTriggers(list);
         }
         if (event.target.matches('#auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit')) {
-            autoDraft.off_after_sec = homeAutoReadOffAfter();
+            autoDraft.off_when_false = homeAutoReadOffWhenFalse();
+            autoDraft.off_after_sec = autoDraft.off_when_false ? 0 : homeAutoReadOffAfter();
             homeAutoApplyOffAfterToActions(autoDraft.off_after_sec);
             homeAutoSyncOffAfterFields();
         }
