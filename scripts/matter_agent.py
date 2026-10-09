@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 25
+AGENT_VERSION = 26
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1358,6 +1358,81 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
 def current_live_devices() -> list[dict[str, Any]]:
     with _live_lock:
         return [dict(row) for row in _live_devices]
+
+
+def node_id_from_any(raw: Any) -> int:
+    if isinstance(raw, bool):
+        return 0
+    if isinstance(raw, int):
+        return raw if raw > 0 else 0
+    if isinstance(raw, dict):
+        for key in ("node_id", "nodeId"):
+            try:
+                nid = int(raw.get(key) or 0)
+            except (TypeError, ValueError):
+                nid = 0
+            if nid > 0:
+                return nid
+        for node in nodes_from_result(raw):
+            if node is raw:
+                continue
+            nid = node_id_from_any(node)
+            if nid > 0:
+                return nid
+    if isinstance(raw, list):
+        for item in raw:
+            nid = node_id_from_any(item)
+            if nid > 0:
+                return nid
+    return 0
+
+
+def merge_live_devices(extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in current_live_devices() + extra:
+        if not isinstance(row, dict):
+            continue
+        did = str(row.get("id") or "")
+        if did:
+            by_id[did] = dict(row)
+    merged = list(by_id.values())
+    if merged:
+        remember_live_devices(merged)
+    return current_live_devices()
+
+
+def refresh_after_commission(result: Any) -> list[dict[str, Any]]:
+    """Fold the newly paired node into the live list so Home can show it without a refresh."""
+    node_id = node_id_from_any(result)
+    devices = flatten_nodes(result) if result is not None else []
+    if not devices:
+        rpc = matter_rpc("get_nodes", timeout=8.0, channel=CMD_CHANNEL)
+        if rpc.get("ok"):
+            devices = flatten_nodes(rpc.get("result"))
+    if devices:
+        merge_live_devices(devices)
+    elif node_id > 0:
+        threading.Thread(
+            target=_interview_commissioned_node,
+            args=(node_id,),
+            daemon=True,
+        ).start()
+    return current_live_devices()
+
+
+def _interview_commissioned_node(node_id: int) -> None:
+    try:
+        interview_node_ids([node_id])
+        rpc = matter_rpc("get_node", {"node_id": node_id}, timeout=12.0, channel=CMD_CHANNEL)
+        extra = flatten_nodes(rpc.get("result")) if rpc.get("ok") else []
+        if extra:
+            merge_live_devices(extra)
+            return
+        rpc = matter_rpc("get_nodes", timeout=15.0, channel=CMD_CHANNEL)
+        if rpc.get("ok"):
+            merge_live_devices(flatten_nodes(rpc.get("result")))
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: interview after pair failed for node {node_id}: {exc}", flush=True)
 
 
 def patch_live_device(device_id: str, fields: dict[str, Any], *, sticky: bool = False) -> dict[str, Any] | None:
@@ -3382,7 +3457,13 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         )
         if not rpc.get("ok"):
             return rpc
-        return {"ok": True, "result": rpc.get("result")}
+        devices = refresh_after_commission(rpc.get("result"))
+        return {
+            "ok": True,
+            "result": rpc.get("result"),
+            "devices": devices,
+            "node_id": node_id_from_any(rpc.get("result")),
+        }
     if op == "remove_node":
         try:
             node_id = int(body.get("node_id") or 0)

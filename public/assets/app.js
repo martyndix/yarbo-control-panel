@@ -11460,17 +11460,45 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
     const input = document.getElementById('home-pair-code');
     const code = input?.value.trim() || '';
     const btn = document.getElementById('home-pair');
-    if (btn) btn.disabled = true;
+    const status = document.getElementById('home-pair-status');
+    if (!code) {
+        showToast('Paste a Matter pairing code or QR text', 'error');
+        if (status) {
+            status.textContent = 'Paste a Matter pairing code or QR text';
+            status.classList.remove('hidden');
+        }
+        return;
+    }
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Adding…';
+    }
+    if (input) input.disabled = true;
+    if (status) {
+        status.textContent = 'Pairing the device. This can take up to a minute.';
+        status.classList.remove('hidden');
+    }
     try {
-        const data = await homeApi({ action: 'commission', code }, 95000);
+        const data = await homeApi({ action: 'commission', code }, 110000);
         if (!data.ok) throw new Error(data.error || 'Pairing failed');
         if (input) input.value = '';
-        showToast(data.message || 'Device added', 'success');
-        await loadHomeDashboard();
+        const message = data.message || 'Device added';
+        if (status) status.textContent = message;
+        showToast(message, 'success');
+        await loadHomeDashboard({ force: true });
+        window.setTimeout(() => loadHomeDashboard({ force: true }), 3000);
     } catch (err) {
         showToast(err.message || 'Pairing failed', 'error');
+        if (status) {
+            status.textContent = err.message || 'Pairing failed';
+            status.classList.remove('hidden');
+        }
     } finally {
-        if (btn) btn.disabled = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Add device';
+        }
+        if (input) input.disabled = false;
     }
 });
 document.getElementById('home-scene-from-on')?.addEventListener('click', () => {

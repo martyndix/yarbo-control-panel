@@ -596,6 +596,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </label>
                     <button type="button" class="btn" id="home-pair">Add device</button>
                 </div>
+                <p id="home-pair-status" class="hint hidden" role="status"></p>
                 <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice.</p>
             </div>
             <div id="home-room-add" class="home-room-add">

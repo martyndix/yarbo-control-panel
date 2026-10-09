@@ -584,7 +584,7 @@ final class YarboHome
             return ['ok' => false, 'error' => 'Paste a Matter pairing code or QR text'];
         }
         $agent = YarboMatterAgentClient::fromEnv();
-        $result = $agent->request(['op' => 'commission', 'code' => $code], 95.0);
+        $result = $agent->request(['op' => 'commission', 'code' => $code], 105.0);
         if (!($result['ok'] ?? false)) {
             return [
                 'ok' => false,
@@ -592,9 +592,25 @@ final class YarboHome
             ];
         }
 
-        @unlink($this->projectRoot . '/data/home-nodes-cache.json');
+        $incoming = is_array($result['devices'] ?? null) ? $result['devices'] : [];
+        if ($incoming === []) {
+            $states = $agent->request(['op' => 'states'], 2.5, false);
+            $incoming = is_array($states['devices'] ?? null) ? $states['devices'] : [];
+        }
+        $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
+        if ($incoming !== []) {
+            $merged = self::unionDeviceLists($this->load()['last_devices'] ?? [], $incoming);
+            $this->writeDeviceCache(
+                $cachePath,
+                $merged,
+                YarboMatterFabric::storageMtime($this->projectRoot . '/data/matter-server')
+            );
+            $this->rememberDevices($merged);
+        } else {
+            @unlink($cachePath);
+        }
 
-        return ['ok' => true, 'message' => 'Device added. It can take a few seconds to appear.'];
+        return ['ok' => true, 'message' => 'Device added.'];
     }
 
     /**
@@ -2188,6 +2204,50 @@ final class YarboHome
             'devices' => $devices,
             'fabric' => $fabric,
         ];
+    }
+
+    /**
+     * Add newly paired rows onto the remembered list without dropping existing devices.
+     *
+     * @param list<array<string, mixed>> $base
+     * @param list<array<string, mixed>> $incoming
+     * @return list<array<string, mixed>>
+     */
+    public static function unionDeviceLists(array $base, array $incoming): array
+    {
+        $byId = [];
+        foreach ($base as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '') {
+                $byId[$id] = $row;
+            }
+        }
+        foreach ($incoming as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            if (!isset($byId[$id])) {
+                $byId[$id] = $row;
+                continue;
+            }
+            $merged = self::copyLiveDeviceFields($byId[$id], $row);
+            foreach (['name', 'vendor', 'product', 'source'] as $key) {
+                $value = trim((string) ($row[$key] ?? ''));
+                if ($value !== '') {
+                    $merged[$key] = $value;
+                }
+            }
+            $byId[$id] = $merged;
+        }
+
+        return array_values($byId);
     }
 
     /**

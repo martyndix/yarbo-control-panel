@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.71] - 2026-10-09
+
+### Fixed
+- Home **Add device** shows **Adding…** while the pairing code is in progress. After a successful add, the device list reloads so a new heater (or other Matter accessory) appears without refreshing the page.
+
 ## [4.0.70] - 2026-10-09
 
 ### Fixed

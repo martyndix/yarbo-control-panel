@@ -65,4 +65,25 @@ if (($live[0]['id'] ?? '') !== '1:9') {
     exit(1);
 }
 
+$unioned = Yarbo\YarboHome::unionDeviceLists(
+    $store['last_devices'],
+    [['id' => '40:2', 'name' => 'Mill loft', 'kind' => 'heater', 'has_thermostat' => true, 'on' => false]]
+);
+$unionIds = array_map(static fn (array $row): string => (string) ($row['id'] ?? ''), $unioned);
+if (!in_array('1:1', $unionIds, true) || !in_array('40:2', $unionIds, true)) {
+    fwrite(STDERR, "unionDeviceLists must keep old lights and add the paired heater\n");
+    exit(1);
+}
+$heater = null;
+foreach ($unioned as $row) {
+    if (($row['id'] ?? '') === '40:2') {
+        $heater = $row;
+        break;
+    }
+}
+if (($heater['kind'] ?? '') !== 'heater' || ($heater['name'] ?? '') !== 'Mill loft') {
+    fwrite(STDERR, "paired heater row was not kept " . json_encode($heater) . "\n");
+    exit(1);
+}
+
 echo "ok\n";
