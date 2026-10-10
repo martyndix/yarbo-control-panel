@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.94] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** on SwitchBot **K11+** (Alejandro) still got **GenericFailure** from Charging after 4.0.93 — ChangeToMode Cleaning is refused on the dock. The only Matter command that has left a SwitchBot dock is **Mapping**. Start now pulses Mapping once, then immediately ChangeToMode Cleaning. If it stays Mapping, Idle aborts the remap. Idle Start never sends Mapping (**S10** / Martynas).
+
 ## [4.0.93] - 2026-10-10
 
 ### Fixed

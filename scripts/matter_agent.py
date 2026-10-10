@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 41
+AGENT_VERSION = 42
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -4281,7 +4281,10 @@ def set_vacuum_command(
 
     # All rooms is Apple Home whole-house: ChangeToMode Cleaning only.
     # While Charging, SelectAreas (even Bathroom) is GenericFailure on K11+.
-    # Never Mapping. Never Clean Mode ChangeToMode on start.
+    # Cleaning while Charging is also GenericFailure; Mapping is the only
+    # ChangeToMode that has left a SwitchBot dock. Pulse Mapping once, then
+    # Cleaning immediately. Never leave Mapping as the result. Never Clean Mode
+    # ChangeToMode on start.
     select_ids = requested_ids if not all_rooms and requested_ids else None
     if at_charger() or run_op() == OP_SEEKING:
         select_ids = None
@@ -4352,16 +4355,64 @@ def set_vacuum_command(
             cleaning_n, current_n = -1, None
         return (stuck_on_dock() or at_charger()) and current_n != cleaning_n
 
+    def cleaning_refused(rpc: dict[str, Any]) -> bool:
+        return not rpc.get("ok") and int(rpc.get("status") or 0) in (2, 3)
+
+    def is_mapping() -> bool:
+        return str(row.get("vacuum_status") or "") == "Mapping"
+
+    def abort_mapping(rpc: dict[str, Any]) -> dict[str, Any]:
+        idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
+        if idle is not None:
+            vacuum_change_mode(
+                node_id,
+                rvc_ep,
+                RVC_RUN,
+                int(idle["mode"]),
+                device_id=device_id,
+                row=row,
+                verify=False,
+            )
+            sync_row()
+        return finish(
+            {
+                **rpc,
+                "ok": False,
+                "error": rpc.get("error") or "Vacuum started mapping instead of cleaning",
+            }
+        )
+
     started = go_cleaning()
     if is_transport_error(started):
         return started
-    if not started.get("ok") and int(started.get("status") or 0) in (2, 3):
+    mapping = pick_mode(run_modes, (RUN_MAPPING,))
+    if cleaning_refused(started) and at_charger() and mapping is not None:
+        mapped = vacuum_change_mode(
+            node_id,
+            rvc_ep,
+            RVC_RUN,
+            int(mapping["mode"]),
+            device_id=device_id,
+            row=row,
+            verify=False,
+        )
+        if is_transport_error(mapped):
+            return mapped
+        started = go_cleaning()
+        if is_transport_error(started):
+            return started
+        sync_row()
+        if is_mapping():
+            return abort_mapping(started)
+    elif cleaning_refused(started):
         settle_start()
         started = go_cleaning()
         if is_transport_error(started):
             return started
     settle_start()
     sync_row()
+    if is_mapping():
+        return abort_mapping(started)
     if still_idle_on_charger():
         dropped_again = drop_to_idle()
         if dropped_again is not None:
@@ -4371,6 +4422,8 @@ def set_vacuum_command(
             return started
         settle_start()
         sync_row()
+        if is_mapping():
+            return abort_mapping(started)
     if (
         not started.get("ok")
         and int(started.get("status") or 0) == 2
