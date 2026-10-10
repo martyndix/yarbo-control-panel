@@ -3398,6 +3398,24 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         }
         patchUnifiDoorLockButton(card, device || extras);
     }
+    if (card.classList.contains('home-device--vacuum')) {
+        const device = homeDeviceRecord(id);
+        if (device) {
+            if (extras.vacuum_status) device.vacuum_status = extras.vacuum_status;
+            if (extras.vacuum_battery != null && extras.vacuum_battery !== '') {
+                device.vacuum_battery = extras.vacuum_battery;
+            }
+            if (extras.vacuum_clean) device.vacuum_clean = extras.vacuum_clean;
+            if (typeof extras.on === 'boolean') device.on = extras.on;
+        }
+        const actions = card.querySelector('.home-device-actions--vacuum');
+        if (actions) {
+            const wrap = document.createElement('div');
+            wrap.innerHTML = homeVacuumActionsHtml(device || extras);
+            const next = wrap.firstElementChild;
+            if (next) actions.replaceWith(next);
+        }
+    }
 }
 
 function setHomeDeviceOn(id, on) {
@@ -3444,6 +3462,9 @@ function patchHomeDashboard(data) {
             if (d.dps != null) rec.dps = d.dps;
             if (d.open != null) rec.open = d.open;
             if (d.status) rec.status = d.status;
+            if (d.vacuum_status) rec.vacuum_status = d.vacuum_status;
+            if (d.vacuum_battery != null) rec.vacuum_battery = d.vacuum_battery;
+            if (d.vacuum_clean) rec.vacuum_clean = d.vacuum_clean;
         }
         patchHomeDeviceVisual(d.id, d.on, d);
     });
@@ -4001,8 +4022,25 @@ function homeDeviceActionsHtml(d, bright, color) {
         </div>`;
 }
 
+function homeVacuumStatusName(d) {
+    let status = String(d.vacuum_status || (d.on ? 'Cleaning' : 'Idle'));
+    if (status === 'Charging') {
+        status = d.on ? 'Cleaning' : 'Docked';
+    }
+    return status;
+}
+
+function homeVacuumStatusText(d) {
+    const status = homeVacuumStatusName(d);
+    const bat = Number(d.vacuum_battery);
+    if (Number.isFinite(bat) && bat >= 0) {
+        return `${status} · ${Math.round(bat)}%`;
+    }
+    return status;
+}
+
 function homeVacuumActionsHtml(d) {
-    const status = String(d.vacuum_status || (d.on ? 'Cleaning' : 'Idle'));
+    const status = homeVacuumStatusName(d);
     const clean = String(d.vacuum_clean || 'vacuum');
     const paused = status === 'Paused';
     const running = status === 'Cleaning' || paused;
@@ -4026,7 +4064,7 @@ function homeVacuumActionsHtml(d) {
         </div>`
         : '';
     return `<div class="home-device-actions home-device-actions--vacuum">
-            <span class="home-vac-status" data-home-vac-status>${escapeHtml(status)}</span>
+            <span class="home-vac-status" data-home-vac-status>${escapeHtml(homeVacuumStatusText(d))}</span>
             ${modeHtml}
             <button type="button" class="btn btn-secondary btn-compact" data-home-vac-cmd="${paused ? 'resume' : 'start'}">${paused ? 'Resume' : 'Start'}</button>
             ${running && d.can_pause !== false ? `<button type="button" class="btn btn-secondary btn-compact" data-home-vac-cmd="pause">Pause</button>` : ''}
@@ -4392,8 +4430,9 @@ async function sendHomeVacuumCommand(id, command, button) {
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
         if (data.vacuum_status && device) device.vacuum_status = data.vacuum_status;
         if (data.vacuum_clean && device) device.vacuum_clean = data.vacuum_clean;
+        if (data.vacuum_battery != null && device) device.vacuum_battery = data.vacuum_battery;
         const statusEl = document.querySelector(`[data-home-id="${CSS.escape(id)}"] [data-home-vac-status]`);
-        if (statusEl && data.vacuum_status) statusEl.textContent = data.vacuum_status;
+        if (statusEl && device) statusEl.textContent = homeVacuumStatusText(device);
         const toast = cmd === 'dock'
             ? 'Returning to dock'
             : (cmd === 'pause' ? 'Paused' : (cmd === 'select_areas' || cmd === 'rooms' || cmd === 'mop' || cmd === 'vacuum' || cmd === 'vacuum_mop' ? '' : 'Vacuum started'));

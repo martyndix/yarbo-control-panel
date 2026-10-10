@@ -3253,10 +3253,11 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
 }
 
 .home-vac-status {
-    min-width: 4.5rem;
+    min-width: 6.5rem;
     font-size: 0.78rem;
     font-weight: 650;
     color: var(--muted);
+    white-space: nowrap;
 }
 
 .home-device.is-on .home-vac-status {

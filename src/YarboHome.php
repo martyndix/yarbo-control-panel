@@ -343,6 +343,7 @@ final class YarboHome
             if (($row['kind'] ?? '') === self::KIND_VACUUM) {
                 $row['vacuum_status'] = (string) ($device['vacuum_status'] ?? '');
                 $row['vacuum_clean'] = (string) ($device['vacuum_clean'] ?? 'vacuum');
+                $row['vacuum_battery'] = self::optionalPercent($device['vacuum_battery'] ?? null);
                 $row['can_vacuum'] = array_key_exists('can_vacuum', $device) ? (bool) $device['can_vacuum'] : true;
                 $row['can_mop'] = !empty($device['can_mop']);
                 $row['can_vacuum_mop'] = !empty($device['can_vacuum_mop']);
@@ -2078,6 +2079,12 @@ final class YarboHome
                 $device[$key] = (string) $live[$key];
             }
         }
+        if (array_key_exists('vacuum_battery', $live)) {
+            $percent = self::optionalPercent($live['vacuum_battery']);
+            if ($percent !== null) {
+                $device['vacuum_battery'] = $percent;
+            }
+        }
         foreach (['can_vacuum', 'can_mop', 'can_vacuum_mop', 'can_pause'] as $flag) {
             if (array_key_exists($flag, $live)) {
                 $device[$flag] = (bool) $live[$flag];
@@ -2148,6 +2155,10 @@ final class YarboHome
         }
         if (!empty($result['vacuum_clean'])) {
             $patch['vacuum_clean'] = (string) $result['vacuum_clean'];
+        }
+        $battery = self::optionalPercent($result['vacuum_battery'] ?? null);
+        if ($battery !== null) {
+            $patch['vacuum_battery'] = $battery;
         }
         if (array_key_exists('selected_areas', $result)) {
             $patch['selected_areas'] = self::normalizeVacuumAreaIds($result['selected_areas']);
@@ -2393,6 +2404,7 @@ final class YarboHome
             if ($kind === self::KIND_VACUUM || YarboMatterFabric::nameLooksVacuum((string) ($row['name'] ?? '') . ' ' . (string) ($row['product'] ?? ''))) {
                 $slim['vacuum_status'] = (string) ($row['vacuum_status'] ?? '');
                 $slim['vacuum_clean'] = (string) ($row['vacuum_clean'] ?? 'vacuum');
+                $slim['vacuum_battery'] = self::optionalPercent($row['vacuum_battery'] ?? null);
                 $slim['can_vacuum'] = array_key_exists('can_vacuum', $row) ? (bool) $row['can_vacuum'] : true;
                 $slim['can_mop'] = !empty($row['can_mop']);
                 $slim['can_vacuum_mop'] = !empty($row['can_vacuum_mop']);
@@ -2961,6 +2973,18 @@ final class YarboHome
         }
 
         return round((float) $value, 1);
+    }
+
+    private static function optionalPercent(mixed $value): ?int
+    {
+        if ($value === null || $value === '' || is_bool($value)) {
+            return null;
+        }
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        return max(0, min(100, (int) round((float) $value)));
     }
 
     /**

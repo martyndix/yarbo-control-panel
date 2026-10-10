@@ -166,7 +166,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 48, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 49, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -503,9 +503,10 @@ def main() -> int:
     agent.matter_rpc = leftover_stuck_rpc  # type: ignore[method-assign]
     agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
     leftover_stuck = agent.dispatch({"op": "command", "id": "40:1", "action": "start", "kind": "vacuum", "areas": "all"})
-    assert leftover_stuck.get("ok") is False, leftover_stuck
-    assert leftover_stuck.get("on") is False, leftover_stuck
-    assert leftover_stuck.get("vacuum_status") in ("Charging", "Docked"), leftover_stuck
+    assert leftover_stuck.get("ok") is True, leftover_stuck
+    assert leftover_stuck.get("on") is True, leftover_stuck
+    assert leftover_stuck.get("vacuum_status") == "Cleaning", leftover_stuck
+    assert leftover_stuck.get("vacuum_activity") == "cleaning", leftover_stuck
     stuck_modes = change_to_mode_values([c for command, c in calls if command == "device_command"], agent)
     assert 2 not in stuck_modes, stuck_modes
     assert 0 not in stuck_modes, stuck_modes
@@ -1042,6 +1043,57 @@ def main() -> int:
     assert live_charge.get("vacuum_charge_complete") is not True, live_charge
     assert live_charge.get("vacuum_status") == "Docked", live_charge
     assert live_charge.get("vacuum_battery") == 40, live_charge
+
+    agent._live_devices = [{
+        "id": "40:1",
+        "node_id": 40,
+        "kind": "vacuum",
+        "vacuum_op": 1,
+        "vacuum_status": "Cleaning",
+        "vacuum_activity": "cleaning",
+        "vacuum_run_mode": 1,
+        "run_modes": [
+            {"label": "Idle", "mode": 0, "tags": [0x4000]},
+            {"label": "Cleaning", "mode": 1, "tags": [0x4001]},
+        ],
+    }]
+    agent.apply_attribute_event([40, "1/97/4", 0x41])
+    live_lag = agent.live_row("40:1") or {}
+    assert live_lag.get("vacuum_status") == "Cleaning", live_lag
+    assert live_lag.get("on") is True, live_lag
+    agent.apply_attribute_event([40, "1/97/4", 0x40])
+    live_seek = agent.live_row("40:1") or {}
+    assert live_seek.get("vacuum_status") == "Returning", live_seek
+    assert live_seek.get("vacuum_activity") == "returning", live_seek
+    agent.apply_attribute_event([40, "1/97/4", 0x41])
+    live_home = agent.live_row("40:1") or {}
+    assert live_home.get("vacuum_status") == "Docked", live_home
+    assert live_home.get("on") is False, live_home
+    agent.apply_attribute_event([40, "1/97/4", 0x40])
+    agent.apply_attribute_event([40, "0/47/14", 1])
+    live_plug = agent.live_row("40:1") or {}
+    assert live_plug.get("vacuum_status") == "Docked", live_plug
+
+    poll_calls: list[tuple[str, dict]] = []
+    agent._live_devices = [{
+        "id": "40:1",
+        "node_id": 40,
+        "endpoint": 1,
+        "kind": "vacuum",
+        "areas": [{"id": 1, "name": "Kitchen"}],
+        "run_modes": [{"label": "Cleaning", "mode": 1, "tags": [0x4001]}],
+    }]
+
+    def poll_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        poll_calls.append((command, args or {}))
+        return {"ok": True, "result": {"1/97/4": 0x42, "1/47/12": 160}}
+
+    agent.matter_rpc = poll_rpc  # type: ignore[method-assign]
+    agent.poll_vacuum_attributes()
+    assert any(command == "read_attribute" for command, _ in poll_calls), poll_calls
+    polled = agent.live_row("40:1") or {}
+    assert polled.get("vacuum_status") == "Docked", polled
+    assert polled.get("vacuum_battery") == 80, polled
 
     print("test_matter_vacuum_command.py ok")
     return 0

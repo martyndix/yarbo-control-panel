@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 48
+AGENT_VERSION = 49
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2203,35 +2203,9 @@ def apply_attribute_event(data: Any) -> None:
     elif cluster == COLOR_CONTROL:
         fields = apply_color_attribute(device_id, attr, value)
     elif cluster == RVC_OPERATIONAL and attr == ATTR_OPERATIONAL_STATE:
-        op = int(event_number(value) or 0)
-        live = live_row(device_id) or {}
-        complete = bool(live.get("vacuum_charge_complete"))
-        fields["vacuum_op"] = op
-        fields["vacuum_status"] = vacuum_status_label(op, [], charge_complete=complete)
-        fields["on"] = fields["vacuum_status"] in ("Cleaning", "Paused")
+        fields.update(vacuum_runtime_fields(device_id, {"vacuum_op": int(event_number(value) or 0)}))
     elif cluster == RVC_RUN and attr == ATTR_CURRENT_MODE:
-        mode_n = int(event_number(value) or 0)
-        fields["vacuum_run_mode"] = mode_n
-        live = live_row(device_id) or {}
-        option = None
-        for row in live.get("run_modes") or []:
-            if not isinstance(row, dict):
-                continue
-            try:
-                if int(row["mode"]) == mode_n:
-                    option = row
-                    break
-            except (TypeError, ValueError, KeyError):
-                continue
-        tags = [int(t) for t in ((option or {}).get("tags") or []) if isinstance(t, (int, float))]
-        try:
-            op_n = int(live["vacuum_op"]) if live.get("vacuum_op") is not None else None
-        except (TypeError, ValueError):
-            op_n = None
-        fields["vacuum_status"] = vacuum_status_label(
-            op_n, tags, charge_complete=bool(live.get("vacuum_charge_complete"))
-        )
-        fields["on"] = fields["vacuum_status"] in ("Cleaning", "Paused")
+        fields.update(vacuum_runtime_fields(device_id, {"vacuum_run_mode": int(event_number(value) or 0)}))
     elif cluster == POWER_SOURCE and attr in (ATTR_BAT_PERCENT_REMAINING, ATTR_BAT_CHARGE_STATE):
         vac_id = vacuum_live_id(node_id, device_id)
         if not vac_id:
@@ -2242,28 +2216,21 @@ def apply_attribute_event(data: Any) -> None:
             percent = int(live["vacuum_battery"]) if live.get("vacuum_battery") is not None else None
         except (TypeError, ValueError):
             percent = None
-        charge_state = None
+        extra: dict[str, Any] = {}
         if attr == ATTR_BAT_PERCENT_REMAINING:
             raw = event_number(value)
             if raw is None:
                 return
             percent = max(0, min(100, int(round(int(raw) / 2))))
-            fields["vacuum_battery"] = percent
+            extra["vacuum_battery"] = percent
+            extra["vacuum_charge_complete"] = charge_is_complete(None, percent)
         else:
             raw = event_number(value)
             if raw is None:
                 return
-            charge_state = int(raw)
-        complete = charge_is_complete(charge_state, percent)
-        fields["vacuum_charge_complete"] = complete
-        try:
-            op_n = int(live["vacuum_op"]) if live.get("vacuum_op") is not None else None
-        except (TypeError, ValueError):
-            op_n = None
-        fields["vacuum_status"] = vacuum_status_label(
-            op_n, live_vacuum_tags(live), charge_complete=complete
-        )
-        fields["on"] = fields["vacuum_status"] in ("Cleaning", "Paused")
+            extra["vacuum_charge_state"] = int(raw)
+            extra["vacuum_charge_complete"] = charge_is_complete(int(raw), percent)
+        fields.update(vacuum_runtime_fields(device_id, extra))
     elif cluster == RVC_CLEAN and attr == ATTR_CURRENT_MODE:
         fields["vacuum_clean_mode"] = int(event_number(value) or 0)
     elif cluster == SERVICE_AREA and attr == ATTR_SELECTED_AREAS:
@@ -3754,22 +3721,98 @@ def service_area_from_node(attributes: dict[str, Any], preferred: int) -> tuple[
     return [], [], preferred
 
 
+def next_vacuum_activity(
+    op: int | None,
+    run_tags: list[int],
+    previous: str | None,
+    *,
+    plugged_in: bool = False,
+) -> str | None:
+    prev = str(previous or "").strip().lower() or None
+    if op == OP_ERROR:
+        return None
+    if op == OP_PAUSED:
+        return "paused"
+    if op == OP_SEEKING:
+        if plugged_in:
+            return None
+        return "returning"
+    if op == OP_RUNNING:
+        return "cleaning"
+    if op in (OP_DOCKED, OP_CHARGING):
+        if prev == "cleaning":
+            return "cleaning"
+        return None
+    if prev in ("cleaning", "paused", "returning"):
+        return prev
+    return None
+
+
 def vacuum_status_label(
-    op: int | None, run_tags: list[int], *, charge_complete: bool = False
+    op: int | None,
+    run_tags: list[int],
+    *,
+    charge_complete: bool = False,
+    activity: str | None = None,
+    plugged_in: bool = False,
 ) -> str:
+    act = str(activity or "").strip().lower() or None
     if op == OP_ERROR:
         return "Error"
-    if op == OP_PAUSED:
+    if op == OP_PAUSED or act == "paused":
         return "Paused"
     if op == OP_SEEKING:
+        if plugged_in:
+            return "Docked"
         return "Returning"
+    if act == "returning":
+        return "Returning"
+    if RUN_MAPPING in run_tags and (op == OP_RUNNING or act == "cleaning"):
+        return "Mapping"
+    if act == "cleaning" or op == OP_RUNNING:
+        return "Cleaning"
     if op == OP_DOCKED or op == OP_CHARGING:
         return "Docked"
     if RUN_MAPPING in run_tags:
         return "Mapping"
-    if op == OP_RUNNING or RUN_CLEANING in run_tags:
+    if RUN_CLEANING in run_tags:
         return "Cleaning"
     return "Idle"
+
+
+def vacuum_runtime_fields(device_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    live = dict(live_row(device_id) or {})
+    live.update(updates)
+    try:
+        op = int(live["vacuum_op"]) if live.get("vacuum_op") is not None else None
+    except (TypeError, ValueError):
+        op = None
+    tags = live_vacuum_tags(live)
+    try:
+        charge_state = (
+            int(live["vacuum_charge_state"]) if live.get("vacuum_charge_state") is not None else None
+        )
+    except (TypeError, ValueError):
+        charge_state = None
+    plugged_in = charge_state in (BAT_CHARGE_IS_CHARGING, BAT_CHARGE_IS_AT_FULL_CHARGE)
+    activity = next_vacuum_activity(
+        op,
+        tags,
+        live.get("vacuum_activity"),
+        plugged_in=plugged_in,
+    )
+    status = vacuum_status_label(
+        op,
+        tags,
+        charge_complete=bool(live.get("vacuum_charge_complete")),
+        activity=activity,
+        plugged_in=plugged_in,
+    )
+    fields = dict(updates)
+    fields["vacuum_activity"] = activity
+    fields["vacuum_status"] = status
+    fields["on"] = status in ("Cleaning", "Paused")
+    return fields
 
 
 def charge_is_complete(charge_state: int | None, percent: int | None) -> bool:
@@ -3853,7 +3896,7 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     run_option = next((row for row in run_modes if row["mode"] == int(run_current or -1)), None)
     clean_option = next((row for row in clean_modes if row["mode"] == int(clean_current or -1)), None)
     run_tags = [int(t) for t in (run_option.get("tags") if run_option else []) if isinstance(t, (int, float))]
-    bat_percent, _bat_state, charge_complete = battery_from_node(attributes, endpoint)
+    bat_percent, bat_state, charge_complete = battery_from_node(attributes, endpoint)
     status = vacuum_status_label(op, run_tags, charge_complete=charge_complete)
     areas, selected, area_endpoint = service_area_from_node(attributes, endpoint)
     can_vacuum = pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac")) is not None or clean_modes == []
@@ -3875,6 +3918,7 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         "vacuum_run_mode": int(run_current) if run_current is not None else None,
         "vacuum_clean_mode": int(clean_current) if clean_current is not None else None,
         "vacuum_battery": bat_percent,
+        "vacuum_charge_state": bat_state,
         "vacuum_charge_complete": charge_complete,
         "can_vacuum": can_vacuum,
         "can_mop": can_mop,
@@ -4156,21 +4200,81 @@ VACUUM_READ_ATTRS = (
     (POWER_SOURCE, ATTR_BAT_PERCENT_REMAINING),
     (POWER_SOURCE, ATTR_BAT_CHARGE_STATE),
 )
+VACUUM_STATUS_ATTRS = (
+    (RVC_RUN, ATTR_CURRENT_MODE),
+    (RVC_OPERATIONAL, ATTR_OPERATIONAL_STATE),
+    (RVC_OPERATIONAL, ATTR_OPERATIONAL_ERROR),
+    (POWER_SOURCE, ATTR_BAT_PERCENT_REMAINING),
+    (POWER_SOURCE, ATTR_BAT_CHARGE_STATE),
+)
+VACUUM_RUNTIME_KEYS = (
+    "vacuum_op",
+    "vacuum_status",
+    "vacuum_activity",
+    "vacuum_error",
+    "vacuum_run_mode",
+    "vacuum_battery",
+    "vacuum_charge_state",
+    "vacuum_charge_complete",
+    "on",
+)
 
 
-def refresh_vacuum_capabilities(node_id: int, endpoint: int, device_id: str = "") -> dict[str, Any]:
+def apply_live_vacuum_activity(device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    live = dict(live_row(device_id) or {})
+    merged = {**live, **payload}
+    try:
+        op = int(merged["vacuum_op"]) if merged.get("vacuum_op") is not None else None
+    except (TypeError, ValueError):
+        op = None
+    tags = live_vacuum_tags(merged)
+    try:
+        charge_state = (
+            int(merged["vacuum_charge_state"]) if merged.get("vacuum_charge_state") is not None else None
+        )
+    except (TypeError, ValueError):
+        charge_state = None
+    plugged_in = charge_state in (BAT_CHARGE_IS_CHARGING, BAT_CHARGE_IS_AT_FULL_CHARGE)
+    activity = next_vacuum_activity(
+        op,
+        tags,
+        live.get("vacuum_activity"),
+        plugged_in=plugged_in,
+    )
+    payload = dict(payload)
+    payload["vacuum_activity"] = activity
+    payload["vacuum_status"] = vacuum_status_label(
+        op,
+        tags,
+        charge_complete=bool(merged.get("vacuum_charge_complete")),
+        activity=activity,
+        plugged_in=plugged_in,
+    )
+    payload["on"] = payload["vacuum_status"] in ("Cleaning", "Paused")
+    return payload
+
+
+def refresh_vacuum_capabilities(
+    node_id: int,
+    endpoint: int,
+    device_id: str = "",
+    *,
+    status_only: bool = False,
+) -> dict[str, Any]:
     attrs = dict(node_attributes(node_id) or {})
     endpoints: list[int] = []
     for ep in [endpoint, 0, *endpoint_ids(attrs), 1, 2, 3]:
         if ep not in endpoints:
             endpoints.append(ep)
-    paths = [attr_key(ep, cluster, attr) for ep in endpoints for cluster, attr in VACUUM_READ_ATTRS]
+    want = VACUUM_STATUS_ATTRS if status_only else VACUUM_READ_ATTRS
+    paths = [attr_key(ep, cluster, attr) for ep in endpoints for cluster, attr in want]
     rpc = matter_rpc(
         "read_attribute",
         {"node_id": node_id, "attribute_path": paths},
-        timeout=18.0,
+        timeout=18.0 if not status_only else 8.0,
         retries=1,
-        channel=CMD_CHANNEL,
+        channel=POLL_CHANNEL if status_only else CMD_CHANNEL,
+        listen=not status_only,
     )
     if rpc.get("ok"):
         attrs.update(read_result_attributes(rpc.get("result")))
@@ -4182,8 +4286,12 @@ def refresh_vacuum_capabilities(node_id: int, endpoint: int, device_id: str = ""
             rvc_ep = ep
             break
     payload = vacuum_payload(attrs, rvc_ep)
-    if device_id and (payload.get("run_modes") or payload.get("areas") or payload.get("clean_modes")):
-        patch_live_device(device_id, payload)
+    if device_id:
+        payload = apply_live_vacuum_activity(device_id, payload)
+        patch = payload
+        if status_only:
+            patch = {key: payload[key] for key in VACUUM_RUNTIME_KEYS if key in payload}
+        patch_live_device(device_id, patch)
     return payload
 
 
@@ -4193,13 +4301,13 @@ def poll_vacuum_attributes() -> None:
     for row in current_live_devices():
         if not isinstance(row, dict) or str(row.get("kind") or "") != "vacuum":
             continue
-        if row.get("areas") and row.get("run_modes"):
-            continue
         nid, ep = row_node_endpoint(row)
         if nid <= 0 or ep <= 0:
             continue
         try:
-            refresh_vacuum_capabilities(nid, ep, str(row.get("id") or ""))
+            refresh_vacuum_capabilities(
+                nid, ep, str(row.get("id") or ""), status_only=True
+            )
         except Exception as exc:  # noqa: BLE001
             print(f"vacuum attribute read failed: {exc}", flush=True)
 
@@ -4358,13 +4466,13 @@ def set_vacuum_command(
     if action in ("pause",):
         rpc = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Pause", {})
         if rpc.get("ok"):
-            rpc = {**rpc, "on": True, "vacuum_status": "Paused"}
+            rpc = {**rpc, "on": True, "vacuum_status": "Paused", "vacuum_activity": "paused"}
         return rpc
     paused = str(row.get("vacuum_status") or "") == "Paused" or run_op() == OP_PAUSED
     if action in ("resume",) or (action in ("start", "on") and paused):
         rpc = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Resume", {})
         if rpc.get("ok"):
-            rpc = {**rpc, "on": True, "vacuum_status": "Cleaning"}
+            rpc = {**rpc, "on": True, "vacuum_status": "Cleaning", "vacuum_activity": "cleaning"}
         return rpc
     if action in ("dock", "go_home", "off", "stop"):
         rpc = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "GoHome", {})
@@ -4373,7 +4481,12 @@ def set_vacuum_command(
             if idle is not None:
                 rpc = vacuum_change_mode(node_id, rvc_ep, RVC_RUN, int(idle["mode"]))
         if rpc.get("ok"):
-            rpc = {**rpc, "on": False, "vacuum_status": "Returning"}
+            rpc = {
+                **rpc,
+                "on": False,
+                "vacuum_status": "Returning",
+                "vacuum_activity": "returning",
+            }
         return rpc
 
     if action in ("mop", "vacuum", "vac", "vacuum_mop"):
@@ -4423,7 +4536,25 @@ def set_vacuum_command(
         return started
     settle_start()
     sync_row()
-    if not started.get("ok") and int(started.get("status") or 0) == 2 and at_charger():
+    if started.get("ok"):
+        status = str(row.get("vacuum_status") or "")
+        op = run_op()
+        if status == "Mapping" or status == "Error" or op == OP_ERROR:
+            return finish(started)
+        if op == OP_DOCKED:
+            return finish(started)
+        battery = row.get("vacuum_battery")
+        return {
+            **started,
+            "ok": True,
+            "on": True,
+            "vacuum_status": "Cleaning",
+            "vacuum_activity": "cleaning",
+            "vacuum_clean": want_clean or "vacuum",
+            "selected_areas": requested_ids or all_ids,
+            **({"vacuum_battery": battery} if battery is not None else {}),
+        }
+    if int(started.get("status") or 0) == 2 and at_charger():
         started = {
             **started,
             "error": "Vacuum refused Matter start from the dock (generic failure)",
@@ -4717,9 +4848,20 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 action = "start"
             rpc = set_vacuum_command(node_id, endpoint, action, body, device_id=device_id)
             if rpc.get("ok"):
-                patch = {k: rpc[k] for k in ("on", "vacuum_status", "vacuum_clean", "selected_areas") if k in rpc}
+                patch = {
+                    k: rpc[k]
+                    for k in (
+                        "on",
+                        "vacuum_status",
+                        "vacuum_activity",
+                        "vacuum_clean",
+                        "vacuum_battery",
+                        "selected_areas",
+                    )
+                    if k in rpc
+                }
                 if patch:
-                    patch_live_device(device_id, patch, sticky=True)
+                    patch_live_device(device_id, patch)
                 rpc = {**rpc, "id": device_id}
             return rpc
         if action in ("on", "off", "toggle"):

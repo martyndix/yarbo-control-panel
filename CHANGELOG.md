@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.101] - 2026-10-10
+
+### Fixed
+- Matter vacuum tiles stayed on **Charging** while cleaning, and on **Returning** after the robot was back on the dock. Status now follows the live job: **Cleaning** after Start (even if Matter still says Charging), **Returning** on Dock, then **Docked** once it is charging or idle on the dock. The tile also shows battery percent when Matter reports it.
+
 ## [4.0.100] - 2026-10-10
 
 ### Fixed
