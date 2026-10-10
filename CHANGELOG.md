@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.83] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** is ChangeToMode Cleaning only (the Apple Home whole-house command). SelectAreas and Operational Start were sent first and left SwitchBot K11+ on the dock. Room chips still send SelectAreas before Cleaning. ChangeToMode is retried with `NewMode` if CurrentMode does not actually change (`newMode` can default to Idle).
+
 ## [4.0.82] - 2026-10-10
 
 ### Fixed
