@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.93] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** on SwitchBot **K11+** (Alejandro) from Charging still got **GenericFailure** when Bathroom (or any room subset) was selected — SelectAreas while Charging is refused. Start from the charger now skips SelectAreas and sends timed ChangeToMode Cleaning. Idle Start still selects rooms. Mapping is still never sent (**S10** / Martynas).
+
 ## [4.0.92] - 2026-10-10
 
 ### Fixed

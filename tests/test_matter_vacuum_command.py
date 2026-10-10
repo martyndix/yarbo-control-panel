@@ -146,7 +146,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 40, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 41, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -260,6 +260,7 @@ def main() -> int:
     assert (mop_cmd.get("payload") or {}).get("newMode") == 1, mop_cmd
     run_cmd = next(c for c in cmds if c.get("cluster_id") == agent.RVC_RUN)
     assert (run_cmd.get("payload") or {}).get("newMode") == 1, run_cmd
+    assert "timed_request_timeout_ms" not in run_cmd, run_cmd
     assert not any(
         ((c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode")) == 2)
         for c in cmds
@@ -373,6 +374,12 @@ def main() -> int:
         c.get("cluster_id") == agent.RVC_RUN
         and (c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode")) == 1
         for c in charge_cmds
+    ), charge_cmds
+    assert all(
+        c.get("timed_request_timeout_ms") == 3000
+        for c in charge_cmds
+        if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+        and (c.get("payload") or {}).get("newMode") == 1
     ), charge_cmds
 
     calls.clear()
@@ -524,6 +531,45 @@ def main() -> int:
     assert refused.get("ok") is not True or refused.get("vacuum_status") != "Mapping", refused
 
     calls.clear()
+    # Charging + Bathroom must skip SelectAreas (K11+ GenericFailure) and still
+    # send timed ChangeToMode Cleaning. Idle Start still selects rooms above.
+    bath_ok_attrs = dict(vacuum_node()["attributes"])
+    bath_ok_attrs["1/97/4"] = 0x41
+    bath_ok_attrs["1/84/1"] = 0
+
+    def bath_charge_ok_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": bath_ok_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": bath_ok_attrs}
+        if command == "device_command":
+            apply_change_to_mode(agent, bath_ok_attrs, args or {}, keep_charging=True)
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = bath_charge_ok_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    bath_ok = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "areas": [3],
+    })
+    assert bath_ok.get("ok") is True, bath_ok
+    assert bath_ok.get("vacuum_status") == "Cleaning", bath_ok
+    bath_ok_cmds = [args for command, args in calls if command == "device_command"]
+    assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in bath_ok_cmds), bath_ok_cmds
+    assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in bath_ok_cmds), bath_ok_cmds
+    assert all(
+        c.get("timed_request_timeout_ms") == 3000
+        for c in bath_ok_cmds
+        if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+        and (c.get("payload") or {}).get("newMode") == 1
+    ), bath_ok_cmds
+
+    calls.clear()
     # Alejandro (K11+): Charging + Bathroom. ChangeToMode Cleaning (1) is rejected
     # with GenericFailure (2). Resume/Stop are not used. Mapping is 2 — never send it.
     k11_attrs = dict(vacuum_node()["attributes"])
@@ -575,7 +621,7 @@ def main() -> int:
         for c in k11_cmds
         if c.get("cluster_id") == agent.SERVICE_AREA
     ]
-    assert [3] in area_payloads, area_payloads
+    assert area_payloads == [], area_payloads
     run_modes_sent = [
         (c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode"))
         for c in k11_cmds
@@ -583,6 +629,12 @@ def main() -> int:
     ]
     assert 1 in run_modes_sent, run_modes_sent
     assert 2 not in run_modes_sent, run_modes_sent
+    assert all(
+        c.get("timed_request_timeout_ms") == 3000
+        for c in k11_cmds
+        if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+        and (c.get("payload") or {}).get("newMode") == 1
+    ), k11_cmds
     assert all(
         "newMode" in (c.get("payload") or {})
         for c in k11_cmds
@@ -669,6 +721,7 @@ def main() -> int:
     assert from_return.get("ok") is False, from_return
     assert from_return.get("vacuum_status") == "Returning", from_return
     ret_cmds = [args for command, args in calls if command == "device_command"]
+    assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in ret_cmds), ret_cmds
     assert not any(c.get("command_name") == "Stop" for c in ret_cmds), ret_cmds
     assert not any(c.get("command_name") == "GoHome" for c in ret_cmds), ret_cmds
     assert not any(c.get("command_name") == "Resume" for c in ret_cmds), ret_cmds

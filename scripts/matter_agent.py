@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 40
+AGENT_VERSION = 41
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3837,18 +3837,22 @@ def vacuum_rpc_command(
     name: str,
     payload: dict[str, Any],
     timeout: float = 18.0,
+    timed_ms: int | None = None,
 ) -> dict[str, Any]:
     def send(nid: int | None = None) -> dict[str, Any]:
         use = node_id if nid is None else nid
+        args: dict[str, Any] = {
+            "node_id": use,
+            "endpoint_id": endpoint,
+            "cluster_id": cluster,
+            "command_name": name,
+            "payload": payload,
+        }
+        if timed_ms:
+            args["timed_request_timeout_ms"] = int(timed_ms)
         rpc = matter_rpc(
             "device_command",
-            {
-                "node_id": use,
-                "endpoint_id": endpoint,
-                "cluster_id": cluster,
-                "command_name": name,
-                "payload": payload,
-            },
+            args,
             timeout=timeout,
         )
         if not rpc.get("ok"):
@@ -3871,6 +3875,7 @@ def vacuum_change_mode(
     device_id: str = "",
     row: dict[str, Any] | None = None,
     verify: bool = False,
+    timed_ms: int | None = None,
 ) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not set vacuum mode"}
     # CHIP ChangeToMode.newMode defaults to 0 (Idle). Home Assistant sends only
@@ -3888,7 +3893,9 @@ def vacuum_change_mode(
             return None
 
     for payload in payloads:
-        last = vacuum_rpc_command(node_id, endpoint, cluster, "ChangeToMode", payload)
+        last = vacuum_rpc_command(
+            node_id, endpoint, cluster, "ChangeToMode", payload, timed_ms=timed_ms
+        )
         if is_transport_error(last):
             return last
         if not verify or row is None:
@@ -4273,10 +4280,11 @@ def set_vacuum_command(
         return dropped
 
     # All rooms is Apple Home whole-house: ChangeToMode Cleaning only.
-    # SelectAreas of every ID (or []) made K11+ GenericFailure while Charging.
-    # A room subset still sends those IDs first. Never Mapping. Never Clean Mode
-    # ChangeToMode on start — K11+ Clean Mode does not accept that command.
+    # While Charging, SelectAreas (even Bathroom) is GenericFailure on K11+.
+    # Never Mapping. Never Clean Mode ChangeToMode on start.
     select_ids = requested_ids if not all_rooms and requested_ids else None
+    if at_charger() or run_op() == OP_SEEKING:
+        select_ids = None
 
     def apply_rooms(ids: list[int] | None) -> dict[str, Any] | None:
         if not ids:
@@ -4330,6 +4338,7 @@ def set_vacuum_command(
             device_id=device_id,
             row=row,
             verify=True,
+            timed_ms=3000 if at_charger() else None,
         )
         attempts.append(last)
         return last
