@@ -1449,6 +1449,7 @@ $auto->kickRunner();
 assert_true(!is_file($auto->pidPath()) || (int) trim((string) file_get_contents($auto->pidPath())) === getmypid(), 'kickRunner must not spawn when scripts/ is missing');
 assert_true(str_contains($js, 'homeHeaterActionsHtml'), 'heater On/Off and setpoint controls');
 assert_true(str_contains($js, 'homeVacuumActionsHtml'), 'vacuum Start/Mop/rooms');
+assert_true(str_contains($js, 'home-device--vacuum'), 'vacuum cards stack name above rooms');
 assert_true(str_contains($js, 'data-home-vac-area'), 'vacuum room chips');
 assert_true(str_contains($js, 'data-home-vac-cmd'), 'vacuum start/dock');
 assert_true(str_contains($js, "['start', 'Start']"), 'vacuum Then Start');

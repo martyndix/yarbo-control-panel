@@ -3054,11 +3054,25 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     background: var(--surface);
 }
 
+.home-device--vacuum {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+}
+
 .home-card--manage .home-device:not(.home-device--hidden) {
     grid-template-columns: auto minmax(0, 1fr) minmax(6.5rem, auto) minmax(6.5rem, auto) auto;
     grid-template-areas:
         "handle label label label manage"
         "handle room group actions manage";
+}
+
+.home-card--manage .home-device--vacuum:not(.home-device--hidden) {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "handle label manage"
+        "handle room manage"
+        "handle group manage"
+        "handle actions manage";
 }
 
 .home-card--manage .home-device:not(.home-device--hidden) > .home-reorder-controls {
@@ -3229,6 +3243,13 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     flex-wrap: wrap;
     gap: 0.35rem;
     align-items: center;
+    justify-content: flex-start;
+}
+
+.home-device-actions--vacuum [data-home-vac-mode].is-active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
 }
 
 .home-vac-status {
