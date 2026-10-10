@@ -17,6 +17,25 @@ final class YarboMatterFabric
     private const RVC_RUN = 0x0054;
     private const RVC_CLEAN = 0x0055;
     private const RVC_OPERATIONAL = 0x0061;
+    private const SERVICE_AREA = 0x0150;
+    private const ATTR_SUPPORTED_MODES = 0;
+    private const ATTR_CURRENT_MODE = 1;
+    private const ATTR_OPERATIONAL_STATE = 0;
+    private const ATTR_SUPPORTED_AREAS = 0;
+    private const ATTR_SELECTED_AREAS = 2;
+    private const RUN_IDLE = 0x4000;
+    private const RUN_CLEANING = 0x4001;
+    private const RUN_MAPPING = 0x4002;
+    private const CLEAN_VACUUM = 0x4000;
+    private const CLEAN_MOP = 0x4001;
+    private const CLEAN_VACUUM_THEN_MOP = 0x4003;
+    private const OP_STOPPED = 0;
+    private const OP_RUNNING = 1;
+    private const OP_PAUSED = 2;
+    private const OP_ERROR = 3;
+    private const OP_SEEKING = 0x40;
+    private const OP_CHARGING = 0x41;
+    private const OP_DOCKED = 0x42;
     private const DESCRIPTOR = 29;
     private const BASIC_INFO = 40;
     private const BRIDGED_BASIC = 57;
@@ -278,11 +297,15 @@ final class YarboMatterFabric
                     $brightness = (int) round($level * 100 / 254);
                 }
                 $thermo = $kind === 'heater' ? self::thermostatPayload($attributes, $endpoint) : [];
+                $vacuum = $kind === 'vacuum' ? self::vacuumPayload($attributes, $endpoint) : [];
                 $on = self::attrBool($onVal);
                 if (array_key_exists('thermostat_on', $thermo) && $thermo['thermostat_on'] !== null) {
                     $on = (bool) $thermo['thermostat_on'];
+                } elseif ($vacuum !== [] && array_key_exists('on', $vacuum)) {
+                    $on = (bool) $vacuum['on'];
                 }
                 unset($thermo['thermostat_on']);
+                unset($vacuum['on']);
                 $devices[] = [
                     'id' => $nodeId . ':' . $endpoint,
                     'node_id' => $nodeId,
@@ -305,7 +328,7 @@ final class YarboMatterFabric
                         'color_xy' => false,
                         'color_ct' => false,
                         'color_hex' => '',
-                    ]) + $thermo;
+                    ]) + $thermo + $vacuum;
             }
             if (count($devices) === $before && $nodeId > 0 && $attributes !== []) {
                 $stubKind = self::classifyByName('light', $source, $vendor, $product);
@@ -500,7 +523,7 @@ final class YarboMatterFabric
             return false;
         }
 
-        return (bool) preg_match('/\b(vacuum|robot\s*vac|roborock|roomba)\b/', $text);
+        return (bool) preg_match('/\b(vacuum|robot\s*vac|roborock|roomba|deebot|ecovacs|dreame|narwal|k11)\b/', $text);
     }
 
     public static function classifyByName(string $kind, string ...$labels): string
@@ -650,6 +673,216 @@ final class YarboMatterFabric
         }
 
         return $number !== self::SYSTEM_MODE_OFF && $number !== self::SYSTEM_MODE_FAN;
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array<string, mixed>
+     */
+    private static function vacuumPayload(array $attributes, int $endpoint): array
+    {
+        $runModes = self::parseModeOptions(self::attrRaw($attributes, $endpoint, self::RVC_RUN, self::ATTR_SUPPORTED_MODES));
+        $cleanModes = self::parseModeOptions(self::attrRaw($attributes, $endpoint, self::RVC_CLEAN, self::ATTR_SUPPORTED_MODES));
+        $runCurrent = self::attrNum($attributes, $endpoint, self::RVC_RUN, self::ATTR_CURRENT_MODE);
+        $cleanCurrent = self::attrNum($attributes, $endpoint, self::RVC_CLEAN, self::ATTR_CURRENT_MODE);
+        $opRaw = self::attrNum($attributes, $endpoint, self::RVC_OPERATIONAL, self::ATTR_OPERATIONAL_STATE);
+        $op = $opRaw !== null ? (int) $opRaw : null;
+        $runOption = null;
+        foreach ($runModes as $option) {
+            if ((int) ($option['mode'] ?? -1) === (int) ($runCurrent ?? -2)) {
+                $runOption = $option;
+                break;
+            }
+        }
+        $cleanOption = null;
+        foreach ($cleanModes as $option) {
+            if ((int) ($option['mode'] ?? -1) === (int) ($cleanCurrent ?? -2)) {
+                $cleanOption = $option;
+                break;
+            }
+        }
+        $runTags = [];
+        foreach (is_array($runOption['tags'] ?? null) ? $runOption['tags'] : [] as $tag) {
+            if (is_numeric($tag)) {
+                $runTags[] = (int) $tag;
+            }
+        }
+        $status = self::vacuumStatusLabel($op, $runTags);
+        $areas = self::parseAreas(self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SUPPORTED_AREAS));
+        $canMop = self::modeHasTagOrWord($cleanModes, [self::CLEAN_MOP, self::CLEAN_VACUUM_THEN_MOP], 'mop');
+        $canVacuumMop = self::modeHasTagOrWord($cleanModes, [self::CLEAN_VACUUM_THEN_MOP], 'vacuum and mop')
+            || self::modeHasTagOrWord($cleanModes, [self::CLEAN_VACUUM_THEN_MOP], 'vac & mop');
+        $on = in_array($status, ['Cleaning', 'Paused', 'Mapping'], true);
+
+        return [
+            'vacuum_status' => $status,
+            'vacuum_clean' => self::vacuumCleanKind($cleanOption),
+            'vacuum_op' => $op,
+            'can_vacuum' => true,
+            'can_mop' => $canMop,
+            'can_vacuum_mop' => $canVacuumMop,
+            'can_pause' => self::endpointHasCluster($attributes, $endpoint, self::RVC_OPERATIONAL),
+            'areas' => $areas,
+            'selected_areas' => self::parseSelectedAreas(
+                self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SELECTED_AREAS)
+            ),
+            'on' => $on,
+        ];
+    }
+
+    /**
+     * @param list<int> $runTags
+     */
+    private static function vacuumStatusLabel(?int $op, array $runTags): string
+    {
+        if ($op === self::OP_ERROR) {
+            return 'Error';
+        }
+        if ($op === self::OP_PAUSED) {
+            return 'Paused';
+        }
+        if ($op === self::OP_RUNNING || in_array(self::RUN_CLEANING, $runTags, true)) {
+            return 'Cleaning';
+        }
+        if ($op === self::OP_SEEKING) {
+            return 'Returning';
+        }
+        if ($op === self::OP_CHARGING) {
+            return 'Charging';
+        }
+        if ($op === self::OP_DOCKED) {
+            return 'Docked';
+        }
+        if (in_array(self::RUN_MAPPING, $runTags, true)) {
+            return 'Mapping';
+        }
+
+        return 'Idle';
+    }
+
+    /**
+     * @param array<string, mixed>|null $option
+     */
+    private static function vacuumCleanKind(?array $option): string
+    {
+        if ($option === null) {
+            return 'vacuum';
+        }
+        $tags = is_array($option['tags'] ?? null) ? $option['tags'] : [];
+        $label = strtolower((string) ($option['label'] ?? ''));
+        if (in_array(self::CLEAN_VACUUM_THEN_MOP, $tags, true) || (str_contains($label, 'mop') && str_contains($label, 'vac'))) {
+            return 'vacuum_mop';
+        }
+        if (in_array(self::CLEAN_MOP, $tags, true) || str_contains($label, 'mop')) {
+            return 'mop';
+        }
+
+        return 'vacuum';
+    }
+
+    /**
+     * @param list<array{mode: int, label: string, tags: list<int>}> $options
+     * @param list<int> $tags
+     */
+    private static function modeHasTagOrWord(array $options, array $tags, string $word): bool
+    {
+        foreach ($options as $option) {
+            foreach (is_array($option['tags'] ?? null) ? $option['tags'] : [] as $tag) {
+                if (in_array((int) $tag, $tags, true)) {
+                    return true;
+                }
+            }
+            if (str_contains(strtolower((string) ($option['label'] ?? '')), $word)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<array{mode: int, label: string, tags: list<int>}>
+     */
+    private static function parseModeOptions(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $mode = $item['mode'] ?? $item['1'] ?? $item[1] ?? null;
+            if (!is_numeric($mode)) {
+                continue;
+            }
+            $label = $item['label'] ?? $item['0'] ?? $item[0] ?? '';
+            $tagsRaw = $item['modeTags'] ?? $item['mode_tags'] ?? $item['2'] ?? $item[2] ?? [];
+            $tags = [];
+            if (is_array($tagsRaw)) {
+                foreach ($tagsRaw as $tag) {
+                    $val = is_array($tag) ? ($tag['value'] ?? $tag['1'] ?? $tag[1] ?? null) : $tag;
+                    if (is_numeric($val)) {
+                        $tags[] = (int) $val;
+                    }
+                }
+            }
+            $out[] = ['mode' => (int) $mode, 'label' => is_string($label) ? $label : '', 'tags' => $tags];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<array{id: int, name: string}>
+     */
+    private static function parseAreas(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $id = $item['areaID'] ?? $item['area_id'] ?? $item['0'] ?? $item[0] ?? null;
+            if (!is_numeric($id)) {
+                continue;
+            }
+            $info = $item['locationInfo'] ?? $item['location_info'] ?? $item['2'] ?? $item[2] ?? null;
+            $name = '';
+            if (is_array($info)) {
+                $name = (string) ($info['locationName'] ?? $info['location_name'] ?? $info['0'] ?? $info[0] ?? '');
+            }
+            $name = trim($name);
+            if ($name === '') {
+                $name = 'Room ' . (int) $id;
+            }
+            $out[] = ['id' => (int) $id, 'name' => substr($name, 0, 40)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<int>
+     */
+    private static function parseSelectedAreas(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            $val = is_array($item) ? ($item['0'] ?? $item[0] ?? $item['value'] ?? $item['areaID'] ?? null) : $item;
+            if (is_numeric($val)) {
+                $out[] = (int) $val;
+            }
+        }
+
+        return $out;
     }
 
     /**

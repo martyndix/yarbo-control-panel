@@ -340,6 +340,16 @@ final class YarboHome
                 $row['heating_min'] = self::optionalCelsius($device['heating_min'] ?? 5) ?? 5.0;
                 $row['heating_max'] = self::optionalCelsius($device['heating_max'] ?? 35) ?? 35.0;
             }
+            if (($row['kind'] ?? '') === self::KIND_VACUUM) {
+                $row['vacuum_status'] = (string) ($device['vacuum_status'] ?? '');
+                $row['vacuum_clean'] = (string) ($device['vacuum_clean'] ?? 'vacuum');
+                $row['can_vacuum'] = array_key_exists('can_vacuum', $device) ? (bool) $device['can_vacuum'] : true;
+                $row['can_mop'] = !empty($device['can_mop']);
+                $row['can_vacuum_mop'] = !empty($device['can_vacuum_mop']);
+                $row['can_pause'] = !empty($device['can_pause']);
+                $row['areas'] = self::normalizeVacuumAreas($device['areas'] ?? []);
+                $row['selected_areas'] = self::normalizeVacuumAreaIds($device['selected_areas'] ?? []);
+            }
             if ($isUnifi) {
                 foreach ([
                     'native_id',
@@ -649,6 +659,17 @@ final class YarboHome
         }
         if ($action === 'brightness' && array_key_exists('brightness', $input)) {
             $body['brightness'] = (int) $input['brightness'];
+        }
+        if ($kind === self::KIND_VACUUM) {
+            $clean = strtolower(trim((string) ($input['clean_mode'] ?? $input['mode'] ?? '')));
+            if (in_array($clean, ['vacuum', 'mop', 'vacuum_mop'], true)) {
+                $body['clean_mode'] = $clean;
+            }
+            if (array_key_exists('areas', $input)) {
+                $body['areas'] = $input['areas'] === 'all'
+                    ? 'all'
+                    : self::normalizeVacuumAreaIds($input['areas']);
+            }
         }
         if ($action === 'color') {
             $hex = $this->normalizeHex((string) ($input['hex'] ?? $input['color_hex'] ?? ''));
@@ -1417,6 +1438,9 @@ final class YarboHome
             return false;
         }
         $kind = strtolower(trim((string) $kind));
+        if (in_array($action, ['start', 'dock', 'pause', 'resume', 'mop', 'select_areas'], true)) {
+            return $kind === '' || $kind === self::KIND_VACUUM;
+        }
         if ($kind === '') {
             $kind = self::KIND_LIGHT;
         }
@@ -1425,6 +1449,12 @@ final class YarboHome
         }
         if ($kind === self::KIND_HEATER) {
             return in_array($action, ['on', 'off', 'toggle', 'setpoint', 'temperature', 'heating_setpoint'], true);
+        }
+        if ($kind === self::KIND_VACUUM) {
+            return in_array($action, [
+                'on', 'off', 'toggle', 'start', 'stop', 'pause', 'resume', 'dock',
+                'mop', 'vacuum', 'select_areas',
+            ], true);
         }
         if ($kind === self::KIND_LIGHT) {
             return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp', 'pulse'], true);
@@ -2043,6 +2073,22 @@ final class YarboHome
         if (array_key_exists('node_id', $live) && (int) $live['node_id'] > 0) {
             $device['node_id'] = (int) $live['node_id'];
         }
+        foreach (['vacuum_status', 'vacuum_clean'] as $key) {
+            if (array_key_exists($key, $live) && $live[$key] !== null && $live[$key] !== '') {
+                $device[$key] = (string) $live[$key];
+            }
+        }
+        foreach (['can_vacuum', 'can_mop', 'can_vacuum_mop', 'can_pause'] as $flag) {
+            if (array_key_exists($flag, $live)) {
+                $device[$flag] = (bool) $live[$flag];
+            }
+        }
+        if (array_key_exists('areas', $live)) {
+            $device['areas'] = self::normalizeVacuumAreas($live['areas']);
+        }
+        if (array_key_exists('selected_areas', $live)) {
+            $device['selected_areas'] = self::normalizeVacuumAreaIds($live['selected_areas']);
+        }
 
         return $device;
     }
@@ -2096,6 +2142,15 @@ final class YarboHome
         }
         if (array_key_exists('system_mode', $result) && $result['system_mode'] !== null && $result['system_mode'] !== '') {
             $patch['system_mode'] = (int) $result['system_mode'];
+        }
+        if (!empty($result['vacuum_status'])) {
+            $patch['vacuum_status'] = (string) $result['vacuum_status'];
+        }
+        if (!empty($result['vacuum_clean'])) {
+            $patch['vacuum_clean'] = (string) $result['vacuum_clean'];
+        }
+        if (array_key_exists('selected_areas', $result)) {
+            $patch['selected_areas'] = self::normalizeVacuumAreaIds($result['selected_areas']);
         }
 
         return $patch;
@@ -2314,7 +2369,7 @@ final class YarboHome
             if ($id === '' || YarboUnifi::isHomeId($id)) {
                 continue;
             }
-            $out[] = YarboMatterFabric::reclassifyRow([
+            $slim = [
                 'id' => $id,
                 'node_id' => (int) ($row['node_id'] ?? 0),
                 'endpoint' => (int) ($row['endpoint'] ?? 0),
@@ -2333,7 +2388,19 @@ final class YarboHome
                 'color_ct' => (bool) ($row['color_ct'] ?? false),
                 'color_hex' => (string) ($row['color_hex'] ?? ''),
                 'available' => (bool) ($row['available'] ?? true),
-            ]);
+            ];
+            $kind = strtolower((string) ($row['kind'] ?? ''));
+            if ($kind === self::KIND_VACUUM || YarboMatterFabric::nameLooksVacuum((string) ($row['name'] ?? '') . ' ' . (string) ($row['product'] ?? ''))) {
+                $slim['vacuum_status'] = (string) ($row['vacuum_status'] ?? '');
+                $slim['vacuum_clean'] = (string) ($row['vacuum_clean'] ?? 'vacuum');
+                $slim['can_vacuum'] = array_key_exists('can_vacuum', $row) ? (bool) $row['can_vacuum'] : true;
+                $slim['can_mop'] = !empty($row['can_mop']);
+                $slim['can_vacuum_mop'] = !empty($row['can_vacuum_mop']);
+                $slim['can_pause'] = !empty($row['can_pause']);
+                $slim['areas'] = self::normalizeVacuumAreas($row['areas'] ?? []);
+                $slim['selected_areas'] = self::normalizeVacuumAreaIds($row['selected_areas'] ?? []);
+            }
+            $out[] = YarboMatterFabric::reclassifyRow($slim);
         }
 
         return $out;
@@ -2832,6 +2899,56 @@ final class YarboHome
         }
 
         return $anyOn;
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<array{id: int, name: string}>
+     */
+    public static function normalizeVacuumAreas(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $id = $item['id'] ?? $item['areaID'] ?? $item['area_id'] ?? null;
+            if (!is_numeric($id)) {
+                continue;
+            }
+            $name = trim((string) ($item['name'] ?? ''));
+            if ($name === '') {
+                $name = 'Room ' . (int) $id;
+            }
+            $out[] = ['id' => (int) $id, 'name' => substr($name, 0, 40)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<int>
+     */
+    public static function normalizeVacuumAreaIds(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (is_array($item)) {
+                $item = $item['id'] ?? $item['areaID'] ?? null;
+            }
+            if (is_numeric($item)) {
+                $out[] = (int) $item;
+            }
+        }
+
+        return $out;
     }
 
     private static function optionalCelsius(mixed $value): ?float

@@ -2990,7 +2990,7 @@ function homeDeviceCanToggle(d) {
         return kind === 'light' || kind === 'relay';
     }
     const kind = String(d.kind || 'light');
-    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub';
+    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub' && kind !== 'vacuum';
 }
 
 function homeIsLight(d) {
@@ -3925,7 +3925,8 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const kindName = homeKindLabel(d);
     const kindChip = kindName ? `<span class="home-device-kind">${escapeHtml(kindName)}</span>` : '';
     const heater = String(d.kind || '') === 'heater';
-    const canToggle = !hidden && homeDeviceCanToggle(d) && !heater;
+    const vacuum = String(d.kind || '') === 'vacuum';
+    const canToggle = !hidden && homeDeviceCanToggle(d) && !heater && !vacuum;
     const toggleClass = canToggle ? ' home-device--toggle' : '';
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
@@ -3941,7 +3942,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
     const actions = hidden ? '' : homeDeviceActionsHtml(d, bright, color);
-    return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${toggleClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
+    return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${toggleClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
@@ -3989,11 +3990,48 @@ function homeDeviceActionsHtml(d, bright, color) {
     if (String(d.kind || '') === 'heater') {
         return homeHeaterActionsHtml(d);
     }
+    if (String(d.kind || '') === 'vacuum') {
+        return homeVacuumActionsHtml(d);
+    }
     const on = Boolean(d.on);
     return `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             ${bright}
             ${color}
+        </div>`;
+}
+
+function homeVacuumActionsHtml(d) {
+    const status = String(d.vacuum_status || (d.on ? 'Cleaning' : 'Idle'));
+    const clean = String(d.vacuum_clean || 'vacuum');
+    const paused = status === 'Paused';
+    const running = status === 'Cleaning' || paused;
+    const canMop = Boolean(d.can_mop);
+    const areas = Array.isArray(d.areas) ? d.areas : [];
+    const selected = new Set((d.selected_areas || []).map((id) => Number(id)));
+    const allOn = areas.length === 0 || (selected.size === 0 || areas.every((area) => selected.has(Number(area.id))));
+    const modeHtml = canMop
+        ? `<button type="button" class="btn btn-secondary btn-compact${clean === 'vacuum' || clean === '' ? ' is-active' : ''}" data-home-vac-mode="vacuum">Vacuum</button>
+            <button type="button" class="btn btn-secondary btn-compact${clean === 'mop' ? ' is-active' : ''}" data-home-vac-mode="mop">Mop</button>
+            ${d.can_vacuum_mop ? `<button type="button" class="btn btn-secondary btn-compact${clean === 'vacuum_mop' ? ' is-active' : ''}" data-home-vac-mode="vacuum_mop">Vac + mop</button>` : ''}`
+        : '';
+    const rooms = areas.length
+        ? `<div class="home-vac-rooms" role="group" aria-label="Rooms">
+            <button type="button" class="home-vac-room${allOn ? ' is-on' : ''}" data-home-vac-area="all">All rooms</button>
+            ${areas.map((area) => {
+                const id = Number(area.id);
+                const on = allOn || selected.has(id);
+                return `<button type="button" class="home-vac-room${on ? ' is-on' : ''}" data-home-vac-area="${id}">${escapeHtml(area.name || `Room ${id}`)}</button>`;
+            }).join('')}
+        </div>`
+        : '';
+    return `<div class="home-device-actions home-device-actions--vacuum">
+            <span class="home-vac-status" data-home-vac-status>${escapeHtml(status)}</span>
+            ${modeHtml}
+            <button type="button" class="btn btn-secondary btn-compact" data-home-vac-cmd="${paused ? 'resume' : 'start'}">${paused ? 'Resume' : 'Start'}</button>
+            ${running && d.can_pause !== false ? `<button type="button" class="btn btn-secondary btn-compact" data-home-vac-cmd="pause">Pause</button>` : ''}
+            <button type="button" class="btn btn-secondary btn-compact" data-home-vac-cmd="dock">Dock</button>
+            ${rooms}
         </div>`;
 }
 
@@ -4293,6 +4331,73 @@ function homeCommandErrorMessage(err, fallback, heater = false) {
             : 'That command timed out. Try again.';
     }
     return err?.message || fallback;
+}
+
+function homeVacuumToggleArea(id, which) {
+    const device = homeDeviceRecord(id);
+    if (!device) return;
+    const areas = Array.isArray(device.areas) ? device.areas : [];
+    const allIds = areas.map((area) => Number(area.id)).filter((n) => Number.isFinite(n));
+    let selected = (device.selected_areas || []).map((n) => Number(n)).filter((n) => allIds.includes(n));
+    if (which === 'all') {
+        selected = allIds.slice();
+    } else {
+        const room = Number(which);
+        const allOn = selected.length === 0 || allIds.every((aid) => selected.includes(aid));
+        if (allOn) {
+            selected = [room];
+        } else if (selected.includes(room)) {
+            selected = selected.filter((aid) => aid !== room);
+            if (!selected.length) selected = allIds.slice();
+        } else {
+            selected = [...selected, room];
+        }
+    }
+    device.selected_areas = selected;
+    const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+    const allOn = selected.length === 0 || allIds.every((aid) => selected.includes(aid));
+    card.querySelectorAll('[data-home-vac-area]').forEach((el) => {
+        const key = el.getAttribute('data-home-vac-area');
+        const on = key === 'all' ? allOn : selected.includes(Number(key));
+        el.classList.toggle('is-on', on);
+    });
+}
+
+async function sendHomeVacuumCommand(id, command, button) {
+    const device = homeDeviceRecord(id);
+    if (!device) return;
+    const cmd = command === 'resume' ? 'resume' : command;
+    const payload = {
+        action: 'command',
+        id,
+        command: cmd,
+        kind: 'vacuum',
+        clean_mode: device.vacuum_clean || 'vacuum',
+    };
+    const areas = Array.isArray(device.areas) ? device.areas : [];
+    const selected = (device.selected_areas || []).map((n) => Number(n));
+    const allIds = areas.map((area) => Number(area.id));
+    const allOn = !selected.length || allIds.every((aid) => selected.includes(aid));
+    if (areas.length && (cmd === 'start' || cmd === 'mop')) {
+        payload.areas = allOn ? 'all' : selected;
+    }
+    if (cmd === 'mop') payload.clean_mode = 'mop';
+    if (button) button.disabled = true;
+    try {
+        const data = await homeApi(payload, 60000);
+        if (!data.ok) throw new Error(data.error || 'Failed');
+        if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
+        if (data.vacuum_status && device) device.vacuum_status = data.vacuum_status;
+        const statusEl = document.querySelector(`[data-home-id="${CSS.escape(id)}"] [data-home-vac-status]`);
+        if (statusEl && data.vacuum_status) statusEl.textContent = data.vacuum_status;
+        showToast(cmd === 'dock' ? 'Returning to dock' : (cmd === 'pause' ? 'Paused' : 'Vacuum started'), 'success');
+        await loadHomeDashboard({ patch: true });
+    } catch (err) {
+        showToast(homeCommandErrorMessage(err, 'Vacuum command failed'), 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
 }
 
 async function sendHomeDeviceToggle(id, button, forceOn) {
@@ -4710,6 +4815,30 @@ function bindHomeDashboard() {
             await sendHomeDeviceToggle(id, power, power.getAttribute('data-home-power') === 'on');
             return;
         }
+        const vacCmd = event.target.closest('[data-home-vac-cmd]');
+        if (vacCmd) {
+            const card = vacCmd.closest('[data-home-id]');
+            await sendHomeVacuumCommand(card?.getAttribute('data-home-id') || '', vacCmd.getAttribute('data-home-vac-cmd') || 'start', vacCmd);
+            return;
+        }
+        const vacMode = event.target.closest('[data-home-vac-mode]');
+        if (vacMode) {
+            const card = vacMode.closest('[data-home-id]');
+            const id = card?.getAttribute('data-home-id') || '';
+            const device = homeDeviceRecord(id);
+            if (device) device.vacuum_clean = vacMode.getAttribute('data-home-vac-mode') || 'vacuum';
+            card?.querySelectorAll('[data-home-vac-mode]').forEach((el) => {
+                el.classList.toggle('is-active', el.getAttribute('data-home-vac-mode') === device?.vacuum_clean);
+            });
+            return;
+        }
+        const vacArea = event.target.closest('[data-home-vac-area]');
+        if (vacArea) {
+            const card = vacArea.closest('[data-home-id]');
+            const id = card?.getAttribute('data-home-id') || '';
+            homeVacuumToggleArea(id, vacArea.getAttribute('data-home-vac-area') || 'all');
+            return;
+        }
         const row = event.target.closest('[data-home-id].home-device--toggle');
         if (!row || event.target.closest('button, input, select, a, .home-drag-handle, .home-reorder-controls, .home-device-manage')) {
             return;
@@ -4964,6 +5093,9 @@ function homeAutoThenCommands(d) {
         if (d.gate) return [['open', 'Open'], ['close', 'Close'], ['stop', 'Stop']];
         return [['unlock', 'Unlock']];
     }
+    if (d.kind === 'vacuum') {
+        return [['start', 'Start'], ['mop', 'Mop'], ['dock', 'Dock'], ['pause', 'Pause']];
+    }
     const cmds = [['on', 'On'], ['off', 'Off']];
     if (homeAutoThenCanPulse(d)) cmds.push(['pulse', 'Pulse']);
     return cmds;
@@ -5084,6 +5216,9 @@ function homeAutoDefaultThen(d) {
     }
     if (homeIsUnifi(d) && (d.kind === 'door' || d.kind === 'hub')) {
         return { kind: 'device', id: d.id, command: d.gate ? 'open' : 'unlock' };
+    }
+    if (d.kind === 'vacuum') {
+        return { kind: 'device', id: d.id, command: 'start', device_kind: 'vacuum' };
     }
     if (!homeAutoThenOk(d)) return null;
     const action = { kind: 'device', id: d.id, command: 'on', device_kind: d.kind || 'light' };
@@ -5230,6 +5365,10 @@ function homeAutoThenPhrase(action, names) {
     }
     const name = names[action.id] || 'Device';
     if (action.command === 'off') return `${name} off`;
+    if (action.command === 'start') return `${name} start`;
+    if (action.command === 'dock') return `${name} dock`;
+    if (action.command === 'pause') return `${name} pause`;
+    if (action.command === 'mop') return `${name} mop`;
     if (action.command === 'pulse') {
         const n = Math.max(1, Math.min(10, Number(action.pulse_count || 3) || 3));
         return `${name} pulse ×${n}`;

@@ -3054,11 +3054,25 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     background: var(--surface);
 }
 
+.home-device--vacuum {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+}
+
 .home-card--manage .home-device:not(.home-device--hidden) {
     grid-template-columns: auto minmax(0, 1fr) minmax(6.5rem, auto) minmax(6.5rem, auto) auto;
     grid-template-areas:
         "handle label label label manage"
         "handle room group actions manage";
+}
+
+.home-card--manage .home-device--vacuum:not(.home-device--hidden) {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "handle label manage"
+        "handle room manage"
+        "handle group manage"
+        "handle actions manage";
 }
 
 .home-card--manage .home-device:not(.home-device--hidden) > .home-reorder-controls {
@@ -3222,6 +3236,53 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
 
 .home-device-actions--heater {
     gap: 0.35rem;
+}
+
+.home-device-actions--vacuum {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.home-device-actions--vacuum [data-home-vac-mode].is-active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.home-vac-status {
+    min-width: 4.5rem;
+    font-size: 0.78rem;
+    font-weight: 650;
+    color: var(--muted);
+}
+
+.home-device.is-on .home-vac-status {
+    color: var(--text);
+}
+
+.home-vac-rooms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    width: 100%;
+}
+
+.home-vac-room {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.home-vac-room.is-on {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
 }
 
 .home-heater-room {

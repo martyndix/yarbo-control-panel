@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.79] - 2026-10-10
+
+### Added
+- Matter robot vacuums (K11+ / RVC) show **Vacuum** / **Mop**, named rooms from Apple Home (Service Area), and **Start** / **Pause** / **Dock**. The old On button no longer sends a light On/Off that the robot does not support.
+
 ## [4.0.78] - 2026-10-10
 
 ### Changed
