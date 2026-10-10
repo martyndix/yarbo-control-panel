@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 34
+AGENT_VERSION = 35
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3853,10 +3853,17 @@ def vacuum_change_mode(
     verify: bool = False,
 ) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not set vacuum mode"}
-    # CHIP ChangeToMode.newMode defaults to 0 (Idle). A wrong JSON key still
-    # "succeeds" and parks the robot. Verify CurrentMode when we can.
+    # CHIP ChangeToMode.newMode defaults to 0 (Idle). Send every alias in one
+    # payload so a wrong key cannot silently start Idle.
     key = "vacuum_run_mode" if cluster == RVC_RUN else "vacuum_clean_mode"
-    for payload in ({"newMode": mode}, {"NewMode": mode}, {"new_mode": mode}):
+    mode_n = int(mode)
+    payloads: list[dict[str, Any]] = [
+        {"newMode": mode_n, "NewMode": mode_n, "new_mode": mode_n, "0": mode_n},
+        {"newMode": mode_n},
+        {"NewMode": mode_n},
+        {"0": mode_n},
+    ]
+    for payload in payloads:
         last = vacuum_rpc_command(node_id, endpoint, cluster, "ChangeToMode", payload)
         if is_transport_error(last):
             return last
@@ -3896,7 +3903,14 @@ def vacuum_change_mode(
 
 def vacuum_select_areas(node_id: int, endpoint: int, areas: list[int]) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not select rooms"}
-    for payload in ({"newAreas": areas}, {"NewAreas": areas}, {"new_areas": areas}):
+    ids = [int(item) for item in areas]
+    payloads: list[dict[str, Any]] = [
+        {"newAreas": ids, "NewAreas": ids, "new_areas": ids, "0": ids},
+        {"newAreas": ids},
+        {"NewAreas": ids},
+        {"0": ids},
+    ]
+    for payload in payloads:
         last = vacuum_rpc_command(node_id, endpoint, SERVICE_AREA, "SelectAreas", payload)
         if last.get("ok") or is_transport_error(last) or is_unsupported_cluster(last):
             return last
@@ -4178,22 +4192,18 @@ def set_vacuum_command(
     if dropped is not None:
         return dropped
 
-    # Home Assistant: SelectAreas then ChangeToMode Cleaning. SwitchBot Cleaning is
-    # InvalidInMode without a room selection; Mapping does not need one (and rebuilds the map).
-    # Empty NewAreas = unconstrained full clean.
-    if not all_rooms and requested_ids and all_ids:
-        selected = vacuum_select_areas(node_id, area_endpoint, requested_ids)
-        if not selected.get("ok") and not is_unsupported_cluster(selected) and not is_transport_error(selected):
-            return selected
-    elif all_rooms and (all_ids or areas):
-        selected = vacuum_select_areas(node_id, area_endpoint, [])
+    # SwitchBot treats SelectAreas [] as "no rooms" (Cleaning stays Idle). Send the
+    # chosen room IDs, or every room for All rooms. Mapping does not need this.
+    select_ids = requested_ids if not all_rooms and requested_ids else (all_ids if all_rooms else None)
+    if select_ids:
+        selected = vacuum_select_areas(node_id, area_endpoint, select_ids)
         if (
-            not selected.get("ok")
-            and all_ids
+            not all_rooms
+            and not selected.get("ok")
             and not is_unsupported_cluster(selected)
             and not is_transport_error(selected)
         ):
-            vacuum_select_areas(node_id, area_endpoint, all_ids)
+            return selected
 
     if want_clean == "mop":
         option = pick_mode(clean_modes, (CLEAN_MOP,), ("mop",))
@@ -4232,11 +4242,11 @@ def set_vacuum_command(
         return started
     settle_start()
     sync_row()
-    if stuck_on_dock() and all_ids:
+    if (stuck_on_dock() or at_charger()) and all_ids:
         dropped_again = drop_to_idle()
         if dropped_again is not None:
             return dropped_again
-        vacuum_select_areas(node_id, area_endpoint, all_ids)
+        vacuum_select_areas(node_id, area_endpoint, select_ids or all_ids)
         started = go_cleaning()
         if is_transport_error(started):
             return started

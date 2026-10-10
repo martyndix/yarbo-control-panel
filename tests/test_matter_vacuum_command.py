@@ -126,7 +126,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 34, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 35, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -297,7 +297,8 @@ def main() -> int:
     area_cmds = [c for c in live_cmds if c.get("cluster_id") == agent.SERVICE_AREA]
     assert area_cmds, live_cmds
     area_payload = area_cmds[0].get("payload") or {}
-    assert area_payload.get("newAreas") == [] or area_payload.get("NewAreas") == [] or area_payload.get("new_areas") == [], area_cmds[0]
+    picked = area_payload.get("newAreas", area_payload.get("NewAreas", area_payload.get("new_areas")))
+    assert picked == [1, 2, 3], area_cmds[0]
     run_idx = next(i for i, c in enumerate(live_cmds) if c.get("cluster_id") == agent.RVC_RUN)
     assert live_cmds.index(area_cmds[0]) < run_idx, live_cmds
     assert not any(c.get("command_name") == "Start" for c in live_cmds), live_cmds
