@@ -37,7 +37,8 @@ def vacuum_node() -> dict:
                 {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
             ],
             "1/85/1": 0,
-            "1/97/0": 0,
+            "1/97/0": ["Cleaning"],
+            "1/97/4": 0,
             "1/336/0": [
                 {
                     "areaID": 1,
@@ -57,8 +58,66 @@ def vacuum_node() -> dict:
     }
 
 
+def s10_node() -> dict:
+    return {
+        "node_id": 50,
+        "available": True,
+        "attributes": {
+            "0/40/1": "SwitchBot",
+            "0/40/3": "S10",
+            "1/29/0": [{"deviceType": 0x0074, "revision": 1}],
+            "1/84/0": [
+                {"label": "Idle", "mode": 0, "modeTags": [{"value": 0x4000}]},
+                {"label": "Cleaning", "mode": 2, "modeTags": [{"value": 0x4001}]},
+            ],
+            "1/84/1": 2,
+            "1/85/0": [
+                {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4000}]},
+                {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
+            ],
+            "1/85/1": 0,
+            "1/97/0": ["Cleaning"],
+            "1/97/4": 0x42,
+            "1/336/0": [
+                {"areaID": 1, "areaInfo": {"locationInfo": {"locationName": "Kitchen"}}},
+            ],
+            "2/29/0": [{"deviceType": 0x0015, "revision": 1}],
+            "3/29/0": [{"deviceType": 0x0015, "revision": 1}],
+        },
+    }
+
+
+def apply_change_to_mode(agent, attrs: dict, args: dict, *, leave_docked: bool = False) -> None:
+    if (args or {}).get("command_name") != "ChangeToMode":
+        return
+    payload = (args or {}).get("payload") or {}
+    mode = payload.get("newMode")
+    if mode is None:
+        mode = payload.get("NewMode")
+    if mode is None:
+        return
+    cluster = (args or {}).get("cluster_id")
+    try:
+        ep = int((args or {}).get("endpoint_id") or 1)
+        mode_n = int(mode)
+    except (TypeError, ValueError):
+        return
+    if cluster == agent.RVC_RUN:
+        attrs[f"{ep}/84/1"] = mode_n
+        if leave_docked:
+            attrs[f"{ep}/97/4"] = 0x42
+        else:
+            attrs[f"{ep}/97/4"] = 0 if mode_n == 0 else 1
+    elif cluster == agent.RVC_CLEAN:
+        attrs[f"{ep}/85/1"] = mode_n
+
+
 def main() -> int:
     agent = load_agent()
+    agent.VACUUM_MODE_SETTLE_S = 0
+    agent.VACUUM_START_SETTLE_S = 0
+    assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
+    assert agent.AGENT_VERSION == 32, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -73,17 +132,30 @@ def main() -> int:
     if vac.get("vacuum_status") != "Idle":
         raise SystemExit(f"status {vac.get('vacuum_status')}")
     docked_node = vacuum_node()
-    docked_node["attributes"]["1/97/0"] = 0x42
+    docked_node["attributes"]["1/97/4"] = 0x42
     docked_node["attributes"]["1/84/1"] = 1
     docked = {d["id"]: d for d in agent.flatten_nodes({"nodes": [docked_node]})}.get("40:1") or {}
     if docked.get("vacuum_status") != "Docked" or docked.get("on") is True:
         raise SystemExit(f"docked {docked}")
+    s10 = {d["id"]: d for d in agent.flatten_nodes({"nodes": [s10_node()]})}.get("50:1") or {}
+    if s10.get("kind") != "vacuum":
+        raise SystemExit(f"s10 kind {s10}")
+    if s10.get("vacuum_status") != "Docked" or s10.get("on") is True:
+        raise SystemExit(f"s10 should be Docked while Cleaning+docked, got {s10.get('vacuum_status')}")
+    if int((s10.get("run_modes") or [{}])[-1].get("mode") or 0) != 2:
+        raise SystemExit(f"s10 cleaning mode {s10.get('run_modes')}")
 
     calls: list[tuple] = []
+    fake_attrs = dict(vacuum_node()["attributes"])
 
     def fake_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
         calls.append((command, args or {}))
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": fake_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": fake_attrs}
         if command == "device_command":
+            apply_change_to_mode(agent, fake_attrs, args or {})
             return {"ok": True}
         return {"ok": True, "result": None}
 
@@ -147,7 +219,7 @@ def main() -> int:
                 {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4000}]},
                 {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
             ]},
-            "1/97/0": 0,
+            "1/97/4": 0,
             "2/336/0": {"value": [
                 {"AreaID": 1, "LocationInfo": {"LocationName": "Kitchen"}},
                 {"area_id": 2, "location_info": {"location_name": "Hall"}},
@@ -173,6 +245,7 @@ def main() -> int:
         if command == "read_attribute":
             return {"ok": True, "result": node_attrs}
         if command == "device_command":
+            apply_change_to_mode(agent, node_attrs, args or {})
             return {"ok": True, "result": {"status": 0}}
         return {"ok": True, "result": None}
 
@@ -196,9 +269,15 @@ def main() -> int:
 
     def clean_fail_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
         calls.append((command, args or {}))
+        if command in ("get_node", "read_attribute"):
+            return {
+                "ok": True,
+                "result": node_attrs if command == "read_attribute" else {"node_id": 40, "attributes": node_attrs},
+            }
         if command == "device_command" and (args or {}).get("cluster_id") == agent.RVC_CLEAN:
             return {"ok": False, "error": "Vacuum rejected ChangeToMode (135)", "status": 0x87}
         if command == "device_command":
+            apply_change_to_mode(agent, node_attrs, args or {})
             return {"ok": True}
         return {"ok": True, "result": None}
 
@@ -222,8 +301,8 @@ def main() -> int:
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in start_cmds), start_cmds
 
     calls.clear()
-    docked_attrs = dict(node_attrs)
-    docked_attrs["1/97/0"] = 0x42
+    docked_attrs = dict(vacuum_node()["attributes"])
+    docked_attrs["1/97/4"] = 0x42
     docked_attrs["1/84/1"] = 1
 
     def still_docked_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
@@ -235,6 +314,7 @@ def main() -> int:
         if command == "device_command" and (args or {}).get("command_name") == "Start":
             return {"ok": False, "error": "Vacuum rejected Start (129)", "status": 0x81}
         if command == "device_command":
+            apply_change_to_mode(agent, docked_attrs, args or {}, leave_docked=True)
             return {"ok": True, "result": {"status": 0}}
         return {"ok": True, "result": None}
 
@@ -264,6 +344,37 @@ def main() -> int:
     rejected = agent.vacuum_response_status({"0": 3, "1": "InvalidInMode"})
     assert rejected == 3, rejected
     assert agent.vacuum_response_status({"status": 0}) == 0
+
+    calls.clear()
+    s10_attrs = s10_node()["attributes"]
+    s10_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [s10_node()]})}.get("50:1") or {}
+
+    def s10_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 50, "attributes": s10_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": s10_attrs}
+        if command == "device_command":
+            apply_change_to_mode(agent, s10_attrs, args or {})
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = s10_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in s10_row.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    s10_start = agent.dispatch({"op": "command", "id": "50:1", "action": "start", "kind": "vacuum", "areas": "all"})
+    assert s10_start.get("ok") is True, s10_start
+    assert s10_start.get("vacuum_status") == "Cleaning", s10_start
+    s10_cmds = [args for command, args in calls if command == "device_command"]
+    run_payloads = [
+        (c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode"))
+        for c in s10_cmds
+        if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+    ]
+    assert run_payloads == [0, 2], run_payloads
+    assert all(c.get("endpoint_id") == 1 for c in s10_cmds if c.get("cluster_id") == agent.RVC_RUN), s10_cmds
+    assert not any(c.get("command_name") == "Start" for c in s10_cmds), s10_cmds
+    assert not any(c.get("cluster_id") == agent.ON_OFF for c in s10_cmds), s10_cmds
 
     print("test_matter_vacuum_command.py ok")
     return 0

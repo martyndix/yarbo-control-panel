@@ -20,7 +20,8 @@ final class YarboMatterFabric
     private const SERVICE_AREA = 0x0150;
     private const ATTR_SUPPORTED_MODES = 0;
     private const ATTR_CURRENT_MODE = 1;
-    private const ATTR_OPERATIONAL_STATE = 0;
+    /** Operational State cluster: PhaseList=0 … OperationalState=4. */
+    private const ATTR_OPERATIONAL_STATE = 4;
     private const ATTR_SUPPORTED_AREAS = 0;
     private const ATTR_SELECTED_AREAS = 2;
     private const RUN_IDLE = 0x4000;
@@ -740,6 +741,7 @@ final class YarboMatterFabric
             'can_pause' => self::endpointHasCluster($attributes, $endpoint, self::RVC_OPERATIONAL),
             'areas' => $areas,
             'selected_areas' => self::parseSelectedAreas($selectedRaw),
+            'rvc_endpoint' => $endpoint,
             'on' => $on,
         ];
     }

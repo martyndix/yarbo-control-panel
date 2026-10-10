@@ -297,7 +297,8 @@ $vacuumNode = [
             ['label' => 'Mop', 'mode' => 1, 'modeTags' => [['value' => 0x4001]]],
         ],
         '1/85/1' => 0,
-        '1/97/0' => 0,
+        '1/97/0' => ['Cleaning'],
+        '1/97/4' => 0,
         '1/336/0' => [
             ['areaID' => 1, 'mapID' => 9, 'areaInfo' => ['locationInfo' => ['locationName' => 'Kitchen']]],
             ['0' => 2, '1' => 9, '2' => ['0' => ['0' => 'Hall']]],
@@ -346,7 +347,7 @@ $wrappedVacuum = [
             ['label' => 'Idle', 'mode' => 0, 'modeTags' => [['value' => 0x4000]]],
             ['label' => 'Cleaning', 'mode' => 1, 'modeTags' => [['value' => 0x4001]]],
         ]],
-        '1/97/0' => 0,
+        '1/97/4' => 0,
         '2/336/0' => ['value' => [
             ['AreaID' => 3, 'LocationInfo' => ['LocationName' => 'Dining']],
             ['area_id' => 4, 'location_info' => ['location_name' => 'Study']],
@@ -415,7 +416,7 @@ $lightTypedVacuum = [
         '1/6/0' => false,
         '1/8/0' => 40,
         '1/84/0' => 1,
-        '1/97/0' => 1,
+        '1/97/4' => 1,
     ],
 ];
 $millHeater = [
