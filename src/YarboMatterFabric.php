@@ -729,7 +729,7 @@ final class YarboMatterFabric
         $canMop = self::modeHasTagOrWord($cleanModes, [self::CLEAN_MOP, self::CLEAN_VACUUM_THEN_MOP], 'mop');
         $canVacuumMop = self::modeHasTagOrWord($cleanModes, [self::CLEAN_VACUUM_THEN_MOP], 'vacuum and mop')
             || self::modeHasTagOrWord($cleanModes, [self::CLEAN_VACUUM_THEN_MOP], 'vac & mop');
-        $on = in_array($status, ['Cleaning', 'Paused', 'Mapping'], true);
+        $on = in_array($status, ['Cleaning', 'Paused'], true);
 
         return [
             'vacuum_status' => $status,
@@ -766,11 +766,11 @@ final class YarboMatterFabric
         if ($op === self::OP_DOCKED) {
             return 'Docked';
         }
-        if ($op === self::OP_RUNNING || in_array(self::RUN_CLEANING, $runTags, true)) {
-            return 'Cleaning';
-        }
         if (in_array(self::RUN_MAPPING, $runTags, true)) {
             return 'Mapping';
+        }
+        if ($op === self::OP_RUNNING || in_array(self::RUN_CLEANING, $runTags, true)) {
+            return 'Cleaning';
         }
 
         return 'Idle';

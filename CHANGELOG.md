@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.85] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** sends only the RVC Run Mode with the Cleaning tag (`0x4001`). It no longer falls through to mode 1/2 or the first non-idle mode, which on SwitchBot S10 is **Mapping** and rebuilds the map. Mapping while running is shown as Mapping, not Cleaning.
+
 ## [4.0.84] - 2026-10-10
 
 ### Fixed

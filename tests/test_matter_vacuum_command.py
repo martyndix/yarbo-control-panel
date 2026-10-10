@@ -30,6 +30,7 @@ def vacuum_node() -> dict:
             "1/84/0": [
                 {"label": "Idle", "mode": 0, "modeTags": [{"value": 0x4000}]},
                 {"label": "Cleaning", "mode": 1, "modeTags": [{"value": 0x4001}]},
+                {"label": "Mapping", "mode": 2, "modeTags": [{"value": 0x4002}]},
             ],
             "1/84/1": 0,
             "1/85/0": [
@@ -68,6 +69,7 @@ def s10_node() -> dict:
             "1/29/0": [{"deviceType": 0x0074, "revision": 1}],
             "1/84/0": [
                 {"label": "Idle", "mode": 0, "modeTags": [{"value": 0x4000}]},
+                {"label": "Mapping", "mode": 1, "modeTags": [{"value": 0x4002}]},
                 {"label": "Cleaning", "mode": 2, "modeTags": [{"value": 0x4001}]},
             ],
             "1/84/1": 2,
@@ -117,7 +119,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 32, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 33, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -144,6 +146,22 @@ def main() -> int:
         raise SystemExit(f"s10 should be Docked while Cleaning+docked, got {s10.get('vacuum_status')}")
     if int((s10.get("run_modes") or [{}])[-1].get("mode") or 0) != 2:
         raise SystemExit(f"s10 cleaning mode {s10.get('run_modes')}")
+    mapping_node = s10_node()
+    mapping_node["attributes"]["1/84/1"] = 1
+    mapping_node["attributes"]["1/97/4"] = 1
+    mapped = {d["id"]: d for d in agent.flatten_nodes({"nodes": [mapping_node]})}.get("50:1") or {}
+    if mapped.get("vacuum_status") != "Mapping" or mapped.get("on") is True:
+        raise SystemExit(f"mapping {mapped}")
+    picked = agent.pick_cleaning_run_mode(s10.get("run_modes") or [])
+    if not picked or int(picked["mode"]) != 2:
+        raise SystemExit(f"pick cleaning {picked}")
+    untagged = [
+        {"mode": 0, "label": "Idle", "tags": []},
+        {"mode": 1, "label": "Mapping", "tags": []},
+        {"mode": 2, "label": "Cleaning", "tags": []},
+    ]
+    if int((agent.pick_cleaning_run_mode(untagged) or {}).get("mode") or -1) != 2:
+        raise SystemExit("untagged mapping must not be picked as Cleaning")
 
     calls: list[tuple] = []
     fake_attrs = dict(vacuum_node()["attributes"])
@@ -189,6 +207,11 @@ def main() -> int:
     assert (mop_cmd.get("payload") or {}).get("newMode") == 1, mop_cmd
     run_cmd = next(c for c in cmds if c.get("cluster_id") == agent.RVC_RUN)
     assert (run_cmd.get("payload") or {}).get("newMode") == 1, run_cmd
+    assert not any(
+        ((c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode")) == 2)
+        for c in cmds
+        if c.get("cluster_id") == agent.RVC_RUN
+    ), cmds
 
     calls.clear()
     on = agent.dispatch({"op": "command", "id": "40:1", "action": "on", "kind": "vacuum"})
@@ -262,6 +285,11 @@ def main() -> int:
     ), live_cmds
     run_payload = next(c.get("payload") or {} for c in live_cmds if c.get("cluster_id") == agent.RVC_RUN)
     assert run_payload.get("newMode") == 1 or run_payload.get("NewMode") == 1, run_payload
+    assert not any(
+        ((c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode")) == 2)
+        for c in live_cmds
+        if c.get("cluster_id") == agent.RVC_RUN
+    ), live_cmds
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in live_cmds), live_cmds
 
     calls.clear()
@@ -372,9 +400,45 @@ def main() -> int:
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
     ]
     assert run_payloads == [0, 2], run_payloads
+    assert 1 not in run_payloads, run_payloads
     assert all(c.get("endpoint_id") == 1 for c in s10_cmds if c.get("cluster_id") == agent.RVC_RUN), s10_cmds
     assert not any(c.get("command_name") == "Start" for c in s10_cmds), s10_cmds
     assert not any(c.get("cluster_id") == agent.ON_OFF for c in s10_cmds), s10_cmds
+
+    calls.clear()
+    s10_fail_attrs = s10_node()["attributes"]
+    s10_fail_attrs["1/84/1"] = 0
+    s10_fail_attrs["1/97/4"] = 0x42
+
+    def s10_clean_reject(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 50, "attributes": s10_fail_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": s10_fail_attrs}
+        if command == "device_command" and (args or {}).get("cluster_id") == agent.RVC_RUN:
+            payload = (args or {}).get("payload") or {}
+            mode = payload.get("newMode", payload.get("NewMode"))
+            if mode == 2:
+                return {"ok": True, "result": {"0": 3, "1": "InvalidInMode"}}
+            apply_change_to_mode(agent, s10_fail_attrs, args or {})
+            return {"ok": True, "result": {"status": 0}}
+        if command == "device_command":
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = s10_clean_reject  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in s10_row.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    refused = agent.dispatch({"op": "command", "id": "50:1", "action": "start", "kind": "vacuum", "areas": "all"})
+    refused_cmds = [args for command, args in calls if command == "device_command"]
+    refused_modes = [
+        (c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode"))
+        for c in refused_cmds
+        if c.get("cluster_id") == agent.RVC_RUN
+    ]
+    assert 1 not in refused_modes, refused_modes
+    assert 2 in refused_modes, refused_modes
+    assert refused.get("ok") is not True or refused.get("vacuum_status") != "Mapping", refused
 
     print("test_matter_vacuum_command.py ok")
     return 0

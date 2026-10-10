@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 32
+AGENT_VERSION = 33
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2199,9 +2199,28 @@ def apply_attribute_event(data: Any) -> None:
         op = int(event_number(value) or 0)
         fields["vacuum_op"] = op
         fields["vacuum_status"] = vacuum_status_label(op, [])
-        fields["on"] = fields["vacuum_status"] in ("Cleaning", "Paused", "Mapping")
+        fields["on"] = fields["vacuum_status"] in ("Cleaning", "Paused")
     elif cluster == RVC_RUN and attr == ATTR_CURRENT_MODE:
-        fields["vacuum_run_mode"] = int(event_number(value) or 0)
+        mode_n = int(event_number(value) or 0)
+        fields["vacuum_run_mode"] = mode_n
+        live = live_row(device_id) or {}
+        option = None
+        for row in live.get("run_modes") or []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                if int(row["mode"]) == mode_n:
+                    option = row
+                    break
+            except (TypeError, ValueError, KeyError):
+                continue
+        tags = [int(t) for t in ((option or {}).get("tags") or []) if isinstance(t, (int, float))]
+        try:
+            op_n = int(live["vacuum_op"]) if live.get("vacuum_op") is not None else None
+        except (TypeError, ValueError):
+            op_n = None
+        fields["vacuum_status"] = vacuum_status_label(op_n, tags)
+        fields["on"] = fields["vacuum_status"] in ("Cleaning", "Paused")
     elif cluster == RVC_CLEAN and attr == ATTR_CURRENT_MODE:
         fields["vacuum_clean_mode"] = int(event_number(value) or 0)
     elif cluster == SERVICE_AREA and attr == ATTR_SELECTED_AREAS:
@@ -3394,6 +3413,30 @@ def pick_mode(options: list[dict[str, Any]], tags: tuple[int, ...], words: tuple
     return None
 
 
+def mode_is_mapping(option: dict[str, Any] | None) -> bool:
+    if not option:
+        return False
+    if mode_has_tag(option, RUN_MAPPING):
+        return True
+    return "map" in str(option.get("label") or "").lower()
+
+
+def pick_cleaning_run_mode(options: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Start must use the Cleaning tag. Mapping is a different mode and rebuilds the map."""
+    tagged = pick_mode(options, (RUN_CLEANING,), ())
+    if tagged and not mode_is_mapping(tagged):
+        return tagged
+    for option in options:
+        if mode_is_mapping(option) or mode_has_tag(option, RUN_IDLE):
+            continue
+        label = str(option.get("label") or "").lower()
+        if "idle" in label or "map" in label:
+            continue
+        if "clean" in label:
+            return option
+    return None
+
+
 # Matter AreaTypeTag (common-area namespace). Index is the tag value.
 AREA_TYPE_LABELS = (
     "Aisle",
@@ -3655,10 +3698,10 @@ def vacuum_status_label(op: int | None, run_tags: list[int]) -> str:
         return "Charging"
     if op == OP_DOCKED:
         return "Docked"
-    if op == OP_RUNNING or RUN_CLEANING in run_tags:
-        return "Cleaning"
     if RUN_MAPPING in run_tags:
         return "Mapping"
+    if op == OP_RUNNING or RUN_CLEANING in run_tags:
+        return "Cleaning"
     return "Idle"
 
 
@@ -3701,7 +3744,7 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         )
         is not None
     )
-    on = status in ("Cleaning", "Paused", "Mapping")
+    on = status in ("Cleaning", "Paused")
     return {
         "vacuum_status": status,
         "vacuum_clean": vacuum_clean_kind(clean_option) or ("vacuum" if can_vacuum else ""),
@@ -4035,6 +4078,14 @@ def set_vacuum_command(
             "vacuum_clean": want_clean or "vacuum",
             "selected_areas": requested_ids or all_ids,
         }
+        if status == "Mapping":
+            return {
+                "ok": False,
+                "on": False,
+                "vacuum_status": "Mapping",
+                "error": "Vacuum started mapping instead of cleaning",
+                **base,
+            }
         if running:
             return {**(rpc or {"ok": True}), "ok": True, "on": True, "vacuum_status": status, **base}
         if still_docked():
@@ -4085,35 +4136,24 @@ def set_vacuum_command(
             rpc = {**rpc, "on": False, "vacuum_status": "Returning"}
         return rpc
 
-    cleaning = pick_mode(run_modes, (RUN_CLEANING,), ("clean", "cleaning", "auto"))
+    cleaning = pick_cleaning_run_mode(run_modes)
     if cleaning is None:
-        cleaning = next(
-            (
-                option
-                for option in run_modes
-                if not mode_has_tag(option, RUN_IDLE)
-                and "idle" not in str(option.get("label") or "").lower()
-            ),
-            None,
-        )
-
-    def current_is_cleaning() -> bool:
-        current_run = row.get("vacuum_run_mode")
-        if cleaning is None or current_run is None:
-            return False
-        try:
-            return int(current_run) == int(cleaning["mode"])
-        except (TypeError, ValueError):
-            return False
+        return {"ok": False, "error": "This vacuum has no Cleaning mode"}
 
     def drop_to_idle() -> dict[str, Any] | None:
-        # SwitchBot S10/K11+ have no DirectModeChange: Cleaning→Cleaning while
-        # docked is a no-op. Idle first, then Cleaning, matches a fresh Apple Home start.
-        if not current_is_cleaning() or not still_docked():
+        # SwitchBot S10/K11+ have no DirectModeChange: same-mode while docked is a
+        # no-op. Idle first, then Cleaning only — never Mapping (that rebuilds the map).
+        if not still_docked():
             return None
         idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
         if idle is None:
             return None
+        current_run = row.get("vacuum_run_mode")
+        try:
+            if current_run is not None and int(current_run) == int(idle["mode"]):
+                return None
+        except (TypeError, ValueError):
+            pass
         idle_rpc = vacuum_change_mode(
             node_id, rvc_ep, RVC_RUN, int(idle["mode"]), device_id=device_id, row=row, verify=True
         )
@@ -4154,35 +4194,16 @@ def set_vacuum_command(
             return mop_rpc
 
     def go_cleaning() -> dict[str, Any]:
-        last: dict[str, Any] = {"ok": False, "error": "Could not start the vacuum"}
-        modes: list[int] = []
-        if cleaning is not None:
-            modes.append(int(cleaning["mode"]))
-        for option in run_modes:
-            if mode_has_tag(option, RUN_IDLE) or "idle" in str(option.get("label") or "").lower():
-                continue
-            try:
-                mode_n = int(option["mode"])
-            except (TypeError, ValueError, KeyError):
-                continue
-            if mode_n not in modes:
-                modes.append(mode_n)
-        for fallback in (1, 2):
-            if fallback not in modes:
-                modes.append(fallback)
-        for mode in modes:
-            last = vacuum_change_mode(
-                node_id,
-                rvc_ep,
-                RVC_RUN,
-                mode,
-                device_id=device_id,
-                row=row,
-                verify=True,
-            )
-            attempts.append(last)
-            if last.get("ok") or is_transport_error(last):
-                return last
+        last = vacuum_change_mode(
+            node_id,
+            rvc_ep,
+            RVC_RUN,
+            int(cleaning["mode"]),
+            device_id=device_id,
+            row=row,
+            verify=True,
+        )
+        attempts.append(last)
         return last
 
     def retry_if_docked(select: list[int] | None) -> dict[str, Any] | None:
