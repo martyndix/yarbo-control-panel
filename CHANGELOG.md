@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.97] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** waited after Mapping, so Alejandro ran a map job. Mapping is still the undock, but Cleaning is now sent repeatedly until the robot is actually Cleaning off the charger, instead of waiting then sending once. Idle is still never sent after Mapping.
+
 ## [4.0.96] - 2026-10-10
 
 ### Fixed

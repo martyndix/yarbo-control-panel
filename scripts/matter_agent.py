@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 44
+AGENT_VERSION = 45
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -4260,9 +4260,9 @@ def set_vacuum_command(
     # While Charging, SelectAreas is GenericFailure. Cleaning while Charging
     # is GenericFailure or a leftover-mode no-op. Idle while Charging is
     # SwitchBot standby then docking — never send it on Start.
-    # Mapping is the ChangeToMode that leaves the dock. Pulse it, wait until
-    # Charging/Docked clears, then Cleaning. Idle after Mapping docks the
-    # robot — never send it on Start. Never leave Mapping as success.
+    # Mapping is the ChangeToMode that leaves the dock. Waiting then Cleaning
+    # lets a map job start. Pulse Mapping, then Cleaning repeatedly until the
+    # robot is actually Cleaning off the charger. Idle after Mapping docks it.
     select_ids = requested_ids if not all_rooms and requested_ids else None
     if at_charger() or run_op() == OP_SEEKING:
         select_ids = None
@@ -4310,7 +4310,7 @@ def set_vacuum_command(
         if not mop_rpc.get("ok") and is_transport_error(mop_rpc):
             return mop_rpc
 
-    def go_cleaning() -> dict[str, Any]:
+    def nudge_cleaning(*, verify: bool) -> dict[str, Any]:
         last = vacuum_change_mode(
             node_id,
             rvc_ep,
@@ -4318,11 +4318,14 @@ def set_vacuum_command(
             int(cleaning["mode"]),
             device_id=device_id,
             row=row,
-            verify=True,
+            verify=verify,
             timed_ms=3000 if at_charger() else None,
         )
         attempts.append(last)
         return last
+
+    def go_cleaning() -> dict[str, Any]:
+        return nudge_cleaning(verify=True)
 
     def cleaning_refused(rpc: dict[str, Any]) -> bool:
         return not rpc.get("ok") and int(rpc.get("status") or 0) in (2, 3)
@@ -4330,15 +4333,11 @@ def set_vacuum_command(
     def is_mapping() -> bool:
         return str(row.get("vacuum_status") or "") == "Mapping"
 
-    def wait_off_charger() -> None:
-        deadline = time.time() + max(0.0, float(VACUUM_UNDOCK_WAIT_S))
-        while True:
-            sync_row()
-            if not at_charger():
-                return
-            if VACUUM_UNDOCK_WAIT_S <= 0 or time.time() >= deadline:
-                return
-            time.sleep(min(0.5, max(0.1, VACUUM_MODE_SETTLE_S or 0.4)))
+    def actually_cleaning() -> bool:
+        if at_charger() or is_mapping():
+            return False
+        status = str(row.get("vacuum_status") or "")
+        return status == "Cleaning" or run_op() == OP_RUNNING
 
     mapping = pick_mode(run_modes, (RUN_MAPPING,))
     started: dict[str, Any] = {
@@ -4358,11 +4357,23 @@ def set_vacuum_command(
         )
         if is_transport_error(mapped):
             return mapped
-        wait_off_charger()
+        deadline = time.time() + max(0.0, float(VACUUM_UNDOCK_WAIT_S))
+        while VACUUM_UNDOCK_WAIT_S > 0:
+            started = nudge_cleaning(verify=False)
+            if is_transport_error(started):
+                return started
+            sync_row()
+            if actually_cleaning():
+                return finish({"ok": True})
+            if time.time() >= deadline:
+                break
+            time.sleep(min(0.4, max(0.2, VACUUM_MODE_SETTLE_S or 0.25)))
         started = go_cleaning()
         if is_transport_error(started):
             return started
         sync_row()
+        if actually_cleaning():
+            return finish(started)
         if is_mapping() or cleaning_refused(started):
             started = go_cleaning()
             if is_transport_error(started):
