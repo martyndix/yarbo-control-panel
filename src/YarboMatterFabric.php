@@ -755,9 +755,6 @@ final class YarboMatterFabric
         if ($op === self::OP_PAUSED) {
             return 'Paused';
         }
-        if ($op === self::OP_RUNNING || in_array(self::RUN_CLEANING, $runTags, true)) {
-            return 'Cleaning';
-        }
         if ($op === self::OP_SEEKING) {
             return 'Returning';
         }
@@ -766,6 +763,9 @@ final class YarboMatterFabric
         }
         if ($op === self::OP_DOCKED) {
             return 'Docked';
+        }
+        if ($op === self::OP_RUNNING || in_array(self::RUN_CLEANING, $runTags, true)) {
+            return 'Cleaning';
         }
         if (in_array(self::RUN_MAPPING, $runTags, true)) {
             return 'Mapping';

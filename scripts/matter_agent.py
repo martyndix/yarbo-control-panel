@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 29
+AGENT_VERSION = 30
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3646,14 +3646,14 @@ def vacuum_status_label(op: int | None, run_tags: list[int]) -> str:
         return "Error"
     if op == OP_PAUSED:
         return "Paused"
-    if op == OP_RUNNING or RUN_CLEANING in run_tags:
-        return "Cleaning"
     if op == OP_SEEKING:
         return "Returning"
     if op == OP_CHARGING:
         return "Charging"
     if op == OP_DOCKED:
         return "Docked"
+    if op == OP_RUNNING or RUN_CLEANING in run_tags:
+        return "Cleaning"
     if RUN_MAPPING in run_tags:
         return "Mapping"
     return "Idle"
@@ -3718,10 +3718,50 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     }
 
 
-def mode_command_status(result: Any) -> int:
+def vacuum_response_status(result: Any) -> int:
+    """ChangeToMode / SelectAreas / IM status. 0 = success.
+
+    python-matter-server may return named fields or TLV numeric keys. Field 0 of
+    ChangeToModeResponse / SelectAreasResponse is the cluster status enum.
+    """
     if result is None or result is True:
         return 0
+    if isinstance(result, dict):
+        if "result" in result and not any(key in result for key in ("status", "Status", "0", 0)):
+            return vacuum_response_status(result.get("result"))
+        for key in ("status", "Status", "0", 0):
+            if key not in result:
+                continue
+            val = result[key]
+            if isinstance(val, dict):
+                inner = dict_field(val, "value", "Value", "status", "Status", "0", 0)
+                if isinstance(inner, (int, float)):
+                    return int(inner)
+                name = str(val.get("name") or val.get("Name") or "").lower().replace(" ", "")
+                if name in ("success", "ksuccess"):
+                    return 0
+                if "invalidinmode" in name:
+                    return 3
+                if "unsupported" in name:
+                    return CHIP_STATUS_UNSUPPORTED_CLUSTER
+            if isinstance(val, (int, float)):
+                return int(val)
+            if isinstance(val, str):
+                text = val.strip().lower().replace(" ", "")
+                if text in ("0", "success", "ok", "ksuccess"):
+                    return 0
+                if "invalidinmode" in text:
+                    return 3
+                try:
+                    return int(text, 0)
+                except ValueError:
+                    return CHIP_STATUS_FAILURE
+        return write_status_code(result)
     return write_status_code(result)
+
+
+def mode_command_status(result: Any) -> int:
+    return vacuum_response_status(result)
 
 
 def vacuum_rpc_command(
@@ -3747,7 +3787,7 @@ def vacuum_rpc_command(
         )
         if not rpc.get("ok"):
             return rpc
-        status = mode_command_status(rpc.get("result"))
+        status = vacuum_response_status(rpc.get("result"))
         if status:
             return {"ok": False, "error": f"Vacuum rejected {name} ({status})", "status": status}
         return {"ok": True}
@@ -3875,10 +3915,7 @@ def set_vacuum_command(
     device_id: str = "",
 ) -> dict[str, Any]:
     row = dict(live_row(device_id) or {}) if device_id else {}
-    needs_live = (not row.get("run_modes")) or (
-        not row.get("areas") and action in ("start", "mop", "vacuum", "on", "select_areas")
-    )
-    if needs_live:
+    if action in ("start", "mop", "vacuum", "on", "dock", "pause", "resume", "select_areas", "rooms"):
         live = refresh_vacuum_capabilities(node_id, endpoint, device_id)
         if live:
             row.update(live)
@@ -3897,8 +3934,8 @@ def set_vacuum_command(
     requested_areas = body.get("areas")
     all_ids = [int(item["id"]) for item in areas if isinstance(item, dict) and "id" in item]
     if requested_areas in ("all", True):
-        # Empty SelectAreas is unconstrained full clean (HA / Matter 1.3).
-        requested_ids: list[int] | None = []
+        # SwitchBot K11+ (no SelectWhileRunning, Maps on) ignores empty SelectAreas.
+        requested_ids: list[int] | None = list(all_ids)
     elif isinstance(requested_areas, list):
         requested_ids = []
         for item in requested_areas:
@@ -3906,10 +3943,58 @@ def set_vacuum_command(
                 requested_ids.append(int(item))
             except (TypeError, ValueError):
                 continue
+        if not requested_ids:
+            requested_ids = list(all_ids)
     else:
         requested_ids = None
     if requested_ids is None and action in ("start", "mop", "vacuum", "on", ""):
-        requested_ids = []
+        requested_ids = list(all_ids)
+
+    def sync_row() -> dict[str, Any]:
+        live = refresh_vacuum_capabilities(node_id, endpoint, device_id)
+        if live:
+            row.update(live)
+        return row
+
+    def run_op() -> int | None:
+        try:
+            return int(row["vacuum_op"]) if row.get("vacuum_op") is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    attempts: list[dict[str, Any]] = []
+
+    def finish(rpc: dict[str, Any] | None = None) -> dict[str, Any]:
+        status = str(row.get("vacuum_status") or "")
+        op = run_op()
+        running = status in ("Cleaning", "Paused", "Mapping") or op == OP_RUNNING
+        docked = op in (OP_DOCKED, OP_CHARGING) or status in ("Docked", "Charging")
+        accepted = any(isinstance(item, dict) and item.get("ok") for item in attempts) or bool(
+            rpc and rpc.get("ok")
+        )
+        base = {
+            "vacuum_clean": want_clean or "vacuum",
+            "selected_areas": requested_ids or all_ids,
+        }
+        if running:
+            return {**(rpc or {"ok": True}), "ok": True, "on": True, "vacuum_status": status, **base}
+        if docked:
+            return {
+                "ok": False,
+                "on": False,
+                "vacuum_status": status or "Docked",
+                "error": "Vacuum did not start",
+                **base,
+            }
+        if accepted:
+            return {**(rpc or {"ok": True}), "ok": True, "on": True, "vacuum_status": status or "Cleaning", **base}
+        return {
+            "ok": False,
+            "on": False,
+            "vacuum_status": status or "Idle",
+            "error": (rpc or {}).get("error") or "Could not start the vacuum",
+            **base,
+        }
 
     if action in ("select_areas", "rooms"):
         if requested_ids is None:
@@ -3924,7 +4009,7 @@ def set_vacuum_command(
         if rpc.get("ok"):
             rpc = {**rpc, "on": True, "vacuum_status": "Paused"}
         return rpc
-    paused = str(row.get("vacuum_status") or "") == "Paused" or row.get("vacuum_op") == OP_PAUSED
+    paused = str(row.get("vacuum_status") or "") == "Paused" or run_op() == OP_PAUSED
     if action in ("resume",) or (action in ("start", "on") and paused):
         rpc = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "Resume", {})
         if rpc.get("ok"):
@@ -3941,22 +4026,42 @@ def set_vacuum_command(
         return rpc
 
     cleaning = pick_mode(run_modes, (RUN_CLEANING,), ("clean", "cleaning", "auto"))
+    if cleaning is None:
+        cleaning = next(
+            (
+                option
+                for option in run_modes
+                if not mode_has_tag(option, RUN_IDLE)
+                and "idle" not in str(option.get("label") or "").lower()
+            ),
+            None,
+        )
     current_run = row.get("vacuum_run_mode")
-    already_cleaning = str(row.get("vacuum_status") or "") == "Cleaning"
+    already_cleaning = False
     if cleaning is not None and current_run is not None:
         try:
-            already_cleaning = already_cleaning or int(current_run) == int(cleaning["mode"])
+            already_cleaning = int(current_run) == int(cleaning["mode"])
         except (TypeError, ValueError):
-            pass
-    if already_cleaning:
+            already_cleaning = False
+    if already_cleaning and run_op() in (OP_DOCKED, OP_CHARGING, OP_STOPPED, None):
         idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
         if idle is not None:
             idle_rpc = vacuum_change_mode(node_id, endpoint, RVC_RUN, int(idle["mode"]))
             if is_transport_error(idle_rpc):
                 return idle_rpc
+            sync_row()
 
     if requested_ids is not None and all_ids:
         selected = vacuum_select_areas(node_id, area_endpoint, requested_ids)
+        if (
+            not selected.get("ok")
+            and requested_ids
+            and not is_transport_error(selected)
+            and not is_unsupported_cluster(selected)
+        ):
+            fallback = vacuum_select_areas(node_id, area_endpoint, [])
+            if fallback.get("ok"):
+                selected = fallback
         if not selected.get("ok") and not is_unsupported_cluster(selected) and not is_transport_error(selected):
             return selected
 
@@ -3968,6 +4073,7 @@ def set_vacuum_command(
             return rpc
         return None
 
+    # K11+ Clean Mode does not advertise ChangeToMode. Only set it when mopping.
     if want_clean == "mop":
         option = pick_mode(clean_modes, (CLEAN_MOP,), ("mop",))
         if option is None:
@@ -3986,59 +4092,34 @@ def set_vacuum_command(
         failed = apply_clean_mode(option)
         if failed is not None:
             return failed
-    elif want_clean in ("vacuum", "vac") and clean_modes:
-        failed = apply_clean_mode(pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac")))
-        if failed is not None:
-            return failed
 
-    cleaning = pick_mode(run_modes, (RUN_CLEANING,), ("clean", "cleaning", "auto"))
-    if cleaning is None:
-        cleaning = next(
-            (
-                option
-                for option in run_modes
-                if not mode_has_tag(option, RUN_IDLE)
-                and "idle" not in str(option.get("label") or "").lower()
-            ),
-            None,
-        )
-    attempts: list[dict[str, Any]] = []
     if cleaning is not None:
         attempts.append(vacuum_change_mode(node_id, endpoint, RVC_RUN, int(cleaning["mode"])))
-        if attempts[-1].get("ok"):
-            return {
-                **attempts[-1],
-                "on": True,
-                "vacuum_status": "Cleaning",
-                "vacuum_clean": want_clean or "vacuum",
-                "selected_areas": requested_ids or all_ids,
-            }
+        if is_transport_error(attempts[-1]):
+            return attempts[-1]
     for mode in (1, 2):
         if cleaning is not None and int(cleaning["mode"]) == mode:
             continue
+        if attempts and attempts[-1].get("ok"):
+            break
         rpc = vacuum_change_mode(node_id, endpoint, RVC_RUN, mode)
         attempts.append(rpc)
-        if rpc.get("ok"):
-            return {
-                **rpc,
-                "on": True,
-                "vacuum_status": "Cleaning",
-                "vacuum_clean": want_clean or "vacuum",
-                "selected_areas": requested_ids or all_ids,
-            }
         if is_transport_error(rpc):
             return rpc
-    started = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "Start", {})
-    if started.get("ok"):
-        return {
-            **started,
-            "on": True,
-            "vacuum_status": "Cleaning",
-            "vacuum_clean": want_clean or "vacuum",
-            "selected_areas": requested_ids or all_ids,
-        }
-    last = next((item for item in reversed(attempts) if item.get("error")), started)
-    return last if last.get("error") else {"ok": False, "error": "Could not start the vacuum"}
+    sync_row()
+    if run_op() in (OP_DOCKED, OP_CHARGING, OP_STOPPED, None) and str(row.get("vacuum_status") or "") not in (
+        "Cleaning",
+        "Paused",
+        "Mapping",
+    ):
+        started = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "Start", {})
+        attempts.append(started)
+        if is_transport_error(started):
+            return started
+        sync_row()
+    last_ok = next((item for item in reversed(attempts) if item.get("ok")), None)
+    last_err = next((item for item in reversed(attempts) if item.get("error")), None)
+    return finish(last_ok or last_err or {"ok": False, "error": "Could not start the vacuum"})
 
 
 def fallback_kind(attributes: dict[str, Any], endpoint: int) -> str:
