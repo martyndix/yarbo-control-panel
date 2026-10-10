@@ -181,17 +181,14 @@ def main() -> int:
     assert start_all.get("ok") is True, start_all
     live_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("command_name") == "Resume" for c in live_cmds), live_cmds
-    assert any(c.get("cluster_id") == agent.SERVICE_AREA for c in live_cmds), live_cmds
+    assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in live_cmds), live_cmds
+    assert not any(c.get("command_name") == "Start" for c in live_cmds), live_cmds
     assert any(
         c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
         for c in live_cmds
     ), live_cmds
-    area_payload = next(c.get("payload") or {} for c in live_cmds if c.get("cluster_id") == agent.SERVICE_AREA)
-    assert area_payload.get("newAreas") == [1, 2, 3] or area_payload.get("NewAreas") == [1, 2, 3], area_payload
-    assert any(
-        c.get("cluster_id") == agent.RVC_OPERATIONAL and c.get("command_name") == "Start"
-        for c in live_cmds
-    ), live_cmds
+    run_payload = next(c.get("payload") or {} for c in live_cmds if c.get("cluster_id") == agent.RVC_RUN)
+    assert run_payload.get("newMode") == 1 or run_payload.get("NewMode") == 1, run_payload
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in live_cmds), live_cmds
 
     calls.clear()
@@ -220,8 +217,8 @@ def main() -> int:
         c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
         for c in start_cmds
     ), start_cmds
-    all_payload = next(c.get("payload") or {} for c in start_cmds if c.get("cluster_id") == agent.SERVICE_AREA)
-    assert all_payload.get("newAreas") == [1, 2, 3] or all_payload.get("NewAreas") == [1, 2, 3], all_payload
+    assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in start_cmds), start_cmds
+    assert not any(c.get("command_name") == "Start" for c in start_cmds), start_cmds
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in start_cmds), start_cmds
 
     calls.clear()
