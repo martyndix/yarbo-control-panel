@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 42
+AGENT_VERSION = 43
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -4191,6 +4191,18 @@ def set_vacuum_command(
                 "error": f"Vacuum error ({detail})" if detail else "Vacuum reported an error",
                 **base,
             }
+        # Leftover Cleaning CurrentMode while Charging/Docked is not started.
+        # Check the charger before treating the Cleaning tag as running.
+        if op in (OP_DOCKED, OP_CHARGING) or stuck_on_dock() or status == "Charging":
+            detail = str((rpc or {}).get("error") or "").strip()
+            on_charge = op == OP_CHARGING or status == "Charging"
+            return {
+                "ok": False,
+                "on": False,
+                "vacuum_status": "Charging" if on_charge else "Docked",
+                "error": f"Vacuum did not start ({detail})" if detail else "Vacuum did not start",
+                **base,
+            }
         if running:
             return {**(rpc or {"ok": True}), "ok": True, "on": True, "vacuum_status": status, **base}
         if status == "Returning" or run_op() == OP_SEEKING:
@@ -4200,15 +4212,6 @@ def set_vacuum_command(
                 "on": False,
                 "vacuum_status": "Returning",
                 "error": f"Vacuum did not start ({detail})" if detail else "Vacuum is returning to the dock",
-                **base,
-            }
-        if stuck_on_dock() or status == "Charging" or run_op() == OP_CHARGING:
-            detail = str((rpc or {}).get("error") or "").strip()
-            return {
-                "ok": False,
-                "on": False,
-                "vacuum_status": status or "Docked",
-                "error": f"Vacuum did not start ({detail})" if detail else "Vacuum did not start",
                 **base,
             }
         return {
@@ -4252,39 +4255,12 @@ def set_vacuum_command(
     if cleaning is None:
         return {"ok": False, "error": "This vacuum has no Cleaning mode"}
 
-    def drop_to_idle() -> dict[str, Any] | None:
-        # SwitchBot S10/K11+ have no DirectModeChange: same-mode while docked is a
-        # no-op. Idle first, then Cleaning only — never Mapping (that rebuilds the map).
-        if not at_charger():
-            return None
-        idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
-        if idle is None:
-            return None
-        current_run = row.get("vacuum_run_mode")
-        try:
-            if current_run is not None and int(current_run) == int(idle["mode"]):
-                return None
-        except (TypeError, ValueError):
-            pass
-        idle_rpc = vacuum_change_mode(
-            node_id, rvc_ep, RVC_RUN, int(idle["mode"]), device_id=device_id, row=row, verify=True
-        )
-        if is_transport_error(idle_rpc):
-            return idle_rpc
-        settle_mode()
-        sync_row()
-        return None
-
-    dropped = drop_to_idle()
-    if dropped is not None:
-        return dropped
-
     # All rooms is Apple Home whole-house: ChangeToMode Cleaning only.
-    # While Charging, SelectAreas (even Bathroom) is GenericFailure on K11+.
-    # Cleaning while Charging is also GenericFailure; Mapping is the only
-    # ChangeToMode that has left a SwitchBot dock. Pulse Mapping once, then
-    # Cleaning immediately. Never leave Mapping as the result. Never Clean Mode
-    # ChangeToMode on start.
+    # While Charging, SelectAreas is GenericFailure. Cleaning while Charging
+    # is GenericFailure or a leftover-mode no-op. Idle while Charging is
+    # SwitchBot standby then docking — never send it on Start.
+    # Mapping is the ChangeToMode that leaves the dock; pulse it if still on
+    # the charger, then Cleaning immediately. Never leave Mapping as success.
     select_ids = requested_ids if not all_rooms and requested_ids else None
     if at_charger() or run_op() == OP_SEEKING:
         select_ids = None
@@ -4346,14 +4322,11 @@ def set_vacuum_command(
         attempts.append(last)
         return last
 
-    def still_idle_on_charger() -> bool:
-        current = row.get("vacuum_run_mode")
+    def current_run_n() -> int | None:
         try:
-            cleaning_n = int(cleaning["mode"])
-            current_n = int(current) if current is not None else None
+            return int(row["vacuum_run_mode"]) if row.get("vacuum_run_mode") is not None else None
         except (TypeError, ValueError):
-            cleaning_n, current_n = -1, None
-        return (stuck_on_dock() or at_charger()) and current_n != cleaning_n
+            return None
 
     def cleaning_refused(rpc: dict[str, Any]) -> bool:
         return not rpc.get("ok") and int(rpc.get("status") or 0) in (2, 3)
@@ -4382,11 +4355,23 @@ def set_vacuum_command(
             }
         )
 
-    started = go_cleaning()
-    if is_transport_error(started):
-        return started
     mapping = pick_mode(run_modes, (RUN_MAPPING,))
-    if cleaning_refused(started) and at_charger() and mapping is not None:
+    already_cleaning_on_charger = (
+        at_charger()
+        and current_run_n() is not None
+        and current_run_n() == int(cleaning["mode"])
+    )
+    started: dict[str, Any] = {
+        "ok": False,
+        "status": 2,
+        "error": "Vacuum cannot start while charging (generic failure)",
+    }
+    if not already_cleaning_on_charger:
+        started = go_cleaning()
+        if is_transport_error(started):
+            return started
+
+    if at_charger() and mapping is not None:
         mapped = vacuum_change_mode(
             node_id,
             rvc_ep,
@@ -4413,17 +4398,6 @@ def set_vacuum_command(
     sync_row()
     if is_mapping():
         return abort_mapping(started)
-    if still_idle_on_charger():
-        dropped_again = drop_to_idle()
-        if dropped_again is not None:
-            return dropped_again
-        started = go_cleaning()
-        if is_transport_error(started):
-            return started
-        settle_start()
-        sync_row()
-        if is_mapping():
-            return abort_mapping(started)
     if (
         not started.get("ok")
         and int(started.get("status") or 0) == 2

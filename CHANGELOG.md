@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.95] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** every second time toasted **Vacuum started** while SwitchBot showed standby then docking. After a real clean, CurrentMode stays Cleaning on the charger; Start sent **Idle** (standby/dock) and treated leftover Cleaning+Charging as started. Start no longer sends Idle on the charger, pulses Mapping if still docked, and only reports started after it leaves Charging/Docked.
+
 ## [4.0.94] - 2026-10-10
 
 ### Fixed
