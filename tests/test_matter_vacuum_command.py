@@ -166,7 +166,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 50, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 51, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -257,6 +257,13 @@ def main() -> int:
         raise SystemExit(f"error {errored}")
     if "invalid" not in str(errored.get("vacuum_error") or "").lower():
         raise SystemExit(f"error text {errored.get('vacuum_error')}")
+    noerror_node = vacuum_node()
+    noerror_node["attributes"]["1/97/4"] = 3
+    noerror_node["attributes"]["1/97/5"] = {"errorStateID": 0}
+    noerror_node["attributes"]["1/84/1"] = 1
+    noerr = {d["id"]: d for d in agent.flatten_nodes({"nodes": [noerror_node]})}.get("40:1") or {}
+    if noerr.get("vacuum_status") == "Error":
+        raise SystemExit(f"NoError should not show Error, got {noerr}")
     returning_node = vacuum_node()
     returning_node["attributes"]["1/97/4"] = 0x40
     returning_node["attributes"]["1/84/1"] = 0
@@ -1112,6 +1119,31 @@ def main() -> int:
     polled = agent.live_row("40:1") or {}
     assert polled.get("vacuum_status") == "Docked", polled
     assert polled.get("vacuum_battery") == 80, polled
+
+    agent._live_devices = [{
+        "id": "40:1",
+        "node_id": 40,
+        "kind": "vacuum",
+        "vacuum_op": 1,
+        "vacuum_status": "Cleaning",
+        "vacuum_activity": "cleaning",
+        "vacuum_run_mode": 1,
+        "run_modes": [
+            {"label": "Idle", "mode": 0, "tags": [0x4000]},
+            {"label": "Cleaning", "mode": 1, "tags": [0x4001]},
+        ],
+    }]
+    agent.apply_attribute_event([40, "1/97/4", 3])
+    live_op_first = agent.live_row("40:1") or {}
+    assert live_op_first.get("vacuum_status") == "Cleaning", live_op_first
+    agent.apply_attribute_event([40, "1/97/5", {"errorStateID": 0}])
+    live_noerr = agent.live_row("40:1") or {}
+    assert live_noerr.get("vacuum_status") == "Cleaning", live_noerr
+    assert live_noerr.get("on") is True, live_noerr
+    agent.apply_attribute_event([40, "1/97/5", {"errorStateID": 0x41}])
+    live_stuck = agent.live_row("40:1") or {}
+    assert live_stuck.get("vacuum_status") == "Error", live_stuck
+    assert "stuck" in str(live_stuck.get("vacuum_error") or "").lower(), live_stuck
 
     print("test_matter_vacuum_command.py ok")
     return 0

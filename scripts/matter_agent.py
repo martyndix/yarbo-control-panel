@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 50
+AGENT_VERSION = 51
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2204,6 +2204,8 @@ def apply_attribute_event(data: Any) -> None:
         fields = apply_color_attribute(device_id, attr, value)
     elif cluster == RVC_OPERATIONAL and attr == ATTR_OPERATIONAL_STATE:
         fields.update(vacuum_runtime_fields(device_id, {"vacuum_op": int(event_number(value) or 0)}))
+    elif cluster == RVC_OPERATIONAL and attr == ATTR_OPERATIONAL_ERROR:
+        fields.update(vacuum_runtime_fields(device_id, {"vacuum_error": parse_operational_error(value)}))
     elif cluster == RVC_RUN and attr == ATTR_CURRENT_MODE:
         fields.update(vacuum_runtime_fields(device_id, {"vacuum_run_mode": int(event_number(value) or 0)}))
     elif cluster == POWER_SOURCE and attr in (ATTR_BAT_PERCENT_REMAINING, ATTR_BAT_CHARGE_STATE):
@@ -3711,16 +3713,26 @@ def service_area_from_node(attributes: dict[str, Any], preferred: int) -> tuple[
     return [], [], preferred
 
 
+def vacuum_error_is_real(text: Any) -> bool:
+    s = str(text or "").strip().lower()
+    if s in ("", "0", "error 0", "error (0)", "noerror", "no error", "none"):
+        return False
+    return True
+
+
 def next_vacuum_activity(
     op: int | None,
     run_tags: list[int],
     previous: str | None,
     *,
     plugged_in: bool = False,
+    error_text: str | None = None,
 ) -> str | None:
     prev = str(previous or "").strip().lower() or None
     if op == OP_ERROR:
-        return None
+        if vacuum_error_is_real(error_text):
+            return None
+        return prev
     if op == OP_PAUSED:
         return "paused"
     if op == OP_SEEKING:
@@ -3745,9 +3757,10 @@ def vacuum_status_label(
     charge_complete: bool = False,
     activity: str | None = None,
     plugged_in: bool = False,
+    error_text: str | None = None,
 ) -> str:
     act = str(activity or "").strip().lower() or None
-    if op == OP_ERROR:
+    if op == OP_ERROR and vacuum_error_is_real(error_text):
         return "Error"
     if op == OP_PAUSED or act == "paused":
         return "Paused"
@@ -3785,11 +3798,13 @@ def vacuum_runtime_fields(device_id: str, updates: dict[str, Any]) -> dict[str, 
     except (TypeError, ValueError):
         charge_state = None
     plugged_in = charge_state in (BAT_CHARGE_IS_CHARGING, BAT_CHARGE_IS_AT_FULL_CHARGE)
+    error_text = live.get("vacuum_error")
     activity = next_vacuum_activity(
         op,
         tags,
         live.get("vacuum_activity"),
         plugged_in=plugged_in,
+        error_text=error_text,
     )
     status = vacuum_status_label(
         op,
@@ -3797,6 +3812,7 @@ def vacuum_runtime_fields(device_id: str, updates: dict[str, Any]) -> dict[str, 
         charge_complete=bool(live.get("vacuum_charge_complete")),
         activity=activity,
         plugged_in=plugged_in,
+        error_text=error_text,
     )
     fields = dict(updates)
     fields["vacuum_activity"] = activity
@@ -3896,7 +3912,9 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     clean_option = next((row for row in clean_modes if row["mode"] == int(clean_current or -1)), None)
     run_tags = [int(t) for t in (run_option.get("tags") if run_option else []) if isinstance(t, (int, float))]
     bat_percent, bat_state, charge_complete = battery_from_node(attributes, endpoint)
-    status = vacuum_status_label(op, run_tags, charge_complete=charge_complete)
+    status = vacuum_status_label(
+        op, run_tags, charge_complete=charge_complete, error_text=error_text
+    )
     areas, selected, area_endpoint = service_area_from_node(attributes, endpoint)
     can_vacuum = pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac")) is not None or clean_modes == []
     can_mop = pick_mode(clean_modes, (CLEAN_MOP, CLEAN_VACUUM_THEN_MOP), ("mop",)) is not None
@@ -4234,11 +4252,13 @@ def apply_live_vacuum_activity(device_id: str, payload: dict[str, Any]) -> dict[
     except (TypeError, ValueError):
         charge_state = None
     plugged_in = charge_state in (BAT_CHARGE_IS_CHARGING, BAT_CHARGE_IS_AT_FULL_CHARGE)
+    error_text = merged.get("vacuum_error")
     activity = next_vacuum_activity(
         op,
         tags,
         live.get("vacuum_activity"),
         plugged_in=plugged_in,
+        error_text=error_text,
     )
     payload = dict(payload)
     payload["vacuum_activity"] = activity
@@ -4248,6 +4268,7 @@ def apply_live_vacuum_activity(device_id: str, payload: dict[str, Any]) -> dict[
         charge_complete=bool(merged.get("vacuum_charge_complete")),
         activity=activity,
         plugged_in=plugged_in,
+        error_text=error_text,
     )
     payload["on"] = payload["vacuum_status"] in ("Cleaning", "Paused")
     return payload
@@ -4540,7 +4561,9 @@ def set_vacuum_command(
     if started.get("ok"):
         status = str(row.get("vacuum_status") or "")
         op = run_op()
-        if status == "Mapping" or status == "Error" or op == OP_ERROR:
+        if status == "Mapping":
+            return finish(started)
+        if vacuum_error_is_real(row.get("vacuum_error")):
             return finish(started)
         if op == OP_DOCKED:
             return finish(started)

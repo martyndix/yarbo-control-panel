@@ -21,8 +21,9 @@ final class YarboMatterFabric
     private const POWER_SOURCE = 0x002F;
     private const ATTR_SUPPORTED_MODES = 0;
     private const ATTR_CURRENT_MODE = 1;
-    /** Operational State cluster: PhaseList=0 … OperationalState=4. */
+    /** Operational State cluster: PhaseList=0 … OperationalState=4, OperationalError=5. */
     private const ATTR_OPERATIONAL_STATE = 4;
+    private const ATTR_OPERATIONAL_ERROR = 5;
     private const ATTR_SUPPORTED_AREAS = 0;
     private const ATTR_SELECTED_AREAS = 2;
     private const ATTR_BAT_PERCENT_REMAINING = 12;
@@ -714,7 +715,8 @@ final class YarboMatterFabric
             }
         }
         $battery = self::batteryFromNode($attributes, $endpoint);
-        $status = self::vacuumStatusLabel($op, $runTags, $battery['complete']);
+        $errorText = self::parseOperationalError(self::attrRaw($attributes, $endpoint, self::RVC_OPERATIONAL, self::ATTR_OPERATIONAL_ERROR));
+        $status = self::vacuumStatusLabel($op, $runTags, $battery['complete'], $errorText);
         $areas = [];
         $selectedRaw = self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SELECTED_AREAS);
         foreach (self::endpointIds($attributes) as $areaEp) {
@@ -754,12 +756,59 @@ final class YarboMatterFabric
         ];
     }
 
+    private static function vacuumErrorIsReal(mixed $text): bool
+    {
+        $s = strtolower(trim((string) ($text ?? '')));
+
+        return !in_array($s, ['', '0', 'error 0', 'error (0)', 'noerror', 'no error', 'none'], true);
+    }
+
+    private static function parseOperationalError(mixed $raw): string
+    {
+        $current = $raw;
+        if (is_array($current) && array_key_exists('value', $current)) {
+            $current = $current['value'];
+        }
+        if ($current === null || $current === 0 || $current === 0.0 || $current === '0' || $current === '') {
+            return '';
+        }
+        $code = 0;
+        if (is_int($current) || is_float($current)) {
+            $code = (int) $current;
+        } elseif (is_array($current)) {
+            $val = $current['errorStateID'] ?? $current['error_state_id'] ?? $current['ErrorStateID'] ?? $current['0'] ?? $current[0] ?? null;
+            if (is_numeric($val)) {
+                $code = (int) $val;
+            }
+            $label = trim((string) ($current['errorStateLabel'] ?? $current['error_state_label'] ?? $current['ErrorStateLabel'] ?? $current['1'] ?? $current[1] ?? ''));
+            if ($label !== '') {
+                return $label;
+            }
+        } else {
+            return trim((string) $current);
+        }
+        if ($code <= 0) {
+            return '';
+        }
+        $names = [
+            1 => 'Unable to start',
+            2 => 'Unable to complete',
+            3 => 'Command invalid in this state',
+            0x40 => 'Failed to find dock',
+            0x41 => 'Stuck',
+            0x42 => 'Dust bin missing',
+            0x43 => 'Dust bin full',
+        ];
+
+        return $names[$code] ?? ('Error ' . $code);
+    }
+
     /**
      * @param list<int> $runTags
      */
-    private static function vacuumStatusLabel(?int $op, array $runTags, bool $chargeComplete = false): string
+    private static function vacuumStatusLabel(?int $op, array $runTags, bool $chargeComplete = false, string $errorText = ''): string
     {
-        if ($op === self::OP_ERROR) {
+        if ($op === self::OP_ERROR && self::vacuumErrorIsReal($errorText)) {
             return 'Error';
         }
         if ($op === self::OP_PAUSED) {

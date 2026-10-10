@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.103] - 2026-10-10
+
+### Fixed
+- Matter vacuum Start briefly showed **Error (0)** then Cleaning. OperationalError 0 is NoError (the robot leaving the dock). The tile keeps **Cleaning** unless there is a real fault (stuck, dust bin, …). SwitchBot K11+ / S10 still do not expose battery over Matter.
+
 ## [4.0.102] - 2026-10-10
 
 ### Fixed
