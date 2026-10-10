@@ -146,7 +146,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 36, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 37, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -176,6 +176,14 @@ def main() -> int:
     leaving = {d["id"]: d for d in agent.flatten_nodes({"nodes": [charging_idle]})}.get("40:1") or {}
     if leaving.get("vacuum_status") != "Cleaning" or leaving.get("on") is not True:
         raise SystemExit(f"charging+cleaning should be Cleaning, got {leaving}")
+    error_node = vacuum_node()
+    error_node["attributes"]["1/97/4"] = 3
+    error_node["attributes"]["1/97/5"] = {"errorStateID": 3}
+    errored = {d["id"]: d for d in agent.flatten_nodes({"nodes": [error_node]})}.get("40:1") or {}
+    if errored.get("vacuum_status") != "Error" or errored.get("on") is True:
+        raise SystemExit(f"error {errored}")
+    if "invalid" not in str(errored.get("vacuum_error") or "").lower():
+        raise SystemExit(f"error text {errored.get('vacuum_error')}")
     s10 = {d["id"]: d for d in agent.flatten_nodes({"nodes": [s10_node()]})}.get("50:1") or {}
     if s10.get("kind") != "vacuum":
         raise SystemExit(f"s10 kind {s10}")
@@ -514,7 +522,8 @@ def main() -> int:
 
     calls.clear()
     # Alejandro (K11+): Charging + Bathroom. ChangeToMode Cleaning (1) is accepted
-    # but CurrentMode stays Idle 0. Resume is what starts the robot. Mapping is 2.
+    # but CurrentMode stays Idle 0. Resume while Charging is CommandInvalidInState
+    # (Error, robot does not move). Mapping is 2 — never send it.
     k11_attrs = dict(vacuum_node()["attributes"])
     k11_attrs["0/40/3"] = "K11+"
     k11_attrs["1/97/4"] = 0x41
@@ -530,8 +539,8 @@ def main() -> int:
         if command == "device_command":
             apply_select_areas(agent, k11_attrs, args)
             if args.get("command_name") == "Resume":
-                k11_attrs["1/84/1"] = 1
-                k11_attrs["1/97/4"] = 1
+                k11_attrs["1/97/4"] = 3
+                k11_attrs["1/97/5"] = {"errorStateID": 3}
                 return {"ok": True, "result": {"status": 0}}
             if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
                 return {"ok": True, "result": {"status": 0}}
@@ -539,6 +548,7 @@ def main() -> int:
                 apply_change_to_mode(agent, k11_attrs, args, keep_charging=True)
             return {"ok": True, "result": {"status": 0}}
         if command == "write_attribute":
+            k11_attrs["1/97/4"] = 3
             return {"ok": True, "result": {"status": 0}}
         return {"ok": True, "result": None}
 
@@ -551,8 +561,9 @@ def main() -> int:
         "kind": "vacuum",
         "areas": [3],
     })
-    assert bathroom.get("ok") is True, bathroom
-    assert bathroom.get("vacuum_status") == "Cleaning", bathroom
+    assert bathroom.get("ok") is False, bathroom
+    assert bathroom.get("vacuum_status") != "Cleaning", bathroom
+    assert bathroom.get("vacuum_status") != "Error", bathroom
     k11_cmds = [args for command, args in calls if command == "device_command"]
     area_payloads = [
         (c.get("payload") or {}).get("newAreas", (c.get("payload") or {}).get("NewAreas"))
@@ -567,9 +578,51 @@ def main() -> int:
     ]
     assert 1 in run_modes_sent, run_modes_sent
     assert 2 not in run_modes_sent, run_modes_sent
-    assert any(c.get("command_name") == "Resume" for c in k11_cmds), k11_cmds
+    assert not any(c.get("command_name") == "Resume" for c in k11_cmds), k11_cmds
+    assert not any(command == "write_attribute" for command, _args in calls), calls
     assert not any(c.get("cluster_id") == agent.ON_OFF for c in k11_cmds), k11_cmds
     assert not any(c.get("command_name") == "Start" for c in k11_cmds), k11_cmds
+
+    calls.clear()
+    err_attrs = dict(vacuum_node()["attributes"])
+    err_attrs["1/97/4"] = 3
+    err_attrs["1/97/5"] = {"errorStateID": 3}
+    err_attrs["1/84/1"] = 0
+
+    def k11_error_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": err_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": err_attrs}
+        if command == "device_command":
+            if args.get("command_name") == "Stop":
+                err_attrs["1/97/4"] = 0x41
+                err_attrs["1/97/5"] = 0
+                return {"ok": True, "result": {"status": 0}}
+            if args.get("command_name") == "Resume":
+                err_attrs["1/97/4"] = 3
+                return {"ok": True, "result": {"status": 0}}
+            apply_change_to_mode(agent, err_attrs, args, keep_charging=True)
+            apply_select_areas(agent, err_attrs, args)
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = k11_error_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    from_error = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "areas": [3],
+    })
+    err_cmds = [args for command, args in calls if command == "device_command"]
+    assert any(c.get("command_name") == "Stop" for c in err_cmds), err_cmds
+    assert not any(c.get("command_name") == "Resume" for c in err_cmds), err_cmds
+    assert from_error.get("vacuum_status") != "Error", from_error
+    assert from_error.get("ok") is True, from_error
 
     print("test_matter_vacuum_command.py ok")
     return 0

@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 36
+AGENT_VERSION = 37
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -61,8 +61,9 @@ RVC_OPERATIONAL = 0x0061
 SERVICE_AREA = 0x0150
 ATTR_SUPPORTED_MODES = 0
 ATTR_CURRENT_MODE = 1
-# Operational State cluster: PhaseList=0 … OperationalState=4. Attr 0 is a list.
+# Operational State cluster: PhaseList=0 … OperationalState=4, OperationalError=5.
 ATTR_OPERATIONAL_STATE = 4
+ATTR_OPERATIONAL_ERROR = 5
 ATTR_SUPPORTED_AREAS = 0
 ATTR_SUPPORTED_MAPS = 1
 ATTR_SELECTED_AREAS = 2
@@ -3734,6 +3735,7 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     clean_current = attr_num(attributes, endpoint, RVC_CLEAN, ATTR_CURRENT_MODE)
     op_raw = attr_num(attributes, endpoint, RVC_OPERATIONAL, ATTR_OPERATIONAL_STATE)
     op = int(op_raw) if op_raw is not None else None
+    error_text = parse_operational_error(attr_raw(attributes, endpoint, RVC_OPERATIONAL, ATTR_OPERATIONAL_ERROR))
     run_option = next((row for row in run_modes if row["mode"] == int(run_current or -1)), None)
     clean_option = next((row for row in clean_modes if row["mode"] == int(clean_current or -1)), None)
     run_tags = [int(t) for t in (run_option.get("tags") if run_option else []) if isinstance(t, (int, float))]
@@ -3754,6 +3756,7 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         "vacuum_status": status,
         "vacuum_clean": vacuum_clean_kind(clean_option) or ("vacuum" if can_vacuum else ""),
         "vacuum_op": op,
+        "vacuum_error": error_text,
         "vacuum_run_mode": int(run_current) if run_current is not None else None,
         "vacuum_clean_mode": int(clean_current) if clean_current is not None else None,
         "can_vacuum": can_vacuum,
@@ -3858,13 +3861,12 @@ def vacuum_change_mode(
     verify: bool = False,
 ) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not set vacuum mode"}
-    # CHIP ChangeToMode.newMode defaults to 0 (Idle). Send every alias in one
-    # payload so a wrong key cannot silently start Idle. If the device keeps
-    # Idle after that, more aliases will not help (K11+ Charging).
+    # CHIP ChangeToMode.newMode defaults to 0 (Idle). Home Assistant sends only
+    # newMode. Extra keys in one blob can confuse the stack; try aliases one at
+    # a time if the first payload does not stick.
     key = "vacuum_run_mode" if cluster == RVC_RUN else "vacuum_clean_mode"
     mode_n = int(mode)
     payloads: list[dict[str, Any]] = [
-        {"newMode": mode_n, "NewMode": mode_n, "new_mode": mode_n, "0": mode_n},
         {"newMode": mode_n},
         {"NewMode": mode_n},
         {"new_mode": mode_n},
@@ -3898,8 +3900,6 @@ def vacuum_change_mode(
             if VACUUM_MODE_SETTLE_S <= 0:
                 break
             time.sleep(VACUUM_MODE_SETTLE_S)
-        if last.get("ok") and current_mode() != mode_n and "newMode" in payload:
-            break
     if verify and row is not None:
         current = current_mode()
         if current is not None and current != mode_n:
@@ -3916,7 +3916,6 @@ def vacuum_select_areas(node_id: int, endpoint: int, areas: list[int]) -> dict[s
     last: dict[str, Any] = {"ok": False, "error": "Could not select rooms"}
     ids = [int(item) for item in areas]
     payloads: list[dict[str, Any]] = [
-        {"newAreas": ids, "NewAreas": ids, "new_areas": ids, "0": ids},
         {"newAreas": ids},
         {"NewAreas": ids},
         {"new_areas": ids},
@@ -3939,8 +3938,47 @@ def selected_area_ids(row: dict[str, Any]) -> list[int]:
     return out
 
 
-def vacuum_write_run_mode(node_id: int, endpoint: int, mode: int) -> dict[str, Any]:
-    return write_attribute(node_id, endpoint, RVC_RUN, ATTR_CURRENT_MODE, int(mode))
+def parse_operational_error(raw: Any) -> str:
+    current = unwrap_attr(raw)
+    if current in (None, 0, "0"):
+        return ""
+    if isinstance(current, (int, float)):
+        code = int(current)
+    elif isinstance(current, dict):
+        val = dict_field(
+            current,
+            "errorStateID",
+            "error_state_id",
+            "ErrorStateID",
+            "0",
+            0,
+        )
+        try:
+            code = int(val) if val is not None else 0
+        except (TypeError, ValueError):
+            code = 0
+        label = str(
+            dict_field(current, "errorStateLabel", "error_state_label", "ErrorStateLabel", "1", 1)
+            or ""
+        ).strip()
+        if label:
+            return label
+    else:
+        return str(current).strip()
+    names = {
+        1: "Unable to start",
+        2: "Unable to complete",
+        3: "Command invalid in this state",
+        0x40: "Failed to find dock",
+        0x41: "Stuck",
+        0x42: "Dust bin missing",
+        0x43: "Dust bin full",
+        0x44: "Water tank empty",
+        0x45: "Water tank missing",
+        0x46: "Water tank lid open",
+        0x47: "Mop pad missing",
+    }
+    return names.get(code, f"Error {code}") if code else ""
 
 
 def read_result_attributes(result: Any) -> dict[str, Any]:
@@ -3985,6 +4023,7 @@ VACUUM_READ_ATTRS = (
     (RVC_CLEAN, ATTR_SUPPORTED_MODES),
     (RVC_CLEAN, ATTR_CURRENT_MODE),
     (RVC_OPERATIONAL, ATTR_OPERATIONAL_STATE),
+    (RVC_OPERATIONAL, ATTR_OPERATIONAL_ERROR),
     (SERVICE_AREA, ATTR_SUPPORTED_AREAS),
     (SERVICE_AREA, ATTR_SUPPORTED_MAPS),
     (SERVICE_AREA, ATTR_SELECTED_AREAS),
@@ -4121,10 +4160,7 @@ def set_vacuum_command(
     def finish(rpc: dict[str, Any] | None = None) -> dict[str, Any]:
         status = str(row.get("vacuum_status") or "")
         op = run_op()
-        running = status in ("Cleaning", "Paused", "Mapping") or op == OP_RUNNING
-        accepted = any(isinstance(item, dict) and item.get("ok") for item in attempts) or bool(
-            rpc and rpc.get("ok")
-        )
+        running = status in ("Cleaning", "Paused") or op == OP_RUNNING
         base = {
             "vacuum_clean": want_clean or "vacuum",
             "selected_areas": requested_ids or all_ids,
@@ -4135,6 +4171,15 @@ def set_vacuum_command(
                 "on": False,
                 "vacuum_status": "Mapping",
                 "error": "Vacuum started mapping instead of cleaning",
+                **base,
+            }
+        if status == "Error" or op == OP_ERROR:
+            detail = str(row.get("vacuum_error") or (rpc or {}).get("error") or "").strip()
+            return {
+                "ok": False,
+                "on": False,
+                "vacuum_status": "Error",
+                "error": f"Vacuum error ({detail})" if detail else "Vacuum reported an error",
                 **base,
             }
         if running:
@@ -4148,8 +4193,6 @@ def set_vacuum_command(
                 "error": f"Vacuum did not start ({detail})" if detail else "Vacuum did not start",
                 **base,
             }
-        if accepted:
-            return {**(rpc or {"ok": True}), "ok": True, "on": True, "vacuum_status": status or "Cleaning", **base}
         return {
             "ok": False,
             "on": False,
@@ -4190,6 +4233,32 @@ def set_vacuum_command(
     cleaning = pick_cleaning_run_mode(run_modes)
     if cleaning is None:
         return {"ok": False, "error": "This vacuum has no Cleaning mode"}
+
+    def in_error() -> bool:
+        return run_op() == OP_ERROR or str(row.get("vacuum_status") or "") == "Error"
+
+    def clear_error() -> dict[str, Any] | None:
+        # Resume from Charging/Idle is CommandInvalidInState / UnableToStartOrResume
+        # on RVC (Alejandro K11+ showed Error and did not move). Stop + Idle clears it.
+        if not in_error():
+            return None
+        stop = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Stop", {})
+        if is_transport_error(stop):
+            return stop
+        idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
+        if idle is not None:
+            idle_rpc = vacuum_change_mode(
+                node_id, rvc_ep, RVC_RUN, int(idle["mode"]), device_id=device_id, row=row, verify=False
+            )
+            if is_transport_error(idle_rpc):
+                return idle_rpc
+        settle_mode()
+        sync_row()
+        return None
+
+    cleared = clear_error()
+    if cleared is not None:
+        return cleared
 
     def drop_to_idle() -> dict[str, Any] | None:
         # SwitchBot S10/K11+ have no DirectModeChange: same-mode while docked is a
@@ -4289,32 +4358,11 @@ def set_vacuum_command(
             cleaning_n, current_n = -1, None
         return (stuck_on_dock() or at_charger()) and current_n != cleaning_n
 
-    def resume_from_charger() -> dict[str, Any]:
-        # Alejandro (K11+) accepts ChangeToMode Cleaning while Charging (IM
-        # success) but CurrentMode stays Idle 0. Resume is what actually leaves
-        # the dock. Never send Mapping (Martynas/S10 Mapping is mode 1).
-        rpc = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Resume", {})
-        attempts.append(rpc)
-        return rpc
-
     started = go_cleaning()
     if is_transport_error(started):
         return started
     settle_start()
     sync_row()
-    if still_idle_on_charger():
-        resumed = resume_from_charger()
-        if is_transport_error(resumed):
-            return resumed
-        settle_start()
-        sync_row()
-    if still_idle_on_charger():
-        written = vacuum_write_run_mode(node_id, rvc_ep, int(cleaning["mode"]))
-        attempts.append(written)
-        if is_transport_error(written):
-            return written
-        settle_start()
-        sync_row()
     if still_idle_on_charger() and all_ids:
         dropped_again = drop_to_idle()
         if dropped_again is not None:
@@ -4327,10 +4375,6 @@ def set_vacuum_command(
             return started
         settle_start()
         sync_row()
-        if still_idle_on_charger():
-            resume_from_charger()
-            settle_start()
-            sync_row()
     return finish(started)
 
 

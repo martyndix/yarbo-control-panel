@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.89] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** on SwitchBot **K11+** (Alejandro) sent **Resume** while Charging. That is `CommandInvalidInState` on RVC, so the tile toasted Vacuum started then showed **Error** and the robot never moved. Start no longer Resumes unless the robot is Paused. Error is cleared with Stop then Idle, and is never treated as started. Mapping is still never sent (**S10** / Martynas).
+
 ## [4.0.88] - 2026-10-10
 
 ### Fixed
