@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.96] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** mapped for about five seconds, then docked. Mapping leaves the dock, but Cleaning was sent while still Charging (GenericFailure) and Idle aborted the map, which is docking. Start now waits until Charging/Docked clears, then sends Cleaning, and never sends Idle after Mapping.
+
 ## [4.0.95] - 2026-10-10
 
 ### Fixed

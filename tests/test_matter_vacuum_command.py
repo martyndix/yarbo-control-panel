@@ -145,8 +145,9 @@ def main() -> int:
     agent = load_agent()
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
+    agent.VACUUM_UNDOCK_WAIT_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 43, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 44, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -381,7 +382,7 @@ def main() -> int:
         for c in charge_cmds
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
     ]
-    assert charge_modes == [1, 2, 1], charge_modes
+    assert charge_modes == [2, 1], charge_modes
     assert 0 not in charge_modes, charge_modes
 
     calls.clear()
@@ -597,9 +598,8 @@ def main() -> int:
     ]
     assert 1 in refused_modes, refused_modes
     assert 2 in refused_modes, refused_modes
-    assert 0 in refused_modes, refused_modes
+    assert 0 not in refused_modes, refused_modes
     assert refused.get("ok") is not True, refused
-    assert refused.get("vacuum_status") != "Mapping", refused
 
     calls.clear()
     # Charging + Bathroom must skip SelectAreas (K11+ GenericFailure) and still
@@ -644,7 +644,7 @@ def main() -> int:
         for c in bath_ok_cmds
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
     ]
-    assert bath_modes == [1, 2, 1], bath_modes
+    assert bath_modes == [2, 1], bath_modes
     assert 0 not in bath_modes, bath_modes
 
     calls.clear()
@@ -691,12 +691,13 @@ def main() -> int:
         for c in undock_cmds
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
     ]
-    assert undock_modes[:3] == [1, 2, 1], undock_modes
+    assert undock_modes[:2] == [2, 1], undock_modes
+    assert 0 not in undock_modes, undock_modes
     assert not any(c.get("command_name") == "Resume" for c in undock_cmds), undock_cmds
     assert not any(c.get("command_name") == "Stop" for c in undock_cmds), undock_cmds
 
     calls.clear()
-    # Mapping undocked but Cleaning still fails: Idle aborts remap.
+    # Mapping undocked but Cleaning still fails: retry Cleaning, never Idle.
     abort_attrs = dict(vacuum_node()["attributes"])
     abort_attrs["1/97/4"] = 0x41
     abort_attrs["1/84/1"] = 0
@@ -729,14 +730,14 @@ def main() -> int:
         "areas": "all",
     })
     assert aborted.get("ok") is False, aborted
-    assert aborted.get("vacuum_status") != "Mapping", aborted
     abort_cmds = [args for command, args in calls if command == "device_command"]
     abort_modes = [
         (c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode"))
         for c in abort_cmds
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
     ]
-    assert abort_modes == [1, 2, 1, 0], abort_modes
+    assert abort_modes == [2, 1, 1], abort_modes
+    assert 0 not in abort_modes, abort_modes
 
     calls.clear()
     # Alejandro (K11+): Charging. Cleaning and Mapping both GenericFailure.
