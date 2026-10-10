@@ -2870,12 +2870,15 @@ let homeSceneDraft = { id: '', name: '', included: {}, states: {} };
 let autoPageOpen = false;
 let autoDraft = null;
 const HOME_AUTO_POWERWALL_ID = 'powerwall';
+const HOME_AUTO_YARBO_ID = 'yarbo';
+const HOME_AUTO_LYMOW_ID = 'lymow';
 const HOME_AUTO_PW_METRICS = {
     battery: { label: 'Battery', unit: '%', step: 1, value: 50 },
     export: { label: 'Export', unit: 'W', step: 50, value: 500 },
     solar: { label: 'Solar', unit: 'W', step: 50, value: 200 },
     load: { label: 'Load', unit: 'W', step: 50, value: 1000 },
 };
+let homeAutoPlans = [];
 let autoNameLocked = false;
 let autoDrag = null;
 
@@ -4849,6 +4852,8 @@ function homeAutoNames() {
         if (s?.id) names[`scene:${s.id}`] = s.name || 'Scene';
     });
     names[HOME_AUTO_POWERWALL_ID] = 'Powerwall';
+    names[HOME_AUTO_YARBO_ID] = 'Yarbo';
+    names[HOME_AUTO_LYMOW_ID] = 'Lymow';
     return names;
 }
 
@@ -4926,6 +4931,7 @@ function homeAutoWhenEvents(d) {
 }
 
 function homeAutoThenCanOffAfter(action) {
+    if (action?.kind === 'yarbo') return false;
     const cmd = String(action?.command || (action?.kind === 'scene' ? 'run' : 'on'));
     return !['off', 'stop', 'unlock', 'lock', 'open', 'close'].includes(cmd);
 }
@@ -5136,6 +5142,10 @@ function homeAutoWhenPhrase(trigger, names) {
         const unit = homeAutoThresholdUnit(trigger.metric);
         return `${name} ${trigger.metric} ${trigger.op} ${trigger.value}${unit}`;
     }
+    if (trigger.type === 'robot') {
+        const name = names[trigger.id] || (trigger.id === HOME_AUTO_LYMOW_ID ? 'Lymow' : 'Yarbo');
+        return `${name} ${trigger.event === 'ok' ? 'OK' : 'Error'}`;
+    }
     const name = names[trigger.id] || 'Device';
     const event = trigger.event || 'turns_on';
     const labels = {
@@ -5188,6 +5198,12 @@ function homeAutoReadThenLooks() {
 }
 
 function homeAutoThenPhrase(action, names) {
+    if (action.kind === 'yarbo') {
+        if (action.command === 'start_plan') return `Start ${action.plan_name || 'plan'}`;
+        if (action.command === 'return_to_dock') return 'Dock';
+        if (action.command === 'stop') return 'Stop';
+        return 'Yarbo';
+    }
     if (action.kind === 'scene') {
         const name = names[`scene:${action.id}`] || names[action.id] || 'Scene';
         let text = action.command === 'stop' ? `${name} off` : name;
@@ -5225,6 +5241,59 @@ function homeAutoThresholdUnit(metric) {
 function homeAutoPowerwallOn() {
     if (!lastHub?.modules) return true;
     return Boolean(lastHub.modules.powerwall);
+}
+
+function homeAutoYarboOn() {
+    if (!lastHub?.modules) return true;
+    return Boolean(lastHub.modules.yarbo);
+}
+
+function homeAutoLymowOn() {
+    if (!lastHub?.modules) return true;
+    return Boolean(lastHub.modules.lymow);
+}
+
+function homeAutoRobotName(id) {
+    return id === HOME_AUTO_LYMOW_ID ? 'Lymow' : 'Yarbo';
+}
+
+function homeAutoRobotTrigger(id, event = 'error') {
+    const robot = id === HOME_AUTO_LYMOW_ID ? HOME_AUTO_LYMOW_ID : HOME_AUTO_YARBO_ID;
+    return { type: 'robot', id: robot, event: event === 'ok' ? 'ok' : 'error' };
+}
+
+function homeAutoIsRobot(row) {
+    return row?.type === 'robot' && (row.id === HOME_AUTO_YARBO_ID || row.id === HOME_AUTO_LYMOW_ID);
+}
+
+function homeAutoYarboAction(command, planId, planName) {
+    const cmd = ['start_plan', 'return_to_dock', 'stop'].includes(command) ? command : 'stop';
+    const action = { kind: 'yarbo', command: cmd };
+    if (cmd === 'start_plan') {
+        if (planId != null && planId !== '') action.plan_id = planId;
+        if (planName) action.plan_name = planName;
+    }
+    return action;
+}
+
+async function homeAutoLoadPlans() {
+    if (!homeAutoYarboOn()) return;
+    try {
+        const res = await fetch('/api/plans.php');
+        const data = await res.json();
+        homeAutoPlans = Array.isArray(data.plans) ? data.plans : [];
+        if (autoDraft && homeAutoPlans[0]) {
+            autoDraft.actions.forEach((action) => {
+                if (action?.kind === 'yarbo' && action.command === 'start_plan' && (action.plan_id == null || action.plan_id === '')) {
+                    action.plan_id = homeAutoPlans[0].id;
+                    action.plan_name = homeAutoPlans[0].name || '';
+                }
+            });
+        }
+        if (autoPageOpen && autoDraft) renderHomeAutoEditor();
+    } catch {
+        homeAutoPlans = Array.isArray(homeAutoPlans) ? homeAutoPlans : [];
+    }
 }
 
 function homeAutoPowerwallTrigger(metric, op = 'above', value) {
@@ -5497,8 +5566,10 @@ function openHomeAutomations({ updateHash = true } = {}) {
     }
     autoDraft = null;
     autoNameLocked = false;
+    if (homeAutoYarboOn()) homeAutoLoadPlans();
     loadHomeDashboard({ force: true }).then(async () => {
         await homeAutoEnsureTimezone();
+        if (homeAutoYarboOn()) await homeAutoLoadPlans();
         if (autoPageOpen) renderHomeAutomations();
     }).catch(() => {});
     renderHomeAutomations();
@@ -5639,6 +5710,10 @@ function renderHomeAutoEditor() {
     if ((autoDraft.conditions || []).length) document.getElementById('auto-if')?.setAttribute('open', '');
     const pwIf = document.querySelector('#home-automations-editor [data-auto-if="powerwall"]');
     if (pwIf) pwIf.classList.toggle('hidden', !homeAutoPowerwallOn());
+    const yarboIf = document.querySelector('#home-automations-editor [data-auto-if="yarbo"]');
+    if (yarboIf) yarboIf.classList.toggle('hidden', !homeAutoYarboOn());
+    const lymowIf = document.querySelector('#home-automations-editor [data-auto-if="lymow"]');
+    if (lymowIf) lymowIf.classList.toggle('hidden', !homeAutoLymowOn());
     homeAutoSyncHoldField();
     homeAutoSyncOffAfterFields();
     renderHomeAutoTray();
@@ -5724,7 +5799,7 @@ function homeAutoSyncOffAfterFields() {
 
 function homeAutoWhenChipsHtml() {
     const triggers = homeAutoTriggers();
-    if (!triggers.length) return '<p class="hint">Drop Time, Sunset, a door, a sensor, or Powerwall here. You can add more than one.</p>';
+    if (!triggers.length) return '<p class="hint">Drop Time, Sunset, a door, a sensor, Powerwall, or robot Error here. You can add more than one.</p>';
     const match = homeAutoWhenMatch();
     const join = match === 'all' ? 'and' : 'or';
     let html = '';
@@ -5759,6 +5834,18 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
                 <option value="sunrise" ${trigger.event === 'sunrise' ? 'selected' : ''}>Sunrise</option>
             </select>
             <input type="number" data-auto-offset value="${Number(trigger.offset_min || 0)}" step="5"> min
+            <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
+    if (homeAutoIsRobot(trigger)) {
+        const name = homeAutoRobotName(trigger.id);
+        const event = trigger.event === 'ok' ? 'ok' : 'error';
+        return `<div class="auto-chip auto-chip--robot" data-auto-when ${iAttr}>
+            ${escapeHtml(name)}
+            <select data-auto-robot-event aria-label="${escapeHtml(name)} when">
+                <option value="error" ${event === 'error' ? 'selected' : ''}>Error</option>
+                <option value="ok" ${event === 'ok' ? 'selected' : ''}>OK</option>
+            </select>
             <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
@@ -5818,6 +5905,26 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
 }
 
 function homeAutoThenChipHtml(action, index) {
+    if (action.kind === 'yarbo') {
+        const cmd = action.command || 'stop';
+        let body = 'Stop';
+        if (cmd === 'return_to_dock') body = 'Dock';
+        if (cmd === 'start_plan') {
+            const selected = action.plan_id != null ? String(action.plan_id) : '';
+            const opts = homeAutoPlans.map((plan) => {
+                const id = String(plan.id ?? '');
+                return `<option value="${escapeHtml(id)}" ${id === selected ? 'selected' : ''}>${escapeHtml(plan.name || id)}</option>`;
+            });
+            if (!opts.length) {
+                opts.push(`<option value="">No plans yet</option>`);
+            }
+            body = `Start <select data-auto-yarbo-plan aria-label="Work plan">${opts.join('')}</select>`;
+        }
+        return `<div class="auto-chip auto-chip--robot" data-auto-then="${index}">
+            ${body}
+            <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
     const isScene = action.kind === 'scene';
     const d = isScene
         ? { id: `scene:${action.id}`, kind: 'scene', name: homeAutoSceneById(action.id)?.name || 'Scene' }
@@ -5844,6 +5951,18 @@ function homeAutoThenChipHtml(action, index) {
 }
 
 function homeAutoIfChipHtml(cond, index) {
+    if (homeAutoIsRobot(cond)) {
+        const name = homeAutoRobotName(cond.id);
+        const event = cond.event === 'ok' ? 'ok' : 'error';
+        return `<div class="auto-chip auto-chip--robot" data-auto-if-i="${index}">
+            ${escapeHtml(name)}
+            <select data-auto-if-robot-event aria-label="${escapeHtml(name)} only if">
+                <option value="error" ${event === 'error' ? 'selected' : ''}>Error</option>
+                <option value="ok" ${event === 'ok' ? 'selected' : ''}>OK</option>
+            </select>
+            <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
     if (cond.type === 'time_window') {
         return `<div class="auto-chip auto-chip--clock" data-auto-if-i="${index}">
             Between <input type="time" data-auto-if-start value="${escapeHtml(cond.start || '08:00')}">
@@ -6006,6 +6125,8 @@ function homeAutoTrayGroups(devices, scenes) {
     const order = [
         ['time', 'Time'],
         ['powerwall', 'Powerwall'],
+        ['yarbo', 'Yarbo'],
+        ['lymow', 'Lymow'],
         ['lights', 'Lights'],
         ['heaters', 'Heaters'],
         ['plugs', 'Plugs'],
@@ -6033,6 +6154,21 @@ function homeAutoTrayGroups(devices, scenes) {
             buckets.powerwall.push(homeAutoTrayChip('powerwall', id, row.label, 'auto-chip--powerwall'));
         });
     }
+    if (homeAutoYarboOn()) {
+        buckets.yarbo.push(
+            homeAutoTrayChip('robot', `${HOME_AUTO_YARBO_ID}:error`, 'Error', 'auto-chip--robot'),
+            homeAutoTrayChip('robot', `${HOME_AUTO_YARBO_ID}:ok`, 'OK', 'auto-chip--robot'),
+            homeAutoTrayChip('yarbo', 'start_plan', 'Start plan', 'auto-chip--robot'),
+            homeAutoTrayChip('yarbo', 'return_to_dock', 'Dock', 'auto-chip--robot'),
+            homeAutoTrayChip('yarbo', 'stop', 'Stop', 'auto-chip--robot'),
+        );
+    }
+    if (homeAutoLymowOn()) {
+        buckets.lymow.push(
+            homeAutoTrayChip('robot', `${HOME_AUTO_LYMOW_ID}:error`, 'Error', 'auto-chip--robot'),
+            homeAutoTrayChip('robot', `${HOME_AUTO_LYMOW_ID}:ok`, 'OK', 'auto-chip--robot'),
+        );
+    }
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
     [...devices].sort(byName).forEach((d) => {
         const gid = homeAutoDeviceGroupId(d);
@@ -6057,6 +6193,16 @@ function homeAutoApplyTray(kind, id, zone) {
     if (!autoDraft) return;
     if (kind === 'time' || kind === 'sunset' || kind === 'sunrise') {
         if (zone === 'then') return;
+        if (zone === 'if') {
+            if (kind === 'time') autoDraft.conditions.push({ type: 'time_window', start: '08:00', end: '22:00' });
+            else autoDraft.conditions.push({
+                type: 'sun_window',
+                start: kind === 'sunrise' ? 'sunrise' : 'sunset',
+                end: kind === 'sunrise' ? 'sunset' : 'sunrise',
+            });
+            renderHomeAutoEditor();
+            return;
+        }
         homeAutoApplyWhen(kind === 'time'
             ? { type: 'time', at: '21:00' }
             : { type: 'sun', event: kind, offset_min: 0 });
@@ -6069,13 +6215,57 @@ function homeAutoApplyTray(kind, id, zone) {
             showToast('Powerwall goes in When or Only if', 'error');
             return;
         }
-        homeAutoApplyWhen(homeAutoPowerwallTrigger(id || 'battery'));
+        const trigger = homeAutoPowerwallTrigger(id || 'battery');
+        if (zone === 'if') autoDraft.conditions.push(trigger);
+        else homeAutoApplyWhen(trigger);
+        homeAutoFollowName();
+        renderHomeAutoEditor();
+        return;
+    }
+    if (kind === 'robot') {
+        const [robot, event] = String(id || '').split(':');
+        if (robot === HOME_AUTO_LYMOW_ID && !homeAutoLymowOn()) {
+            showToast('Turn on the Lymow module first', 'error');
+            return;
+        }
+        if (robot !== HOME_AUTO_LYMOW_ID && !homeAutoYarboOn()) {
+            showToast('Turn on the Yarbo module first', 'error');
+            return;
+        }
+        if (zone === 'then') {
+            showToast(
+                robot === HOME_AUTO_LYMOW_ID
+                    ? 'This panel does not send Lymow start, dock, or pause. Lymow Error goes in When or Only if'
+                    : 'Yarbo Error goes in When or Only if',
+                'error',
+            );
+            return;
+        }
+        const trigger = homeAutoRobotTrigger(robot, event);
+        if (zone === 'if') autoDraft.conditions.push(trigger);
+        else homeAutoApplyWhen(trigger);
+        homeAutoFollowName();
+        renderHomeAutoEditor();
+        return;
+    }
+    if (kind === 'yarbo') {
+        if (!homeAutoYarboOn()) {
+            showToast('Turn on the Yarbo module first', 'error');
+            return;
+        }
+        if (zone === 'when' || zone === 'if') {
+            showToast('Start plan, Dock, and Stop go in Then', 'error');
+            return;
+        }
+        const first = homeAutoPlans[0];
+        const action = homeAutoYarboAction(id || 'stop', first?.id, first?.name);
+        autoDraft.actions.push(action);
         homeAutoFollowName();
         renderHomeAutoEditor();
         return;
     }
     if (kind === 'scene') {
-        if (zone === 'when') {
+        if (zone === 'when' || zone === 'if') {
             showToast('Scenes go in Then', 'error');
             return;
         }
@@ -6092,6 +6282,16 @@ function homeAutoApplyTray(kind, id, zone) {
     }
     const d = homeAutoDeviceById(id);
     if (!d) return;
+    if (zone === 'if') {
+        const states = homeAutoIfStateOptions(d);
+        if (!states.length) {
+            showToast('That device cannot go in Only if', 'error');
+            return;
+        }
+        autoDraft.conditions.push({ type: 'device', id: d.id, state: states[0][0] });
+        renderHomeAutoEditor();
+        return;
+    }
     if (zone === 'when' || (zone !== 'then' && !homeAutoTriggers().length && (d.kind === 'sensor' || d.kind === 'door' || d.kind === 'hub'))) {
         homeAutoApplyWhen(homeAutoDefaultWhen(d));
         homeAutoFollowName();
@@ -6119,11 +6319,11 @@ function homeAutoApplyTray(kind, id, zone) {
 function homeAutoClickTray(kind, id) {
     if (!autoDraft) return;
     const d = kind === 'device' ? homeAutoDeviceById(id) : null;
-    if (kind === 'time' || kind === 'sunset' || kind === 'sunrise' || kind === 'powerwall' || (d && !homeAutoThenOk(d))) {
+    if (kind === 'time' || kind === 'sunset' || kind === 'sunrise' || kind === 'powerwall' || kind === 'robot' || (d && !homeAutoThenOk(d))) {
         homeAutoApplyTray(kind, id, 'when');
         return;
     }
-    if (kind === 'scene') {
+    if (kind === 'scene' || kind === 'yarbo') {
         homeAutoApplyTray(kind, id, 'then');
         return;
     }
@@ -6248,6 +6448,9 @@ async function homeAutoSave() {
             const op = chip?.querySelector('[data-auto-pw-op]')?.value || trigger.op;
             const value = Number(chip?.querySelector('[data-auto-thresh]')?.value);
             Object.assign(trigger, homeAutoPowerwallTrigger(metric, op, Number.isFinite(value) ? value : trigger.value));
+        } else if (homeAutoIsRobot(trigger)) {
+            const event = chip?.querySelector('[data-auto-robot-event]')?.value || trigger.event;
+            Object.assign(trigger, homeAutoRobotTrigger(trigger.id, event));
         } else if (trigger.type === 'threshold') {
             const value = Number(chip?.querySelector('[data-auto-thresh]')?.value);
             if (Number.isFinite(value)) trigger.value = value;
@@ -6428,6 +6631,17 @@ function bindHomeAutomations() {
                 }
                 autoDraft.conditions.push(homeAutoPowerwallTrigger('battery'));
             }
+            else if (which === 'yarbo' || which === 'lymow') {
+                if (which === 'yarbo' && !homeAutoYarboOn()) {
+                    showToast('Turn on the Yarbo module first', 'error');
+                    return;
+                }
+                if (which === 'lymow' && !homeAutoLymowOn()) {
+                    showToast('Turn on the Lymow module first', 'error');
+                    return;
+                }
+                autoDraft.conditions.push(homeAutoRobotTrigger(which, 'error'));
+            }
             else {
                 const used = new Set(homeAutoTriggers().map((t) => t.id).filter(Boolean));
                 const other = homeAutoAllDevices().find((d) => !used.has(d.id));
@@ -6521,6 +6735,24 @@ function bindHomeAutomations() {
                 homeAutoSetTriggers(list);
             }
         }
+        if (event.target.matches('[data-auto-robot-event]')) {
+            const i = homeAutoTriggerIndex(event.target);
+            const list = homeAutoTriggers();
+            if (homeAutoIsRobot(list[i])) {
+                list[i] = homeAutoRobotTrigger(list[i].id, event.target.value);
+                homeAutoSetTriggers(list);
+            }
+        }
+        if (event.target.matches('[data-auto-yarbo-plan]')) {
+            const i = homeAutoThenLookIndex(event.target);
+            const action = autoDraft.actions?.[i];
+            if (action?.kind === 'yarbo' && action.command === 'start_plan') {
+                const planId = event.target.value;
+                const plan = homeAutoPlans.find((row) => String(row.id) === String(planId));
+                action.plan_id = planId;
+                action.plan_name = plan?.name || '';
+            }
+        }
         if (event.target.matches('[data-auto-thresh]')) {
             const i = homeAutoTriggerIndex(event.target);
             const list = homeAutoTriggers();
@@ -6536,6 +6768,13 @@ function bindHomeAutomations() {
                 const op = chip?.querySelector('[data-auto-if-pw-op]')?.value || cond.op || 'above';
                 const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
                 autoDraft.conditions[i] = homeAutoPowerwallTrigger(metric, op, Number.isFinite(value) ? value : undefined);
+            }
+        }
+        if (event.target.matches('[data-auto-if-robot-event]')) {
+            const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
+            const cond = autoDraft.conditions[i];
+            if (homeAutoIsRobot(cond)) {
+                autoDraft.conditions[i] = homeAutoRobotTrigger(cond.id, event.target.value);
             }
         }
         if (event.target.matches('[data-auto-cmd]')) {
@@ -6594,12 +6833,12 @@ function bindHomeAutomations() {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
-        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-then-off], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-then-off], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan]')) {
             homeAutoFollowName();
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

@@ -693,7 +693,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div class="auto-builder">
                     <section class="auto-drop" id="auto-when" data-auto-zone="when" aria-label="When">
                         <h3 class="settings-subtitle">When</h3>
-                        <p class="hint">Drag a sensor, door, Time, Sunset, or Powerwall here. Drop more than one, then pick Any (or) or All (and). Tap a chip if you cannot drag.</p>
+                        <p class="hint">Drag a sensor, door, Time, Sunset, Powerwall, or robot Error here. Drop more than one, then pick Any (or) or All (and). Tap a chip if you cannot drag.</p>
                         <div class="auto-drop-chips" id="auto-when-chips"></div>
                         <label class="settings-field auto-hold">
                             <span class="label">Trigger delay</span>
@@ -708,7 +708,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <span class="hint">When (and Only if) must stay true this long, then Then runs. If it drops, the wait starts over.</span>
                         </label>
                     </section>
-                    <details class="auto-if" id="auto-if">
+                    <details class="auto-if auto-drop" id="auto-if" data-auto-zone="if">
                         <summary>Only if…</summary>
                         <p class="hint">Optional. All of these must be true when the When fires.</p>
                         <div id="auto-if-chips" class="auto-drop-chips"></div>
@@ -716,12 +716,14 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="window">Time window</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="sun">Sunset / sunrise</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="powerwall">Powerwall</button>
+                            <button type="button" class="btn btn-secondary btn-compact" data-auto-if="yarbo">Yarbo</button>
+                            <button type="button" class="btn btn-secondary btn-compact" data-auto-if="lymow">Lymow</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="device">Device is…</button>
                         </div>
                     </details>
                     <section class="auto-drop" id="auto-then" data-auto-zone="then" aria-label="Then">
                         <h3 class="settings-subtitle">Then</h3>
-                        <p class="hint">Drag lights, scenes, or Unlock here. Reorder by dragging. On can set brightness, colour, or temperature when the device has those.</p>
+                        <p class="hint">Drag lights, scenes, Unlock, or a Yarbo Start plan / Dock / Stop here. Reorder by dragging. On can set brightness, colour, or temperature when the device has those.</p>
                         <div class="auto-drop-chips" id="auto-then-chips"></div>
                         <label class="settings-field auto-off-after">
                             <span class="label">Turn off after</span>

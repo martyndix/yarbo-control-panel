@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.76] - 2026-10-10
+
+### Added
+- Home Automations **Yarbo** and **Lymow** chips when that module is on in Settings. When / Only if: **Error** (rising edge) and **OK**. Yarbo Then: **Start plan** (work-plan picker), **Dock**, and **Stop**. Lymow stays status-only — this panel does not send Lymow mow commands.
+
 ## [4.0.75] - 2026-10-10
 
 ### Changed

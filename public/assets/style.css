@@ -4351,7 +4351,8 @@ body.home-is-reordering {
     max-width: 10rem;
 }
 
-.auto-chip--powerwall {
+.auto-chip--powerwall,
+.auto-chip--robot {
     border-style: dotted;
 }
 

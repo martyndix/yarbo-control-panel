@@ -45,6 +45,7 @@ function home_automations_tick(YarboHomeAutomations $engine): void
         $result = $engine->tick();
         $engine->refreshUnifiIfDue(time(), 5);
         $engine->refreshPowerwallIfDue(time(), 12);
+        $engine->refreshYarboIfDue(time(), 5);
         if (($result['ok'] ?? false) && ($result['fired'] ?? []) !== []) {
             $failStreak = 0;
             fwrite(STDERR, 'home_automations: fired ' . implode(',', $result['fired'])
@@ -84,6 +85,9 @@ $watchFiles = [
     $root . '/src/YarboMatterAgentClient.php',
     $root . '/src/YarboUnifi.php',
     $root . '/src/YarboPowerwall.php',
+    $root . '/src/YarboMqttAgentClient.php',
+    $root . '/src/YarboLymow.php',
+    $root . '/src/YarboTelemetry.php',
     $root . '/src/YarboHub.php',
     $root . '/src/YarboVestaboard.php',
 ];

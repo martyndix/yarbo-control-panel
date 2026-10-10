@@ -988,6 +988,238 @@ $nodeErr = $home->friendlyMatterError('Node 12 is not (yet) available.');
 assert_true(str_contains($nodeErr, 'Garage lights'), 'node error names the light: ' . $nodeErr);
 assert_true(str_contains($nodeErr, 'Matter node 12'), 'node error keeps the node id: ' . $nodeErr);
 
+$yarboErr = YarboHomeAutomations::yarboSnapshotRow([
+    'online' => true,
+    'error_code' => 12,
+    'power_fault' => 0,
+]);
+assert_true(($yarboErr['id'] ?? '') === YarboHomeAutomations::YARBO_ID, 'yarbo snapshot id');
+assert_true(($yarboErr['kind'] ?? '') === 'robot', 'yarbo snapshot kind');
+assert_true(($yarboErr['error'] ?? false) === true, 'yarbo error from error_code');
+$yarboOk = YarboHomeAutomations::yarboSnapshotRow(['online' => true, 'error_code' => 0, 'power_fault' => 0]);
+assert_true(($yarboOk['error'] ?? true) === false, 'yarbo ok when error_code is 0');
+$yarboFault = YarboHomeAutomations::yarboSnapshotRow(['online' => true, 'error_code' => 0, 'power_fault' => 1]);
+assert_true(($yarboFault['error'] ?? false) === true, 'yarbo error from power_fault');
+$yarboOffline = YarboHomeAutomations::yarboSnapshotRow(['online' => false, 'error_code' => 12]);
+assert_true(($yarboOffline['error'] ?? true) === false, 'offline yarbo is not error');
+$lyErr = YarboHomeAutomations::lymowSnapshotRow(['work_status' => 7, 'page_name' => 'Front']);
+assert_true(($lyErr['id'] ?? '') === YarboHomeAutomations::LYMOW_ID, 'lymow snapshot id');
+assert_true(($lyErr['error'] ?? false) === true, 'lymow error from work_status 7');
+assert_true(($lyErr['name'] ?? '') === 'Front', 'lymow snapshot name');
+$lyOk = YarboHomeAutomations::lymowSnapshotRow(['work_status' => 2]);
+assert_true(($lyOk['error'] ?? true) === false, 'lymow mowing is not error');
+assert_true(
+    YarboHomeAutomations::whenPhrase(['type' => 'robot', 'id' => 'yarbo', 'event' => 'error']) === 'Yarbo Error',
+    'yarbo error phrase'
+);
+assert_true(
+    YarboHomeAutomations::whenPhrase(['type' => 'robot', 'id' => 'lymow', 'event' => 'ok']) === 'Lymow OK',
+    'lymow ok phrase'
+);
+assert_true(
+    YarboHomeAutomations::thenPhrase(['kind' => 'yarbo', 'command' => 'start_plan', 'plan_name' => 'Front lawn']) === 'Start Front lawn',
+    'start plan phrase'
+);
+assert_true(YarboHomeAutomations::thenPhrase(['kind' => 'yarbo', 'command' => 'return_to_dock']) === 'Dock', 'dock phrase');
+assert_true(YarboHomeAutomations::thenPhrase(['kind' => 'yarbo', 'command' => 'stop']) === 'Stop', 'stop phrase');
+
+$commands = [];
+@unlink($auto->statePath());
+$robotScene = $auto->save([
+    'id' => 'a-yarbo-err',
+    'name' => '',
+    'enabled' => true,
+    'trigger' => ['type' => 'robot', 'id' => 'yarbo', 'event' => 'error'],
+    'actions' => [['kind' => 'scene', 'id' => 'sc-outdoor', 'command' => 'run']],
+    'cooldown_sec' => 0,
+    'names' => ['yarbo' => 'Yarbo', 'scene:sc-outdoor' => 'Outdoor Lights'],
+]);
+assert_true(!empty($robotScene['ok']), 'save yarbo error → scene: ' . json_encode($robotScene));
+assert_true(($robotScene['automation']['name'] ?? '') === 'Yarbo Error → Outdoor Lights', 'yarbo auto-name: ' . ($robotScene['automation']['name'] ?? ''));
+$robotSnap = static function (bool $yarbo, bool $lymow = false): array {
+    return [
+        YarboHomeAutomations::yarboSnapshotRow(['error' => $yarbo]),
+        YarboHomeAutomations::lymowSnapshotRow(['error' => $lymow]),
+        ['id' => 'unifi:light:porch', 'kind' => 'light', 'on' => false],
+    ];
+};
+$tRobot = 1_830_000_000;
+$r = $auto->tick($robotSnap(false), $tRobot);
+assert_true($r['fired'] === [], 'yarbo idle must not fire');
+$r = $auto->tick($robotSnap(true), $tRobot + 1);
+assert_true($r['fired'] === ['a-yarbo-err'], 'yarbo error rising edge fires scene: ' . json_encode($r));
+assert_true(count($commands) === 1 && ($commands[0]['kind'] ?? '') === 'scene', 'yarbo error action is scene: ' . json_encode($commands));
+$r = $auto->tick($robotSnap(true), $tRobot + 2);
+assert_true($r['fired'] === [], 'staying in error must not re-fire');
+$auto->delete('a-yarbo-err');
+$commands = [];
+@unlink($auto->statePath());
+
+$lymowScene = $auto->save([
+    'id' => 'a-lymow-err',
+    'enabled' => true,
+    'trigger' => ['type' => 'robot', 'id' => 'lymow', 'event' => 'error'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($lymowScene['ok']), 'save lymow error rule');
+$auto->tick($robotSnap(false, false), $tRobot);
+$r = $auto->tick($robotSnap(false, true), $tRobot + 1);
+assert_true($r['fired'] === ['a-lymow-err'], 'lymow error rising edge fires: ' . json_encode($r));
+$auto->delete('a-lymow-err');
+$commands = [];
+@unlink($auto->statePath());
+
+$okRule = $auto->save([
+    'id' => 'a-yarbo-ok',
+    'enabled' => true,
+    'trigger' => ['type' => 'robot', 'id' => 'yarbo', 'event' => 'ok'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($okRule['ok']), 'save yarbo ok rule');
+$auto->tick($robotSnap(true), $tRobot);
+$r = $auto->tick($robotSnap(false), $tRobot + 1);
+assert_true($r['fired'] === ['a-yarbo-ok'], 'yarbo ok fires when error clears: ' . json_encode($r));
+$auto->delete('a-yarbo-ok');
+$commands = [];
+@unlink($auto->statePath());
+
+$planRule = $auto->save([
+    'id' => 'a-start-plan',
+    'enabled' => true,
+    'trigger' => ['type' => 'robot', 'id' => 'yarbo', 'event' => 'ok'],
+    'actions' => [['kind' => 'yarbo', 'command' => 'start_plan', 'plan_id' => 42, 'plan_name' => 'Front lawn']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($planRule['ok']), 'save start plan: ' . json_encode($planRule));
+assert_true(($planRule['automation']['actions'][0]['kind'] ?? '') === 'yarbo', 'start plan kind');
+assert_true(($planRule['automation']['actions'][0]['plan_id'] ?? 0) === 42, 'start plan id persisted');
+$auto->tick($robotSnap(true), $tRobot);
+$r = $auto->tick($robotSnap(false), $tRobot + 1);
+assert_true($r['fired'] === ['a-start-plan'], 'ok edge starts a plan: ' . json_encode($r));
+assert_true(
+    ($commands[0]['kind'] ?? '') === 'yarbo'
+    && ($commands[0]['command'] ?? '') === 'start_plan'
+    && ($commands[0]['plan_id'] ?? 0) === 42,
+    'start_plan payload: ' . json_encode($commands)
+);
+$auto->delete('a-start-plan');
+$commands = [];
+@unlink($auto->statePath());
+
+$dockRule = $auto->save([
+    'id' => 'a-dock',
+    'enabled' => true,
+    'trigger' => ['type' => 'robot', 'id' => 'yarbo', 'event' => 'error'],
+    'actions' => [['kind' => 'yarbo', 'command' => 'return_to_dock']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($dockRule['ok']), 'save dock');
+$auto->tick($robotSnap(false), $tRobot);
+$r = $auto->tick($robotSnap(true), $tRobot + 1);
+assert_true($r['fired'] === ['a-dock'], 'error edge docks: ' . json_encode($r));
+assert_true(($commands[0]['command'] ?? '') === 'return_to_dock', 'dock payload: ' . json_encode($commands));
+$auto->delete('a-dock');
+$commands = [];
+@unlink($auto->statePath());
+
+$stopRule = $auto->save([
+    'id' => 'a-stop',
+    'enabled' => true,
+    'trigger' => ['type' => 'robot', 'id' => 'yarbo', 'event' => 'error'],
+    'actions' => [['kind' => 'yarbo', 'command' => 'stop']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($stopRule['ok']), 'save stop');
+$auto->tick($robotSnap(false), $tRobot);
+$r = $auto->tick($robotSnap(true), $tRobot + 1);
+assert_true($r['fired'] === ['a-stop'], 'error edge stops: ' . json_encode($r));
+assert_true(($commands[0]['command'] ?? '') === 'stop', 'stop payload');
+$auto->delete('a-stop');
+
+$emptyPlan = $auto->save([
+    'id' => 'a-empty-plan',
+    'enabled' => true,
+    'trigger' => ['type' => 'robot', 'id' => 'yarbo', 'event' => 'ok'],
+    'actions' => [['kind' => 'yarbo', 'command' => 'start_plan']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($emptyPlan['ok']), 'empty start_plan still saves: ' . json_encode($emptyPlan));
+$commands = [];
+@unlink($auto->statePath());
+$auto->tick($robotSnap(true), $tRobot);
+$r = $auto->tick($robotSnap(false), $tRobot + 1);
+assert_true($r['fired'] === [], 'empty plan Then must not count as fired');
+assert_true($commands === [], 'empty plan must not call MQTT handler');
+assert_true(str_contains((string) (($r['errors'][0] ?? '')), 'Pick a work plan'), 'empty plan Then error: ' . json_encode($r));
+$auto->delete('a-empty-plan');
+
+$robotOffRoot = sys_get_temp_dir() . '/yarbo-auto-robot-off-' . bin2hex(random_bytes(3));
+mkdir($robotOffRoot . '/data', 0775, true);
+file_put_contents($robotOffRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => false, 'lymow' => false, 'home' => true],
+], JSON_UNESCAPED_SLASHES));
+$robotOff = new YarboHomeAutomations($robotOffRoot);
+assert_true($robotOff->yarboLiveRow() === null, 'yarbo module off omits snapshot row');
+assert_true($robotOff->lymowLiveRow() === null, 'lymow module off omits snapshot row');
+$offCmds = [];
+$robotOff->setCommandHandler(static function (array $action) use (&$offCmds): array {
+    $offCmds[] = $action;
+
+    return ['ok' => true];
+});
+$robotOff->save([
+    'id' => 'a-off-mod',
+    'enabled' => true,
+    'trigger' => ['type' => 'robot', 'id' => 'yarbo', 'event' => 'error'],
+    'actions' => [['kind' => 'yarbo', 'command' => 'stop']],
+    'cooldown_sec' => 0,
+]);
+$r = $robotOff->tick([YarboHomeAutomations::yarboSnapshotRow(['error' => false])], $tRobot);
+$r = $robotOff->tick([YarboHomeAutomations::yarboSnapshotRow(['error' => true])], $tRobot + 1);
+assert_true($offCmds === [], 'yarbo module off skips Then MQTT: ' . json_encode($offCmds));
+assert_true(str_contains((string) (($r['errors'][0] ?? '')), 'Yarbo module'), 'module-off Then error: ' . json_encode($r));
+
+$lyOnRoot = sys_get_temp_dir() . '/yarbo-auto-ly-on-' . bin2hex(random_bytes(3));
+mkdir($lyOnRoot . '/data', 0775, true);
+file_put_contents($lyOnRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'lymow' => true, 'home' => true],
+], JSON_UNESCAPED_SLASHES));
+$lyOn = new YarboHomeAutomations($lyOnRoot);
+$lyRow = $lyOn->lymowLiveRow();
+assert_true(is_array($lyRow) && ($lyRow['id'] ?? '') === 'lymow', 'lymow module on includes snapshot row');
+$yaRow = $lyOn->yarboLiveRow();
+assert_true(is_array($yaRow) && ($yaRow['id'] ?? '') === 'yarbo', 'yarbo module on includes snapshot row');
+
+$onlyIfErr = $auto->save([
+    'id' => 'a-if-robot',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'conditions' => [['type' => 'robot', 'id' => 'yarbo', 'event' => 'error']],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($onlyIfErr['ok']), 'save only-if yarbo error: ' . json_encode($onlyIfErr));
+$commands = [];
+@unlink($auto->statePath());
+$ifSnap = static function (bool $motion, bool $error): array {
+    return [
+        ['id' => 'unifi:sensor:s1', 'kind' => 'sensor', 'motion' => $motion, 'on' => false, 'open' => false],
+        YarboHomeAutomations::yarboSnapshotRow(['error' => $error]),
+        ['id' => 'unifi:light:porch', 'kind' => 'light', 'on' => false],
+    ];
+};
+$auto->tick($ifSnap(false, true), $tRobot);
+$r = $auto->tick($ifSnap(true, false), $tRobot + 1);
+assert_true($r['fired'] === [], 'motion must not fire unless yarbo is in error');
+$auto->tick($ifSnap(false, true), $tRobot + 2);
+$r = $auto->tick($ifSnap(true, true), $tRobot + 3);
+assert_true($r['fired'] === ['a-if-robot'], 'motion + only-if error fires: ' . json_encode($r));
+$auto->delete('a-if-robot');
+$commands = [];
+@unlink($auto->statePath());
+
 $dash = $home->dashboard();
 assert_true(isset($dash['automations']) && isset($dash['server_timezone']), 'dashboard exposes automations');
 assert_true(!is_file($root . '/data/home-automations-state.json') || true, 'dashboard may not need a state file');
@@ -1005,6 +1237,7 @@ assert_true(str_contains($panel, 'home_automations.php'), 'panel.sh must start t
 assert_true(str_contains($panel, 'home-automations.log'), 'sidecar writes a log');
 $sidecar = (string) file_get_contents(__DIR__ . '/../scripts/home_automations.php');
 assert_true(strpos($sidecar, 'tick();') < strpos($sidecar, 'refreshUnifiIfDue'), 'time tick must run before UniFi refresh');
+assert_true(str_contains($sidecar, 'refreshYarboIfDue'), 'sidecar refreshes Yarbo cache after tick');
 assert_true(str_contains($sidecar, 'acquireRunnerLock'), 'sidecar takes a pid lock');
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay');
@@ -1119,6 +1352,7 @@ assert_true(str_contains($change, '## [4.0.72]'), 'changelog 4.0.72');
 assert_true(str_contains($change, '## [4.0.73]'), 'changelog 4.0.73');
 assert_true(str_contains($change, '## [4.0.74]'), 'changelog 4.0.74');
 assert_true(str_contains($change, '## [4.0.75]'), 'changelog 4.0.75');
+assert_true(str_contains($change, '## [4.0.76]'), 'changelog 4.0.76');
 assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');
@@ -1138,6 +1372,18 @@ assert_true(str_contains($homePhp, "\$body['kind'] = \$kind"), 'Home command for
 assert_true(str_contains($js, 'queueHomeHeaterSetpoint'), 'heater setpoint debounce');
 assert_true(str_contains($js, 'Heater is still changing'), 'heater abort toast');
 assert_true(str_contains($js, 'HOME_AUTO_POWERWALL_ID'), 'powerwall automation id');
+assert_true(str_contains($js, 'HOME_AUTO_YARBO_ID'), 'yarbo automation id');
+assert_true(str_contains($js, 'HOME_AUTO_LYMOW_ID'), 'lymow automation id');
+assert_true(str_contains($js, 'homeAutoYarboOn()'), 'yarbo module gate');
+assert_true(str_contains($js, 'homeAutoLymowOn()'), 'lymow module gate');
+assert_true(str_contains($js, 'homeAutoLoadPlans'), 'loads work plans for Start plan');
+assert_true(str_contains($js, 'homeAutoYarboAction'), 'yarbo Then helper');
+assert_true(str_contains($js, 'homeAutoRobotTrigger'), 'robot When helper');
+assert_true(str_contains($js, "['yarbo', 'Yarbo']"), 'yarbo tray group');
+assert_true(str_contains($js, "['lymow', 'Lymow']"), 'lymow tray group');
+assert_true(str_contains($js, 'does not send Lymow start'), 'lymow Then toast');
+assert_true(str_contains($index, 'data-auto-if="yarbo"'), 'only-if Yarbo button');
+assert_true(str_contains($index, 'data-auto-if="lymow"'), 'only-if Lymow button');
 assert_true(str_contains($js, 'homeAutoPowerwallTrigger'), 'powerwall When helper');
 assert_true(str_contains($js, "battery: { label: 'Battery'"), 'Powerwall Battery chip capital');
 assert_true(str_contains($js, "export: { label: 'Export'"), 'Powerwall Export chip capital');

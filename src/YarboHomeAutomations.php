@@ -22,6 +22,10 @@ final class YarboHomeAutomations
     ];
     public const POWERWALL_ID = 'powerwall';
     public const POWERWALL_METRICS = ['battery', 'export', 'solar', 'load'];
+    public const YARBO_ID = 'yarbo';
+    public const LYMOW_ID = 'lymow';
+    public const ROBOT_EVENTS = ['error', 'ok'];
+    public const YARBO_COMMANDS = ['start_plan', 'return_to_dock', 'stop'];
     public const HOLD_MIN_SEC = 60;
     public const HOLD_MAX_SEC = 300;
 
@@ -678,6 +682,37 @@ final class YarboHomeAutomations
     }
 
     /**
+     * Cached Yarbo error flag. MQTT stays off the 1 Hz tick.
+     */
+    public function refreshYarboIfDue(int $now, int $everySec = 5): void
+    {
+        $hub = new YarboHub($this->projectRoot);
+        if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
+            return;
+        }
+        $state = $this->loadState();
+        $at = (int) ($state['yarbo_at'] ?? 0);
+        if ($at > 0 && ($now - $at) < $everySec) {
+            return;
+        }
+        try {
+            $result = YarboMqttAgentClient::fromEnv()->telemetry(2.0, false);
+            $raw = is_array($result['raw'] ?? null) ? $result['raw'] : [];
+            $online = !empty($result['ok']) && $raw !== [];
+            $parsed = $online ? YarboTelemetry::parse($raw) : [];
+            $this->writeYarboCache([
+                'online' => $online,
+                'error_code' => $parsed['error_code'] ?? 0,
+                'power_fault' => $parsed['power_fault'] ?? 0,
+                'name' => trim((string) ($parsed['mqtt_robot_name'] ?? $parsed['robot_name'] ?? '')) ?: 'Yarbo',
+            ]);
+        } catch (\Throwable) {
+        }
+        $state['yarbo_at'] = $now;
+        $this->writeState($state);
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     private function liveSnapshot(): array
@@ -686,6 +721,14 @@ final class YarboHomeAutomations
         $pw = $this->powerwallLiveRow();
         if ($pw !== null) {
             $rows[] = $pw;
+        }
+        $yarbo = $this->yarboLiveRow();
+        if ($yarbo !== null) {
+            $rows[] = $yarbo;
+        }
+        $lymow = $this->lymowLiveRow();
+        if ($lymow !== null) {
+            $rows[] = $lymow;
         }
 
         return $rows;
@@ -733,6 +776,143 @@ final class YarboHomeAutomations
             'solar' => $solar,
             'load' => $load,
         ];
+    }
+
+    /**
+     * Cached Yarbo error for When / Only-if. Does not call MQTT.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function yarboLiveRow(): ?array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
+            return null;
+        }
+
+        return self::yarboSnapshotRow($this->readYarboCache());
+    }
+
+    /**
+     * Cached Lymow error. dashboardPayload() only reads disk.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function lymowLiveRow(): ?array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        if (!$hub->enabled(YarboHub::MODULE_LYMOW)) {
+            return null;
+        }
+
+        return self::lymowSnapshotRow(
+            (new YarboLymow($this->projectRoot))->dashboardPayload()
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    public static function yarboSnapshotRow(array $data): array
+    {
+        $name = trim((string) ($data['name'] ?? $data['robot_name'] ?? $data['mqtt_robot_name'] ?? ''));
+        if ($name === '') {
+            $name = 'Yarbo';
+        }
+
+        return [
+            'id' => self::YARBO_ID,
+            'kind' => 'robot',
+            'name' => $name,
+            'error' => self::yarboErrorFromData($data),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    public static function lymowSnapshotRow(array $data): array
+    {
+        $name = trim((string) ($data['name'] ?? $data['page_name'] ?? $data['display_name'] ?? $data['device_name'] ?? ''));
+        if ($name === '') {
+            $name = 'Lymow';
+        }
+
+        return [
+            'id' => self::LYMOW_ID,
+            'kind' => 'robot',
+            'name' => $name,
+            'error' => self::lymowErrorFromData($data),
+        ];
+    }
+
+    /**
+     * Online and (error_code ≠ 0 or power_fault > 0) — same as Paper yarbo_error.
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function yarboErrorFromData(array $data): bool
+    {
+        if (array_key_exists('error', $data) && is_bool($data['error'])) {
+            return $data['error'];
+        }
+        $online = self::truthy($data['online'] ?? $data['yarbo_ok'] ?? false);
+        $errorCode = (int) ($data['error_code'] ?? 0);
+        $powerFault = (int) ($data['power_fault'] ?? 0);
+
+        return $online && ($errorCode !== 0 || $powerFault > 0);
+    }
+
+    /**
+     * work_status === 7 (ERROR) — same as Paper lymow_error.
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function lymowErrorFromData(array $data): bool
+    {
+        if (array_key_exists('error', $data) && is_bool($data['error'])) {
+            return $data['error'];
+        }
+        $work = isset($data['work_status']) && is_numeric($data['work_status'])
+            ? (int) $data['work_status']
+            : null;
+
+        return $work === 7;
+    }
+
+    public function yarboCachePath(): string
+    {
+        return $this->projectRoot . '/data/yarbo-auto-cache.json';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function readYarboCache(): array
+    {
+        if (!is_file($this->yarboCachePath())) {
+            return [];
+        }
+        $decoded = json_decode((string) file_get_contents($this->yarboCachePath()), true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function writeYarboCache(array $data): void
+    {
+        $dir = dirname($this->yarboCachePath());
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if ($json !== false) {
+            file_put_contents($this->yarboCachePath(), $json . "\n", LOCK_EX);
+        }
     }
 
     private static function truthy(mixed $value): bool
@@ -818,6 +998,24 @@ final class YarboHomeAutomations
     }
 
     /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private function normalizeRobot(array $row): ?array
+    {
+        $id = strtolower(trim((string) ($row['id'] ?? '')));
+        if ($id !== self::YARBO_ID && $id !== self::LYMOW_ID) {
+            return null;
+        }
+        $event = strtolower(trim((string) ($row['event'] ?? 'error')));
+        if (!in_array($event, self::ROBOT_EVENTS, true)) {
+            $event = 'error';
+        }
+
+        return ['type' => 'robot', 'id' => $id, 'event' => $event];
+    }
+
+    /**
      * @param array<string, mixed> $trigger
      * @param array<string, array<string, mixed>> $rows
      */
@@ -848,6 +1046,47 @@ final class YarboHomeAutomations
         }
 
         return $inclusive ? $curr >= $value : $curr > $value;
+    }
+
+    /**
+     * Rising edge: error becomes true, or OK when error clears.
+     *
+     * @param array<string, mixed> $trigger
+     * @param array<string, array<string, mixed>> $prev
+     * @param array<string, array<string, mixed>> $curr
+     */
+    private function robotEdgeFired(array $trigger, array $prev, array $curr): bool
+    {
+        $id = (string) ($trigger['id'] ?? '');
+        if (!isset($prev[$id]) || !isset($curr[$id])) {
+            return false;
+        }
+        $was = !empty($prev[$id]['error']);
+        $is = !empty($curr[$id]['error']);
+        if ((string) ($trigger['event'] ?? 'error') === 'ok') {
+            return $was && !$is;
+        }
+
+        return !$was && $is;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<string, array<string, mixed>> $curr
+     */
+    private function robotCurrentlyTrue(array $row, array $curr): bool
+    {
+        $id = (string) ($row['id'] ?? '');
+        $snap = $curr[$id] ?? null;
+        if ($snap === null || !array_key_exists('error', $snap) || $snap['error'] === null) {
+            return false;
+        }
+        $is = !empty($snap['error']);
+        if ((string) ($row['event'] ?? $row['state'] ?? 'error') === 'ok') {
+            return !$is;
+        }
+
+        return $is;
     }
 
     /**
@@ -1102,6 +1341,13 @@ final class YarboHomeAutomations
 
             return $name . ' ' . $metricLabel . ' ' . $op . ' ' . $value . $unit;
         }
+        if ($type === 'robot') {
+            $id = (string) ($trigger['id'] ?? '');
+            $name = $names[$id] ?? ($id === self::LYMOW_ID ? 'Lymow' : 'Yarbo');
+            $event = (string) ($trigger['event'] ?? 'error') === 'ok' ? 'OK' : 'Error';
+
+            return $name . ' ' . $event;
+        }
         $name = $names[(string) ($trigger['id'] ?? '')] ?? 'Device';
         $event = (string) ($trigger['event'] ?? 'turns_on');
         $for = (int) ($trigger['for_sec'] ?? 0);
@@ -1134,7 +1380,17 @@ final class YarboHomeAutomations
      */
     public static function thenPhrase(array $action, array $names = []): string
     {
-        if (($action['kind'] ?? '') === 'scene') {
+        if (($action['kind'] ?? '') === 'yarbo') {
+            $cmd = (string) ($action['command'] ?? '');
+            $text = match ($cmd) {
+                'start_plan' => 'Start ' . (trim((string) ($action['plan_name'] ?? '')) !== ''
+                    ? (string) $action['plan_name']
+                    : 'plan'),
+                'return_to_dock' => 'Dock',
+                'stop' => 'Stop',
+                default => 'Yarbo',
+            };
+        } elseif (($action['kind'] ?? '') === 'scene') {
             $name = $names['scene:' . ($action['id'] ?? '')] ?? $names[(string) ($action['id'] ?? '')] ?? 'Scene';
             $cmd = (string) ($action['command'] ?? 'run');
             $text = $cmd === 'stop' ? $name . ' off' : $name;
@@ -1329,6 +1585,9 @@ final class YarboHomeAutomations
         if ($type === 'threshold') {
             return $this->normalizeThreshold($trigger);
         }
+        if ($type === 'robot') {
+            return $this->normalizeRobot($trigger);
+        }
         if ($type !== 'device') {
             return null;
         }
@@ -1353,6 +1612,25 @@ final class YarboHomeAutomations
     private function normalizeAction(array $action): ?array
     {
         $kind = strtolower(trim((string) ($action['kind'] ?? 'device')));
+        if ($kind === 'yarbo') {
+            $cmd = strtolower(trim((string) ($action['command'] ?? '')));
+            if (!in_array($cmd, self::YARBO_COMMANDS, true)) {
+                return null;
+            }
+            $out = ['kind' => 'yarbo', 'command' => $cmd];
+            if ($cmd === 'start_plan') {
+                $planId = $action['plan_id'] ?? $action['planId'] ?? '';
+                if ($planId !== null && $planId !== '') {
+                    $out['plan_id'] = is_numeric($planId) ? (int) $planId : trim((string) $planId);
+                }
+                $planName = trim((string) ($action['plan_name'] ?? ''));
+                if ($planName !== '') {
+                    $out['plan_name'] = $planName;
+                }
+            }
+
+            return $out;
+        }
         if ($kind === 'scene') {
             $id = trim((string) ($action['id'] ?? ''));
             if ($id === '') {
@@ -1468,6 +1746,9 @@ final class YarboHomeAutomations
         if ($type === 'threshold') {
             return $this->normalizeThreshold($cond);
         }
+        if ($type === 'robot') {
+            return $this->normalizeRobot($cond);
+        }
         if ($type !== 'device') {
             return null;
         }
@@ -1502,6 +1783,7 @@ final class YarboHomeAutomations
                 'motion_at' => isset($row['motion_at']) && is_numeric($row['motion_at']) ? (int) $row['motion_at'] : 0,
                 'temperature' => isset($row['temperature']) && is_numeric($row['temperature']) ? (float) $row['temperature'] : null,
                 'humidity' => isset($row['humidity']) && is_numeric($row['humidity']) ? (float) $row['humidity'] : null,
+                'error' => array_key_exists('error', $row) ? (bool) $row['error'] : null,
             ];
             foreach (self::POWERWALL_METRICS as $metric) {
                 $out[$id][$metric] = isset($row[$metric]) && is_numeric($row[$metric]) ? (float) $row[$metric] : null;
@@ -1624,6 +1906,9 @@ final class YarboHomeAutomations
 
             return !$this->thresholdCompare($trigger, $prevVal);
         }
+        if ($type === 'robot') {
+            return $this->robotEdgeFired($trigger, $prev, $curr);
+        }
         $deviceId = (string) ($trigger['id'] ?? '');
         $event = (string) ($trigger['event'] ?? '');
         if (in_array($event, self::DURATION_EVENTS, true)) {
@@ -1697,6 +1982,9 @@ final class YarboHomeAutomations
             $currVal = $this->thresholdValue($trigger, $curr);
 
             return $currVal !== null && $this->thresholdCompare($trigger, $currVal);
+        }
+        if ($type === 'robot') {
+            return $this->robotCurrentlyTrue($trigger, $curr);
         }
         $deviceId = (string) ($trigger['id'] ?? '');
         $event = (string) ($trigger['event'] ?? '');
@@ -2039,6 +2327,12 @@ final class YarboHomeAutomations
                 }
                 continue;
             }
+            if ($type === 'robot') {
+                if (!$this->robotCurrentlyTrue($cond, $curr)) {
+                    return false;
+                }
+                continue;
+            }
             if ($type === 'device') {
                 $row = $curr[(string) ($cond['id'] ?? '')] ?? null;
                 if ($row === null) {
@@ -2098,6 +2392,8 @@ final class YarboHomeAutomations
         }
         if (($action['kind'] ?? '') === 'scene') {
             $label = $names['scene:' . ($action['id'] ?? '')] ?? $names[(string) ($action['id'] ?? '')] ?? '';
+        } elseif (($action['kind'] ?? '') === 'yarbo') {
+            $label = 'Yarbo';
         } else {
             $label = $names[(string) ($action['id'] ?? '')] ?? '';
         }
@@ -2204,6 +2500,9 @@ final class YarboHomeAutomations
                     continue;
                 }
                 $out[] = ['kind' => 'scene', 'id' => (string) $action['id'], 'command' => 'stop'];
+                continue;
+            }
+            if (($action['kind'] ?? '') === 'yarbo') {
                 continue;
             }
             $cmd = (string) ($action['command'] ?? 'on');
@@ -2379,6 +2678,9 @@ final class YarboHomeAutomations
      */
     private function runOneAction(YarboHome $home, array $action): array
     {
+        if (($action['kind'] ?? '') === 'yarbo') {
+            return $this->runYarboAction($action);
+        }
         if ($this->commandHandler !== null) {
             return ($this->commandHandler)($action);
         }
@@ -2399,6 +2701,40 @@ final class YarboHomeAutomations
         $payload = ['id' => (string) $action['id'], 'command' => $cmd];
 
         return $home->command($payload);
+    }
+
+    /**
+     * @param array<string, mixed> $action
+     * @return array<string, mixed>
+     */
+    private function runYarboAction(array $action): array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
+            return ['ok' => false, 'error' => 'Turn on the Yarbo module first'];
+        }
+        $cmd = (string) ($action['command'] ?? '');
+        if ($cmd === 'start_plan') {
+            $planId = $action['plan_id'] ?? '';
+            if ($planId === null || $planId === '') {
+                return ['ok' => false, 'error' => 'Pick a work plan'];
+            }
+        }
+        if ($this->commandHandler !== null) {
+            return ($this->commandHandler)($action);
+        }
+        try {
+            $agent = YarboMqttAgentClient::fromEnv();
+
+            return match ($cmd) {
+                'start_plan' => $agent->startPlan($action['plan_id'], 0),
+                'return_to_dock' => $agent->returnToDock(),
+                'stop' => $agent->stop(),
+                default => ['ok' => false, 'error' => 'Unknown Yarbo command'],
+            };
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
     }
 
     /**
@@ -2509,7 +2845,7 @@ final class YarboHomeAutomations
     private function applyActionSnapshot(array $curr, array $actions): array
     {
         foreach ($actions as $action) {
-            if (($action['kind'] ?? '') === 'scene') {
+            if (($action['kind'] ?? '') === 'scene' || ($action['kind'] ?? '') === 'yarbo') {
                 continue;
             }
             $id = (string) ($action['id'] ?? '');
@@ -2746,6 +3082,7 @@ final class YarboHomeAutomations
             'delayed' => [],
             'clock' => 0,
             'powerwall_at' => 0,
+            'yarbo_at' => 0,
             'unifi_at' => 0,
             'sensors_at' => 0,
             'doors_at' => 0,
@@ -2773,6 +3110,7 @@ final class YarboHomeAutomations
             'delayed' => is_array($decoded['delayed'] ?? null) ? $decoded['delayed'] : [],
             'clock' => (int) ($decoded['clock'] ?? 0),
             'powerwall_at' => (int) ($decoded['powerwall_at'] ?? 0),
+            'yarbo_at' => (int) ($decoded['yarbo_at'] ?? 0),
             'unifi_at' => (int) ($decoded['unifi_at'] ?? 0),
             'sensors_at' => (int) ($decoded['sensors_at'] ?? 0),
             'doors_at' => (int) ($decoded['doors_at'] ?? 0),
