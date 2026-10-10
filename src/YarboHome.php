@@ -7,6 +7,11 @@ namespace Yarbo;
 final class YarboHome
 {
     public const KIND_LIGHT = 'light';
+    public const PULSE_COUNT_MIN = 1;
+    public const PULSE_COUNT_MAX = 10;
+    public const PULSE_COUNT_DEFAULT = 3;
+    public const PULSE_HEX_DEFAULT = '#ff3b30';
+    public const PULSE_DWELL_US = 400000;
     public const KIND_PLUG = 'plug';
     public const KIND_SWITCH = 'switch';
     public const KIND_HEATER = 'heater';
@@ -1420,6 +1425,9 @@ final class YarboHome
         }
         if ($kind === self::KIND_HEATER) {
             return in_array($action, ['on', 'off', 'toggle', 'setpoint', 'temperature', 'heating_setpoint'], true);
+        }
+        if ($kind === self::KIND_LIGHT) {
+            return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp', 'pulse'], true);
         }
 
         return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp'], true);
@@ -2838,7 +2846,170 @@ final class YarboHome
         return round((float) $value, 1);
     }
 
+    /**
+     * Snapshot on/brightness/colour so a pulse can restore a scene look.
+     *
+     * @param array<string, mixed> $row
+     * @return array{on: bool, brightness?: int, hex?: string, kelvin?: int}
+     */
+    public static function pulseLookFromDevice(array $row): array
+    {
+        $on = !empty($row['on']);
+        $look = ['on' => $on];
+        if (!$on) {
+            return $look;
+        }
+        if (isset($row['brightness']) && is_numeric($row['brightness'])) {
+            $bright = max(0, min(100, (int) $row['brightness']));
+            if ($bright > 0) {
+                $look['brightness'] = $bright;
+            }
+        }
+        $hex = self::normalizeHexValue((string) ($row['color_hex'] ?? $row['hex'] ?? ''));
+        if ($hex !== null) {
+            $look['hex'] = $hex;
+        }
+        $kelvin = $row['kelvin'] ?? $row['color_temp'] ?? null;
+        if ($kelvin !== null && $kelvin !== '' && is_numeric($kelvin)) {
+            $look['kelvin'] = max(1500, min(8000, (int) $kelvin));
+        }
+
+        return $look;
+    }
+
+    public static function normalizePulseCount(mixed $raw): int
+    {
+        $n = (int) $raw;
+        if ($n < self::PULSE_COUNT_MIN) {
+            $n = self::PULSE_COUNT_DEFAULT;
+        }
+        if ($n > self::PULSE_COUNT_MAX) {
+            $n = self::PULSE_COUNT_MAX;
+        }
+
+        return $n;
+    }
+
+    /**
+     * On-colour / off steps, then restore. Used by automations Pulse.
+     *
+     * @param array{on: bool, brightness?: int, hex?: string, kelvin?: int} $restore
+     * @return list<array<string, mixed>>
+     */
+    public static function pulsePlan(
+        string $id,
+        ?string $hex,
+        int $count,
+        array $restore,
+        bool $dimmable = false
+    ): array {
+        $id = trim($id);
+        $count = self::normalizePulseCount($count);
+        $hex = $hex !== null ? self::normalizeHexValue($hex) : null;
+        $steps = [];
+        for ($i = 0; $i < $count; $i++) {
+            if ($dimmable) {
+                $steps[] = ['id' => $id, 'command' => 'brightness', 'brightness' => 100];
+            }
+            if ($hex !== null) {
+                $steps[] = ['id' => $id, 'command' => 'color', 'hex' => $hex];
+            } elseif (!$dimmable) {
+                $steps[] = ['id' => $id, 'command' => 'on'];
+            }
+            $steps[] = ['id' => $id, 'command' => 'off'];
+        }
+        if (empty($restore['on'])) {
+            return $steps;
+        }
+        $sent = false;
+        if (isset($restore['brightness']) && is_numeric($restore['brightness'])) {
+            $steps[] = [
+                'id' => $id,
+                'command' => 'brightness',
+                'brightness' => max(1, min(100, (int) $restore['brightness'])),
+            ];
+            $sent = true;
+        }
+        $restoreHex = isset($restore['hex']) ? self::normalizeHexValue((string) $restore['hex']) : null;
+        if ($restoreHex !== null) {
+            $steps[] = ['id' => $id, 'command' => 'color', 'hex' => $restoreHex];
+            $sent = true;
+        } elseif (isset($restore['kelvin']) && is_numeric($restore['kelvin'])) {
+            $steps[] = [
+                'id' => $id,
+                'command' => 'color_temp',
+                'kelvin' => max(1500, min(8000, (int) $restore['kelvin'])),
+            ];
+            $sent = true;
+        }
+        if (!$sent) {
+            $steps[] = ['id' => $id, 'command' => 'on'];
+        }
+
+        return $steps;
+    }
+
+    /**
+     * @param array<string, mixed> $job
+     * @return array<string, mixed>
+     */
+    public function executePulse(array $job, int $dwellUs = self::PULSE_DWELL_US): array
+    {
+        $id = trim((string) ($job['id'] ?? ''));
+        if ($id === '') {
+            return ['ok' => false, 'error' => 'Pick a light'];
+        }
+        $hex = self::normalizeHexValue((string) ($job['hex'] ?? $job['color_hex'] ?? self::PULSE_HEX_DEFAULT));
+        $count = self::normalizePulseCount($job['pulse_count'] ?? $job['count'] ?? self::PULSE_COUNT_DEFAULT);
+        $restore = is_array($job['restore'] ?? null)
+            ? $job['restore']
+            : $this->capturePulseLook($id);
+        $caps = $this->deviceControlCaps($id);
+        $steps = self::pulsePlan($id, $hex, $count, $restore, !empty($caps['dimmable']));
+        $errors = [];
+        $last = ['ok' => true];
+        foreach ($steps as $i => $step) {
+            $last = $this->command($step);
+            if (!($last['ok'] ?? false)) {
+                $errors[] = (string) ($last['error'] ?? 'failed');
+            }
+            $cmd = (string) ($step['command'] ?? '');
+            if ($dwellUs > 0 && ($cmd === 'color' || $cmd === 'on' || $cmd === 'brightness' || $cmd === 'off')) {
+                $next = $steps[$i + 1] ?? null;
+                $nextCmd = is_array($next) ? (string) ($next['command'] ?? '') : '';
+                if ($nextCmd === 'off' || $cmd === 'off') {
+                    usleep($dwellUs);
+                }
+            }
+        }
+        if ($errors !== []) {
+            return ['ok' => false, 'error' => $errors[0]];
+        }
+
+        return $last;
+    }
+
+    /**
+     * @return array{on: bool, brightness?: int, hex?: string, kelvin?: int}
+     */
+    public function capturePulseLook(string $id): array
+    {
+        $id = trim($id);
+        foreach ($this->automationDevices() as $row) {
+            if (trim((string) ($row['id'] ?? '')) === $id) {
+                return self::pulseLookFromDevice($row);
+            }
+        }
+
+        return ['on' => false];
+    }
+
     private function normalizeHex(string $value): ?string
+    {
+        return self::normalizeHexValue($value);
+    }
+
+    public static function normalizeHexValue(string $value): ?string
     {
         $value = trim($value);
         if ($value === '') {
