@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.102] - 2026-10-10
+
+### Fixed
+- Matter vacuum tiles showed **0%** battery when Matter had not reported a percent (`null` was treated as 0). The tile now shows battery only for a real 1–100% reading, unwraps Matter’s half-percent `BatPercentRemaining` values, and keeps looking if one PowerSource endpoint only has charge state.
+
 ## [4.0.101] - 2026-10-10
 
 ### Fixed

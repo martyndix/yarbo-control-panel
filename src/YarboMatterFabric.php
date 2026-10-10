@@ -797,15 +797,12 @@ final class YarboMatterFabric
         }
         foreach ($endpoints as $ep) {
             $rawState = self::attrNum($attributes, $ep, self::POWER_SOURCE, self::ATTR_BAT_CHARGE_STATE);
-            $rawPct = self::attrNum($attributes, $ep, self::POWER_SOURCE, self::ATTR_BAT_PERCENT_REMAINING);
+            $found = self::decodeBatPercent(self::attrRaw($attributes, $ep, self::POWER_SOURCE, self::ATTR_BAT_PERCENT_REMAINING));
             if ($rawState !== null && $chargeState === null) {
                 $chargeState = (int) $rawState;
             }
-            if ($rawPct !== null && $percent === null) {
-                $percent = max(0, min(100, (int) round(((int) $rawPct) / 2)));
-            }
-            if ($chargeState !== null || $percent !== null) {
-                break;
+            if ($found !== null && $percent === null) {
+                $percent = $found;
             }
         }
         $complete = $chargeState === self::BAT_CHARGE_IS_AT_FULL_CHARGE
@@ -1232,23 +1229,52 @@ final class YarboMatterFabric
     /**
      * @param array<string, mixed> $attributes
      */
-    private static function attrNum(array $attributes, int $endpoint, int $cluster, int $attr): ?float
+    private static function eventNumber(mixed $value): ?float
     {
-        $val = self::attrRaw($attributes, $endpoint, $cluster, $attr);
-        if ($val === null || is_bool($val)) {
+        if ($value === null || is_bool($value)) {
             return null;
         }
-        if (is_int($val) || is_float($val)) {
-            return (float) $val;
+        if (is_int($value) || is_float($value)) {
+            return (float) $value;
         }
-        if (is_array($val)) {
-            $inner = $val['value'] ?? $val['0'] ?? null;
-            if (is_int($inner) || is_float($inner)) {
-                return (float) $inner;
+        if (is_string($value) && is_numeric(trim($value))) {
+            return (float) $value;
+        }
+        if (is_array($value)) {
+            foreach (['value', 'Value', 0, '0'] as $key) {
+                if (array_key_exists($key, $value)) {
+                    $found = self::eventNumber($value[$key]);
+                    if ($found !== null) {
+                        return $found;
+                    }
+                }
             }
         }
 
         return null;
+    }
+
+    private static function decodeBatPercent(mixed $raw): ?int
+    {
+        $n = self::eventNumber($raw);
+        if ($n === null) {
+            return null;
+        }
+        $value = (int) round($n);
+        if ($value <= 0 || $value === 255 || $value > 200) {
+            return null;
+        }
+        $percent = (int) round($value / 2.0);
+        if ($percent < 1) {
+            return null;
+        }
+
+        return min(100, $percent);
+    }
+
+    private static function attrNum(array $attributes, int $endpoint, int $cluster, int $attr): ?float
+    {
+        return self::eventNumber(self::attrRaw($attributes, $endpoint, $cluster, $attr));
     }
 
     /**

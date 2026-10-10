@@ -166,7 +166,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 49, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 50, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -220,6 +220,24 @@ def main() -> int:
         raise SystemExit(f"still charging should be Docked, got {still_row}")
     if still_row.get("vacuum_battery") != 40:
         raise SystemExit(f"charging battery {still_row.get('vacuum_battery')}")
+    if vac.get("vacuum_battery") not in (None,):
+        raise SystemExit(f"missing battery should be None, got {vac.get('vacuum_battery')}")
+    wrapped_bat = vacuum_node()
+    wrapped_bat["attributes"]["1/47/12"] = {"0": 160}
+    wrapped_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [wrapped_bat]})}.get("40:1") or {}
+    if wrapped_row.get("vacuum_battery") != 80:
+        raise SystemExit(f"wrapped battery {wrapped_row.get('vacuum_battery')}")
+    value_bat = vacuum_node()
+    value_bat["attributes"]["0/47/14"] = 0
+    value_bat["attributes"]["1/47/12"] = {"value": 140}
+    value_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [value_bat]})}.get("40:1") or {}
+    if value_row.get("vacuum_battery") != 70:
+        raise SystemExit(f"value-wrapped battery {value_row.get('vacuum_battery')}")
+    zero_bat = vacuum_node()
+    zero_bat["attributes"]["1/47/12"] = 0
+    zero_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [zero_bat]})}.get("40:1") or {}
+    if zero_row.get("vacuum_battery") not in (None,):
+        raise SystemExit(f"zero battery should be omitted, got {zero_row.get('vacuum_battery')}")
     trickle = vacuum_node()
     trickle["attributes"]["1/97/4"] = 0x41
     trickle["attributes"]["1/47/14"] = 1

@@ -4032,11 +4032,14 @@ function homeVacuumStatusName(d) {
 
 function homeVacuumStatusText(d) {
     const status = homeVacuumStatusName(d);
-    const bat = Number(d.vacuum_battery);
-    if (Number.isFinite(bat) && bat >= 0) {
-        return `${status} · ${Math.round(bat)}%`;
+    if (d.vacuum_battery == null || d.vacuum_battery === '') {
+        return status;
     }
-    return status;
+    const bat = Number(d.vacuum_battery);
+    if (!Number.isFinite(bat) || bat <= 0) {
+        return status;
+    }
+    return `${status} · ${Math.round(bat)}%`;
 }
 
 function homeVacuumActionsHtml(d) {

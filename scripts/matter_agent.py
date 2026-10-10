@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 49
+AGENT_VERSION = 50
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2218,10 +2218,9 @@ def apply_attribute_event(data: Any) -> None:
             percent = None
         extra: dict[str, Any] = {}
         if attr == ATTR_BAT_PERCENT_REMAINING:
-            raw = event_number(value)
-            if raw is None:
+            percent = decode_bat_percent(value)
+            if percent is None:
                 return
-            percent = max(0, min(100, int(round(int(raw) / 2))))
             extra["vacuum_battery"] = percent
             extra["vacuum_charge_complete"] = charge_is_complete(None, percent)
         else:
@@ -2480,16 +2479,7 @@ def endpoint_has_cluster(attributes: dict[str, Any], endpoint: int, cluster: int
 
 
 def attr_num(attributes: dict[str, Any], endpoint: int, cluster: int, attr: int) -> float | None:
-    val = attr_raw(attributes, endpoint, cluster, attr)
-    if isinstance(val, bool) or val is None:
-        return None
-    if isinstance(val, (int, float)):
-        return float(val)
-    if isinstance(val, dict):
-        inner = val.get("value", val.get("0"))
-        if isinstance(inner, (int, float)):
-            return float(inner)
-    return None
+    return event_number(attr_raw(attributes, endpoint, cluster, attr))
 
 
 def attr_bool(val: Any) -> bool:
@@ -3843,6 +3833,20 @@ def live_vacuum_tags(live: dict[str, Any]) -> list[int]:
     return []
 
 
+def decode_bat_percent(raw: Any) -> int | None:
+    """Matter BatPercentRemaining is 0-200 in half-percent units. 0 and 255 are unknown."""
+    n = event_number(raw)
+    if n is None:
+        return None
+    value = int(round(n))
+    if value <= 0 or value == 255 or value > 200:
+        return None
+    percent = int(round(value / 2.0))
+    if percent < 1:
+        return None
+    return min(100, percent)
+
+
 def battery_from_node(attributes: dict[str, Any], preferred: int) -> tuple[int | None, int | None, bool]:
     percent: int | None = None
     charge_state: int | None = None
@@ -3852,19 +3856,14 @@ def battery_from_node(attributes: dict[str, Any], preferred: int) -> tuple[int |
             endpoints.append(ep)
     for ep in endpoints:
         raw_state = attr_num(attributes, ep, POWER_SOURCE, ATTR_BAT_CHARGE_STATE)
-        raw_pct = attr_num(attributes, ep, POWER_SOURCE, ATTR_BAT_PERCENT_REMAINING)
+        found = decode_bat_percent(attr_raw(attributes, ep, POWER_SOURCE, ATTR_BAT_PERCENT_REMAINING))
         if raw_state is not None and charge_state is None:
             try:
                 charge_state = int(raw_state)
             except (TypeError, ValueError):
                 charge_state = None
-        if raw_pct is not None and percent is None:
-            try:
-                percent = max(0, min(100, int(round(int(raw_pct) / 2))))
-            except (TypeError, ValueError):
-                percent = None
-        if charge_state is not None or percent is not None:
-            break
+        if found is not None and percent is None:
+            percent = found
     return percent, charge_state, charge_is_complete(charge_state, percent)
 
 
@@ -4291,6 +4290,8 @@ def refresh_vacuum_capabilities(
         patch = payload
         if status_only:
             patch = {key: payload[key] for key in VACUUM_RUNTIME_KEYS if key in payload}
+        if patch.get("vacuum_battery") is None:
+            patch.pop("vacuum_battery", None)
         patch_live_device(device_id, patch)
     return payload
 

@@ -343,7 +343,10 @@ final class YarboHome
             if (($row['kind'] ?? '') === self::KIND_VACUUM) {
                 $row['vacuum_status'] = (string) ($device['vacuum_status'] ?? '');
                 $row['vacuum_clean'] = (string) ($device['vacuum_clean'] ?? 'vacuum');
-                $row['vacuum_battery'] = self::optionalPercent($device['vacuum_battery'] ?? null);
+                $battery = self::optionalPercent($device['vacuum_battery'] ?? null);
+                if ($battery !== null && $battery > 0) {
+                    $row['vacuum_battery'] = $battery;
+                }
                 $row['can_vacuum'] = array_key_exists('can_vacuum', $device) ? (bool) $device['can_vacuum'] : true;
                 $row['can_mop'] = !empty($device['can_mop']);
                 $row['can_vacuum_mop'] = !empty($device['can_vacuum_mop']);
@@ -2081,7 +2084,7 @@ final class YarboHome
         }
         if (array_key_exists('vacuum_battery', $live)) {
             $percent = self::optionalPercent($live['vacuum_battery']);
-            if ($percent !== null) {
+            if ($percent !== null && $percent > 0) {
                 $device['vacuum_battery'] = $percent;
             }
         }
@@ -2157,7 +2160,7 @@ final class YarboHome
             $patch['vacuum_clean'] = (string) $result['vacuum_clean'];
         }
         $battery = self::optionalPercent($result['vacuum_battery'] ?? null);
-        if ($battery !== null) {
+        if ($battery !== null && $battery > 0) {
             $patch['vacuum_battery'] = $battery;
         }
         if (array_key_exists('selected_areas', $result)) {
@@ -2404,7 +2407,10 @@ final class YarboHome
             if ($kind === self::KIND_VACUUM || YarboMatterFabric::nameLooksVacuum((string) ($row['name'] ?? '') . ' ' . (string) ($row['product'] ?? ''))) {
                 $slim['vacuum_status'] = (string) ($row['vacuum_status'] ?? '');
                 $slim['vacuum_clean'] = (string) ($row['vacuum_clean'] ?? 'vacuum');
-                $slim['vacuum_battery'] = self::optionalPercent($row['vacuum_battery'] ?? null);
+                $battery = self::optionalPercent($row['vacuum_battery'] ?? null);
+                if ($battery !== null && $battery > 0) {
+                    $slim['vacuum_battery'] = $battery;
+                }
                 $slim['can_vacuum'] = array_key_exists('can_vacuum', $row) ? (bool) $row['can_vacuum'] : true;
                 $slim['can_mop'] = !empty($row['can_mop']);
                 $slim['can_vacuum_mop'] = !empty($row['can_vacuum_mop']);
