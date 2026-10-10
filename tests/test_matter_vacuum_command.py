@@ -166,7 +166,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 47, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 48, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -190,8 +190,8 @@ def main() -> int:
     charging_idle["attributes"]["1/97/4"] = 0x41
     charging_idle["attributes"]["1/84/1"] = 0
     charging = {d["id"]: d for d in agent.flatten_nodes({"nodes": [charging_idle]})}.get("40:1") or {}
-    if charging.get("vacuum_status") != "Charging":
-        raise SystemExit(f"charging idle {charging}")
+    if charging.get("vacuum_status") != "Docked" or charging.get("on") is True:
+        raise SystemExit(f"charging idle should be Docked, got {charging}")
     full_charge = vacuum_node()
     full_charge["attributes"]["1/97/4"] = 0x41
     full_charge["attributes"]["1/84/1"] = 0
@@ -216,8 +216,8 @@ def main() -> int:
     still_charging["attributes"]["1/47/14"] = 1
     still_charging["attributes"]["1/47/12"] = 80
     still_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [still_charging]})}.get("40:1") or {}
-    if still_row.get("vacuum_status") != "Charging" or still_row.get("vacuum_charge_complete") is True:
-        raise SystemExit(f"still charging {still_row}")
+    if still_row.get("vacuum_status") != "Docked" or still_row.get("on") is True:
+        raise SystemExit(f"still charging should be Docked, got {still_row}")
     if still_row.get("vacuum_battery") != 40:
         raise SystemExit(f"charging battery {still_row.get('vacuum_battery')}")
     trickle = vacuum_node()
@@ -229,8 +229,8 @@ def main() -> int:
         raise SystemExit(f"100% while Charging should be Docked, got {trickle_row}")
     charging_idle["attributes"]["1/84/1"] = 1
     leaving = {d["id"]: d for d in agent.flatten_nodes({"nodes": [charging_idle]})}.get("40:1") or {}
-    if leaving.get("vacuum_status") != "Cleaning" or leaving.get("on") is not True:
-        raise SystemExit(f"charging+cleaning should be Cleaning, got {leaving}")
+    if leaving.get("vacuum_status") != "Docked" or leaving.get("on") is True:
+        raise SystemExit(f"charging+cleaning leftover should be Docked, got {leaving}")
     error_node = vacuum_node()
     error_node["attributes"]["1/97/4"] = 3
     error_node["attributes"]["1/97/5"] = {"errorStateID": 3}
@@ -293,6 +293,32 @@ def main() -> int:
     assert ping.get("version") == agent.AGENT_VERSION, ping
 
     calls.clear()
+    mop = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "mop",
+        "kind": "vacuum",
+    })
+    assert mop.get("ok") is True, mop
+    mop_cmds = [args for command, args in calls if command == "device_command"]
+    assert all(c.get("cluster_id") == agent.RVC_CLEAN for c in mop_cmds), mop_cmds
+    assert (mop_cmds[0].get("payload") or {}).get("newMode") == 1, mop_cmds
+
+    calls.clear()
+    rooms = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "select_areas",
+        "kind": "vacuum",
+        "areas": [2],
+    })
+    assert rooms.get("ok") is True, rooms
+    room_cmds = [args for command, args in calls if command == "device_command"]
+    assert all(c.get("cluster_id") == agent.SERVICE_AREA for c in room_cmds), room_cmds
+    payload = (room_cmds[0].get("payload") or {})
+    assert payload.get("newAreas") == [2] or payload.get("new_areas") == [2], room_cmds
+
+    calls.clear()
     start = agent.dispatch({
         "op": "command",
         "id": "40:1",
@@ -304,15 +330,11 @@ def main() -> int:
     assert start.get("ok") is True, start
     cmds = [args for command, args in calls if command == "device_command"]
     clusters = [c.get("cluster_id") for c in cmds]
-    assert agent.SERVICE_AREA in clusters, cmds
-    assert agent.RVC_CLEAN in clusters, cmds
+    assert agent.SERVICE_AREA not in clusters, cmds
+    assert agent.RVC_CLEAN not in clusters, cmds
     assert agent.RVC_RUN in clusters, cmds
     assert agent.ON_OFF not in clusters, cmds
-    area_cmd = next(c for c in cmds if c.get("cluster_id") == agent.SERVICE_AREA)
-    payload = area_cmd.get("payload") or {}
-    assert payload.get("newAreas") == [2] or payload.get("new_areas") == [2], area_cmd
-    mop_cmd = next(c for c in cmds if c.get("cluster_id") == agent.RVC_CLEAN)
-    assert (mop_cmd.get("payload") or {}).get("newMode") == 1, mop_cmd
+    assert not any(c.get("command_name") == "Start" for c in cmds), cmds
     run_cmd = next(c for c in cmds if c.get("cluster_id") == agent.RVC_RUN)
     assert (run_cmd.get("payload") or {}).get("newMode") == 1, run_cmd
     assert "timed_request_timeout_ms" not in run_cmd, run_cmd
@@ -413,14 +435,6 @@ def main() -> int:
         if command == "read_attribute":
             return {"ok": True, "result": charge_attrs}
         if command == "device_command":
-            args = args or {}
-            if apply_start(charge_attrs, args):
-                return {"ok": True, "result": {"status": 0}}
-            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
-                payload = args.get("payload") or {}
-                mode = payload.get("newMode", payload.get("NewMode"))
-                if mode == 1 and charge_attrs.get("1/97/4") == 0x41:
-                    return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
             apply_change_to_mode(agent, charge_attrs, args or {})
             return {"ok": True, "result": {"status": 0}}
         return {"ok": True, "result": None}
@@ -434,7 +448,7 @@ def main() -> int:
     assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in charge_cmds), charge_cmds
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in charge_cmds), charge_cmds
     charge_modes = change_to_mode_values(charge_cmds, agent)
-    assert any(c.get("command_name") == "Start" for c in charge_cmds), charge_cmds
+    assert not any(c.get("command_name") == "Start" for c in charge_cmds), charge_cmds
     assert charge_modes == [1], charge_modes
     assert 2 not in charge_modes, charge_modes
     assert 0 not in charge_modes, charge_modes
@@ -453,13 +467,6 @@ def main() -> int:
         if command == "read_attribute":
             return {"ok": True, "result": leftover_attrs}
         if command == "device_command":
-            if apply_start(leftover_attrs, args):
-                return {"ok": True, "result": {"status": 0}}
-            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
-                payload = args.get("payload") or {}
-                mode = payload.get("newMode", payload.get("NewMode"))
-                if mode == 1 and leftover_attrs.get("1/97/4") == 0x41:
-                    return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
             apply_change_to_mode(agent, leftover_attrs, args)
             return {"ok": True, "result": {"status": 0}}
         return {"ok": True, "result": None}
@@ -471,7 +478,7 @@ def main() -> int:
     assert leftover.get("vacuum_status") == "Cleaning", leftover
     leftover_cmds = [args for command, args in calls if command == "device_command"]
     leftover_modes = change_to_mode_values(leftover_cmds, agent)
-    assert any(c.get("command_name") == "Start" for c in leftover_cmds), leftover_cmds
+    assert not any(c.get("command_name") == "Start" for c in leftover_cmds), leftover_cmds
     assert leftover_modes == [1], leftover_modes
     assert 2 not in leftover_modes, leftover_modes
     assert 0 not in leftover_modes, leftover_modes
@@ -550,8 +557,6 @@ def main() -> int:
             return {"ok": True, "result": {"node_id": 40, "attributes": docked_attrs}}
         if command == "read_attribute":
             return {"ok": True, "result": docked_attrs}
-        if command == "device_command" and (args or {}).get("command_name") == "Start":
-            return {"ok": False, "error": "Vacuum rejected Start (129)", "status": 0x81}
         if command == "device_command":
             apply_change_to_mode(agent, docked_attrs, args or {}, leave_docked=True)
             return {"ok": True, "result": {"status": 0}}
@@ -595,8 +600,6 @@ def main() -> int:
         if command == "read_attribute":
             return {"ok": True, "result": s10_attrs}
         if command == "device_command":
-            if apply_start(s10_attrs, args or {}):
-                return {"ok": True, "result": {"status": 0}}
             apply_change_to_mode(agent, s10_attrs, args or {})
             return {"ok": True, "result": {"status": 0}}
         return {"ok": True, "result": None}
@@ -608,7 +611,7 @@ def main() -> int:
     assert s10_start.get("vacuum_status") == "Cleaning", s10_start
     s10_cmds = [args for command, args in calls if command == "device_command"]
     run_payloads = change_to_mode_values(s10_cmds, agent)
-    assert any(c.get("command_name") == "Start" for c in s10_cmds), s10_cmds
+    assert not any(c.get("command_name") == "Start" for c in s10_cmds), s10_cmds
     assert run_payloads == [2], run_payloads
     assert 1 not in run_payloads, run_payloads
     assert 0 not in run_payloads, run_payloads
@@ -667,14 +670,6 @@ def main() -> int:
         if command == "read_attribute":
             return {"ok": True, "result": bath_ok_attrs}
         if command == "device_command":
-            args = args or {}
-            if apply_start(bath_ok_attrs, args):
-                return {"ok": True, "result": {"status": 0}}
-            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
-                payload = args.get("payload") or {}
-                mode = payload.get("newMode", payload.get("NewMode"))
-                if mode == 1 and bath_ok_attrs.get("1/97/4") == 0x41:
-                    return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
             apply_change_to_mode(agent, bath_ok_attrs, args or {})
             return {"ok": True, "result": {"status": 0}}
         return {"ok": True, "result": None}
@@ -694,13 +689,13 @@ def main() -> int:
     assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in bath_ok_cmds), bath_ok_cmds
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in bath_ok_cmds), bath_ok_cmds
     bath_modes = change_to_mode_values(bath_ok_cmds, agent)
-    assert any(c.get("command_name") == "Start" for c in bath_ok_cmds), bath_ok_cmds
+    assert not any(c.get("command_name") == "Start" for c in bath_ok_cmds), bath_ok_cmds
     assert bath_modes == [1], bath_modes
     assert 2 not in bath_modes, bath_modes
     assert 0 not in bath_modes, bath_modes
 
     calls.clear()
-    # Charging: Operational Start leaves the dock, then Cleaning. Never Mapping.
+    # Apple Home Start from the charger: ChangeToMode Cleaning only. Never Mapping.
     undock_attrs = dict(vacuum_node()["attributes"])
     undock_attrs["0/40/3"] = "K11+"
     undock_attrs["1/97/4"] = 0x41
@@ -714,13 +709,6 @@ def main() -> int:
         if command == "read_attribute":
             return {"ok": True, "result": undock_attrs}
         if command == "device_command":
-            if apply_start(undock_attrs, args):
-                return {"ok": True, "result": {"status": 0}}
-            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
-                payload = args.get("payload") or {}
-                mode = payload.get("newMode", payload.get("NewMode"))
-                if mode == 1 and undock_attrs.get("1/97/4") == 0x41:
-                    return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
             apply_change_to_mode(agent, undock_attrs, args)
             return {"ok": True, "result": {"status": 0}}
         return {"ok": True, "result": None}
@@ -737,7 +725,7 @@ def main() -> int:
     assert undocked.get("ok") is True, undocked
     assert undocked.get("vacuum_status") == "Cleaning", undocked
     undock_cmds = [args for command, args in calls if command == "device_command"]
-    assert any(c.get("command_name") == "Start" for c in undock_cmds), undock_cmds
+    assert not any(c.get("command_name") == "Start" for c in undock_cmds), undock_cmds
     assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in undock_cmds), undock_cmds
     undock_modes = change_to_mode_values(undock_cmds, agent)
     assert undock_modes == [1], undock_modes
@@ -782,10 +770,12 @@ def main() -> int:
     assert aborted.get("ok") is False, aborted
     abort_cmds = [args for command, args in calls if command == "device_command"]
     abort_modes = change_to_mode_values(abort_cmds, agent)
-    assert abort_modes == [1, 1], abort_modes
+    assert abort_modes == [1], abort_modes
     assert 2 not in abort_modes, abort_modes
     assert 0 not in abort_modes, abort_modes
-    assert any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
+    assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
+    assert aborted.get("vacuum_status") == "Docked", aborted
+    assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
 
     calls.clear()
     # Alejandro (K11+): Charging. Cleaning and Mapping both GenericFailure.
@@ -831,8 +821,9 @@ def main() -> int:
     assert bathroom.get("vacuum_status") != "Cleaning", bathroom
     assert bathroom.get("vacuum_status") != "Error", bathroom
     err = str(bathroom.get("error") or "").lower()
-    assert "generic failure" in err or "charging" in err, bathroom
-    assert bathroom.get("vacuum_status") in ("Charging", "Idle", "Docked"), bathroom
+    assert "generic failure" in err or "dock" in err, bathroom
+    assert "while charging" not in err, bathroom
+    assert bathroom.get("vacuum_status") == "Docked", bathroom
     k11_cmds = [args for command, args in calls if command == "device_command"]
     area_payloads = [
         (c.get("payload") or {}).get("newAreas", (c.get("payload") or {}).get("NewAreas"))
@@ -845,14 +836,13 @@ def main() -> int:
         for c in k11_cmds
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
     ]
-    assert 1 in k11_modes, k11_modes
+    assert k11_modes == [1], k11_modes
     assert 2 not in k11_modes, k11_modes
-    assert any(c.get("command_name") == "Start" for c in k11_cmds), k11_cmds
+    assert not any(c.get("command_name") == "Start" for c in k11_cmds), k11_cmds
     assert all(
-        c.get("timed_request_timeout_ms") == 3000
+        "timed_request_timeout_ms" not in c
         for c in k11_cmds
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
-        and (c.get("payload") or {}).get("newMode") == 1
     ), k11_cmds
     assert all(
         "newMode" in (c.get("payload") or {})
@@ -953,7 +943,7 @@ def main() -> int:
 
     calls.clear()
     # Charging + PowerSource full: webpage was Charging while the app said
-    # charging complete. Show Docked, skip Operational Start, send Cleaning.
+    # charging complete. Show Docked, send Cleaning only.
     full_start_attrs = dict(vacuum_node()["attributes"])
     full_start_attrs["1/97/4"] = 0x41
     full_start_attrs["1/84/1"] = 0
@@ -1023,7 +1013,7 @@ def main() -> int:
     full_fail_cmds = [args for command, args in calls if command == "device_command"]
     full_fail_modes = change_to_mode_values(full_fail_cmds, agent)
     assert not any(c.get("command_name") == "Start" for c in full_fail_cmds), full_fail_cmds
-    assert full_fail_modes == [1, 1, 1], full_fail_modes
+    assert full_fail_modes == [1], full_fail_modes
     assert 2 not in full_fail_modes, full_fail_modes
     assert 0 not in full_fail_modes, full_fail_modes
 
@@ -1050,7 +1040,7 @@ def main() -> int:
     agent.apply_attribute_event([40, "1/47/12", 80])
     live_charge = agent.live_row("40:1") or {}
     assert live_charge.get("vacuum_charge_complete") is not True, live_charge
-    assert live_charge.get("vacuum_status") == "Charging", live_charge
+    assert live_charge.get("vacuum_status") == "Docked", live_charge
     assert live_charge.get("vacuum_battery") == 40, live_charge
 
     print("test_matter_vacuum_command.py ok")

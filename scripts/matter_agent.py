@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 47
+AGENT_VERSION = 48
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3763,14 +3763,12 @@ def vacuum_status_label(
         return "Paused"
     if op == OP_SEEKING:
         return "Returning"
-    if op == OP_DOCKED or (op == OP_CHARGING and charge_complete):
+    if op == OP_DOCKED or op == OP_CHARGING:
         return "Docked"
     if RUN_MAPPING in run_tags:
         return "Mapping"
     if op == OP_RUNNING or RUN_CLEANING in run_tags:
         return "Cleaning"
-    if op == OP_CHARGING:
-        return "Charging"
     return "Idle"
 
 
@@ -4321,13 +4319,12 @@ def set_vacuum_command(
                 **base,
             }
         # Leftover Cleaning CurrentMode while Charging/Docked is not started.
-        # Check the charger before treating the Cleaning tag as running.
-        if op in (OP_DOCKED, OP_CHARGING) or stuck_on_dock() or status == "Charging":
+        if op in (OP_DOCKED, OP_CHARGING) or stuck_on_dock() or status in ("Charging", "Docked"):
             detail = str((rpc or {}).get("error") or "").strip()
             return {
                 "ok": False,
                 "on": False,
-                "vacuum_status": "Charging" if actively_charging() else "Docked",
+                "vacuum_status": "Docked",
                 "error": f"Vacuum did not start ({detail})" if detail else "Vacuum did not start",
                 **base,
             }
@@ -4379,117 +4376,57 @@ def set_vacuum_command(
             rpc = {**rpc, "on": False, "vacuum_status": "Returning"}
         return rpc
 
+    if action in ("mop", "vacuum", "vac", "vacuum_mop"):
+        kind = want_clean or action
+        if kind in ("vac",):
+            kind = "vacuum"
+        if kind == "mop":
+            option = pick_mode(clean_modes, (CLEAN_MOP,), ("mop",))
+            if option is None:
+                return {"ok": False, "error": "This vacuum cannot mop"}
+        elif kind in ("vacuum_mop", "both"):
+            option = pick_mode(
+                clean_modes,
+                (CLEAN_VACUUM_THEN_MOP, CLEAN_MOP),
+                ("vacuum then mop", "vac & mop", "mop & vac", "vacuum and mop"),
+            )
+            if option is None:
+                return {"ok": False, "error": "This vacuum cannot mop"}
+            kind = "vacuum_mop"
+        else:
+            option = pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac", "auto", "quick"))
+            if option is None:
+                return {"ok": True, "vacuum_clean": "vacuum"}
+        rpc = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
+        if rpc.get("ok"):
+            rpc = {**rpc, "vacuum_clean": kind}
+        return rpc
+
     cleaning = pick_cleaning_run_mode(run_modes)
     if cleaning is None:
         return {"ok": False, "error": "This vacuum has no Cleaning mode"}
 
-    # All rooms is Apple Home whole-house: ChangeToMode Cleaning only.
-    # While Charging, SelectAreas and Cleaning are GenericFailure. Idle is
-    # standby/dock. Mapping starts a map job — never send it. Dock/GoHome
-    # works, so while actually charging try Operational Start then Cleaning.
-    # Matter often stays Charging after the battery is full (SwitchBot app:
-    # charging complete). Treat that as Docked and skip Operational Start.
-    select_ids = requested_ids if not all_rooms and requested_ids else None
-    if at_charger() or run_op() == OP_SEEKING:
-        select_ids = None
-
-    def apply_rooms(ids: list[int] | None) -> dict[str, Any] | None:
-        if not ids:
-            return None
-        selected = vacuum_select_areas(node_id, area_endpoint, ids)
-        if (
-            not selected.get("ok")
-            and not is_unsupported_cluster(selected)
-            and not is_transport_error(selected)
-        ):
-            return selected
-        if is_transport_error(selected):
-            return selected
-        settle_mode()
-        sync_row()
-        if set(selected_area_ids(row)) != set(ids):
-            vacuum_select_areas(node_id, area_endpoint, ids)
-            settle_mode()
-            sync_row()
-        return None
-
-    rooms_err = apply_rooms(select_ids)
-    if rooms_err is not None:
-        return rooms_err
-
-    if want_clean == "mop":
-        option = pick_mode(clean_modes, (CLEAN_MOP,), ("mop",))
-        if option is None:
-            return {"ok": False, "error": "This vacuum cannot mop"}
-        mop_rpc = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
-        if not mop_rpc.get("ok") and is_transport_error(mop_rpc):
-            return mop_rpc
-    elif want_clean in ("vacuum_mop", "both"):
-        option = pick_mode(
-            clean_modes,
-            (CLEAN_VACUUM_THEN_MOP, CLEAN_MOP),
-            ("vacuum then mop", "vac & mop", "mop & vac", "vacuum and mop"),
-        )
-        if option is None:
-            return {"ok": False, "error": "This vacuum cannot mop"}
-        mop_rpc = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
-        if not mop_rpc.get("ok") and is_transport_error(mop_rpc):
-            return mop_rpc
-
-    def go_cleaning() -> dict[str, Any]:
-        last = vacuum_change_mode(
-            node_id,
-            rvc_ep,
-            RVC_RUN,
-            int(cleaning["mode"]),
-            device_id=device_id,
-            row=row,
-            verify=True,
-            timed_ms=3000 if at_charger() else None,
-        )
-        attempts.append(last)
-        return last
-
-    def cleaning_refused(rpc: dict[str, Any]) -> bool:
-        return not rpc.get("ok") and int(rpc.get("status") or 0) in (2, 3)
-
-    if at_charger() and not charge_complete():
-        started_op = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Start", {})
-        if is_transport_error(started_op):
-            return started_op
-        settle_start()
-        sync_row()
-        if str(row.get("vacuum_status") or "") == "Error" or run_op() == OP_ERROR:
-            return finish(started_op)
-        if str(row.get("vacuum_status") or "") == "Mapping":
-            return finish(
-                {
-                    "ok": False,
-                    "error": "Vacuum started mapping instead of cleaning",
-                }
-            )
-
-    started = go_cleaning()
+    # Apple Home Start is ChangeToMode Cleaning only. Rooms and Vacuum/Mop
+    # are separate taps. Mapping remaps; Idle is standby/dock; Operational
+    # Start and SelectAreas GenericFailure on the charger.
+    started = vacuum_change_mode(
+        node_id,
+        rvc_ep,
+        RVC_RUN,
+        int(cleaning["mode"]),
+        device_id=device_id,
+        row=row,
+        verify=True,
+    )
+    attempts.append(started)
     if is_transport_error(started):
         return started
-    retries = 2 if charge_complete() else 1
-    for _ in range(retries):
-        if not cleaning_refused(started):
-            break
-        settle_start()
-        started = go_cleaning()
-        if is_transport_error(started):
-            return started
     settle_start()
     sync_row()
-    if (
-        not started.get("ok")
-        and int(started.get("status") or 0) == 2
-        and actively_charging()
-    ):
+    if not started.get("ok") and int(started.get("status") or 0) == 2 and at_charger():
         started = {
             **started,
-            "error": "Vacuum cannot start while charging (generic failure)",
+            "error": "Vacuum refused Matter start from the dock (generic failure)",
         }
     return finish(started)
 

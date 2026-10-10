@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.100] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** now matches Apple Home: **ChangeToMode Cleaning** only. Operational Start, SelectAreas, suction, Mapping, and Idle are not sent on Start. Rooms and Vacuum/Mop apply when those chips are tapped. Charging and Docked both show **Docked**. Mapping is still never sent.
+
 ## [4.0.99] - 2026-10-10
 
 ### Fixed

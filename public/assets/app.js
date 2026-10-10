@@ -4333,7 +4333,7 @@ function homeCommandErrorMessage(err, fallback, heater = false) {
     return err?.message || fallback;
 }
 
-function homeVacuumToggleArea(id, which) {
+async function homeVacuumToggleArea(id, which) {
     const device = homeDeviceRecord(id);
     if (!device) return;
     const areas = Array.isArray(device.areas) ? device.areas : [];
@@ -4362,6 +4362,7 @@ function homeVacuumToggleArea(id, which) {
         const on = key === 'all' ? allOn : selected.includes(Number(key));
         el.classList.toggle('is-on', on);
     });
+    await sendHomeVacuumCommand(id, 'select_areas');
 }
 
 async function sendHomeVacuumCommand(id, command, button) {
@@ -4378,11 +4379,11 @@ async function sendHomeVacuumCommand(id, command, button) {
     const selected = (device.selected_areas || []).map((n) => Number(n));
     const allIds = areas.map((area) => Number(area.id));
     const allOn = !selected.length || allIds.every((aid) => selected.includes(aid));
-    if (cmd === 'start' || cmd === 'mop') {
+    if (cmd === 'select_areas' || cmd === 'rooms') {
         payload.areas = (!areas.length || allOn) ? 'all' : selected;
     }
-    if (cmd === 'mop' || device.vacuum_clean === 'mop' || device.vacuum_clean === 'vacuum_mop') {
-        payload.clean_mode = cmd === 'mop' ? 'mop' : device.vacuum_clean;
+    if (cmd === 'mop' || cmd === 'vacuum' || cmd === 'vacuum_mop') {
+        payload.clean_mode = cmd === 'vacuum_mop' ? 'vacuum_mop' : cmd;
     }
     if (button) button.disabled = true;
     try {
@@ -4390,12 +4391,18 @@ async function sendHomeVacuumCommand(id, command, button) {
         if (!data.ok) throw new Error(data.error || 'Failed');
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
         if (data.vacuum_status && device) device.vacuum_status = data.vacuum_status;
+        if (data.vacuum_clean && device) device.vacuum_clean = data.vacuum_clean;
         const statusEl = document.querySelector(`[data-home-id="${CSS.escape(id)}"] [data-home-vac-status]`);
         if (statusEl && data.vacuum_status) statusEl.textContent = data.vacuum_status;
-        showToast(cmd === 'dock' ? 'Returning to dock' : (cmd === 'pause' ? 'Paused' : 'Vacuum started'), 'success');
+        const toast = cmd === 'dock'
+            ? 'Returning to dock'
+            : (cmd === 'pause' ? 'Paused' : (cmd === 'select_areas' || cmd === 'rooms' || cmd === 'mop' || cmd === 'vacuum' || cmd === 'vacuum_mop' ? '' : 'Vacuum started'));
+        if (toast) showToast(toast, 'success');
         await loadHomeDashboard({ patch: true });
     } catch (err) {
-        showToast(homeCommandErrorMessage(err, 'Vacuum command failed'), 'error');
+        if (cmd !== 'select_areas' && cmd !== 'rooms') {
+            showToast(homeCommandErrorMessage(err, 'Vacuum command failed'), 'error');
+        }
     } finally {
         if (button) button.disabled = false;
     }
@@ -4827,17 +4834,19 @@ function bindHomeDashboard() {
             const card = vacMode.closest('[data-home-id]');
             const id = card?.getAttribute('data-home-id') || '';
             const device = homeDeviceRecord(id);
-            if (device) device.vacuum_clean = vacMode.getAttribute('data-home-vac-mode') || 'vacuum';
+            const mode = vacMode.getAttribute('data-home-vac-mode') || 'vacuum';
+            if (device) device.vacuum_clean = mode;
             card?.querySelectorAll('[data-home-vac-mode]').forEach((el) => {
                 el.classList.toggle('is-active', el.getAttribute('data-home-vac-mode') === device?.vacuum_clean);
             });
+            await sendHomeVacuumCommand(id, mode, vacMode);
             return;
         }
         const vacArea = event.target.closest('[data-home-vac-area]');
         if (vacArea) {
             const card = vacArea.closest('[data-home-id]');
             const id = card?.getAttribute('data-home-id') || '';
-            homeVacuumToggleArea(id, vacArea.getAttribute('data-home-vac-area') || 'all');
+            await homeVacuumToggleArea(id, vacArea.getAttribute('data-home-vac-area') || 'all');
             return;
         }
         const row = event.target.closest('[data-home-id].home-device--toggle');

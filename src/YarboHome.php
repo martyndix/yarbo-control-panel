@@ -1438,7 +1438,7 @@ final class YarboHome
             return false;
         }
         $kind = strtolower(trim((string) $kind));
-        if (in_array($action, ['start', 'dock', 'pause', 'resume', 'mop', 'select_areas'], true)) {
+        if (in_array($action, ['start', 'dock', 'pause', 'resume', 'mop', 'vacuum', 'select_areas'], true)) {
             return $kind === '' || $kind === self::KIND_VACUUM;
         }
         if ($kind === '') {
