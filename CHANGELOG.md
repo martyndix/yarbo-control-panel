@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.87] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** was sending ChangeToMode with a key python-matter-server ignores, so CHIP defaulted **newMode to Idle (0)** — toast `still 0, wanted 1` while Charging. The command now sets `newMode`/`NewMode`/`0` together. All rooms sends every room ID (SwitchBot treats `[]` as no rooms, so Cleaning never starts).
+
 ## [4.0.86] - 2026-10-10
 
 ### Fixed
