@@ -166,7 +166,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 46, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 47, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -192,6 +192,41 @@ def main() -> int:
     charging = {d["id"]: d for d in agent.flatten_nodes({"nodes": [charging_idle]})}.get("40:1") or {}
     if charging.get("vacuum_status") != "Charging":
         raise SystemExit(f"charging idle {charging}")
+    full_charge = vacuum_node()
+    full_charge["attributes"]["1/97/4"] = 0x41
+    full_charge["attributes"]["1/84/1"] = 0
+    full_charge["attributes"]["1/47/14"] = 2
+    full_charge["attributes"]["1/47/12"] = 200
+    full_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [full_charge]})}.get("40:1") or {}
+    if full_row.get("vacuum_status") != "Docked" or full_row.get("on") is True:
+        raise SystemExit(f"charging+full should be Docked, got {full_row}")
+    if full_row.get("vacuum_charge_complete") is not True:
+        raise SystemExit(f"charge complete {full_row}")
+    if full_row.get("vacuum_battery") != 100:
+        raise SystemExit(f"battery {full_row.get('vacuum_battery')}")
+    root_full = vacuum_node()
+    root_full["attributes"]["1/97/4"] = 0x41
+    root_full["attributes"]["0/47/14"] = 2
+    root_full["attributes"]["0/47/12"] = 200
+    root_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [root_full]})}.get("40:1") or {}
+    if root_row.get("vacuum_status") != "Docked" or root_row.get("vacuum_charge_complete") is not True:
+        raise SystemExit(f"root PowerSource full {root_row}")
+    still_charging = vacuum_node()
+    still_charging["attributes"]["1/97/4"] = 0x41
+    still_charging["attributes"]["1/47/14"] = 1
+    still_charging["attributes"]["1/47/12"] = 80
+    still_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [still_charging]})}.get("40:1") or {}
+    if still_row.get("vacuum_status") != "Charging" or still_row.get("vacuum_charge_complete") is True:
+        raise SystemExit(f"still charging {still_row}")
+    if still_row.get("vacuum_battery") != 40:
+        raise SystemExit(f"charging battery {still_row.get('vacuum_battery')}")
+    trickle = vacuum_node()
+    trickle["attributes"]["1/97/4"] = 0x41
+    trickle["attributes"]["1/47/14"] = 1
+    trickle["attributes"]["1/47/12"] = 200
+    trickle_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [trickle]})}.get("40:1") or {}
+    if trickle_row.get("vacuum_status") != "Docked" or trickle_row.get("vacuum_charge_complete") is not True:
+        raise SystemExit(f"100% while Charging should be Docked, got {trickle_row}")
     charging_idle["attributes"]["1/84/1"] = 1
     leaving = {d["id"]: d for d in agent.flatten_nodes({"nodes": [charging_idle]})}.get("40:1") or {}
     if leaving.get("vacuum_status") != "Cleaning" or leaving.get("on") is not True:
@@ -915,6 +950,108 @@ def main() -> int:
     ]
     assert ret_run and all("newMode" in payload and payload.get("newMode") == 1 for payload in ret_run), ret_run
     assert all(payload.get("newMode") != 2 for payload in ret_run), ret_run
+
+    calls.clear()
+    # Charging + PowerSource full: webpage was Charging while the app said
+    # charging complete. Show Docked, skip Operational Start, send Cleaning.
+    full_start_attrs = dict(vacuum_node()["attributes"])
+    full_start_attrs["1/97/4"] = 0x41
+    full_start_attrs["1/84/1"] = 0
+    full_start_attrs["1/47/14"] = 2
+    full_start_attrs["1/47/12"] = 200
+
+    def full_start_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": full_start_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": full_start_attrs}
+        if command == "device_command":
+            if args.get("command_name") == "Start":
+                return {"ok": True, "result": {"status": 0}}
+            apply_change_to_mode(agent, full_start_attrs, args)
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = full_start_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    from_full = agent.dispatch({"op": "command", "id": "40:1", "action": "start", "kind": "vacuum", "areas": "all"})
+    assert from_full.get("ok") is True, from_full
+    assert from_full.get("vacuum_status") == "Cleaning", from_full
+    full_cmds = [args for command, args in calls if command == "device_command"]
+    full_modes = change_to_mode_values(full_cmds, agent)
+    assert not any(c.get("command_name") == "Start" for c in full_cmds), full_cmds
+    assert full_modes == [1], full_modes
+    assert 2 not in full_modes, full_modes
+    assert 0 not in full_modes, full_modes
+    assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in full_cmds), full_cmds
+
+    calls.clear()
+    # Full battery that still refuses Cleaning: Docked, never "while charging".
+    full_fail_attrs = dict(vacuum_node()["attributes"])
+    full_fail_attrs["1/97/4"] = 0x41
+    full_fail_attrs["1/84/1"] = 0
+    full_fail_attrs["1/47/14"] = 2
+    full_fail_attrs["1/47/12"] = 200
+
+    def full_fail_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": full_fail_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": full_fail_attrs}
+        if command == "device_command":
+            if args.get("command_name") == "Start":
+                return {"ok": True, "result": {"status": 0}}
+            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
+                payload = args.get("payload") or {}
+                mode = payload.get("newMode", payload.get("NewMode"))
+                if mode == 1:
+                    return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = full_fail_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    full_fail = agent.dispatch({"op": "command", "id": "40:1", "action": "start", "kind": "vacuum", "areas": "all"})
+    assert full_fail.get("ok") is False, full_fail
+    assert full_fail.get("vacuum_status") == "Docked", full_fail
+    err = str(full_fail.get("error") or "").lower()
+    assert "while charging" not in err, full_fail
+    full_fail_cmds = [args for command, args in calls if command == "device_command"]
+    full_fail_modes = change_to_mode_values(full_fail_cmds, agent)
+    assert not any(c.get("command_name") == "Start" for c in full_fail_cmds), full_fail_cmds
+    assert full_fail_modes == [1, 1, 1], full_fail_modes
+    assert 2 not in full_fail_modes, full_fail_modes
+    assert 0 not in full_fail_modes, full_fail_modes
+
+    agent._live_devices = [{
+        "id": "40:1",
+        "node_id": 40,
+        "kind": "vacuum",
+        "vacuum_op": 0x41,
+        "vacuum_status": "Charging",
+        "vacuum_run_mode": 0,
+        "run_modes": [
+            {"label": "Idle", "mode": 0, "tags": [0x4000]},
+            {"label": "Cleaning", "mode": 1, "tags": [0x4001]},
+        ],
+    }]
+    agent.apply_attribute_event([40, "0/47/14", 2])
+    live_full = agent.live_row("40:1") or {}
+    assert live_full.get("vacuum_charge_complete") is True, live_full
+    assert live_full.get("vacuum_status") == "Docked", live_full
+    agent.apply_attribute_event([40, "1/97/4", 0x41])
+    live_op = agent.live_row("40:1") or {}
+    assert live_op.get("vacuum_status") == "Docked", live_op
+    agent.apply_attribute_event([40, "1/47/14", 1])
+    agent.apply_attribute_event([40, "1/47/12", 80])
+    live_charge = agent.live_row("40:1") or {}
+    assert live_charge.get("vacuum_charge_complete") is not True, live_charge
+    assert live_charge.get("vacuum_status") == "Charging", live_charge
+    assert live_charge.get("vacuum_battery") == 40, live_charge
 
     print("test_matter_vacuum_command.py ok")
     return 0

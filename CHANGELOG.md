@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.99] - 2026-10-10
+
+### Fixed
+- Matter vacuum tiles showed **Charging** after the SwitchBot app said charging complete, and Start toasted **Vacuum cannot start while charging**. Matter OperationalState often stays Charging (0x41) when the battery is full. The panel now reads PowerSource charge/percent, shows **Docked** when charge is complete, skips Operational Start, retries Cleaning, and does not call a full battery “while charging”. Mapping is still never sent.
+
 ## [4.0.98] - 2026-10-10
 
 ### Fixed

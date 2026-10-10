@@ -18,12 +18,17 @@ final class YarboMatterFabric
     private const RVC_CLEAN = 0x0055;
     private const RVC_OPERATIONAL = 0x0061;
     private const SERVICE_AREA = 0x0150;
+    private const POWER_SOURCE = 0x002F;
     private const ATTR_SUPPORTED_MODES = 0;
     private const ATTR_CURRENT_MODE = 1;
     /** Operational State cluster: PhaseList=0 … OperationalState=4. */
     private const ATTR_OPERATIONAL_STATE = 4;
     private const ATTR_SUPPORTED_AREAS = 0;
     private const ATTR_SELECTED_AREAS = 2;
+    private const ATTR_BAT_PERCENT_REMAINING = 12;
+    private const ATTR_BAT_CHARGE_STATE = 14;
+    private const BAT_CHARGE_IS_AT_FULL_CHARGE = 2;
+    private const BAT_CHARGE_IS_NOT_CHARGING = 3;
     private const RUN_IDLE = 0x4000;
     private const RUN_CLEANING = 0x4001;
     private const RUN_MAPPING = 0x4002;
@@ -708,7 +713,8 @@ final class YarboMatterFabric
                 $runTags[] = (int) $tag;
             }
         }
-        $status = self::vacuumStatusLabel($op, $runTags);
+        $battery = self::batteryFromNode($attributes, $endpoint);
+        $status = self::vacuumStatusLabel($op, $runTags, $battery['complete']);
         $areas = [];
         $selectedRaw = self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SELECTED_AREAS);
         foreach (self::endpointIds($attributes) as $areaEp) {
@@ -735,6 +741,8 @@ final class YarboMatterFabric
             'vacuum_status' => $status,
             'vacuum_clean' => self::vacuumCleanKind($cleanOption),
             'vacuum_op' => $op,
+            'vacuum_battery' => $battery['percent'],
+            'vacuum_charge_complete' => $battery['complete'],
             'can_vacuum' => true,
             'can_mop' => $canMop,
             'can_vacuum_mop' => $canVacuumMop,
@@ -749,7 +757,7 @@ final class YarboMatterFabric
     /**
      * @param list<int> $runTags
      */
-    private static function vacuumStatusLabel(?int $op, array $runTags): string
+    private static function vacuumStatusLabel(?int $op, array $runTags, bool $chargeComplete = false): string
     {
         if ($op === self::OP_ERROR) {
             return 'Error';
@@ -760,7 +768,7 @@ final class YarboMatterFabric
         if ($op === self::OP_SEEKING) {
             return 'Returning';
         }
-        if ($op === self::OP_DOCKED) {
+        if ($op === self::OP_DOCKED || ($op === self::OP_CHARGING && $chargeComplete)) {
             return 'Docked';
         }
         if (in_array(self::RUN_MAPPING, $runTags, true)) {
@@ -774,6 +782,40 @@ final class YarboMatterFabric
         }
 
         return 'Idle';
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array{percent: ?int, complete: bool}
+     */
+    private static function batteryFromNode(array $attributes, int $preferred): array
+    {
+        $percent = null;
+        $chargeState = null;
+        $endpoints = [];
+        foreach (array_merge([$preferred, 0, 1, 2, 3], self::endpointIds($attributes)) as $ep) {
+            if (!in_array($ep, $endpoints, true)) {
+                $endpoints[] = $ep;
+            }
+        }
+        foreach ($endpoints as $ep) {
+            $rawState = self::attrNum($attributes, $ep, self::POWER_SOURCE, self::ATTR_BAT_CHARGE_STATE);
+            $rawPct = self::attrNum($attributes, $ep, self::POWER_SOURCE, self::ATTR_BAT_PERCENT_REMAINING);
+            if ($rawState !== null && $chargeState === null) {
+                $chargeState = (int) $rawState;
+            }
+            if ($rawPct !== null && $percent === null) {
+                $percent = max(0, min(100, (int) round(((int) $rawPct) / 2)));
+            }
+            if ($chargeState !== null || $percent !== null) {
+                break;
+            }
+        }
+        $complete = $chargeState === self::BAT_CHARGE_IS_AT_FULL_CHARGE
+            || $chargeState === self::BAT_CHARGE_IS_NOT_CHARGING
+            || ($percent !== null && $percent >= 100);
+
+        return ['percent' => $percent, 'complete' => $complete];
     }
 
     /**
