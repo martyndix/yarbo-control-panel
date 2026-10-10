@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.98] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** was still sending **Mapping** to leave the dock, so Alejandro started a map job (toast: started mapping instead of cleaning). Dock/GoHome works. Start no longer sends Mapping. From the charger it tries Operational **Start**, then ChangeToMode Cleaning. Idle is not sent.
+
 ## [4.0.97] - 2026-10-10
 
 ### Fixed
