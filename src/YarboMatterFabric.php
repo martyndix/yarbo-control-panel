@@ -760,9 +760,6 @@ final class YarboMatterFabric
         if ($op === self::OP_SEEKING) {
             return 'Returning';
         }
-        if ($op === self::OP_CHARGING) {
-            return 'Charging';
-        }
         if ($op === self::OP_DOCKED) {
             return 'Docked';
         }
@@ -771,6 +768,9 @@ final class YarboMatterFabric
         }
         if ($op === self::OP_RUNNING || in_array(self::RUN_CLEANING, $runTags, true)) {
             return 'Cleaning';
+        }
+        if ($op === self::OP_CHARGING) {
+            return 'Charging';
         }
 
         return 'Idle';

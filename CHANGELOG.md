@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.86] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** from the charger selects rooms then ChangeToMode Cleaning (Home Assistant order). SwitchBot Cleaning is InvalidInMode without SelectAreas, which showed **Vacuum did not change mode** while Charging. Charging + Cleaning is treated as started; Docked + Cleaning is still stuck.
+
 ## [4.0.85] - 2026-10-10
 
 ### Fixed
