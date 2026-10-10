@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.104] - 2026-10-10
+
+### Changed
+- Home Automations lists devices by **room** under Lights / Heaters / Sensors (and the rest), and each chip shows the **product** — UniFi Floodlight, USP Sensor, Mill heater, Hue, and so on — so two devices can both be named Light without putting the room in brackets.
+
 ## [4.0.103] - 2026-10-10
 
 ### Fixed

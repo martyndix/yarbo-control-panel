@@ -5294,7 +5294,7 @@ function homeAutoAllDevices() {
     ];
     const overlay = ['dimmable', 'colorable', 'color_hs', 'color_xy', 'color_ct', 'color_hex', 'color_temp',
         'color_temp_min', 'color_temp_max', 'brightness', 'kind', 'heating_setpoint', 'heating_min', 'heating_max',
-        'has_thermostat', 'product', 'name'];
+        'has_thermostat', 'product', 'vendor', 'source', 'name', 'room', 'room_id', 'type_label'];
     lists.forEach((list) => {
         list.forEach((d) => {
             if (!d || !d.id) return;
@@ -6089,9 +6089,8 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
             </div>`;
         }
         const d = homeAutoDeviceById(trigger.id);
-        const name = d?.name || trigger.id;
         return `<div class="auto-chip" data-auto-when ${iAttr}>
-            ${escapeHtml(name)}
+            ${homeAutoChipNameHtml(d || { name: trigger.id })}
             <select data-auto-event>
                 <option value="temp_above" ${trigger.metric === 'temperature' && trigger.op === 'above' ? 'selected' : ''}>temperature above</option>
                 <option value="temp_below" ${trigger.metric === 'temperature' && trigger.op === 'below' ? 'selected' : ''}>temperature below</option>
@@ -6100,15 +6099,15 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
             </select>
             <input type="number" data-auto-thresh value="${escapeHtml(String(trigger.value ?? 22))}" step="0.5">
             <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
+            ${homeAutoChipMetaHtml(d)}
         </div>`;
     }
     const d = homeAutoDeviceById(trigger.id);
-    const name = d?.name || trigger.id;
     const events = homeAutoWhenEvents(d || { id: trigger.id, kind: 'light' });
     const eventName = trigger.event || 'turns_on';
     const dur = homeAutoDurationEvent(eventName) ? homeAutoDurationParts(trigger.for_sec || 300) : null;
     return `<div class="auto-chip" data-auto-when ${iAttr}>
-        ${escapeHtml(name)}
+        ${homeAutoChipNameHtml(d || { name: trigger.id })}
         <select data-auto-event>${events.map(([v, label]) =>
             `<option value="${v}" ${v === eventName ? 'selected' : ''}>${label}</option>`
         ).join('')}</select>
@@ -6119,6 +6118,7 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
                 <option value="3600" ${dur.unit === 3600 ? 'selected' : ''}>hr</option>
             </select>` : ''}
         <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
+        ${homeAutoChipMetaHtml(d)}
     </div>`;
 }
 
@@ -6151,12 +6151,13 @@ function homeAutoThenChipHtml(action, index) {
     const cmd = action.command || (isScene ? 'run' : 'on');
     if (cmd === 'brightness' && !cmds.some(([v]) => v === 'brightness')) cmds.push(['brightness', 'Brightness']);
     return `<div class="auto-chip${isScene ? ' auto-chip--scene' : ''}" draggable="true" data-auto-then="${index}">
-        ${escapeHtml(d.name || action.id)}
+        ${homeAutoChipNameHtml(d)}
         <select data-auto-cmd>${cmds.map(([v, label]) =>
             `<option value="${v}" ${v === cmd ? 'selected' : ''}>${label}</option>`
         ).join('')}</select>
         ${homeAutoThenParamsHtml(d, action, cmd)}
         <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
+        ${isScene ? '' : homeAutoChipMetaHtml(d)}
     </div>`;
 }
 
@@ -6215,7 +6216,7 @@ function homeAutoIfChipHtml(cond, index) {
     const groups = homeAutoDeviceSelectGroups(devices);
     const opts = groups.map((group) =>
         `<optgroup label="${escapeHtml(group.label)}">${group.items.map((d) =>
-            `<option value="${escapeHtml(d.id)}" ${d.id === cond.id ? 'selected' : ''}>${escapeHtml(d.name || d.id)}</option>`
+            `<option value="${escapeHtml(d.id)}" ${d.id === cond.id ? 'selected' : ''}>${escapeHtml(homeAutoDeviceOptionLabel(d))}</option>`
         ).join('')}</optgroup>`
     ).join('');
     const selected = homeAutoDeviceById(cond.id) || devices[0];
@@ -6266,8 +6267,7 @@ function homeAutoDeviceSelectGroups(devices) {
     order.forEach(([id]) => {
         buckets[id] = [];
     });
-    const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
-    [...devices].sort(byName).forEach((d) => {
+    homeAutoSortDevices(devices).forEach((d) => {
         const gid = homeAutoDeviceGroupId(d);
         (buckets[gid] || buckets.other).push(d);
     });
@@ -6280,12 +6280,21 @@ function renderHomeAutoTray() {
     const tray = document.getElementById('auto-tray');
     if (!tray) return;
     const groups = homeAutoTrayGroups(homeAutoAllDevices(), homeDash.scenes || []);
-    tray.innerHTML = groups.map((group) => (
-        `<div class="auto-tray-group" data-auto-group="${escapeHtml(group.id)}">
+    tray.innerHTML = groups.map((group) => {
+        const rooms = Array.isArray(group.rooms) ? group.rooms : [];
+        const body = rooms.length
+            ? rooms.map((room) => {
+                const heading = room.label
+                    ? `<h5 class="auto-tray-room">${escapeHtml(room.label)}</h5>`
+                    : '';
+                return `${heading}<div class="auto-tray-chips">${(room.chips || []).join('')}</div>`;
+            }).join('')
+            : `<div class="auto-tray-chips">${(group.chips || []).join('')}</div>`;
+        return `<div class="auto-tray-group" data-auto-group="${escapeHtml(group.id)}">
             <h4 class="auto-tray-label">${escapeHtml(group.label)}</h4>
-            <div class="auto-tray-chips">${group.chips.join('')}</div>
-        </div>`
-    )).join('');
+            ${body}
+        </div>`;
+    }).join('');
 }
 
 function homeAutoDeviceGroupId(d) {
@@ -6325,10 +6334,120 @@ function homeAutoDeviceGroupId(d) {
     }
 }
 
-function homeAutoTrayChip(kind, id, name, extraClass) {
+function homeAutoTrayChip(kind, id, name, extraClass, meta) {
     const cls = extraClass ? `auto-chip ${extraClass}` : 'auto-chip';
     const idAttr = id ? ` data-id="${escapeHtml(id)}"` : '';
-    return `<button type="button" class="${cls}" draggable="true" data-auto-tray="${escapeHtml(kind)}"${idAttr}>${escapeHtml(name)}</button>`;
+    const label = meta ? `${name}, ${meta}` : name;
+    const metaHtml = meta ? `<span class="auto-chip-meta">${escapeHtml(meta)}</span>` : '';
+    return `<button type="button" class="${cls}" draggable="true" data-auto-tray="${escapeHtml(kind)}"${idAttr} aria-label="${escapeHtml(label)}"><span class="auto-chip-name">${escapeHtml(name)}</span>${metaHtml}</button>`;
+}
+
+function homeAutoChipNameHtml(d) {
+    return `<span class="auto-chip-name">${escapeHtml(d?.name || d?.id || 'Device')}</span>`;
+}
+
+function homeAutoChipMetaHtml(d, includeRoom = true) {
+    const meta = homeAutoDeviceMeta(d, includeRoom);
+    return meta ? `<span class="auto-chip-meta">${escapeHtml(meta)}</span>` : '';
+}
+
+function homeAutoDeviceOptionLabel(d) {
+    const name = d?.name || d?.id || 'Device';
+    const meta = homeAutoDeviceMeta(d, true);
+    return meta ? `${name} · ${meta}` : name;
+}
+
+function homeAutoDeviceMeta(d, includeRoom = true) {
+    const parts = [];
+    if (includeRoom) {
+        const room = String(d?.room || '').trim();
+        if (room) parts.push(room);
+    }
+    const type = homeAutoTypeLabel(d);
+    if (type) parts.push(type);
+    return parts.join(' · ');
+}
+
+function homeAutoTypeLabel(d) {
+    if (!d) return '';
+    const preset = String(d.type_label || '').trim();
+    if (preset) return preset;
+    const id = String(d.id || '');
+    const source = String(d.source || '').toLowerCase();
+    const product = String(d.product || '').trim();
+    const vendor = String(d.vendor || '').trim();
+    const kind = String(d.kind || '').toLowerCase();
+    const name = String(d.name || '').trim();
+    const unifi = homeIsUnifi(d) || source === 'unifi' || id.startsWith('unifi:');
+    if (unifi) {
+        const blob = `${product} ${id}`.toLowerCase();
+        if (blob.includes('floodlight motion') || blob.includes(':pir-') || id.includes('pir-')) return 'Floodlight motion';
+        if (product === 'Door position sensor' || blob.includes(':dps-') || id.includes('dps-')) return 'Door sensor';
+        if (/\b(usp|ufp-?sense|up\s*sense|up-sense)\b/i.test(product)) return 'USP Sensor';
+        if (kind === 'light' || /flood|ufl/i.test(product)) return 'UniFi Floodlight';
+        if (kind === 'relay' || /ul-?relay/i.test(product)) return 'UniFi Relay';
+        if (kind === 'hub' || /ua-?hub|gate.?hub/i.test(product)) return 'UniFi Hub';
+        if (kind === 'door') return 'UniFi Door';
+        if (kind === 'camera') {
+            if (product && !/protect camera/i.test(product)) return `UniFi ${product}`;
+            return 'UniFi Camera';
+        }
+        if (kind === 'sensor') {
+            if (product && !/protect sensor/i.test(product)) return product;
+            return 'UniFi Sensor';
+        }
+        return product || 'UniFi';
+    }
+    if (product && product.toLowerCase() !== name.toLowerCase()) return product;
+    if (vendor && vendor.toLowerCase() !== name.toLowerCase()) return vendor;
+    if (kind === 'heater') return 'Heater';
+    if (kind === 'vacuum') return 'Vacuum';
+    if (kind === 'plug') return 'Plug';
+    if (kind === 'switch') return 'Switch';
+    return '';
+}
+
+function homeAutoRoomRank(d) {
+    const rooms = homeDash.rooms || [];
+    const id = String(d?.room_id || '');
+    if (id) {
+        const idx = rooms.findIndex((row) => row && row.id === id);
+        if (idx >= 0) return idx;
+    }
+    const name = String(d?.room || '').trim();
+    if (name) {
+        const idx = rooms.findIndex((row) => row && String(row.name || '') === name);
+        if (idx >= 0) return idx;
+        return 1000;
+    }
+    return 2000;
+}
+
+function homeAutoSortDevices(devices) {
+    const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+    return [...devices].sort((a, b) => {
+        const rank = homeAutoRoomRank(a) - homeAutoRoomRank(b);
+        if (rank) return rank;
+        const rooms = String(a.room || '').localeCompare(String(b.room || ''), undefined, { sensitivity: 'base' });
+        if (rooms) return rooms;
+        return byName(a, b);
+    });
+}
+
+function homeAutoTrayDeviceRooms(devices) {
+    const hasNamedRoom = devices.some((d) => String(d?.room || '').trim());
+    const rooms = [];
+    homeAutoSortDevices(devices).forEach((d) => {
+        const named = String(d?.room || '').trim();
+        const label = named || (hasNamedRoom ? 'No room' : '');
+        if (!rooms.length || rooms[rooms.length - 1].label !== label) {
+            rooms.push({ label, chips: [] });
+        }
+        rooms[rooms.length - 1].chips.push(
+            homeAutoTrayChip('device', d.id, d.name || d.id, 'auto-chip--device', homeAutoTypeLabel(d))
+        );
+    });
+    return rooms;
 }
 
 function homeAutoTrayGroups(devices, scenes) {
@@ -6380,16 +6499,31 @@ function homeAutoTrayGroups(devices, scenes) {
         );
     }
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
-    [...devices].sort(byName).forEach((d) => {
+    const deviceBuckets = {};
+    order.forEach(([id]) => {
+        deviceBuckets[id] = [];
+    });
+    homeAutoSortDevices(devices).forEach((d) => {
         const gid = homeAutoDeviceGroupId(d);
-        (buckets[gid] || buckets.other).push(homeAutoTrayChip('device', d.id, d.name || d.id));
+        (deviceBuckets[gid] || deviceBuckets.other).push(d);
+    });
+    Object.entries(deviceBuckets).forEach(([gid, list]) => {
+        if (!list.length) return;
+        const rooms = homeAutoTrayDeviceRooms(list);
+        buckets[gid] = rooms.flatMap((room) => room.chips);
+        buckets[`${gid}__rooms`] = rooms;
     });
     [...scenes].sort(byName).forEach((s) => {
         buckets.scenes.push(homeAutoTrayChip('scene', s.id, s.name || 'Scene'));
     });
     return order
         .filter(([id]) => (buckets[id] || []).length)
-        .map(([id, label]) => ({ id, label, chips: buckets[id] }));
+        .map(([id, label]) => ({
+            id,
+            label,
+            chips: buckets[id],
+            rooms: buckets[`${id}__rooms`] || null,
+        }));
 }
 
 function homeAutoApplyWhen(trigger) {

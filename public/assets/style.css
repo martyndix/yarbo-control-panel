@@ -4282,6 +4282,35 @@ body.home-is-reordering {
     -webkit-appearance: none;
 }
 
+.auto-chip--device {
+    align-items: flex-start;
+    border-radius: 12px;
+    line-height: 1.2;
+}
+
+.auto-chip-name {
+    font-weight: 600;
+}
+
+.auto-chip-meta {
+    flex-basis: 100%;
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.25;
+}
+
+.auto-tray-room {
+    margin: 0.4rem 0 0.15rem;
+    font-size: 0.78rem;
+    font-weight: 650;
+    color: var(--text);
+}
+
+.auto-tray-group .auto-tray-room:first-of-type {
+    margin-top: 0.05rem;
+}
+
 .auto-chip select,
 .auto-chip input[type="number"],
 .auto-chip input[type="time"],

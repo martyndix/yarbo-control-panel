@@ -1555,6 +1555,7 @@ final class YarboHome
                 'name' => (string) ($device['name'] ?? $id),
                 'kind' => (string) ($device['kind'] ?? self::KIND_LIGHT),
                 'source' => (string) ($device['source'] ?? ''),
+                'vendor' => (string) ($device['vendor'] ?? ''),
                 'product' => (string) ($device['product'] ?? ''),
                 'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
                 'open' => array_key_exists('open', $device) && $device['open'] !== null ? (bool) $device['open'] : null,
@@ -1616,6 +1617,17 @@ final class YarboHome
      */
     private function namedAutomationDevices(array $store): array
     {
+        $roomsById = [];
+        foreach ($store['room_defs'] ?? [] as $def) {
+            if (!is_array($def)) {
+                continue;
+            }
+            $roomId = (string) ($def['id'] ?? '');
+            $roomName = (string) ($def['name'] ?? '');
+            if ($roomId !== '' && $roomName !== '') {
+                $roomsById[$roomId] = $roomName;
+            }
+        }
         $out = [];
         foreach ($this->automationDevices() as $row) {
             if (!is_array($row)) {
@@ -1626,10 +1638,90 @@ final class YarboHome
                 continue;
             }
             $row['name'] = (string) ($store['names'][$id] ?? $row['name'] ?? $id);
+            $roomId = (string) ($store['rooms'][$id] ?? '');
+            $roomName = $roomsById[$roomId] ?? '';
+            $row['room_id'] = $roomName !== '' ? $roomId : '';
+            $row['room'] = $roomName;
+            $row['type_label'] = self::automationTypeLabel($row);
             $out[] = $row;
         }
 
         return $out;
+    }
+
+    /**
+     * Product / model line for Automations (not the custom name).
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function automationTypeLabel(array $row): string
+    {
+        $id = (string) ($row['id'] ?? '');
+        $source = strtolower((string) ($row['source'] ?? ''));
+        $product = trim((string) ($row['product'] ?? ''));
+        $vendor = trim((string) ($row['vendor'] ?? ''));
+        $kind = strtolower(trim((string) ($row['kind'] ?? '')));
+        $name = trim((string) ($row['name'] ?? ''));
+        $isUnifi = YarboUnifi::isHomeId($id) || $source === YarboUnifi::SOURCE;
+        if ($isUnifi) {
+            return self::unifiAutomationTypeLabel($kind, $product, $id);
+        }
+        if ($product !== '' && strcasecmp($product, $name) !== 0) {
+            return $product;
+        }
+        if ($vendor !== '' && strcasecmp($vendor, $name) !== 0) {
+            return $vendor;
+        }
+
+        return match ($kind) {
+            self::KIND_HEATER => 'Heater',
+            self::KIND_VACUUM => 'Vacuum',
+            self::KIND_PLUG => 'Plug',
+            self::KIND_SWITCH => 'Switch',
+            default => '',
+        };
+    }
+
+    private static function unifiAutomationTypeLabel(string $kind, string $product, string $id): string
+    {
+        $blob = strtolower($product . ' ' . $id);
+        if (str_contains($blob, 'floodlight motion') || str_contains($blob, ':pir-') || str_contains($id, 'pir-')) {
+            return 'Floodlight motion';
+        }
+        if ($product === 'Door position sensor' || str_contains($blob, ':dps-') || str_contains($id, 'dps-')) {
+            return 'Door sensor';
+        }
+        if (preg_match('/\b(usp|ufp-?sense|up\s*sense|up-sense)\b/i', $product) === 1) {
+            return 'USP Sensor';
+        }
+        if ($kind === 'light' || preg_match('/flood|ufl/i', $product) === 1) {
+            return 'UniFi Floodlight';
+        }
+        if ($kind === 'relay' || preg_match('/ul-?relay/i', $product) === 1) {
+            return 'UniFi Relay';
+        }
+        if ($kind === 'hub' || preg_match('/ua-?hub|gate.?hub/i', $product) === 1) {
+            return 'UniFi Hub';
+        }
+        if ($kind === 'door') {
+            return 'UniFi Door';
+        }
+        if ($kind === 'camera') {
+            if ($product !== '' && preg_match('/protect camera/i', $product) !== 1) {
+                return 'UniFi ' . $product;
+            }
+
+            return 'UniFi Camera';
+        }
+        if ($kind === 'sensor') {
+            if ($product !== '' && preg_match('/protect sensor/i', $product) !== 1) {
+                return $product;
+            }
+
+            return 'UniFi Sensor';
+        }
+
+        return $product !== '' ? $product : 'UniFi';
     }
 
     /**
