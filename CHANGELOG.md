@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.90] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** on SwitchBot **K11+** (Alejandro) showed **Returning** with toast `still 0, wanted 1`. Clearing Error sent **Stop** (SeekingCharger) and ChangeToMode aliases without `newMode` encode Idle 0, which undoes Cleaning. Start now sends only Home Assistant’s `{"newMode": n}` / `{"newAreas": ids}`. Stop is not used. Mapping is still never sent (**S10** / Martynas).
+
 ## [4.0.89] - 2026-10-10
 
 ### Fixed

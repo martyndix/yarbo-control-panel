@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 37
+AGENT_VERSION = 38
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3862,16 +3862,11 @@ def vacuum_change_mode(
 ) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not set vacuum mode"}
     # CHIP ChangeToMode.newMode defaults to 0 (Idle). Home Assistant sends only
-    # newMode. Extra keys in one blob can confuse the stack; try aliases one at
-    # a time if the first payload does not stick.
+    # {"newMode": n}. Aliases without that field (NewMode, "0") encode Idle and
+    # undo Cleaning — toast still 0, wanted 1. Never send those.
     key = "vacuum_run_mode" if cluster == RVC_RUN else "vacuum_clean_mode"
     mode_n = int(mode)
-    payloads: list[dict[str, Any]] = [
-        {"newMode": mode_n},
-        {"NewMode": mode_n},
-        {"new_mode": mode_n},
-        {"0": mode_n},
-    ]
+    payloads: list[dict[str, Any]] = [{"newMode": mode_n}]
 
     def current_mode() -> int | None:
         try:
@@ -3915,12 +3910,7 @@ def vacuum_change_mode(
 def vacuum_select_areas(node_id: int, endpoint: int, areas: list[int]) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not select rooms"}
     ids = [int(item) for item in areas]
-    payloads: list[dict[str, Any]] = [
-        {"newAreas": ids},
-        {"NewAreas": ids},
-        {"new_areas": ids},
-        {"0": ids},
-    ]
+    payloads: list[dict[str, Any]] = [{"newAreas": ids}]
     for payload in payloads:
         last = vacuum_rpc_command(node_id, endpoint, SERVICE_AREA, "SelectAreas", payload)
         if last.get("ok") or is_transport_error(last) or is_unsupported_cluster(last):
@@ -4184,6 +4174,15 @@ def set_vacuum_command(
             }
         if running:
             return {**(rpc or {"ok": True}), "ok": True, "on": True, "vacuum_status": status, **base}
+        if status == "Returning" or run_op() == OP_SEEKING:
+            detail = str((rpc or {}).get("error") or "").strip()
+            return {
+                "ok": False,
+                "on": False,
+                "vacuum_status": "Returning",
+                "error": f"Vacuum did not start ({detail})" if detail else "Vacuum is returning to the dock",
+                **base,
+            }
         if stuck_on_dock() or status == "Charging" or run_op() == OP_CHARGING:
             detail = str((rpc or {}).get("error") or "").strip()
             return {
@@ -4233,32 +4232,6 @@ def set_vacuum_command(
     cleaning = pick_cleaning_run_mode(run_modes)
     if cleaning is None:
         return {"ok": False, "error": "This vacuum has no Cleaning mode"}
-
-    def in_error() -> bool:
-        return run_op() == OP_ERROR or str(row.get("vacuum_status") or "") == "Error"
-
-    def clear_error() -> dict[str, Any] | None:
-        # Resume from Charging/Idle is CommandInvalidInState / UnableToStartOrResume
-        # on RVC (Alejandro K11+ showed Error and did not move). Stop + Idle clears it.
-        if not in_error():
-            return None
-        stop = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Stop", {})
-        if is_transport_error(stop):
-            return stop
-        idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
-        if idle is not None:
-            idle_rpc = vacuum_change_mode(
-                node_id, rvc_ep, RVC_RUN, int(idle["mode"]), device_id=device_id, row=row, verify=False
-            )
-            if is_transport_error(idle_rpc):
-                return idle_rpc
-        settle_mode()
-        sync_row()
-        return None
-
-    cleared = clear_error()
-    if cleared is not None:
-        return cleared
 
     def drop_to_idle() -> dict[str, Any] | None:
         # SwitchBot S10/K11+ have no DirectModeChange: same-mode while docked is a

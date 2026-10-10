@@ -146,7 +146,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 37, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 38, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -184,6 +184,12 @@ def main() -> int:
         raise SystemExit(f"error {errored}")
     if "invalid" not in str(errored.get("vacuum_error") or "").lower():
         raise SystemExit(f"error text {errored.get('vacuum_error')}")
+    returning_node = vacuum_node()
+    returning_node["attributes"]["1/97/4"] = 0x40
+    returning_node["attributes"]["1/84/1"] = 0
+    returning = {d["id"]: d for d in agent.flatten_nodes({"nodes": [returning_node]})}.get("40:1") or {}
+    if returning.get("vacuum_status") != "Returning" or returning.get("on") is True:
+        raise SystemExit(f"returning {returning}")
     s10 = {d["id"]: d for d in agent.flatten_nodes({"nodes": [s10_node()]})}.get("50:1") or {}
     if s10.get("kind") != "vacuum":
         raise SystemExit(f"s10 kind {s10}")
@@ -578,7 +584,13 @@ def main() -> int:
     ]
     assert 1 in run_modes_sent, run_modes_sent
     assert 2 not in run_modes_sent, run_modes_sent
+    assert all(
+        "newMode" in (c.get("payload") or {})
+        for c in k11_cmds
+        if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+    ), k11_cmds
     assert not any(c.get("command_name") == "Resume" for c in k11_cmds), k11_cmds
+    assert not any(c.get("command_name") == "Stop" for c in k11_cmds), k11_cmds
     assert not any(command == "write_attribute" for command, _args in calls), calls
     assert not any(c.get("cluster_id") == agent.ON_OFF for c in k11_cmds), k11_cmds
     assert not any(c.get("command_name") == "Start" for c in k11_cmds), k11_cmds
@@ -597,12 +609,8 @@ def main() -> int:
         if command == "read_attribute":
             return {"ok": True, "result": err_attrs}
         if command == "device_command":
-            if args.get("command_name") == "Stop":
-                err_attrs["1/97/4"] = 0x41
-                err_attrs["1/97/5"] = 0
-                return {"ok": True, "result": {"status": 0}}
-            if args.get("command_name") == "Resume":
-                err_attrs["1/97/4"] = 3
+            if args.get("command_name") in ("Stop", "Resume"):
+                err_attrs["1/97/4"] = 0x40
                 return {"ok": True, "result": {"status": 0}}
             apply_change_to_mode(agent, err_attrs, args, keep_charging=True)
             apply_select_areas(agent, err_attrs, args)
@@ -619,10 +627,59 @@ def main() -> int:
         "areas": [3],
     })
     err_cmds = [args for command, args in calls if command == "device_command"]
-    assert any(c.get("command_name") == "Stop" for c in err_cmds), err_cmds
+    assert not any(c.get("command_name") == "Stop" for c in err_cmds), err_cmds
     assert not any(c.get("command_name") == "Resume" for c in err_cmds), err_cmds
     assert from_error.get("vacuum_status") != "Error", from_error
     assert from_error.get("ok") is True, from_error
+
+    calls.clear()
+    ret_attrs = dict(vacuum_node()["attributes"])
+    ret_attrs["1/97/4"] = 0x40
+    ret_attrs["1/84/1"] = 0
+
+    def k11_returning_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": ret_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": ret_attrs}
+        if command == "device_command":
+            apply_select_areas(agent, ret_attrs, args)
+            if args.get("command_name") in ("Stop", "GoHome"):
+                ret_attrs["1/97/4"] = 0x40
+                return {"ok": True, "result": {"status": 0}}
+            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
+                payload = args.get("payload") or {}
+                if "newMode" not in payload:
+                    ret_attrs["1/84/1"] = 0
+                    return {"ok": True, "result": {"status": 0}}
+                return {"ok": True, "result": {"status": 0}}
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = k11_returning_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    from_return = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "areas": [3],
+    })
+    assert from_return.get("ok") is False, from_return
+    assert from_return.get("vacuum_status") == "Returning", from_return
+    ret_cmds = [args for command, args in calls if command == "device_command"]
+    assert not any(c.get("command_name") == "Stop" for c in ret_cmds), ret_cmds
+    assert not any(c.get("command_name") == "GoHome" for c in ret_cmds), ret_cmds
+    assert not any(c.get("command_name") == "Resume" for c in ret_cmds), ret_cmds
+    ret_run = [
+        c.get("payload") or {}
+        for c in ret_cmds
+        if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+    ]
+    assert ret_run and all("newMode" in payload and payload.get("newMode") == 1 for payload in ret_run), ret_run
+    assert all(payload.get("newMode") != 2 for payload in ret_run), ret_run
 
     print("test_matter_vacuum_command.py ok")
     return 0
