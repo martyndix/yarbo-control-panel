@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 38
+AGENT_VERSION = 39
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3819,6 +3819,17 @@ def mode_command_status(result: Any) -> int:
     return vacuum_response_status(result)
 
 
+def vacuum_command_status_label(name: str, status: int) -> str:
+    code = int(status)
+    if name == "ChangeToMode":
+        labels = {1: "unsupported mode", 2: "generic failure", 3: "invalid in this mode"}
+    elif name == "SelectAreas":
+        labels = {1: "unsupported room", 2: "invalid in this mode", 3: "invalid rooms"}
+    else:
+        labels = {1: "unable to start", 2: "unable to complete", 3: "invalid in this state"}
+    return labels.get(code) or str(code)
+
+
 def vacuum_rpc_command(
     node_id: int,
     endpoint: int,
@@ -3844,7 +3855,8 @@ def vacuum_rpc_command(
             return rpc
         status = vacuum_response_status(rpc.get("result"))
         if status:
-            return {"ok": False, "error": f"Vacuum rejected {name} ({status})", "status": status}
+            label = vacuum_command_status_label(name, status)
+            return {"ok": False, "error": f"Vacuum rejected {name} ({label})", "status": status}
         return {"ok": True}
 
     return command_with_reconnect(node_id, send)
@@ -4286,6 +4298,37 @@ def set_vacuum_command(
             sync_row()
         return None
 
+    def set_suction_mode() -> dict[str, Any] | None:
+        # K11+ Clean Mode is suction (Quick/Auto/Deep), not vacuum/mop. Hubitat
+        # can ChangeToMode that cluster; Run Cleaning from Charging returns
+        # GenericFailure (2) if suction is not set.
+        if want_clean in ("mop", "vacuum_mop", "both"):
+            return None
+        option = pick_mode(
+            clean_modes,
+            (CLEAN_VACUUM,),
+            ("auto", "quick", "vacuum", "standard", "normal"),
+        )
+        if option is None or mode_is_mapping(option) or mode_has_tag(option, CLEAN_MOP):
+            return None
+        current = row.get("vacuum_clean_mode")
+        try:
+            if current is not None and int(current) == int(option["mode"]):
+                return None
+        except (TypeError, ValueError):
+            pass
+        suction = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
+        if is_transport_error(suction):
+            return suction
+        settle_mode()
+        sync_row()
+        return None
+
+    if at_charger() or run_op() == OP_SEEKING:
+        suction_err = set_suction_mode()
+        if suction_err is not None:
+            return suction_err
+
     rooms_err = apply_rooms(select_ids)
     if rooms_err is not None:
         return rooms_err
@@ -4334,6 +4377,14 @@ def set_vacuum_command(
     started = go_cleaning()
     if is_transport_error(started):
         return started
+    if not started.get("ok") and int(started.get("status") or 0) in (2, 3):
+        settle_start()
+        suction_err = set_suction_mode()
+        if suction_err is not None:
+            return suction_err
+        started = go_cleaning()
+        if is_transport_error(started):
+            return started
     settle_start()
     sync_row()
     if still_idle_on_charger() and all_ids:
@@ -4348,6 +4399,15 @@ def set_vacuum_command(
             return started
         settle_start()
         sync_row()
+    if (
+        not started.get("ok")
+        and int(started.get("status") or 0) == 2
+        and (at_charger() or str(row.get("vacuum_status") or "") == "Charging")
+    ):
+        started = {
+            **started,
+            "error": "Vacuum cannot start while charging (generic failure)",
+        }
     return finish(started)
 
 

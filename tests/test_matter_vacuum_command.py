@@ -146,7 +146,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 38, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 39, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -190,6 +190,8 @@ def main() -> int:
     returning = {d["id"]: d for d in agent.flatten_nodes({"nodes": [returning_node]})}.get("40:1") or {}
     if returning.get("vacuum_status") != "Returning" or returning.get("on") is True:
         raise SystemExit(f"returning {returning}")
+    if agent.vacuum_command_status_label("ChangeToMode", 2) != "generic failure":
+        raise SystemExit("ChangeToMode 2 should be generic failure")
     s10 = {d["id"]: d for d in agent.flatten_nodes({"nodes": [s10_node()]})}.get("50:1") or {}
     if s10.get("kind") != "vacuum":
         raise SystemExit(f"s10 kind {s10}")
@@ -527,9 +529,8 @@ def main() -> int:
     assert refused.get("ok") is not True or refused.get("vacuum_status") != "Mapping", refused
 
     calls.clear()
-    # Alejandro (K11+): Charging + Bathroom. ChangeToMode Cleaning (1) is accepted
-    # but CurrentMode stays Idle 0. Resume while Charging is CommandInvalidInState
-    # (Error, robot does not move). Mapping is 2 — never send it.
+    # Alejandro (K11+): Charging + Bathroom. ChangeToMode Cleaning (1) is rejected
+    # with GenericFailure (2). Resume/Stop are not used. Mapping is 2 — never send it.
     k11_attrs = dict(vacuum_node()["attributes"])
     k11_attrs["0/40/3"] = "K11+"
     k11_attrs["1/97/4"] = 0x41
@@ -549,7 +550,7 @@ def main() -> int:
                 k11_attrs["1/97/5"] = {"errorStateID": 3}
                 return {"ok": True, "result": {"status": 0}}
             if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
-                return {"ok": True, "result": {"status": 0}}
+                return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
             if args.get("command_name") == "ChangeToMode":
                 apply_change_to_mode(agent, k11_attrs, args, keep_charging=True)
             return {"ok": True, "result": {"status": 0}}
@@ -570,6 +571,9 @@ def main() -> int:
     assert bathroom.get("ok") is False, bathroom
     assert bathroom.get("vacuum_status") != "Cleaning", bathroom
     assert bathroom.get("vacuum_status") != "Error", bathroom
+    err = str(bathroom.get("error") or "").lower()
+    assert "generic failure" in err or "charging" in err, bathroom
+    assert bathroom.get("vacuum_status") in ("Charging", "Idle", "Docked"), bathroom
     k11_cmds = [args for command, args in calls if command == "device_command"]
     area_payloads = [
         (c.get("payload") or {}).get("newAreas", (c.get("payload") or {}).get("NewAreas"))

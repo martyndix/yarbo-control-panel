@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.91] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** on SwitchBot **K11+** (Alejandro) while Charging now gets ChangeToMode **GenericFailure (2)** — the Cleaning command is reaching the robot and being refused. Start sets suction (Auto/Vacuum) first, retries Cleaning once, and says it cannot start while charging instead of a raw `(2)`. Mapping is still never sent (**S10** / Martynas).
+
 ## [4.0.90] - 2026-10-10
 
 ### Fixed
