@@ -117,6 +117,62 @@ def main() -> int:
     go = [args for command, args in calls if command == "device_command"]
     assert go and go[0].get("command_name") == "GoHome", go
 
+    wrapped = {
+        "node_id": 41,
+        "available": True,
+        "attributes": {
+            "0/40/3": "Martynas",
+            "1/29/0": [{"deviceType": 0x0074, "revision": 1}],
+            "1/84/0": {"value": [
+                {"label": "Idle", "mode": 0, "modeTags": [{"value": 0x4000}]},
+                {"label": "Cleaning", "mode": 1, "modeTags": [{"value": 0x4001}]},
+            ]},
+            "1/85/0": {"value": [
+                {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4000}]},
+                {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
+            ]},
+            "1/97/0": 0,
+            "2/336/0": {"value": [
+                {"AreaID": 1, "LocationInfo": {"LocationName": "Kitchen"}},
+                {"area_id": 2, "location_info": {"location_name": "Hall"}},
+            ]},
+        },
+    }
+    wrapped_rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [wrapped]})}
+    wrapped_vac = wrapped_rows.get("41:1") or {}
+    if [a["name"] for a in wrapped_vac.get("areas") or []] != ["Kitchen", "Hall"]:
+        raise SystemExit(f"wrapped areas {wrapped_vac.get('areas')}")
+    if wrapped_vac.get("can_mop") is not True:
+        raise SystemExit(f"wrapped mop {wrapped_vac}")
+
+    calls.clear()
+    slim = {k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}
+    agent._live_devices = [slim]
+    node_attrs = vacuum_node()["attributes"]
+
+    def live_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": node_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": node_attrs}
+        if command == "device_command":
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = live_rpc  # type: ignore[method-assign]
+    start_all = agent.dispatch({"op": "command", "id": "40:1", "action": "start", "kind": "vacuum"})
+    assert start_all.get("ok") is True, start_all
+    live_cmds = [args for command, args in calls if command == "device_command"]
+    assert not any(c.get("command_name") == "Resume" for c in live_cmds), live_cmds
+    assert any(c.get("cluster_id") == agent.SERVICE_AREA for c in live_cmds), live_cmds
+    assert any(
+        c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+        for c in live_cmds
+    ), live_cmds
+    area_payload = next(c.get("payload") or {} for c in live_cmds if c.get("cluster_id") == agent.SERVICE_AREA)
+    assert area_payload.get("newAreas") == [1, 2] or area_payload.get("NewAreas") == [1, 2], area_payload
+
     print("test_matter_vacuum_command.py ok")
     return 0
 

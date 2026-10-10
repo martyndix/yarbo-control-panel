@@ -38,7 +38,7 @@ def mill_node() -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 27, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 28, agent.AGENT_VERSION
     assert agent.node_id_from_any({"node_id": 40}) == 40
     assert agent.node_id_from_any(40) == 40
     assert agent.node_id_from_any({"result": {"nodeId": 7}}) == 7

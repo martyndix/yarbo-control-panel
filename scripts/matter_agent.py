@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 27
+AGENT_VERSION = 28
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -63,6 +63,7 @@ ATTR_SUPPORTED_MODES = 0
 ATTR_CURRENT_MODE = 1
 ATTR_OPERATIONAL_STATE = 0
 ATTR_SUPPORTED_AREAS = 0
+ATTR_SUPPORTED_MAPS = 1
 ATTR_SELECTED_AREAS = 2
 RUN_IDLE = 0x4000
 RUN_CLEANING = 0x4001
@@ -1639,6 +1640,7 @@ def start_state_poll() -> None:
                 # wait for it here or Apple Home On/Off never gets polled.
                 kick_listening()
                 poll_light_attributes()
+                poll_vacuum_attributes()
             except Exception as exc:  # noqa: BLE001
                 print(f"matter state poll failed: {exc}", flush=True)
                 reset_ws(POLL_CHANNEL)
@@ -3290,16 +3292,60 @@ def dict_field(item: Any, *names: Any) -> Any:
     return None
 
 
+def unwrap_attr(raw: Any) -> Any:
+    current = raw
+    for _ in range(4):
+        if not isinstance(current, dict):
+            return current
+        if any(
+            key in current
+            for key in (
+                "areaID",
+                "area_id",
+                "AreaID",
+                "mode",
+                "label",
+                "modeTags",
+                "locationInfo",
+                "location_info",
+                "mapID",
+                "map_id",
+            )
+        ):
+            return current
+        if "value" in current:
+            current = current["value"]
+            continue
+        if "Value" in current:
+            current = current["Value"]
+            continue
+        keys = [key for key in current.keys() if str(key).isdigit()]
+        if keys and len(keys) == len(current):
+            return [current[key] for key in sorted(keys, key=lambda item: int(item))]
+        return current
+    return current
+
+
+def as_list(raw: Any) -> list[Any]:
+    current = unwrap_attr(raw)
+    if isinstance(current, list):
+        return current
+    if isinstance(current, dict):
+        keys = [key for key in current.keys() if str(key).isdigit()]
+        if keys and len(keys) == len(current):
+            return [current[key] for key in sorted(keys, key=lambda item: int(item))]
+    return []
+
+
 def parse_mode_tags(raw: Any) -> list[int]:
     out: list[int] = []
-    if isinstance(raw, (int, float)):
-        return [int(raw)]
-    if not isinstance(raw, list):
-        return out
-    for item in raw:
+    current = unwrap_attr(raw)
+    if isinstance(current, (int, float)):
+        return [int(current)]
+    for item in as_list(current):
         val: Any = item
         if isinstance(item, dict):
-            val = dict_field(item, "value", "1", 1, "tag")
+            val = dict_field(item, "value", "Value", "1", 1, "tag")
         try:
             if val is not None:
                 out.append(int(val))
@@ -3310,14 +3356,12 @@ def parse_mode_tags(raw: Any) -> list[int]:
 
 def parse_mode_options(raw: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    if not isinstance(raw, list):
-        return out
-    for item in raw:
+    for item in as_list(raw):
         if not isinstance(item, dict):
             continue
-        label = dict_field(item, "label", "0", 0)
-        mode = dict_field(item, "mode", "1", 1)
-        tags = parse_mode_tags(dict_field(item, "modeTags", "mode_tags", "2", 2))
+        label = dict_field(item, "label", "Label", "0", 0)
+        mode = dict_field(item, "mode", "Mode", "1", 1)
+        tags = parse_mode_tags(dict_field(item, "modeTags", "mode_tags", "ModeTags", "2", 2))
         try:
             mode_n = int(mode) if mode is not None else None
         except (TypeError, ValueError):
@@ -3345,51 +3389,93 @@ def pick_mode(options: list[dict[str, Any]], tags: tuple[int, ...], words: tuple
     return None
 
 
-def parse_area_name(item: dict[str, Any]) -> str:
-    info = dict_field(item, "locationInfo", "location_info", "2", 2)
+def parse_area_name(item: dict[str, Any], maps: dict[int, str] | None = None) -> str:
+    info = dict_field(item, "locationInfo", "location_info", "LocationInfo", "2", 2)
     if isinstance(info, dict):
-        name = dict_field(info, "locationName", "location_name", "0", 0)
+        name = dict_field(info, "locationName", "location_name", "LocationName", "0", 0)
         if isinstance(name, str) and name.strip():
             return name.strip()
-    name = dict_field(item, "name", "label")
+    elif isinstance(info, (list, tuple)) and info:
+        name = info[0]
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    name = dict_field(item, "name", "label", "Name")
     if isinstance(name, str) and name.strip():
         return name.strip()
+    map_id = dict_field(item, "mapID", "map_id", "MapID", "1", 1)
+    try:
+        mid = int(map_id) if map_id is not None else None
+    except (TypeError, ValueError):
+        mid = None
+    if mid is not None and maps and maps.get(mid):
+        return str(maps[mid])
     return ""
 
 
-def parse_areas(raw: Any) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    if not isinstance(raw, list):
-        return out
-    for item in raw:
+def parse_maps(raw: Any) -> dict[int, str]:
+    out: dict[int, str] = {}
+    for item in as_list(raw):
         if not isinstance(item, dict):
             continue
-        area_id = dict_field(item, "areaID", "area_id", "0", 0)
+        map_id = dict_field(item, "mapID", "map_id", "MapID", "0", 0)
+        name = dict_field(item, "name", "Name", "1", 1)
+        try:
+            mid = int(map_id) if map_id is not None else None
+        except (TypeError, ValueError):
+            mid = None
+        if mid is None:
+            continue
+        text = str(name or "").strip()
+        if text:
+            out[mid] = text
+    return out
+
+
+def parse_areas(raw: Any, maps: dict[int, str] | None = None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for item in as_list(raw):
+        if not isinstance(item, dict):
+            continue
+        area_id = dict_field(item, "areaID", "area_id", "AreaID", "0", 0)
         try:
             nid = int(area_id) if area_id is not None else None
         except (TypeError, ValueError):
             nid = None
         if nid is None:
             continue
-        name = parse_area_name(item) or f"Room {nid}"
+        name = parse_area_name(item, maps) or f"Room {nid}"
         out.append({"id": nid, "name": name[:40]})
     return out
 
 
 def parse_selected_areas(raw: Any) -> list[int]:
-    if not isinstance(raw, list):
-        return []
     out: list[int] = []
-    for item in raw:
+    for item in as_list(raw):
         val: Any = item
         if isinstance(item, dict):
-            val = dict_field(item, "0", 0, "value", "areaID", "area_id")
+            val = dict_field(item, "0", 0, "value", "areaID", "area_id", "AreaID")
         try:
             if val is not None:
                 out.append(int(val))
         except (TypeError, ValueError):
             continue
     return out
+
+
+def service_area_from_node(attributes: dict[str, Any], preferred: int) -> tuple[list[dict[str, Any]], list[int], int]:
+    endpoints: list[int] = []
+    for ep in [preferred, *endpoint_ids(attributes)]:
+        if ep and ep not in endpoints:
+            endpoints.append(ep)
+    for ep in endpoints:
+        maps = parse_maps(attr_raw(attributes, ep, SERVICE_AREA, ATTR_SUPPORTED_MAPS))
+        areas = parse_areas(attr_raw(attributes, ep, SERVICE_AREA, ATTR_SUPPORTED_AREAS), maps)
+        if not areas and not endpoint_has_cluster(attributes, ep, SERVICE_AREA):
+            continue
+        if areas:
+            selected = parse_selected_areas(attr_raw(attributes, ep, SERVICE_AREA, ATTR_SELECTED_AREAS))
+            return areas, selected, ep
+    return [], [], preferred
 
 
 def vacuum_status_label(op: int | None, run_tags: list[int]) -> str:
@@ -3438,8 +3524,7 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     clean_option = next((row for row in clean_modes if row["mode"] == int(clean_current or -1)), None)
     run_tags = [int(t) for t in (run_option.get("tags") if run_option else []) if isinstance(t, (int, float))]
     status = vacuum_status_label(op, run_tags)
-    areas = parse_areas(attr_raw(attributes, endpoint, SERVICE_AREA, ATTR_SUPPORTED_AREAS))
-    selected = parse_selected_areas(attr_raw(attributes, endpoint, SERVICE_AREA, ATTR_SELECTED_AREAS))
+    areas, selected, area_endpoint = service_area_from_node(attributes, endpoint)
     can_vacuum = pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac")) is not None or clean_modes == []
     can_mop = pick_mode(clean_modes, (CLEAN_MOP, CLEAN_VACUUM_THEN_MOP), ("mop",)) is not None
     can_vacuum_mop = (
@@ -3463,16 +3548,54 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         "can_pause": endpoint_has_cluster(attributes, endpoint, RVC_OPERATIONAL),
         "areas": areas,
         "selected_areas": selected,
+        "area_endpoint": area_endpoint,
         "run_modes": run_modes,
         "clean_modes": clean_modes,
         "on": on,
     }
 
 
+def mode_command_status(result: Any) -> int:
+    if result is None or result is True:
+        return 0
+    return write_status_code(result)
+
+
+def vacuum_rpc_command(
+    node_id: int,
+    endpoint: int,
+    cluster: int,
+    name: str,
+    payload: dict[str, Any],
+    timeout: float = 18.0,
+) -> dict[str, Any]:
+    def send(nid: int | None = None) -> dict[str, Any]:
+        use = node_id if nid is None else nid
+        rpc = matter_rpc(
+            "device_command",
+            {
+                "node_id": use,
+                "endpoint_id": endpoint,
+                "cluster_id": cluster,
+                "command_name": name,
+                "payload": payload,
+            },
+            timeout=timeout,
+        )
+        if not rpc.get("ok"):
+            return rpc
+        status = mode_command_status(rpc.get("result"))
+        if status:
+            return {"ok": False, "error": f"Vacuum rejected {name} ({status})", "status": status}
+        return {"ok": True}
+
+    return command_with_reconnect(node_id, send)
+
+
 def vacuum_change_mode(node_id: int, endpoint: int, cluster: int, mode: int) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not set vacuum mode"}
-    for payload in ({"newMode": mode}, {"new_mode": mode}):
-        last = device_command(node_id, endpoint, cluster, "ChangeToMode", payload)
+    for payload in ({"newMode": mode}, {"NewMode": mode}, {"new_mode": mode}):
+        last = vacuum_rpc_command(node_id, endpoint, cluster, "ChangeToMode", payload)
         if last.get("ok") or is_transport_error(last):
             return last
     return last
@@ -3480,11 +3603,105 @@ def vacuum_change_mode(node_id: int, endpoint: int, cluster: int, mode: int) -> 
 
 def vacuum_select_areas(node_id: int, endpoint: int, areas: list[int]) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not select rooms"}
-    for payload in ({"newAreas": areas}, {"new_areas": areas}):
-        last = device_command(node_id, endpoint, SERVICE_AREA, "SelectAreas", payload)
+    for payload in ({"newAreas": areas}, {"NewAreas": areas}, {"new_areas": areas}):
+        last = vacuum_rpc_command(node_id, endpoint, SERVICE_AREA, "SelectAreas", payload)
         if last.get("ok") or is_transport_error(last) or is_unsupported_cluster(last):
             return last
     return last
+
+
+def read_result_attributes(result: Any) -> dict[str, Any]:
+    attrs: dict[str, Any] = {}
+    current = result
+    if isinstance(current, dict) and "result" in current and not any(
+        "/" in str(key) for key in current if key != "result"
+    ):
+        current = current.get("result")
+    if isinstance(current, dict):
+        for path, value in current.items():
+            parsed = parse_attr_path(path)
+            if parsed is None:
+                continue
+            endpoint, cluster, attr = parsed
+            attrs[attr_key(endpoint, cluster, attr)] = value
+        return attrs
+    if isinstance(current, list):
+        for item in current:
+            if isinstance(item, dict):
+                path = item.get("attribute_path") or item.get("path") or item.get("0")
+                value = item.get("value") if "value" in item else item.get("1")
+                parsed = parse_attr_path(path)
+                if parsed is None:
+                    continue
+                endpoint, cluster, attr = parsed
+                attrs[attr_key(endpoint, cluster, attr)] = value
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                path = item[0] if len(item) == 2 else item[1]
+                value = item[-1]
+                parsed = parse_attr_path(path)
+                if parsed is None:
+                    continue
+                endpoint, cluster, attr = parsed
+                attrs[attr_key(endpoint, cluster, attr)] = value
+    return attrs
+
+
+VACUUM_READ_ATTRS = (
+    (RVC_RUN, ATTR_SUPPORTED_MODES),
+    (RVC_RUN, ATTR_CURRENT_MODE),
+    (RVC_CLEAN, ATTR_SUPPORTED_MODES),
+    (RVC_CLEAN, ATTR_CURRENT_MODE),
+    (RVC_OPERATIONAL, ATTR_OPERATIONAL_STATE),
+    (SERVICE_AREA, ATTR_SUPPORTED_AREAS),
+    (SERVICE_AREA, ATTR_SUPPORTED_MAPS),
+    (SERVICE_AREA, ATTR_SELECTED_AREAS),
+)
+
+
+def refresh_vacuum_capabilities(node_id: int, endpoint: int, device_id: str = "") -> dict[str, Any]:
+    attrs = dict(node_attributes(node_id) or {})
+    endpoints: list[int] = []
+    for ep in [endpoint, *endpoint_ids(attrs), 1, 2, 3]:
+        if ep and ep not in endpoints:
+            endpoints.append(ep)
+    paths = [attr_key(ep, cluster, attr) for ep in endpoints for cluster, attr in VACUUM_READ_ATTRS]
+    rpc = matter_rpc(
+        "read_attribute",
+        {"node_id": node_id, "attribute_path": paths},
+        timeout=18.0,
+        retries=1,
+        channel=CMD_CHANNEL,
+    )
+    if rpc.get("ok"):
+        attrs.update(read_result_attributes(rpc.get("result")))
+    if not attrs:
+        return dict(live_row(device_id) or {})
+    rvc_ep = endpoint
+    for ep in endpoints:
+        if endpoint_has_cluster(attrs, ep, RVC_RUN) or endpoint_has_cluster(attrs, ep, RVC_OPERATIONAL):
+            rvc_ep = ep
+            break
+    payload = vacuum_payload(attrs, rvc_ep)
+    if device_id and (payload.get("run_modes") or payload.get("areas") or payload.get("clean_modes")):
+        patch_live_device(device_id, payload)
+    return payload
+
+
+def poll_vacuum_attributes() -> None:
+    if command_in_flight():
+        return
+    for row in current_live_devices():
+        if not isinstance(row, dict) or str(row.get("kind") or "") != "vacuum":
+            continue
+        if row.get("areas") and row.get("run_modes"):
+            continue
+        nid, ep = row_node_endpoint(row)
+        if nid <= 0 or ep <= 0:
+            continue
+        try:
+            refresh_vacuum_capabilities(nid, ep, str(row.get("id") or ""))
+        except Exception as exc:  # noqa: BLE001
+            print(f"vacuum attribute read failed: {exc}", flush=True)
 
 
 def set_vacuum_command(
@@ -3494,18 +3711,30 @@ def set_vacuum_command(
     body: dict[str, Any],
     device_id: str = "",
 ) -> dict[str, Any]:
-    row = live_row(device_id) if device_id else None
-    run_modes = list((row or {}).get("run_modes") or [])
-    clean_modes = list((row or {}).get("clean_modes") or [])
-    areas = list((row or {}).get("areas") or [])
+    row = dict(live_row(device_id) or {}) if device_id else {}
+    needs_live = (not row.get("run_modes")) or (
+        not row.get("areas") and action in ("start", "mop", "vacuum", "on", "select_areas")
+    )
+    if needs_live:
+        live = refresh_vacuum_capabilities(node_id, endpoint, device_id)
+        if live:
+            row.update(live)
+    run_modes = list(row.get("run_modes") or [])
+    clean_modes = list(row.get("clean_modes") or [])
+    areas = list(row.get("areas") or [])
+    try:
+        area_endpoint = int(row.get("area_endpoint") or endpoint)
+    except (TypeError, ValueError):
+        area_endpoint = endpoint
     want_clean = str(body.get("clean_mode") or body.get("mode") or "").strip().lower()
     if action in ("mop",):
         want_clean = "mop"
     elif action in ("vacuum", "vac"):
         want_clean = "vacuum"
     requested_areas = body.get("areas")
+    all_ids = [int(item["id"]) for item in areas if isinstance(item, dict) and "id" in item]
     if requested_areas == "all" or requested_areas is True:
-        requested_ids = [int(item["id"]) for item in areas if isinstance(item, dict) and "id" in item]
+        requested_ids = all_ids
     elif isinstance(requested_areas, list):
         requested_ids = []
         for item in requested_areas:
@@ -3515,27 +3744,30 @@ def set_vacuum_command(
                 continue
     else:
         requested_ids = None
+    if requested_ids is None and all_ids and action in ("start", "mop", "vacuum", "on", ""):
+        requested_ids = all_ids
 
     if action in ("select_areas", "rooms"):
         if requested_ids is None:
             return {"ok": False, "error": "Pick rooms"}
-        rpc = vacuum_select_areas(node_id, endpoint, requested_ids)
+        rpc = vacuum_select_areas(node_id, area_endpoint, requested_ids)
         if rpc.get("ok"):
             rpc = {**rpc, "selected_areas": requested_ids}
         return rpc
 
     if action in ("pause",):
-        rpc = device_command(node_id, endpoint, RVC_OPERATIONAL, "Pause", {})
+        rpc = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "Pause", {})
         if rpc.get("ok"):
             rpc = {**rpc, "on": True, "vacuum_status": "Paused"}
         return rpc
-    if action in ("resume",):
-        rpc = device_command(node_id, endpoint, RVC_OPERATIONAL, "Resume", {})
+    paused = str(row.get("vacuum_status") or "") == "Paused" or row.get("vacuum_op") == OP_PAUSED
+    if action in ("resume",) or (action in ("start", "on") and paused):
+        rpc = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "Resume", {})
         if rpc.get("ok"):
             rpc = {**rpc, "on": True, "vacuum_status": "Cleaning"}
         return rpc
     if action in ("dock", "go_home", "off", "stop"):
-        rpc = device_command(node_id, endpoint, RVC_OPERATIONAL, "GoHome", {})
+        rpc = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "GoHome", {})
         if not rpc.get("ok") and not is_transport_error(rpc):
             idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "dock", "stop"))
             if idle is not None:
@@ -3544,9 +3776,9 @@ def set_vacuum_command(
             rpc = {**rpc, "on": False, "vacuum_status": "Returning"}
         return rpc
 
-    if requested_ids is not None and areas:
-        selected = vacuum_select_areas(node_id, endpoint, requested_ids)
-        if not selected.get("ok") and not is_unsupported_cluster(selected):
+    if requested_ids is not None and all_ids:
+        selected = vacuum_select_areas(node_id, area_endpoint, requested_ids)
+        if not selected.get("ok") and not is_unsupported_cluster(selected) and not is_transport_error(selected):
             return selected
 
     if want_clean == "mop":
@@ -3575,15 +3807,53 @@ def set_vacuum_command(
                 return rpc
 
     cleaning = pick_mode(run_modes, (RUN_CLEANING,), ("clean", "cleaning", "auto"))
+    if cleaning is None:
+        cleaning = next(
+            (
+                option
+                for option in run_modes
+                if not mode_has_tag(option, RUN_IDLE)
+                and "idle" not in str(option.get("label") or "").lower()
+            ),
+            None,
+        )
+    attempts: list[dict[str, Any]] = []
     if cleaning is not None:
-        rpc = vacuum_change_mode(node_id, endpoint, RVC_RUN, int(cleaning["mode"]))
+        attempts.append(vacuum_change_mode(node_id, endpoint, RVC_RUN, int(cleaning["mode"])))
+        if attempts[-1].get("ok"):
+            return {
+                **attempts[-1],
+                "on": True,
+                "vacuum_status": "Cleaning",
+                "vacuum_clean": want_clean or "vacuum",
+                "selected_areas": requested_ids or all_ids,
+            }
+    for mode in (1, 2):
+        if cleaning is not None and int(cleaning["mode"]) == mode:
+            continue
+        rpc = vacuum_change_mode(node_id, endpoint, RVC_RUN, mode)
+        attempts.append(rpc)
         if rpc.get("ok"):
-            return {**rpc, "on": True, "vacuum_status": "Cleaning", "vacuum_clean": want_clean or "vacuum"}
-        return rpc
-    rpc = device_command(node_id, endpoint, RVC_OPERATIONAL, "Resume", {})
-    if rpc.get("ok"):
-        return {**rpc, "on": True, "vacuum_status": "Cleaning"}
-    return rpc if rpc.get("error") else {"ok": False, "error": "Could not start the vacuum"}
+            return {
+                **rpc,
+                "on": True,
+                "vacuum_status": "Cleaning",
+                "vacuum_clean": want_clean or "vacuum",
+                "selected_areas": requested_ids or all_ids,
+            }
+        if is_transport_error(rpc):
+            return rpc
+    started = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "Start", {})
+    if started.get("ok"):
+        return {
+            **started,
+            "on": True,
+            "vacuum_status": "Cleaning",
+            "vacuum_clean": want_clean or "vacuum",
+            "selected_areas": requested_ids or all_ids,
+        }
+    last = next((item for item in reversed(attempts) if item.get("error")), started)
+    return last if last.get("error") else {"ok": False, "error": "Could not start the vacuum"}
 
 
 def fallback_kind(attributes: dict[str, Any], endpoint: int) -> str:
@@ -3780,8 +4050,18 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                         "heating_max",
                         "has_thermostat",
                         "system_mode",
+                        "vacuum_status",
+                        "vacuum_clean",
+                        "can_mop",
+                        "can_vacuum",
+                        "can_vacuum_mop",
+                        "can_pause",
+                        "areas",
+                        "selected_areas",
+                        "run_modes",
+                        "clean_modes",
                     ):
-                        if key in live_row:
+                        if key in live_row and live_row.get(key) not in (None, [], ""):
                             row[key] = live_row.get(key)
         return {
             "ok": True,

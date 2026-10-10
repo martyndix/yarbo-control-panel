@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.80] - 2026-10-10
+
+### Fixed
+- Matter vacuums read **rooms** and **Vacuum / Mop** modes from the robot (Service Area + RVC) instead of only the cached snapshot. Start sends SelectAreas then ChangeToMode Cleaning, so the tile no longer turns green from a no-op Resume while the robot stays docked.
+
 ## [4.0.79] - 2026-10-10
 
 ### Added

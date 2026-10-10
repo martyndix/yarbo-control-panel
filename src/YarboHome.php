@@ -2083,10 +2083,10 @@ final class YarboHome
                 $device[$flag] = (bool) $live[$flag];
             }
         }
-        if (array_key_exists('areas', $live)) {
+        if (!empty($live['areas'])) {
             $device['areas'] = self::normalizeVacuumAreas($live['areas']);
         }
-        if (array_key_exists('selected_areas', $live)) {
+        if (!empty($live['selected_areas'])) {
             $device['selected_areas'] = self::normalizeVacuumAreaIds($live['selected_areas']);
         }
 
