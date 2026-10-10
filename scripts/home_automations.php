@@ -82,6 +82,7 @@ $watchFiles = [
     __FILE__,
     $root . '/src/YarboHomeAutomations.php',
     $root . '/src/YarboHome.php',
+    $root . '/scripts/home_pulse.php',
     $root . '/src/YarboMatterAgentClient.php',
     $root . '/src/YarboUnifi.php',
     $root . '/src/YarboPowerwall.php',

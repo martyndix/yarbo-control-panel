@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.77] - 2026-10-10
+
+### Added
+- Home Automations Then **Pulse** on Matter lights: flash a chosen colour 1–10 times, then return the light to off, on, or its previous brightness/colour (including a scene look).
+
 ## [4.0.76] - 2026-10-10
 
 ### Added

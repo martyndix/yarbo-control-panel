@@ -18,7 +18,7 @@ final class YarboHomeAutomations
     ];
     private const DEVICE_COMMANDS = [
         'on', 'off', 'toggle', 'unlock', 'lock', 'open', 'close', 'stop',
-        'brightness', 'color', 'color_temp', 'setpoint',
+        'brightness', 'color', 'color_temp', 'setpoint', 'pulse',
     ];
     public const POWERWALL_ID = 'powerwall';
     public const POWERWALL_METRICS = ['battery', 'export', 'solar', 'load'];
@@ -1399,6 +1399,9 @@ final class YarboHomeAutomations
             $cmd = (string) ($action['command'] ?? 'on');
             if ($cmd === 'off') {
                 $text = $name . ' off';
+            } elseif ($cmd === 'pulse') {
+                $n = YarboHome::normalizePulseCount($action['pulse_count'] ?? YarboHome::PULSE_COUNT_DEFAULT);
+                $text = $name . ' pulse ×' . $n;
             } elseif ($cmd === 'unlock') {
                 $text = $name . ' unlock';
             } elseif (isset($action['celsius']) || isset($action['heating_setpoint'])) {
@@ -1665,6 +1668,17 @@ final class YarboHomeAutomations
         $out = ['kind' => 'device', 'id' => $id, 'command' => $cmd];
         if ($deviceKind !== '') {
             $out['device_kind'] = $deviceKind;
+        }
+        if ($cmd === 'pulse') {
+            $hex = trim((string) ($action['hex'] ?? $action['color_hex'] ?? YarboHome::PULSE_HEX_DEFAULT));
+            if ($hex !== '' && $hex[0] !== '#') {
+                $hex = '#' . $hex;
+            }
+            $normHex = YarboHome::normalizeHexValue($hex);
+            $out['hex'] = $normHex ?? YarboHome::PULSE_HEX_DEFAULT;
+            $out['pulse_count'] = YarboHome::normalizePulseCount($action['pulse_count'] ?? YarboHome::PULSE_COUNT_DEFAULT);
+
+            return $out;
         }
         if (in_array($cmd, ['on', 'brightness', 'color', 'color_temp', 'setpoint'], true)) {
             if (array_key_exists('brightness', $action) && $action['brightness'] !== null && $action['brightness'] !== '') {
@@ -2506,6 +2520,9 @@ final class YarboHomeAutomations
                 continue;
             }
             $cmd = (string) ($action['command'] ?? 'on');
+            if ($cmd === 'pulse') {
+                continue;
+            }
             if (in_array($cmd, ['off', 'unlock', 'lock', 'open', 'close', 'stop'], true)) {
                 continue;
             }
@@ -2681,6 +2698,9 @@ final class YarboHomeAutomations
         if (($action['kind'] ?? '') === 'yarbo') {
             return $this->runYarboAction($action);
         }
+        if ((string) ($action['command'] ?? '') === 'pulse') {
+            return $this->runPulseAction($home, $action);
+        }
         if ($this->commandHandler !== null) {
             return ($this->commandHandler)($action);
         }
@@ -2735,6 +2755,92 @@ final class YarboHomeAutomations
         } catch (\Throwable $e) {
             return ['ok' => false, 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Flash a colour then restore on/off/scene look. Does not block the 1 Hz tick.
+     *
+     * @param array<string, mixed> $action
+     * @return array<string, mixed>
+     */
+    private function runPulseAction(YarboHome $home, array $action): array
+    {
+        $id = trim((string) ($action['id'] ?? ''));
+        if ($id === '') {
+            return ['ok' => false, 'error' => 'Pick a light'];
+        }
+        $hex = YarboHome::normalizeHexValue((string) ($action['hex'] ?? $action['color_hex'] ?? YarboHome::PULSE_HEX_DEFAULT))
+            ?? YarboHome::PULSE_HEX_DEFAULT;
+        $count = YarboHome::normalizePulseCount($action['pulse_count'] ?? YarboHome::PULSE_COUNT_DEFAULT);
+        $restore = $home->capturePulseLook($id);
+        $job = [
+            'id' => $id,
+            'hex' => $hex,
+            'pulse_count' => $count,
+            'restore' => $restore,
+            'kind' => (string) ($action['device_kind'] ?? 'light'),
+        ];
+        if ($this->commandHandler !== null) {
+            return ($this->commandHandler)($action + ['restore' => $restore, 'command' => 'pulse']);
+        }
+        if ($this->spawnPulseJob($job)) {
+            return ['ok' => true, 'pulsing' => true];
+        }
+
+        return $home->executePulse($job);
+    }
+
+    /**
+     * @param array<string, mixed> $job
+     */
+    private function spawnPulseJob(array $job): bool
+    {
+        $script = $this->projectRoot . '/scripts/home_pulse.php';
+        if (!is_file($script)) {
+            return false;
+        }
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return false;
+        }
+        $path = $dir . '/home-pulse-' . bin2hex(random_bytes(4)) . '.json';
+        $json = json_encode($job, JSON_UNESCAPED_SLASHES);
+        if ($json === false || file_put_contents($path, $json . "\n", LOCK_EX) === false) {
+            return false;
+        }
+        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $log = $dir . '/home-pulse.log';
+        $command = sprintf(
+            'cd %s && %s %s --root=%s --job=%s >> %s 2>&1 < /dev/null &',
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($php),
+            escapeshellarg($script),
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($path),
+            escapeshellarg($log)
+        );
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['file', $log, 'a'],
+            2 => ['file', $log, 'a'],
+        ];
+        $process = @proc_open(
+            ['bash', '-c', $command],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot
+        );
+        if (!is_resource($process)) {
+            @unlink($path);
+
+            return false;
+        }
+        if (isset($pipes[0]) && is_resource($pipes[0])) {
+            fclose($pipes[0]);
+        }
+        proc_close($process);
+
+        return true;
     }
 
     /**
@@ -2846,6 +2952,9 @@ final class YarboHomeAutomations
     {
         foreach ($actions as $action) {
             if (($action['kind'] ?? '') === 'scene' || ($action['kind'] ?? '') === 'yarbo') {
+                continue;
+            }
+            if ((string) ($action['command'] ?? '') === 'pulse') {
                 continue;
             }
             $id = (string) ($action['id'] ?? '');

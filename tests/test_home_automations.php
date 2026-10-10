@@ -55,6 +55,9 @@ assert_true(!YarboHome::deviceAcceptsCommand('unifi:hub:door1', 'on'), 'Access h
 assert_true(YarboHome::deviceAcceptsCommand('unifi:hub:door1', 'unlock'), 'Access hub must accept unlock');
 assert_true(YarboHome::deviceAcceptsCommand('unifi:light:porch', 'on'), 'UniFi light must accept on');
 assert_true(YarboHome::deviceAcceptsCommand('1:2', 'on', 'light'), 'Matter light must accept on');
+assert_true(YarboHome::deviceAcceptsCommand('1:2', 'pulse', 'light'), 'Matter light must accept pulse');
+assert_true(!YarboHome::deviceAcceptsCommand('unifi:light:porch', 'pulse'), 'UniFi light must not accept pulse');
+assert_true(!YarboHome::deviceAcceptsCommand('1:9', 'pulse', 'heater'), 'heater must not accept pulse');
 assert_true(YarboHome::deviceAcceptsCommand('1:9', 'on', 'heater'), 'heater must accept on');
 assert_true(YarboHome::deviceAcceptsCommand('1:9', 'off', 'heater'), 'heater must accept off');
 assert_true(YarboHome::deviceAcceptsCommand('1:9', 'setpoint', 'heater'), 'heater must accept setpoint');
@@ -1220,6 +1223,127 @@ $auto->delete('a-if-robot');
 $commands = [];
 @unlink($auto->statePath());
 
+$offLook = YarboHome::pulseLookFromDevice(['on' => false, 'brightness' => 80, 'color_hex' => '#00ff00']);
+assert_true(($offLook['on'] ?? true) === false, 'off look ignores colour');
+assert_true(!isset($offLook['hex']), 'off look has no hex');
+$onLook = YarboHome::pulseLookFromDevice([
+    'on' => true,
+    'brightness' => 40,
+    'color_hex' => '#aabbcc',
+    'color_temp' => 2700,
+]);
+assert_true(($onLook['on'] ?? false) === true, 'on look');
+assert_true(($onLook['brightness'] ?? 0) === 40, 'on look brightness');
+assert_true(($onLook['hex'] ?? '') === '#aabbcc', 'on look hex');
+$planOff = YarboHome::pulsePlan('1:2', '#ff0000', 2, ['on' => false], false);
+$cmdsOff = array_column($planOff, 'command');
+assert_true($cmdsOff === ['color', 'off', 'color', 'off'], 'pulse 2× then stay off: ' . json_encode($cmdsOff));
+assert_true(($planOff[0]['hex'] ?? '') === '#ff0000', 'pulse colour');
+$planOn = YarboHome::pulsePlan('1:2', '#ff3b30', 1, [
+    'on' => true,
+    'brightness' => 40,
+    'hex' => '#aabbcc',
+], true);
+$cmdsOn = array_column($planOn, 'command');
+assert_true($cmdsOn === ['brightness', 'color', 'off', 'brightness', 'color'], 'pulse restores scene look: ' . json_encode($cmdsOn));
+assert_true(($planOn[3]['brightness'] ?? 0) === 40, 'restore brightness');
+assert_true(($planOn[4]['hex'] ?? '') === '#aabbcc', 'restore colour');
+assert_true(YarboHome::normalizePulseCount(0) === 3, 'pulse count default');
+assert_true(YarboHome::normalizePulseCount(11) === 10, 'pulse count max 10');
+assert_true(
+    YarboHomeAutomations::thenPhrase([
+        'kind' => 'device',
+        'id' => '1:2',
+        'command' => 'pulse',
+        'pulse_count' => 4,
+    ], ['1:2' => 'Lamp']) === 'Lamp pulse ×4',
+    'pulse phrase'
+);
+
+$pulseSaved = $auto->save([
+    'id' => 'a-pulse',
+    'name' => '',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'actions' => [[
+        'kind' => 'device',
+        'id' => '1:2',
+        'command' => 'pulse',
+        'hex' => '#ff0000',
+        'pulse_count' => 3,
+        'device_kind' => 'light',
+    ]],
+    'cooldown_sec' => 0,
+    'names' => ['unifi:sensor:s1' => 'Kitchen Sensor', '1:2' => 'Lamp'],
+]);
+assert_true(!empty($pulseSaved['ok']), 'save pulse: ' . json_encode($pulseSaved));
+assert_true(($pulseSaved['automation']['actions'][0]['command'] ?? '') === 'pulse', 'pulse command persisted');
+assert_true(($pulseSaved['automation']['actions'][0]['pulse_count'] ?? 0) === 3, 'pulse count persisted');
+assert_true(($pulseSaved['automation']['actions'][0]['hex'] ?? '') === '#ff0000', 'pulse hex persisted');
+assert_true(str_contains((string) ($pulseSaved['automation']['name'] ?? ''), 'pulse ×3'), 'pulse auto-name: ' . ($pulseSaved['automation']['name'] ?? ''));
+$commands = [];
+@unlink($auto->statePath());
+$pulseSense = static function (bool $motion): array {
+    return [[
+        'id' => 'unifi:sensor:s1',
+        'kind' => 'sensor',
+        'motion' => $motion,
+        'on' => false,
+        'open' => false,
+    ], [
+        'id' => '1:2',
+        'kind' => 'light',
+        'on' => false,
+    ]];
+};
+$tPulse = 1_840_000_000;
+$auto->tick($pulseSense(false), $tPulse);
+$r = $auto->tick($pulseSense(true), $tPulse + 1);
+assert_true($r['fired'] === ['a-pulse'], 'pulse fires: ' . json_encode($r));
+assert_true(($commands[0]['command'] ?? '') === 'pulse', 'handler sees pulse: ' . json_encode($commands));
+assert_true(($commands[0]['hex'] ?? '') === '#ff0000', 'handler sees colour');
+assert_true(($commands[0]['restore']['on'] ?? true) === false, 'restore captured off: ' . json_encode($commands[0]['restore'] ?? []));
+$auto->delete('a-pulse');
+
+$homeStore = json_decode((string) file_get_contents($root . '/data/home.json'), true);
+$homeStore['last_devices'] = [[
+    'id' => '1:2',
+    'name' => 'Lamp',
+    'kind' => 'light',
+    'on' => true,
+    'brightness' => 55,
+    'color_hex' => '#112233',
+    'dimmable' => true,
+    'colorable' => true,
+]];
+file_put_contents($root . '/data/home.json', json_encode($homeStore, JSON_UNESCAPED_SLASHES));
+$pulseOn = $auto->save([
+    'id' => 'a-pulse-on',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'actions' => [[
+        'kind' => 'device',
+        'id' => '1:2',
+        'command' => 'pulse',
+        'hex' => '#00ff00',
+        'pulse_count' => 1,
+        'device_kind' => 'light',
+    ]],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($pulseOn['ok']), 'save pulse while on');
+$commands = [];
+@unlink($auto->statePath());
+$auto->tick($pulseSense(false), $tPulse);
+$r = $auto->tick($pulseSense(true), $tPulse + 1);
+assert_true($r['fired'] === ['a-pulse-on'], 'pulse while on fires: ' . json_encode($r));
+assert_true(($commands[0]['restore']['on'] ?? false) === true, 'restore captured on');
+assert_true(($commands[0]['restore']['brightness'] ?? 0) === 55, 'restore brightness from last look');
+assert_true(($commands[0]['restore']['hex'] ?? '') === '#112233', 'restore hex from last look: ' . json_encode($commands[0]['restore'] ?? []));
+$auto->delete('a-pulse-on');
+$commands = [];
+@unlink($auto->statePath());
+
 $dash = $home->dashboard();
 assert_true(isset($dash['automations']) && isset($dash['server_timezone']), 'dashboard exposes automations');
 assert_true(!is_file($root . '/data/home-automations-state.json') || true, 'dashboard may not need a state file');
@@ -1238,6 +1362,7 @@ assert_true(str_contains($panel, 'home-automations.log'), 'sidecar writes a log'
 $sidecar = (string) file_get_contents(__DIR__ . '/../scripts/home_automations.php');
 assert_true(strpos($sidecar, 'tick();') < strpos($sidecar, 'refreshUnifiIfDue'), 'time tick must run before UniFi refresh');
 assert_true(str_contains($sidecar, 'refreshYarboIfDue'), 'sidecar refreshes Yarbo cache after tick');
+assert_true(str_contains($sidecar, 'home_pulse.php'), 'sidecar reloads if the pulse worker changes');
 assert_true(str_contains($sidecar, 'acquireRunnerLock'), 'sidecar takes a pid lock');
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay');
@@ -1275,6 +1400,10 @@ assert_true(str_contains($js, 'homeAutoCanOpen'), 'capability helper');
 assert_true(str_contains($js, 'homeAutoCanMotion'), 'motion capability helper');
 assert_true(str_contains($js, 'data-auto-then-off'), 'then chip off-after');
 assert_true(str_contains($js, 'homeAutoThenCanOffAfter'), 'then off-after helper');
+assert_true(str_contains($js, 'homeAutoThenCanPulse'), 'pulse Then helper');
+assert_true(str_contains($js, "['pulse', 'Pulse']"), 'Pulse command');
+assert_true(str_contains($js, 'data-auto-pulse-count'), 'pulse count picker');
+assert_true(str_contains($index, 'Pulse flashes a colour'), 'Then pulse hint');
 assert_true(str_contains($js, 'homeAutoIfStateOptions'), 'only-if states');
 assert_true(str_contains($js, 'homeAutoThenParamsHtml'), 'Then look controls helper');
 assert_true(str_contains($js, 'data-auto-hex'), 'Then colour picker');
@@ -1353,6 +1482,7 @@ assert_true(str_contains($change, '## [4.0.73]'), 'changelog 4.0.73');
 assert_true(str_contains($change, '## [4.0.74]'), 'changelog 4.0.74');
 assert_true(str_contains($change, '## [4.0.75]'), 'changelog 4.0.75');
 assert_true(str_contains($change, '## [4.0.76]'), 'changelog 4.0.76');
+assert_true(str_contains($change, '## [4.0.77]'), 'changelog 4.0.77');
 assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');

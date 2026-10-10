@@ -4933,7 +4933,7 @@ function homeAutoWhenEvents(d) {
 function homeAutoThenCanOffAfter(action) {
     if (action?.kind === 'yarbo') return false;
     const cmd = String(action?.command || (action?.kind === 'scene' ? 'run' : 'on'));
-    return !['off', 'stop', 'unlock', 'lock', 'open', 'close'].includes(cmd);
+    return !['off', 'stop', 'unlock', 'lock', 'open', 'close', 'pulse'].includes(cmd);
 }
 
 function homeAutoOffAfterChoices(sec) {
@@ -4965,6 +4965,12 @@ function homeAutoApplyOffAfterToActions(sec) {
     });
 }
 
+function homeAutoThenCanPulse(d) {
+    if (!d || homeIsUnifi(d)) return false;
+    const kind = String(d.kind || 'light');
+    return kind === 'light';
+}
+
 function homeAutoThenCommands(d) {
     if (!d) return [['on', 'On']];
     if (d.kind === 'scene' || String(d.id || '').startsWith('scene:')) {
@@ -4974,7 +4980,9 @@ function homeAutoThenCommands(d) {
         if (d.gate) return [['open', 'Open'], ['close', 'Close'], ['stop', 'Stop']];
         return [['unlock', 'Unlock']];
     }
-    return [['on', 'On'], ['off', 'Off']];
+    const cmds = [['on', 'On'], ['off', 'Off']];
+    if (homeAutoThenCanPulse(d)) cmds.push(['pulse', 'Pulse']);
+    return cmds;
 }
 
 function homeAutoThenCanBright(d) {
@@ -4996,6 +5004,18 @@ function homeAutoSanitizeThenLooks() {
         const d = homeAutoDeviceById(action.id);
         if (!d) return action;
         const next = { ...action };
+        if (next.command === 'pulse') {
+            delete next.brightness;
+            delete next.kelvin;
+            delete next.color_temp;
+            delete next.celsius;
+            delete next.heating_setpoint;
+            delete next.off_after_sec;
+            if (!next.hex && !next.color_hex) next.hex = '#ff3b30';
+            const n = Number(next.pulse_count || 3);
+            next.pulse_count = Number.isFinite(n) ? Math.max(1, Math.min(10, Math.round(n))) : 3;
+            return next;
+        }
         if (!homeAutoThenCanBright(d)) delete next.brightness;
         if (!homeAutoThenCanColor(d)) {
             delete next.hex;
@@ -5018,10 +5038,19 @@ function homeAutoThenCanSetpoint(d) {
 }
 
 function homeAutoThenShowsLook(cmd) {
-    return !['off', 'stop', 'unlock', 'lock', 'open', 'close'].includes(String(cmd || 'on'));
+    return !['off', 'stop', 'unlock', 'lock', 'open', 'close', 'pulse'].includes(String(cmd || 'on'));
 }
 
 function homeAutoThenParamsHtml(d, action, cmd) {
+    if (cmd === 'pulse') {
+        const hex = action.hex || action.color_hex || '#ff3b30';
+        const n = Math.max(1, Math.min(10, Number(action.pulse_count || 3) || 3));
+        const times = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) =>
+            `<option value="${i}" ${i === n ? 'selected' : ''}>${i}×</option>`
+        ).join('');
+        return `<input type="color" data-auto-hex value="${escapeHtml(hex)}" aria-label="Pulse colour" title="Pulse colour">
+            <select data-auto-pulse-count aria-label="Pulse times">${times}</select>`;
+    }
     if (!homeAutoThenShowsLook(cmd)) return '';
     let html = '';
     if (homeAutoThenCanBright(d)) {
@@ -5188,11 +5217,15 @@ function homeAutoApplyThenLook(el) {
         const n = Number(el.value);
         if (Number.isFinite(n)) action.celsius = n;
     }
+    if (el.matches('[data-auto-pulse-count]')) {
+        const n = Number(el.value);
+        if (Number.isFinite(n)) action.pulse_count = Math.max(1, Math.min(10, Math.round(n)));
+    }
 }
 
 function homeAutoReadThenLooks() {
     if (!autoDraft) return;
-    document.querySelectorAll('#auto-then-chips [data-auto-bright], #auto-then-chips [data-auto-hex], #auto-then-chips [data-auto-kelvin], #auto-then-chips [data-auto-celsius]').forEach((el) => {
+    document.querySelectorAll('#auto-then-chips [data-auto-bright], #auto-then-chips [data-auto-hex], #auto-then-chips [data-auto-kelvin], #auto-then-chips [data-auto-celsius], #auto-then-chips [data-auto-pulse-count]').forEach((el) => {
         homeAutoApplyThenLook(el);
     });
 }
@@ -5213,6 +5246,10 @@ function homeAutoThenPhrase(action, names) {
     }
     const name = names[action.id] || 'Device';
     if (action.command === 'off') return `${name} off`;
+    if (action.command === 'pulse') {
+        const n = Math.max(1, Math.min(10, Number(action.pulse_count || 3) || 3));
+        return `${name} pulse ×${n}`;
+    }
     if (action.command === 'unlock') return `${name} unlock`;
     if (action.celsius != null || action.heating_setpoint != null) {
         let text = `${name} ${action.celsius ?? action.heating_setpoint}°`;
@@ -6784,10 +6821,20 @@ function bindHomeAutomations() {
                 if (event.target.value === 'brightness' && autoDraft.actions[i].brightness == null) {
                     autoDraft.actions[i].brightness = 100;
                 }
+                if (event.target.value === 'pulse') {
+                    if (!autoDraft.actions[i].hex) autoDraft.actions[i].hex = '#ff3b30';
+                    if (!autoDraft.actions[i].pulse_count) autoDraft.actions[i].pulse_count = 3;
+                    delete autoDraft.actions[i].brightness;
+                    delete autoDraft.actions[i].kelvin;
+                    delete autoDraft.actions[i].celsius;
+                }
                 if (!homeAutoThenCanOffAfter(autoDraft.actions[i])) {
                     delete autoDraft.actions[i].off_after_sec;
                 }
             }
+        }
+        if (event.target.matches('[data-auto-pulse-count]')) {
+            homeAutoApplyThenLook(event.target);
         }
         if (event.target.matches('[data-auto-then-off]')) {
             const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
@@ -6833,12 +6880,12 @@ function bindHomeAutomations() {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
-        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-then-off], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan]')) {
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-then-off], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count]')) {
             homeAutoFollowName();
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');
