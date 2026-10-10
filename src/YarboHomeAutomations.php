@@ -19,6 +19,7 @@ final class YarboHomeAutomations
     private const DEVICE_COMMANDS = [
         'on', 'off', 'toggle', 'unlock', 'lock', 'open', 'close', 'stop',
         'brightness', 'color', 'color_temp', 'setpoint', 'pulse',
+        'start', 'dock', 'pause', 'resume', 'mop', 'vacuum',
     ];
     public const POWERWALL_ID = 'powerwall';
     public const POWERWALL_METRICS = ['battery', 'export', 'solar', 'load'];
@@ -1399,6 +1400,14 @@ final class YarboHomeAutomations
             $cmd = (string) ($action['command'] ?? 'on');
             if ($cmd === 'off') {
                 $text = $name . ' off';
+            } elseif ($cmd === 'start') {
+                $text = $name . ' start';
+            } elseif ($cmd === 'dock') {
+                $text = $name . ' dock';
+            } elseif ($cmd === 'pause') {
+                $text = $name . ' pause';
+            } elseif ($cmd === 'mop') {
+                $text = $name . ' mop';
             } elseif ($cmd === 'pulse') {
                 $n = YarboHome::normalizePulseCount($action['pulse_count'] ?? YarboHome::PULSE_COUNT_DEFAULT);
                 $text = $name . ' pulse ×' . $n;

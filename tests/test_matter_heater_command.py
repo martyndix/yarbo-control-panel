@@ -40,7 +40,7 @@ def main() -> int:
     ping = agent.dispatch({"op": "ping"})
     assert ping.get("ok") is True, ping
     assert ping.get("version") == agent.AGENT_VERSION, ping
-    assert ping.get("version") == 26, ping
+    assert ping.get("version") == 27, ping
     assert "thermostat" in (ping.get("features") or []), ping
 
     assert agent.write_status_code(None) == 0

@@ -3224,6 +3224,46 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     gap: 0.35rem;
 }
 
+.home-device-actions--vacuum {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.home-vac-status {
+    min-width: 4.5rem;
+    font-size: 0.78rem;
+    font-weight: 650;
+    color: var(--muted);
+}
+
+.home-device.is-on .home-vac-status {
+    color: var(--text);
+}
+
+.home-vac-rooms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    width: 100%;
+}
+
+.home-vac-room {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.home-vac-room.is-on {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+}
+
 .home-heater-room {
     min-width: 2.6rem;
     font-size: 0.78rem;
