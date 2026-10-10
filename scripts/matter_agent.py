@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 31
+AGENT_VERSION = 32
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -61,7 +61,8 @@ RVC_OPERATIONAL = 0x0061
 SERVICE_AREA = 0x0150
 ATTR_SUPPORTED_MODES = 0
 ATTR_CURRENT_MODE = 1
-ATTR_OPERATIONAL_STATE = 0
+# Operational State cluster: PhaseList=0 … OperationalState=4. Attr 0 is a list.
+ATTR_OPERATIONAL_STATE = 4
 ATTR_SUPPORTED_AREAS = 0
 ATTR_SUPPORTED_MAPS = 1
 ATTR_SELECTED_AREAS = 2
@@ -79,6 +80,8 @@ OP_ERROR = 3
 OP_SEEKING = 0x40
 OP_CHARGING = 0x41
 OP_DOCKED = 0x42
+VACUUM_MODE_SETTLE_S = 0.4
+VACUUM_START_SETTLE_S = 1.0
 DESCRIPTOR = 29
 BASIC_INFO = 40
 BRIDGED_BASIC = 57
@@ -3714,6 +3717,7 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         "area_endpoint": area_endpoint,
         "run_modes": run_modes,
         "clean_modes": clean_modes,
+        "rvc_endpoint": endpoint,
         "on": on,
     }
 
@@ -3808,6 +3812,7 @@ def vacuum_change_mode(
     last: dict[str, Any] = {"ok": False, "error": "Could not set vacuum mode"}
     # CHIP ChangeToMode.newMode defaults to 0 (Idle). A wrong JSON key still
     # "succeeds" and parks the robot. Verify CurrentMode when we can.
+    key = "vacuum_run_mode" if cluster == RVC_RUN else "vacuum_clean_mode"
     for payload in ({"newMode": mode}, {"NewMode": mode}):
         last = vacuum_rpc_command(node_id, endpoint, cluster, "ChangeToMode", payload)
         if is_transport_error(last):
@@ -3819,7 +3824,6 @@ def vacuum_change_mode(
         live = refresh_vacuum_capabilities(node_id, endpoint, device_id)
         if live:
             row.update(live)
-        key = "vacuum_run_mode" if cluster == RVC_RUN else "vacuum_clean_mode"
         current = row.get(key)
         try:
             if current is not None and int(current) == int(mode):
@@ -3828,6 +3832,17 @@ def vacuum_change_mode(
             pass
         if last.get("ok") and current is None:
             return last
+    if verify and row is not None:
+        current = row.get(key)
+        try:
+            if current is not None and int(current) != int(mode):
+                return {
+                    "ok": False,
+                    "error": last.get("error") or "Vacuum did not change mode",
+                    "status": last.get("status"),
+                }
+        except (TypeError, ValueError):
+            pass
     return last
 
 
@@ -3953,6 +3968,12 @@ def set_vacuum_command(
         area_endpoint = int(row.get("area_endpoint") or endpoint)
     except (TypeError, ValueError):
         area_endpoint = endpoint
+    try:
+        rvc_ep = int(row.get("rvc_endpoint") or endpoint)
+        if rvc_ep <= 0:
+            rvc_ep = endpoint
+    except (TypeError, ValueError):
+        rvc_ep = endpoint
     want_clean = str(body.get("clean_mode") or body.get("mode") or "").strip().lower()
     if action in ("mop",):
         want_clean = "mop"
@@ -3983,6 +4004,14 @@ def set_vacuum_command(
             row.update(live)
         return row
 
+    def settle_mode() -> None:
+        if VACUUM_MODE_SETTLE_S > 0:
+            time.sleep(VACUUM_MODE_SETTLE_S)
+
+    def settle_start() -> None:
+        if VACUUM_START_SETTLE_S > 0:
+            time.sleep(VACUUM_START_SETTLE_S)
+
     def run_op() -> int | None:
         try:
             return int(row["vacuum_op"]) if row.get("vacuum_op") is not None else None
@@ -4009,11 +4038,12 @@ def set_vacuum_command(
         if running:
             return {**(rpc or {"ok": True}), "ok": True, "on": True, "vacuum_status": status, **base}
         if still_docked():
+            detail = str((rpc or {}).get("error") or "").strip()
             return {
                 "ok": False,
                 "on": False,
                 "vacuum_status": status or "Docked",
-                "error": "Vacuum did not start",
+                "error": f"Vacuum did not start ({detail})" if detail else "Vacuum did not start",
                 **base,
             }
         if accepted:
@@ -4035,22 +4065,22 @@ def set_vacuum_command(
         return rpc
 
     if action in ("pause",):
-        rpc = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "Pause", {})
+        rpc = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Pause", {})
         if rpc.get("ok"):
             rpc = {**rpc, "on": True, "vacuum_status": "Paused"}
         return rpc
     paused = str(row.get("vacuum_status") or "") == "Paused" or run_op() == OP_PAUSED
     if action in ("resume",) or (action in ("start", "on") and paused):
-        rpc = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "Resume", {})
+        rpc = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Resume", {})
         if rpc.get("ok"):
             rpc = {**rpc, "on": True, "vacuum_status": "Cleaning"}
         return rpc
     if action in ("dock", "go_home", "off", "stop"):
-        rpc = vacuum_rpc_command(node_id, endpoint, RVC_OPERATIONAL, "GoHome", {})
+        rpc = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "GoHome", {})
         if not rpc.get("ok") and not is_transport_error(rpc):
             idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "dock", "stop"))
             if idle is not None:
-                rpc = vacuum_change_mode(node_id, endpoint, RVC_RUN, int(idle["mode"]))
+                rpc = vacuum_change_mode(node_id, rvc_ep, RVC_RUN, int(idle["mode"]))
         if rpc.get("ok"):
             rpc = {**rpc, "on": False, "vacuum_status": "Returning"}
         return rpc
@@ -4066,25 +4096,39 @@ def set_vacuum_command(
             ),
             None,
         )
-    current_run = row.get("vacuum_run_mode")
-    already_cleaning = False
-    if cleaning is not None and current_run is not None:
-        try:
-            already_cleaning = int(current_run) == int(cleaning["mode"])
-        except (TypeError, ValueError):
-            already_cleaning = False
-    # No DirectModeChange: Cleaning→Cleaning is a no-op. Drop to Idle first.
-    if already_cleaning and still_docked():
-        idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
-        if idle is not None:
-            idle_rpc = vacuum_change_mode(
-                node_id, endpoint, RVC_RUN, int(idle["mode"]), device_id=device_id, row=row, verify=True
-            )
-            if is_transport_error(idle_rpc):
-                return idle_rpc
 
-    # Room chips: SelectAreas then Cleaning. All rooms: Apple Home / SmartThings
-    # send ChangeToMode only — extra SelectAreas/Start left K11+ on the dock.
+    def current_is_cleaning() -> bool:
+        current_run = row.get("vacuum_run_mode")
+        if cleaning is None or current_run is None:
+            return False
+        try:
+            return int(current_run) == int(cleaning["mode"])
+        except (TypeError, ValueError):
+            return False
+
+    def drop_to_idle() -> dict[str, Any] | None:
+        # SwitchBot S10/K11+ have no DirectModeChange: Cleaning→Cleaning while
+        # docked is a no-op. Idle first, then Cleaning, matches a fresh Apple Home start.
+        if not current_is_cleaning() or not still_docked():
+            return None
+        idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
+        if idle is None:
+            return None
+        idle_rpc = vacuum_change_mode(
+            node_id, rvc_ep, RVC_RUN, int(idle["mode"]), device_id=device_id, row=row, verify=True
+        )
+        if is_transport_error(idle_rpc):
+            return idle_rpc
+        settle_mode()
+        sync_row()
+        return None
+
+    dropped = drop_to_idle()
+    if dropped is not None:
+        return dropped
+
+    # Room chips: SelectAreas then Cleaning. All rooms: ChangeToMode Cleaning only
+    # (Apple Home / SmartThings). Empty or all-ID SelectAreas is a fallback if still docked.
     if not all_rooms and requested_ids and all_ids:
         selected = vacuum_select_areas(node_id, area_endpoint, requested_ids)
         if not selected.get("ok") and not is_unsupported_cluster(selected) and not is_transport_error(selected):
@@ -4094,7 +4138,7 @@ def set_vacuum_command(
         option = pick_mode(clean_modes, (CLEAN_MOP,), ("mop",))
         if option is None:
             return {"ok": False, "error": "This vacuum cannot mop"}
-        mop_rpc = vacuum_change_mode(node_id, endpoint, RVC_CLEAN, int(option["mode"]))
+        mop_rpc = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
         if not mop_rpc.get("ok") and is_transport_error(mop_rpc):
             return mop_rpc
     elif want_clean in ("vacuum_mop", "both"):
@@ -4105,18 +4149,33 @@ def set_vacuum_command(
         )
         if option is None:
             return {"ok": False, "error": "This vacuum cannot mop"}
-        mop_rpc = vacuum_change_mode(node_id, endpoint, RVC_CLEAN, int(option["mode"]))
+        mop_rpc = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
         if not mop_rpc.get("ok") and is_transport_error(mop_rpc):
             return mop_rpc
 
     def go_cleaning() -> dict[str, Any]:
         last: dict[str, Any] = {"ok": False, "error": "Could not start the vacuum"}
+        modes: list[int] = []
         if cleaning is not None:
+            modes.append(int(cleaning["mode"]))
+        for option in run_modes:
+            if mode_has_tag(option, RUN_IDLE) or "idle" in str(option.get("label") or "").lower():
+                continue
+            try:
+                mode_n = int(option["mode"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if mode_n not in modes:
+                modes.append(mode_n)
+        for fallback in (1, 2):
+            if fallback not in modes:
+                modes.append(fallback)
+        for mode in modes:
             last = vacuum_change_mode(
                 node_id,
-                endpoint,
+                rvc_ep,
                 RVC_RUN,
-                int(cleaning["mode"]),
+                mode,
                 device_id=device_id,
                 row=row,
                 verify=True,
@@ -4124,26 +4183,42 @@ def set_vacuum_command(
             attempts.append(last)
             if last.get("ok") or is_transport_error(last):
                 return last
-        for mode in (1, 2):
-            if cleaning is not None and int(cleaning["mode"]) == mode:
-                continue
-            last = vacuum_change_mode(
-                node_id, endpoint, RVC_RUN, mode, device_id=device_id, row=row, verify=True
-            )
-            attempts.append(last)
-            if last.get("ok") or is_transport_error(last):
-                return last
         return last
+
+    def retry_if_docked(select: list[int] | None) -> dict[str, Any] | None:
+        settle_start()
+        sync_row()
+        if not still_docked():
+            return None
+        dropped_again = drop_to_idle()
+        if dropped_again is not None:
+            return dropped_again
+        if select is not None:
+            vacuum_select_areas(node_id, area_endpoint, select)
+        started_again = go_cleaning()
+        if is_transport_error(started_again):
+            return started_again
+        settle_start()
+        sync_row()
+        return started_again
 
     started = go_cleaning()
     if is_transport_error(started):
         return started
-    sync_row()
-    if still_docked() and all_rooms and all_ids:
-        vacuum_select_areas(node_id, area_endpoint, all_ids)
-        started = go_cleaning()
-        if is_transport_error(started):
-            return started
+    if all_rooms:
+        retried = retry_if_docked([])
+        if retried is not None:
+            if is_transport_error(retried):
+                return retried
+            started = retried
+        if still_docked() and all_ids:
+            retried = retry_if_docked(all_ids)
+            if retried is not None:
+                if is_transport_error(retried):
+                    return retried
+                started = retried
+    else:
+        settle_start()
         sync_row()
     return finish(started)
 

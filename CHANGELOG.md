@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.84] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** reads RVC OperationalState (attribute 4), not PhaseList (attribute 0). SwitchBot S10 and K11+ stay Docked while Run Mode is already Cleaning; the tile used to turn green from that. Start now drops to Idle first, then ChangeToMode Cleaning by tag (S10 Cleaning is mode 2). Commands go to the live RVC endpoint.
+
 ## [4.0.83] - 2026-10-10
 
 ### Fixed
