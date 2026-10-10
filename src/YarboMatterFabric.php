@@ -890,6 +890,99 @@ final class YarboMatterFabric
         return $out;
     }
 
+    /** @var list<string> */
+    private const AREA_TYPE_LABELS = [
+        'Aisle',
+        'Attic',
+        'Back door',
+        'Back yard',
+        'Balcony',
+        'Bathroom',
+        'Bedroom',
+        'Border',
+        'Boxroom',
+        'Breakfast room',
+        'Carport',
+        'Cellar',
+        'Cloakroom',
+        'Closet',
+        'Conservatory',
+        'Corridor',
+        'Craft room',
+        'Cupboard',
+        'Deck',
+        'Den',
+        'Dining',
+        'Drawing room',
+        'Dressing room',
+        'Driveway',
+        'Elevator',
+        'Ensuite',
+        'Entrance',
+        'Entryway',
+        'Family room',
+        'Foyer',
+        'Game room',
+        'Garage',
+        'Garage door',
+        'Garden',
+        'Garden door',
+        'Guest bathroom',
+        'Guest bedroom',
+        'Guest room',
+        'Gym',
+        'Hallway',
+        'Home office',
+        'Kids room',
+        'Kitchen',
+        'Laundry room',
+        'Lawn',
+        'Library',
+        'Living room',
+        'Lounge',
+        'Media room',
+        'Mud room',
+        'Music room',
+        'Nursery',
+        'Office',
+        'Outdoor kitchen',
+        'Outside',
+        'Pantry',
+        'Parking lot',
+        'Parlor',
+        'Patio',
+        'Play room',
+        'Pool room',
+        'Porch',
+        'Primary bathroom',
+        'Primary bedroom',
+        'Ramp',
+        'Reception room',
+        'Recreation room',
+        'Roof',
+        'Sauna',
+        'Scullery',
+        'Sewing room',
+        'Shed',
+        'Side door',
+        'Side yard',
+        'Sitting room',
+        'Snug',
+        'Spa',
+        'Staircase',
+        'Steam room',
+        'Storage room',
+        'Studio',
+        'Study',
+        'Sun room',
+        'Swimming pool',
+        'Terrace',
+        'Toilet',
+        'Utility room',
+        'Ward',
+        'Workshop',
+    ];
+
     /**
      * @return list<array{id: int, name: string}>
      */
@@ -904,14 +997,7 @@ final class YarboMatterFabric
             if (!is_numeric($id)) {
                 continue;
             }
-            $info = $item['locationInfo'] ?? $item['location_info'] ?? $item['LocationInfo'] ?? $item['2'] ?? $item[2] ?? null;
-            $name = '';
-            if (is_array($info)) {
-                $name = (string) ($info['locationName'] ?? $info['location_name'] ?? $info['LocationName'] ?? $info['0'] ?? $info[0] ?? '');
-            } elseif (is_string($info)) {
-                $name = $info;
-            }
-            $name = trim($name);
+            $name = self::parseAreaName($item);
             if ($name === '') {
                 $name = 'Room ' . (int) $id;
             }
@@ -919,6 +1005,113 @@ final class YarboMatterFabric
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<string|int, mixed> $item
+     */
+    private static function parseAreaName(array $item): string
+    {
+        $areaInfo = $item['areaInfo'] ?? $item['area_info'] ?? $item['AreaInfo'] ?? $item['2'] ?? $item[2] ?? null;
+        $loc = null;
+        if (is_array($areaInfo)) {
+            $loc = $areaInfo['locationInfo'] ?? $areaInfo['location_info'] ?? $areaInfo['LocationInfo'] ?? $areaInfo['0'] ?? $areaInfo[0] ?? null;
+        }
+        $name = self::locationDescriptorName($loc);
+        if ($name === '') {
+            $name = self::locationDescriptorName($areaInfo);
+        }
+        if ($name === '') {
+            $name = self::locationDescriptorName($item['locationInfo'] ?? $item['location_info'] ?? $item['LocationInfo'] ?? null);
+        }
+        if ($name === '') {
+            $name = self::cleanAreaName($item['name'] ?? $item['label'] ?? $item['Name'] ?? '');
+        }
+        if ($name === '') {
+            $name = self::locationDescriptorType($loc);
+            if ($name === '') {
+                $name = self::locationDescriptorType($areaInfo);
+            }
+            if ($name === '') {
+                $name = self::locationDescriptorType($item['locationInfo'] ?? $item['location_info'] ?? $item['LocationInfo'] ?? null);
+            }
+        }
+
+        return $name;
+    }
+
+    private static function cleanAreaName(mixed $name): string
+    {
+        if (!is_string($name)) {
+            return '';
+        }
+        $text = trim($name);
+        if ($text === '') {
+            return '';
+        }
+        $key = strtolower(trim($text, ' .'));
+        if (in_array($key, ['unnamed', 'unknown', 'unknown area', 'n/a', 'na', 'none', 'null', 'room'], true)) {
+            return '';
+        }
+
+        return $text;
+    }
+
+    private static function locationDescriptorName(mixed $info, int $depth = 0): string
+    {
+        if ($depth > 4 || $info === null) {
+            return '';
+        }
+        if (is_string($info)) {
+            return self::cleanAreaName($info);
+        }
+        if (is_array($info) && array_is_list($info) && $info !== []) {
+            return self::locationDescriptorName($info[0], $depth + 1);
+        }
+        if (!is_array($info)) {
+            return '';
+        }
+        $name = $info['locationName'] ?? $info['location_name'] ?? $info['LocationName'] ?? $info['0'] ?? $info[0] ?? null;
+        if (is_array($name)) {
+            $found = self::locationDescriptorName($name, $depth + 1);
+            if ($found !== '') {
+                return $found;
+            }
+        } else {
+            $found = self::cleanAreaName(is_string($name) ? $name : '');
+            if ($found !== '') {
+                return $found;
+            }
+        }
+        $loc = $info['locationInfo'] ?? $info['location_info'] ?? $info['LocationInfo'] ?? null;
+        if ($loc !== null && $loc !== $info) {
+            return self::locationDescriptorName($loc, $depth + 1);
+        }
+
+        return '';
+    }
+
+    private static function locationDescriptorType(mixed $info, int $depth = 0): string
+    {
+        if ($depth > 4 || !is_array($info)) {
+            return '';
+        }
+        $tag = $info['areaType'] ?? $info['area_type'] ?? $info['AreaType'] ?? $info['2'] ?? $info[2] ?? null;
+        if (is_array($tag)) {
+            $tag = $tag['value'] ?? $tag['Value'] ?? $tag['0'] ?? $tag[0] ?? null;
+        }
+        if (is_numeric($tag)) {
+            $n = (int) $tag;
+            if ($n >= 0 && $n < count(self::AREA_TYPE_LABELS)) {
+                return self::AREA_TYPE_LABELS[$n];
+            }
+        }
+        $loc = $info['locationInfo'] ?? $info['location_info'] ?? $info['LocationInfo'] ?? $info['0'] ?? $info[0] ?? null;
+        if (is_array($loc) && $loc !== $info) {
+            return self::locationDescriptorType($loc, $depth + 1);
+        }
+
+        return '';
     }
 
     /**

@@ -39,9 +39,19 @@ def vacuum_node() -> dict:
             "1/85/1": 0,
             "1/97/0": 0,
             "1/336/0": [
-                {"areaID": 1, "locationInfo": {"locationName": "Kitchen"}},
-                {"0": 2, "2": {"0": "Living room"}},
+                {
+                    "areaID": 1,
+                    "mapID": 9,
+                    "areaInfo": {"locationInfo": {"locationName": "Kitchen"}},
+                },
+                {"0": 2, "1": 9, "2": {"0": {"0": "Living room"}}},
+                {
+                    "areaID": 3,
+                    "mapID": 9,
+                    "areaInfo": {"locationInfo": {"locationName": "Unnamed", "areaType": 0x002E}},
+                },
             ],
+            "1/336/1": [{"mapID": 9, "name": "Upstairs"}],
             "1/336/2": [1],
         },
     }
@@ -56,7 +66,7 @@ def main() -> int:
     if vac.get("can_mop") is not True:
         raise SystemExit(f"can_mop {vac}")
     names = [a["name"] for a in vac.get("areas") or []]
-    if names != ["Kitchen", "Living room"]:
+    if names != ["Kitchen", "Living room", "Living room"]:
         raise SystemExit(f"areas {vac.get('areas')}")
     if vac.get("selected_areas") != [1]:
         raise SystemExit(f"selected {vac.get('selected_areas')}")
@@ -171,7 +181,36 @@ def main() -> int:
         for c in live_cmds
     ), live_cmds
     area_payload = next(c.get("payload") or {} for c in live_cmds if c.get("cluster_id") == agent.SERVICE_AREA)
-    assert area_payload.get("newAreas") == [1, 2] or area_payload.get("NewAreas") == [1, 2], area_payload
+    assert area_payload.get("newAreas") == [] or area_payload.get("NewAreas") == [], area_payload
+
+    calls.clear()
+    agent._live_devices = [dict(vac)]
+
+    def clean_fail_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "device_command" and (args or {}).get("cluster_id") == agent.RVC_CLEAN:
+            return {"ok": False, "error": "Vacuum rejected ChangeToMode (135)", "status": 0x87}
+        if command == "device_command":
+            return {"ok": True}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = clean_fail_rpc  # type: ignore[method-assign]
+    start_anyway = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "clean_mode": "vacuum",
+        "areas": "all",
+    })
+    assert start_anyway.get("ok") is True, start_anyway
+    start_cmds = [args for command, args in calls if command == "device_command"]
+    assert any(
+        c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+        for c in start_cmds
+    ), start_cmds
+    all_payload = next(c.get("payload") or {} for c in start_cmds if c.get("cluster_id") == agent.SERVICE_AREA)
+    assert all_payload.get("newAreas") == [] or all_payload.get("NewAreas") == [], all_payload
 
     print("test_matter_vacuum_command.py ok")
     return 0

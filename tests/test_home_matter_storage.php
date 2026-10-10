@@ -299,8 +299,9 @@ $vacuumNode = [
         '1/85/1' => 0,
         '1/97/0' => 0,
         '1/336/0' => [
-            ['areaID' => 1, 'locationInfo' => ['locationName' => 'Kitchen']],
-            ['areaID' => 2, 'locationInfo' => ['locationName' => 'Hall']],
+            ['areaID' => 1, 'mapID' => 9, 'areaInfo' => ['locationInfo' => ['locationName' => 'Kitchen']]],
+            ['0' => 2, '1' => 9, '2' => ['0' => ['0' => 'Hall']]],
+            ['areaID' => 3, 'mapID' => 9, 'areaInfo' => ['locationInfo' => ['locationName' => 'Unnamed', 'areaType' => 0x002E]]],
         ],
         '1/336/2' => [1, 2],
     ],
@@ -331,7 +332,7 @@ if (($kinds['21:1']['kind'] ?? '') !== 'vacuum' || !empty($kinds['21:1']['colora
     exit(1);
 }
 $vacNames = array_column($kinds['21:1']['areas'] ?? [], 'name');
-if ($vacNames !== ['Kitchen', 'Hall'] || empty($kinds['21:1']['can_mop'])) {
+if ($vacNames !== ['Kitchen', 'Hall', 'Living room'] || empty($kinds['21:1']['can_mop'])) {
     fwrite(STDERR, 'vacuum rooms ' . json_encode($kinds['21:1'] ?? null) . "\n");
     exit(1);
 }
@@ -384,7 +385,7 @@ file_put_contents($vacRemember . '/data/home.json', json_encode([
 $vacCached = (new YarboHome($vacRemember))->localHomeDevices();
 $vacRow = $vacCached['devices'][0] ?? [];
 $vacCachedNames = array_column($vacRow['areas'] ?? [], 'name');
-if (($vacRow['kind'] ?? '') !== 'vacuum' || $vacCachedNames !== ['Kitchen', 'Hall'] || empty($vacRow['can_mop'])) {
+if (($vacRow['kind'] ?? '') !== 'vacuum' || $vacCachedNames !== ['Kitchen', 'Hall', 'Living room'] || empty($vacRow['can_mop'])) {
     fwrite(STDERR, 'vacuum last_devices rooms ' . json_encode($vacRow) . "\n");
     exit(1);
 }

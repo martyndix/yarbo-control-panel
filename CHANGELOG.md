@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.81] - 2026-10-10
+
+### Fixed
+- Matter vacuum **room names** come from `areaInfo.locationInfo.locationName`. Map titles like Upstairs and placeholders like Unnamed are no longer used as room labels.
+- **Start** with All rooms sends SelectAreas `[]` (full clean) instead of every room ID, and a failed Vacuum/Mop mode change no longer blocks Cleaning, so the robot actually leaves the dock.
+
 ## [4.0.80] - 2026-10-10
 
 ### Fixed

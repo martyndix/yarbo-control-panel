@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 28
+AGENT_VERSION = 29
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3308,6 +3308,8 @@ def unwrap_attr(raw: Any) -> Any:
                 "modeTags",
                 "locationInfo",
                 "location_info",
+                "areaInfo",
+                "area_info",
                 "mapID",
                 "map_id",
             )
@@ -3389,27 +3391,188 @@ def pick_mode(options: list[dict[str, Any]], tags: tuple[int, ...], words: tuple
     return None
 
 
-def parse_area_name(item: dict[str, Any], maps: dict[int, str] | None = None) -> str:
-    info = dict_field(item, "locationInfo", "location_info", "LocationInfo", "2", 2)
-    if isinstance(info, dict):
-        name = dict_field(info, "locationName", "location_name", "LocationName", "0", 0)
-        if isinstance(name, str) and name.strip():
-            return name.strip()
-    elif isinstance(info, (list, tuple)) and info:
-        name = info[0]
-        if isinstance(name, str) and name.strip():
-            return name.strip()
-    name = dict_field(item, "name", "label", "Name")
-    if isinstance(name, str) and name.strip():
-        return name.strip()
-    map_id = dict_field(item, "mapID", "map_id", "MapID", "1", 1)
+# Matter AreaTypeTag (common-area namespace). Index is the tag value.
+AREA_TYPE_LABELS = (
+    "Aisle",
+    "Attic",
+    "Back door",
+    "Back yard",
+    "Balcony",
+    "Bathroom",
+    "Bedroom",
+    "Border",
+    "Boxroom",
+    "Breakfast room",
+    "Carport",
+    "Cellar",
+    "Cloakroom",
+    "Closet",
+    "Conservatory",
+    "Corridor",
+    "Craft room",
+    "Cupboard",
+    "Deck",
+    "Den",
+    "Dining",
+    "Drawing room",
+    "Dressing room",
+    "Driveway",
+    "Elevator",
+    "Ensuite",
+    "Entrance",
+    "Entryway",
+    "Family room",
+    "Foyer",
+    "Game room",
+    "Garage",
+    "Garage door",
+    "Garden",
+    "Garden door",
+    "Guest bathroom",
+    "Guest bedroom",
+    "Guest room",
+    "Gym",
+    "Hallway",
+    "Home office",
+    "Kids room",
+    "Kitchen",
+    "Laundry room",
+    "Lawn",
+    "Library",
+    "Living room",
+    "Lounge",
+    "Media room",
+    "Mud room",
+    "Music room",
+    "Nursery",
+    "Office",
+    "Outdoor kitchen",
+    "Outside",
+    "Pantry",
+    "Parking lot",
+    "Parlor",
+    "Patio",
+    "Play room",
+    "Pool room",
+    "Porch",
+    "Primary bathroom",
+    "Primary bedroom",
+    "Ramp",
+    "Reception room",
+    "Recreation room",
+    "Roof",
+    "Sauna",
+    "Scullery",
+    "Sewing room",
+    "Shed",
+    "Side door",
+    "Side yard",
+    "Sitting room",
+    "Snug",
+    "Spa",
+    "Staircase",
+    "Steam room",
+    "Storage room",
+    "Studio",
+    "Study",
+    "Sun room",
+    "Swimming pool",
+    "Terrace",
+    "Toilet",
+    "Utility room",
+    "Ward",
+    "Workshop",
+)
+PLACEHOLDER_AREA_NAMES = frozenset(
+    {"unnamed", "unknown", "unknown area", "n/a", "na", "none", "null", "room"}
+)
+
+
+def clean_area_name(name: Any) -> str:
+    if not isinstance(name, str):
+        return ""
+    text = name.strip()
+    if not text:
+        return ""
+    if text.strip(" .").lower() in PLACEHOLDER_AREA_NAMES:
+        return ""
+    return text
+
+
+def area_type_label(raw: Any) -> str:
+    tag: Any = raw
+    if isinstance(tag, dict):
+        tag = dict_field(tag, "value", "Value", "areaType", "area_type", "0", 0)
     try:
-        mid = int(map_id) if map_id is not None else None
+        n = int(tag) if tag is not None else None
     except (TypeError, ValueError):
-        mid = None
-    if mid is not None and maps and maps.get(mid):
-        return str(maps[mid])
+        return ""
+    if n is None or n < 0 or n >= len(AREA_TYPE_LABELS):
+        return ""
+    return AREA_TYPE_LABELS[n]
+
+
+def location_descriptor_name(info: Any, depth: int = 0) -> str:
+    if depth > 4 or info is None:
+        return ""
+    if isinstance(info, str):
+        return clean_area_name(info)
+    if isinstance(info, (list, tuple)) and info:
+        return location_descriptor_name(info[0], depth + 1)
+    if not isinstance(info, dict):
+        return ""
+    name = dict_field(info, "locationName", "location_name", "LocationName", "0", 0)
+    if isinstance(name, dict) or isinstance(name, (list, tuple)):
+        found = location_descriptor_name(name, depth + 1)
+        if found:
+            return found
+    else:
+        found = clean_area_name(name)
+        if found:
+            return found
+    loc = dict_field(info, "locationInfo", "location_info", "LocationInfo")
+    if loc is not None and loc is not info:
+        found = location_descriptor_name(loc, depth + 1)
+        if found:
+            return found
     return ""
+
+
+def location_descriptor_type(info: Any, depth: int = 0) -> str:
+    if depth > 4 or not isinstance(info, dict):
+        return ""
+    label = area_type_label(dict_field(info, "areaType", "area_type", "AreaType", "2", 2))
+    if label:
+        return label
+    loc = dict_field(info, "locationInfo", "location_info", "LocationInfo", "0", 0)
+    if isinstance(loc, dict) and loc is not info:
+        return location_descriptor_type(loc, depth + 1)
+    return ""
+
+
+def parse_area_name(item: dict[str, Any], maps: dict[int, str] | None = None) -> str:
+    _ = maps
+    area_info = dict_field(item, "areaInfo", "area_info", "AreaInfo", "2", 2)
+    loc = None
+    if isinstance(area_info, dict):
+        loc = dict_field(area_info, "locationInfo", "location_info", "LocationInfo", "0", 0)
+    name = location_descriptor_name(loc) or location_descriptor_name(area_info)
+    if not name:
+        # Older fixtures flatten LocationDescriptorStruct onto AreaStruct.
+        name = location_descriptor_name(
+            dict_field(item, "locationInfo", "location_info", "LocationInfo")
+        )
+    if not name:
+        name = clean_area_name(dict_field(item, "name", "label", "Name"))
+    if not name:
+        name = (
+            location_descriptor_type(loc)
+            or location_descriptor_type(area_info)
+            or location_descriptor_type(
+                dict_field(item, "locationInfo", "location_info", "LocationInfo")
+            )
+        )
+    return name
 
 
 def parse_maps(raw: Any) -> dict[int, str]:
@@ -3733,8 +3896,9 @@ def set_vacuum_command(
         want_clean = "vacuum"
     requested_areas = body.get("areas")
     all_ids = [int(item["id"]) for item in areas if isinstance(item, dict) and "id" in item]
-    if requested_areas == "all" or requested_areas is True:
-        requested_ids = all_ids
+    if requested_areas in ("all", True):
+        # Empty SelectAreas is unconstrained full clean (HA / Matter 1.3).
+        requested_ids: list[int] | None = []
     elif isinstance(requested_areas, list):
         requested_ids = []
         for item in requested_areas:
@@ -3744,8 +3908,8 @@ def set_vacuum_command(
                 continue
     else:
         requested_ids = None
-    if requested_ids is None and all_ids and action in ("start", "mop", "vacuum", "on", ""):
-        requested_ids = all_ids
+    if requested_ids is None and action in ("start", "mop", "vacuum", "on", ""):
+        requested_ids = []
 
     if action in ("select_areas", "rooms"):
         if requested_ids is None:
@@ -3776,18 +3940,41 @@ def set_vacuum_command(
             rpc = {**rpc, "on": False, "vacuum_status": "Returning"}
         return rpc
 
+    cleaning = pick_mode(run_modes, (RUN_CLEANING,), ("clean", "cleaning", "auto"))
+    current_run = row.get("vacuum_run_mode")
+    already_cleaning = str(row.get("vacuum_status") or "") == "Cleaning"
+    if cleaning is not None and current_run is not None:
+        try:
+            already_cleaning = already_cleaning or int(current_run) == int(cleaning["mode"])
+        except (TypeError, ValueError):
+            pass
+    if already_cleaning:
+        idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "stop"))
+        if idle is not None:
+            idle_rpc = vacuum_change_mode(node_id, endpoint, RVC_RUN, int(idle["mode"]))
+            if is_transport_error(idle_rpc):
+                return idle_rpc
+
     if requested_ids is not None and all_ids:
         selected = vacuum_select_areas(node_id, area_endpoint, requested_ids)
         if not selected.get("ok") and not is_unsupported_cluster(selected) and not is_transport_error(selected):
             return selected
 
+    def apply_clean_mode(option: dict[str, Any] | None) -> dict[str, Any] | None:
+        if option is None:
+            return None
+        rpc = vacuum_change_mode(node_id, endpoint, RVC_CLEAN, int(option["mode"]))
+        if not rpc.get("ok") and is_transport_error(rpc):
+            return rpc
+        return None
+
     if want_clean == "mop":
         option = pick_mode(clean_modes, (CLEAN_MOP,), ("mop",))
         if option is None:
             return {"ok": False, "error": "This vacuum cannot mop"}
-        rpc = vacuum_change_mode(node_id, endpoint, RVC_CLEAN, int(option["mode"]))
-        if not rpc.get("ok"):
-            return rpc
+        failed = apply_clean_mode(option)
+        if failed is not None:
+            return failed
     elif want_clean in ("vacuum_mop", "both"):
         option = pick_mode(
             clean_modes,
@@ -3796,15 +3983,13 @@ def set_vacuum_command(
         )
         if option is None:
             return {"ok": False, "error": "This vacuum cannot mop"}
-        rpc = vacuum_change_mode(node_id, endpoint, RVC_CLEAN, int(option["mode"]))
-        if not rpc.get("ok"):
-            return rpc
+        failed = apply_clean_mode(option)
+        if failed is not None:
+            return failed
     elif want_clean in ("vacuum", "vac") and clean_modes:
-        option = pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac"))
-        if option is not None:
-            rpc = vacuum_change_mode(node_id, endpoint, RVC_CLEAN, int(option["mode"]))
-            if not rpc.get("ok"):
-                return rpc
+        failed = apply_clean_mode(pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac")))
+        if failed is not None:
+            return failed
 
     cleaning = pick_mode(run_modes, (RUN_CLEANING,), ("clean", "cleaning", "auto"))
     if cleaning is None:
