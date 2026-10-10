@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 35
+AGENT_VERSION = 36
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -81,7 +81,7 @@ OP_SEEKING = 0x40
 OP_CHARGING = 0x41
 OP_DOCKED = 0x42
 VACUUM_MODE_SETTLE_S = 0.4
-VACUUM_START_SETTLE_S = 1.0
+VACUUM_START_SETTLE_S = 2.0
 DESCRIPTOR = 29
 BASIC_INFO = 40
 BRIDGED_BASIC = 57
@@ -3422,7 +3422,12 @@ def mode_is_mapping(option: dict[str, Any] | None) -> bool:
 
 
 def pick_cleaning_run_mode(options: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Start must use the Cleaning tag. Mapping is a different mode and rebuilds the map."""
+    """Start must use the Cleaning tag. Mapping rebuilds the map.
+
+    Alejandro (SwitchBot K11+) is typically Idle 0 / Cleaning 1 / Mapping 2.
+    Martynas (SwitchBot S10) is typically Idle 0 / Mapping 1 / Cleaning 2.
+    Never fall through to Mapping.
+    """
     tagged = pick_mode(options, (RUN_CLEANING,), ())
     if tagged and not mode_is_mapping(tagged):
         return tagged
@@ -3854,15 +3859,25 @@ def vacuum_change_mode(
 ) -> dict[str, Any]:
     last: dict[str, Any] = {"ok": False, "error": "Could not set vacuum mode"}
     # CHIP ChangeToMode.newMode defaults to 0 (Idle). Send every alias in one
-    # payload so a wrong key cannot silently start Idle.
+    # payload so a wrong key cannot silently start Idle. If the device keeps
+    # Idle after that, more aliases will not help (K11+ Charging).
     key = "vacuum_run_mode" if cluster == RVC_RUN else "vacuum_clean_mode"
     mode_n = int(mode)
     payloads: list[dict[str, Any]] = [
         {"newMode": mode_n, "NewMode": mode_n, "new_mode": mode_n, "0": mode_n},
         {"newMode": mode_n},
         {"NewMode": mode_n},
+        {"new_mode": mode_n},
         {"0": mode_n},
     ]
+
+    def current_mode() -> int | None:
+        try:
+            raw = row.get(key) if row else None
+            return int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+
     for payload in payloads:
         last = vacuum_rpc_command(node_id, endpoint, cluster, "ChangeToMode", payload)
         if is_transport_error(last):
@@ -3875,29 +3890,25 @@ def vacuum_change_mode(
             live = refresh_vacuum_capabilities(node_id, endpoint, device_id)
             if live:
                 row.update(live)
-            current = row.get(key)
-            try:
-                if current is not None and int(current) == int(mode):
-                    return {**last, "ok": True}
-            except (TypeError, ValueError):
-                pass
+            current = current_mode()
+            if current is not None and current == mode_n:
+                return {**last, "ok": True}
             if last.get("ok") and current is None:
                 return last
             if VACUUM_MODE_SETTLE_S <= 0:
                 break
             time.sleep(VACUUM_MODE_SETTLE_S)
+        if last.get("ok") and current_mode() != mode_n and "newMode" in payload:
+            break
     if verify and row is not None:
-        current = row.get(key)
-        try:
-            if current is not None and int(current) != int(mode):
-                return {
-                    "ok": False,
-                    "error": last.get("error")
-                    or f"Vacuum did not change mode (still {current}, wanted {mode})",
-                    "status": last.get("status"),
-                }
-        except (TypeError, ValueError):
-            pass
+        current = current_mode()
+        if current is not None and current != mode_n:
+            return {
+                "ok": False,
+                "error": last.get("error")
+                or f"Vacuum did not change mode (still {current}, wanted {mode})",
+                "status": last.get("status"),
+            }
     return last
 
 
@@ -3908,6 +3919,7 @@ def vacuum_select_areas(node_id: int, endpoint: int, areas: list[int]) -> dict[s
         {"newAreas": ids, "NewAreas": ids, "new_areas": ids, "0": ids},
         {"newAreas": ids},
         {"NewAreas": ids},
+        {"new_areas": ids},
         {"0": ids},
     ]
     for payload in payloads:
@@ -3915,6 +3927,20 @@ def vacuum_select_areas(node_id: int, endpoint: int, areas: list[int]) -> dict[s
         if last.get("ok") or is_transport_error(last) or is_unsupported_cluster(last):
             return last
     return last
+
+
+def selected_area_ids(row: dict[str, Any]) -> list[int]:
+    out: list[int] = []
+    for item in row.get("selected_areas") or []:
+        try:
+            out.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def vacuum_write_run_mode(node_id: int, endpoint: int, mode: int) -> dict[str, Any]:
+    return write_attribute(node_id, endpoint, RVC_RUN, ATTR_CURRENT_MODE, int(mode))
 
 
 def read_result_attributes(result: Any) -> dict[str, Any]:
@@ -4194,9 +4220,13 @@ def set_vacuum_command(
 
     # SwitchBot treats SelectAreas [] as "no rooms" (Cleaning stays Idle). Send the
     # chosen room IDs, or every room for All rooms. Mapping does not need this.
+    # K11+ has Maps but not SelectWhileRunning: rooms must be selected while Idle.
     select_ids = requested_ids if not all_rooms and requested_ids else (all_ids if all_rooms else None)
-    if select_ids:
-        selected = vacuum_select_areas(node_id, area_endpoint, select_ids)
+
+    def apply_rooms(ids: list[int] | None) -> dict[str, Any] | None:
+        if not ids:
+            return None
+        selected = vacuum_select_areas(node_id, area_endpoint, ids)
         if (
             not all_rooms
             and not selected.get("ok")
@@ -4204,6 +4234,19 @@ def set_vacuum_command(
             and not is_transport_error(selected)
         ):
             return selected
+        if is_transport_error(selected):
+            return selected
+        settle_mode()
+        sync_row()
+        if set(selected_area_ids(row)) != set(ids):
+            vacuum_select_areas(node_id, area_endpoint, ids)
+            settle_mode()
+            sync_row()
+        return None
+
+    rooms_err = apply_rooms(select_ids)
+    if rooms_err is not None:
+        return rooms_err
 
     if want_clean == "mop":
         option = pick_mode(clean_modes, (CLEAN_MOP,), ("mop",))
@@ -4237,21 +4280,57 @@ def set_vacuum_command(
         attempts.append(last)
         return last
 
+    def still_idle_on_charger() -> bool:
+        current = row.get("vacuum_run_mode")
+        try:
+            cleaning_n = int(cleaning["mode"])
+            current_n = int(current) if current is not None else None
+        except (TypeError, ValueError):
+            cleaning_n, current_n = -1, None
+        return (stuck_on_dock() or at_charger()) and current_n != cleaning_n
+
+    def resume_from_charger() -> dict[str, Any]:
+        # Alejandro (K11+) accepts ChangeToMode Cleaning while Charging (IM
+        # success) but CurrentMode stays Idle 0. Resume is what actually leaves
+        # the dock. Never send Mapping (Martynas/S10 Mapping is mode 1).
+        rpc = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Resume", {})
+        attempts.append(rpc)
+        return rpc
+
     started = go_cleaning()
     if is_transport_error(started):
         return started
     settle_start()
     sync_row()
-    if (stuck_on_dock() or at_charger()) and all_ids:
+    if still_idle_on_charger():
+        resumed = resume_from_charger()
+        if is_transport_error(resumed):
+            return resumed
+        settle_start()
+        sync_row()
+    if still_idle_on_charger():
+        written = vacuum_write_run_mode(node_id, rvc_ep, int(cleaning["mode"]))
+        attempts.append(written)
+        if is_transport_error(written):
+            return written
+        settle_start()
+        sync_row()
+    if still_idle_on_charger() and all_ids:
         dropped_again = drop_to_idle()
         if dropped_again is not None:
             return dropped_again
-        vacuum_select_areas(node_id, area_endpoint, select_ids or all_ids)
+        rooms_retry = apply_rooms(select_ids or all_ids)
+        if rooms_retry is not None:
+            return rooms_retry
         started = go_cleaning()
         if is_transport_error(started):
             return started
         settle_start()
         sync_row()
+        if still_idle_on_charger():
+            resume_from_charger()
+            settle_start()
+            sync_row()
     return finish(started)
 
 

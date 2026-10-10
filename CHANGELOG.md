@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.88] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** on SwitchBot **K11+** (Alejandro) from Charging left CurrentMode Idle (`still 0, wanted 1`). ChangeToMode Cleaning is accepted but does not leave the dock; Start now waits for rooms to apply, then **Resume**, and writes CurrentMode if needed. Mapping is still never sent (**S10** / Martynas Mapping is mode 1).
+
 ## [4.0.87] - 2026-10-10
 
 ### Fixed

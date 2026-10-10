@@ -89,9 +89,29 @@ def s10_node() -> dict:
     }
 
 
+def apply_select_areas(agent, attrs: dict, args: dict) -> None:
+    if (args or {}).get("command_name") != "SelectAreas":
+        return
+    payload = (args or {}).get("payload") or {}
+    areas = payload.get("newAreas")
+    if areas is None:
+        areas = payload.get("NewAreas")
+    if areas is None:
+        areas = payload.get("new_areas")
+    if areas is None:
+        return
+    try:
+        ep = int((args or {}).get("endpoint_id") or 1)
+        ids = [int(item) for item in areas]
+    except (TypeError, ValueError):
+        return
+    attrs[f"{ep}/336/2"] = ids
+
+
 def apply_change_to_mode(
     agent, attrs: dict, args: dict, *, leave_docked: bool = False, keep_charging: bool = False
 ) -> None:
+    apply_select_areas(agent, attrs, args or {})
     if (args or {}).get("command_name") != "ChangeToMode":
         return
     payload = (args or {}).get("payload") or {}
@@ -126,7 +146,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 35, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 36, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -249,7 +269,7 @@ def main() -> int:
         "node_id": 41,
         "available": True,
         "attributes": {
-            "0/40/3": "Martynas",
+            "0/40/3": "Alejandro",
             "1/29/0": [{"deviceType": 0x0074, "revision": 1}],
             "1/84/0": {"value": [
                 {"label": "Idle", "mode": 0, "modeTags": [{"value": 0x4000}]},
@@ -491,6 +511,65 @@ def main() -> int:
     assert 1 not in refused_modes, refused_modes
     assert 2 in refused_modes, refused_modes
     assert refused.get("ok") is not True or refused.get("vacuum_status") != "Mapping", refused
+
+    calls.clear()
+    # Alejandro (K11+): Charging + Bathroom. ChangeToMode Cleaning (1) is accepted
+    # but CurrentMode stays Idle 0. Resume is what starts the robot. Mapping is 2.
+    k11_attrs = dict(vacuum_node()["attributes"])
+    k11_attrs["0/40/3"] = "K11+"
+    k11_attrs["1/97/4"] = 0x41
+    k11_attrs["1/84/1"] = 0
+
+    def k11_charge_ignore_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": k11_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": k11_attrs}
+        if command == "device_command":
+            apply_select_areas(agent, k11_attrs, args)
+            if args.get("command_name") == "Resume":
+                k11_attrs["1/84/1"] = 1
+                k11_attrs["1/97/4"] = 1
+                return {"ok": True, "result": {"status": 0}}
+            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
+                return {"ok": True, "result": {"status": 0}}
+            if args.get("command_name") == "ChangeToMode":
+                apply_change_to_mode(agent, k11_attrs, args, keep_charging=True)
+            return {"ok": True, "result": {"status": 0}}
+        if command == "write_attribute":
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = k11_charge_ignore_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    bathroom = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "areas": [3],
+    })
+    assert bathroom.get("ok") is True, bathroom
+    assert bathroom.get("vacuum_status") == "Cleaning", bathroom
+    k11_cmds = [args for command, args in calls if command == "device_command"]
+    area_payloads = [
+        (c.get("payload") or {}).get("newAreas", (c.get("payload") or {}).get("NewAreas"))
+        for c in k11_cmds
+        if c.get("cluster_id") == agent.SERVICE_AREA
+    ]
+    assert [3] in area_payloads, area_payloads
+    run_modes_sent = [
+        (c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode"))
+        for c in k11_cmds
+        if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
+    ]
+    assert 1 in run_modes_sent, run_modes_sent
+    assert 2 not in run_modes_sent, run_modes_sent
+    assert any(c.get("command_name") == "Resume" for c in k11_cmds), k11_cmds
+    assert not any(c.get("cluster_id") == agent.ON_OFF for c in k11_cmds), k11_cmds
+    assert not any(c.get("command_name") == "Start" for c in k11_cmds), k11_cmds
 
     print("test_matter_vacuum_command.py ok")
     return 0
