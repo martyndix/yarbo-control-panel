@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 39
+AGENT_VERSION = 40
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -4272,18 +4272,18 @@ def set_vacuum_command(
     if dropped is not None:
         return dropped
 
-    # SwitchBot treats SelectAreas [] as "no rooms" (Cleaning stays Idle). Send the
-    # chosen room IDs, or every room for All rooms. Mapping does not need this.
-    # K11+ has Maps but not SelectWhileRunning: rooms must be selected while Idle.
-    select_ids = requested_ids if not all_rooms and requested_ids else (all_ids if all_rooms else None)
+    # All rooms is Apple Home whole-house: ChangeToMode Cleaning only.
+    # SelectAreas of every ID (or []) made K11+ GenericFailure while Charging.
+    # A room subset still sends those IDs first. Never Mapping. Never Clean Mode
+    # ChangeToMode on start — K11+ Clean Mode does not accept that command.
+    select_ids = requested_ids if not all_rooms and requested_ids else None
 
     def apply_rooms(ids: list[int] | None) -> dict[str, Any] | None:
         if not ids:
             return None
         selected = vacuum_select_areas(node_id, area_endpoint, ids)
         if (
-            not all_rooms
-            and not selected.get("ok")
+            not selected.get("ok")
             and not is_unsupported_cluster(selected)
             and not is_transport_error(selected)
         ):
@@ -4297,37 +4297,6 @@ def set_vacuum_command(
             settle_mode()
             sync_row()
         return None
-
-    def set_suction_mode() -> dict[str, Any] | None:
-        # K11+ Clean Mode is suction (Quick/Auto/Deep), not vacuum/mop. Hubitat
-        # can ChangeToMode that cluster; Run Cleaning from Charging returns
-        # GenericFailure (2) if suction is not set.
-        if want_clean in ("mop", "vacuum_mop", "both"):
-            return None
-        option = pick_mode(
-            clean_modes,
-            (CLEAN_VACUUM,),
-            ("auto", "quick", "vacuum", "standard", "normal"),
-        )
-        if option is None or mode_is_mapping(option) or mode_has_tag(option, CLEAN_MOP):
-            return None
-        current = row.get("vacuum_clean_mode")
-        try:
-            if current is not None and int(current) == int(option["mode"]):
-                return None
-        except (TypeError, ValueError):
-            pass
-        suction = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
-        if is_transport_error(suction):
-            return suction
-        settle_mode()
-        sync_row()
-        return None
-
-    if at_charger() or run_op() == OP_SEEKING:
-        suction_err = set_suction_mode()
-        if suction_err is not None:
-            return suction_err
 
     rooms_err = apply_rooms(select_ids)
     if rooms_err is not None:
@@ -4379,21 +4348,15 @@ def set_vacuum_command(
         return started
     if not started.get("ok") and int(started.get("status") or 0) in (2, 3):
         settle_start()
-        suction_err = set_suction_mode()
-        if suction_err is not None:
-            return suction_err
         started = go_cleaning()
         if is_transport_error(started):
             return started
     settle_start()
     sync_row()
-    if still_idle_on_charger() and all_ids:
+    if still_idle_on_charger():
         dropped_again = drop_to_idle()
         if dropped_again is not None:
             return dropped_again
-        rooms_retry = apply_rooms(select_ids or all_ids)
-        if rooms_retry is not None:
-            return rooms_retry
         started = go_cleaning()
         if is_transport_error(started):
             return started

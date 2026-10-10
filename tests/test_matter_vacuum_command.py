@@ -146,7 +146,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 39, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 40, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -330,13 +330,7 @@ def main() -> int:
     assert start_all.get("ok") is True, start_all
     live_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("command_name") == "Resume" for c in live_cmds), live_cmds
-    area_cmds = [c for c in live_cmds if c.get("cluster_id") == agent.SERVICE_AREA]
-    assert area_cmds, live_cmds
-    area_payload = area_cmds[0].get("payload") or {}
-    picked = area_payload.get("newAreas", area_payload.get("NewAreas", area_payload.get("new_areas")))
-    assert picked == [1, 2, 3], area_cmds[0]
-    run_idx = next(i for i, c in enumerate(live_cmds) if c.get("cluster_id") == agent.RVC_RUN)
-    assert live_cmds.index(area_cmds[0]) < run_idx, live_cmds
+    assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in live_cmds), live_cmds
     assert not any(c.get("command_name") == "Start" for c in live_cmds), live_cmds
     assert any(
         c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
@@ -373,7 +367,8 @@ def main() -> int:
     assert from_charge.get("ok") is True, from_charge
     assert from_charge.get("vacuum_status") == "Cleaning", from_charge
     charge_cmds = [args for command, args in calls if command == "device_command"]
-    assert any(c.get("cluster_id") == agent.SERVICE_AREA for c in charge_cmds), charge_cmds
+    assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in charge_cmds), charge_cmds
+    assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in charge_cmds), charge_cmds
     assert any(
         c.get("cluster_id") == agent.RVC_RUN
         and (c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode")) == 1
@@ -412,7 +407,7 @@ def main() -> int:
         c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
         for c in start_cmds
     ), start_cmds
-    assert any(c.get("cluster_id") == agent.SERVICE_AREA for c in start_cmds), start_cmds
+    assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in start_cmds), start_cmds
     assert not any(c.get("command_name") == "Start" for c in start_cmds), start_cmds
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in start_cmds), start_cmds
 

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.92] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** on SwitchBot **K11+** (Alejandro) still failed while Charging after 4.0.91. Starting from the SwitchBot app turns the tile green, so Matter state is fine — Clean Mode ChangeToMode (suction) and SelectAreas of every room were getting **GenericFailure**. All rooms is ChangeToMode Cleaning only; a room subset still selects those rooms first. Mapping is still never sent (**S10** / Martynas).
+
 ## [4.0.91] - 2026-10-10
 
 ### Fixed
