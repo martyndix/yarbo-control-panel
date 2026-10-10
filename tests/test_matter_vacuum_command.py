@@ -72,6 +72,12 @@ def main() -> int:
         raise SystemExit(f"selected {vac.get('selected_areas')}")
     if vac.get("vacuum_status") != "Idle":
         raise SystemExit(f"status {vac.get('vacuum_status')}")
+    docked_node = vacuum_node()
+    docked_node["attributes"]["1/97/0"] = 0x42
+    docked_node["attributes"]["1/84/1"] = 1
+    docked = {d["id"]: d for d in agent.flatten_nodes({"nodes": [docked_node]})}.get("40:1") or {}
+    if docked.get("vacuum_status") != "Docked" or docked.get("on") is True:
+        raise SystemExit(f"docked {docked}")
 
     calls: list[tuple] = []
 
@@ -181,7 +187,12 @@ def main() -> int:
         for c in live_cmds
     ), live_cmds
     area_payload = next(c.get("payload") or {} for c in live_cmds if c.get("cluster_id") == agent.SERVICE_AREA)
-    assert area_payload.get("newAreas") == [] or area_payload.get("NewAreas") == [], area_payload
+    assert area_payload.get("newAreas") == [1, 2, 3] or area_payload.get("NewAreas") == [1, 2, 3], area_payload
+    assert any(
+        c.get("cluster_id") == agent.RVC_OPERATIONAL and c.get("command_name") == "Start"
+        for c in live_cmds
+    ), live_cmds
+    assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in live_cmds), live_cmds
 
     calls.clear()
     agent._live_devices = [dict(vac)]
@@ -210,7 +221,52 @@ def main() -> int:
         for c in start_cmds
     ), start_cmds
     all_payload = next(c.get("payload") or {} for c in start_cmds if c.get("cluster_id") == agent.SERVICE_AREA)
-    assert all_payload.get("newAreas") == [] or all_payload.get("NewAreas") == [], all_payload
+    assert all_payload.get("newAreas") == [1, 2, 3] or all_payload.get("NewAreas") == [1, 2, 3], all_payload
+    assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in start_cmds), start_cmds
+
+    calls.clear()
+    docked_attrs = dict(node_attrs)
+    docked_attrs["1/97/0"] = 0x42
+    docked_attrs["1/84/1"] = 1
+
+    def still_docked_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": docked_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": docked_attrs}
+        if command == "device_command" and (args or {}).get("command_name") == "Start":
+            return {"ok": False, "error": "Vacuum rejected Start (129)", "status": 0x81}
+        if command == "device_command":
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = still_docked_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    stuck = agent.dispatch({"op": "command", "id": "40:1", "action": "start", "kind": "vacuum", "areas": "all"})
+    assert stuck.get("ok") is False, stuck
+    assert stuck.get("on") is False, stuck
+    assert stuck.get("vacuum_status") == "Docked", stuck
+    assert "did not start" in str(stuck.get("error") or ""), stuck
+
+    calls.clear()
+
+    def tlv_fail_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command in ("get_node", "read_attribute"):
+            return {"ok": True, "result": node_attrs if command == "read_attribute" else {"node_id": 40, "attributes": node_attrs}}
+        if command == "device_command" and (args or {}).get("cluster_id") == agent.RVC_RUN:
+            return {"ok": True, "result": {"0": 3, "1": "InvalidInMode"}}
+        if command == "device_command":
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = tlv_fail_rpc  # type: ignore[method-assign]
+    agent._live_devices = [dict(vac)]
+    agent.dispatch({"op": "command", "id": "40:1", "action": "start", "kind": "vacuum", "areas": [2]})
+    rejected = agent.vacuum_response_status({"0": 3, "1": "InvalidInMode"})
+    assert rejected == 3, rejected
+    assert agent.vacuum_response_status({"status": 0}) == 0
 
     print("test_matter_vacuum_command.py ok")
     return 0

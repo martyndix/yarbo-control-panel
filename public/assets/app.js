@@ -4373,7 +4373,6 @@ async function sendHomeVacuumCommand(id, command, button) {
         id,
         command: cmd,
         kind: 'vacuum',
-        clean_mode: device.vacuum_clean || 'vacuum',
     };
     const areas = Array.isArray(device.areas) ? device.areas : [];
     const selected = (device.selected_areas || []).map((n) => Number(n));
@@ -4382,7 +4381,9 @@ async function sendHomeVacuumCommand(id, command, button) {
     if (cmd === 'start' || cmd === 'mop') {
         payload.areas = (!areas.length || allOn) ? 'all' : selected;
     }
-    if (cmd === 'mop') payload.clean_mode = 'mop';
+    if (cmd === 'mop' || device.vacuum_clean === 'mop' || device.vacuum_clean === 'vacuum_mop') {
+        payload.clean_mode = cmd === 'mop' ? 'mop' : device.vacuum_clean;
+    }
     if (button) button.disabled = true;
     try {
         const data = await homeApi(payload, 60000);

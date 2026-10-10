@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.82] - 2026-10-10
+
+### Fixed
+- Matter vacuum **Start** reads the live docked/idle state, selects the chosen rooms by ID, and only reports Cleaning if the robot leaves the dock. SwitchBot K11+ stays docked if Run Mode is already Cleaning, if Vacuum/Mop mode is changed on Start, or if All rooms sends an empty SelectAreas list. The tile no longer turns green from a no-op ChangeToMode.
+
 ## [4.0.81] - 2026-10-10
 
 ### Fixed
