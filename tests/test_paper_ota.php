@@ -129,6 +129,53 @@ if (!str_contains($js, 'once per boot') || !str_contains($js, 'Waiting for')) {
     fwrite(STDERR, "paired list must tell you to reboot if Updating sits on the old firmware\n");
     exit(1);
 }
+if (!str_contains($js, 'ota_charge_ok === false') || !str_contains($js, 'Charge to 50% or plug in USB')) {
+    fwrite(STDERR, "Update must disable below 50% unless charging\n");
+    exit(1);
+}
+if (!Yarbo\YarboPaperDevice::otaChargeOk(32, false)
+    && Yarbo\YarboPaperDevice::otaChargeOk(32, true)
+    && Yarbo\YarboPaperDevice::otaChargeOk(50, false)
+    && Yarbo\YarboPaperDevice::otaChargeOk(null, false)) {
+    // ok
+} else {
+    fwrite(STDERR, "otaChargeOk 32/charging/50/unknown\n");
+    exit(1);
+}
+$store = json_decode((string) file_get_contents($root . '/data/papermono-devices.json'), true);
+$store['devices'][0]['ota_pending'] = false;
+$store['devices'][0]['ota_requested_at'] = null;
+$store['devices'][0]['fw_reported'] = '0.1.56';
+$store['devices'][0]['battery_level'] = 32;
+$store['devices'][0]['is_charging'] = false;
+$store['devices'][0]['last_seen_at'] = gmdate('c');
+file_put_contents($root . '/data/papermono-devices.json', json_encode($store, JSON_UNESCAPED_SLASHES));
+$low = $devices->requestOta('tab1');
+if (($low['ok'] ?? true) === true || !str_contains((string) ($low['error'] ?? ''), 'Charge to 50%')) {
+    fwrite(STDERR, 'low battery must block OTA ' . json_encode($low) . "\n");
+    exit(1);
+}
+$store['devices'][0]['is_charging'] = true;
+file_put_contents($root . '/data/papermono-devices.json', json_encode($store, JSON_UNESCAPED_SLASHES));
+$plugged = $devices->requestOta('tab1');
+if (!($plugged['ok'] ?? false)) {
+    fwrite(STDERR, 'charging must allow OTA ' . json_encode($plugged) . "\n");
+    exit(1);
+}
+$store = json_decode((string) file_get_contents($root . '/data/papermono-devices.json'), true);
+$store['devices'][0]['ota_pending'] = false;
+$store['devices'][0]['is_charging'] = false;
+$store['devices'][0]['battery_level'] = 50;
+file_put_contents($root . '/data/papermono-devices.json', json_encode($store, JSON_UNESCAPED_SLASHES));
+$half = $devices->requestOta('tab1');
+if (!($half['ok'] ?? false)) {
+    fwrite(STDERR, '50% must allow OTA ' . json_encode($half) . "\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.75]')) {
+    fwrite(STDERR, "changelog 4.0.75 missing\n");
+    exit(1);
+}
 if (!str_contains($change, '## [4.0.48]')) {
     fwrite(STDERR, "changelog 4.0.48 missing\n");
     exit(1);

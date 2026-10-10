@@ -49,6 +49,14 @@ if (($after['tab2']['charging_label'] ?? '') !== 'Not charging') {
     fwrite(STDERR, 'study charging ' . json_encode($after['tab2']) . "\n");
     exit(1);
 }
+if (($after['tab1']['ota_charge_ok'] ?? false) !== true) {
+    fwrite(STDERR, 'charging kitchen must allow OTA ' . json_encode($after['tab1']) . "\n");
+    exit(1);
+}
+if (($after['tab2']['ota_charge_ok'] ?? true) !== false) {
+    fwrite(STDERR, '12% study must block OTA ' . json_encode($after['tab2']) . "\n");
+    exit(1);
+}
 
 $devices->touch('tab1', '0.1.52');
 $kept = null;

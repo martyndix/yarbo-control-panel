@@ -22,6 +22,7 @@ final class YarboPaperDevice
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const OTA_PENDING_TTL_S = 900;
+    public const OTA_MIN_BATTERY_PCT = 50;
     public const MESSAGE_MAX = 50;
     public const MESSAGE_CHARS = 180;
     public const MESSAGE_TTL_S = 604800;
@@ -476,6 +477,12 @@ final class YarboPaperDevice
                     'error' => $label . ' is not online. Wait until it polls, then try again.',
                 ];
             }
+            if (!$this->deviceOtaChargeOk($device)) {
+                return [
+                    'ok' => false,
+                    'error' => $this->otaChargeBlockMessage($device, $label),
+                ];
+            }
             $reported = (string) ($device['fw_reported'] ?? '');
             if ($reported !== '' && $reported === $latest) {
                 return [
@@ -874,6 +881,44 @@ final class YarboPaperDevice
         }
         unset($device);
         $this->save($store);
+    }
+
+    /**
+     * Wi-Fi Update needs 50% or USB charging so a low pack cannot die mid-flash.
+     */
+    public static function otaChargeOk(?int $battery, bool $charging): bool
+    {
+        if ($charging) {
+            return true;
+        }
+        if ($battery === null) {
+            return true;
+        }
+
+        return $battery >= self::OTA_MIN_BATTERY_PCT;
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     */
+    private function deviceOtaChargeOk(array $device): bool
+    {
+        $battery = self::parseBatteryLevel($device['battery_level'] ?? null);
+        $charging = self::parseChargingFlag($device['is_charging'] ?? null) ?? false;
+
+        return self::otaChargeOk($battery, $charging);
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     */
+    private function otaChargeBlockMessage(array $device, string $label): string
+    {
+        $battery = self::parseBatteryLevel($device['battery_level'] ?? null);
+        $pct = $battery !== null ? $battery . '%' : 'unknown';
+
+        return $label . ' is at ' . $pct . '. Charge to ' . self::OTA_MIN_BATTERY_PCT
+            . '% or plug in USB, then press Update.';
     }
 
     public static function parseBatteryLevel(mixed $value): ?int
@@ -2724,6 +2769,7 @@ final class YarboPaperDevice
             'ota_pending' => $this->otaPendingActive($device),
             'ota_available' => $this->firmwareReadyForOta($kind)
                 && (string) ($device['fw_reported'] ?? '') !== $this->firmwareVersionForKind($kind),
+            'ota_charge_ok' => self::otaChargeOk($battery, $charging),
             'battery_level' => $battery,
             'is_charging' => $charging,
             'battery_updated_at' => $device['battery_updated_at'] ?? null,

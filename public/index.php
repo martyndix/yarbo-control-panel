@@ -1789,7 +1789,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.65 / 0.2.19-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.65 / 0.2.19-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 
@@ -1848,7 +1848,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn" id="settings-update-run" disabled>Update to latest</button>
                             </div>
                             <h3 class="settings-subtitle">E-paper firmware</h3>
-                            <p class="hint">First flash is USB. After that, queue a Wi-Fi update for an online tablet. Build firmware on the E-paper page first — Update will not compile during the download. The tablet shows <strong>UPDATING</strong>, stays on Wi-Fi, then reboots. It only tries once per boot; reboot if it stays on the old version. PaperMono beeps and lights green.</p>
+                            <p class="hint">First flash is USB. After that, queue a Wi-Fi update for an online tablet. Build firmware on the E-paper page first — Update will not compile during the download. The tablet shows <strong>UPDATING</strong>, stays on Wi-Fi, then reboots. It only tries once per boot; reboot if it stays on the old version. PaperMono beeps and lights green. Update is disabled below 50% unless the tablet is charging.</p>
                             <div id="settings-paper-ota-list" class="papermono-device-list"></div>
                             <p id="settings-paper-ota-result" class="settings-cloud-result hidden" role="status"></p>
                             <div class="settings-update-actions">

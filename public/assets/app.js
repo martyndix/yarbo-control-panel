@@ -8712,6 +8712,10 @@ function paperOtaUpdateButton(device) {
     if (!device.online) {
         return `<button type="button" class="btn btn-secondary btn-compact" disabled title="Tablet not seen recently">Update</button>`;
     }
+    if (device.ota_charge_ok === false) {
+        const pct = device.battery_level != null ? `${Number(device.battery_level)}%` : 'low';
+        return `<button type="button" class="btn btn-secondary btn-compact" disabled title="At ${escapeHtml(pct)}. Charge to 50% or plug in USB">Update</button>`;
+    }
     const title = device.ota_available
         ? 'Push firmware over Wi-Fi'
         : 'Build firmware on the E-paper page first, then press Update';
@@ -8732,7 +8736,7 @@ function renderPaperOtaPanel(devices) {
         if (els.settingsPaperOtaAll) els.settingsPaperOtaAll.disabled = true;
         return;
     }
-    const ready = devices.filter((d) => d.ota_available && d.online && !d.ota_pending);
+    const ready = devices.filter((d) => d.ota_available && d.online && !d.ota_pending && d.ota_charge_ok !== false);
     els.settingsPaperOtaList.innerHTML = devices.map((device) => {
         const last = paperLastSeenText(device);
         const reported = device.fw_reported ? escapeHtml(String(device.fw_reported)) : 'unknown';

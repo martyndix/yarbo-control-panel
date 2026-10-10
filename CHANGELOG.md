@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.75] - 2026-10-10
+
+### Changed
+- PaperMono and Paper Colour **Update** is disabled below 50% battery unless the tablet is on USB charging. The same check applies to Update all and to the Wi-Fi queue, so a low pack cannot start a flash.
+
 ## [4.0.74] - 2026-10-09
 
 ### Added
