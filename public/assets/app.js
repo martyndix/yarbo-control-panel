@@ -4379,8 +4379,8 @@ async function sendHomeVacuumCommand(id, command, button) {
     const selected = (device.selected_areas || []).map((n) => Number(n));
     const allIds = areas.map((area) => Number(area.id));
     const allOn = !selected.length || allIds.every((aid) => selected.includes(aid));
-    if (areas.length && (cmd === 'start' || cmd === 'mop')) {
-        payload.areas = allOn ? 'all' : selected;
+    if (cmd === 'start' || cmd === 'mop') {
+        payload.areas = (!areas.length || allOn) ? 'all' : selected;
     }
     if (cmd === 'mop') payload.clean_mode = 'mop';
     if (button) button.disabled = true;

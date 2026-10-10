@@ -335,6 +335,35 @@ if ($vacNames !== ['Kitchen', 'Hall'] || empty($kinds['21:1']['can_mop'])) {
     fwrite(STDERR, 'vacuum rooms ' . json_encode($kinds['21:1'] ?? null) . "\n");
     exit(1);
 }
+$wrappedVacuum = [
+    'node_id' => 26,
+    'available' => true,
+    'attributes' => [
+        '0/40/3' => 'Martynas',
+        '1/29/0' => [['deviceType' => 0x0074, 'revision' => 1]],
+        '1/84/0' => ['value' => [
+            ['label' => 'Idle', 'mode' => 0, 'modeTags' => [['value' => 0x4000]]],
+            ['label' => 'Cleaning', 'mode' => 1, 'modeTags' => [['value' => 0x4001]]],
+        ]],
+        '1/97/0' => 0,
+        '2/336/0' => ['value' => [
+            ['AreaID' => 3, 'LocationInfo' => ['LocationName' => 'Dining']],
+            ['area_id' => 4, 'location_info' => ['location_name' => 'Study']],
+        ]],
+        '2/336/2' => ['value' => [3, 4]],
+    ],
+];
+$wrappedRow = null;
+foreach (YarboMatterFabric::flatten([$wrappedVacuum]) as $row) {
+    if (($row['id'] ?? '') === '26:1') {
+        $wrappedRow = $row;
+    }
+}
+$wrappedNames = array_column($wrappedRow['areas'] ?? [], 'name');
+if ($wrappedNames !== ['Dining', 'Study']) {
+    fwrite(STDERR, 'wrapped vacuum rooms ' . json_encode($wrappedRow) . "\n");
+    exit(1);
+}
 $vacRemember = sys_get_temp_dir() . '/yarbo-vac-cache-' . bin2hex(random_bytes(3));
 mkdir($vacRemember . '/data', 0775, true);
 file_put_contents($vacRemember . '/data/hub-config.json', json_encode([

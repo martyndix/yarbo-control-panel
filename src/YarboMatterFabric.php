@@ -708,7 +708,23 @@ final class YarboMatterFabric
             }
         }
         $status = self::vacuumStatusLabel($op, $runTags);
-        $areas = self::parseAreas(self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SUPPORTED_AREAS));
+        $areas = [];
+        $selectedRaw = self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SELECTED_AREAS);
+        foreach (self::endpointIds($attributes) as $areaEp) {
+            if ($areaEp === 0) {
+                continue;
+            }
+            $found = self::parseAreas(self::attrRaw($attributes, $areaEp, self::SERVICE_AREA, self::ATTR_SUPPORTED_AREAS));
+            if ($found === []) {
+                continue;
+            }
+            $areas = $found;
+            $selectedRaw = self::attrRaw($attributes, $areaEp, self::SERVICE_AREA, self::ATTR_SELECTED_AREAS);
+            break;
+        }
+        if ($areas === []) {
+            $areas = self::parseAreas(self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SUPPORTED_AREAS));
+        }
         $canMop = self::modeHasTagOrWord($cleanModes, [self::CLEAN_MOP, self::CLEAN_VACUUM_THEN_MOP], 'mop');
         $canVacuumMop = self::modeHasTagOrWord($cleanModes, [self::CLEAN_VACUUM_THEN_MOP], 'vacuum and mop')
             || self::modeHasTagOrWord($cleanModes, [self::CLEAN_VACUUM_THEN_MOP], 'vac & mop');
@@ -723,9 +739,7 @@ final class YarboMatterFabric
             'can_vacuum_mop' => $canVacuumMop,
             'can_pause' => self::endpointHasCluster($attributes, $endpoint, self::RVC_OPERATIONAL),
             'areas' => $areas,
-            'selected_areas' => self::parseSelectedAreas(
-                self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SELECTED_AREAS)
-            ),
+            'selected_areas' => self::parseSelectedAreas($selectedRaw),
             'on' => $on,
         ];
     }
@@ -801,31 +815,73 @@ final class YarboMatterFabric
     }
 
     /**
+     * python-matter-server sometimes wraps arrays in {value: ...}.
+     *
+     * @return list<mixed>
+     */
+    private static function unwrapList(mixed $raw): array
+    {
+        $current = $raw;
+        for ($i = 0; $i < 4; $i++) {
+            if (!is_array($current)) {
+                return [];
+            }
+            if (array_key_exists('areaID', $current) || array_key_exists('mode', $current) || array_key_exists('label', $current)) {
+                return [$current];
+            }
+            if (array_key_exists('value', $current) && !array_key_exists('areaID', $current) && !array_key_exists('mode', $current)) {
+                $current = $current['value'];
+                continue;
+            }
+            if (array_key_exists('Value', $current) && count($current) === 1) {
+                $current = $current['Value'];
+                continue;
+            }
+            break;
+        }
+        if (!is_array($current)) {
+            return [];
+        }
+        if ($current !== [] && !array_is_list($current)) {
+            $keys = array_keys($current);
+            $numeric = true;
+            foreach ($keys as $key) {
+                if (!is_int($key) && !(is_string($key) && ctype_digit($key))) {
+                    $numeric = false;
+                    break;
+                }
+            }
+            if ($numeric) {
+                ksort($current, SORT_NUMERIC);
+
+                return array_values($current);
+            }
+        }
+
+        return array_is_list($current) ? $current : [];
+    }
+
+    /**
      * @return list<array{mode: int, label: string, tags: list<int>}>
      */
     private static function parseModeOptions(mixed $raw): array
     {
-        if (!is_array($raw)) {
-            return [];
-        }
         $out = [];
-        foreach ($raw as $item) {
+        foreach (self::unwrapList($raw) as $item) {
             if (!is_array($item)) {
                 continue;
             }
-            $mode = $item['mode'] ?? $item['1'] ?? $item[1] ?? null;
+            $mode = $item['mode'] ?? $item['Mode'] ?? $item['1'] ?? $item[1] ?? null;
             if (!is_numeric($mode)) {
                 continue;
             }
-            $label = $item['label'] ?? $item['0'] ?? $item[0] ?? '';
-            $tagsRaw = $item['modeTags'] ?? $item['mode_tags'] ?? $item['2'] ?? $item[2] ?? [];
+            $label = $item['label'] ?? $item['Label'] ?? $item['0'] ?? $item[0] ?? '';
+            $tagsRaw = $item['modeTags'] ?? $item['mode_tags'] ?? $item['ModeTags'] ?? $item['2'] ?? $item[2] ?? [];
             $tags = [];
-            if (is_array($tagsRaw)) {
-                foreach ($tagsRaw as $tag) {
-                    $val = is_array($tag) ? ($tag['value'] ?? $tag['1'] ?? $tag[1] ?? null) : $tag;
-                    if (is_numeric($val)) {
-                        $tags[] = (int) $val;
-                    }
+            foreach (self::unwrapList($tagsRaw) as $tag) {
+                $val = is_array($tag) ? ($tag['value'] ?? $tag['1'] ?? $tag[1] ?? null) : $tag;
+                if (is_numeric($val)) {
+                    $tags[] = (int) $val;
                 }
             }
             $out[] = ['mode' => (int) $mode, 'label' => is_string($label) ? $label : '', 'tags' => $tags];
@@ -839,22 +895,21 @@ final class YarboMatterFabric
      */
     private static function parseAreas(mixed $raw): array
     {
-        if (!is_array($raw)) {
-            return [];
-        }
         $out = [];
-        foreach ($raw as $item) {
+        foreach (self::unwrapList($raw) as $item) {
             if (!is_array($item)) {
                 continue;
             }
-            $id = $item['areaID'] ?? $item['area_id'] ?? $item['0'] ?? $item[0] ?? null;
+            $id = $item['areaID'] ?? $item['area_id'] ?? $item['AreaID'] ?? $item['0'] ?? $item[0] ?? null;
             if (!is_numeric($id)) {
                 continue;
             }
-            $info = $item['locationInfo'] ?? $item['location_info'] ?? $item['2'] ?? $item[2] ?? null;
+            $info = $item['locationInfo'] ?? $item['location_info'] ?? $item['LocationInfo'] ?? $item['2'] ?? $item[2] ?? null;
             $name = '';
             if (is_array($info)) {
-                $name = (string) ($info['locationName'] ?? $info['location_name'] ?? $info['0'] ?? $info[0] ?? '');
+                $name = (string) ($info['locationName'] ?? $info['location_name'] ?? $info['LocationName'] ?? $info['0'] ?? $info[0] ?? '');
+            } elseif (is_string($info)) {
+                $name = $info;
             }
             $name = trim($name);
             if ($name === '') {
@@ -871,12 +926,9 @@ final class YarboMatterFabric
      */
     private static function parseSelectedAreas(mixed $raw): array
     {
-        if (!is_array($raw)) {
-            return [];
-        }
         $out = [];
-        foreach ($raw as $item) {
-            $val = is_array($item) ? ($item['0'] ?? $item[0] ?? $item['value'] ?? $item['areaID'] ?? null) : $item;
+        foreach (self::unwrapList($raw) as $item) {
+            $val = is_array($item) ? ($item['0'] ?? $item[0] ?? $item['value'] ?? $item['areaID'] ?? $item['AreaID'] ?? null) : $item;
             if (is_numeric($val)) {
                 $out[] = (int) $val;
             }
