@@ -5094,9 +5094,7 @@ function homeAutoThenCommands(d) {
         return [['unlock', 'Unlock']];
     }
     if (d.kind === 'vacuum') {
-        const cmds = [['start', 'Start'], ['dock', 'Dock'], ['pause', 'Pause']];
-        if (d.can_mop) cmds.splice(1, 0, ['mop', 'Mop']);
-        return cmds;
+        return [['start', 'Start'], ['mop', 'Mop'], ['dock', 'Dock'], ['pause', 'Pause']];
     }
     const cmds = [['on', 'On'], ['off', 'Off']];
     if (homeAutoThenCanPulse(d)) cmds.push(['pulse', 'Pulse']);
