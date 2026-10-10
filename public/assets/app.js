@@ -4936,24 +4936,8 @@ function homeAutoThenCanOffAfter(action) {
     return !['off', 'stop', 'unlock', 'lock', 'open', 'close', 'pulse'].includes(cmd);
 }
 
-function homeAutoOffAfterChoices(sec) {
-    const n = Math.max(0, Number(sec) || 0);
-    const opts = [
-        [0, 'stay on'],
-        [60, 'off 1 min'],
-        [120, 'off 2 min'],
-        [180, 'off 3 min'],
-        [300, 'off 5 min'],
-        [600, 'off 10 min'],
-        [900, 'off 15 min'],
-        [1200, 'off 20 min'],
-        [1800, 'off 30 min'],
-        [3600, 'off 1 hr'],
-    ];
-    if (n > 0 && !opts.some(([v]) => v === n)) {
-        opts.splice(1, 0, [n, `off ${homeAutoFormatDuration(n)}`]);
-    }
-    return opts;
+function homeAutoThenHasOffAfter() {
+    return (autoDraft?.actions || []).some(homeAutoThenCanOffAfter);
 }
 
 function homeAutoApplyOffAfterToActions(sec) {
@@ -5810,11 +5794,15 @@ function homeAutoReadOffWhenFalse() {
 
 function homeAutoSyncOffAfterFields() {
     if (!autoDraft) return;
+    const row = document.getElementById('auto-off-after');
     const enabled = document.getElementById('auto-off-after-enabled');
     const valueEl = document.getElementById('auto-off-after-value');
     const unitEl = document.getElementById('auto-off-after-unit');
     const fields = document.getElementById('auto-off-after-fields');
     const hint = document.getElementById('auto-off-after-hint');
+    const show = homeAutoThenHasOffAfter();
+    row?.classList.toggle('hidden', !show);
+    if (!show) return;
     const whenFalse = Boolean(autoDraft.off_when_false);
     const sec = Number(autoDraft.off_after_sec || 0);
     const on = !whenFalse && sec > 0;
@@ -5825,7 +5813,9 @@ function homeAutoSyncOffAfterFields() {
     if (hint) {
         hint.textContent = whenFalse
             ? 'Turns off what Then turned on once When (and Only if) is no longer true. Trigger delay applies both ways, so a brief dip does not chatter.'
-            : 'Optional. After Then runs, turn those lights or the scene off. If this fires again, the timer restarts.';
+            : (on
+                ? 'After Then runs, turn those lights or the scene off. If this fires again, the timer restarts.'
+                : 'Leave lights and scenes as Then set them.');
     }
     if (on) {
         const parts = homeAutoOffAfterParts(sec);
@@ -5969,20 +5959,12 @@ function homeAutoThenChipHtml(action, index) {
     const cmds = homeAutoThenCommands(d);
     const cmd = action.command || (isScene ? 'run' : 'on');
     if (cmd === 'brightness' && !cmds.some(([v]) => v === 'brightness')) cmds.push(['brightness', 'Brightness']);
-    const canOff = homeAutoThenCanOffAfter({ ...action, command: cmd }) && !autoDraft?.off_when_false;
-    const offSec = canOff ? Number(action.off_after_sec || 0) : 0;
-    const offHtml = canOff
-        ? `<select data-auto-then-off aria-label="Turn off after">${homeAutoOffAfterChoices(offSec).map(([v, label]) =>
-            `<option value="${v}" ${Number(v) === offSec ? 'selected' : ''}>${escapeHtml(label)}</option>`
-        ).join('')}</select>`
-        : '';
     return `<div class="auto-chip${isScene ? ' auto-chip--scene' : ''}" draggable="true" data-auto-then="${index}">
         ${escapeHtml(d.name || action.id)}
         <select data-auto-cmd>${cmds.map(([v, label]) =>
             `<option value="${v}" ${v === cmd ? 'selected' : ''}>${label}</option>`
         ).join('')}</select>
         ${homeAutoThenParamsHtml(d, action, cmd)}
-        ${offHtml}
         <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
     </div>`;
 }
@@ -6496,8 +6478,15 @@ async function homeAutoSave() {
     homeAutoSetTriggers(homeAutoTriggers());
     homeAutoReadThenLooks();
     homeAutoSanitizeThenLooks();
-    autoDraft.off_when_false = homeAutoReadOffWhenFalse();
-    autoDraft.off_after_sec = autoDraft.off_when_false ? 0 : homeAutoReadOffAfter();
+    if (!homeAutoThenHasOffAfter()) {
+        autoDraft.off_when_false = false;
+        autoDraft.off_after_sec = 0;
+        homeAutoApplyOffAfterToActions(0);
+    } else {
+        autoDraft.off_when_false = homeAutoReadOffWhenFalse();
+        autoDraft.off_after_sec = autoDraft.off_when_false ? 0 : homeAutoReadOffAfter();
+        homeAutoApplyOffAfterToActions(autoDraft.off_after_sec);
+    }
     autoDraft.hold_sec = Math.max(0, Number(document.getElementById('auto-hold-sec')?.value || autoDraft.hold_sec || 0));
     if (homeAutoUsesSun() && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);
@@ -6830,21 +6819,13 @@ function bindHomeAutomations() {
                 }
                 if (!homeAutoThenCanOffAfter(autoDraft.actions[i])) {
                     delete autoDraft.actions[i].off_after_sec;
+                } else if (!autoDraft.off_when_false && Number(autoDraft.off_after_sec || 0) > 0) {
+                    autoDraft.actions[i].off_after_sec = Number(autoDraft.off_after_sec);
                 }
             }
         }
         if (event.target.matches('[data-auto-pulse-count]')) {
             homeAutoApplyThenLook(event.target);
-        }
-        if (event.target.matches('[data-auto-then-off]')) {
-            const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
-            if (autoDraft.actions[i]) {
-                const sec = Math.max(0, Number(event.target.value || 0));
-                if (sec > 0) autoDraft.actions[i].off_after_sec = sec;
-                else delete autoDraft.actions[i].off_after_sec;
-                const secs = autoDraft.actions.filter(homeAutoThenCanOffAfter).map((a) => Number(a.off_after_sec || 0));
-                if (secs.length && secs.every((s) => s === secs[0])) autoDraft.off_after_sec = secs[0];
-            }
         }
         if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
             homeAutoApplyThenLook(event.target);
@@ -6880,12 +6861,12 @@ function bindHomeAutomations() {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
-        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-then-off], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count]')) {
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count]')) {
             homeAutoFollowName();
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-then-off], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

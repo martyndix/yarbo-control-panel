@@ -4239,10 +4239,6 @@ body.home-is-reordering {
     cursor: pointer;
 }
 
-.auto-chip [data-auto-then-off] {
-    max-width: 8.8rem;
-}
-
 .auto-chip input[type="number"] {
     width: 3.4rem;
 }

@@ -725,13 +725,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <h3 class="settings-subtitle">Then</h3>
                         <p class="hint">Drag lights, scenes, Unlock, or a Yarbo Start plan / Dock / Stop here. Pulse flashes a colour 1–10 times, then puts the light back to off, on, or its scene look. On can set brightness, colour, or temperature when the device has those.</p>
                         <div class="auto-drop-chips" id="auto-then-chips"></div>
-                        <label class="settings-field auto-off-after">
-                            <span class="label">Turn off after</span>
+                        <label class="settings-field auto-off-after" id="auto-off-after">
+                            <span class="label">After Then</span>
                             <span class="auto-off-after-row">
-                                <select id="auto-off-after-enabled" aria-label="Turn off after">
+                                <select id="auto-off-after-enabled" aria-label="After Then">
                                     <option value="0">Stay on</option>
-                                    <option value="false">When no longer true</option>
-                                    <option value="1">Timer</option>
+                                    <option value="false">Off when When stops</option>
+                                    <option value="1">Off after a timer</option>
                                 </select>
                                 <span id="auto-off-after-fields" class="auto-off-after-fields hidden">
                                     <input type="number" min="1" id="auto-off-after-value" value="5" aria-label="Turn off after amount">
@@ -742,7 +742,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </select>
                                 </span>
                             </span>
-                            <span class="hint" id="auto-off-after-hint">Optional. After Then runs, turn those lights or the scene off. If this fires again, the timer restarts.</span>
+                            <span class="hint" id="auto-off-after-hint">Leave lights and scenes as Then set them.</span>
                         </label>
                     </section>
                 </div>

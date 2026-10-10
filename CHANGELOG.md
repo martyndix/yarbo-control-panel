@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.78] - 2026-10-10
+
+### Changed
+- Home Automations Then has a single **After Then** control (Stay on, Off when When stops, Off after a timer). Per-light stay-on menus are gone so the same choice is not set twice.
+
 ## [4.0.77] - 2026-10-10
 
 ### Added
