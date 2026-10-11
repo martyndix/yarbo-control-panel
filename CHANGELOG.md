@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.107] - 2026-10-11
+
+### Changed
+- PaperMono vacuum room chips are taller so two-line names (Living room, Guest bedroom) sit inside the button, and the label shrinks a step if two lines still would clip. Taps invert the chip immediately; the panel ACKs before Matter runs so the next tap is not stuck behind a 60s robot command. Firmware **0.1.67**.
+
 ## [4.0.106] - 2026-10-11
 
 ### Changed

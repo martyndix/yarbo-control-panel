@@ -27,6 +27,31 @@ function device_token_from_request(): string
     return trim((string) ($_GET['token'] ?? ''));
 }
 
+function device_json_ack_continue(array $data, int $status = 200): void
+{
+    ignore_user_abort(true);
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Connection: close');
+    try {
+        $json = json_encode(
+            $data,
+            JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR
+        );
+    } catch (\JsonException $e) {
+        $json = '{"ok":true}';
+    }
+    header('Content-Length: ' . (string) strlen($json));
+    echo $json;
+    while (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+    flush();
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
+}
+
 function device_json_input(): array
 {
     $input = $_POST;
@@ -327,19 +352,14 @@ if ($action === 'command') {
             json_response(['ok' => false, 'error' => 'Unsupported vacuum command'], 400);
         }
         $mode = strtolower(trim((string) ($input['clean_mode'] ?? $input['mode'] ?? '')));
-        $result = (new \Yarbo\YarboHome(dirname(__DIR__, 2)))->paperVacuumCommand(
+        device_json_ack_continue(['ok' => true, 'command' => $cmd, 'vacuum_cmd' => $vacCmd]);
+        (new \Yarbo\YarboHome(dirname(__DIR__, 2)))->paperVacuumCommand(
             $homeId,
             $vacCmd,
             array_key_exists('areas', $input) ? $input['areas'] : null,
             $mode !== '' ? $mode : null,
         );
-        if (!($result['ok'] ?? false)) {
-            json_response([
-                'ok' => false,
-                'error' => (string) ($result['error'] ?? 'Vacuum command failed'),
-            ], 500);
-        }
-        json_response(['ok' => true, 'command' => $cmd, 'vacuum_cmd' => $vacCmd]);
+        exit;
     }
     if ($cmd === 'vestaboard_live') {
         $live = (string) ($input['vestaboard_live'] ?? $input['live'] ?? '');

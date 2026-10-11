@@ -207,6 +207,7 @@ int robotAreaN[PAPERMONO_ROBOT_MAX];
 int robotAreaIds[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 String robotAreaNames[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 bool robotAreaOn[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
+uint32_t robotVacHoldUntil = 0;
 
 void drawScreen(bool forceFull);
 void serviceTouchQueue();
@@ -732,6 +733,9 @@ String screenKey()
         + "|" + String(robotsUi) + "|" + String(robotSel) + "|" + String(robotCount);
     for (int i = 0; i < robotCount; i++) {
         key += "|" + robotIds[i] + "|" + robotStatus[i] + "|" + robotClean[i];
+        for (int a = 0; a < robotAreaN[i]; a++) {
+            key += robotAreaOn[i][a] ? "1" : "0";
+        }
     }
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         key += "|" + menuCustom[i] + "|" + String(menuShow[i] ? 1 : 0);
@@ -963,13 +967,18 @@ void wrapTwoLines(const String &text, int maxPx, String &line1, String &line2)
     line2 = clipLabelToWidth(text.substring(lo), maxPx);
 }
 
-void drawFittedLabel(int cx, int cy, int maxW, const String &text, uint16_t fg, uint16_t bg)
+void drawFittedLabel(int cx, int cy, int maxW, int maxH, const String &text, uint16_t fg, uint16_t bg)
 {
     M5.Display.setTextColor(fg, bg);
     M5.Display.setTextDatum(MC_DATUM);
-    int sizes[2] = {3, 2};
-    for (int s = 0; s < 2; s++) {
-        M5.Display.setTextSize(sizes[s]);
+    int sizes[3] = {4, 3, 2};
+    for (int s = 0; s < 3; s++) {
+        int size = sizes[s];
+        int lineH = 8 * size;
+        if (maxH > 0 && lineH > maxH) {
+            continue;
+        }
+        M5.Display.setTextSize(size);
         if (M5.Display.textWidth(text) <= maxW) {
             M5.Display.drawString(text, cx, cy);
             return;
@@ -981,11 +990,15 @@ void drawFittedLabel(int cx, int cy, int maxW, const String &text, uint16_t fg, 
             M5.Display.drawString(line1, cx, cy);
             return;
         }
+        int gap = size >= 4 ? 8 : (size == 3 ? 6 : 4);
+        int twoH = lineH * 2 + gap;
+        if (maxH > 0 && twoH > maxH) {
+            continue;
+        }
         if (M5.Display.textWidth(line1) <= maxW && M5.Display.textWidth(line2) <= maxW) {
-            int gap = sizes[s] == 3 ? 8 : 6;
-            int half = sizes[s] == 3 ? 16 : 12;
-            M5.Display.drawString(line1, cx, cy - half - gap / 2);
-            M5.Display.drawString(line2, cx, cy + half + gap / 2);
+            int mid = (lineH + gap) / 2;
+            M5.Display.drawString(line1, cx, cy - mid);
+            M5.Display.drawString(line2, cx, cy + mid);
             return;
         }
     }
@@ -1014,7 +1027,7 @@ void drawButton(int x, int y, int w, int h, const String &label, bool invert)
     uint16_t fg = invert ? TFT_WHITE : TFT_BLACK;
     M5.Display.fillRoundRect(x, y, w, h, 12, bg);
     M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
-    drawFittedLabel(x + w / 2, y + h / 2, w - 24, label, fg, bg);
+    drawFittedLabel(x + w / 2, y + h / 2, w - 24, h - 16, label, fg, bg);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
 }
@@ -1570,7 +1583,7 @@ void drawHousePage(bool forceFull)
         M5.Display.fillRoundRect(x, y, w, h, 12, bg);
         M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
         int padL = door ? 40 : 12;
-        drawFittedLabel(x + padL + (w - padL) / 2, y + h / 2, w - padL - 12, label, fg, bg);
+        drawFittedLabel(x + padL + (w - padL) / 2, y + h / 2, w - padL - 12, h - 16, label, fg, bg);
         if (door) {
             int glyphH = h > 48 ? 28 : h - 20;
             if (glyphH < 16) {
@@ -1621,6 +1634,61 @@ bool robotVacRunning(int idx)
     return s.indexOf("clean") >= 0 || s.indexOf("pause") >= 0 || s.indexOf("mop") >= 0;
 }
 
+void robotVacGeom(int idx, int &modeY, int &modeH, int &cmdY, int &cmdH, int &roomY, int &roomH, int &roomGap, int &roomW)
+{
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    modeY = 196;
+    modeH = 52;
+    cmdY = 258;
+    cmdH = 52;
+    roomY = 322;
+    roomGap = 8;
+    int rooms = (idx >= 0 && idx < robotCount) ? robotAreaN[idx] : 0;
+    int shown = rooms > 0 ? rooms + 1 : 0;
+    int rows = shown > 0 ? (shown + 1) / 2 : 1;
+    int avail = H - 20 - roomY;
+    if (avail < 72) {
+        avail = 72;
+    }
+    roomH = (avail - roomGap * (rows - 1)) / rows;
+    if (roomH > 112) {
+        roomH = 112;
+    }
+    if (roomH < 72) {
+        roomH = 72;
+    }
+    roomW = (W - 32 - 10) / 2;
+}
+
+bool robotVacAllOn(int idx)
+{
+    if (idx < 0 || idx >= robotCount || robotAreaN[idx] <= 0) {
+        return true;
+    }
+    bool any = false;
+    bool all = true;
+    for (int i = 0; i < robotAreaN[idx]; i++) {
+        if (robotAreaOn[idx][i]) {
+            any = true;
+        } else {
+            all = false;
+        }
+    }
+    return !any || all;
+}
+
+void robotVacSend(const char *vacCmd, const char *mode, bool areasAll, const int *areaIds, int areaN)
+{
+    robotVacHoldUntil = millis() + 18000UL;
+    lastDrawnKey = "";
+    drawScreen(false);
+    if (robotSel < 0 || robotSel >= robotCount || !vacCmd) {
+        return;
+    }
+    httpHomeVacuum(robotIds[robotSel].c_str(), vacCmd, mode, areasAll, areaIds, areaN);
+}
+
 void drawRobotVacPage(bool forceFull)
 {
     beginEpdFrame(forceFull);
@@ -1637,6 +1705,9 @@ void drawRobotVacPage(bool forceFull)
     }
     int idx = robotSel;
     int W = M5.Display.width();
+    int gap = 10;
+    int modeY, modeH, cmdY, cmdH, roomY, roomH, roomGap, roomW;
+    robotVacGeom(idx, modeY, modeH, cmdY, cmdH, roomY, roomH, roomGap, roomW);
     M5.Display.setTextSize(2);
     String st = robotStatus[idx];
     if (!st.length()) {
@@ -1644,70 +1715,45 @@ void drawRobotVacPage(bool forceFull)
     }
     M5.Display.drawString(st.substring(0, 28), 16, 108);
     drawButton(16, 144, 120, 42, "BACK", false);
-    int y = 200;
-    int gap = 10;
     int modes = 1 + (robotCanMop[idx] ? 1 : 0) + (robotCanVacMop[idx] ? 1 : 0);
     int mw = (W - 32 - gap * (modes - 1)) / modes;
     int mx = 16;
-    drawButton(mx, y, mw, 56, "VACUUM", robotClean[idx] == "vacuum" || robotClean[idx] == "");
+    drawButton(mx, modeY, mw, modeH, "VACUUM", robotClean[idx] == "vacuum" || robotClean[idx] == "");
     mx += mw + gap;
     if (robotCanMop[idx]) {
-        drawButton(mx, y, mw, 56, "MOP", robotClean[idx] == "mop");
+        drawButton(mx, modeY, mw, modeH, "MOP", robotClean[idx] == "mop");
         mx += mw + gap;
     }
     if (robotCanVacMop[idx]) {
-        drawButton(mx, y, mw, 56, "VAC+MOP", robotClean[idx] == "vacuum_mop");
+        drawButton(mx, modeY, mw, modeH, "VAC+MOP", robotClean[idx] == "vacuum_mop");
     }
-    y = 268;
     bool paused = robotVacPaused(idx);
     bool running = robotVacRunning(idx);
     int cmds = 2 + (running && robotCanPause[idx] ? 1 : 0);
     int cw = (W - 32 - gap * (cmds - 1)) / cmds;
     int cx = 16;
-    drawButton(cx, y, cw, 56, paused ? "RESUME" : "START", false);
+    drawButton(cx, cmdY, cw, cmdH, paused ? "RESUME" : "START", false);
     cx += cw + gap;
     if (running && robotCanPause[idx]) {
-        drawButton(cx, y, cw, 56, "PAUSE", false);
+        drawButton(cx, cmdY, cw, cmdH, "PAUSE", false);
         cx += cw + gap;
     }
-    drawButton(cx, y, cw, 56, "DOCK", false);
-    y = 336;
+    drawButton(cx, cmdY, cw, cmdH, "DOCK", false);
     int rooms = robotAreaN[idx];
-    int shown = rooms + (rooms > 0 ? 1 : 0);
-    if (shown > 0) {
-        int cols = 2;
-        int rows = (shown + cols - 1) / cols;
-        int rh = 52;
-        int rw = (W - 32 - gap) / cols;
-        bool allOn = true;
-        if (rooms > 0) {
-            bool any = false;
-            for (int i = 0; i < rooms; i++) {
-                if (robotAreaOn[idx][i]) {
-                    any = true;
-                } else {
-                    allOn = false;
-                }
-            }
-            if (!any) {
-                allOn = true;
-            }
+    int shown = rooms > 0 ? rooms + 1 : 0;
+    bool allOn = robotVacAllOn(idx);
+    for (int i = 0; i < shown; i++) {
+        int col = i % 2;
+        int row = i / 2;
+        int bx = 16 + col * (roomW + gap);
+        int by = roomY + row * (roomH + roomGap);
+        String label = "ALL";
+        bool on = allOn;
+        if (i > 0) {
+            label = robotAreaNames[idx][i - 1];
+            on = allOn || robotAreaOn[idx][i - 1];
         }
-        for (int i = 0; i < shown; i++) {
-            int col = i % cols;
-            int row = i / cols;
-            int bx = 16 + col * (rw + gap);
-            int by = y + row * (rh + 8);
-            bool on = false;
-            String label = "ALL";
-            if (i == 0) {
-                on = allOn;
-            } else {
-                label = robotAreaNames[idx][i - 1];
-                on = allOn || robotAreaOn[idx][i - 1];
-            }
-            drawButton(bx, by, rw, rh, label, on);
-        }
+        drawButton(bx, by, roomW, roomH, label, on);
     }
     drawPager();
     finishEpdFrame();
@@ -1756,11 +1802,12 @@ void handleRobotVacTouch(int x, int y)
     }
     int W = M5.Display.width();
     int gap = 10;
+    int modeY, modeH, cmdY, cmdH, roomY, roomH, roomGap, roomW;
+    robotVacGeom(idx, modeY, modeH, cmdY, cmdH, roomY, roomH, roomGap, roomW);
     int modes = 1 + (robotCanMop[idx] ? 1 : 0) + (robotCanVacMop[idx] ? 1 : 0);
     int mw = (W - 32 - gap * (modes - 1)) / modes;
     int mx = 16;
-    int my = 200;
-    if (y >= my && y <= my + 56) {
+    if (y >= modeY && y <= modeY + modeH) {
         const char *mode = "vacuum";
         int hit = -1;
         for (int i = 0; i < modes; i++) {
@@ -1780,9 +1827,7 @@ void handleRobotVacTouch(int x, int y)
             return;
         }
         robotClean[idx] = mode;
-        httpHomeVacuum(robotIds[idx].c_str(), mode, mode, false, nullptr, 0);
-        httpGetStatus();
-        drawScreen(false);
+        robotVacSend(mode, mode, false, nullptr, 0);
         return;
     }
     bool paused = robotVacPaused(idx);
@@ -1790,8 +1835,7 @@ void handleRobotVacTouch(int x, int y)
     int cmds = 2 + (running && robotCanPause[idx] ? 1 : 0);
     int cw = (W - 32 - gap * (cmds - 1)) / cmds;
     int cx = 16;
-    int cy = 268;
-    if (y >= cy && y <= cy + 56) {
+    if (y >= cmdY && y <= cmdY + cmdH) {
         int hit = -1;
         for (int i = 0; i < cmds; i++) {
             if (x >= cx && x <= cx + cw) {
@@ -1810,80 +1854,65 @@ void handleRobotVacTouch(int x, int y)
         } else {
             return;
         }
-        httpHomeVacuum(robotIds[idx].c_str(), cmd, nullptr, false, nullptr, 0);
-        httpGetStatus();
-        drawScreen(false);
+        if (strcmp(cmd, "pause") == 0) {
+            robotStatus[idx] = "Paused";
+        } else if (strcmp(cmd, "dock") == 0) {
+            robotStatus[idx] = "Returning";
+        } else {
+            robotStatus[idx] = "Cleaning";
+        }
+        robotVacSend(cmd, nullptr, false, nullptr, 0);
         return;
     }
     int rooms = robotAreaN[idx];
-    int shown = rooms + (rooms > 0 ? 1 : 0);
-    if (shown <= 0) {
-        return;
-    }
-    int cols = 2;
-    int rh = 52;
-    int rw = (W - 32 - gap) / cols;
-    int y0 = 336;
-    bool allOn = true;
-    bool any = false;
-    for (int i = 0; i < rooms; i++) {
-        if (robotAreaOn[idx][i]) {
-            any = true;
-        } else {
-            allOn = false;
-        }
-    }
-    if (!any) {
-        allOn = true;
-    }
+    int shown = rooms > 0 ? rooms + 1 : 0;
+    bool allOn = robotVacAllOn(idx);
     for (int i = 0; i < shown; i++) {
-        int col = i % cols;
-        int row = i / cols;
-        int bx = 16 + col * (rw + gap);
-        int by = y0 + row * (rh + 8);
-        if (x < bx || x > bx + rw || y < by || y > by + rh) {
+        int col = i % 2;
+        int row = i / 2;
+        int bx = 16 + col * (roomW + gap);
+        int by = roomY + row * (roomH + roomGap);
+        if (x < bx || x > bx + roomW || y < by || y > by + roomH) {
             continue;
         }
         if (i == 0) {
             for (int a = 0; a < rooms; a++) {
                 robotAreaOn[idx][a] = true;
             }
-            httpHomeVacuum(robotIds[idx].c_str(), "select_areas", nullptr, true, nullptr, 0);
-        } else {
-            int a = i - 1;
-            if (allOn) {
-                for (int k = 0; k < rooms; k++) {
-                    robotAreaOn[idx][k] = false;
-                }
-                robotAreaOn[idx][a] = true;
-            } else {
-                robotAreaOn[idx][a] = !robotAreaOn[idx][a];
-                int onN = 0;
-                for (int k = 0; k < rooms; k++) {
-                    if (robotAreaOn[idx][k]) {
-                        onN++;
-                    }
-                }
-                if (onN == 0) {
-                    for (int k = 0; k < rooms; k++) {
-                        robotAreaOn[idx][k] = true;
-                    }
-                }
+            robotVacSend("select_areas", nullptr, true, nullptr, 0);
+            return;
+        }
+        int a = i - 1;
+        if (allOn) {
+            for (int k = 0; k < rooms; k++) {
+                robotAreaOn[idx][k] = false;
             }
-            int picked[PAPERMONO_VAC_AREA_MAX];
-            int pn = 0;
-            bool nowAll = true;
+            robotAreaOn[idx][a] = true;
+        } else {
+            robotAreaOn[idx][a] = !robotAreaOn[idx][a];
+            int onN = 0;
             for (int k = 0; k < rooms; k++) {
                 if (robotAreaOn[idx][k]) {
-                    picked[pn++] = robotAreaIds[idx][k];
-                } else {
-                    nowAll = false;
+                    onN++;
                 }
             }
-            httpHomeVacuum(robotIds[idx].c_str(), "select_areas", nullptr, nowAll, picked, pn);
+            if (onN == 0) {
+                for (int k = 0; k < rooms; k++) {
+                    robotAreaOn[idx][k] = true;
+                }
+            }
         }
-        httpGetStatus();
-        drawScreen(false);
+        int picked[PAPERMONO_VAC_AREA_MAX];
+        int pn = 0;
+        bool nowAll = true;
+        for (int k = 0; k < rooms; k++) {
+            if (robotAreaOn[idx][k]) {
+                picked[pn++] = robotAreaIds[idx][k];
+            } else {
+                nowAll = false;
+            }
+        }
+        robotVacSend("select_areas", nullptr, nowAll, picked, pn);
         return;
     }
 }
@@ -4075,8 +4104,9 @@ bool httpGetStatus()
         }
     }
     String keepRobot = (robotSel >= 0 && robotSel < robotCount) ? robotIds[robotSel] : String("");
-    robotCount = 0;
-    {
+    bool holdRobot = robotVacHoldUntil != 0 && (int32_t) (millis() - robotVacHoldUntil) < 0;
+    robotCount = holdRobot ? robotCount : 0;
+    if (!holdRobot) {
         JsonArray items = doc["robot_items"].as<JsonArray>();
         if (!items.isNull()) {
             for (JsonVariant item : items) {
