@@ -1528,6 +1528,7 @@ assert_true(str_contains($change, '## [4.0.101]'), 'changelog 4.0.101');
 assert_true(str_contains($change, '## [4.0.102]'), 'changelog 4.0.102');
 assert_true(str_contains($change, '## [4.0.103]'), 'changelog 4.0.103');
 assert_true(str_contains($change, '## [4.0.104]'), 'changelog 4.0.104');
+assert_true(str_contains($change, '## [4.0.105]'), 'changelog 4.0.105');
 assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');

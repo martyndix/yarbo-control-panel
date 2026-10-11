@@ -1217,9 +1217,20 @@ final class YarboPaperDevice
      */
     private function vestaboardCompact(YarboVestaboard $vbObj, array $vb, ?array $parsed, bool $online): array
     {
-        $layout = $vbObj->layoutForLiveModule($parsed, $online);
-        $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null);
-        $lines = is_array($layout['lines'] ?? null) ? array_values($layout['lines']) : null;
+        $codes = null;
+        $lines = null;
+        if ($vbObj->isExternalHoldActive($vb)) {
+            $held = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
+            if (!$this->vestaboardCodesBlank($held)) {
+                $codes = $held;
+                $lines = YarboVestaboard::linesFromCodes($held);
+            }
+        }
+        if ($this->vestaboardCodesBlank($codes)) {
+            $layout = $vbObj->layoutForLiveModule($parsed, $online);
+            $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null);
+            $lines = is_array($layout['lines'] ?? null) ? array_values($layout['lines']) : null;
+        }
         if ($this->vestaboardCodesBlank($codes)) {
             $codes = YarboVestaboard::normalizeLiveCodes($vb['last_live_codes'] ?? null);
             $lines = null;

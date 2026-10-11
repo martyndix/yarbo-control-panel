@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.105] - 2026-10-11
+
+### Fixed
+- A custom message from the **Vestaboard app** now shows on PaperMono and Paper Colour for the same hold window as the dashboard. The tablets were still drawing the live Powerwall / Yarbo / Lymow layout.
+
 ## [4.0.104] - 2026-10-10
 
 ### Changed
