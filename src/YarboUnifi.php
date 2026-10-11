@@ -825,8 +825,13 @@ final class YarboUnifi
             $base . '?quality=low',
             $base,
         ];
+        $last = ['status' => 0, 'body' => '', 'error' => 'Protect RTSPS unreachable'];
         foreach ($paths as $path) {
-            $res = $this->request('GET', $this->protectUrl($config, $path), $this->protectHeaders($config), null, 6.0, false);
+            $res = $this->request('GET', $this->protectUrl($config, $path), $this->protectHeaders($config), null, 2.5, false);
+            $last = $res;
+            if ((int) ($res['status'] ?? 0) === 0) {
+                throw new \RuntimeException($res['error'] ?? 'Protect RTSPS unreachable');
+            }
             $url = self::firstRtspsUrl((string) ($res['body'] ?? ''));
             if ($url !== '') {
                 return $url;
@@ -837,13 +842,16 @@ final class YarboUnifi
             $this->protectUrl($config, $base),
             $this->protectHeaders($config),
             json_encode(['quality' => ['medium', 'low', 'high']], JSON_UNESCAPED_SLASHES),
-            6.0,
+            2.5,
             false
         );
-        $res = $this->request('GET', $this->protectUrl($config, $base), $this->protectHeaders($config), null, 6.0, false);
+        $res = $this->request('GET', $this->protectUrl($config, $base), $this->protectHeaders($config), null, 2.5, false);
+        if ((int) ($res['status'] ?? 0) === 0) {
+            throw new \RuntimeException($res['error'] ?? 'Protect RTSPS unreachable');
+        }
         $url = self::firstRtspsUrl((string) ($res['body'] ?? ''));
         if ($url === '') {
-            throw new \RuntimeException($res['error'] ?? 'Protect did not return an RTSPS URL');
+            throw new \RuntimeException($last['error'] ?? 'Protect did not return an RTSPS URL');
         }
 
         return $url;
