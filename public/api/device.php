@@ -335,14 +335,12 @@ if ($action === 'command') {
         $cmd = (string) ($input['command'] ?? '');
     if ($cmd === 'home_toggle' || $cmd === 'home_scene') {
         $homeId = (string) ($input['home_id'] ?? $input['id'] ?? '');
-        $result = (new \Yarbo\YarboHome(dirname(__DIR__, 2)))->paperCommand($homeId);
-        if (!($result['ok'] ?? false)) {
-            json_response([
-                'ok' => false,
-                'error' => (string) ($result['error'] ?? 'Home command failed'),
-            ], 500);
+        if ($homeId === '') {
+            json_response(['ok' => false, 'error' => 'Home id required'], 400);
         }
-        json_response(['ok' => true, 'command' => $cmd]);
+        device_json_ack_continue(['ok' => true, 'command' => $cmd]);
+        (new \Yarbo\YarboHome(dirname(__DIR__, 2)))->paperCommand($homeId);
+        exit;
     }
     if ($cmd === 'home_vacuum') {
         $homeId = (string) ($input['home_id'] ?? $input['id'] ?? '');

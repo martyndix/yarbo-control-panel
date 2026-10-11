@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.108] - 2026-10-11
+
+### Fixed
+- PaperMono MENU / BACK / HOUSE / Unlock taps no longer wait inside an e-paper refresh or a Matter HTTP call. Long names (POWERWALL, VESTABOARD, Utility) shrink instead of wrapping one or two leftover letters. Custom menu labels, order, and which tiles are on are stored on the tablet so the holding menu is not NOTE/MAIL/DEVICE until Wi-Fi returns. Compact `ota_pending` no longer wipes the logo or module tiles. Overlapping fast refreshes (mottled panel, dead touch, reboot to unlock) are gated with a BUSY timeout. Firmware **0.1.68**.
+
 ## [4.0.107] - 2026-10-11
 
 ### Changed

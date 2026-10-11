@@ -195,6 +195,7 @@ int homeCount = 0;
 int robotsUi = PAPERMONO_ROBOT_LIST;
 int robotSel = -1;
 int robotCount = 0;
+bool robotsHaveItems = false;
 String robotIds[PAPERMONO_ROBOT_MAX];
 String robotNames[PAPERMONO_ROBOT_MAX];
 String robotKinds[PAPERMONO_ROBOT_MAX];
@@ -208,6 +209,7 @@ int robotAreaIds[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 String robotAreaNames[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 bool robotAreaOn[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 uint32_t robotVacHoldUntil = 0;
+uint32_t homeHoldUntil = 0;
 
 void drawScreen(bool forceFull);
 void serviceTouchQueue();
@@ -255,6 +257,8 @@ void wifiService();
 void startWifiScan();
 void saveGuestWifi();
 void clearGuestWifi();
+void saveMenuLayout();
+void loadMenuLayout();
 bool httpGetPlans(bool refresh);
 bool httpGetStatus();
 bool httpHomeVacuum(const char *homeId, const char *vacCmd, const char *mode, bool areasAll, const int *areaIds, int areaN);
@@ -314,6 +318,7 @@ void loadConfig()
     vestaboardOn = prefs.getBool("vboard", vestaboardOn);
     vestaboardKnown = prefs.getBool("vknown", vestaboardKnown);
     prefs.end();
+    loadMenuLayout();
 }
 
 void applyCompanionFields(JsonDocument &doc, bool persist)
@@ -658,7 +663,8 @@ void clearGuestWifi()
 
 void waitEpdReady()
 {
-    while (M5.Display.displayBusy()) {
+    uint32_t t0 = millis();
+    while (M5.Display.displayBusy() && (millis() - t0) < 4000) {
         pollSerialConfig();
         if (applyPendingPages()) {
             redrawQueued = true;
@@ -669,11 +675,12 @@ void waitEpdReady()
 
 void beginEpdFrame(bool forceQuality)
 {
-    while (M5.Display.displayBusy()) {
+    uint32_t t0 = millis();
+    while (M5.Display.displayBusy() && (millis() - t0) < 4000) {
         pollSerialConfig();
         delay(5);
     }
-    bool full = forceQuality || partialRefreshCount >= 10;
+    bool full = forceQuality || partialRefreshCount >= 6;
     M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fastest);
     partialRefreshCount = full ? 0 : (partialRefreshCount + 1);
     M5.Display.startWrite();
@@ -683,11 +690,14 @@ void finishEpdFrame()
 {
     M5.Display.endWrite();
     M5.Display.display();
-    /* displayBusy() can stay false for a few ms after display(). Starting
-     * another refresh in that window overlaps waveforms (mottled/dark panel). */
+    /* displayBusy() can stay false after display(). Starting another refresh
+     * in that window overlaps waveforms (mottled/dark panel, dead touch). */
     uint32_t t0 = millis();
-    while (!M5.Display.displayBusy() && (millis() - t0) < 80) {
+    while (!M5.Display.displayBusy() && (millis() - t0) < 200) {
         delay(1);
+    }
+    if (!M5.Display.displayBusy()) {
+        delay(350);
     }
 }
 
@@ -781,7 +791,7 @@ bool pageEnabled(int page)
         return lymowOn;
     }
     if (page == PAPERMONO_PAGE_ROBOTS) {
-        return menuShow[page] && robotCount > 0;
+        return menuShow[page] && (robotCount > 0 || robotsHaveItems);
     }
     return menuShow[page];
 }
@@ -948,31 +958,23 @@ void wrapTwoLines(const String &text, int maxPx, String &line1, String &line2)
         }
     }
     if (best > 0) {
-        line1 = clipLabelToWidth(text.substring(0, best), maxPx);
-        line2 = clipLabelToWidth(text.substring(best + 1), maxPx);
+        line1 = text.substring(0, best);
+        line2 = text.substring(best + 1);
         line2.trim();
+        if (line2.length() < 2) {
+            line1 = text;
+            line2 = "";
+        }
         return;
     }
-    int lo = 1;
-    int hi = (int) text.length();
-    while (lo < hi) {
-        int mid = (lo + hi + 1) / 2;
-        if (M5.Display.textWidth(text.substring(0, mid)) <= maxPx) {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    line1 = clipLabelToWidth(text.substring(0, lo), maxPx);
-    line2 = clipLabelToWidth(text.substring(lo), maxPx);
 }
 
 void drawFittedLabel(int cx, int cy, int maxW, int maxH, const String &text, uint16_t fg, uint16_t bg)
 {
     M5.Display.setTextColor(fg, bg);
     M5.Display.setTextDatum(MC_DATUM);
-    int sizes[3] = {4, 3, 2};
-    for (int s = 0; s < 3; s++) {
+    int sizes[4] = {4, 3, 2, 1};
+    for (int s = 0; s < 4; s++) {
         int size = sizes[s];
         int lineH = 8 * size;
         if (maxH > 0 && lineH > maxH) {
@@ -983,16 +985,15 @@ void drawFittedLabel(int cx, int cy, int maxW, int maxH, const String &text, uin
             M5.Display.drawString(text, cx, cy);
             return;
         }
-        String line1;
-        String line2;
-        wrapTwoLines(text, maxW, line1, line2);
-        if (line2.length() == 0) {
-            M5.Display.drawString(line1, cx, cy);
-            return;
-        }
         int gap = size >= 4 ? 8 : (size == 3 ? 6 : 4);
         int twoH = lineH * 2 + gap;
         if (maxH > 0 && twoH > maxH) {
+            continue;
+        }
+        String line1;
+        String line2;
+        wrapTwoLines(text, maxW, line1, line2);
+        if (line2.length() < 2) {
             continue;
         }
         if (M5.Display.textWidth(line1) <= maxW && M5.Display.textWidth(line2) <= maxW) {
@@ -1269,6 +1270,97 @@ void applyMenuOrder(JsonVariant order)
         menuOrderPage[n++] = page;
     }
     menuOrderN = n > 0 ? n : 6;
+}
+
+String menuLayoutStamp()
+{
+    String s = String((int) yarboOn) + String((int) powerwallOn) + String((int) lymowOn)
+        + String((int) homeOn) + String((int) robotsHaveItems) + "|" + String(menuOrderN);
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        s += "|" + menuCustom[i] + (menuShow[i] ? "1" : "0");
+    }
+    for (int i = 0; i < menuOrderN; i++) {
+        s += String(menuOrderPage[i]);
+    }
+    return s;
+}
+
+static String lastMenuStamp;
+
+void saveMenuLayout()
+{
+    String now = menuLayoutStamp();
+    if (now == lastMenuStamp) {
+        return;
+    }
+    lastMenuStamp = now;
+    prefs.begin("yarbo", false);
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        char k[8];
+        snprintf(k, sizeof(k), "ml%d", i);
+        prefs.putString(k, menuCustom[i]);
+        snprintf(k, sizeof(k), "ms%d", i);
+        prefs.putBool(k, menuShow[i]);
+    }
+    prefs.putInt("mon", menuOrderN);
+    for (int i = 0; i < PAPERMONO_MENU_MAX; i++) {
+        char k[8];
+        snprintf(k, sizeof(k), "mo%d", i);
+        prefs.putInt(k, i < menuOrderN ? menuOrderPage[i] : -1);
+    }
+    prefs.putBool("yon", yarboOn);
+    prefs.putBool("pon", powerwallOn);
+    prefs.putBool("lon", lymowOn);
+    prefs.putBool("hon", homeOn);
+    prefs.putBool("rhv", robotsHaveItems);
+    prefs.end();
+}
+
+void loadMenuLayout()
+{
+    prefs.begin("yarbo", true);
+    for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
+        char k[8];
+        snprintf(k, sizeof(k), "ml%d", i);
+        if (prefs.isKey(k)) {
+            menuCustom[i] = prefs.getString(k, menuCustom[i]);
+        }
+        snprintf(k, sizeof(k), "ms%d", i);
+        if (prefs.isKey(k)) {
+            menuShow[i] = prefs.getBool(k, menuShow[i]);
+        }
+    }
+    if (prefs.isKey("mon")) {
+        int n = prefs.getInt("mon", menuOrderN);
+        if (n > 0 && n <= PAPERMONO_MENU_MAX) {
+            menuOrderN = n;
+            for (int i = 0; i < n; i++) {
+                char k[8];
+                snprintf(k, sizeof(k), "mo%d", i);
+                int page = prefs.getInt(k, menuOrderPage[i]);
+                if (page >= 0 && page < PAPERMONO_PAGE_COUNT) {
+                    menuOrderPage[i] = page;
+                }
+            }
+        }
+    }
+    if (prefs.isKey("yon")) {
+        yarboOn = prefs.getBool("yon", yarboOn);
+    }
+    if (prefs.isKey("pon")) {
+        powerwallOn = prefs.getBool("pon", powerwallOn);
+    }
+    if (prefs.isKey("lon")) {
+        lymowOn = prefs.getBool("lon", lymowOn);
+    }
+    if (prefs.isKey("hon")) {
+        homeOn = prefs.getBool("hon", homeOn);
+    }
+    if (prefs.isKey("rhv")) {
+        robotsHaveItems = prefs.getBool("rhv", robotsHaveItems);
+    }
+    prefs.end();
+    lastMenuStamp = menuLayoutStamp();
 }
 
 void rebuildMenuLayout()
@@ -2215,7 +2307,7 @@ void updateRadioDraft()
     const int w = M5.Display.width() - 32;
     const int h = PAPERMONO_DRAFT_H;
     M5.Display.waitDisplay();
-    if (partialRefreshCount >= 10) {
+    if (partialRefreshCount >= 6) {
         drawScreen(false);
         return;
     }
@@ -2675,9 +2767,6 @@ void exitLock()
     }
     noteActivity();
     applyFrontlight(true);
-    if (currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {
-        httpGetPlans(false);
-    }
     drawScreen(false);
 }
 
@@ -3083,11 +3172,8 @@ void drawScreen(bool forceFull)
         return;
     }
     inDraw = true;
-    do {
-        redrawQueued = false;
-        waitEpdReady();
-        serviceTouchQueue();
-    } while (redrawQueued);
+    redrawQueued = false;
+    waitEpdReady();
     if (screenLocked) {
         String key = screenKey();
         if (forceFull || key != lastDrawnKey) {
@@ -3136,9 +3222,6 @@ void drawScreen(bool forceFull)
         }
     }
     inDraw = false;
-    if (redrawQueued) {
-        drawScreen(false);
-    }
 }
 
 void drawSetup()
@@ -4077,36 +4160,43 @@ bool httpGetStatus()
     }
     applyCompactExtras(doc);
     vestaboardLive = doc["vestaboard_live"] | vestaboardLive;
-    yarboOn = doc["yarbo_enabled"] | true;
-    powerwallOn = doc["powerwall_enabled"] | false;
-    lymowOn = doc["lymow_enabled"] | false;
-    homeOn = doc["home_enabled"] | false;
-    homeCount = 0;
-    {
+    if (!doc["yarbo_enabled"].isNull()) {
+        yarboOn = doc["yarbo_enabled"] | yarboOn;
+    }
+    if (!doc["powerwall_enabled"].isNull()) {
+        powerwallOn = doc["powerwall_enabled"] | powerwallOn;
+    }
+    if (!doc["lymow_enabled"].isNull()) {
+        lymowOn = doc["lymow_enabled"] | lymowOn;
+    }
+    if (!doc["home_enabled"].isNull()) {
+        homeOn = doc["home_enabled"] | homeOn;
+    }
+    bool holdHome = homeHoldUntil != 0 && (int32_t) (millis() - homeHoldUntil) < 0;
+    if (!holdHome && doc["home_items"].is<JsonArray>()) {
+        homeCount = 0;
         JsonArray items = doc["home_items"].as<JsonArray>();
-        if (!items.isNull()) {
-            for (JsonVariant item : items) {
-                if (homeCount >= PAPERMONO_HOME_MAX) {
-                    break;
-                }
-                JsonObject o = item.as<JsonObject>();
-                if (o.isNull()) {
-                    continue;
-                }
-                homeIds[homeCount] = String((const char *) (o["id"] | ""));
-                homeNames[homeCount] = String((const char *) (o["name"] | ""));
-                homeKinds[homeCount] = String((const char *) (o["kind"] | "light"));
-                homeOnState[homeCount] = o["on"] | false;
-                if (homeIds[homeCount].length()) {
-                    homeCount++;
-                }
+        for (JsonVariant item : items) {
+            if (homeCount >= PAPERMONO_HOME_MAX) {
+                break;
+            }
+            JsonObject o = item.as<JsonObject>();
+            if (o.isNull()) {
+                continue;
+            }
+            homeIds[homeCount] = String((const char *) (o["id"] | ""));
+            homeNames[homeCount] = String((const char *) (o["name"] | ""));
+            homeKinds[homeCount] = String((const char *) (o["kind"] | "light"));
+            homeOnState[homeCount] = o["on"] | false;
+            if (homeIds[homeCount].length()) {
+                homeCount++;
             }
         }
     }
     String keepRobot = (robotSel >= 0 && robotSel < robotCount) ? robotIds[robotSel] : String("");
     bool holdRobot = robotVacHoldUntil != 0 && (int32_t) (millis() - robotVacHoldUntil) < 0;
-    robotCount = holdRobot ? robotCount : 0;
-    if (!holdRobot) {
+    if (!holdRobot && doc["robot_items"].is<JsonArray>()) {
+        robotCount = 0;
         JsonArray items = doc["robot_items"].as<JsonArray>();
         if (!items.isNull()) {
             for (JsonVariant item : items) {
@@ -4165,6 +4255,7 @@ bool httpGetStatus()
                 }
             }
         }
+        robotsHaveItems = robotCount > 0;
     }
     if (keepRobot.length()) {
         int found = -1;
@@ -4188,7 +4279,17 @@ bool httpGetStatus()
     lymowBattery = doc["lymow_battery"] | lymowBattery;
     lymowState = doc["lymow_state"] | lymowState;
     lymowCharging = doc["lymow_charging"] | lymowCharging;
-    syncPaperLogo(String((const char *) (doc["logo_hash"] | "")));
+    if (!doc["ota_pending"] && !doc["logo_hash"].isNull()) {
+        String logoNext = String((const char *) (doc["logo_hash"] | ""));
+        if (logoNext.length()) {
+            if (!M5.Display.displayBusy()) {
+                syncPaperLogo(logoNext);
+            }
+        } else if (doc["logo_set"].is<bool>() && !doc["logo_set"].as<bool>()) {
+            syncPaperLogo("");
+        }
+    }
+    saveMenuLayout();
     lastError = "";
     if (!doc["ok"]) {
         String err = doc["error"] | "bad status";
@@ -4572,9 +4673,17 @@ void handleHouseTouch(int x, int y)
         houseButtonRect(i, bx, by, bw, bh);
         if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
             const char *cmd = homeKinds[i] == "scene" ? "home_scene" : "home_toggle";
-            httpCommand(cmd, nullptr, nullptr, homeIds[i].c_str());
-            httpGetStatus();
+            if (homeKinds[i] == "scene") {
+                homeOnState[i] = !homeOnState[i];
+            } else if (homeKinds[i] == "door" || homeKinds[i] == "hub") {
+                /* Unlock is a pulse; keep the open glyph from the sensor. */
+            } else {
+                homeOnState[i] = !homeOnState[i];
+            }
+            homeHoldUntil = millis() + 18000UL;
+            lastDrawnKey = "";
             drawScreen(false);
+            httpCommand(cmd, nullptr, nullptr, homeIds[i].c_str());
             return;
         }
     }
@@ -4734,7 +4843,11 @@ void loop()
 
     flushPageButtons();
 
-    if (prevClock != clockLocal) {
+    if (redrawQueued) {
+        drawScreen(false);
+    }
+
+    if (prevClock != clockLocal && !M5.Display.displayBusy()) {
         drawScreen(false);
         flushPageButtons();
     }
@@ -4744,7 +4857,7 @@ void loop()
         return;
     }
 
-    if (now - lastPoll > PAPERMONO_POLL_MS) {
+    if (now - lastPoll > PAPERMONO_POLL_MS && !M5.Display.displayBusy()) {
         lastPoll = now;
         httpGetStatus();
         if (currentPage == PAPERMONO_PAGE_PLANS) {

@@ -17,8 +17,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.67"'), 'firmware 0.1.67');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.67';"), 'panel firmware pin 0.1.67');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.68"'), 'firmware 0.1.68');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.68';"), 'panel firmware pin 0.1.68');
 assert_true(str_contains($fw, 'void waitEpdReady()'), 'wait for e-paper BUSY');
 assert_true(str_contains($fw, 'void serviceTouchQueue()'), 'touch handled as a queue');
 if (!preg_match('/void waitEpdReady\(\)\n\{\n(?:.*\n)*?\}\n\n/', $fw, $wait)) {
@@ -27,7 +27,13 @@ if (!preg_match('/void waitEpdReady\(\)\n\{\n(?:.*\n)*?\}\n\n/', $fw, $wait)) {
 }
 assert_true(str_contains($wait[0], 'applyPendingPages()'), 'A/B still taken during BUSY');
 assert_true(!str_contains($wait[0], 'serviceTouchQueue'), 'HOUSE HTTP must not run during BUSY');
-assert_true(str_contains($fw, 'while (!M5.Display.displayBusy() && (millis() - t0) < 80)'), 'finishEpdFrame waits for BUSY to assert');
+assert_true(str_contains($wait[0], 'millis() - t0) < 4000'), 'BUSY wait must time out so Unlock is not stuck');
+assert_true(str_contains($fw, 'while (!M5.Display.displayBusy() && (millis() - t0) < 200)'), 'finishEpdFrame waits for BUSY to assert');
+$drawStart = strpos($fw, "void drawScreen(bool forceFull)\n{");
+$setupStart = strpos($fw, "void drawSetup()\n{");
+assert_true($drawStart !== false && $setupStart !== false && $setupStart > $drawStart, 'drawScreen before drawSetup');
+$draw = substr($fw, $drawStart, $setupStart - $drawStart);
+assert_true(!str_contains($draw, 'serviceTouchQueue'), 'drawScreen must not handle taps (HTTP overlap / mottle)');
 assert_true(str_contains($fw, 'drawScreen(false);'), 'navigation uses fast e-paper update');
 assert_true(str_contains($fw, "wifiStartHome();\n        drawScreen(true);"), 'boot paints with a full refresh');
 if (!preg_match('/void showPage\(int page, bool loadPlansIfNeeded\)\n\{[\s\S]*?\n\}\n\nvoid nextPage/', $fw, $show)) {
