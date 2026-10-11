@@ -198,6 +198,7 @@ int robotCount = 0;
 bool robotsHaveItems = false;
 String robotIds[PAPERMONO_ROBOT_MAX];
 String robotNames[PAPERMONO_ROBOT_MAX];
+String robotRooms[PAPERMONO_ROBOT_MAX];
 String robotKinds[PAPERMONO_ROBOT_MAX];
 String robotStatus[PAPERMONO_ROBOT_MAX];
 String robotClean[PAPERMONO_ROBOT_MAX];
@@ -742,7 +743,7 @@ String screenKey()
         + "|" + String(usingRemote ? 1 : 0)
         + "|" + String(robotsUi) + "|" + String(robotSel) + "|" + String(robotCount);
     for (int i = 0; i < robotCount; i++) {
-        key += "|" + robotIds[i] + "|" + robotStatus[i] + "|" + robotClean[i];
+        key += "|" + robotIds[i] + "|" + robotStatus[i] + "|" + robotClean[i] + "|" + robotRooms[i];
         for (int a = 0; a < robotAreaN[i]; a++) {
             key += robotAreaOn[i][a] ? "1" : "0";
         }
@@ -1030,6 +1031,29 @@ void drawButton(int x, int y, int w, int h, const String &label, bool invert)
     M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
     drawFittedLabel(x + w / 2, y + h / 2, w - 24, h - 16, label, fg, bg);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+}
+
+void drawRobotListButton(int x, int y, int w, int h, const String &name, const String &room)
+{
+    M5.Display.fillRoundRect(x, y, w, h, 12, TFT_WHITE);
+    M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
+    if (room.length() == 0) {
+        drawFittedLabel(x + w / 2, y + h / 2, w - 24, h - 16, name, TFT_BLACK, TFT_WHITE);
+        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+        M5.Display.setTextDatum(TL_DATUM);
+        return;
+    }
+    int subH = 20;
+    int nameH = h - subH - 18;
+    if (nameH < 24) {
+        nameH = 24;
+    }
+    drawFittedLabel(x + w / 2, y + 10 + nameH / 2, w - 24, nameH, name, TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(clipLabelToWidth(room, w - 24), x + w / 2, y + h - 16);
     M5.Display.setTextDatum(TL_DATUM);
 }
 
@@ -1872,7 +1896,7 @@ void drawRobotsPage(bool forceFull)
     for (int i = 0; i < shown; i++) {
         int x, y, w, h;
         robotButtonRect(i, x, y, w, h);
-        drawButton(x, y, w, h, robotNames[i], false);
+        drawRobotListButton(x, y, w, h, robotNames[i], robotRooms[i]);
     }
     drawPager();
     finishEpdFrame();
@@ -4209,6 +4233,7 @@ bool httpGetStatus()
                 }
                 robotIds[robotCount] = String((const char *) (o["id"] | ""));
                 robotNames[robotCount] = String((const char *) (o["name"] | ""));
+                robotRooms[robotCount] = String((const char *) (o["room"] | ""));
                 robotKinds[robotCount] = String((const char *) (o["kind"] | ""));
                 robotStatus[robotCount] = String((const char *) (o["status"] | ""));
                 robotClean[robotCount] = String((const char *) (o["vacuum_clean"] | "vacuum"));

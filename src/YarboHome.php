@@ -2874,7 +2874,7 @@ final class YarboHome
             if (!in_array($clean, ['vacuum', 'mop', 'vacuum_mop'], true)) {
                 $clean = 'vacuum';
             }
-            $out[] = [
+            $row = [
                 'id' => $id,
                 'kind' => 'vacuum',
                 'name' => YarboHub::normalizeDisplayName(
@@ -2889,6 +2889,19 @@ final class YarboHome
                 'areas' => $areas,
                 'selected_areas' => $selected,
             ];
+            $roomId = trim((string) ($store['rooms'][$id] ?? ''));
+            if ($roomId !== '') {
+                foreach ($store['room_defs'] as $def) {
+                    if ((string) ($def['id'] ?? '') === $roomId) {
+                        $roomName = YarboHub::normalizeDisplayName((string) ($def['name'] ?? ''), 24);
+                        if ($roomName !== '') {
+                            $row['room'] = $roomName;
+                        }
+                        break;
+                    }
+                }
+            }
+            $out[] = $row;
             if (count($out) >= self::PAPER_MAX) {
                 break;
             }

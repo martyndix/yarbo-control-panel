@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.109] - 2026-10-11
+
+### Changed
+- PaperMono ROBOTS list shows the Home **room** in small type under a Matter vacuum’s name when one is assigned. Vacuums with no room, plus Yarbo and Lymow, stay name-only. Firmware **0.1.69**.
+
 ## [4.0.108] - 2026-10-11
 
 ### Fixed

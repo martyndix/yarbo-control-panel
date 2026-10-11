@@ -38,6 +38,8 @@ file_put_contents($root . '/data/home.json', json_encode([
     'hidden' => [],
     'scenes' => [],
     'paper' => [],
+    'room_defs' => [['id' => 'r1', 'name' => 'Kitchen']],
+    'rooms' => ['40:1' => 'r1'],
     'last_devices' => [[
         'id' => '40:1',
         'name' => 'Kitchen vac',
@@ -53,16 +55,24 @@ file_put_contents($root . '/data/home.json', json_encode([
             ['id' => 2, 'name' => 'Hall'],
         ],
         'selected_areas' => [1],
+    ], [
+        'id' => '40:2',
+        'name' => 'Hall vac',
+        'kind' => 'vacuum',
+        'vacuum_status' => 'Idle',
     ]],
 ], JSON_UNESCAPED_SLASHES));
 
 $home = new YarboHome($root);
 $vacs = $home->paperRobotVacuums();
-assert_true(count($vacs) === 1, 'one vacuum: ' . json_encode($vacs));
+assert_true(count($vacs) === 2, 'two vacuums: ' . json_encode($vacs));
 assert_true(($vacs[0]['id'] ?? '') === '40:1', 'vacuum id');
 assert_true(($vacs[0]['kind'] ?? '') === 'vacuum', 'vacuum kind');
 assert_true(str_contains((string) ($vacs[0]['status'] ?? ''), 'Docked'), 'vacuum status');
 assert_true(($vacs[0]['areas'][0]['name'] ?? '') === 'Kitchen', 'vacuum rooms');
+assert_true(($vacs[0]['room'] ?? '') === 'Kitchen', 'vacuum assigned room: ' . json_encode($vacs));
+assert_true(($vacs[1]['id'] ?? '') === '40:2', 'second vacuum');
+assert_true(!isset($vacs[1]['room']) || $vacs[1]['room'] === '', 'unassigned vacuum has no room subtitle');
 
 $compact = new ReflectionMethod(YarboPaperDevice::class, 'companionCompact');
 $compact->setAccessible(true);
@@ -120,12 +130,15 @@ $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_ROBOTS 11'), 'robots page id');
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.68"'), 'firmware 0.1.68');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.68';"), 'panel pin 0.1.68');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.69"'), 'firmware 0.1.69');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.69';"), 'panel pin 0.1.69');
 assert_true(str_contains($homePhp, 'function paperRobotVacuums'), 'paper vacuums helper');
 assert_true(str_contains($homePhp, 'function paperVacuumCommand'), 'paper vacuum command');
 assert_true(str_contains($api, "\$cmd === 'home_vacuum'"), 'device API home_vacuum');
 assert_true(str_contains($fw, 'void drawRobotsPage(bool forceFull)'), 'firmware robots page');
+assert_true(str_contains($fw, 'void drawRobotListButton'), 'list tiles can show assigned room');
+assert_true(str_contains($fw, 'String robotRooms['), 'compact room field');
+assert_true(str_contains($homePhp, "\$row['room'] = \$roomName"), 'paper vacuums include assigned room');
 assert_true(str_contains($fw, 'bool httpHomeVacuum'), 'firmware vacuum POST');
 assert_true(str_contains($fw, 'void robotVacGeom'), 'vacuum chip layout');
 assert_true(str_contains($fw, 'void robotVacSend'), 'tap redraws before HTTP');
@@ -141,6 +154,7 @@ assert_true(str_contains($fw, 'homeHoldUntil'), 'HOUSE taps invert before Matter
 assert_true(str_contains($api, 'function device_json_ack_continue'), 'paper vacuum ACKs before Matter');
 assert_true(str_contains($api, 'device_json_ack_continue([\'ok\' => true, \'command\' => $cmd, \'vacuum_cmd\' => $vacCmd])'), 'home_vacuum uses ACK-first');
 assert_true(str_contains($api, "\$cmd === 'home_toggle' || \$cmd === 'home_scene'"), 'paper HOUSE ACKs before Matter');
+assert_true(str_contains($change, '## [4.0.109]'), 'changelog 4.0.109');
 assert_true(str_contains($change, '## [4.0.108]'), 'changelog 4.0.108');
 assert_true(str_contains($change, '## [4.0.107]'), 'changelog 4.0.107');
 assert_true(str_contains($html, 'data-menu-id="robots"'), 'settings robots row');
