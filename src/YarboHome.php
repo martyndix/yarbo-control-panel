@@ -20,6 +20,7 @@ final class YarboHome
     public const PAPER_MAX = 12;
     /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
     public const PAPER_NAME_MAX = 40;
+    public const PAPER_ROBOT_AREA_MAX = 8;
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -2819,6 +2820,101 @@ final class YarboHome
         }
 
         return $out;
+    }
+
+    /**
+     * Matter vacuums for the PaperMono ROBOTS page. Not tablet HOUSE assignment.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function paperRobotVacuums(): array
+    {
+        $store = $this->load();
+        $hidden = array_fill_keys($store['hidden'], true);
+        $live = $this->devicesWithLiveState();
+        $out = [];
+        foreach ($live['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            if ($id === '' || isset($hidden[$id])) {
+                continue;
+            }
+            $kind = strtolower(trim((string) ($device['kind'] ?? '')));
+            $looksVac = $kind === self::KIND_VACUUM
+                || YarboMatterFabric::nameLooksVacuum((string) ($device['name'] ?? '') . ' ' . (string) ($device['product'] ?? ''));
+            if (!$looksVac) {
+                continue;
+            }
+            $areas = array_slice(self::normalizeVacuumAreas($device['areas'] ?? []), 0, self::PAPER_ROBOT_AREA_MAX);
+            $areaIds = [];
+            foreach ($areas as $area) {
+                $areaIds[] = (int) $area['id'];
+            }
+            $selected = [];
+            foreach (self::normalizeVacuumAreaIds($device['selected_areas'] ?? []) as $areaId) {
+                if (in_array($areaId, $areaIds, true)) {
+                    $selected[] = $areaId;
+                }
+            }
+            $status = trim((string) ($device['vacuum_status'] ?? ''));
+            if ($status === '') {
+                $status = !empty($device['on']) ? 'Cleaning' : 'Idle';
+            }
+            if ($status === 'Charging') {
+                $status = !empty($device['on']) ? 'Cleaning' : 'Docked';
+            }
+            $battery = self::optionalPercent($device['vacuum_battery'] ?? null);
+            $label = $status;
+            if ($battery !== null && $battery > 0) {
+                $label .= ' · ' . $battery . '%';
+            }
+            $clean = strtolower(trim((string) ($device['vacuum_clean'] ?? 'vacuum')));
+            if (!in_array($clean, ['vacuum', 'mop', 'vacuum_mop'], true)) {
+                $clean = 'vacuum';
+            }
+            $out[] = [
+                'id' => $id,
+                'kind' => 'vacuum',
+                'name' => YarboHub::normalizeDisplayName(
+                    (string) ($store['names'][$id] ?? $device['name'] ?? $id),
+                    self::PAPER_NAME_MAX,
+                ) ?: $id,
+                'status' => $label,
+                'vacuum_clean' => $clean,
+                'can_mop' => !empty($device['can_mop']),
+                'can_vacuum_mop' => !empty($device['can_vacuum_mop']),
+                'can_pause' => array_key_exists('can_pause', $device) ? !empty($device['can_pause']) : true,
+                'areas' => $areas,
+                'selected_areas' => $selected,
+            ];
+            if (count($out) >= self::PAPER_MAX) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function paperVacuumCommand(string $id, string $command, mixed $areas = null, ?string $mode = null): array
+    {
+        $input = [
+            'id' => $id,
+            'command' => $command,
+            'kind' => self::KIND_VACUUM,
+        ];
+        if ($areas !== null) {
+            $input['areas'] = $areas;
+        }
+        if ($mode !== null && $mode !== '') {
+            $input['clean_mode'] = $mode;
+        }
+
+        return $this->command($input);
     }
 
     /**

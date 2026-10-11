@@ -3214,6 +3214,7 @@ async function loadHomeDashboard(opts = {}) {
             ? [...(((homeDash.paper_devices || []).find((p) => p.id === savingId) || {}).assigned || [])]
             : null;
         homeDash = data;
+        applyCompanionSettingsVisibility();
         if (savingId && localAssigned) {
             const paper = (homeDash.paper_devices || []).find((p) => p.id === savingId);
             if (paper) paper.assigned = localAssigned;
@@ -5861,16 +5862,20 @@ function renderHomeAutomations() {
     }
     html += rules.map((rule) => {
         const sentence = homeAutoSentence(rule, names);
+        const lastAt = runner.last_fire_at && runner.last_fire_at[rule.id];
         const lastHm = runner.last_fire_hm && runner.last_fire_hm[rule.id];
         const thenErr = String((runner.then_error && runner.then_error[rule.id]) || '').trim();
-        let lastHint = ' Not run yet.';
-        if (lastHm && thenErr) lastHint = ` Tried ${lastHm}. Then failed: ${thenErr}`;
-        else if (lastHm) lastHint = ` Last ran ${lastHm}.`;
-        else if (thenErr) lastHint = ` Then failed: ${thenErr}`;
+        const ago = lastAt ? formatTimeAgo(lastAt) : (lastHm ? { text: lastHm, title: lastHm } : null);
+        let lastHint = 'Not run yet.';
+        if (ago && thenErr) lastHint = `Tried ${ago.text}. Then failed: ${thenErr}`;
+        else if (ago) lastHint = `Last ran ${ago.text}.`;
+        else if (thenErr) lastHint = `Then failed: ${thenErr}`;
+        const lastTitle = ago && ago.title ? ` title="${escapeHtml(ago.title)}"` : '';
         return `<article class="auto-row" data-auto-id="${escapeHtml(rule.id)}">
             <div class="auto-row-main">
                 <div class="auto-row-name">${escapeHtml(rule.name || sentence)}</div>
-                <p class="hint">${escapeHtml(sentence)}${escapeHtml(lastHint)}</p>
+                <p class="hint">${escapeHtml(sentence)}</p>
+                <p class="hint auto-row-last"${lastTitle}>${escapeHtml(lastHint)}</p>
             </div>
             <div class="auto-row-actions">
                 <label class="hint" style="display:flex;gap:0.35rem;align-items:center">
@@ -7429,9 +7434,10 @@ function applyCompanionSettingsVisibility() {
     document.querySelectorAll('#paper-menu-list [data-menu-id]').forEach((row) => {
         const id = row.getAttribute('data-menu-id') || '';
         let show = true;
-        if (id === 'yarbo') show = yarboOn;
-        else if (id === 'powerwall') show = powerwallOn;
-        else if (id === 'lymow') show = lymowOn;
+        if (id === 'robots') {
+            const hasVac = (homeDash.devices || []).some((d) => String(d.kind || '') === 'vacuum');
+            show = yarboOn || lymowOn || hasVac;
+        } else if (id === 'powerwall') show = powerwallOn;
         else if (id === 'house') show = homeOn;
         row.classList.toggle('hidden', !show);
     });

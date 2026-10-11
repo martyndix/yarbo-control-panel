@@ -319,6 +319,28 @@ if ($action === 'command') {
         }
         json_response(['ok' => true, 'command' => $cmd]);
     }
+    if ($cmd === 'home_vacuum') {
+        $homeId = (string) ($input['home_id'] ?? $input['id'] ?? '');
+        $vacCmd = strtolower(trim((string) ($input['vacuum_cmd'] ?? $input['home_action'] ?? '')));
+        $allowedVac = ['start', 'pause', 'resume', 'dock', 'mop', 'vacuum', 'vacuum_mop', 'select_areas'];
+        if ($homeId === '' || !in_array($vacCmd, $allowedVac, true)) {
+            json_response(['ok' => false, 'error' => 'Unsupported vacuum command'], 400);
+        }
+        $mode = strtolower(trim((string) ($input['clean_mode'] ?? $input['mode'] ?? '')));
+        $result = (new \Yarbo\YarboHome(dirname(__DIR__, 2)))->paperVacuumCommand(
+            $homeId,
+            $vacCmd,
+            array_key_exists('areas', $input) ? $input['areas'] : null,
+            $mode !== '' ? $mode : null,
+        );
+        if (!($result['ok'] ?? false)) {
+            json_response([
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Vacuum command failed'),
+            ], 500);
+        }
+        json_response(['ok' => true, 'command' => $cmd, 'vacuum_cmd' => $vacCmd]);
+    }
     if ($cmd === 'vestaboard_live') {
         $live = (string) ($input['vestaboard_live'] ?? $input['live'] ?? '');
         $result = (new \Yarbo\YarboVestaboard(dirname(__DIR__, 2)))->setLiveModule($live);

@@ -18,6 +18,7 @@ file_put_contents($root . '/data/papermono-devices.json', json_encode([
 $devices = new Yarbo\YarboPaperDevice($root);
 $saved = $devices->savePrefs([
     'menu_labels' => [
+        'robots' => '  Bots  ',
         'status' => '  Robot  ',
         'house' => 'Lights and scenes name that is way too long',
         'radio' => '',
@@ -26,8 +27,12 @@ $saved = $devices->savePrefs([
 ]);
 $labels = $saved['prefs']['menu_labels'] ?? [];
 $defaults = Yarbo\YarboPaperDevice::defaultMenuLabels();
-if (($labels['yarbo'] ?? '') !== 'Robot') {
-    fwrite(STDERR, 'yarbo migrate ' . json_encode($labels) . "\n");
+if (($labels['robots'] ?? '') !== 'Bots') {
+    fwrite(STDERR, 'robots label ' . json_encode($labels) . "\n");
+    exit(1);
+}
+if (array_key_exists('yarbo', $labels) || array_key_exists('lymow', $labels)) {
+    fwrite(STDERR, 'legacy menu labels still present ' . json_encode($labels) . "\n");
     exit(1);
 }
 if (!str_starts_with((string) ($labels['house'] ?? ''), 'Lights and scenes')) {
@@ -56,7 +61,7 @@ $hidden = $devices->savePrefs([
     ],
 ]);
 $vis = $hidden['prefs']['menu_visible'] ?? [];
-if (($vis['yarbo'] ?? true) !== false || ($vis['note'] ?? true) !== false) {
+if (($vis['robots'] ?? true) !== false || ($vis['note'] ?? true) !== false) {
     fwrite(STDERR, 'visible ' . json_encode($vis) . "\n");
     exit(1);
 }
@@ -76,11 +81,11 @@ $compact = $ref->getMethod('prefsCompact');
 $compact->setAccessible(true);
 $tab1 = $devices->findById('tab1');
 $extra = $compact->invoke($devices, $tab1);
-if (($extra['menu_labels']['yarbo'] ?? '') !== 'Robot') {
+if (($extra['menu_labels']['robots'] ?? '') !== 'Bots') {
     fwrite(STDERR, 'compact labels ' . json_encode($extra['menu_labels'] ?? null) . "\n");
     exit(1);
 }
-if (($extra['menu_visible']['yarbo'] ?? true) !== false) {
+if (($extra['menu_visible']['robots'] ?? true) !== false) {
     fwrite(STDERR, 'compact vis ' . json_encode($extra['menu_visible'] ?? null) . "\n");
     exit(1);
 }
@@ -89,7 +94,7 @@ $ordered = $devices->savePrefs([
     'menu_order' => ['house', 'radio', 'status', 'house', 'unknown'],
 ]);
 $order = $ordered['prefs']['menu_order'] ?? [];
-$expect = ['house', 'radio', 'yarbo', 'note', 'powerwall', 'lymow', 'device'];
+$expect = ['house', 'radio', 'robots', 'note', 'powerwall', 'device'];
 if ($order !== $expect) {
     fwrite(STDERR, 'order ' . json_encode($order) . "\n");
     exit(1);
@@ -115,6 +120,14 @@ if (str_contains($html, 'data-menu-label="status"') || str_contains($html, 'pape
 }
 if (!str_contains($html, 'id="paper-menu-list"') || !str_contains($html, 'data-menu-move')) {
     fwrite(STDERR, "menu reorder UI missing\n");
+    exit(1);
+}
+if (!str_contains($html, 'data-menu-id="robots"') || !str_contains($html, 'data-menu-label="robots"')) {
+    fwrite(STDERR, "robots menu row missing\n");
+    exit(1);
+}
+if (str_contains($html, 'data-menu-id="yarbo"') || str_contains($html, 'data-menu-id="lymow"')) {
+    fwrite(STDERR, "yarbo/lymow still separate menu rows\n");
     exit(1);
 }
 

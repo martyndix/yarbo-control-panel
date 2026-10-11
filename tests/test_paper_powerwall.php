@@ -24,9 +24,9 @@ $pwPhp = (string) file_get_contents($root . '/src/YarboPowerwall.php');
 $html = (string) file_get_contents($root . '/public/index.php');
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
 
-assert_true(str_contains($mver, '#define PAPERMONO_FW_VERSION "0.1.65"'), 'firmware 0.1.65');
+assert_true(str_contains($mver, '#define PAPERMONO_FW_VERSION "0.1.66"'), 'firmware 0.1.66');
 assert_true(str_contains($cver, '#define PAPERMONO_FW_VERSION "0.2.19-colour"'), 'firmware 0.2.19-colour');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.65';"), 'panel firmware pin 0.1.65');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.66';"), 'panel firmware pin 0.1.66');
 assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.19-colour';"), 'panel colour pin 0.2.19-colour');
 assert_true(str_contains($php, "'powerwall_grid'"), 'compact sends grid');
 assert_true(str_contains($php, "'powerwall_battery'"), 'compact sends battery flow');
@@ -40,7 +40,7 @@ assert_true(str_contains($color, 'doc["powerwall_battery"]'), 'Paper Colour pars
 assert_true(str_contains($html, 'Grid       Export 0.8 kW'), 'PaperMono preview Grid');
 assert_true(str_contains($html, 'Battery    Charge 0.4 kW'), 'PaperMono preview Battery');
 assert_true(str_contains($html, 'Grid      Export 0.8 kW'), 'Paper Colour preview Grid');
-assert_true(str_contains($html, 'firmware 0.1.65'), 'settings hint 0.1.65');
+assert_true(str_contains($html, 'firmware 0.1.66'), 'settings hint 0.1.66');
 assert_true(str_contains($html, '0.2.19-colour'), 'settings hint 0.2.19-colour');
 assert_true(str_contains($change, '## [4.0.74]'), 'changelog 4.0.74');
 

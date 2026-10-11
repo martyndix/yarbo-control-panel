@@ -115,7 +115,7 @@ final class YarboHomeAutomations
     }
 
     /**
-     * @return array{at: int, age_sec: int|null, running: bool, last_error: string, last_fired: list<string>, last_fire_hm: array<string, string>, then_error: array<string, string>, clock_hm: string, timezone: string}
+     * @return array{at: int, age_sec: int|null, running: bool, last_error: string, last_fired: list<string>, last_fire_hm: array<string, string>, last_fire_at: array<string, string>, then_error: array<string, string>, clock_hm: string, timezone: string}
      */
     public function runnerPublic(): array
     {
@@ -133,6 +133,7 @@ final class YarboHomeAutomations
         }
 
         $lastFireHm = [];
+        $lastFireAt = [];
         try {
             $tz = new \DateTimeZone($this->timezoneName());
         } catch (\Exception) {
@@ -144,7 +145,9 @@ final class YarboHomeAutomations
             if ($id === '' || $ts <= 0) {
                 continue;
             }
-            $lastFireHm[$id] = (new \DateTimeImmutable('@' . $ts))->setTimezone($tz)->format('H:i');
+            $when = (new \DateTimeImmutable('@' . $ts))->setTimezone($tz);
+            $lastFireHm[$id] = $when->format('H:i');
+            $lastFireAt[$id] = $when->format('c');
         }
 
         $thenError = [];
@@ -164,6 +167,7 @@ final class YarboHomeAutomations
             'last_error' => $stickyError !== '' ? $stickyError : ($errors !== [] ? (string) $errors[0] : (string) ($state['unifi_error'] ?? '')),
             'last_fired' => $fired,
             'last_fire_hm' => $lastFireHm,
+            'last_fire_at' => $lastFireAt,
             'then_error' => $thenError,
             'clock_hm' => $this->clockHm(),
             'timezone' => $this->timezoneName(),

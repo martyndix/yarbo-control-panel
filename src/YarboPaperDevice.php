@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.65';
+    public const FIRMWARE_VERSION = '0.1.66';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.19-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -1069,10 +1069,35 @@ final class YarboPaperDevice
         $pwEnabled = $hub->enabled(YarboHub::MODULE_POWERWALL);
         $lyEnabled = $hub->enabled(YarboHub::MODULE_LYMOW);
         $homeEnabled = $hub->enabled(YarboHub::MODULE_HOME);
+        $home = new YarboHome($this->projectRoot);
         $homeItems = [];
         if ($homeEnabled) {
             $tabletId = is_array($forDevice) ? (string) ($forDevice['id'] ?? '') : '';
-            $homeItems = (new YarboHome($this->projectRoot))->paperItems($tabletId);
+            $homeItems = $home->paperItems($tabletId);
+        }
+        $vacuums = $home->paperRobotVacuums();
+        $robotItems = [];
+        if ($yarboEnabled) {
+            $yarboName = trim((string) (is_array($parsed) ? ($parsed['robot_name'] ?? '') : ''));
+            $robotItems[] = [
+                'id' => 'yarbo',
+                'kind' => 'yarbo',
+                'name' => $yarboName !== '' ? YarboHub::normalizeDisplayName($yarboName, YarboHome::PAPER_NAME_MAX) : 'Yarbo',
+            ];
+        }
+        if ($lyEnabled) {
+            $lyName = trim((string) ($ly['page_name'] ?? ''));
+            $robotItems[] = [
+                'id' => 'lymow',
+                'kind' => 'lymow',
+                'name' => $lyName !== '' ? YarboHub::normalizeDisplayName($lyName, YarboHome::PAPER_NAME_MAX) : 'Lymow',
+            ];
+        }
+        foreach ($vacuums as $vacuum) {
+            if (count($robotItems) >= YarboHome::PAPER_MAX) {
+                break;
+            }
+            $robotItems[] = $vacuum;
         }
         $errorCode = is_array($parsed) ? ($parsed['error_code'] ?? 0) : 0;
         $powerFault = is_array($parsed) ? (int) ($parsed['power_fault'] ?? 0) : 0;
@@ -1087,6 +1112,7 @@ final class YarboPaperDevice
             'lymow_enabled' => $lyEnabled,
             'home_enabled' => $homeEnabled,
             'home_items' => $homeItems,
+            'robot_items' => $robotItems,
             'powerwall_pct' => isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : -1,
             'powerwall_solar' => (string) ($pw['solar_label'] ?? '—'),
             'powerwall_load' => (string) ($pw['load_label'] ?? '—'),
@@ -1115,6 +1141,7 @@ final class YarboPaperDevice
                 YarboHub::MODULE_LYMOW => $lyEnabled,
                 YarboHub::MODULE_HOME => $homeEnabled,
             ],
+            $vacuums !== [],
         );
 
         return $out;
@@ -1570,7 +1597,7 @@ final class YarboPaperDevice
      */
     public static function defaultMenuKeys(): array
     {
-        return ['yarbo', 'note', 'powerwall', 'lymow', 'radio', 'device', 'house'];
+        return ['robots', 'note', 'powerwall', 'radio', 'device', 'house'];
     }
 
     /**
@@ -1579,10 +1606,9 @@ final class YarboPaperDevice
     public static function defaultMenuLabels(): array
     {
         return [
-            'yarbo' => 'YARBO',
+            'robots' => 'ROBOTS',
             'note' => 'NOTE',
             'powerwall' => 'POWER',
-            'lymow' => 'LYMOW',
             'radio' => 'MAIL',
             'device' => 'DEVICE',
             'house' => 'HOUSE',
@@ -1621,10 +1647,10 @@ final class YarboPaperDevice
 
             return in_array($s, ['1', 'true', 'yes', 'on'], true);
         };
-        if (!array_key_exists('yarbo', $src)) {
+        if (!array_key_exists('robots', $src)) {
             $any = false;
             $saw = false;
-            foreach (['status', 'health', 'plans'] as $id) {
+            foreach (['robots', 'yarbo', 'lymow', 'status', 'health', 'plans'] as $id) {
                 if (!array_key_exists($id, $src)) {
                     continue;
                 }
@@ -1632,9 +1658,9 @@ final class YarboPaperDevice
                 $any = $any || $bool($src[$id] ?? null, true);
             }
             if ($saw) {
-                $src['yarbo'] = $any;
+                $src['robots'] = $any;
             }
-        };
+        }
         foreach ($defaults as $id => $fallback) {
             $out[$id] = $bool($src[$id] ?? null, $fallback);
         }
@@ -1649,12 +1675,6 @@ final class YarboPaperDevice
     {
         $defaults = self::defaultMenuLabels();
         $src = is_array($input) ? $input : [];
-        if (!isset($src['yarbo']) || trim((string) $src['yarbo']) === '') {
-            $legacy = trim((string) ($src['status'] ?? ''));
-            if ($legacy !== '') {
-                $src['yarbo'] = $legacy;
-            }
-        }
         $out = [];
         foreach ($defaults as $id => $fallback) {
             $raw = trim((string) ($src[$id] ?? ''));
@@ -1684,8 +1704,8 @@ final class YarboPaperDevice
         if (is_array($input)) {
             foreach ($input as $id) {
                 $id = strtolower(trim((string) $id));
-                if ($id === 'status' || $id === 'health' || $id === 'plans') {
-                    $id = 'yarbo';
+                if (in_array($id, ['status', 'health', 'plans', 'yarbo', 'lymow'], true)) {
+                    $id = 'robots';
                 }
                 if (!isset($allowed[$id]) || isset($seen[$id])) {
                     continue;
@@ -1715,9 +1735,12 @@ final class YarboPaperDevice
             $lockScreen = 'logo';
         }
         $unlockPage = strtolower(trim((string) ($input['unlock_page'] ?? $defaults['unlock_page'])));
+        if (in_array($unlockPage, ['yarbo', 'status', 'health', 'plans', 'lymow'], true)) {
+            $unlockPage = 'robots';
+        }
         if (!in_array($unlockPage, [
-            'home', 'yarbo', 'status', 'health', 'plans', 'note', 'board',
-            'powerwall', 'lymow', 'radio', 'device', 'house',
+            'home', 'robots', 'note', 'board',
+            'powerwall', 'radio', 'device', 'house',
         ], true)) {
             $unlockPage = 'home';
         }

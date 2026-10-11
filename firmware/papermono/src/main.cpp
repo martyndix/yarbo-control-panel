@@ -94,7 +94,7 @@ String lockScreen = "both";
 String unlockPage = "home";
 String menuCustom[PAPERMONO_PAGE_COUNT];
 bool menuShow[PAPERMONO_PAGE_COUNT] = {
-    true, true, true, true, true, false, true, true, true, true, true
+    true, true, true, true, true, false, true, true, true, true, true, true
 };
 #define PAPERMONO_MENU_MAX 12
 int menuLaidPage[PAPERMONO_MENU_MAX];
@@ -103,12 +103,11 @@ int menuLaidY[PAPERMONO_MENU_MAX];
 int menuLaidN = 0;
 int menuLaidW = 208;
 int menuLaidH = 100;
-int menuOrderN = 7;
+int menuOrderN = 6;
 int menuOrderPage[PAPERMONO_MENU_MAX] = {
-    PAPERMONO_PAGE_STATUS,
+    PAPERMONO_PAGE_ROBOTS,
     PAPERMONO_PAGE_NOTE,
     PAPERMONO_PAGE_POWERWALL,
-    PAPERMONO_PAGE_LYMOW,
     PAPERMONO_PAGE_RADIO,
     PAPERMONO_PAGE_DEVICE,
     PAPERMONO_PAGE_HOUSE
@@ -193,6 +192,21 @@ String homeNames[PAPERMONO_HOME_MAX];
 String homeKinds[PAPERMONO_HOME_MAX];
 bool homeOnState[PAPERMONO_HOME_MAX];
 int homeCount = 0;
+int robotsUi = PAPERMONO_ROBOT_LIST;
+int robotSel = -1;
+int robotCount = 0;
+String robotIds[PAPERMONO_ROBOT_MAX];
+String robotNames[PAPERMONO_ROBOT_MAX];
+String robotKinds[PAPERMONO_ROBOT_MAX];
+String robotStatus[PAPERMONO_ROBOT_MAX];
+String robotClean[PAPERMONO_ROBOT_MAX];
+bool robotCanMop[PAPERMONO_ROBOT_MAX];
+bool robotCanVacMop[PAPERMONO_ROBOT_MAX];
+bool robotCanPause[PAPERMONO_ROBOT_MAX];
+int robotAreaN[PAPERMONO_ROBOT_MAX];
+int robotAreaIds[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
+String robotAreaNames[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
+bool robotAreaOn[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 
 void drawScreen(bool forceFull);
 void serviceTouchQueue();
@@ -241,6 +255,8 @@ void startWifiScan();
 void saveGuestWifi();
 void clearGuestWifi();
 bool httpGetPlans(bool refresh);
+bool httpGetStatus();
+bool httpHomeVacuum(const char *homeId, const char *vacCmd, const char *mode, bool areasAll, const int *areaIds, int areaN);
 
 void saveConfig()
 {
@@ -686,6 +702,7 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_RADIO) return "MAIL";
     if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
     if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
+    if (page == PAPERMONO_PAGE_ROBOTS) return "ROBOTS";
     return "HOME";
 }
 
@@ -711,7 +728,11 @@ String screenKey()
         + String(homeOn ? 1 : 0) + "|" + String(homeCount)
         + "|" + String(menuOpen ? 1 : 0) + "|" + String(lastYarboPage)
         + "|" + String(tabletCharging ? 1 : 0)
-        + "|" + String(usingRemote ? 1 : 0);
+        + "|" + String(usingRemote ? 1 : 0)
+        + "|" + String(robotsUi) + "|" + String(robotSel) + "|" + String(robotCount);
+    for (int i = 0; i < robotCount; i++) {
+        key += "|" + robotIds[i] + "|" + robotStatus[i] + "|" + robotClean[i];
+    }
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         key += "|" + menuCustom[i] + "|" + String(menuShow[i] ? 1 : 0);
     }
@@ -748,6 +769,15 @@ bool pageEnabled(int page)
     }
     if (page == PAPERMONO_PAGE_HOUSE && !homeOn) {
         return false;
+    }
+    if (isYarboPage(page)) {
+        return yarboOn;
+    }
+    if (page == PAPERMONO_PAGE_LYMOW) {
+        return lymowOn;
+    }
+    if (page == PAPERMONO_PAGE_ROBOTS) {
+        return menuShow[page] && robotCount > 0;
     }
     return menuShow[page];
 }
@@ -800,13 +830,12 @@ int firstEnabledPage()
 
 int pageFromUnlockId(const String &id)
 {
-    if (id == "yarbo" || id == "status") return PAPERMONO_PAGE_STATUS;
+    if (id == "robots" || id == "yarbo" || id == "status" || id == "lymow") return PAPERMONO_PAGE_ROBOTS;
     if (id == "health") return PAPERMONO_PAGE_HEALTH;
     if (id == "plans") return PAPERMONO_PAGE_PLANS;
     if (id == "note") return PAPERMONO_PAGE_NOTE;
     if (id == "board") return PAPERMONO_PAGE_BOARD;
     if (id == "powerwall") return PAPERMONO_PAGE_POWERWALL;
-    if (id == "lymow") return PAPERMONO_PAGE_LYMOW;
     if (id == "radio") return PAPERMONO_PAGE_RADIO;
     if (id == "device") return PAPERMONO_PAGE_DEVICE;
     if (id == "house") return PAPERMONO_PAGE_HOUSE;
@@ -830,7 +859,8 @@ int stepEnabledPage(int from, int dir)
     int p = from;
     for (int i = 0; i < count; i++) {
         p = (p + dir + count) % count;
-        if (p == PAPERMONO_PAGE_HEALTH || p == PAPERMONO_PAGE_PLANS) {
+        if (p == PAPERMONO_PAGE_HEALTH || p == PAPERMONO_PAGE_PLANS
+            || p == PAPERMONO_PAGE_STATUS || p == PAPERMONO_PAGE_LYMOW) {
             continue;
         }
         if (pageEnabled(p)) return p;
@@ -1005,7 +1035,14 @@ String headerBrand()
         return "YARBO";
     }
     if (isYarboPage(currentPage)) {
-        return menuLabel(PAPERMONO_PAGE_STATUS);
+        return "YARBO";
+    }
+    if (currentPage == PAPERMONO_PAGE_LYMOW) {
+        return "LYMOW";
+    }
+    if (currentPage == PAPERMONO_PAGE_ROBOTS && robotsUi == PAPERMONO_ROBOT_VAC
+        && robotSel >= 0 && robotSel < robotCount) {
+        return robotNames[robotSel];
     }
     if (currentPage == PAPERMONO_PAGE_BOARD) {
         return menuLabel(PAPERMONO_PAGE_NOTE);
@@ -1081,6 +1118,7 @@ const char *pageKey(int page)
     if (page == PAPERMONO_PAGE_RADIO) return "radio";
     if (page == PAPERMONO_PAGE_DEVICE) return "device";
     if (page == PAPERMONO_PAGE_HOUSE) return "house";
+    if (page == PAPERMONO_PAGE_ROBOTS) return "robots";
     return "home";
 }
 
@@ -1095,6 +1133,7 @@ String menuLabelDefault(int page)
     if (page == PAPERMONO_PAGE_LYMOW) return "LYMOW";
     if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
     if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
+    if (page == PAPERMONO_PAGE_ROBOTS) return "ROBOTS";
     return "HOME";
 }
 
@@ -1116,7 +1155,9 @@ void applyMenuLabels(JsonVariant labels)
             continue;
         }
         const char *raw = "";
-        if (i == PAPERMONO_PAGE_STATUS) {
+        if (i == PAPERMONO_PAGE_ROBOTS) {
+            raw = labels["robots"] | "";
+        } else if (i == PAPERMONO_PAGE_STATUS) {
             raw = labels["yarbo"] | "";
             if (raw[0] == 0) {
                 raw = labels["status"] | "";
@@ -1138,18 +1179,18 @@ void applyMenuVisible(JsonVariant vis)
     if (!vis.is<JsonObject>()) {
         return;
     }
-    bool yarboSet = false;
-    bool yarboOnMenu = true;
-    JsonVariant yv = vis["yarbo"];
-    if (yv.is<bool>() || yv.is<int>()) {
-        yarboSet = true;
-        yarboOnMenu = yv.is<bool>() ? yv.as<bool>() : ((int) yv) != 0;
+    bool robotsSet = false;
+    bool robotsOnMenu = true;
+    JsonVariant rv = vis["robots"];
+    if (rv.is<bool>() || rv.is<int>()) {
+        robotsSet = true;
+        robotsOnMenu = rv.is<bool>() ? rv.as<bool>() : ((int) rv) != 0;
     }
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         if (i == PAPERMONO_PAGE_HOME || i == PAPERMONO_PAGE_BOARD) {
             continue;
         }
-        if (isYarboPage(i)) {
+        if (isYarboPage(i) || i == PAPERMONO_PAGE_LYMOW || i == PAPERMONO_PAGE_ROBOTS) {
             continue;
         }
         JsonVariant v = vis[pageKey(i)];
@@ -1159,12 +1200,11 @@ void applyMenuVisible(JsonVariant vis)
             menuShow[i] = ((int) v) != 0;
         }
     }
-    if (!yarboSet) {
-        yarboOnMenu = false;
-        const char *keys[] = {"status", "health", "plans"};
+    if (!robotsSet) {
         bool any = false;
         bool saw = false;
-        for (int i = 0; i < 3; i++) {
+        const char *keys[] = {"yarbo", "lymow", "status", "health", "plans"};
+        for (int i = 0; i < 5; i++) {
             JsonVariant v = vis[keys[i]];
             if (v.is<bool>() || v.is<int>()) {
                 saw = true;
@@ -1172,11 +1212,13 @@ void applyMenuVisible(JsonVariant vis)
                 any = any || on;
             }
         }
-        yarboOnMenu = saw ? any : true;
+        robotsOnMenu = saw ? any : true;
     }
-    menuShow[PAPERMONO_PAGE_STATUS] = yarboOnMenu;
-    menuShow[PAPERMONO_PAGE_HEALTH] = yarboOnMenu;
-    menuShow[PAPERMONO_PAGE_PLANS] = yarboOnMenu;
+    menuShow[PAPERMONO_PAGE_ROBOTS] = robotsOnMenu;
+    menuShow[PAPERMONO_PAGE_STATUS] = true;
+    menuShow[PAPERMONO_PAGE_HEALTH] = true;
+    menuShow[PAPERMONO_PAGE_PLANS] = true;
+    menuShow[PAPERMONO_PAGE_LYMOW] = true;
     menuShow[PAPERMONO_PAGE_BOARD] = false;
     menuShow[PAPERMONO_PAGE_HOME] = true;
 }
@@ -1184,8 +1226,8 @@ void applyMenuVisible(JsonVariant vis)
 void applyMenuOrder(JsonVariant order)
 {
     static const int kDefault[] = {
-        PAPERMONO_PAGE_STATUS, PAPERMONO_PAGE_NOTE, PAPERMONO_PAGE_POWERWALL,
-        PAPERMONO_PAGE_LYMOW, PAPERMONO_PAGE_RADIO, PAPERMONO_PAGE_DEVICE, PAPERMONO_PAGE_HOUSE
+        PAPERMONO_PAGE_ROBOTS, PAPERMONO_PAGE_NOTE, PAPERMONO_PAGE_POWERWALL,
+        PAPERMONO_PAGE_RADIO, PAPERMONO_PAGE_DEVICE, PAPERMONO_PAGE_HOUSE
     };
     bool used[PAPERMONO_PAGE_COUNT] = {};
     int n = 0;
@@ -1193,11 +1235,9 @@ void applyMenuOrder(JsonVariant order)
         for (JsonVariant item : order.as<JsonArray>()) {
             String id = String((const char *) (item | ""));
             int page = pageFromUnlockId(id);
-            if (id == "yarbo") {
-                page = PAPERMONO_PAGE_STATUS;
-            }
             if (page == PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_BOARD
-                || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS) {
+                || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS
+                || page == PAPERMONO_PAGE_STATUS || page == PAPERMONO_PAGE_LYMOW) {
                 continue;
             }
             if (used[page] || n >= PAPERMONO_MENU_MAX) {
@@ -1207,7 +1247,7 @@ void applyMenuOrder(JsonVariant order)
             menuOrderPage[n++] = page;
         }
     }
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 6; i++) {
         int page = kDefault[i];
         if (used[page] || n >= PAPERMONO_MENU_MAX) {
             continue;
@@ -1215,12 +1255,7 @@ void applyMenuOrder(JsonVariant order)
         used[page] = true;
         menuOrderPage[n++] = page;
     }
-    menuOrderN = n > 0 ? n : 7;
-}
-
-bool yarboMenuEnabled()
-{
-    return pageEnabled(PAPERMONO_PAGE_STATUS) || pageEnabled(PAPERMONO_PAGE_HEALTH) || pageEnabled(PAPERMONO_PAGE_PLANS);
+    menuOrderN = n > 0 ? n : 6;
 }
 
 void rebuildMenuLayout()
@@ -1229,10 +1264,8 @@ void rebuildMenuLayout()
     int n = 0;
     for (int i = 0; i < menuOrderN && n < PAPERMONO_MENU_MAX; i++) {
         int page = menuOrderPage[i];
-        if (page == PAPERMONO_PAGE_STATUS) {
-            if (yarboMenuEnabled()) {
-                pages[n++] = PAPERMONO_PAGE_STATUS;
-            }
+        if (page == PAPERMONO_PAGE_STATUS || page == PAPERMONO_PAGE_LYMOW
+            || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS) {
             continue;
         }
         if (pageEnabled(page)) {
@@ -1313,8 +1346,8 @@ void drawMenuPage(bool forceFull)
     if (highlight == PAPERMONO_PAGE_BOARD) {
         highlight = PAPERMONO_PAGE_NOTE;
     }
-    if (isYarboPage(highlight)) {
-        highlight = PAPERMONO_PAGE_STATUS;
+    if (isYarboPage(highlight) || highlight == PAPERMONO_PAGE_LYMOW) {
+        highlight = PAPERMONO_PAGE_ROBOTS;
     }
     for (int i = 0; i < menuLaidN; i++) {
         int page = menuLaidPage[i];
@@ -1352,10 +1385,9 @@ void handleMenuTouch(int x, int y)
         if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
             int page = menuLaidPage[i];
             menuOpen = false;
-            if (page == PAPERMONO_PAGE_STATUS) {
-                page = (isYarboPage(lastYarboPage) && pageEnabled(lastYarboPage))
-                    ? lastYarboPage
-                    : firstYarboPage();
+            if (page == PAPERMONO_PAGE_ROBOTS) {
+                robotsUi = PAPERMONO_ROBOT_LIST;
+                robotSel = -1;
             }
             if (page == PAPERMONO_PAGE_RADIO) {
                 radioUi = PAPERMONO_RADIO_INBOX;
@@ -1551,6 +1583,340 @@ void drawHousePage(bool forceFull)
     }
     drawPager();
     finishEpdFrame();
+}
+
+int robotItemCount()
+{
+    int shown = robotCount < PAPERMONO_ROBOT_VISIBLE ? robotCount : PAPERMONO_ROBOT_VISIBLE;
+    return shown < 0 ? 0 : shown;
+}
+
+void robotButtonRect(int idx, int &x, int &y, int &w, int &h)
+{
+    int cols, rows, bw, bh, gap, x0, y0;
+    int n = robotItemCount();
+    if (n < 1) {
+        n = 1;
+    }
+    layoutTileGrid(n, cols, rows, bw, bh, gap, x0, y0);
+    int col = idx % cols;
+    int row = idx / cols;
+    x = x0 + col * (bw + gap);
+    y = y0 + row * (bh + gap);
+    w = bw;
+    h = bh;
+}
+
+bool robotVacPaused(int idx)
+{
+    String s = robotStatus[idx];
+    s.toLowerCase();
+    return s.indexOf("pause") >= 0;
+}
+
+bool robotVacRunning(int idx)
+{
+    String s = robotStatus[idx];
+    s.toLowerCase();
+    return s.indexOf("clean") >= 0 || s.indexOf("pause") >= 0 || s.indexOf("mop") >= 0;
+}
+
+void drawRobotVacPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    if (robotSel < 0 || robotSel >= robotCount) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("No robot selected.", 16, 180);
+        drawPager();
+        finishEpdFrame();
+        return;
+    }
+    int idx = robotSel;
+    int W = M5.Display.width();
+    M5.Display.setTextSize(2);
+    String st = robotStatus[idx];
+    if (!st.length()) {
+        st = "Idle";
+    }
+    M5.Display.drawString(st.substring(0, 28), 16, 108);
+    drawButton(16, 144, 120, 42, "BACK", false);
+    int y = 200;
+    int gap = 10;
+    int modes = 1 + (robotCanMop[idx] ? 1 : 0) + (robotCanVacMop[idx] ? 1 : 0);
+    int mw = (W - 32 - gap * (modes - 1)) / modes;
+    int mx = 16;
+    drawButton(mx, y, mw, 56, "VACUUM", robotClean[idx] == "vacuum" || robotClean[idx] == "");
+    mx += mw + gap;
+    if (robotCanMop[idx]) {
+        drawButton(mx, y, mw, 56, "MOP", robotClean[idx] == "mop");
+        mx += mw + gap;
+    }
+    if (robotCanVacMop[idx]) {
+        drawButton(mx, y, mw, 56, "VAC+MOP", robotClean[idx] == "vacuum_mop");
+    }
+    y = 268;
+    bool paused = robotVacPaused(idx);
+    bool running = robotVacRunning(idx);
+    int cmds = 2 + (running && robotCanPause[idx] ? 1 : 0);
+    int cw = (W - 32 - gap * (cmds - 1)) / cmds;
+    int cx = 16;
+    drawButton(cx, y, cw, 56, paused ? "RESUME" : "START", false);
+    cx += cw + gap;
+    if (running && robotCanPause[idx]) {
+        drawButton(cx, y, cw, 56, "PAUSE", false);
+        cx += cw + gap;
+    }
+    drawButton(cx, y, cw, 56, "DOCK", false);
+    y = 336;
+    int rooms = robotAreaN[idx];
+    int shown = rooms + (rooms > 0 ? 1 : 0);
+    if (shown > 0) {
+        int cols = 2;
+        int rows = (shown + cols - 1) / cols;
+        int rh = 52;
+        int rw = (W - 32 - gap) / cols;
+        bool allOn = true;
+        if (rooms > 0) {
+            bool any = false;
+            for (int i = 0; i < rooms; i++) {
+                if (robotAreaOn[idx][i]) {
+                    any = true;
+                } else {
+                    allOn = false;
+                }
+            }
+            if (!any) {
+                allOn = true;
+            }
+        }
+        for (int i = 0; i < shown; i++) {
+            int col = i % cols;
+            int row = i / cols;
+            int bx = 16 + col * (rw + gap);
+            int by = y + row * (rh + 8);
+            bool on = false;
+            String label = "ALL";
+            if (i == 0) {
+                on = allOn;
+            } else {
+                label = robotAreaNames[idx][i - 1];
+                on = allOn || robotAreaOn[idx][i - 1];
+            }
+            drawButton(bx, by, rw, rh, label, on);
+        }
+    }
+    drawPager();
+    finishEpdFrame();
+}
+
+void drawRobotsPage(bool forceFull)
+{
+    if (robotsUi == PAPERMONO_ROBOT_VAC) {
+        drawRobotVacPage(forceFull);
+        return;
+    }
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    int shown = robotItemCount();
+    if (shown == 0) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("No robots to show.", 16, 180);
+        M5.Display.drawString("Turn on Yarbo or Lymow,", 16, 214);
+        M5.Display.drawString("or add a Matter vacuum.", 16, 248);
+    }
+    for (int i = 0; i < shown; i++) {
+        int x, y, w, h;
+        robotButtonRect(i, x, y, w, h);
+        drawButton(x, y, w, h, robotNames[i], false);
+    }
+    drawPager();
+    finishEpdFrame();
+}
+
+void handleRobotVacTouch(int x, int y)
+{
+    if (robotSel < 0 || robotSel >= robotCount) {
+        robotsUi = PAPERMONO_ROBOT_LIST;
+        drawScreen(false);
+        return;
+    }
+    int idx = robotSel;
+    if (x >= 16 && x <= 136 && y >= 144 && y <= 186) {
+        robotsUi = PAPERMONO_ROBOT_LIST;
+        robotSel = -1;
+        drawScreen(false);
+        return;
+    }
+    int W = M5.Display.width();
+    int gap = 10;
+    int modes = 1 + (robotCanMop[idx] ? 1 : 0) + (robotCanVacMop[idx] ? 1 : 0);
+    int mw = (W - 32 - gap * (modes - 1)) / modes;
+    int mx = 16;
+    int my = 200;
+    if (y >= my && y <= my + 56) {
+        const char *mode = "vacuum";
+        int hit = -1;
+        for (int i = 0; i < modes; i++) {
+            if (x >= mx && x <= mx + mw) {
+                hit = i;
+                break;
+            }
+            mx += mw + gap;
+        }
+        if (hit == 0) {
+            mode = "vacuum";
+        } else if (hit == 1 && robotCanMop[idx]) {
+            mode = "mop";
+        } else if (hit >= 1 && robotCanVacMop[idx]) {
+            mode = "vacuum_mop";
+        } else {
+            return;
+        }
+        robotClean[idx] = mode;
+        httpHomeVacuum(robotIds[idx].c_str(), mode, mode, false, nullptr, 0);
+        httpGetStatus();
+        drawScreen(false);
+        return;
+    }
+    bool paused = robotVacPaused(idx);
+    bool running = robotVacRunning(idx);
+    int cmds = 2 + (running && robotCanPause[idx] ? 1 : 0);
+    int cw = (W - 32 - gap * (cmds - 1)) / cmds;
+    int cx = 16;
+    int cy = 268;
+    if (y >= cy && y <= cy + 56) {
+        int hit = -1;
+        for (int i = 0; i < cmds; i++) {
+            if (x >= cx && x <= cx + cw) {
+                hit = i;
+                break;
+            }
+            cx += cw + gap;
+        }
+        const char *cmd = "start";
+        if (hit == 0) {
+            cmd = paused ? "resume" : "start";
+        } else if (hit == 1 && running && robotCanPause[idx]) {
+            cmd = "pause";
+        } else if (hit >= 0) {
+            cmd = "dock";
+        } else {
+            return;
+        }
+        httpHomeVacuum(robotIds[idx].c_str(), cmd, nullptr, false, nullptr, 0);
+        httpGetStatus();
+        drawScreen(false);
+        return;
+    }
+    int rooms = robotAreaN[idx];
+    int shown = rooms + (rooms > 0 ? 1 : 0);
+    if (shown <= 0) {
+        return;
+    }
+    int cols = 2;
+    int rh = 52;
+    int rw = (W - 32 - gap) / cols;
+    int y0 = 336;
+    bool allOn = true;
+    bool any = false;
+    for (int i = 0; i < rooms; i++) {
+        if (robotAreaOn[idx][i]) {
+            any = true;
+        } else {
+            allOn = false;
+        }
+    }
+    if (!any) {
+        allOn = true;
+    }
+    for (int i = 0; i < shown; i++) {
+        int col = i % cols;
+        int row = i / cols;
+        int bx = 16 + col * (rw + gap);
+        int by = y0 + row * (rh + 8);
+        if (x < bx || x > bx + rw || y < by || y > by + rh) {
+            continue;
+        }
+        if (i == 0) {
+            for (int a = 0; a < rooms; a++) {
+                robotAreaOn[idx][a] = true;
+            }
+            httpHomeVacuum(robotIds[idx].c_str(), "select_areas", nullptr, true, nullptr, 0);
+        } else {
+            int a = i - 1;
+            if (allOn) {
+                for (int k = 0; k < rooms; k++) {
+                    robotAreaOn[idx][k] = false;
+                }
+                robotAreaOn[idx][a] = true;
+            } else {
+                robotAreaOn[idx][a] = !robotAreaOn[idx][a];
+                int onN = 0;
+                for (int k = 0; k < rooms; k++) {
+                    if (robotAreaOn[idx][k]) {
+                        onN++;
+                    }
+                }
+                if (onN == 0) {
+                    for (int k = 0; k < rooms; k++) {
+                        robotAreaOn[idx][k] = true;
+                    }
+                }
+            }
+            int picked[PAPERMONO_VAC_AREA_MAX];
+            int pn = 0;
+            bool nowAll = true;
+            for (int k = 0; k < rooms; k++) {
+                if (robotAreaOn[idx][k]) {
+                    picked[pn++] = robotAreaIds[idx][k];
+                } else {
+                    nowAll = false;
+                }
+            }
+            httpHomeVacuum(robotIds[idx].c_str(), "select_areas", nullptr, nowAll, picked, pn);
+        }
+        httpGetStatus();
+        drawScreen(false);
+        return;
+    }
+}
+
+void handleRobotsTouch(int x, int y)
+{
+    if (robotsUi == PAPERMONO_ROBOT_VAC) {
+        handleRobotVacTouch(x, y);
+        return;
+    }
+    int shown = robotItemCount();
+    for (int i = 0; i < shown; i++) {
+        int bx, by, bw, bh;
+        robotButtonRect(i, bx, by, bw, bh);
+        if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
+            String kind = robotKinds[i];
+            if (kind == "yarbo") {
+                int page = (isYarboPage(lastYarboPage) && pageEnabled(lastYarboPage))
+                    ? lastYarboPage
+                    : firstYarboPage();
+                showPage(page, true);
+                return;
+            }
+            if (kind == "lymow") {
+                showPage(PAPERMONO_PAGE_LYMOW, false);
+                return;
+            }
+            robotsUi = PAPERMONO_ROBOT_VAC;
+            robotSel = i;
+            drawScreen(false);
+            return;
+        }
+    }
 }
 
 void drawPlansPage(bool forceFull)
@@ -2732,6 +3098,8 @@ void drawScreen(bool forceFull)
                 drawDevicePage(forceFull);
             } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
                 drawHousePage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_ROBOTS) {
+                drawRobotsPage(forceFull);
             } else {
                 drawHome(forceFull);
             }
@@ -3706,6 +4074,81 @@ bool httpGetStatus()
             }
         }
     }
+    String keepRobot = (robotSel >= 0 && robotSel < robotCount) ? robotIds[robotSel] : String("");
+    robotCount = 0;
+    {
+        JsonArray items = doc["robot_items"].as<JsonArray>();
+        if (!items.isNull()) {
+            for (JsonVariant item : items) {
+                if (robotCount >= PAPERMONO_ROBOT_MAX) {
+                    break;
+                }
+                JsonObject o = item.as<JsonObject>();
+                if (o.isNull()) {
+                    continue;
+                }
+                robotIds[robotCount] = String((const char *) (o["id"] | ""));
+                robotNames[robotCount] = String((const char *) (o["name"] | ""));
+                robotKinds[robotCount] = String((const char *) (o["kind"] | ""));
+                robotStatus[robotCount] = String((const char *) (o["status"] | ""));
+                robotClean[robotCount] = String((const char *) (o["vacuum_clean"] | "vacuum"));
+                robotCanMop[robotCount] = o["can_mop"] | false;
+                robotCanVacMop[robotCount] = o["can_vacuum_mop"] | false;
+                robotCanPause[robotCount] = o["can_pause"] | true;
+                robotAreaN[robotCount] = 0;
+                JsonArray areas = o["areas"].as<JsonArray>();
+                int selectedBuf[PAPERMONO_VAC_AREA_MAX];
+                int selectedN = 0;
+                JsonArray selected = o["selected_areas"].as<JsonArray>();
+                if (!selected.isNull()) {
+                    for (JsonVariant sid : selected) {
+                        if (selectedN >= PAPERMONO_VAC_AREA_MAX) {
+                            break;
+                        }
+                        selectedBuf[selectedN++] = sid.as<int>();
+                    }
+                }
+                if (!areas.isNull()) {
+                    for (JsonVariant area : areas) {
+                        if (robotAreaN[robotCount] >= PAPERMONO_VAC_AREA_MAX) {
+                            break;
+                        }
+                        JsonObject ao = area.as<JsonObject>();
+                        int n = robotAreaN[robotCount];
+                        robotAreaIds[robotCount][n] = ao["id"] | 0;
+                        robotAreaNames[robotCount][n] = String((const char *) (ao["name"] | ""));
+                        bool on = selectedN == 0;
+                        if (!on) {
+                            for (int s = 0; s < selectedN; s++) {
+                                if (selectedBuf[s] == robotAreaIds[robotCount][n]) {
+                                    on = true;
+                                    break;
+                                }
+                            }
+                        }
+                        robotAreaOn[robotCount][n] = on;
+                        robotAreaN[robotCount]++;
+                    }
+                }
+                if (robotIds[robotCount].length() && robotNames[robotCount].length()) {
+                    robotCount++;
+                }
+            }
+        }
+    }
+    if (keepRobot.length()) {
+        int found = -1;
+        for (int i = 0; i < robotCount; i++) {
+            if (robotIds[i] == keepRobot) {
+                found = i;
+                break;
+            }
+        }
+        robotSel = found;
+        if (found < 0) {
+            robotsUi = PAPERMONO_ROBOT_LIST;
+        }
+    }
     powerwallPct = doc["powerwall_pct"] | powerwallPct;
     powerwallSolar = doc["powerwall_solar"] | powerwallSolar;
     powerwallLoad = doc["powerwall_load"] | powerwallLoad;
@@ -3852,6 +4295,47 @@ bool httpCommand(const char *cmd, const char *planId = nullptr, const char *live
     return ok;
 }
 
+bool httpHomeVacuum(const char *homeId, const char *vacCmd, const char *mode, bool areasAll, const int *areaIds, int areaN)
+{
+    if (WiFi.status() != WL_CONNECTED || !homeId || !homeId[0] || !vacCmd || !vacCmd[0]) {
+        return false;
+    }
+    JsonDocument doc;
+    doc["action"] = "command";
+    doc["command"] = "home_vacuum";
+    doc["token"] = token;
+    doc["home_id"] = homeId;
+    doc["vacuum_cmd"] = vacCmd;
+    if (mode && mode[0]) {
+        doc["clean_mode"] = mode;
+    }
+    if (areasAll) {
+        doc["areas"] = "all";
+    } else if (areaIds && areaN > 0) {
+        JsonArray areas = doc["areas"].to<JsonArray>();
+        for (int i = 0; i < areaN; i++) {
+            areas.add(areaIds[i]);
+        }
+    }
+    String payload;
+    serializeJson(doc, payload);
+    HTTPClient http;
+    int code = paperNetPost(http, "/api/device.php", payload);
+    String body = http.getString();
+    http.end();
+    JsonDocument res;
+    deserializeJson(res, body);
+    bool ok = code == 200 && res["ok"];
+    if (ok) {
+        lastError = "";
+    } else if (res["error"].is<const char*>()) {
+        lastError = res["error"].as<const char*>();
+    } else {
+        lastError = "cmd HTTP " + String(code);
+    }
+    return ok;
+}
+
 void runCommand(const char *cmd)
 {
     httpCommand(cmd);
@@ -3870,6 +4354,10 @@ void setVestaboardLive(const char *live)
 void showPage(int page, bool loadPlansIfNeeded)
 {
     menuOpen = false;
+    if (page != PAPERMONO_PAGE_ROBOTS) {
+        robotsUi = PAPERMONO_ROBOT_LIST;
+        robotSel = -1;
+    }
     if (page == PAPERMONO_PAGE_BOARD) {
         page = PAPERMONO_PAGE_NOTE;
     }
@@ -3921,6 +4409,10 @@ bool applyPendingPages()
     }
     for (int i = 0; i < n; i++) {
         currentPage = stepEnabledPage(currentPage, dir);
+    }
+    if (currentPage != PAPERMONO_PAGE_ROBOTS) {
+        robotsUi = PAPERMONO_ROBOT_LIST;
+        robotSel = -1;
     }
     if (isYarboPage(currentPage)) {
         lastYarboPage = currentPage;
@@ -4148,6 +4640,8 @@ void serviceTouchQueue()
         handlePlansTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
         handleHouseTouch(tx, ty);
+    } else if (currentPage == PAPERMONO_PAGE_ROBOTS) {
+        handleRobotsTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_NOTE) {
         handleNoteTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_RADIO) {

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.106] - 2026-10-11
+
+### Changed
+- Home Automations last-run sits on its own line as relative time (“3 minutes ago”, “2 days ago”).
+- PaperMono unlock menu has one **ROBOTS** button for Yarbo, Lymow, and Matter vacuums. Rename it under Settings → E-paper like HOUSE/MAIL. The button is hidden when both robot modules are off and there are no vacuums. Website Yarbo/Lymow modules and homepage buttons are unchanged. Firmware **0.1.66**.
+
 ## [4.0.105] - 2026-10-11
 
 ### Fixed

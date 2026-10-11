@@ -305,18 +305,27 @@ final class YarboHub
      * @param array<string, bool> $modules
      * @return array<string, bool>
      */
-    public static function menuVisibleForModules(array $visible, array $modules): array
+    public static function menuVisibleForModules(array $visible, array $modules, bool $hasMatterRobots = false): array
     {
         $map = [
-            'yarbo' => self::MODULE_YARBO,
             'powerwall' => self::MODULE_POWERWALL,
-            'lymow' => self::MODULE_LYMOW,
             'house' => self::MODULE_HOME,
         ];
         foreach ($map as $menuId => $moduleId) {
             if (empty($modules[$moduleId])) {
                 $visible[$menuId] = false;
             }
+        }
+        $hasYarbo = !empty($modules[self::MODULE_YARBO]);
+        $hasLymow = !empty($modules[self::MODULE_LYMOW]);
+        if (!$hasYarbo) {
+            $visible['yarbo'] = false;
+        }
+        if (!$hasLymow) {
+            $visible['lymow'] = false;
+        }
+        if (!$hasYarbo && !$hasLymow && !$hasMatterRobots) {
+            $visible['robots'] = false;
         }
 
         return $visible;

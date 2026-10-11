@@ -1314,17 +1314,17 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="both" selected>Logo and Vestaboard</option>
                                 </select>
                             </label>
-                            <p class="hint">PaperMono Unlock always opens the page menu. On a Yarbo screen, A/B step Status, Health, and Plans. Home is still on A/B, not on the menu.</p>
+                            <p class="hint">PaperMono Unlock always opens the page menu. One <strong>ROBOTS</strong> button opens Yarbo, Lymow, and Matter vacuums. On a Yarbo screen, A/B still step Status, Health, and Plans. Home is still on A/B, not on the menu.</p>
                             <h3 class="settings-subtitle">Menu buttons</h3>
-                            <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. One <strong>Yarbo</strong> button opens Status; side buttons A/B then step Health and Plans. NOTE is the live Vestaboard plus the view buttons. The name on each button is also the title at the top of that page. Names wrap on the tablet and apply on the next poll — no reflash.</p>
+                            <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. <strong>ROBOTS</strong> holds Yarbo, Lymow, and Matter vacuums — it stays off the menu when both robot modules are off and there are no vacuums. NOTE is the live Vestaboard plus the view buttons. The name on each button is also the title at the top of that page. Names wrap on the tablet and apply on the next poll — no reflash.</p>
                             <div id="paper-menu-list" class="paper-menu-list">
-                                <div class="paper-menu-row" data-menu-id="yarbo">
+                                <div class="paper-menu-row" data-menu-id="robots">
                                     <span class="paper-menu-reorder">
-                                        <button type="button" class="home-move-btn" data-menu-move="-1" title="Move up" aria-label="Move Yarbo up">▲</button>
-                                        <button type="button" class="home-move-btn" data-menu-move="1" title="Move down" aria-label="Move Yarbo down">▼</button>
+                                        <button type="button" class="home-move-btn" data-menu-move="-1" title="Move up" aria-label="Move Robots up">▲</button>
+                                        <button type="button" class="home-move-btn" data-menu-move="1" title="Move down" aria-label="Move Robots down">▼</button>
                                     </span>
-                                    <input type="checkbox" data-menu-visible="yarbo" checked aria-label="Show Yarbo">
-                                    <label class="settings-field"><span class="label">Yarbo</span><input type="text" data-menu-label="yarbo" maxlength="20" placeholder="YARBO" autocomplete="off"></label>
+                                    <input type="checkbox" data-menu-visible="robots" checked aria-label="Show Robots">
+                                    <label class="settings-field"><span class="label">Robots</span><input type="text" data-menu-label="robots" maxlength="20" placeholder="ROBOTS" autocomplete="off"></label>
                                 </div>
                                 <div class="paper-menu-row" data-menu-id="note">
                                     <span class="paper-menu-reorder">
@@ -1341,14 +1341,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </span>
                                     <input type="checkbox" data-menu-visible="powerwall" checked aria-label="Show Powerwall">
                                     <label class="settings-field"><span class="label">Powerwall</span><input type="text" data-menu-label="powerwall" maxlength="20" placeholder="POWER" autocomplete="off"></label>
-                                </div>
-                                <div class="paper-menu-row" data-menu-id="lymow">
-                                    <span class="paper-menu-reorder">
-                                        <button type="button" class="home-move-btn" data-menu-move="-1" title="Move up" aria-label="Move Lymow up">▲</button>
-                                        <button type="button" class="home-move-btn" data-menu-move="1" title="Move down" aria-label="Move Lymow down">▼</button>
-                                    </span>
-                                    <input type="checkbox" data-menu-visible="lymow" checked aria-label="Show Lymow">
-                                    <label class="settings-field"><span class="label">Lymow</span><input type="text" data-menu-label="lymow" maxlength="20" placeholder="LYMOW" autocomplete="off"></label>
                                 </div>
                                 <div class="paper-menu-row" data-menu-id="radio">
                                     <span class="paper-menu-reorder">
@@ -1454,7 +1446,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <summary>Screen previews</summary>
                                 <p class="hint">Mocks of the current tablet pages. They follow the modules you have switched on.</p>
                             <div class="papermono-preview-grid" id="papermono-preview-grid">
-                                <figure class="papermono-preview" data-preview-for="yarbo">
+                                <figure class="papermono-preview" data-preview-for="menu">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono unlock menu mock with page buttons and mail notification blob">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
@@ -1463,7 +1455,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="400" y="50" width="38" height="32" rx="5" fill="#111"/>
                                         <path d="M409 50 v-10 a10 10 0 0 1 20 0 v10" fill="none" stroke="#111" stroke-width="6"/>
                                         <rect x="24" y="118" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="128" y="184" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">YARBO</text>
+                                        <text x="128" y="184" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">ROBOTS</text>
                                         <rect x="248" y="118" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
                                         <text x="352" y="184" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">NOTE</text>
                                         <rect x="24" y="242" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
@@ -1472,13 +1464,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <text x="352" y="308" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#f4f1e8">MAIL</text>
                                         <circle cx="436" cy="262" r="12" fill="#f4f1e8"/>
                                         <rect x="24" y="366" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="128" y="432" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">LYMOW</text>
+                                        <text x="128" y="432" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">DEVICE</text>
                                         <rect x="248" y="366" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="352" y="432" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">DEVICE</text>
-                                        <rect x="24" y="490" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
-                                        <text x="128" y="556" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOUSE</text>
+                                        <text x="352" y="432" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">HOUSE</text>
                                     </svg>
-                                    <figcaption>Unlock menu — one YARBO button; A/B steps Status, Health, Plans. Reorder in Settings. MAIL blob if unread</figcaption>
+                                    <figcaption>Unlock menu — one ROBOTS button for Yarbo, Lymow, and Matter vacuums. Reorder in Settings. MAIL blob if unread</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
@@ -1791,7 +1781,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.65 / 0.2.19-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.66 / 0.2.19-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

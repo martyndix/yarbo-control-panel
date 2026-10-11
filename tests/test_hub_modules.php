@@ -119,11 +119,30 @@ if (in_array('powerwall', $enabledIds, true) || !in_array('home', $enabledIds, t
 }
 
 $menu = Yarbo\YarboHub::menuVisibleForModules(
-    ['yarbo' => true, 'powerwall' => true, 'lymow' => true, 'house' => true, 'note' => true],
+    ['robots' => true, 'powerwall' => true, 'house' => true, 'note' => true],
     $off['modules'],
+    false,
 );
-if ($menu['powerwall'] !== false || $menu['lymow'] !== false || $menu['house'] !== true || $menu['note'] !== true) {
+if (($menu['robots'] ?? false) !== true || $menu['powerwall'] !== false || $menu['house'] !== true || $menu['note'] !== true) {
     fwrite(STDERR, 'menu overlay ' . json_encode($menu) . "\n");
+    exit(1);
+}
+$empty = Yarbo\YarboHub::menuVisibleForModules(
+    ['robots' => true, 'note' => true],
+    ['yarbo' => false, 'powerwall' => false, 'lymow' => false, 'home' => true],
+    false,
+);
+if (($empty['robots'] ?? true) !== false) {
+    fwrite(STDERR, 'robots should hide with no modules and no vacuums ' . json_encode($empty) . "\n");
+    exit(1);
+}
+$vacOnly = Yarbo\YarboHub::menuVisibleForModules(
+    ['robots' => true, 'note' => true],
+    ['yarbo' => false, 'powerwall' => false, 'lymow' => false, 'home' => true],
+    true,
+);
+if (($vacOnly['robots'] ?? false) !== true) {
+    fwrite(STDERR, 'robots should show for matter vacuums ' . json_encode($vacOnly) . "\n");
     exit(1);
 }
 
