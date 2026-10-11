@@ -75,6 +75,17 @@ $liveLightForce = false;
 $livePirMotion = true;
 $unifi->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls, &$doorDps, &$lightPrivateHtml, &$lightPublicFail, &$sensorOpen, &$sensorTemp, &$sensorHumidity, &$liveLightOn, &$liveLightForce, &$livePirMotion): array {
     $calls[] = [$method, $url, $headers, $body];
+    if (str_contains($url, '/rtsps-stream')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'high' => 'rtsps://192.168.1.1:7441/high',
+                'medium' => 'rtsps://192.168.1.1:7441/token',
+                'low' => 'rtsps://192.168.1.1:7441/low',
+            ]),
+            'content_type' => 'application/json',
+        ];
+    }
     if (str_contains($url, '/cameras') && !str_contains($url, '/snapshot')) {
         return [
             'status' => 200,
@@ -648,6 +659,35 @@ if ($snap !== 'JFIF') {
     fwrite(STDERR, "snapshot $snap\n");
     exit(1);
 }
+$cache = $root . '/data/unifi-snap-cam1.jpg';
+file_put_contents($cache, 'OLDJPEG');
+$cachedSnap = $unifi->snapshotJpeg('cam1');
+if ($cachedSnap !== 'OLDJPEG') {
+    fwrite(STDERR, "snapshot cache $cachedSnap\n");
+    exit(1);
+}
+$freshSnap = $unifi->snapshotJpeg('cam1', true);
+if ($freshSnap !== 'JFIF') {
+    fwrite(STDERR, "fresh snapshot $freshSnap\n");
+    exit(1);
+}
+if (Yarbo\YarboUnifi::SNAPSHOT_CACHE_TTL !== 4) {
+    fwrite(STDERR, 'snapshot ttl ' . Yarbo\YarboUnifi::SNAPSHOT_CACHE_TTL . "\n");
+    exit(1);
+}
+if (Yarbo\YarboUnifi::firstRtspsUrl('{"high":"rtsps://h","medium":"rtsps://m"}') !== 'rtsps://m') {
+    fwrite(STDERR, "firstRtspsUrl should prefer medium\n");
+    exit(1);
+}
+if (Yarbo\YarboUnifi::firstRtspsUrl('{"data":{"url":"rtsp://plain"}}') !== 'rtsp://plain') {
+    fwrite(STDERR, "firstRtspsUrl nested url failed\n");
+    exit(1);
+}
+$rtsp = $unifi->rtspsUrl('unifi:camera:cam1');
+if ($rtsp !== 'rtsps://192.168.1.1:7441/token') {
+    fwrite(STDERR, "rtspsUrl $rtsp\n");
+    exit(1);
+}
 
 $unifi->setShowOnHome('unifi:light:light1', true);
 $rows = $unifi->homeRows();
@@ -1008,6 +1048,30 @@ if (!str_contains($js, "startsWith('unifi:')") || !str_contains($js, '8000')) {
 }
 if (!str_contains($css, '.home-device-actions .home-device-meta')) {
     fwrite(STDERR, "actions-box meta CSS missing\n");
+    exit(1);
+}
+if (!str_contains($js, 'data-unifi-live') || !str_contains($js, 'UNIFI_SNAP_INTERVAL_MS') || !str_contains($js, 'openUnifiLive') || !str_contains($js, 'action=stream')) {
+    fwrite(STDERR, "UniFi live still refresh missing from app.js\n");
+    exit(1);
+}
+if (!str_contains($css, '.unifi-live-panel') || !str_contains($css, 'unifi-live-open')) {
+    fwrite(STDERR, "UniFi live CSS missing\n");
+    exit(1);
+}
+$api = (string) file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
+$html = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
+$docs = (string) file_get_contents(dirname(__DIR__) . '/docs/unifi.md');
+$change = (string) file_get_contents(dirname(__DIR__) . '/CHANGELOG.md');
+if (!str_contains($api, "action === 'stream'") || !str_contains($api, 'fresh')) {
+    fwrite(STDERR, "unifi.php stream/fresh missing\n");
+    exit(1);
+}
+if (!str_contains($html, 'unifi-live-modal')) {
+    fwrite(STDERR, "live camera modal missing\n");
+    exit(1);
+}
+if (!str_contains($docs, 'rtsps-stream') || !str_contains($change, '## [4.0.110]')) {
+    fwrite(STDERR, "UniFi live docs/changelog missing\n");
     exit(1);
 }
 

@@ -6,7 +6,7 @@ Not affiliated with Ubiquiti.
 
 ## What it can do
 
-- List Protect cameras and show JPEG stills on the UniFi page and on Home.
+- List Protect cameras and show JPEG stills on the UniFi page and on Home. Stills refresh every few seconds. Click a still for a live view (Protect RTSPS via ffmpeg when installed, otherwise a fast snapshot stream).
 - Toggle Protect floodlights (`PATCH /proxy/protect/integration/v1/lights/{id}` with `isLightForceEnabled` and `ledLevel` 6). If that does not confirm the LED, the panel logs into UniFi OS with the stored local admin and PATCHes private `lightOnSettings.isLedForceOn` (cookie + CSRF). A Control Plane API key alone cannot authenticate `/proxy/protect/api`; an HTML login page is not treated as success. Home re-reads light state in the background so On/Off from the Protect app shows on the website.
 - Toggle Protect relays (`POST /relays/{id}/outputs/{outputId}/activate`). Relays are dry-contact outputs in Protect, not Access doors.
 - Show Protect sensor status (open/closed, motion, temperature/humidity). Home re-reads `GET /sensors` in the background so those chips stay live without blocking light clicks.
@@ -19,7 +19,7 @@ Not affiliated with Ubiquiti.
 - Remote UniFi via `unifi.ui.com`.
 - A Vestaboard UniFi page.
 - PaperMono HOUSE buttons for UniFi devices.
-- Protect recordings, event history, or two-way talk.
+- Protect recordings, event history, two-way talk, or WebRTC.
 - Access user / credential administration.
 - Access after **Identity Enterprise** (the OpenAPI is disabled there).
 
@@ -66,6 +66,8 @@ Door list: `GET /doors` (`view:space`). Device/hub list: `GET /devices?refresh=t
 Protect lights: the panel PATCHes the public Integration API `{ "isLightForceEnabled": true, "lightDeviceSettings": { "ledLevel": 6 } }` (`/proxy/protect/integration/v1/lights/{id}` with `X-API-KEY`). If a local admin is stored, it also logs in at `/api/auth/login` (session cached) and PATCHes `/proxy/protect/api/lights/{id}` `{ "lightOnSettings": { "isLedForceOn": true } }` with cookie + CSRF. A later HTTP 401 from UniFi OS login does not revert the website On/Off if a force PATCH already succeeded. Home re-reads `GET /lights` (and private `/proxy/protect/api/lights` when a session exists) in the same background job as sensors, so On/Off from the Protect app shows on the website. A short overlay covers Protect lag after a website click. Off sends `isLightForceEnabled` / `isLedForceOn` false. Relays: `POST /relays/{id}/outputs/{outputId}/activate` with `{ "state": "on"|"off" }`.
 
 Protect sensors: `GET /proxy/protect/integration/v1/sensors` (`isOpened`, `stats.temperature.value`, `stats.humidity.value`). Home does not poll this on the request that serves the grid; a background process updates `data/unifi-inventory.json` so the next 3-second Home refresh can show Open and new readings. Access `GET /doors` (controller Open/Closed) is a separate poll in that same job.
+
+Protect cameras: stills are `GET /cameras/{id}/snapshot`. Live view prefers `GET /cameras/{id}/rtsps-stream` (medium, then low) piped through ffmpeg as MJPEG (`/api/unifi.php?action=stream`). If ffmpeg or RTSPS is missing, that same URL sends a snapshot MJPEG loop (`fresh` snapshots). Thumbnails skip the 4-second JPEG cache only when `fresh=1`.
 
 ## Home
 

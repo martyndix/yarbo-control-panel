@@ -4012,6 +4012,23 @@ body.home-is-reordering {
     color: #f4f4f4;
 }
 
+button.unifi-live-open {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+button.unifi-live-open:hover img,
+button.unifi-live-open:focus-visible img {
+    opacity: 0.92;
+}
+
 .unifi-camera-still,
 .unifi-thumb {
     display: block;
@@ -4020,6 +4037,27 @@ body.home-is-reordering {
     min-height: 96px;
     max-height: 180px;
     object-fit: cover;
+    background: #000;
+    cursor: pointer;
+}
+
+.unifi-live-panel {
+    width: min(100%, 960px);
+}
+
+.unifi-live-viewport {
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    min-height: 200px;
+}
+
+.unifi-live-viewport img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: min(70vh, 720px);
+    object-fit: contain;
     background: #000;
 }
 

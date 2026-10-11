@@ -19,11 +19,26 @@ if ($method === 'GET' && $action === 'snapshot') {
         json_response(['ok' => false, 'error' => 'Turn on the UniFi module in Settings.'], 403);
     }
     try {
-        $jpeg = $unifi->snapshotJpeg((string) ($_GET['id'] ?? ''));
+        $fresh = YarboHub::asBool($_GET['fresh'] ?? false);
+        $jpeg = $unifi->snapshotJpeg((string) ($_GET['id'] ?? ''), $fresh);
         header('Content-Type: image/jpeg');
-        header('Cache-Control: private, max-age=20');
+        header('Cache-Control: ' . ($fresh ? 'no-store, no-cache, must-revalidate' : 'private, max-age=4'));
         header('Content-Length: ' . (string) strlen($jpeg));
         echo $jpeg;
+        exit;
+    } catch (Throwable $e) {
+        json_response(['ok' => false, 'error' => $e->getMessage()], 502);
+    }
+}
+
+if ($method === 'GET' && $action === 'stream') {
+    if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
+        json_response(['ok' => false, 'error' => 'Turn on the UniFi module in Settings.'], 403);
+    }
+    try {
+        ignore_user_abort(true);
+        set_time_limit(0);
+        $unifi->streamMjpeg((string) ($_GET['id'] ?? ''));
         exit;
     } catch (Throwable $e) {
         json_response(['ok' => false, 'error' => $e->getMessage()], 502);

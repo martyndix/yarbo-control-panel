@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.110] - 2026-10-11
+
+### Changed
+- Home and UniFi camera stills refresh every few seconds. Click a still to open a live view: Protect RTSPS through ffmpeg when the panel host has it, otherwise a fast snapshot stream.
+
 ## [4.0.109] - 2026-10-11
 
 ### Changed

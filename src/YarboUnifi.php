@@ -13,6 +13,7 @@ final class YarboUnifi
     public const KIND_DOOR = 'door';
     public const KIND_RELAY = 'relay';
     public const KIND_HUB = 'hub';
+    public const SNAPSHOT_CACHE_TTL = 4;
 
     /** @var callable|null */
     private $transport = null;
@@ -770,13 +771,9 @@ final class YarboUnifi
         return $rows;
     }
 
-    public function snapshotJpeg(string $cameraId): string
+    public function snapshotJpeg(string $cameraId, bool $fresh = false): string
     {
-        $cameraId = trim($cameraId);
-        $parsed = self::parseHomeId($cameraId);
-        if ($parsed !== null) {
-            $cameraId = $parsed['native_id'];
-        }
+        $cameraId = $this->normalizeCameraId($cameraId);
         if ($cameraId === '') {
             throw new \RuntimeException('Pick a camera');
         }
@@ -786,15 +783,22 @@ final class YarboUnifi
         }
         $cacheDir = $this->projectRoot . '/data';
         $cache = $cacheDir . '/unifi-snap-' . preg_replace('/[^a-zA-Z0-9._-]+/', '_', $cameraId) . '.jpg';
-        if (is_file($cache) && (time() - (int) filemtime($cache)) < 20) {
-            $cached = file_get_contents($cache);
-            if (is_string($cached) && $cached !== '') {
-                return $cached;
+        $cached = '';
+        if (is_file($cache)) {
+            $raw = file_get_contents($cache);
+            if (is_string($raw) && $raw !== '') {
+                $cached = $raw;
             }
+        }
+        if (!$fresh && $cached !== '' && (time() - (int) filemtime($cache)) < self::SNAPSHOT_CACHE_TTL) {
+            return $cached;
         }
         $url = $this->protectUrl($config, '/cameras/' . rawurlencode($cameraId) . '/snapshot?highQuality=false');
         $res = $this->request('GET', $url, $this->protectHeaders($config), null, 6.0, true);
         if ($res['status'] < 200 || $res['status'] >= 300 || $res['body'] === '') {
+            if ($cached !== '') {
+                return $cached;
+            }
             throw new \RuntimeException($res['error'] ?? ('Protect snapshot failed HTTP ' . $res['status']));
         }
         if (!is_dir($cacheDir)) {
@@ -803,6 +807,258 @@ final class YarboUnifi
         file_put_contents($cache, $res['body']);
 
         return $res['body'];
+    }
+
+    public function rtspsUrl(string $cameraId): string
+    {
+        $cameraId = $this->normalizeCameraId($cameraId);
+        if ($cameraId === '') {
+            throw new \RuntimeException('Pick a camera');
+        }
+        $config = $this->load();
+        if ($config['protect_api_key'] === '') {
+            throw new \RuntimeException('Add a Protect API key in Settings → UniFi.');
+        }
+        $base = '/cameras/' . rawurlencode($cameraId) . '/rtsps-stream';
+        $paths = [
+            $base . '?quality=medium',
+            $base . '?quality=low',
+            $base,
+        ];
+        foreach ($paths as $path) {
+            $res = $this->request('GET', $this->protectUrl($config, $path), $this->protectHeaders($config), null, 6.0, false);
+            $url = self::firstRtspsUrl((string) ($res['body'] ?? ''));
+            if ($url !== '') {
+                return $url;
+            }
+        }
+        $this->request(
+            'PATCH',
+            $this->protectUrl($config, $base),
+            $this->protectHeaders($config),
+            json_encode(['quality' => ['medium', 'low', 'high']], JSON_UNESCAPED_SLASHES),
+            6.0,
+            false
+        );
+        $res = $this->request('GET', $this->protectUrl($config, $base), $this->protectHeaders($config), null, 6.0, false);
+        $url = self::firstRtspsUrl((string) ($res['body'] ?? ''));
+        if ($url === '') {
+            throw new \RuntimeException($res['error'] ?? 'Protect did not return an RTSPS URL');
+        }
+
+        return $url;
+    }
+
+    public static function firstRtspsUrl(string $body): string
+    {
+        $trimmed = trim($body);
+        if ($trimmed === '') {
+            return '';
+        }
+        if (self::isRtspUrl($trimmed)) {
+            return $trimmed;
+        }
+        try {
+            $decoded = json_decode($trimmed, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return '';
+        }
+
+        return is_array($decoded) ? self::findRtspsIn($decoded) : '';
+    }
+
+    public function streamMjpeg(string $cameraId, int $fps = 5): void
+    {
+        $cameraId = $this->normalizeCameraId($cameraId);
+        if ($cameraId === '') {
+            throw new \RuntimeException('Pick a camera');
+        }
+        $fps = max(1, min(8, $fps));
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+        header('Pragma: no-cache');
+        header('Connection: close');
+        header('X-Accel-Buffering: no');
+        header('Content-Type: multipart/x-mixed-replace; boundary=frame');
+        if (function_exists('apache_setenv')) {
+            @apache_setenv('no-gzip', '1');
+        }
+        @ini_set('zlib.output_compression', '0');
+        @ini_set('output_buffering', 'off');
+        if ($this->transport === null) {
+            $rtsp = '';
+            try {
+                $rtsp = $this->rtspsUrl($cameraId);
+            } catch (\Throwable) {
+                $rtsp = '';
+            }
+            if ($rtsp !== '') {
+                $this->pipeFfmpegMjpeg($rtsp, $fps);
+                if (connection_aborted()) {
+                    return;
+                }
+            }
+        }
+        $this->streamSnapshotLoop($cameraId, $fps);
+    }
+
+    private function normalizeCameraId(string $cameraId): string
+    {
+        $cameraId = trim($cameraId);
+        $parsed = self::parseHomeId($cameraId);
+        if ($parsed !== null) {
+            return $parsed['kind'] === self::KIND_CAMERA ? $parsed['native_id'] : '';
+        }
+
+        return $cameraId;
+    }
+
+    private static function isRtspUrl(string $value): bool
+    {
+        return str_starts_with($value, 'rtsps://') || str_starts_with($value, 'rtsp://');
+    }
+
+    /**
+     * @param array<mixed> $value
+     */
+    private static function findRtspsIn(array $value): string
+    {
+        foreach (['medium', 'low', 'high', 'package', 'url', 'rtsps', 'rtspsUrl', 'rtsp'] as $key) {
+            if (!array_key_exists($key, $value)) {
+                continue;
+            }
+            $found = self::rtspsFromMixed($value[$key]);
+            if ($found !== '') {
+                return $found;
+            }
+        }
+        foreach ($value as $item) {
+            $found = self::rtspsFromMixed($item);
+            if ($found !== '') {
+                return $found;
+            }
+        }
+
+        return '';
+    }
+
+    private static function rtspsFromMixed(mixed $value): string
+    {
+        if (is_string($value)) {
+            $value = trim($value);
+
+            return self::isRtspUrl($value) ? $value : '';
+        }
+        if (is_array($value)) {
+            return self::findRtspsIn($value);
+        }
+
+        return '';
+    }
+
+    private function pipeFfmpegMjpeg(string $rtsp, int $fps): void
+    {
+        $ffmpeg = $this->ffmpegBinary();
+        if ($ffmpeg === '') {
+            return;
+        }
+        $cmd = implode(' ', [
+            escapeshellarg($ffmpeg),
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-nostdin',
+            '-rtsp_transport', 'tcp',
+            '-i', escapeshellarg($rtsp),
+            '-an',
+            '-f', 'mjpeg',
+            '-q:v', '5',
+            '-r', (string) $fps,
+            'pipe:1',
+        ]);
+        $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (!is_resource($proc)) {
+            return;
+        }
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $buffer = '';
+        $sent = false;
+        $started = microtime(true);
+        while (!feof($pipes[1])) {
+            if (connection_aborted()) {
+                break;
+            }
+            $chunk = fread($pipes[1], 8192);
+            if ($chunk === false) {
+                break;
+            }
+            if ($chunk === '') {
+                if (!$sent && (microtime(true) - $started) > 6.0) {
+                    break;
+                }
+                usleep(20000);
+                continue;
+            }
+            $buffer .= $chunk;
+            while (($start = strpos($buffer, "\xff\xd8")) !== false) {
+                $next = strpos($buffer, "\xff\xd8", $start + 2);
+                if ($next === false) {
+                    break;
+                }
+                $frame = substr($buffer, $start, $next - $start);
+                $buffer = substr($buffer, $next);
+                $this->emitMjpegFrame($frame);
+                $sent = true;
+            }
+        }
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+        $status = proc_get_status($proc);
+        if ($status['running'] ?? false) {
+            proc_terminate($proc, 9);
+        }
+        proc_close($proc);
+    }
+
+    private function streamSnapshotLoop(string $cameraId, int $fps): void
+    {
+        $delayUs = (int) max(250000, intdiv(1000000, max(1, $fps)));
+        while (!connection_aborted()) {
+            try {
+                $jpeg = $this->snapshotJpeg($cameraId, true);
+            } catch (\Throwable) {
+                usleep($delayUs);
+                continue;
+            }
+            if ($jpeg !== '') {
+                $this->emitMjpegFrame($jpeg);
+            }
+            usleep($delayUs);
+        }
+    }
+
+    private function emitMjpegFrame(string $jpeg): void
+    {
+        echo "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " . strlen($jpeg) . "\r\n\r\n";
+        echo $jpeg;
+        echo "\r\n";
+        if (function_exists('flush')) {
+            flush();
+        }
+    }
+
+    private function ffmpegBinary(): string
+    {
+        $config = @include $this->projectRoot . '/config.php';
+        $fromConfig = is_array($config) ? trim((string) ($config['ffmpeg_path'] ?? '')) : '';
+        if ($fromConfig !== '' && $fromConfig !== 'ffmpeg' && is_file($fromConfig)) {
+            return $fromConfig;
+        }
+        $which = trim((string) shell_exec('command -v ffmpeg 2>/dev/null'));
+
+        return $which !== '' ? $which : '';
     }
 
     /**

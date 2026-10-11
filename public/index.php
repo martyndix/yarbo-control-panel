@@ -1922,6 +1922,20 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </div>
 
+        <div id="unifi-live-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="unifi-live-title">
+            <button type="button" class="modal-backdrop" data-unifi-live-close aria-label="Close live camera"></button>
+            <div class="modal-panel card unifi-live-panel">
+                <h2 id="unifi-live-title">Camera</h2>
+                <div class="unifi-live-viewport">
+                    <img id="unifi-live-img" alt="Live camera">
+                </div>
+                <p id="unifi-live-error" class="hint hidden"></p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" data-unifi-live-close>Close</button>
+                </div>
+            </div>
+        </div>
+
         <div id="update-confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="update-confirm-title">
             <button type="button" class="modal-backdrop" data-update-confirm-close aria-label="Cancel update"></button>
             <div class="modal-panel card update-confirm-panel">

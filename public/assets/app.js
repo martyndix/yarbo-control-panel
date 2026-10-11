@@ -139,6 +139,10 @@ const els = {
     settingsUnifiResult: document.getElementById('settings-unifi-result'),
     settingsUnifiTest: document.getElementById('settings-unifi-test'),
     settingsUnifiDevices: document.getElementById('settings-unifi-devices'),
+    unifiLiveModal: document.getElementById('unifi-live-modal'),
+    unifiLiveTitle: document.getElementById('unifi-live-title'),
+    unifiLiveImg: document.getElementById('unifi-live-img'),
+    unifiLiveError: document.getElementById('unifi-live-error'),
     settingsVestaboardLive: document.getElementById('settings-vestaboard-live'),
     settingsPowerwallRegion: document.getElementById('settings-powerwall-region'),
     settingsPowerwallPublicUrl: document.getElementById('settings-powerwall-public-url'),
@@ -400,6 +404,7 @@ function syncBodyModalClass() {
         els.plansManageModal,
         els.updateConfirmModal,
         els.vestaboardRotateModal,
+        els.unifiLiveModal,
     ].some((modal) => modal && !modal.classList.contains('hidden'));
     document.body.classList.toggle('modal-open', open);
 }
@@ -2500,10 +2505,17 @@ function updateLymowDashboard(ly) {
     applyDeviceNameSubtitle();
 }
 
+const UNIFI_SNAP_INTERVAL_MS = 5000;
+const UNIFI_LIVE_FALLBACK_MS = 400;
 let unifiPollTimer = 0;
 let unifiDash = { cameras: [], lights: [], sensors: [], relays: [], doors: [], hubs: [], devices: [] };
 let unifiPickerDirty = false;
 let unifiSnapGen = 0;
+let unifiSnapTimer = 0;
+let unifiLiveId = '';
+let unifiLiveFallbackTimer = 0;
+let unifiLiveFallbackBusy = false;
+let unifiLiveObjectUrl = '';
 
 function unifiShowOnHomeSnapshot() {
     const ids = [...document.querySelectorAll('input[data-unifi-home]:checked')]
@@ -2637,7 +2649,156 @@ async function unifiApi(body, timeoutMs = 20000) {
 function unifiSnapSrc(d, bust) {
     const id = d.native_id || d.id || '';
     const base = `/api/unifi.php?action=snapshot&id=${encodeURIComponent(id)}`;
-    return bust ? `${base}&r=${unifiSnapGen}` : base;
+    const token = bust ? (unifiSnapGen || Date.now()) : Date.now();
+    return `${base}&r=${token}`;
+}
+
+function unifiLiveOpenHtml(d, imgClass) {
+    const id = d.id || d.native_id || '';
+    const name = d.name || 'Camera';
+    const src = unifiSnapSrc(d, true);
+    return `<button type="button" class="unifi-live-open" data-unifi-live="${escapeHtml(id)}" data-unifi-name="${escapeHtml(name)}">
+            <img class="${escapeHtml(imgClass)}" src="${escapeHtml(src)}" alt="${escapeHtml(name)}" loading="lazy" decoding="async">
+        </button>`;
+}
+
+function unifiStillsVisible() {
+    const home = document.getElementById('home-card');
+    const unifi = document.getElementById('unifi-card');
+    const homeShow = home && !home.classList.contains('module-pane-hidden');
+    const unifiShow = unifi && !unifi.classList.contains('module-pane-hidden');
+    return Boolean((homeShow && home.querySelector('.unifi-thumb'))
+        || (unifiShow && unifi.querySelector('.unifi-camera-still')));
+}
+
+function refreshUnifiStills() {
+    if (document.hidden || !unifiStillsVisible()) return;
+    const imgs = document.querySelectorAll('.unifi-thumb, .unifi-camera-still');
+    if (!imgs.length) return;
+    unifiSnapGen = Date.now();
+    imgs.forEach((img) => {
+        if (img.id === 'unifi-live-img' || !img.complete) return;
+        try {
+            const url = new URL(img.src, window.location.origin);
+            if (!url.pathname.endsWith('/unifi.php')) return;
+            url.searchParams.set('r', String(unifiSnapGen));
+            url.searchParams.delete('fresh');
+            img.src = url.toString();
+        } catch {
+            /* keep current still */
+        }
+    });
+}
+
+function ensureUnifiStillRefresh() {
+    if (unifiSnapTimer) return;
+    unifiSnapTimer = window.setInterval(refreshUnifiStills, UNIFI_SNAP_INTERVAL_MS);
+}
+
+function stopUnifiLiveFallback() {
+    if (unifiLiveFallbackTimer) {
+        clearInterval(unifiLiveFallbackTimer);
+        unifiLiveFallbackTimer = 0;
+    }
+    unifiLiveFallbackBusy = false;
+}
+
+function showUnifiLiveError(message) {
+    if (!els.unifiLiveError) return;
+    const text = String(message || '').trim();
+    els.unifiLiveError.textContent = text;
+    els.unifiLiveError.classList.toggle('hidden', text === '');
+}
+
+async function grabUnifiLiveSnapshot() {
+    if (!unifiLiveId || !els.unifiLiveImg || unifiLiveFallbackBusy || document.hidden) return;
+    unifiLiveFallbackBusy = true;
+    try {
+        const res = await fetch(`/api/unifi.php?action=snapshot&id=${encodeURIComponent(unifiLiveId)}&fresh=1&r=${Date.now()}`, { cache: 'no-store' });
+        const type = (res.headers.get('content-type') || '').toLowerCase();
+        if (!res.ok || !type.includes('jpeg')) {
+            let message = `Live view failed (${res.status})`;
+            if (type.includes('json')) {
+                try {
+                    const data = await res.json();
+                    if (data.error) message = String(data.error);
+                } catch { /* keep message */ }
+            }
+            throw new Error(message);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        els.unifiLiveImg.src = url;
+        if (unifiLiveObjectUrl) URL.revokeObjectURL(unifiLiveObjectUrl);
+        unifiLiveObjectUrl = url;
+        showUnifiLiveError('');
+    } catch (err) {
+        showUnifiLiveError(err.message || 'Could not load live view.');
+    } finally {
+        unifiLiveFallbackBusy = false;
+    }
+}
+
+function startUnifiLiveFallback() {
+    if (!unifiLiveId) return;
+    stopUnifiLiveFallback();
+    grabUnifiLiveSnapshot();
+    unifiLiveFallbackTimer = window.setInterval(grabUnifiLiveSnapshot, UNIFI_LIVE_FALLBACK_MS);
+}
+
+function closeUnifiLive() {
+    unifiLiveId = '';
+    stopUnifiLiveFallback();
+    if (els.unifiLiveImg) {
+        els.unifiLiveImg.removeAttribute('src');
+        els.unifiLiveImg.onload = null;
+        els.unifiLiveImg.onerror = null;
+    }
+    if (unifiLiveObjectUrl) {
+        URL.revokeObjectURL(unifiLiveObjectUrl);
+        unifiLiveObjectUrl = '';
+    }
+    showUnifiLiveError('');
+    els.unifiLiveModal?.classList.add('hidden');
+    syncBodyModalClass();
+}
+
+function openUnifiLive(id, name) {
+    id = String(id || '').trim();
+    if (!id || !els.unifiLiveModal || !els.unifiLiveImg) return;
+    unifiLiveId = id;
+    stopUnifiLiveFallback();
+    if (els.unifiLiveTitle) els.unifiLiveTitle.textContent = name || 'Camera';
+    showUnifiLiveError('');
+    els.unifiLiveModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+    const img = els.unifiLiveImg;
+    img.onload = () => showUnifiLiveError('');
+    img.onerror = () => startUnifiLiveFallback();
+    img.src = `/api/unifi.php?action=stream&id=${encodeURIComponent(id)}&r=${Date.now()}`;
+}
+
+function setupUnifiLive() {
+    document.addEventListener('click', (event) => {
+        const close = event.target.closest('[data-unifi-live-close]');
+        if (close) {
+            closeUnifiLive();
+            return;
+        }
+        const open = event.target.closest('[data-unifi-live]');
+        if (!open || open.closest('.home-device-manage, .home-drag-handle, .home-reorder-controls')) return;
+        event.preventDefault();
+        openUnifiLive(open.getAttribute('data-unifi-live') || '', open.getAttribute('data-unifi-name') || 'Camera');
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && els.unifiLiveModal && !els.unifiLiveModal.classList.contains('hidden')) {
+            closeUnifiLive();
+        }
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) refreshUnifiStills();
+    });
+    ensureUnifiStillRefresh();
 }
 
 function unifiDoorHasPosition(d) {
@@ -2707,9 +2868,8 @@ function unifiDeviceCardHtml(d) {
     const kind = String(d.kind || '');
     const on = Boolean(d.on);
     if (kind === 'camera') {
-        const src = unifiSnapSrc(d, false);
         return `<article class="unifi-camera-card" data-unifi-id="${escapeHtml(d.id)}">
-            <img class="unifi-camera-still" src="${escapeHtml(src)}" alt="${escapeHtml(d.name || 'Camera')}" decoding="async">
+            ${unifiLiveOpenHtml(d, 'unifi-camera-still')}
             <p class="unifi-camera-name">${escapeHtml(d.name || 'Camera')}</p>
             <p class="hint unifi-card-status">${escapeHtml(d.status || '')}</p>
         </article>`;
@@ -2821,6 +2981,7 @@ function renderUnifiDashboard(data, { replace = false } = {}) {
     patchUnifiWrap(document.getElementById('unifi-doors'), data?.doors || [], unifiDeviceCardHtml);
     patchUnifiWrap(document.getElementById('unifi-sensors'), data?.sensors || [], unifiDeviceCardHtml);
     renderUnifiHomePicker(data, { replace });
+    ensureUnifiStillRefresh();
 }
 
 async function loadUnifiDashboard(opts = {}) {
@@ -3982,9 +4143,8 @@ function homeDeviceActionsHtml(d, bright, color) {
     if (homeIsUnifi(d)) {
         const kind = String(d.kind || '');
         if (kind === 'camera') {
-            const src = d.snapshot || `/api/unifi.php?action=snapshot&id=${encodeURIComponent(d.id)}`;
             return `<div class="home-device-actions home-device-actions--camera">
-                <img class="unifi-thumb" src="${escapeHtml(src)}" alt="" loading="lazy">
+                ${unifiLiveOpenHtml(d, 'unifi-thumb')}
             </div>`;
         }
         if (kind === 'sensor') {
@@ -4300,6 +4460,7 @@ function renderHomeDashboard(data, opts = {}) {
         renderHomeSceneEditor();
     }
     renderHomePaperAssign(data);
+    ensureUnifiStillRefresh();
 }
 
 async function saveHomeDeviceName(input) {
@@ -12281,6 +12442,7 @@ document.getElementById('home-paper-assign')?.addEventListener('change', async (
     }
     await homeSavePaperAssignment(ids);
 });
+setupUnifiLive();
 refreshUpdateBadge();
 if (settingsHashPane()) {
     openSettingsModal();
