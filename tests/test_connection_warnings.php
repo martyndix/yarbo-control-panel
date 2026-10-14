@@ -33,11 +33,17 @@ assert_true(str_contains($html, 'id="settings-vestaboard-health"'), 'vestaboard 
 assert_true(str_contains($js, 'function applyConnectionWarnings'), 'JS applies connection warnings');
 assert_true(str_contains($js, 'connection_warnings'), 'JS reads hub.connection_warnings');
 assert_true(str_contains($css, '.settings-health-warn'), 'settings health warn colour');
-assert_true(str_contains($change, '## [4.0.111]'), 'changelog 4.0.111');
+assert_true(str_contains($change, '## [4.0.112]'), 'changelog 4.0.112');
+assert_true(str_contains($js, 'action: \'save\''), 'powerwall test saves form first');
+assert_true(str_contains($js, 'function powerwallFormFields'), 'JS reads gateway fields from the form');
 
 assert_true(YarboHub::keepNonEmpty(['client_id' => ''], ['client_id'], 'abc-123') === 'abc-123', 'keepNonEmpty blank keeps');
 assert_true(YarboHub::keepNonEmpty(['client_id' => ' new '], ['client_id'], 'abc-123') === 'new', 'keepNonEmpty writes');
 assert_true(YarboHub::keepNonEmpty([], ['client_id'], 'abc-123') === 'abc-123', 'keepNonEmpty omitted keeps');
+assert_true(
+    YarboHub::keepNonEmpty(['gateway_host' => '', 'powerwall_gateway_host' => '192.168.1.50'], ['gateway_host', 'powerwall_gateway_host'], '') === '192.168.1.50',
+    'keepNonEmpty skips empty first alias'
+);
 assert_true(YarboHub::looksLikeCredentialError('HTTP 401: unauthorized'), '401 is credential');
 assert_true(YarboHub::looksLikeCredentialError('Tesla refused the refresh token'), 'refresh refused is credential');
 assert_true(YarboHub::looksLikeCredentialError('invalid_grant'), 'invalid_grant is credential');
@@ -64,6 +70,16 @@ assert_true($pw->save([
 
 assert_true($pw->save([
     'powerwall_transport' => 'local',
+    'gateway_host' => '',
+    'powerwall_gateway_host' => '10.0.0.8',
+    'gateway_password' => '',
+    'powerwall_gateway_password' => 'vwxyz',
+]), 'powerwall empty alias does not block filled field');
+assert_true($pw->load()['gateway_host'] === '10.0.0.8', 'host from second alias');
+assert_true($pw->load()['gateway_password'] === 'vwxyz', 'password from second alias');
+
+assert_true($pw->save([
+    'powerwall_transport' => 'local',
     'powerwall_gateway_host' => '',
     'powerwall_gateway_email' => '',
     'powerwall_gateway_password' => '',
@@ -74,9 +90,9 @@ assert_true($pw->save([
 ]), 'powerwall blank save');
 
 $kept = $pw->load();
-assert_true($kept['gateway_host'] === '192.168.1.50', 'gateway host kept');
+assert_true($kept['gateway_host'] === '10.0.0.8', 'gateway host kept after blank');
 assert_true($kept['gateway_email'] === 'owner@example.com', 'gateway email kept');
-assert_true($kept['gateway_password'] === 'abcde', 'gateway password kept');
+assert_true($kept['gateway_password'] === 'vwxyz', 'gateway password kept');
 assert_true($kept['client_id'] === 'tesla-client', 'client id kept');
 assert_true($kept['public_panel_url'] === 'https://panel.example.com', 'public url kept');
 assert_true($kept['energy_site_id'] === '12345', 'site id kept');
@@ -91,6 +107,15 @@ assert_true($pw->connectionWarning() === null, 'linked tesla cloud has no warnin
 
 assert_true($pw->save(['powerwall_client_id' => '']), 'blank client id after link');
 assert_true($pw->load()['client_id'] === 'tesla-client', 'linked client id still kept');
+
+$pwHostOnly = new YarboPowerwall($root . '-pw-host-only');
+mkdir($root . '-pw-host-only/data', 0775, true);
+assert_true($pwHostOnly->save([
+    'powerwall_transport' => 'local',
+    'powerwall_gateway_host' => '192.168.1.50',
+]), 'host without password');
+$hostOnlyWarn = (string) $pwHostOnly->connectionWarning();
+assert_true(str_contains($hostOnlyWarn, 'sticker password'), 'password-only warning: ' . $hostOnlyWarn);
 
 $pwMissing = new YarboPowerwall($root . '-pw-miss');
 mkdir($root . '-pw-miss/data', 0775, true);

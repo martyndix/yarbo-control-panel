@@ -375,6 +375,7 @@ let areasLayer = null;
 let loadedPlans = [];
 let lastStatusData = null;
 let lastHub = null;
+let powerwallPasswordSet = false;
 let pendingPlanDeleteId = null;
 let lastRobotFix = null;
 let mapZoneLayers = [];
@@ -7593,6 +7594,55 @@ function powerwallTransport() {
     return checked?.value === 'local' ? 'local' : 'cloud';
 }
 
+function settingsNamedValue(name) {
+    const form = els.settingsForm;
+    if (!form) return '';
+    try {
+        const fromForm = new FormData(form).get(name);
+        if (typeof fromForm === 'string' && fromForm !== '') return fromForm;
+    } catch {
+        /* ignore */
+    }
+    const el = form.elements?.namedItem(name);
+    if (!el || typeof el === 'string') return '';
+    if ('value' in el) return String(el.value || '');
+    return '';
+}
+
+function powerwallFormFields() {
+    const host = (els.settingsPowerwallHost?.value || settingsNamedValue('powerwall_gateway_host') || '').trim();
+    const email = (els.settingsPowerwallEmail?.value || settingsNamedValue('powerwall_gateway_email') || '').trim();
+    const password = els.settingsPowerwallPassword?.value || settingsNamedValue('powerwall_gateway_password') || '';
+    const secret = els.settingsPowerwallClientSecret?.value || settingsNamedValue('powerwall_client_secret') || '';
+    const refresh = els.settingsPowerwallRefresh?.value || settingsNamedValue('powerwall_refresh_token') || '';
+    return {
+        powerwall_transport: powerwallTransport(),
+        powerwall_region: els.settingsPowerwallRegion?.value || 'eu',
+        powerwall_public_url: (els.settingsPowerwallPublicUrl?.value || '').trim(),
+        powerwall_client_id: (els.settingsPowerwallClientId?.value || '').trim(),
+        powerwall_energy_site_id: (els.settingsPowerwallSite?.value || '').trim(),
+        powerwall_gateway_host: host,
+        powerwall_gateway_email: email,
+        powerwall_gateway_password: password,
+        powerwall_client_secret: secret,
+        powerwall_refresh_token: refresh,
+    };
+}
+
+function withPowerwallSecrets(payload, fields) {
+    const next = { ...payload };
+    if (fields.powerwall_gateway_password !== '') {
+        next.powerwall_gateway_password = fields.powerwall_gateway_password;
+    }
+    if (fields.powerwall_client_secret !== '') {
+        next.powerwall_client_secret = fields.powerwall_client_secret;
+    }
+    if (fields.powerwall_refresh_token !== '') {
+        next.powerwall_refresh_token = fields.powerwall_refresh_token;
+    }
+    return next;
+}
+
 function applyPowerwallTransport() {
     const local = powerwallTransport() === 'local';
     document.getElementById('settings-powerwall-local-fields')?.classList.toggle('hidden', !local);
@@ -9016,6 +9066,7 @@ async function loadSettings() {
         if (els.settingsPowerwallHost) els.settingsPowerwallHost.value = pw.gateway_host || '';
         if (els.settingsPowerwallEmail) els.settingsPowerwallEmail.value = pw.gateway_email || '';
         if (els.settingsPowerwallPassword) els.settingsPowerwallPassword.value = '';
+        powerwallPasswordSet = Boolean(pw.gateway_password_set);
         if (els.settingsPowerwallOauth) {
             if (pw.oauth_url) {
                 els.settingsPowerwallOauth.href = pw.oauth_url;
@@ -10695,6 +10746,20 @@ async function saveSettings(event) {
         return;
     }
 
+    const pwFields = powerwallFormFields();
+    if (Boolean(els.settingsModulePowerwall?.checked) && pwFields.powerwall_transport === 'local') {
+        if (pwFields.powerwall_gateway_host === '') {
+            showSettingsPane('powerwall');
+            setSettingsError('Gateway IP is required for Local Gateway.');
+            return;
+        }
+        if (pwFields.powerwall_gateway_password === '' && !powerwallPasswordSet) {
+            showSettingsPane('powerwall');
+            setSettingsError('Enter the Gateway sticker password. It is not shown after save.');
+            return;
+        }
+    }
+
     if (els.settingsSave) els.settingsSave.disabled = true;
     try {
         const payload = {
@@ -10726,13 +10791,13 @@ async function saveSettings(event) {
                 unifi: Boolean(els.settingsModuleUnifi?.checked),
             },
             vestaboard_live: els.settingsVestaboardLive?.value || 'yarbo',
-            powerwall_transport: powerwallTransport(),
-            powerwall_region: els.settingsPowerwallRegion?.value || 'eu',
-            powerwall_public_url: els.settingsPowerwallPublicUrl?.value.trim() || '',
-            powerwall_client_id: els.settingsPowerwallClientId?.value.trim() || '',
-            powerwall_energy_site_id: els.settingsPowerwallSite?.value.trim() || '',
-            powerwall_gateway_host: els.settingsPowerwallHost?.value.trim() || '',
-            powerwall_gateway_email: els.settingsPowerwallEmail?.value.trim() || '',
+            powerwall_transport: pwFields.powerwall_transport,
+            powerwall_region: pwFields.powerwall_region,
+            powerwall_public_url: pwFields.powerwall_public_url,
+            powerwall_client_id: pwFields.powerwall_client_id,
+            powerwall_energy_site_id: pwFields.powerwall_energy_site_id,
+            powerwall_gateway_host: pwFields.powerwall_gateway_host,
+            powerwall_gateway_email: pwFields.powerwall_gateway_email,
             lymow_host: els.settingsLymowHost?.value.trim() || '',
             lymow_display_name: els.settingsLymowName?.value.trim() || '',
             lymow_email: els.settingsLymowEmail?.value.trim() || '',
@@ -10758,12 +10823,7 @@ async function saveSettings(event) {
         if (vestaboardCloudToken !== '') {
             payload.vestaboard_cloud_token = vestaboardCloudToken;
         }
-        const pwSecret = els.settingsPowerwallClientSecret?.value ?? '';
-        if (pwSecret !== '') payload.powerwall_client_secret = pwSecret;
-        const pwRefresh = els.settingsPowerwallRefresh?.value ?? '';
-        if (pwRefresh !== '') payload.powerwall_refresh_token = pwRefresh;
-        const pwPass = els.settingsPowerwallPassword?.value ?? '';
-        if (pwPass !== '') payload.powerwall_gateway_password = pwPass;
+        Object.assign(payload, withPowerwallSecrets({}, pwFields));
         const lymowPass = els.settingsLymowPassword?.value ?? '';
         if (lymowPass !== '') payload.lymow_password = lymowPass;
         const unifiKey = els.settingsUnifiProtectKey?.value ?? '';
@@ -10803,6 +10863,14 @@ async function saveSettings(event) {
             }
         }
         applyConnectionWarnings(data);
+        powerwallPasswordSet = Boolean(data.powerwall?.gateway_password_set);
+        if (els.settingsPowerwallHost && data.powerwall?.gateway_host) {
+            els.settingsPowerwallHost.value = data.powerwall.gateway_host;
+        }
+        if (els.settingsPowerwallEmail && data.powerwall?.gateway_email != null) {
+            els.settingsPowerwallEmail.value = data.powerwall.gateway_email;
+        }
+        if (els.settingsPowerwallPassword) els.settingsPowerwallPassword.value = '';
         showToast('Settings saved', 'success');
         // Stay on Settings so Build firmware and other actions still work.
         fetchStatus().catch(() => {});
@@ -11961,7 +12029,38 @@ els.settingsPowerwallKeys?.addEventListener('click', async (e) => {
 els.settingsPowerwallTest?.addEventListener('click', async (e) => {
     const button = e.currentTarget;
     button.disabled = true;
+    const fields = powerwallFormFields();
+    if (fields.powerwall_transport === 'local') {
+        if (fields.powerwall_gateway_host === '') {
+            showToast('Enter the Gateway IP first.', 'error');
+            button.disabled = false;
+            return;
+        }
+        if (fields.powerwall_gateway_password === '' && !powerwallPasswordSet) {
+            showToast('Enter the Gateway sticker password first.', 'error');
+            button.disabled = false;
+            return;
+        }
+    }
     try {
+        const saveRes = await fetch('/api/powerwall.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(withPowerwallSecrets({
+                action: 'save',
+                powerwall_transport: fields.powerwall_transport,
+                powerwall_region: fields.powerwall_region,
+                powerwall_public_url: fields.powerwall_public_url,
+                powerwall_client_id: fields.powerwall_client_id,
+                powerwall_energy_site_id: fields.powerwall_energy_site_id,
+                powerwall_gateway_host: fields.powerwall_gateway_host,
+                powerwall_gateway_email: fields.powerwall_gateway_email,
+            }, fields)),
+        });
+        const saved = await parseJsonResponse(saveRes);
+        if (!saved.ok) throw new Error(saved.error || 'Could not save Powerwall settings');
+        powerwallPasswordSet = Boolean(saved.config?.gateway_password_set);
+        if (els.settingsPowerwallPassword) els.settingsPowerwallPassword.value = '';
         const res = await fetch('/api/powerwall.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -11969,8 +12068,22 @@ els.settingsPowerwallTest?.addEventListener('click', async (e) => {
         });
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Powerwall test failed');
+        if (els.settingsPowerwallResult) {
+            els.settingsPowerwallResult.textContent = data.message || 'Powerwall OK';
+            els.settingsPowerwallResult.className = 'settings-cloud-result success';
+            els.settingsPowerwallResult.classList.remove('hidden');
+        }
         showToast(data.message || 'Powerwall OK', 'success');
+        applySettingsHealthHint(
+            'settings-powerwall-health',
+            (data.config || saved.config)?.connection_warning,
+        );
     } catch (err) {
+        if (els.settingsPowerwallResult) {
+            els.settingsPowerwallResult.textContent = err.message || 'Powerwall test failed';
+            els.settingsPowerwallResult.className = 'settings-cloud-result';
+            els.settingsPowerwallResult.classList.remove('hidden');
+        }
         showToast(err.message || 'Powerwall test failed', 'error');
     } finally {
         button.disabled = false;

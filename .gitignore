@@ -57,6 +57,11 @@
 /data/matter-setup.json
 /data/matter-setup.log
 /data/tesla-fleet-private.pem
+/data/*.tmp
+/data/*.lock
+/data/.update-preserve/
+/data/.update-script-copy
+/data/papermono-devices.json
 /public/.well-known/appspecific/com.tesla.3p.public-key.pem
 /firmware/papermono/.pio/
 /firmware/papercolor/.pio/

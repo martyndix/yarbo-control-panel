@@ -7,7 +7,13 @@
 #
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Prefer the real clone path when this script was copied under data/ so git
+# cannot splice the running file mid-update.
+if [[ -n "${YARBO_PANEL_ROOT:-}" && -d "${YARBO_PANEL_ROOT}/scripts" ]]; then
+  ROOT="$YARBO_PANEL_ROOT"
+else
+  ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 cd "$ROOT"
 
 SERVICE_NAME="yarbo-panel"
@@ -66,6 +72,9 @@ release_update_lock() {
 
 cleanup_update_lock() {
   release_update_lock
+  if [[ "${YARBO_UPDATE_FROM_COPY:-}" == "1" ]]; then
+    rm -f "${ROOT}/data/.update-script-copy"
+  fi
 }
 
 fail() {
@@ -190,8 +199,56 @@ if ! $BEHIND; then
   exit 0
 fi
 
+# Run from a copy under data/ so git reset --hard cannot change this file
+# while bash is still reading it.
+if ! $CHECK_ONLY && [[ "${YARBO_UPDATE_FROM_COPY:-}" != "1" ]]; then
+  mkdir -p "${ROOT}/data"
+  UPDATE_COPY="${ROOT}/data/.update-script-copy"
+  cp "$0" "$UPDATE_COPY"
+  chmod +x "$UPDATE_COPY"
+  export YARBO_UPDATE_FROM_COPY=1
+  export YARBO_PANEL_ROOT="$ROOT"
+  exec bash "$UPDATE_COPY" "$@"
+fi
+
 acquire_update_lock
 trap cleanup_update_lock EXIT
+
+# git reset --hard removes tracked files that are not on origin/main. A login
+# JSON that was once `git add`ed on this Pi (even if .gitignore lists it now)
+# would vanish. Copy those files aside, then put them back after git.
+CREDENTIAL_FILES=(
+  powerwall-config.json
+  tesla-fleet-private.pem
+  lymow-config.json
+  lymow-cloud.json
+  unifi-config.json
+  vestaboard-config.json
+  hub-config.json
+  cloud-config.json
+  home.json
+  papermono-devices.json
+  paper-remote.json
+  robot-name.json
+  rain-config.json
+)
+PRESERVE_DIR="${ROOT}/data/.update-preserve"
+rm -rf "${PRESERVE_DIR}"
+mkdir -p "${PRESERVE_DIR}"
+PRESERVED=0
+for name in "${CREDENTIAL_FILES[@]}"; do
+  if [[ -f "${ROOT}/data/${name}" ]]; then
+    cp -a "${ROOT}/data/${name}" "${PRESERVE_DIR}/${name}"
+    PRESERVED=$((PRESERVED + 1))
+  fi
+done
+TESLA_PUB="${ROOT}/public/.well-known/appspecific/com.tesla.3p.public-key.pem"
+if [[ -f "$TESLA_PUB" ]]; then
+  mkdir -p "${PRESERVE_DIR}/tesla-well-known"
+  cp -a "$TESLA_PUB" "${PRESERVE_DIR}/tesla-well-known/"
+  PRESERVED=$((PRESERVED + 1))
+fi
+step "Preserved ${PRESERVED} local setting files"
 
 step "Updating to origin/${BRANCH}"
 write_status "pulling" "Pulling latest code from GitHub"
@@ -201,6 +258,22 @@ if ! run_owner "git merge --ff-only '${REMOTE_REF}'"; then
     fail "git update failed. Resolve local changes (e.g. git stash) and try again."
   fi
 fi
+
+mkdir -p "${ROOT}/data"
+if [[ -d "${PRESERVE_DIR}" ]]; then
+  for f in "${PRESERVE_DIR}"/*; do
+    [[ -f "$f" ]] || continue
+    cp -a "$f" "${ROOT}/data/$(basename "$f")"
+  done
+  if [[ -f "${PRESERVE_DIR}/tesla-well-known/com.tesla.3p.public-key.pem" ]]; then
+    mkdir -p "${ROOT}/public/.well-known/appspecific"
+    cp -a "${PRESERVE_DIR}/tesla-well-known/com.tesla.3p.public-key.pem" \
+      "${ROOT}/public/.well-known/appspecific/"
+  fi
+  rm -rf "${PRESERVE_DIR}"
+fi
+step "Restored local setting files"
+run_owner "git rm -f --cached --ignore-unmatch -- data/powerwall-config.json data/tesla-fleet-private.pem data/lymow-config.json data/lymow-cloud.json data/unifi-config.json data/vestaboard-config.json data/hub-config.json data/cloud-config.json data/home.json data/papermono-devices.json data/paper-remote.json data/robot-name.json data/rain-config.json public/.well-known/appspecific/com.tesla.3p.public-key.pem" >/dev/null 2>&1 || true
 
 NEW="$(git rev-parse HEAD)"
 NEW_SHORT="$(git rev-parse --short HEAD)"
@@ -335,6 +408,7 @@ if $SYSTEMD_UNIT; then
   step "Restarting systemd service ${SERVICE_NAME}"
   write_status "restarting" "Restarting panel service"
   release_update_lock
+  rm -f "${ROOT}/data/.update-script-copy"
   trap - EXIT
   if sudo -n systemctl restart "${SERVICE_NAME}" 2>/dev/null; then
     RESTARTED=true

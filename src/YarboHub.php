@@ -284,8 +284,9 @@ final class YarboHub
                 continue;
             }
             $value = trim((string) $input[$key]);
-
-            return $value !== '' ? $value : $current;
+            if ($value !== '') {
+                return $value;
+            }
         }
 
         return $current;

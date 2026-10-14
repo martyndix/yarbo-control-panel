@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.112] - 2026-10-14
+
+### Fixed
+- Panel updates copy Powerwall / Lymow / UniFi / Vestaboard logins aside before `git reset` and put them back after, so a file that was once tracked on the Pi is not deleted. The updater runs from a copy so replacing `update.sh` cannot skip that restore. Powerwall settings are written atomically so a restart cannot truncate the file.
+- Local Gateway IP and sticker password now save when you enter them. Settings → **Test Powerwall** writes those fields first (it used to test the previously stored login). The Test button stays visible on Local Gateway.
+
 ## [4.0.111] - 2026-10-14
 
 ### Fixed

@@ -26,7 +26,7 @@ If you already have a Fleet **refresh token**, paste it instead of OAuth.
 
 **Test Powerwall** should then show house draw / solar / battery.
 
-Leave Client ID, public URL, Gateway IP, and secrets blank on later Settings saves to keep the stored values. If Tesla or the Gateway login fails, a warning banner appears while the Powerwall module is on.
+Leave Client ID, public URL, Gateway IP, and secrets blank on later Settings saves to keep the stored values. The sticker password is never shown again after save — type it once more if the warning says it is missing. **Test Powerwall** writes the form first, then probes. Panel updates copy `data/powerwall-config.json` aside before git and put it back after, so a `git reset` cannot drop the Gateway login. If Tesla or the Gateway login fails, a warning banner appears while the Powerwall module is on.
 
 Cloudflare quick path: `cloudflared tunnel --url http://127.0.0.1:8080` while the panel runs, use the `https://*.trycloudflare.com` URL as the public panel URL (token is temporary unless you use a named tunnel).
 

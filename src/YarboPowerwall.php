@@ -115,28 +115,44 @@ final class YarboPowerwall
         if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
             return false;
         }
+        $lock = fopen($this->configPath() . '.lock', 'c');
+        if ($lock === false) {
+            return false;
+        }
+        if (!flock($lock, LOCK_EX)) {
+            fclose($lock);
+
+            return false;
+        }
+        try {
+            return $this->writeConfig($input);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    private function writeConfig(array $input): bool
+    {
         $current = $this->load();
-        $password = $current['gateway_password'];
-        if (array_key_exists('gateway_password', $input) || array_key_exists('powerwall_gateway_password', $input)) {
-            $next = (string) ($input['gateway_password'] ?? $input['powerwall_gateway_password'] ?? '');
-            if ($next !== '') {
-                $password = $next;
-            }
-        }
-        $secret = $current['client_secret'];
-        if (array_key_exists('client_secret', $input) || array_key_exists('powerwall_client_secret', $input)) {
-            $next = (string) ($input['client_secret'] ?? $input['powerwall_client_secret'] ?? '');
-            if ($next !== '') {
-                $secret = $next;
-            }
-        }
-        $refresh = $current['refresh_token'];
-        if (array_key_exists('refresh_token', $input) || array_key_exists('powerwall_refresh_token', $input)) {
-            $next = trim((string) ($input['refresh_token'] ?? $input['powerwall_refresh_token'] ?? ''));
-            if ($next !== '') {
-                $refresh = $next;
-            }
-        }
+        $password = YarboHub::keepNonEmpty(
+            $input,
+            ['gateway_password', 'powerwall_gateway_password'],
+            (string) $current['gateway_password']
+        );
+        $secret = YarboHub::keepNonEmpty(
+            $input,
+            ['client_secret', 'powerwall_client_secret'],
+            (string) $current['client_secret']
+        );
+        $refresh = YarboHub::keepNonEmpty(
+            $input,
+            ['refresh_token', 'powerwall_refresh_token'],
+            (string) $current['refresh_token']
+        );
         $publicUrl = YarboHub::keepNonEmpty(
             $input,
             ['public_panel_url', 'powerwall_public_url'],
@@ -192,8 +208,18 @@ final class YarboPowerwall
         if ($json === false) {
             return false;
         }
+        $path = $this->configPath();
+        $tmp = $path . '.tmp';
+        if (file_put_contents($tmp, $json . "\n", LOCK_EX) === false) {
+            return false;
+        }
+        if (!rename($tmp, $path)) {
+            @unlink($tmp);
 
-        return file_put_contents($this->configPath(), $json . "\n", LOCK_EX) !== false;
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -225,8 +251,14 @@ final class YarboPowerwall
     {
         $config = $this->load();
         if ($config['transport'] === self::TRANSPORT_LOCAL) {
-            if ($config['gateway_host'] === '' || $config['gateway_password'] === '') {
+            if ($config['gateway_host'] === '' && $config['gateway_password'] === '') {
                 return 'Powerwall: Gateway IP or sticker password is missing. Enter them in Settings.';
+            }
+            if ($config['gateway_host'] === '') {
+                return 'Powerwall: Gateway IP is missing. Enter it in Settings.';
+            }
+            if ($config['gateway_password'] === '') {
+                return 'Powerwall: Gateway sticker password is missing. Enter it in Settings (it is not shown after save).';
             }
         } else {
             $linked = $config['refresh_token'] !== '' || $config['access_token'] !== '';

@@ -1049,12 +1049,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="label">Energy site ID (optional)</span>
                                     <input type="text" id="settings-powerwall-site" name="powerwall_energy_site_id" autocomplete="off" placeholder="Filled automatically after sign-in">
                                 </label>
-                                <p id="settings-powerwall-health" class="hint hidden" role="status"></p>
-                                <p id="settings-powerwall-result" class="settings-cloud-result hidden" role="status"></p>
                                 <div class="settings-update-actions">
                                     <button type="button" class="btn btn-secondary" id="settings-powerwall-keys">Generate Tesla public key</button>
                                     <a class="btn btn-secondary" id="settings-powerwall-oauth" href="#">Sign in with Tesla</a>
-                                    <button type="button" class="btn btn-secondary" id="settings-powerwall-test">Test Powerwall</button>
                                 </div>
                             </div>
                             <div id="settings-powerwall-local-fields" class="hidden">
@@ -1069,8 +1066,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 </label>
                                 <label class="settings-field">
                                     <span class="label">Customer password</span>
-                                    <input type="password" id="settings-powerwall-password" name="powerwall_gateway_password" autocomplete="off" placeholder="Leave blank to keep the saved password">
+                                    <input type="password" id="settings-powerwall-password" name="powerwall_gateway_password" autocomplete="new-password" placeholder="Leave blank to keep the saved password">
                                 </label>
+                            </div>
+                            <p id="settings-powerwall-health" class="hint hidden" role="status"></p>
+                            <p id="settings-powerwall-result" class="settings-cloud-result hidden" role="status"></p>
+                            <div class="settings-update-actions">
+                                <button type="button" class="btn btn-secondary" id="settings-powerwall-test">Test Powerwall</button>
                             </div>
                         </section>
 
@@ -1845,7 +1847,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span id="settings-update-callout-text"></span>
                             </div>
                             <h3 class="settings-subtitle">Panel updates</h3>
-                            <p class="hint">Pull the latest code from GitHub. <code>config.php</code> and <code>data/</code> are preserved.</p>
+                            <p class="hint">Pull the latest code from GitHub. <code>config.php</code> and logins in <code>data/</code> (Powerwall, Lymow, UniFi, Vestaboard) are copied aside and restored after the pull.</p>
                             <p id="settings-update-status" class="hint">Checking for updates…</p>
                             <div id="settings-update-notes" class="settings-update-notes hidden" aria-live="polite"></div>
                             <p id="settings-update-result" class="settings-cloud-result hidden" role="status"></p>
