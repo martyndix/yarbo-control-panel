@@ -24,6 +24,7 @@ const els = {
     rainSensor: document.getElementById('rain-sensor'),
     updatedAt: document.getElementById('updated-at'),
     errorBanner: document.getElementById('error-banner'),
+    credentialBanner: document.getElementById('credential-banner'),
     toast: document.getElementById('toast'),
     cameraGrid: document.getElementById('camera-grid'),
     cameraNote: document.getElementById('camera-note'),
@@ -2292,6 +2293,42 @@ function setError(message) {
     }
 }
 
+function applyConnectionWarnings(data) {
+    const hasHub = data?.hub != null;
+    const rows = Array.isArray(data?.hub?.connection_warnings)
+        ? data.hub.connection_warnings
+        : [];
+    const messages = rows
+        .map((row) => String(row?.message || '').trim())
+        .filter(Boolean);
+    if (els.credentialBanner) {
+        if (messages.length) {
+            els.credentialBanner.textContent = messages.join('\n');
+            els.credentialBanner.classList.remove('hidden');
+        } else if (hasHub) {
+            els.credentialBanner.textContent = '';
+            els.credentialBanner.classList.add('hidden');
+        }
+    }
+    const byId = {};
+    rows.forEach((row) => {
+        if (row?.id) byId[row.id] = String(row.message || '').trim();
+    });
+    applySettingsHealthHint('settings-powerwall-health', byId.powerwall || data?.powerwall?.connection_warning);
+    applySettingsHealthHint('settings-lymow-health', byId.lymow || data?.lymow?.connection_warning);
+    applySettingsHealthHint('settings-unifi-health', byId.unifi || data?.unifi?.connection_warning);
+    applySettingsHealthHint('settings-vestaboard-health', byId.vestaboard || data?.vestaboard?.connection_warning);
+}
+
+function applySettingsHealthHint(id, message) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const text = String(message || '').trim();
+    el.textContent = text;
+    el.classList.toggle('hidden', text === '');
+    el.classList.toggle('settings-health-warn', text !== '');
+}
+
 function noteCommandQuiet(ms = COMMAND_QUIET_MS) {
     commandQuietUntil = Date.now() + ms;
 }
@@ -2405,7 +2442,11 @@ function applyModuleSwitcher(hub) {
 
 function applyHubFromStatus(data) {
     const hub = data?.hub;
-    if (!hub) return;
+    if (!hub) {
+        applyConnectionWarnings(data);
+        return;
+    }
+    applyConnectionWarnings(data);
     const ids = applyModuleSwitcher(hub);
     updatePowerwallDashboard(data.powerwall);
     updateLymowDashboard(data.lymow);
@@ -9002,6 +9043,7 @@ async function loadSettings() {
                 loadCloudStatusHint();
             }
         }
+        applyConnectionWarnings(data);
         if (!data.writable) {
             setSettingsError('config.php is not writable on the server.');
         }
@@ -10760,6 +10802,7 @@ async function saveSettings(event) {
                 applyVestaboardLiveChoices(vestaboardExtraModules(data.hub), data.hub.vestaboard_live || '');
             }
         }
+        applyConnectionWarnings(data);
         showToast('Settings saved', 'success');
         // Stay on Settings so Build firmware and other actions still work.
         fetchStatus().catch(() => {});

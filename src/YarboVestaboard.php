@@ -322,7 +322,30 @@ final class YarboVestaboard
             'quiet_hours_active' => $this->isQuietHours(),
             'quiet_timezone' => $this->resolveQuietTimezone($config),
             'quiet_clock_now' => $this->quietNowHm($config),
+            'connection_warning' => $this->connectionWarning(),
         ] + $this->rotatePublicFields($config);
+    }
+
+    public function connectionWarning(): ?string
+    {
+        $config = $this->load();
+        if (!$config['enabled']) {
+            return null;
+        }
+        $missing = $this->missingCredentialError($config);
+        if ($missing !== null) {
+            return 'Vestaboard: ' . $missing;
+        }
+        $error = $this->publicLastError((string) $config['last_error']);
+        if ($error !== null && YarboHub::looksLikeCredentialError($error)) {
+            return 'Vestaboard: ' . $error;
+        }
+        $lastSent = is_string($config['last_sent_at'] ?? null) ? strtotime($config['last_sent_at']) : false;
+        if ($error !== null && ($lastSent === false || (time() - $lastSent) > 900)) {
+            return 'Vestaboard: ' . $error;
+        }
+
+        return null;
     }
 
     /**

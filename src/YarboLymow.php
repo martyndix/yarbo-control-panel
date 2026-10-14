@@ -99,9 +99,7 @@ final class YarboLymow
         $host = $hostInput !== null
             ? self::normalizeHost((string) $hostInput)
             : $current['host'];
-        $email = array_key_exists('lymow_email', $input) || array_key_exists('email', $input)
-            ? trim((string) ($input['lymow_email'] ?? $input['email'] ?? ''))
-            : $current['email'];
+        $email = YarboHub::keepNonEmpty($input, ['lymow_email', 'email'], (string) $current['email']);
         $password = $current['password'];
         if (array_key_exists('lymow_password', $input) || array_key_exists('password', $input)) {
             $nextPassword = (string) ($input['lymow_password'] ?? $input['password'] ?? '');
@@ -161,7 +159,29 @@ final class YarboLymow
             'display_name' => $config['display_name'],
             'device_name' => $this->apiDeviceName($cloud),
             'page_name' => $this->pageName($config, $cloud),
+            'connection_warning' => $this->connectionWarning(),
         ];
+    }
+
+    public function connectionWarning(): ?string
+    {
+        $config = $this->load();
+        if ($config['email'] === '' || $config['password'] === '') {
+            return 'Lymow: not signed in. Open Settings and sign in.';
+        }
+        if (!$this->cloudSignedIn()) {
+            return 'Lymow: sign-in expired. Open Settings and sign in again.';
+        }
+        $error = trim((string) $config['last_error']);
+        $cloud = $this->readCloudState();
+        $cloudError = trim((string) ($cloud['error'] ?? ''));
+        foreach ([$error, $cloudError] as $row) {
+            if ($row !== '' && YarboHub::looksLikeCredentialError($row)) {
+                return 'Lymow: ' . $row;
+            }
+        }
+
+        return null;
     }
 
     /**

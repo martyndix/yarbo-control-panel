@@ -174,9 +174,13 @@ final class YarboUnifi
             return false;
         }
         $current = $this->load();
-        $host = array_key_exists('unifi_host', $input) || array_key_exists('host', $input)
-            ? self::normalizeHost((string) ($input['unifi_host'] ?? $input['host'] ?? ''))
-            : $current['host'];
+        $host = $current['host'];
+        if (array_key_exists('unifi_host', $input) || array_key_exists('host', $input)) {
+            $nextHost = self::normalizeHost((string) ($input['unifi_host'] ?? $input['host'] ?? ''));
+            if ($nextHost !== '') {
+                $host = $nextHost;
+            }
+        }
         $verify = array_key_exists('unifi_verify_tls', $input) || array_key_exists('verify_tls', $input)
             ? YarboHub::asBool($input['unifi_verify_tls'] ?? $input['verify_tls'] ?? false)
             : $current['verify_tls'];
@@ -187,9 +191,11 @@ final class YarboUnifi
                 $protectKey = $next;
             }
         }
-        $username = array_key_exists('unifi_protect_username', $input) || array_key_exists('protect_username', $input)
-            ? trim((string) ($input['unifi_protect_username'] ?? $input['protect_username'] ?? ''))
-            : $current['protect_username'];
+        $username = YarboHub::keepNonEmpty(
+            $input,
+            ['unifi_protect_username', 'protect_username'],
+            (string) $current['protect_username']
+        );
         $password = $current['protect_password'];
         if (array_key_exists('unifi_protect_password', $input) || array_key_exists('protect_password', $input)) {
             $next = (string) ($input['unifi_protect_password'] ?? $input['protect_password'] ?? '');
@@ -298,7 +304,25 @@ final class YarboUnifi
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
             'last_check' => $config['last_check'],
             'devices' => $this->catalogFromInventory($inventory, $config['show_on_home']),
+            'connection_warning' => $this->connectionWarning(),
         ];
+    }
+
+    public function connectionWarning(): ?string
+    {
+        $config = $this->load();
+        if ($config['host'] === '') {
+            return 'UniFi: console host is missing. Enter it in Settings.';
+        }
+        if ($config['protect_api_key'] === '' && $config['access_token'] === '') {
+            return 'UniFi: add a Protect API key or an Access token in Settings.';
+        }
+        $error = trim((string) $config['last_error']);
+        if ($error !== '' && (!$config['last_ok'] || YarboHub::looksLikeCredentialError($error))) {
+            return 'UniFi: ' . $error;
+        }
+
+        return null;
     }
 
     /**

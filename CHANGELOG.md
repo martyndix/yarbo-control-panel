@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.111] - 2026-10-14
+
+### Fixed
+- Settings → Save no longer clears Tesla / Gateway fields that were left blank to keep the stored value. That wipe left Powerwall and the Vestaboard Note on stale numbers and **sending…**.
+
+### Changed
+- A warning banner lists enabled modules whose login is missing or rejected (Powerwall, Lymow, UniFi, Vestaboard). The same hint sits on each Settings pane. Stale Powerwall readings are no longer printed on the Note as live.
+
 ## [4.0.110] - 2026-10-11
 
 ### Changed

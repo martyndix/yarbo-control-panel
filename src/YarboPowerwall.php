@@ -137,33 +137,44 @@ final class YarboPowerwall
                 $refresh = $next;
             }
         }
+        $publicUrl = YarboHub::keepNonEmpty(
+            $input,
+            ['public_panel_url', 'powerwall_public_url'],
+            (string) $current['public_panel_url']
+        );
         $next = [
             'transport' => (isset($input['transport']) || isset($input['powerwall_transport']))
                 ? ((string) ($input['transport'] ?? $input['powerwall_transport']) === self::TRANSPORT_LOCAL
                     ? self::TRANSPORT_LOCAL
                     : self::TRANSPORT_CLOUD)
                 : $current['transport'],
-            'gateway_host' => array_key_exists('gateway_host', $input) || array_key_exists('powerwall_gateway_host', $input)
-                ? trim((string) ($input['gateway_host'] ?? $input['powerwall_gateway_host'] ?? ''))
-                : $current['gateway_host'],
-            'gateway_email' => array_key_exists('gateway_email', $input) || array_key_exists('powerwall_gateway_email', $input)
-                ? trim((string) ($input['gateway_email'] ?? $input['powerwall_gateway_email'] ?? ''))
-                : $current['gateway_email'],
+            'gateway_host' => YarboHub::keepNonEmpty(
+                $input,
+                ['gateway_host', 'powerwall_gateway_host'],
+                (string) $current['gateway_host']
+            ),
+            'gateway_email' => YarboHub::keepNonEmpty(
+                $input,
+                ['gateway_email', 'powerwall_gateway_email'],
+                (string) $current['gateway_email']
+            ),
             'gateway_password' => $password,
             'region' => $this->normalizeRegion((string) ($input['region'] ?? $input['powerwall_region'] ?? $current['region'])),
-            'client_id' => array_key_exists('client_id', $input) || array_key_exists('powerwall_client_id', $input)
-                ? trim((string) ($input['client_id'] ?? $input['powerwall_client_id'] ?? ''))
-                : $current['client_id'],
+            'client_id' => YarboHub::keepNonEmpty(
+                $input,
+                ['client_id', 'powerwall_client_id'],
+                (string) $current['client_id']
+            ),
             'client_secret' => $secret,
             'refresh_token' => $refresh,
             'access_token' => (string) ($input['access_token'] ?? $current['access_token']),
             'access_expires_at' => (int) ($input['access_expires_at'] ?? $current['access_expires_at']),
-            'energy_site_id' => array_key_exists('energy_site_id', $input) || array_key_exists('powerwall_energy_site_id', $input)
-                ? trim((string) ($input['energy_site_id'] ?? $input['powerwall_energy_site_id'] ?? ''))
-                : $current['energy_site_id'],
-            'public_panel_url' => array_key_exists('public_panel_url', $input) || array_key_exists('powerwall_public_url', $input)
-                ? rtrim(trim((string) ($input['public_panel_url'] ?? $input['powerwall_public_url'] ?? '')), '/')
-                : $current['public_panel_url'],
+            'energy_site_id' => YarboHub::keepNonEmpty(
+                $input,
+                ['energy_site_id', 'powerwall_energy_site_id'],
+                (string) $current['energy_site_id']
+            ),
+            'public_panel_url' => rtrim($publicUrl, '/'),
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
             'vb_batt' => array_key_exists('vb_batt', $input) ? $this->nullableInt($input['vb_batt']) : $current['vb_batt'],
             'vb_batt_at' => array_key_exists('vb_batt_at', $input) ? $this->nullableTime($input['vb_batt_at']) : $current['vb_batt_at'],
@@ -206,7 +217,35 @@ final class YarboPowerwall
             'public_key_ready' => is_file($this->publicKeyPath()),
             'oauth_url' => $this->authorizeUrl(),
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
+            'connection_warning' => $this->connectionWarning(),
         ];
+    }
+
+    public function connectionWarning(): ?string
+    {
+        $config = $this->load();
+        if ($config['transport'] === self::TRANSPORT_LOCAL) {
+            if ($config['gateway_host'] === '' || $config['gateway_password'] === '') {
+                return 'Powerwall: Gateway IP or sticker password is missing. Enter them in Settings.';
+            }
+        } else {
+            $linked = $config['refresh_token'] !== '' || $config['access_token'] !== '';
+            if (!$linked) {
+                return 'Powerwall: Tesla cloud is not linked. Sign in with Tesla, or use Local Gateway and the sticker password.';
+            }
+            if ($config['client_id'] === '' && $config['refresh_token'] !== '') {
+                return 'Powerwall: Tesla Client ID is missing, so the refresh token cannot be renewed. Paste it from developer.tesla.com.';
+            }
+        }
+        $error = trim((string) $config['last_error']);
+        if ($error === '') {
+            return null;
+        }
+        if (YarboHub::looksLikeCredentialError($error) || !$this->hasFreshReading()) {
+            return 'Powerwall: ' . $error;
+        }
+
+        return null;
     }
 
     /**
@@ -218,25 +257,35 @@ final class YarboPowerwall
     {
         $fresh = $this->readCache(true);
         if ($fresh !== null) {
-            return $fresh;
+            return $this->withConnectionHealth($fresh);
         }
         if (!$allowRefresh) {
             $stale = $this->readCache(false);
             if ($stale !== null) {
-                return $stale;
+                if (!$this->readingStillUsable($stale)) {
+                    $stale['ok'] = false;
+                    $stale['online'] = false;
+                    $stale['stale'] = true;
+                    $error = (string) ($this->load()['last_error'] ?? '');
+                    if ($error !== '') {
+                        $stale['error'] = $error;
+                    }
+                }
+
+                return $this->withConnectionHealth($stale);
             }
             $config = $this->load();
             $error = (string) ($config['last_error'] ?? '');
 
-            return [
+            return $this->withConnectionHealth([
                 'ok' => false,
                 'online' => false,
                 'source' => $config['transport'] ?? 'cloud',
                 'error' => $error !== '' ? $error : 'No cached Powerwall reading',
-            ];
+            ]);
         }
 
-        return $this->refresh();
+        return $this->withConnectionHealth($this->refresh());
     }
 
     /**
@@ -348,8 +397,7 @@ final class YarboPowerwall
                 'vb_load_at' => $touchLoad ? gmdate('c') : $config['vb_load_at'],
             ]);
         }
-        $hasNumbers = $battShow !== null || $row1Show !== null || $loadShow !== null;
-        $showLive = $online || $hasNumbers;
+        $showLive = $online;
         $verb = $showLive ? 'POWERWALL' : 'OFFLINE';
         $lines = [
             $showLive
@@ -359,7 +407,7 @@ final class YarboPowerwall
             $this->pair('DRAW', $loadShow !== null ? $this->formatW((float) $loadShow) : '--'),
         ];
         $chipBatt = $showLive
-            ? ($batt ?? (is_numeric($battShow) ? (int) $battShow : null))
+            ? (is_numeric($battShow) ? (int) $battShow : $batt)
             : null;
         $codes = $this->encodeLines($lines, $chipBatt, $showLive && $chipBatt !== null);
 
@@ -737,6 +785,28 @@ final class YarboPowerwall
         }
 
         return array_key_exists('battery_percent', $row) || array_key_exists('load_w', $row);
+    }
+
+    private function hasFreshReading(): bool
+    {
+        $row = $this->readCache(false);
+
+        return is_array($row) && $this->readingStillUsable($row);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function withConnectionHealth(array $payload): array
+    {
+        $warning = $this->connectionWarning();
+        $payload['connection_warning'] = $warning;
+        if ($warning !== null && empty($payload['error'])) {
+            $payload['error'] = $warning;
+        }
+
+        return $payload;
     }
 
     private function nullableInt(mixed $value): ?int

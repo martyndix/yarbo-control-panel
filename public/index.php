@@ -32,8 +32,14 @@ $jsMtime = (int) (@filemtime(__DIR__ . '/assets/app.js') ?: 0);
 $cssMtime = (int) (@filemtime(__DIR__ . '/assets/style.css') ?: 0);
 $assetVersion = $panelVersion . '.' . (string) (max($jsMtime, $cssMtime) ?: time());
 require_once dirname(__DIR__) . '/src/YarboHub.php';
-$panelTitle = \Yarbo\YarboHub::panelTitle((new \Yarbo\YarboHub(dirname(__DIR__)))->houseName());
+$hub = new \Yarbo\YarboHub(dirname(__DIR__));
+$panelTitle = \Yarbo\YarboHub::panelTitle($hub->houseName());
 $panelTitleSafe = htmlspecialchars($panelTitle, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+$credentialBannerText = implode("\n", array_values(array_filter(array_map(
+    static fn(array $row): string => trim((string) ($row['message'] ?? '')),
+    $hub->connectionWarnings()
+))));
+$credentialBannerSafe = htmlspecialchars($credentialBannerText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 ?>
 <!DOCTYPE html>
 <html lang="en" data-panel-version="<?= htmlspecialchars($panelVersion, ENT_QUOTES, 'UTF-8') ?>">
@@ -115,6 +121,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         </header>
 
         <section id="error-banner" class="banner error hidden" role="alert"></section>
+        <section
+            id="credential-banner"
+            class="banner warning<?= $credentialBannerText === '' ? ' hidden' : '' ?>"
+            role="status"
+        ><?= $credentialBannerSafe ?></section>
 
         <div id="panel-sections" class="panel-sections">
 
@@ -976,6 +987,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="ap-east-1">Asia (ap-east-1)</option>
                                 </select>
                             </label>
+                            <p id="settings-lymow-health" class="hint hidden" role="status"></p>
                             <p id="settings-lymow-result" class="settings-cloud-result hidden" role="status"></p>
                             <div class="settings-update-actions">
                                 <button type="button" class="btn btn-secondary" id="settings-lymow-login">Sign in / Test Lymow</button>
@@ -1037,6 +1049,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="label">Energy site ID (optional)</span>
                                     <input type="text" id="settings-powerwall-site" name="powerwall_energy_site_id" autocomplete="off" placeholder="Filled automatically after sign-in">
                                 </label>
+                                <p id="settings-powerwall-health" class="hint hidden" role="status"></p>
                                 <p id="settings-powerwall-result" class="settings-cloud-result hidden" role="status"></p>
                                 <div class="settings-update-actions">
                                     <button type="button" class="btn btn-secondary" id="settings-powerwall-keys">Generate Tesla public key</button>
@@ -1100,6 +1113,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <input type="checkbox" id="settings-unifi-access-standalone" name="unifi_access_standalone">
                                 <span>Access is standalone (port 12445) instead of UniFi OS proxy</span>
                             </label>
+                            <p id="settings-unifi-health" class="hint hidden" role="status"></p>
                             <p id="settings-unifi-result" class="settings-cloud-result hidden" role="status"></p>
                             <div class="settings-update-actions">
                                 <button type="button" class="btn btn-secondary" id="settings-unifi-test">Test UniFi connection</button>
@@ -1191,6 +1205,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--white" data-quiet-code="69" title="White"></button>
                                     </div>
                                 </div>
+                                <p id="settings-vestaboard-health" class="hint hidden" role="status"></p>
                                 <p id="settings-vestaboard-result" class="settings-cloud-result hidden" role="status"></p>
                                 <div class="papermono-actions">
                                     <button type="button" class="btn btn-secondary" id="settings-vestaboard-test">Test connection</button>

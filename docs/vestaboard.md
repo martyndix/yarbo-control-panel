@@ -103,6 +103,8 @@ If the flaps no longer match the last layout this panel wrote, live status pause
 - During the day, for **one hour** (a later different app message resets that hour).
 - During **Quiet hours**, until that window **ends** (not one hour). The same applies if a custom message is already on the board when quiet hours start — the overnight quiet template is not written over it.
 
+If the Local key or Cloud token is missing or rejected, a warning banner appears while Vestaboard is enabled.
+
 The dashboard shows **Resume previous status** while paused. That (or Settings → **Send now**) writes the panel’s current layout immediately. After the timer, the watcher resumes on its own.
 
 The live page is **Yarbo**, **Powerwall**, **Lymow**, or **ALL** (three battery rows). Change it from Settings → **Modules**, the pills on the **Vestaboard Note** card, or PaperMono’s **NOTE** page. Powerwall, Lymow, and ALL buttons only appear when those dashboards are enabled. App-hold and Quiet hours still apply. Lymow uses the same layout as Yarbo: **LYMOW** plus the activity verb (**MOWING**, **CHARGING**, **IDLE**, **DOCKING**, **PAUSED**, …), **BATTERY** plus **%** or **FULL** (colour chip on the last column), and a context line (**WORK DONE n%**, **ON DOCK**, **CHARGED**, **READY**, **HEADING HOME**, **PLAN HOLD**).

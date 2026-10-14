@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../src/YarboHub.php';
+require __DIR__ . '/../vendor/autoload.php';
 
 $root = sys_get_temp_dir() . '/yarbo-hub-mod-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);

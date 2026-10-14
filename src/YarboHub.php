@@ -227,7 +227,92 @@ final class YarboHub
             'house_name' => $config['house_name'],
             'panel_title' => self::panelTitle($config['house_name']),
             'vestaboard_live_choices' => self::vestaboardLiveChoices($config['modules']),
+            'connection_warnings' => $this->connectionWarnings(),
         ];
+    }
+
+    /**
+     * Warnings for enabled modules whose saved login no longer works.
+     *
+     * @return list<array{id: string, label: string, message: string}>
+     */
+    public function connectionWarnings(): array
+    {
+        require_once __DIR__ . '/YarboPowerwall.php';
+        require_once __DIR__ . '/YarboLymow.php';
+        require_once __DIR__ . '/YarboUnifi.php';
+        require_once __DIR__ . '/YarboVestaboard.php';
+        $config = $this->load();
+        $out = [];
+        if (!empty($config['modules'][self::MODULE_POWERWALL])) {
+            $message = (new YarboPowerwall($this->projectRoot))->connectionWarning();
+            if ($message !== null) {
+                $out[] = ['id' => self::MODULE_POWERWALL, 'label' => 'Powerwall', 'message' => $message];
+            }
+        }
+        if (!empty($config['modules'][self::MODULE_LYMOW])) {
+            $message = (new YarboLymow($this->projectRoot))->connectionWarning();
+            if ($message !== null) {
+                $out[] = ['id' => self::MODULE_LYMOW, 'label' => 'Lymow', 'message' => $message];
+            }
+        }
+        if (!empty($config['modules'][self::MODULE_UNIFI])) {
+            $message = (new YarboUnifi($this->projectRoot))->connectionWarning();
+            if ($message !== null) {
+                $out[] = ['id' => self::MODULE_UNIFI, 'label' => 'UniFi', 'message' => $message];
+            }
+        }
+        $board = new YarboVestaboard($this->projectRoot);
+        $message = $board->connectionWarning();
+        if ($message !== null) {
+            $out[] = ['id' => 'vestaboard', 'label' => 'Vestaboard', 'message' => $message];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Keep the stored value when Settings sends a blank field (same as passwords).
+     *
+     * @param array<string, mixed> $input
+     * @param list<string> $keys
+     */
+    public static function keepNonEmpty(array $input, array $keys, string $current): string
+    {
+        foreach ($keys as $key) {
+            if (!array_key_exists($key, $input)) {
+                continue;
+            }
+            $value = trim((string) $input[$key]);
+
+            return $value !== '' ? $value : $current;
+        }
+
+        return $current;
+    }
+
+    public static function looksLikeCredentialError(string $error): bool
+    {
+        $lower = strtolower($error);
+
+        return str_contains($lower, '401')
+            || str_contains($lower, '403')
+            || str_contains($lower, 'unauthorized')
+            || str_contains($lower, 'forbidden')
+            || str_contains($lower, 'refused the refresh')
+            || str_contains($lower, 'invalid_grant')
+            || str_contains($lower, 'invalid_client')
+            || str_contains($lower, 'not linked')
+            || str_contains($lower, 'sign in')
+            || str_contains($lower, 'credential')
+            || str_contains($lower, 'password')
+            || str_contains($lower, 'api key')
+            || str_contains($lower, 'api token')
+            || str_contains($lower, 'client id')
+            || str_contains($lower, 'no-man')
+            || str_contains($lower, 'login did not')
+            || str_contains($lower, 'expired')
+            || str_contains($lower, 'rejected');
     }
 
     public static function asBool(mixed $value, bool $default = false): bool

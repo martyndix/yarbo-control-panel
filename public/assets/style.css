@@ -638,6 +638,10 @@ body.home-automations-open #panel-sections {
     display: none;
 }
 
+.settings-health-warn {
+    color: var(--warning-text);
+}
+
 .settings-cloud-result {
     margin: 0;
     padding: 0.65rem 0.75rem;
@@ -1100,6 +1104,7 @@ body.modal-open {
     background: var(--warning-bg);
     color: var(--warning-text);
     border: 1px solid #8a6d3b;
+    white-space: pre-line;
 }
 
 .toast {
