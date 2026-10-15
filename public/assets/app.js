@@ -4168,6 +4168,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const kindChip = kindName ? `<span class="home-device-kind">${escapeHtml(kindName)}</span>` : '';
     const heater = String(d.kind || '') === 'heater';
     const vacuum = String(d.kind || '') === 'vacuum';
+    const camera = String(d.kind || '') === 'camera';
     const canToggle = !hidden && homeDeviceCanToggle(d) && !heater && !vacuum;
     const toggleClass = canToggle ? ' home-device--toggle' : '';
     const manage = hidden
@@ -4184,7 +4185,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
     const actions = hidden ? '' : homeDeviceActionsHtml(d, bright, color);
-    return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${toggleClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
+    return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${toggleClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.114] - 2026-10-15
+
+### Fixed
+- Home manage: camera stills sit under the room dropdown instead of covering it, so you can assign a camera to a room.
+
 ## [4.0.113] - 2026-10-15
 
 ### Fixed
