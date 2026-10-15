@@ -2285,7 +2285,21 @@ function formatConnectionError(message) {
     return message;
 }
 
+function yarboModuleEnabled() {
+    if (lastHub?.modules && typeof lastHub.modules === 'object') {
+        return Boolean(lastHub.modules.yarbo);
+    }
+    const ids = Array.isArray(lastHub?.enabled) ? lastHub.enabled.map((m) => m.id) : [];
+    if (ids.length) {
+        return ids.includes('yarbo');
+    }
+    return document.documentElement.getAttribute('data-yarbo-module') !== '0';
+}
+
 function setError(message) {
+    if (message && !yarboModuleEnabled()) {
+        message = null;
+    }
     if (message) {
         els.errorBanner.textContent = formatConnectionError(message);
         els.errorBanner.classList.remove('hidden');
@@ -2438,6 +2452,9 @@ function applyModuleSwitcher(hub) {
     let active = localStorage.getItem(ACTIVE_MODULE_KEY) || hub.active_module || ids[0] || 'yarbo';
     if (!ids.includes(active)) active = ids[0] || 'yarbo';
     setActiveModule(active, false);
+    if (!ids.includes('yarbo')) {
+        setError(null);
+    }
     return ids;
 }
 

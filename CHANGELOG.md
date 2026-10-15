@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.113] - 2026-10-15
+
+### Fixed
+- The red Yarbo connection timeout banner no longer appears when the Yarbo module is off. Home, Powerwall, Lymow, and UniFi keep working without a broker.
+
 ## [4.0.112] - 2026-10-14
 
 ### Fixed
