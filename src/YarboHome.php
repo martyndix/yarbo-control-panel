@@ -309,7 +309,9 @@ final class YarboHome
                 'product' => (string) ($device['product'] ?? ''),
                 'source' => $isUnifi ? YarboUnifi::SOURCE : (string) ($device['source'] ?? ''),
                 'bridge' => (bool) ($device['bridge'] ?? false),
-                'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
+                'on' => ((string) ($device['kind'] ?? '')) === 'camera'
+                    ? false
+                    : YarboMatterFabric::attrBool($device['on'] ?? false),
                 'brightness' => $isLight && !$isUnifi && isset($device['brightness']) ? (int) $device['brightness'] : null,
                 'dimmable' => $isLight && !$isUnifi && (bool) ($device['dimmable'] ?? false),
                 'colorable' => $colorable,
@@ -1413,6 +1415,17 @@ final class YarboHome
         }
 
         return ['ok' => true];
+    }
+
+    /**
+     * Cameras can be online without being “on”. Room headers stay green only for
+     * devices that actually switch.
+     *
+     * @param array<string, mixed> $device
+     */
+    public static function countsTowardRoomOn(array $device): bool
+    {
+        return strtolower((string) ($device['kind'] ?? '')) !== 'camera';
     }
 
     /**
@@ -3564,7 +3577,7 @@ final class YarboHome
         $brightSum = 0;
         $brightN = 0;
         foreach ($devices as $device) {
-            if (!empty($device['on'])) {
+            if (self::countsTowardRoomOn($device) && !empty($device['on'])) {
                 $on = true;
             }
             if (!empty($device['dimmable'])) {

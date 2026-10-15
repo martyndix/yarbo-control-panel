@@ -3542,7 +3542,8 @@ function homeDeviceRecord(id) {
 function patchHomeDeviceVisual(id, on, extras = {}) {
     const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
     if (!card) return;
-    card.classList.toggle('is-on', Boolean(on));
+    const lit = Boolean(on) && !card.classList.contains('home-device--camera');
+    card.classList.toggle('is-on', lit);
     const btn = card.querySelector('[data-home-toggle]');
     if (btn) btn.textContent = on ? 'Off' : 'On';
     card.querySelectorAll('[data-home-power]').forEach((el) => {
@@ -4169,8 +4170,9 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const heater = String(d.kind || '') === 'heater';
     const vacuum = String(d.kind || '') === 'vacuum';
     const camera = String(d.kind || '') === 'camera';
-    const canToggle = !hidden && homeDeviceCanToggle(d) && !heater && !vacuum;
+    const canToggle = !hidden && homeDeviceCanToggle(d) && !heater && !vacuum && !camera;
     const toggleClass = canToggle ? ' home-device--toggle' : '';
+    const lit = on && !camera;
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
@@ -4185,7 +4187,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
     const actions = hidden ? '' : homeDeviceActionsHtml(d, bright, color);
-    return `<article class="home-device${on ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${toggleClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
+    return `<article class="home-device${lit ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${toggleClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>

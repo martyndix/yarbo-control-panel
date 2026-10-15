@@ -696,6 +696,17 @@ if (!in_array('unifi:camera:cam1', $ids, true) || !in_array('unifi:light:light1'
     fwrite(STDERR, 'homeRows ' . json_encode($ids) . "\n");
     exit(1);
 }
+$camHomeRow = null;
+foreach ($rows as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:camera:cam1') {
+        $camHomeRow = $row;
+        break;
+    }
+}
+if ($camHomeRow === null || !empty($camHomeRow['on'])) {
+    fwrite(STDERR, 'connected camera must not be on ' . json_encode($camHomeRow) . "\n");
+    exit(1);
+}
 if (!in_array('unifi:sensor:pir-light1', $ids, true)) {
     fwrite(STDERR, 'floodlight PIR must follow the light onto Home ' . json_encode($ids) . "\n");
     exit(1);

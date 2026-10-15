@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.115] - 2026-10-15
+
+### Fixed
+- Home cameras stay a neutral row (not green “on”). A connected camera no longer turns the room name green; lights and other switchable devices still do.
+
 ## [4.0.114] - 2026-10-15
 
 ### Fixed

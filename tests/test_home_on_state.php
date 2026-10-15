@@ -386,6 +386,98 @@ assert_true(isset($byHomeId['unifi:sensor:s1']), 'Home must include the UniFi se
 assert_true(($byHomeId['unifi:sensor:s1']['status'] ?? '') === '21.4° · 48% RH', 'Home sensor must keep temperature status');
 assert_true((float) ($byHomeId['unifi:sensor:s1']['humidity'] ?? 0) === 48.0, 'Home sensor must keep humidity');
 
+assert_true(YarboHome::countsTowardRoomOn(['kind' => 'light', 'on' => true]) === true, 'lights count toward room on');
+assert_true(YarboHome::countsTowardRoomOn(['kind' => 'heater', 'on' => true]) === true, 'heaters count toward room on');
+assert_true(YarboHome::countsTowardRoomOn(['kind' => 'camera', 'on' => true]) === false, 'cameras must not count toward room on');
+
+$camRoomRoot = sys_get_temp_dir() . '/yarbo-home-cam-room-' . bin2hex(random_bytes(3));
+mkdir($camRoomRoot . '/data', 0775, true);
+file_put_contents($camRoomRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+    'active_module' => 'home',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($camRoomRoot . '/data/unifi-config.json', json_encode([
+    'host' => '',
+    'show_on_home' => ['unifi:camera:cam-drive', 'unifi:camera:cam-garage', 'unifi:light:boiler'],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($camRoomRoot . '/data/home.json', json_encode([
+    'names' => [],
+    'room_defs' => [
+        ['id' => 'drive', 'name' => 'Driveway'],
+        ['id' => 'garage', 'name' => 'Garage'],
+    ],
+    'rooms' => [
+        'unifi:camera:cam-drive' => 'drive',
+        'unifi:camera:cam-garage' => 'garage',
+        'unifi:light:boiler' => 'garage',
+    ],
+    'group_defs' => [],
+    'groups' => [],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($camRoomRoot . '/data/unifi-inventory.json', json_encode([
+    'cameras' => [
+        [
+            'id' => 'unifi:camera:cam-drive',
+            'native_id' => 'cam-drive',
+            'name' => 'Driveway',
+            'kind' => 'camera',
+            'source' => 'unifi',
+            'on' => true,
+            'available' => true,
+            'status' => 'Online',
+        ],
+        [
+            'id' => 'unifi:camera:cam-garage',
+            'native_id' => 'cam-garage',
+            'name' => 'Garage Outside',
+            'kind' => 'camera',
+            'source' => 'unifi',
+            'on' => true,
+            'available' => true,
+            'status' => 'Online',
+        ],
+    ],
+    'lights' => [[
+        'id' => 'unifi:light:boiler',
+        'native_id' => 'boiler',
+        'name' => 'Boiler',
+        'kind' => 'light',
+        'source' => 'unifi',
+        'on' => true,
+        'status' => 'On',
+    ]],
+    'relays' => [],
+    'doors' => [],
+    'hubs' => [],
+    'sensors' => [],
+    'errors' => [],
+], JSON_UNESCAPED_SLASHES));
+$camHome = new YarboHome($camRoomRoot);
+$camDash = $camHome->dashboard();
+$camById = [];
+foreach ($camDash['devices'] ?? [] as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $camById[$row['id']] = $row;
+    }
+}
+$camRooms = [];
+foreach ($camDash['rooms'] ?? [] as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $camRooms[$row['id']] = $row;
+    }
+}
+assert_true(isset($camById['unifi:camera:cam-drive']), 'camera-only room still lists the camera');
+assert_true(empty($camById['unifi:camera:cam-drive']['on']), 'stale camera on must not stay on');
+assert_true(empty($camById['unifi:camera:cam-garage']['on']), 'garage camera must not look on');
+assert_true(($camById['unifi:light:boiler']['on'] ?? false) === true, 'garage light stays on');
+assert_true(($camRooms['drive']['on'] ?? true) === false, 'camera-only room must not go green');
+assert_true(($camRooms['garage']['on'] ?? false) === true, 'room with a light on stays green');
+
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(
     !preg_match('/function homeColorInputsHtml[\s\S]{0,500}d\.kind === [\'"]light[\'"]/', $js),
@@ -414,10 +506,14 @@ assert_true(str_contains($homePhp, 'cachedDeviceSetpoint'), 'heater On uses the 
 assert_true(str_contains($homePhp, '? 80.0 : 60.0'), 'heater Matter writes get a longer PHP wait');
 assert_true(str_contains($homePhp, "['op' => 'states'], 2.5, false)"), 'live mill list waits long enough for states');
 assert_true(str_contains($homePhp, 'unionDeviceLists'), 'pairing merges the new node into last_devices');
+assert_true(str_contains($homePhp, 'function countsTowardRoomOn'), 'rooms ignore cameras when choosing green');
+assert_true(str_contains($homePhp, "if (self::countsTowardRoomOn(\$device) && !empty(\$device['on']))"), 'room on only from switchable devices');
 assert_true(str_contains($js, "btn.textContent = 'Adding…'"), 'Add device shows Adding while pairing');
 assert_true(str_contains($js, 'loadHomeDashboard({ force: true })'), 'pairing reloads Home even if a poll is in flight');
 assert_true(str_contains($js, 'applyHomeHiddenLocal(id, true)'), 'Hide must move the tile without a full page refresh');
 assert_true(str_contains($js, 'await reloadHomeList()'), 'Hide must force-reload Home');
+assert_true(str_contains($js, 'const lit = on && !camera'), 'camera cards must not render as green on');
+assert_true(str_contains($js, "Boolean(on) && !card.classList.contains('home-device--camera')"), 'camera patch must not add is-on');
 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(
@@ -427,5 +523,6 @@ assert_true(
 assert_true(str_contains($css, 'grid-area: label'), 'manage name box sits in its own grid area');
 assert_true(str_contains($css, 'handle label label label manage'), 'manage name row is not shared with heater controls');
 assert_true(str_contains($css, 'flex: 1 1 8rem'), 'manage name input can grow once it has a row');
+assert_true(str_contains($css, '.home-device--camera.is-on'), 'camera is-on must reset to the neutral row');
 
 echo "ok\n";

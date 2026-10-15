@@ -17,6 +17,11 @@ if (!str_contains($js, "camera ? ' home-device--camera' : ''") && !str_contains(
     exit(1);
 }
 
+if (!str_contains($js, 'const lit = on && !camera') && !str_contains($js, 'Boolean(on) && !card.classList.contains(\'home-device--camera\')')) {
+    fwrite(STDERR, "camera tiles must not take the green is-on class\n");
+    exit(1);
+}
+
 if (!str_contains($css, '.home-device--camera:not(.home-device--hidden)')) {
     fwrite(STDERR, "manage layout must stack camera stills below the room select\n");
     exit(1);
@@ -37,8 +42,18 @@ if (!str_contains($css, '.home-device-room-select') || !str_contains($css, 'z-in
     exit(1);
 }
 
+if (!str_contains($css, '.home-device--camera.is-on')) {
+    fwrite(STDERR, "camera is-on must stay a neutral row\n");
+    exit(1);
+}
+
 if (!str_contains($change, '## [4.0.114]')) {
     fwrite(STDERR, "changelog 4.0.114\n");
+    exit(1);
+}
+
+if (!str_contains($change, '## [4.0.115]')) {
+    fwrite(STDERR, "changelog 4.0.115\n");
     exit(1);
 }
 

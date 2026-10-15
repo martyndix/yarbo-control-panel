@@ -3133,6 +3133,22 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.home-device--camera.is-on {
+    background: var(--surface);
+    border-color: var(--border);
+    box-shadow: none;
+}
+
+.home-device--camera.is-on .home-device-name,
+.home-device--camera.is-on .home-device-name-input {
+    color: inherit;
+}
+
+.home-device--camera.is-on .home-device-dot {
+    background: var(--muted);
+    box-shadow: none;
+}
+
 .home-device-label {
     display: flex;
     align-items: center;

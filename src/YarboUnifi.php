@@ -1713,6 +1713,9 @@ final class YarboUnifi
                 if ($id === '') {
                     continue;
                 }
+                if ($group === 'cameras' || ($row['kind'] ?? '') === self::KIND_CAMERA) {
+                    $row['on'] = false;
+                }
                 $out[] = $row + ['show_on_home' => isset($show[$id])];
             }
         }
@@ -1764,7 +1767,7 @@ final class YarboUnifi
             'source' => self::SOURCE,
             'product' => (string) ($row['type'] ?? $row['model'] ?? 'Protect camera'),
             'available' => $connected || $this->truthy($row['isAdopted'] ?? true),
-            'on' => $connected,
+            'on' => false,
             'dimmable' => false,
             'colorable' => false,
             'status' => $connected ? 'Online' : 'Offline',
