@@ -337,6 +337,79 @@ if ($vacNames !== ['Kitchen', 'Hall', 'Living room'] || empty($kinds['21:1']['ca
     fwrite(STDERR, 'vacuum rooms ' . json_encode($kinds['21:1'] ?? null) . "\n");
     exit(1);
 }
+if (empty($kinds['21:1']['can_vacuum_mop'])) {
+    fwrite(STDERR, 'vacuum and mop modes must expose Vac + mop ' . json_encode($kinds['21:1'] ?? null) . "\n");
+    exit(1);
+}
+$comboNode = $vacuumNode;
+$comboNode['node_id'] = 27;
+$comboNode['attributes']['1/85/0'][] = [
+    'label' => 'Vac + mop',
+    'mode' => 2,
+    'modeTags' => [['value' => 0x4000], ['value' => 0x4001]],
+];
+$comboNode['attributes']['1/85/1'] = 2;
+$comboRow = null;
+foreach (YarboMatterFabric::flatten([$comboNode]) as $row) {
+    if (($row['id'] ?? '') === '27:1') {
+        $comboRow = $row;
+    }
+}
+if (($comboRow['vacuum_clean'] ?? '') !== 'vacuum_mop' || empty($comboRow['can_vacuum_mop'])) {
+    fwrite(STDERR, 'dual-tag Vac + mop ' . json_encode($comboRow) . "\n");
+    exit(1);
+}
+$refillNode = $vacuumNode;
+$refillNode['node_id'] = 28;
+$refillNode['attributes']['1/84/1'] = 1;
+$refillNode['attributes']['1/97/4'] = 3;
+$refillNode['attributes']['1/97/5'] = ['errorStateID' => 0x44];
+$refillRow = null;
+foreach (YarboMatterFabric::flatten([$refillNode]) as $row) {
+    if (($row['id'] ?? '') === '28:1') {
+        $refillRow = $row;
+    }
+}
+if (($refillRow['vacuum_status'] ?? '') === 'Error') {
+    fwrite(STDERR, 'water tank empty must not show Error ' . json_encode($refillRow) . "\n");
+    exit(1);
+}
+if (($refillRow['vacuum_status'] ?? '') !== 'Refilling') {
+    fwrite(STDERR, 'water tank empty should be Refilling ' . json_encode($refillRow) . "\n");
+    exit(1);
+}
+if (($refillRow['vacuum_clean'] ?? '') !== 'vacuum_mop') {
+    fwrite(STDERR, 'refill should count as vac+mop ' . json_encode($refillRow) . "\n");
+    exit(1);
+}
+$fillingNode = $vacuumNode;
+$fillingNode['node_id'] = 29;
+$fillingNode['attributes']['1/84/1'] = 1;
+$fillingNode['attributes']['1/97/4'] = 0x45;
+$fillingRow = null;
+foreach (YarboMatterFabric::flatten([$fillingNode]) as $row) {
+    if (($row['id'] ?? '') === '29:1') {
+        $fillingRow = $row;
+    }
+}
+if (($fillingRow['vacuum_status'] ?? '') !== 'Refilling' || ($fillingRow['on'] ?? false) !== true) {
+    fwrite(STDERR, 'FillingWaterTank ' . json_encode($fillingRow) . "\n");
+    exit(1);
+}
+$stuckNode = $vacuumNode;
+$stuckNode['node_id'] = 30;
+$stuckNode['attributes']['1/97/4'] = 3;
+$stuckNode['attributes']['1/97/5'] = ['errorStateID' => 0x41];
+$stuckRow = null;
+foreach (YarboMatterFabric::flatten([$stuckNode]) as $row) {
+    if (($row['id'] ?? '') === '30:1') {
+        $stuckRow = $row;
+    }
+}
+if (($stuckRow['vacuum_status'] ?? '') !== 'Error') {
+    fwrite(STDERR, 'stuck must stay Error ' . json_encode($stuckRow) . "\n");
+    exit(1);
+}
 $wrappedVacuum = [
     'node_id' => 26,
     'available' => true,

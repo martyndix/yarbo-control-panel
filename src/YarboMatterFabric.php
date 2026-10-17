@@ -35,6 +35,7 @@ final class YarboMatterFabric
     private const RUN_MAPPING = 0x4002;
     private const CLEAN_VACUUM = 0x4000;
     private const CLEAN_MOP = 0x4001;
+    private const CLEAN_DEEP = 0x4002;
     private const CLEAN_VACUUM_THEN_MOP = 0x4003;
     private const OP_STOPPED = 0;
     private const OP_RUNNING = 1;
@@ -43,6 +44,10 @@ final class YarboMatterFabric
     private const OP_SEEKING = 0x40;
     private const OP_CHARGING = 0x41;
     private const OP_DOCKED = 0x42;
+    private const OP_EMPTYING = 0x43;
+    private const OP_WASHING = 0x44;
+    private const OP_FILLING = 0x45;
+    private const OP_UPDATING_MAPS = 0x46;
     private const DESCRIPTOR = 29;
     private const BASIC_INFO = 40;
     private const BRIDGED_BASIC = 57;
@@ -734,14 +739,34 @@ final class YarboMatterFabric
         if ($areas === []) {
             $areas = self::parseAreas(self::attrRaw($attributes, $endpoint, self::SERVICE_AREA, self::ATTR_SUPPORTED_AREAS));
         }
-        $canMop = self::modeHasTagOrWord($cleanModes, [self::CLEAN_MOP, self::CLEAN_VACUUM_THEN_MOP], 'mop');
-        $canVacuumMop = self::modeHasTagOrWord($cleanModes, [self::CLEAN_VACUUM_THEN_MOP], 'vacuum and mop')
-            || self::modeHasTagOrWord($cleanModes, [self::CLEAN_VACUUM_THEN_MOP], 'vac & mop');
-        $on = in_array($status, ['Cleaning', 'Paused'], true);
+        $kind = self::vacuumCleanKind($cleanOption);
+        $canMop = false;
+        $canVacuumMop = false;
+        $canVacuum = $cleanModes === [];
+        foreach ($cleanModes as $option) {
+            $optionKind = self::vacuumCleanKind($option);
+            if ($optionKind === 'vacuum' || $optionKind === '') {
+                $canVacuum = true;
+            }
+            if ($optionKind === 'mop' || $optionKind === 'vacuum_mop') {
+                $canMop = true;
+            }
+            if ($optionKind === 'vacuum_mop') {
+                $canVacuumMop = true;
+            }
+        }
+        if ($canVacuum && $canMop) {
+            $canVacuumMop = true;
+        }
+        if (in_array($status, ['Emptying', 'Refilling', 'Washing'], true) && $canMop && in_array($kind, ['', 'vacuum'], true)) {
+            $kind = 'vacuum_mop';
+            $canVacuumMop = true;
+        }
+        $on = in_array($status, ['Cleaning', 'Paused', 'Emptying', 'Washing', 'Refilling'], true);
 
         return [
             'vacuum_status' => $status,
-            'vacuum_clean' => self::vacuumCleanKind($cleanOption),
+            'vacuum_clean' => $kind !== '' ? $kind : ($canVacuum ? 'vacuum' : ''),
             'vacuum_op' => $op,
             'vacuum_battery' => $battery['percent'],
             'vacuum_charge_complete' => $battery['complete'],
@@ -756,11 +781,64 @@ final class YarboMatterFabric
         ];
     }
 
+    private static function vacuumErrorIsService(mixed $text): bool
+    {
+        $s = strtolower(str_replace(['_', '-'], ' ', trim((string) ($text ?? ''))));
+        if ($s === '') {
+            return false;
+        }
+        foreach ([
+            'dust bin full', 'dustbin full', 'water tank empty', 'watertank empty',
+            'dirty water tank full', 'emptying', 'filling', 'refill',
+            'washing', 'wash mop', 'cleaning mop',
+        ] as $needle) {
+            if (str_contains($s, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static function vacuumErrorIsReal(mixed $text): bool
     {
         $s = strtolower(trim((string) ($text ?? '')));
+        if (in_array($s, ['', '0', 'error 0', 'error (0)', 'noerror', 'no error', 'none'], true)) {
+            return false;
+        }
 
-        return !in_array($s, ['', '0', 'error 0', 'error (0)', 'noerror', 'no error', 'none'], true);
+        return !self::vacuumErrorIsService($text);
+    }
+
+    private static function vacuumServiceStatus(?int $op, string $errorText = ''): string
+    {
+        if ($op === self::OP_EMPTYING) {
+            return 'Emptying';
+        }
+        if ($op === self::OP_WASHING) {
+            return 'Washing';
+        }
+        if ($op === self::OP_FILLING) {
+            return 'Refilling';
+        }
+        $s = strtolower(str_replace(['_', '-'], ' ', $errorText));
+        foreach (['dust bin full', 'dustbin full', 'dirty water', 'emptying'] as $needle) {
+            if (str_contains($s, $needle)) {
+                return 'Emptying';
+            }
+        }
+        foreach (['water tank empty', 'watertank empty', 'filling', 'refill'] as $needle) {
+            if (str_contains($s, $needle)) {
+                return 'Refilling';
+            }
+        }
+        foreach (['washing', 'wash mop', 'cleaning mop'] as $needle) {
+            if (str_contains($s, $needle)) {
+                return 'Washing';
+            }
+        }
+
+        return '';
     }
 
     private static function parseOperationalError(mixed $raw): string
@@ -798,6 +876,12 @@ final class YarboMatterFabric
             0x41 => 'Stuck',
             0x42 => 'Dust bin missing',
             0x43 => 'Dust bin full',
+            0x44 => 'Water tank empty',
+            0x45 => 'Water tank missing',
+            0x46 => 'Water tank lid open',
+            0x47 => 'Mop pad missing',
+            0x48 => 'Low battery',
+            0x4A => 'Dirty water tank full',
         ];
 
         return $names[$code] ?? ('Error ' . $code);
@@ -810,6 +894,13 @@ final class YarboMatterFabric
     {
         if ($op === self::OP_ERROR && self::vacuumErrorIsReal($errorText)) {
             return 'Error';
+        }
+        $service = self::vacuumServiceStatus($op, $errorText);
+        if ($service !== '') {
+            return $service;
+        }
+        if ($op === self::OP_UPDATING_MAPS) {
+            return 'Mapping';
         }
         if ($op === self::OP_PAUSED) {
             return 'Paused';
@@ -869,12 +960,22 @@ final class YarboMatterFabric
         if ($option === null) {
             return 'vacuum';
         }
-        $tags = is_array($option['tags'] ?? null) ? $option['tags'] : [];
-        $label = strtolower((string) ($option['label'] ?? ''));
-        if (in_array(self::CLEAN_VACUUM_THEN_MOP, $tags, true) || (str_contains($label, 'mop') && str_contains($label, 'vac'))) {
+        $tags = [];
+        foreach (is_array($option['tags'] ?? null) ? $option['tags'] : [] as $tag) {
+            if (is_numeric($tag)) {
+                $tags[] = (int) $tag;
+            }
+        }
+        $label = strtolower(str_replace(['&', '+'], ' ', (string) ($option['label'] ?? '')));
+        $hasVacTag = in_array(self::CLEAN_VACUUM, $tags, true);
+        $hasMopTag = in_array(self::CLEAN_MOP, $tags, true);
+        $hasComboTag = in_array(self::CLEAN_VACUUM_THEN_MOP, $tags, true) || in_array(self::CLEAN_DEEP, $tags, true);
+        $hasVacWord = str_contains($label, 'vac') || str_contains($label, 'sweep');
+        $hasMopWord = str_contains($label, 'mop');
+        if ($hasComboTag || ($hasVacTag && $hasMopTag) || ($hasVacWord && $hasMopWord)) {
             return 'vacuum_mop';
         }
-        if (in_array(self::CLEAN_MOP, $tags, true) || str_contains($label, 'mop')) {
+        if (($hasMopTag && !$hasVacTag) || ($hasMopWord && !$hasVacWord)) {
             return 'mop';
         }
 

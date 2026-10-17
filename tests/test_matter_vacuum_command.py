@@ -173,6 +173,8 @@ def main() -> int:
         raise SystemExit(f"kind {vac}")
     if vac.get("can_mop") is not True:
         raise SystemExit(f"can_mop {vac}")
+    if vac.get("can_vacuum_mop") is not True:
+        raise SystemExit(f"can_vacuum_mop {vac}")
     names = [a["name"] for a in vac.get("areas") or []]
     if names != ["Kitchen", "Living room", "Living room"]:
         raise SystemExit(f"areas {vac.get('areas')}")
@@ -1144,6 +1146,92 @@ def main() -> int:
     live_stuck = agent.live_row("40:1") or {}
     assert live_stuck.get("vacuum_status") == "Error", live_stuck
     assert "stuck" in str(live_stuck.get("vacuum_error") or "").lower(), live_stuck
+
+    combo = vacuum_node()
+    combo["attributes"]["1/85/0"].append(
+        {"label": "Vac + mop", "mode": 2, "modeTags": [{"value": 0x4000}, {"value": 0x4001}]}
+    )
+    combo["attributes"]["1/85/1"] = 2
+    combo["attributes"]["1/84/1"] = 1
+    combo["attributes"]["1/97/4"] = 1
+    combo_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [combo]})}.get("40:1") or {}
+    if combo_row.get("vacuum_clean") != "vacuum_mop" or combo_row.get("can_vacuum_mop") is not True:
+        raise SystemExit(f"dual-tag vac+mop {combo_row}")
+
+    refill = vacuum_node()
+    refill["attributes"]["1/84/1"] = 1
+    refill["attributes"]["1/97/4"] = 3
+    refill["attributes"]["1/97/5"] = {"errorStateID": 0x44}
+    refill_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [refill]})}.get("40:1") or {}
+    if refill_row.get("vacuum_status") == "Error":
+        raise SystemExit(f"water tank empty must not be Error {refill_row}")
+    if refill_row.get("vacuum_status") != "Refilling":
+        raise SystemExit(f"water tank empty should be Refilling {refill_row}")
+    if refill_row.get("vacuum_clean") != "vacuum_mop":
+        raise SystemExit(f"refill should count as vac+mop {refill_row}")
+    if refill_row.get("on") is not True:
+        raise SystemExit(f"refill is still a job {refill_row}")
+
+    filling = vacuum_node()
+    filling["attributes"]["1/84/1"] = 1
+    filling["attributes"]["1/97/4"] = 0x45
+    filling_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [filling]})}.get("40:1") or {}
+    if filling_row.get("vacuum_status") != "Refilling":
+        raise SystemExit(f"FillingWaterTank {filling_row}")
+
+    emptying = vacuum_node()
+    emptying["attributes"]["1/97/4"] = 0x43
+    emptying_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [emptying]})}.get("40:1") or {}
+    if emptying_row.get("vacuum_status") != "Emptying":
+        raise SystemExit(f"EmptyingDustBin {emptying_row}")
+
+    washing = vacuum_node()
+    washing["attributes"]["1/97/4"] = 0x44
+    washing_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [washing]})}.get("40:1") or {}
+    if washing_row.get("vacuum_status") != "Washing":
+        raise SystemExit(f"CleaningMop {washing_row}")
+
+    agent._live_devices = [{
+        "id": "40:1",
+        "node_id": 40,
+        "kind": "vacuum",
+        "vacuum_op": 1,
+        "vacuum_status": "Cleaning",
+        "vacuum_activity": "cleaning",
+        "vacuum_run_mode": 1,
+        "vacuum_clean": "vacuum",
+        "vacuum_clean_mode": 0,
+        "can_mop": True,
+        "run_modes": [
+            {"label": "Idle", "mode": 0, "tags": [0x4000]},
+            {"label": "Cleaning", "mode": 1, "tags": [0x4001]},
+        ],
+        "clean_modes": [
+            {"label": "Vacuum", "mode": 0, "tags": [0x4000]},
+            {"label": "Mop", "mode": 1, "tags": [0x4001]},
+            {"label": "Vac + mop", "mode": 2, "tags": [0x4000, 0x4001]},
+        ],
+    }]
+    agent.apply_attribute_event([40, "1/97/5", {"errorStateID": 0x44}])
+    live_refill = agent.live_row("40:1") or {}
+    assert live_refill.get("vacuum_status") != "Error", live_refill
+    assert live_refill.get("vacuum_status") == "Refilling", live_refill
+    assert live_refill.get("vacuum_clean") == "vacuum_mop", live_refill
+    agent.apply_attribute_event([40, "1/85/1", 2])
+    live_combo = agent.live_row("40:1") or {}
+    assert live_combo.get("vacuum_clean") == "vacuum_mop", live_combo
+    agent.apply_attribute_event([40, "1/85/1", 1])
+    live_mop = agent.live_row("40:1") or {}
+    assert live_mop.get("vacuum_clean") == "mop", live_mop
+
+    s10_combo = s10_node()
+    s10_combo["attributes"]["1/85/0"].append(
+        {"label": "Vac&Mop", "mode": 2, "modeTags": [{"value": 0x4003}]}
+    )
+    s10_combo["attributes"]["1/85/1"] = 2
+    s10_combo_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [s10_combo]})}.get("50:1") or {}
+    if s10_combo_row.get("vacuum_clean") != "vacuum_mop":
+        raise SystemExit(f"s10 Vac&Mop {s10_combo_row}")
 
     print("test_matter_vacuum_command.py ok")
     return 0

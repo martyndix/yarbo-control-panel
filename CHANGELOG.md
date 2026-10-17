@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.116] - 2026-10-17
+
+### Fixed
+- Matter vacuum tiles showed **Error** while heading to the water station to empty or refill during vac+mop. Emptying, washing, and refilling stay a working status; **Error** is only a real fault (stuck, missing pad, …). Vac + mop is its own chip when the robot can mop, including Vacuum+Mop Matter modes that used to look like Vacuum or Mop only.
+
 ## [4.0.115] - 2026-10-15
 
 ### Fixed

@@ -87,6 +87,10 @@ OP_ERROR = 3
 OP_SEEKING = 0x40
 OP_CHARGING = 0x41
 OP_DOCKED = 0x42
+OP_EMPTYING = 0x43
+OP_WASHING = 0x44
+OP_FILLING = 0x45
+OP_UPDATING_MAPS = 0x46
 VACUUM_MODE_SETTLE_S = 0.4
 VACUUM_START_SETTLE_S = 2.0
 DESCRIPTOR = 29
@@ -2233,7 +2237,7 @@ def apply_attribute_event(data: Any) -> None:
             extra["vacuum_charge_complete"] = charge_is_complete(int(raw), percent)
         fields.update(vacuum_runtime_fields(device_id, extra))
     elif cluster == RVC_CLEAN and attr == ATTR_CURRENT_MODE:
-        fields["vacuum_clean_mode"] = int(event_number(value) or 0)
+        fields.update(vacuum_runtime_fields(device_id, {"vacuum_clean_mode": int(event_number(value) or 0)}))
     elif cluster == SERVICE_AREA and attr == ATTR_SELECTED_AREAS:
         fields["selected_areas"] = parse_selected_areas(value)
     if fields:
@@ -3713,11 +3717,50 @@ def service_area_from_node(attributes: dict[str, Any], preferred: int) -> tuple[
     return [], [], preferred
 
 
+def vacuum_error_is_service(text: Any) -> bool:
+    s = str(text or "").strip().lower().replace("_", " ").replace("-", " ")
+    if not s:
+        return False
+    needles = (
+        "dust bin full",
+        "dustbin full",
+        "water tank empty",
+        "watertank empty",
+        "dirty water tank full",
+        "emptying",
+        "filling",
+        "refill",
+        "washing",
+        "wash mop",
+        "cleaning mop",
+    )
+    return any(n in s for n in needles)
+
+
 def vacuum_error_is_real(text: Any) -> bool:
     s = str(text or "").strip().lower()
     if s in ("", "0", "error 0", "error (0)", "noerror", "no error", "none"):
         return False
+    if vacuum_error_is_service(text):
+        return False
     return True
+
+
+def vacuum_service_status(op: int | None, error_text: Any = None) -> str | None:
+    if op == OP_EMPTYING:
+        return "Emptying"
+    if op == OP_WASHING:
+        return "Washing"
+    if op == OP_FILLING:
+        return "Refilling"
+    s = str(error_text or "").strip().lower().replace("_", " ").replace("-", " ")
+    if any(n in s for n in ("dust bin full", "dustbin full", "dirty water", "emptying")):
+        return "Emptying"
+    if any(n in s for n in ("water tank empty", "watertank empty", "filling", "refill")):
+        return "Refilling"
+    if any(n in s for n in ("washing", "wash mop", "cleaning mop")):
+        return "Washing"
+    return None
 
 
 def next_vacuum_activity(
@@ -3729,6 +3772,8 @@ def next_vacuum_activity(
     error_text: str | None = None,
 ) -> str | None:
     prev = str(previous or "").strip().lower() or None
+    if op in (OP_EMPTYING, OP_WASHING, OP_FILLING) or vacuum_error_is_service(error_text):
+        return prev or "cleaning"
     if op == OP_ERROR:
         if vacuum_error_is_real(error_text):
             return None
@@ -3762,6 +3807,11 @@ def vacuum_status_label(
     act = str(activity or "").strip().lower() or None
     if op == OP_ERROR and vacuum_error_is_real(error_text):
         return "Error"
+    service = vacuum_service_status(op, error_text)
+    if service:
+        return service
+    if op == OP_UPDATING_MAPS:
+        return "Mapping"
     if op == OP_PAUSED or act == "paused":
         return "Paused"
     if op == OP_SEEKING:
@@ -3817,7 +3867,13 @@ def vacuum_runtime_fields(device_id: str, updates: dict[str, Any]) -> dict[str, 
     fields = dict(updates)
     fields["vacuum_activity"] = activity
     fields["vacuum_status"] = status
-    fields["on"] = status in ("Cleaning", "Paused")
+    kind = live_vacuum_clean_kind(live)
+    if status in ("Emptying", "Refilling", "Washing") and kind in ("", "vacuum"):
+        if live.get("can_mop") or pick_clean_kind(live.get("clean_modes") or [], "vacuum_mop"):
+            kind = "vacuum_mop"
+    if kind:
+        fields["vacuum_clean"] = kind
+    fields["on"] = status in ("Cleaning", "Paused", "Emptying", "Washing", "Refilling")
     return fields
 
 
@@ -3847,6 +3903,32 @@ def live_vacuum_tags(live: dict[str, Any]) -> list[int]:
         except (TypeError, ValueError, KeyError):
             continue
     return []
+
+
+def live_vacuum_clean_kind(live: dict[str, Any]) -> str:
+    try:
+        mode_n = int(live["vacuum_clean_mode"]) if live.get("vacuum_clean_mode") is not None else None
+    except (TypeError, ValueError):
+        mode_n = None
+    if mode_n is not None:
+        for row in live.get("clean_modes") or []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                if int(row["mode"]) == mode_n:
+                    kind = vacuum_clean_kind(row)
+                    if kind:
+                        return kind
+            except (TypeError, ValueError, KeyError):
+                continue
+    return str(live.get("vacuum_clean") or "")
+
+
+def pick_clean_kind(options: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
+    for option in options:
+        if vacuum_clean_kind(option) == kind:
+            return option
+    return None
 
 
 def decode_bat_percent(raw: Any) -> int | None:
@@ -3886,16 +3968,17 @@ def battery_from_node(attributes: dict[str, Any], preferred: int) -> tuple[int |
 def vacuum_clean_kind(option: dict[str, Any] | None) -> str:
     if not option:
         return ""
-    if mode_has_tag(option, CLEAN_MOP) and not mode_has_tag(option, CLEAN_VACUUM):
-        return "mop"
-    if mode_has_tag(option, CLEAN_VACUUM_THEN_MOP):
+    label = str(option.get("label") or "").lower().replace("&", " ").replace("+", " ")
+    has_vac_tag = mode_has_tag(option, CLEAN_VACUUM)
+    has_mop_tag = mode_has_tag(option, CLEAN_MOP)
+    has_combo_tag = mode_has_tag(option, CLEAN_VACUUM_THEN_MOP) or mode_has_tag(option, CLEAN_DEEP)
+    has_vac_word = any(word in label for word in ("vac", "sweep"))
+    has_mop_word = "mop" in label
+    if has_combo_tag or (has_vac_tag and has_mop_tag) or (has_vac_word and has_mop_word):
         return "vacuum_mop"
-    label = str(option.get("label") or "").lower()
-    if "mop" in label and "vac" in label:
-        return "vacuum_mop"
-    if "mop" in label:
+    if (has_mop_tag and not has_vac_tag) or (has_mop_word and not has_vac_word):
         return "mop"
-    if mode_has_tag(option, CLEAN_VACUUM) or "vac" in label:
+    if has_vac_tag or has_vac_word:
         return "vacuum"
     return ""
 
@@ -3916,20 +3999,27 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         op, run_tags, charge_complete=charge_complete, error_text=error_text
     )
     areas, selected, area_endpoint = service_area_from_node(attributes, endpoint)
-    can_vacuum = pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac")) is not None or clean_modes == []
-    can_mop = pick_mode(clean_modes, (CLEAN_MOP, CLEAN_VACUUM_THEN_MOP), ("mop",)) is not None
+    if status in ("Emptying", "Refilling", "Washing") and (
+        vacuum_clean_kind(clean_option) in ("", "vacuum")
+    ):
+        # Water-station trips are vac+mop (or mop), not a fault.
+        if pick_clean_kind(clean_modes, "vacuum_mop") or pick_clean_kind(clean_modes, "mop"):
+            clean_option = pick_clean_kind(clean_modes, "vacuum_mop") or clean_option
+    can_vacuum = pick_clean_kind(clean_modes, "vacuum") is not None or clean_modes == []
+    can_mop = pick_clean_kind(clean_modes, "mop") is not None or pick_clean_kind(clean_modes, "vacuum_mop") is not None
     can_vacuum_mop = (
-        pick_mode(
-            clean_modes,
-            (CLEAN_VACUUM_THEN_MOP,),
-            ("vacuum then mop", "vac & mop", "mop & vac", "vacuum and mop"),
-        )
-        is not None
+        pick_clean_kind(clean_modes, "vacuum_mop") is not None
+        or (can_vacuum and can_mop)
     )
-    on = status in ("Cleaning", "Paused")
+    if status in ("Emptying", "Refilling", "Washing") and can_mop:
+        can_vacuum_mop = True
+    on = status in ("Cleaning", "Paused", "Emptying", "Washing", "Refilling")
+    kind = vacuum_clean_kind(clean_option) or ("vacuum" if can_vacuum else "")
+    if status in ("Emptying", "Refilling", "Washing") and kind in ("", "vacuum") and can_mop:
+        kind = "vacuum_mop"
     return {
         "vacuum_status": status,
-        "vacuum_clean": vacuum_clean_kind(clean_option) or ("vacuum" if can_vacuum else ""),
+        "vacuum_clean": kind,
         "vacuum_op": op,
         "vacuum_error": error_text,
         "vacuum_run_mode": int(run_current) if run_current is not None else None,
@@ -4164,6 +4254,13 @@ def parse_operational_error(raw: Any) -> str:
         0x45: "Water tank missing",
         0x46: "Water tank lid open",
         0x47: "Mop pad missing",
+        0x48: "Low battery",
+        0x49: "Cannot reach target",
+        0x4A: "Dirty water tank full",
+        0x4B: "Dirty water tank missing",
+        0x4C: "Wheels jammed",
+        0x4D: "Brush jammed",
+        0x4E: "Navigation sensor obscured",
     }
     return names.get(code, f"Error {code}") if code else ""
 
@@ -4426,7 +4523,7 @@ def set_vacuum_command(
     def finish(rpc: dict[str, Any] | None = None) -> dict[str, Any]:
         status = str(row.get("vacuum_status") or "")
         op = run_op()
-        running = status in ("Cleaning", "Paused") or op == OP_RUNNING
+        running = status in ("Cleaning", "Paused", "Emptying", "Washing", "Refilling") or op == OP_RUNNING
         base = {
             "vacuum_clean": want_clean or "vacuum",
             "selected_areas": requested_ids or all_ids,
@@ -4439,7 +4536,7 @@ def set_vacuum_command(
                 "error": "Vacuum started mapping instead of cleaning",
                 **base,
             }
-        if status == "Error" or op == OP_ERROR:
+        if status == "Error" or (op == OP_ERROR and vacuum_error_is_real(row.get("vacuum_error"))):
             detail = str(row.get("vacuum_error") or (rpc or {}).get("error") or "").strip()
             return {
                 "ok": False,
@@ -4516,20 +4613,20 @@ def set_vacuum_command(
         if kind in ("vac",):
             kind = "vacuum"
         if kind == "mop":
-            option = pick_mode(clean_modes, (CLEAN_MOP,), ("mop",))
+            option = pick_clean_kind(clean_modes, "mop")
             if option is None:
                 return {"ok": False, "error": "This vacuum cannot mop"}
         elif kind in ("vacuum_mop", "both"):
-            option = pick_mode(
-                clean_modes,
-                (CLEAN_VACUUM_THEN_MOP, CLEAN_MOP),
-                ("vacuum then mop", "vac & mop", "mop & vac", "vacuum and mop"),
-            )
+            option = pick_clean_kind(clean_modes, "vacuum_mop")
             if option is None:
-                return {"ok": False, "error": "This vacuum cannot mop"}
+                # SwitchBot S10/K11+ often only expose Vacuum and Mop over Matter.
+                # Remember Vac + mop on the tile; the robot app owns the combined job.
+                return {"ok": True, "vacuum_clean": "vacuum_mop"}
             kind = "vacuum_mop"
         else:
-            option = pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac", "auto", "quick"))
+            option = pick_clean_kind(clean_modes, "vacuum") or pick_mode(
+                clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac", "auto", "quick")
+            )
             if option is None:
                 return {"ok": True, "vacuum_clean": "vacuum"}
         rpc = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))

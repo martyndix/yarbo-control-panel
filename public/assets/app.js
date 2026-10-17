@@ -4269,7 +4269,8 @@ function homeVacuumActionsHtml(d) {
     const status = homeVacuumStatusName(d);
     const clean = String(d.vacuum_clean || 'vacuum');
     const paused = status === 'Paused';
-    const running = status === 'Cleaning' || paused;
+    const running = status === 'Cleaning' || paused
+        || status === 'Emptying' || status === 'Washing' || status === 'Refilling';
     const canMop = Boolean(d.can_mop);
     const areas = Array.isArray(d.areas) ? d.areas : [];
     const selected = new Set((d.selected_areas || []).map((id) => Number(id)));
@@ -4277,7 +4278,7 @@ function homeVacuumActionsHtml(d) {
     const modeHtml = canMop
         ? `<button type="button" class="btn btn-secondary btn-compact${clean === 'vacuum' || clean === '' ? ' is-active' : ''}" data-home-vac-mode="vacuum">Vacuum</button>
             <button type="button" class="btn btn-secondary btn-compact${clean === 'mop' ? ' is-active' : ''}" data-home-vac-mode="mop">Mop</button>
-            ${d.can_vacuum_mop ? `<button type="button" class="btn btn-secondary btn-compact${clean === 'vacuum_mop' ? ' is-active' : ''}" data-home-vac-mode="vacuum_mop">Vac + mop</button>` : ''}`
+            <button type="button" class="btn btn-secondary btn-compact${clean === 'vacuum_mop' ? ' is-active' : ''}" data-home-vac-mode="vacuum_mop">Vac + mop</button>`
         : '';
     const rooms = areas.length
         ? `<div class="home-vac-rooms" role="group" aria-label="Rooms">
