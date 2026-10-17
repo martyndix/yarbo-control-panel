@@ -13,11 +13,10 @@
 
 // M5Stack PaperColor (https://docs.m5stack.com/en/core/PaperColor)
 // Spectra 6 400x600, no touch. Buttons A/B change page, C sleep/wake.
-// Manufacturer e-paper rules we follow:
-// - After ~10 partial (fast) refreshes, run one full-screen refresh to clear ghosting.
-// - Do not stream uninterrupted partial refreshes (DC imbalance can damage the panel).
-// - Skip redraws when status has not changed.
-// - Use the panel's OTP waveforms (M5GFX epd_quality / epd_fastest); no custom LUTs.
+// Spectra 6 has no useful partial refresh (~15–20s per full update). Buffer every
+// frame with startWrite/endWrite and call display() once. Without that, each
+// fillRect/drawString (Vestaboard cell, glyph) kicks a full-panel refresh and
+// the lock screen can take tens of minutes. Skip redraws when status is unchanged.
 
 Preferences prefs;
 String wifiSsid;
@@ -67,7 +66,6 @@ String powerwallSolar = "—";
 String powerwallLoad = "—";
 String powerwallGrid = "—";
 String powerwallBattery = "—";
-int partialRefreshCount = 0;
 String lastDrawnKey;
 String logoHash = "";
 int currentPage = PAPERMONO_PAGE_HOME;
@@ -163,11 +161,31 @@ void pollSerialConfig()
     }
 }
 
+void waitEpdReady()
+{
+    uint32_t t0 = millis();
+    while (M5.Display.displayBusy() && (millis() - t0) < 25000) {
+        pollSerialConfig();
+        delay(5);
+    }
+    if (M5.Display.displayBusy()) {
+        M5.Display.waitDisplay();
+    }
+}
+
 void beginEpdFrame(bool forceFull)
 {
-    bool full = forceFull || partialRefreshCount >= 10;
-    M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fastest);
-    partialRefreshCount = full ? 0 : (partialRefreshCount + 1);
+    (void) forceFull;
+    waitEpdReady();
+    M5.Display.setEpdMode(epd_mode_t::epd_quality);
+    M5.Display.startWrite();
+}
+
+void finishEpdFrame()
+{
+    M5.Display.endWrite();
+    M5.Display.display();
+    waitEpdReady();
 }
 
 String pageName(int page)
@@ -382,7 +400,7 @@ void drawHome(bool forceFull)
     drawButton(16, y0 + bh + gap, bw, bh, state == "active" ? "PAUSE" : "RESUME", false);
     drawButton(16 + bw + gap, y0 + bh + gap, bw, bh, lightsOn ? "LIGHTS OFF" : "LIGHTS", false);
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawStatusPage(bool forceFull)
@@ -406,7 +424,7 @@ void drawStatusPage(bool forceFull)
         M5.Display.drawString(lastError.substring(0, 40), 16, 468);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawHealthPage(bool forceFull)
@@ -429,7 +447,7 @@ void drawHealthPage(bool forceFull)
     drawKv("Rain sns", rainSensor, y); y += step;
     drawKv("Net mod", netModule, y);
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 int plansRowY0()
@@ -498,7 +516,7 @@ void drawPlansPage(bool forceFull)
         drawButton(16 + bw + gap, startY, bw, 72, "MORE", false);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawPowerwallPage(bool forceFull)
@@ -520,7 +538,7 @@ void drawPowerwallPage(bool forceFull)
         M5.Display.drawString(lastError.substring(0, 40), 16, 390);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawLymowPage(bool forceFull)
@@ -540,7 +558,7 @@ void drawLymowPage(bool forceFull)
         M5.Display.drawString(lastError.substring(0, 40), 16, 320);
     }
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 char vestaboardGlyph(int code)
@@ -639,7 +657,7 @@ void drawLockScreen(bool forceFull)
     }
     M5.Display.setTextDatum(BC_DATUM);
     M5.Display.drawString("C unlocks", W / 2, M5.Display.height() - 8);
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawBoardPage(bool forceFull)
@@ -655,7 +673,7 @@ void drawBoardPage(bool forceFull)
     M5.Display.setTextSize(1);
     M5.Display.drawString("live Vestaboard", M5.Display.width() / 2, 200);
     drawPager();
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void drawScreen(bool forceFull)
@@ -728,11 +746,7 @@ void drawSetup()
     M5.Display.drawString("   and send 2.4 GHz Wi-Fi.", 16, 278);
     M5.Display.drawString("Keep this cable connected", 16, 330);
     M5.Display.drawString("until CFG_OK.", 16, 352);
-    M5.Display.display();
-    while (M5.Display.displayBusy()) {
-        pollSerialConfig();
-        delay(5);
-    }
+    finishEpdFrame();
     lastDrawnKey = "setup";
 }
 
@@ -821,7 +835,7 @@ void drawOtaScreen()
     M5.Display.drawString("UPDATING", M5.Display.width() / 2, M5.Display.height() / 2 - 40);
     M5.Display.setTextSize(1);
     M5.Display.drawString("Stay on Wi-Fi. Do not power off.", M5.Display.width() / 2, M5.Display.height() / 2 + 16);
-    M5.Display.display();
+    finishEpdFrame();
 }
 
 void runOtaUpdate()
@@ -1150,7 +1164,7 @@ void setup()
         delay(20);
     }
     auto cfg = M5.config();
-    cfg.clear_display = true;
+    cfg.clear_display = false;
     M5.begin(cfg);
     announceUsbReady();
     for (int i = 0; i < 50; i++) {

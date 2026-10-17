@@ -157,7 +157,10 @@ class PaperMonoFlashTests(unittest.TestCase):
         for src in (mono, color):
             self.assertIn("Serial.setTxTimeoutMs(0)", src)
             self.assertGreaterEqual(src.count("announceUsbReady();"), 3)
-        self.assertIn("while (M5.Display.displayBusy())", color)
+        self.assertIn("while (M5.Display.displayBusy() && (millis() - t0) < 25000)", color)
+        self.assertIn("pollSerialConfig();", color)
+        self.assertIn("M5.Display.startWrite();", color)
+        self.assertIn("void finishEpdFrame()", color)
 
     def test_panel_copy_mentions_wifi_only(self) -> None:
         html = (ROOT / "public" / "index.php").read_text(encoding="utf-8")

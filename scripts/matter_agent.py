@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 51
+AGENT_VERSION = 52
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -180,6 +180,11 @@ _preferred_shared = False
 _live_lock = threading.Lock()
 _live_devices: list[dict[str, Any]] = []
 _state_poll_started = False
+_scan_lock = threading.Lock()
+_scan_due_at = 0.0
+SCAN_INTERVAL_S = 15 * 60
+FIRST_SCAN_DELAY_S = 90.0
+SCAN_NODE_CAP = 2
 _command_busy = 0
 _command_busy_lock = threading.Lock()
 _listen_starting = False
@@ -1342,6 +1347,31 @@ def _background_recover() -> None:
         _recover_done.set()
 
 
+def looks_like_leftover_hue_endpoint(
+    name: str,
+    product: str = "",
+    source: str = "",
+    endpoint: int = 0,
+) -> bool:
+    """Hue Bridge dummy endpoints are named like 'BSB003 96' (model + endpoint, no bulb label)."""
+    if endpoint <= 0:
+        return False
+    label = (name or "").strip()
+    if not label:
+        return False
+    if re.fullmatch(rf"[A-Z]{{2,}}[A-Z0-9]*[0-9][A-Z0-9]*\s+{endpoint}", label, re.I):
+        return True
+    suffix = f" {endpoint}"
+    for base in (product or "", source or ""):
+        base = base.strip()
+        if not base or label.lower() != f"{base}{suffix}".lower():
+            continue
+        low = base.lower()
+        if "bridge" in low or re.fullmatch(r"[a-z]{2,}[a-z0-9]*[0-9][a-z0-9]*", low):
+            return True
+    return False
+
+
 def looks_like_uninterviewed_stub(devices: list[dict[str, Any]]) -> bool:
     if not devices:
         return False
@@ -1641,6 +1671,86 @@ def poll_light_attributes() -> None:
     refresh_live_from_nodes()
 
 
+def node_endpoint_count(node: dict[str, Any]) -> int:
+    attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
+    return sum(1 for endpoint in endpoint_ids(attributes) if endpoint > 0)
+
+
+def scan_candidate_node_ids(nodes: list[dict[str, Any]], cap: int = SCAN_NODE_CAP) -> list[int]:
+    scored: list[tuple[int, int, int]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        try:
+            node_id = int(node.get("node_id") or node.get("nodeId") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+        if node_id <= 0:
+            continue
+        is_bridge = bool(node.get("is_bridge") or node.get("isBridge") or False)
+        ep_count = node_endpoint_count(node)
+        if not is_bridge and ep_count <= 3:
+            continue
+        scored.append((0 if is_bridge else 1, -ep_count, node_id))
+    scored.sort()
+    out: list[int] = []
+    seen: set[int] = set()
+    for _, _, node_id in scored:
+        if node_id in seen:
+            continue
+        seen.add(node_id)
+        out.append(node_id)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def scan_existing_nodes(*, force: bool = False) -> dict[str, Any]:
+    global _scan_due_at
+    if not _scan_lock.acquire(blocking=force):
+        return {"ok": True, "busy": True, "interviewed": [], "devices": current_live_devices()}
+    try:
+        rpc = matter_rpc("get_nodes", timeout=15.0, channel=CMD_CHANNEL)
+        nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
+        if not nodes:
+            nodes = nodes_from_disk()
+        candidates = scan_candidate_node_ids(nodes)
+        interviewed: list[int] = []
+        for node_id in candidates:
+            if command_in_flight() and not force:
+                break
+            matter_rpc("interview_node", {"node_id": node_id}, timeout=45.0, channel=CMD_CHANNEL)
+            interviewed.append(node_id)
+        rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
+        if rpc.get("ok"):
+            devices = flatten_nodes(nodes_from_result(rpc.get("result")))
+            if devices:
+                remember_live_devices(devices)
+        _scan_due_at = time.time() + SCAN_INTERVAL_S
+        return {
+            "ok": True,
+            "interviewed": interviewed,
+            "devices": current_live_devices(),
+        }
+    finally:
+        _scan_lock.release()
+
+
+def maybe_scan_new_endpoints() -> None:
+    global _scan_due_at
+    now = time.time()
+    if _scan_due_at <= 0:
+        _scan_due_at = now + FIRST_SCAN_DELAY_S
+        return
+    if now < _scan_due_at or command_in_flight():
+        return
+    _scan_due_at = now + SCAN_INTERVAL_S
+    try:
+        scan_existing_nodes(force=False)
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter endpoint scan failed: {exc}", flush=True)
+
+
 def start_state_poll() -> None:
     global _state_poll_started
     if _state_poll_started:
@@ -1655,6 +1765,7 @@ def start_state_poll() -> None:
                 kick_listening()
                 poll_light_attributes()
                 poll_vacuum_attributes()
+                maybe_scan_new_endpoints()
             except Exception as exc:  # noqa: BLE001
                 print(f"matter state poll failed: {exc}", flush=True)
                 reset_ws(POLL_CHANNEL)
@@ -4718,6 +4829,8 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             type_ids = device_type_ids(types)
             kind = device_kind(types)
             label = endpoint_name(attributes, endpoint, vendor, product)
+            if looks_like_leftover_hue_endpoint(label, product, source, endpoint):
+                continue
             kind = classify_by_name(kind, label, vendor, product, source)
             if endpoint_looks_heater(attributes, endpoint):
                 kind = "heater"
@@ -4833,7 +4946,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "ok": True,
             "engine": "matter-agent",
             "version": AGENT_VERSION,
-            "features": ["color", "color_temp", "thermostat", "vacuum"],
+            "features": ["color", "color_temp", "thermostat", "vacuum", "scan"],
         }
     if op == "status":
         probe = socket.socket()
@@ -4902,6 +5015,8 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "ok": True,
             "devices": current_live_devices(),
         }
+    if op == "scan":
+        return scan_existing_nodes(force=True)
     if op == "restore_nodes":
         restored = persist_node_stubs_and_reload()
         if restored:

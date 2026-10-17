@@ -467,6 +467,67 @@ def main() -> int:
     if not held or held[0].get("on") is not True:
         raise SystemExit(f"website On sticky {held}")
 
+    leftover_node = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            "0/40/1": "Signify Netherlands B.V.",
+            "0/40/3": "BSB003",
+            "2/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "2/6/0": True,
+            "2/8/0": 80,
+            "2/57/5": "Hall",
+            "96/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "96/6/0": True,
+            "96/8/0": 10,
+            "100/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "100/6/0": True,
+        },
+    }
+    leftover_ids = {str(row.get("id") or "") for row in agent.flatten_nodes([leftover_node])}
+    if "1:2" not in leftover_ids:
+        raise SystemExit(f"named Hue light missing {leftover_ids}")
+    if "1:96" in leftover_ids or "1:100" in leftover_ids:
+        raise SystemExit(f"leftover Hue endpoints flattened {leftover_ids}")
+    if not agent.looks_like_leftover_hue_endpoint("BSB003 96", "BSB003", "Hue Bridge", 96):
+        raise SystemExit("BSB003 96 should look leftover")
+    if agent.looks_like_leftover_hue_endpoint("Hall", "BSB003", "Hue Bridge", 12):
+        raise SystemExit("named Hall should not look leftover")
+
+    mill = {
+        "node_id": 26,
+        "available": True,
+        "attributes": {
+            "0/40/3": "Mill Wi-Fi Panel Heater Gen4",
+            "1/6/0": False,
+            "2/513/18": 2100,
+        },
+    }
+    if agent.scan_candidate_node_ids([leftover_node, mill]) != [1]:
+        raise SystemExit(f"scan should prefer the Hue Bridge {agent.scan_candidate_node_ids([leftover_node, mill])}")
+
+    scan_calls: list[tuple] = []
+
+    def fake_scan_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True, **_kwargs):
+        scan_calls.append((command, args or {}))
+        if command == "get_nodes":
+            return {"ok": True, "result": [leftover_node]}
+        if command == "interview_node":
+            return {"ok": True}
+        return {"ok": False, "error": "no"}
+
+    agent.matter_rpc = fake_scan_rpc  # type: ignore[method-assign]
+    agent._live_devices = []
+    scanned = agent.dispatch({"op": "scan"})
+    if not scanned.get("ok"):
+        raise SystemExit(f"scan op {scanned}")
+    if not any(command == "interview_node" and (args or {}).get("node_id") == 1 for command, args in scan_calls):
+        raise SystemExit(f"scan did not interview the Hue Bridge {scan_calls}")
+    scanned_ids = {str(row.get("id") or "") for row in scanned.get("devices") or []}
+    if "1:2" not in scanned_ids or "1:96" in scanned_ids:
+        raise SystemExit(f"scan devices {scanned_ids}")
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 

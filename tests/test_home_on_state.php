@@ -123,6 +123,37 @@ $noHue = YarboHome::overlayDeviceStates(
 );
 $noHueIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $noHue);
 assert_true(!in_array('1:96', $noHueIds, true) && !in_array('1:100', $noHueIds, true), 'overlay must not dump leftover Hue endpoints');
+assert_true(YarboHome::looksLikeLeftoverHueEndpoint(['id' => '1:96', 'name' => 'BSB003 96']), 'BSB003 96 is a leftover Hue endpoint');
+assert_true(!YarboHome::looksLikeLeftoverHueEndpoint(['id' => '1:12', 'name' => 'Hall', 'kind' => 'light']), 'named Hue lights are not leftover');
+assert_true(!YarboHome::looksLikeLeftoverHueEndpoint([
+    'id' => '25:1',
+    'name' => 'Mill Wi-Fi Panel Heater Gen4 1',
+    'product' => 'Mill Wi-Fi Panel Heater Gen4',
+    'kind' => 'heater',
+]), 'unnamed mill heaters are not leftover Hue endpoints');
+assert_true(!YarboHome::looksLikeLeftoverHueEndpoint([
+    'id' => '41:1',
+    'name' => 'Hue ambiance 1',
+    'product' => 'Hue ambiance',
+    'kind' => 'light',
+]), 'unnamed Hue lamps are not leftover Bridge endpoints');
+assert_true(YarboHome::looksLikeLeftoverHueEndpoint([
+    'id' => '1:96',
+    'name' => 'Hue Bridge 96',
+    'product' => 'Hue Bridge',
+]), 'Hue Bridge 96 is a leftover endpoint');
+$newHue = YarboHome::overlayDeviceStates(
+    [['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => true]],
+    [
+        ['id' => '1:2', 'kind' => 'light', 'on' => false],
+        ['id' => '1:12', 'node_id' => 1, 'endpoint' => 12, 'name' => 'Hall', 'kind' => 'light', 'on' => false],
+        ['id' => '1:96', 'name' => 'BSB003 96', 'kind' => 'light', 'on' => true, 'dimmable' => true],
+        ['id' => '1:100', 'name' => 'BSB003 100', 'kind' => 'light', 'on' => true, 'dimmable' => true],
+    ]
+);
+$newHueIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $newHue);
+assert_true(in_array('1:12', $newHueIds, true), 'overlay must add a new named Hue light');
+assert_true(!in_array('1:96', $newHueIds, true) && !in_array('1:100', $newHueIds, true), 'overlay still drops leftover Hue endpoints when adding a new light');
 
 $root = sys_get_temp_dir() . '/yarbo-home-on-' . bin2hex(random_bytes(3));
 mkdir($root . '/data/matter-server', 0775, true);
@@ -506,9 +537,16 @@ assert_true(str_contains($homePhp, 'cachedDeviceSetpoint'), 'heater On uses the 
 assert_true(str_contains($homePhp, '? 80.0 : 60.0'), 'heater Matter writes get a longer PHP wait');
 assert_true(str_contains($homePhp, "['op' => 'states'], 2.5, false)"), 'live mill list waits long enough for states');
 assert_true(str_contains($homePhp, 'unionDeviceLists'), 'pairing merges the new node into last_devices');
+assert_true(str_contains($homePhp, 'function scanDevices'), 'Look for devices re-interviews the Hue Bridge');
+assert_true(str_contains($homePhp, 'looksLikeLeftoverHueEndpoint'), 'new Hue lights skip leftover Bridge endpoints');
 assert_true(str_contains($homePhp, 'function countsTowardRoomOn'), 'rooms ignore cameras when choosing green');
 assert_true(str_contains($homePhp, "if (self::countsTowardRoomOn(\$device) && !empty(\$device['on']))"), 'room on only from switchable devices');
 assert_true(str_contains($js, "btn.textContent = 'Adding…'"), 'Add device shows Adding while pairing');
+assert_true(str_contains($js, "action: 'scan'"), 'Look for devices calls scan');
+assert_true(str_contains($js, 'home-scene-filter'), 'scene editor search');
+assert_true(str_contains($js, "homeSceneListMode === 'in'"), 'scene editor In scene tab');
+assert_true(str_contains($js, 'function homeSceneEligible'), 'scene editor skips vacuums and cameras');
+assert_true(str_contains($js, 'on: onEl ? Boolean(onEl.checked) : prev.on'), 'ticking a compact scene row keeps the live on state');
 assert_true(str_contains($js, 'loadHomeDashboard({ force: true })'), 'pairing reloads Home even if a poll is in flight');
 assert_true(str_contains($js, 'applyHomeHiddenLocal(id, true)'), 'Hide must move the tile without a full page refresh');
 assert_true(str_contains($js, 'await reloadHomeList()'), 'Hide must force-reload Home');
@@ -524,5 +562,8 @@ assert_true(str_contains($css, 'grid-area: label'), 'manage name box sits in its
 assert_true(str_contains($css, 'handle label label label manage'), 'manage name row is not shared with heater controls');
 assert_true(str_contains($css, 'flex: 1 1 8rem'), 'manage name input can grow once it has a row');
 assert_true(str_contains($css, '.home-device--camera.is-on'), 'camera is-on must reset to the neutral row');
+assert_true(str_contains($css, '.home-scene-filter'), 'scene editor search field');
+assert_true(str_contains($css, 'max-height: min(28rem, 60vh)'), 'scene member list scrolls instead of growing');
+assert_true(str_contains($css, '.home-scene-member:not(.is-in)'), 'unticked scene rows stay compact');
 
 echo "ok\n";

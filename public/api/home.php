@@ -33,13 +33,14 @@ if (!$hub->enabled(YarboHub::MODULE_HOME) && $action !== 'setup') {
     json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
 }
 
-set_time_limit($action === 'commission' ? 110 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'group_command' || $action === 'scene_run' || $action === 'scene_off' ? 180 : ($action === 'command' ? 100 : 70))));
+set_time_limit($action === 'commission' || $action === 'scan' ? 110 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'group_command' || $action === 'scene_run' || $action === 'scene_off' ? 180 : ($action === 'command' ? 100 : 70))));
 ignore_user_abort($action === 'setup');
 
 try {
     $result = match ($action) {
         'setup' => $home->startSetup(),
         'commission' => $home->commission((string) ($input['code'] ?? '')),
+        'scan' => $home->scanDevices(),
         'forget' => $home->forgetNode((int) ($input['node_id'] ?? 0)),
         'hide' => $home->hideDevice((string) ($input['id'] ?? ''), true),
         'unhide' => $home->hideDevice((string) ($input['id'] ?? ''), false),

@@ -636,6 +636,75 @@ final class YarboHome
     }
 
     /**
+     * Re-interview paired bridges so Hue lights added in the Hue / Apple Home app appear.
+     *
+     * @return array<string, mixed>
+     */
+    public function scanDevices(): array
+    {
+        $agent = YarboMatterAgentClient::fromEnv();
+        $result = $agent->request(['op' => 'scan'], 95.0);
+        if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
+            $result = $agent->request(['op' => 'nodes', 'quick' => false], 95.0);
+        }
+        if (!($result['ok'] ?? false)) {
+            return [
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Could not look for devices'),
+            ];
+        }
+
+        $incoming = [];
+        foreach (is_array($result['devices'] ?? null) ? $result['devices'] : [] as $row) {
+            if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
+                continue;
+            }
+            $incoming[] = $row;
+        }
+        $store = $this->load();
+        $before = [];
+        foreach ($store['last_devices'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '') {
+                $before[$id] = true;
+            }
+        }
+        $merged = $incoming === []
+            ? ($store['last_devices'] ?? [])
+            : self::unionDeviceLists($store['last_devices'] ?? [], $incoming);
+        if ($incoming !== []) {
+            $merged = self::overlayDeviceStates($merged, $incoming);
+        }
+        $added = 0;
+        foreach ($merged as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '' && !isset($before[$id])) {
+                $added++;
+            }
+        }
+        $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
+        if ($merged !== []) {
+            $this->writeDeviceCache(
+                $cachePath,
+                $merged,
+                YarboMatterFabric::storageMtime($this->projectRoot . '/data/matter-server')
+            );
+            $this->rememberDevices($merged);
+        }
+        $message = $added === 0
+            ? 'No new devices. Hue lights added in the Hue or Apple Home app can take a minute to appear.'
+            : ($added === 1 ? 'Found 1 new device.' : 'Found ' . $added . ' new devices.');
+
+        return ['ok' => true, 'message' => $message, 'added' => $added];
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
@@ -2051,26 +2120,83 @@ final class YarboHome
             $out[] = $device;
         }
         foreach ($byId as $liveId => $live) {
-            if (isset($used[$liveId]) || !self::liveRowLooksHeater($live)) {
+            if (isset($used[$liveId]) || self::looksLikeLeftoverHueEndpoint($live)) {
                 continue;
             }
-            $nid = self::rowNodeId($live, $liveId);
-            $already = false;
-            foreach ($out as $existing) {
-                if (!is_array($existing) || !self::liveRowLooksHeater($existing)) {
-                    continue;
+            if (self::liveRowLooksHeater($live)) {
+                $nid = self::rowNodeId($live, $liveId);
+                $already = false;
+                foreach ($out as $existing) {
+                    if (!is_array($existing) || !self::liveRowLooksHeater($existing)) {
+                        continue;
+                    }
+                    if ($nid > 0 && self::rowNodeId($existing) === $nid) {
+                        $already = true;
+                        break;
+                    }
                 }
-                if ($nid > 0 && self::rowNodeId($existing) === $nid) {
-                    $already = true;
-                    break;
+                if (!$already) {
+                    $out[] = $live;
                 }
+                continue;
             }
-            if (!$already) {
+            if (self::liveRowLooksAddableDevice($live)) {
                 $out[] = $live;
             }
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    /**
+     * Dummy Hue Bridge endpoints named like "BSB003 96" (product + endpoint, no bulb label).
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function looksLikeLeftoverHueEndpoint(array $row): bool
+    {
+        $name = trim((string) ($row['name'] ?? ''));
+        $endpoint = (int) ($row['endpoint'] ?? 0);
+        if ($endpoint <= 0) {
+            $id = trim((string) ($row['id'] ?? ''));
+            if (str_contains($id, ':')) {
+                $endpoint = (int) explode(':', $id, 2)[1];
+            }
+        }
+        if ($name === '' || $endpoint <= 0) {
+            return false;
+        }
+        if (preg_match('/^[A-Z]{2,}[A-Z0-9]*[0-9][A-Z0-9]*\s+' . preg_quote((string) $endpoint, '/') . '$/i', $name)) {
+            return true;
+        }
+        $suffix = ' ' . $endpoint;
+        foreach ([(string) ($row['product'] ?? ''), (string) ($row['source'] ?? '')] as $base) {
+            $base = trim($base);
+            if ($base === '' || strcasecmp($name, $base . $suffix) !== 0) {
+                continue;
+            }
+            $low = strtolower($base);
+            if (str_contains($low, 'bridge') || preg_match('/^[a-z]{2,}[a-z0-9]*[0-9][a-z0-9]*$/', $low)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Extra live lights/plugs/switches the cache has not stored yet (new Hue bulbs on the Bridge).
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function liveRowLooksAddableDevice(array $row): bool
+    {
+        $kind = strtolower(trim((string) ($row['kind'] ?? '')));
+
+        return in_array($kind, [self::KIND_LIGHT, self::KIND_PLUG, self::KIND_SWITCH], true);
     }
 
     /**

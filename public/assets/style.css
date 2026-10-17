@@ -3655,19 +3655,69 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     font-size: 0.9rem;
 }
 
+.home-scene-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+    margin: 0 0 0.45rem;
+}
+
+.home-scene-filter {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+
+.home-scene-tabs {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.home-scene-tabs .is-active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+}
+
 .home-scene-members {
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
     margin: 0 0 0.85rem;
+    max-height: min(28rem, 60vh);
+    overflow: auto;
+    padding-right: 0.1rem;
 }
 
 .home-scene-room {
-    margin: 0.45rem 0 0.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    width: 100%;
+    margin: 0.2rem 0 0;
+    padding: 0.28rem 0.2rem;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
     font-size: 0.78rem;
     font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+}
+
+.home-scene-room-count {
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--muted);
 }
 
@@ -3680,6 +3730,11 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     border-radius: 8px;
     padding: 0.28rem 0.45rem;
     background: var(--surface);
+}
+
+.home-scene-member:not(.is-in) {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0.16rem 0.45rem;
 }
 
 .home-scene-member.is-in {
@@ -4014,6 +4069,10 @@ body.home-is-reordering {
 
     .home-scene-member {
         grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .home-scene-member:not(.is-in) {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .home-scene-member input[type="range"],

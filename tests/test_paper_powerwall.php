@@ -25,9 +25,9 @@ $html = (string) file_get_contents($root . '/public/index.php');
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
 
 assert_true(str_contains($mver, '#define PAPERMONO_FW_VERSION "0.1.69"'), 'firmware 0.1.69');
-assert_true(str_contains($cver, '#define PAPERMONO_FW_VERSION "0.2.19-colour"'), 'firmware 0.2.19-colour');
+assert_true(str_contains($cver, '#define PAPERMONO_FW_VERSION "0.2.20-colour"'), 'firmware 0.2.20-colour');
 assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.69';"), 'panel firmware pin 0.1.69');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.19-colour';"), 'panel colour pin 0.2.19-colour');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.20-colour';"), 'panel colour pin 0.2.20-colour');
 assert_true(str_contains($php, "'powerwall_grid'"), 'compact sends grid');
 assert_true(str_contains($php, "'powerwall_battery'"), 'compact sends battery flow');
 assert_true(str_contains($pwPhp, 'function formatFlowLabel'), 'directed watt labels');
@@ -41,7 +41,11 @@ assert_true(str_contains($html, 'Grid       Export 0.8 kW'), 'PaperMono preview 
 assert_true(str_contains($html, 'Battery    Charge 0.4 kW'), 'PaperMono preview Battery');
 assert_true(str_contains($html, 'Grid      Export 0.8 kW'), 'Paper Colour preview Grid');
 assert_true(str_contains($html, 'firmware 0.1.69'), 'settings hint 0.1.69');
-assert_true(str_contains($html, '0.2.19-colour'), 'settings hint 0.2.19-colour');
+assert_true(str_contains($html, '0.2.20-colour'), 'settings hint 0.2.20-colour');
+assert_true(str_contains($color, 'void finishEpdFrame()'), 'Paper Colour buffers a frame then one refresh');
+assert_true(str_contains($color, 'M5.Display.startWrite();'), 'Paper Colour startWrite before drawing');
+assert_true(str_contains($color, 'M5.Display.endWrite();'), 'Paper Colour endWrite before display');
+assert_true(!str_contains($color, 'partialRefreshCount'), 'Paper Colour does not stream fast refreshes on Spectra 6');
 assert_true(str_contains($change, '## [4.0.74]'), 'changelog 4.0.74');
 
 assert_true(YarboPowerwall::formatFlowLabel(-1200, 'Import', 'Export') === 'Export 1200W', 'grid export label');

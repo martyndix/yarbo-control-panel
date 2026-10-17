@@ -177,7 +177,9 @@ foreach ([
     'paperNetGet',
     'paperNetLanReachable',
     'WiFi.SSID() != wifiSsid',
-    '#define PAPERMONO_FW_VERSION "0.2.19-colour"',
+    '#define PAPERMONO_FW_VERSION "0.2.20-colour"',
+    'void finishEpdFrame()',
+    'M5.Display.startWrite();',
 ] as $needle) {
     $hay = $color . "\n" . file_get_contents(__DIR__ . '/../firmware/papercolor/src/paper_net.h') . "\n" . $cver;
     if (!str_contains($hay, $needle)) {

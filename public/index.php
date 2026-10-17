@@ -595,7 +595,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-                            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. Tick UniFi devices in Settings → UniFi to show them here too. A Hue Bridge is one pairing: every Hue light then appears as its own row. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps. Tap ⚙️ to drag rooms, groups, lights, and scenes into the order you want.</p>
+                            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. Tick UniFi devices in Settings → UniFi to show them here too. A Hue Bridge is one pairing: every Hue light then appears as its own row. New Hue bulbs show up after Look for devices, or within about 15 minutes — do not pair the Bridge again. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps. Tap ⚙️ to drag rooms, groups, lights, and scenes into the order you want.</p>
             <p id="home-server-status" class="updated">Matter server: —</p>
             <p id="home-setup-status" class="hint hidden"></p>
             <button type="button" class="btn btn-secondary hidden" id="home-setup">Set up Matter server</button>
@@ -606,9 +606,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <input type="text" id="home-pair-code" spellcheck="false" autocomplete="off" placeholder="11-digit code or MT:…">
                     </label>
                     <button type="button" class="btn" id="home-pair">Add device</button>
+                    <button type="button" class="btn btn-secondary" id="home-scan">Look for devices</button>
                 </div>
                 <p id="home-pair-status" class="hint hidden" role="status"></p>
-                <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice.</p>
+                <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice. Lights you later add in Hue or Apple Home appear here after Look for devices, or on the next hunt (about every 15 minutes).</p>
             </div>
             <div id="home-room-add" class="home-room-add">
                 <input type="text" id="home-room-name" placeholder="Kitchen" maxlength="32" aria-label="New room name">
@@ -626,7 +627,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
             <div class="home-manage-extras">
             <h3 class="settings-subtitle">Scene editor</h3>
-            <p class="hint">Pick which lights belong to a scene and set on/off, brightness, and colour. PaperMono can run a scene and tap again to turn those lights off. These are not Apple or Hue scenes.</p>
+            <p class="hint">Pick which lights belong to a scene and set on/off, brightness, and colour. Search or open In scene to skip the long list. PaperMono can run a scene and tap again to turn those lights off. These are not Apple or Hue scenes.</p>
             <div id="home-scene-editor" class="home-scene-editor">
                 <div class="home-scene-add">
                     <input type="text" id="home-scene-name" placeholder="Evening" maxlength="32" aria-label="Scene name">
@@ -635,6 +636,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="btn btn-secondary hidden" id="home-scene-cancel">Cancel edit</button>
                 </div>
                 <p class="hint" id="home-scene-editor-hint">Tick only the lights this scene should change. Unticked lights are left alone.</p>
+                <div class="home-scene-toolbar">
+                    <input type="search" id="home-scene-filter" class="home-scene-filter" placeholder="Search lights" autocomplete="off">
+                    <div class="home-scene-tabs" role="tablist" aria-label="Scene devices">
+                        <button type="button" class="btn btn-secondary btn-compact" id="home-scene-list-in" data-scene-list="in">In scene</button>
+                        <button type="button" class="btn btn-secondary btn-compact is-active" id="home-scene-list-all" data-scene-list="all">All</button>
+                    </div>
+                </div>
                 <div id="home-scene-members" class="home-scene-members"></div>
             </div>
             <h3 class="settings-subtitle">PaperMono HOUSE</h3>
@@ -1231,7 +1239,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.19-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.20-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -1798,7 +1806,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.69 / 0.2.19-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.69 / 0.2.20-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

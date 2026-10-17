@@ -317,7 +317,8 @@ def main() -> int:
     )
     try:
         ping = wait_ping()
-        assert ping.get("version") == 17, ping
+        assert int(ping.get("version") or 0) >= 52, ping
+        assert "scan" in (ping.get("features") or []), ping
         time.sleep(0.4)
         started = time.time()
         result = post({"op": "command", "id": "1:2", "action": "on"}, timeout=3.0)

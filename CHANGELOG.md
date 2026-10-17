@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.117] - 2026-10-17
+
+### Changed
+- Home looks for new Hue lights on the paired Bridge about every 15 minutes, and ⚙️ has **Look for devices**. Lights added in the Hue or Apple Home app then show on the list — do not pair the Bridge again.
+- Scene editor: search, **In scene** / **All**, collapsible rooms, and compact unticked rows, so 100+ Matter devices are not one long scroll.
+
+### Fixed
+- Paper Colour lock/Vestaboard was doing a full Spectra 6 refresh for almost every cell (tens of minutes). Frames now buffer with startWrite and refresh once. Firmware **0.2.20-colour**.
+
 ## [4.0.116] - 2026-10-17
 
 ### Fixed

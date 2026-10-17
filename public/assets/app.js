@@ -3087,6 +3087,10 @@ let homeDrag = null;
 const homeExpandedRooms = new Set();
 const homeExpandedGroups = new Set();
 let homeSceneDraft = { id: '', name: '', included: {}, states: {} };
+let homeSceneFilter = '';
+let homeSceneListMode = 'all';
+const homeSceneCollapsedRooms = new Set();
+const homeSceneOpenRooms = new Set();
 let autoPageOpen = false;
 let autoDraft = null;
 const HOME_AUTO_POWERWALL_ID = 'powerwall';
@@ -3104,6 +3108,13 @@ let autoDrag = null;
 
 function homeResetSceneDraft() {
     homeSceneDraft = { id: '', name: '', included: {}, states: {} };
+    homeSceneListMode = 'all';
+}
+
+function homeSceneEligible(d) {
+    if (!d || homeIsUnifi(d)) return false;
+    const kind = String(d.kind || '');
+    return kind !== 'vacuum' && kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub';
 }
 
 function homeSceneStateForDevice(d, fallback) {
@@ -3125,7 +3136,7 @@ function homeFillSceneDraftFromOn() {
     const included = {};
     const states = {};
     (homeDash.devices || []).forEach((d) => {
-        if (homeIsUnifi(d) || !d.on) return;
+        if (!homeSceneEligible(d) || !d.on) return;
         included[d.id] = true;
         states[d.id] = {
             on: true,
@@ -3159,6 +3170,9 @@ function homeLoadSceneDraft(scene) {
         included,
         states,
     };
+    homeSceneListMode = 'in';
+    homeSceneCollapsedRooms.clear();
+    homeSceneOpenRooms.clear();
 }
 
 function readHomeSceneDraftFromDom() {
@@ -3169,12 +3183,18 @@ function readHomeSceneDraftFromDom() {
         if (!id) return;
         const included = Boolean(row.querySelector('[data-scene-include]')?.checked);
         homeSceneDraft.included[id] = included;
+        const prev = homeSceneDraft.states[id] || {};
+        const onEl = row.querySelector('[data-scene-on]');
+        const brightEl = row.querySelector('[data-scene-bright]');
+        const colorEl = row.querySelector('[data-scene-color]');
+        const kelvinEl = row.querySelector('[data-scene-kelvin]');
+        const setEl = row.querySelector('[data-scene-setpoint]');
         homeSceneDraft.states[id] = {
-            on: Boolean(row.querySelector('[data-scene-on]')?.checked),
-            brightness: Number(row.querySelector('[data-scene-bright]')?.value ?? 100),
-            hex: row.querySelector('[data-scene-color]')?.value || null,
-            kelvin: Number(row.querySelector('[data-scene-kelvin]')?.value || 0) || null,
-            setpoint: Number(row.querySelector('[data-scene-setpoint]')?.value || 0) || null,
+            on: onEl ? Boolean(onEl.checked) : prev.on,
+            brightness: brightEl ? Number(brightEl.value ?? 100) : prev.brightness,
+            hex: colorEl ? (colorEl.value || null) : prev.hex,
+            kelvin: kelvinEl ? (Number(kelvinEl.value || 0) || null) : prev.kelvin,
+            setpoint: setEl ? (Number(setEl.value || 0) || null) : prev.setpoint,
         };
     });
 }
@@ -3183,7 +3203,7 @@ function collectHomeSceneActions() {
     readHomeSceneDraftFromDom();
     const actions = [];
     (homeDash.devices || []).forEach((d) => {
-        if (homeIsUnifi(d) || !homeSceneDraft.included[d.id]) return;
+        if (!homeSceneEligible(d) || !homeSceneDraft.included[d.id]) return;
         const st = homeSceneStateForDevice(d);
         const on = Boolean(st.on);
         const heater = String(d.kind || '') === 'heater';
@@ -4327,6 +4347,33 @@ function homeHeaterActionsHtml(d) {
         </div>`;
 }
 
+function homeSceneQuery() {
+    return homeSceneFilter.trim().toLowerCase();
+}
+
+function homeSceneDeviceMatches(d, query) {
+    if (!query) return true;
+    const hay = `${d.name || ''} ${d.kind || ''} ${d.product || ''} ${d.vendor || ''}`.toLowerCase();
+    return hay.includes(query);
+}
+
+function homeSceneRoomCollapsed(roomId, selectedCount) {
+    if (homeSceneOpenRooms.has(roomId)) return false;
+    if (homeSceneCollapsedRooms.has(roomId)) return true;
+    if (homeSceneQuery() || homeSceneListMode === 'in') return false;
+    return selectedCount === 0;
+}
+
+function homeSceneRoomHeadingHtml(roomId, name, selectedCount, totalCount, collapsed) {
+    const extra = selectedCount
+        ? `${selectedCount} in scene · ${totalCount}`
+        : String(totalCount);
+    return `<button type="button" class="home-scene-room" data-scene-room="${escapeHtml(roomId)}" aria-expanded="${collapsed ? 'false' : 'true'}">
+        <span>${collapsed ? '▸' : '▾'} ${escapeHtml(name)}</span>
+        <span class="home-scene-room-count">${escapeHtml(extra)}</span>
+    </button>`;
+}
+
 function renderHomeSceneEditor() {
     const wrap = document.getElementById('home-scene-members');
     if (!wrap) return;
@@ -4347,15 +4394,32 @@ function renderHomeSceneEditor() {
                 ? `${selected} light${selected === 1 ? '' : 's'} in this scene. Unticked lights are left alone.`
                 : 'Tick only the lights this scene should change, or use lights that are on.');
     }
-    const devices = (homeDash.devices || []).filter((d) => !homeIsUnifi(d));
+    const inBtn = document.getElementById('home-scene-list-in');
+    const allBtn = document.getElementById('home-scene-list-all');
+    inBtn?.classList.toggle('is-active', homeSceneListMode === 'in');
+    allBtn?.classList.toggle('is-active', homeSceneListMode === 'all');
+    if (inBtn) inBtn.textContent = selected ? `In scene (${selected})` : 'In scene';
+    const devices = (homeDash.devices || []).filter((d) => homeSceneEligible(d));
+    const query = homeSceneQuery();
+    const visible = devices.filter((d) => {
+        if (homeSceneListMode === 'in' && !homeSceneDraft.included[d.id]) return false;
+        return homeSceneDeviceMatches(d, query);
+    });
+    if (allBtn) allBtn.textContent = `All (${devices.length})`;
     if (!devices.length) {
         wrap.innerHTML = '<p class="hint">Add Matter lights first, then pick which ones belong to the scene.</p>';
+        return;
+    }
+    if (!visible.length) {
+        wrap.innerHTML = `<p class="hint">${homeSceneListMode === 'in' && !query
+            ? 'Nothing in this scene yet. Open All, or use lights that are on.'
+            : 'No matching lights.'}</p>`;
         return;
     }
     const rooms = homeDash.rooms || [];
     const byRoom = new Map(rooms.map((r) => [r.id, []]));
     const ungrouped = [];
-    devices.forEach((d) => {
+    visible.forEach((d) => {
         if (d.room_id && byRoom.has(d.room_id)) byRoom.get(d.room_id).push(d);
         else ungrouped.push(d);
     });
@@ -4363,12 +4427,16 @@ function renderHomeSceneEditor() {
     rooms.forEach((room) => {
         const list = byRoom.get(room.id) || [];
         if (!list.length) return;
-        html += `<p class="home-scene-room">${escapeHtml(room.name)}</p>`;
-        html += list.map((d) => homeSceneMemberRowHtml(d)).join('');
+        const selectedCount = list.filter((d) => homeSceneDraft.included[d.id]).length;
+        const collapsed = homeSceneRoomCollapsed(room.id, selectedCount);
+        html += homeSceneRoomHeadingHtml(room.id, room.name, selectedCount, list.length, collapsed);
+        if (!collapsed) html += list.map((d) => homeSceneMemberRowHtml(d)).join('');
     });
     if (ungrouped.length) {
-        if (html) html += '<p class="home-scene-room">Ungrouped</p>';
-        html += ungrouped.map((d) => homeSceneMemberRowHtml(d)).join('');
+        const selectedCount = ungrouped.filter((d) => homeSceneDraft.included[d.id]).length;
+        const collapsed = homeSceneRoomCollapsed('_ungrouped', selectedCount);
+        html += homeSceneRoomHeadingHtml('_ungrouped', 'Ungrouped', selectedCount, ungrouped.length, collapsed);
+        if (!collapsed) html += ungrouped.map((d) => homeSceneMemberRowHtml(d)).join('');
     }
     wrap.innerHTML = html;
 }
@@ -4377,30 +4445,34 @@ function homeSceneMemberRowHtml(d) {
     const included = Boolean(homeSceneDraft.included[d.id]);
     const st = homeSceneStateForDevice(d);
     const on = Boolean(st.on);
+    const pick = `<label class="home-scene-member-pick"><input type="checkbox" data-scene-include ${included ? 'checked' : ''}> <span class="home-scene-member-name">${escapeHtml(d.name)}</span></label>`;
+    if (!included) {
+        return `<div class="home-scene-member" data-scene-member="${escapeHtml(d.id)}">${pick}</div>`;
+    }
     if (String(d.kind || '') === 'heater') {
         const min = Number(d.heating_min ?? 5);
         const max = Number(d.heating_max ?? 35);
         const set = st.setpoint != null ? Number(st.setpoint) : Number(d.heating_setpoint ?? 21);
-        return `<div class="home-scene-member${included ? ' is-in' : ''}${included && on ? ' is-on' : ''}" data-scene-member="${escapeHtml(d.id)}">
-        <label class="home-scene-member-pick"><input type="checkbox" data-scene-include ${included ? 'checked' : ''}> <span class="home-scene-member-name">${escapeHtml(d.name)}</span></label>
-        <label class="home-scene-on"><input type="checkbox" data-scene-on ${on ? 'checked' : ''} ${included ? '' : 'disabled'}> On</label>
-        <label class="home-heater-set">Set <input type="number" min="${min}" max="${max}" step="0.5" value="${escapeHtml(String(set))}" data-scene-setpoint ${included && on ? '' : 'disabled'} aria-label="Heating setpoint">°</label>
+        return `<div class="home-scene-member is-in${on ? ' is-on' : ''}" data-scene-member="${escapeHtml(d.id)}">
+        ${pick}
+        <label class="home-scene-on"><input type="checkbox" data-scene-on ${on ? 'checked' : ''}> On</label>
+        <label class="home-heater-set">Set <input type="number" min="${min}" max="${max}" step="0.5" value="${escapeHtml(String(set))}" data-scene-setpoint ${on ? '' : 'disabled'} aria-label="Heating setpoint">°</label>
     </div>`;
     }
     const bright = d.dimmable
-        ? `<input type="range" min="0" max="100" value="${Number(st.brightness ?? 100)}" data-scene-bright ${included && on ? '' : 'disabled'}>`
+        ? `<input type="range" min="0" max="100" value="${Number(st.brightness ?? 100)}" data-scene-bright ${on ? '' : 'disabled'}>`
         : '';
     const color = homeColorInputsHtml(
         d,
-        included && on,
+        on,
         st.hex,
         st.kelvin,
         'data-scene-color',
         'data-scene-kelvin'
     );
-    return `<div class="home-scene-member${included ? ' is-in' : ''}${included && on ? ' is-on' : ''}" data-scene-member="${escapeHtml(d.id)}">
-        <label class="home-scene-member-pick"><input type="checkbox" data-scene-include ${included ? 'checked' : ''}> <span class="home-scene-member-name">${escapeHtml(d.name)}</span></label>
-        <label class="home-scene-on"><input type="checkbox" data-scene-on ${on ? 'checked' : ''} ${included ? '' : 'disabled'}> On</label>
+    return `<div class="home-scene-member is-in${on ? ' is-on' : ''}" data-scene-member="${escapeHtml(d.id)}">
+        ${pick}
+        <label class="home-scene-on"><input type="checkbox" data-scene-on ${on ? 'checked' : ''}> On</label>
         ${bright}
         ${color}
     </div>`;
@@ -12503,10 +12575,53 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
         if (input) input.disabled = false;
     }
 });
+document.getElementById('home-scan')?.addEventListener('click', async () => {
+    const btn = document.getElementById('home-scan');
+    const status = document.getElementById('home-pair-status');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Looking…';
+    }
+    if (status) {
+        status.textContent = 'Looking for new Hue lights on the paired Bridge. This can take up to a minute.';
+        status.classList.remove('hidden');
+    }
+    try {
+        const data = await homeApi({ action: 'scan' }, 110000);
+        if (!data.ok) throw new Error(data.error || 'Look for devices failed');
+        const message = data.message || 'Looked for devices';
+        if (status) status.textContent = message;
+        showToast(message, 'success');
+        await loadHomeDashboard({ force: true });
+        window.setTimeout(() => loadHomeDashboard({ force: true }), 3000);
+    } catch (err) {
+        showToast(err.message || 'Look for devices failed', 'error');
+        if (status) {
+            status.textContent = err.message || 'Look for devices failed';
+            status.classList.remove('hidden');
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Look for devices';
+        }
+    }
+});
+document.getElementById('home-scene-filter')?.addEventListener('input', (event) => {
+    homeSceneFilter = String(event.target.value || '');
+    renderHomeSceneEditor();
+});
+document.querySelectorAll('[data-scene-list]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        homeSceneListMode = btn.getAttribute('data-scene-list') === 'in' ? 'in' : 'all';
+        renderHomeSceneEditor();
+    });
+});
 document.getElementById('home-scene-from-on')?.addEventListener('click', () => {
     const nameEl = document.getElementById('home-scene-name');
     homeSceneDraft.name = nameEl?.value.trim() || homeSceneDraft.name || '';
     homeFillSceneDraftFromOn();
+    homeSceneListMode = 'in';
     const count = Object.values(homeSceneDraft.included).filter(Boolean).length;
     if (!count) {
         showToast('No lights are on. Turn some on, then try again.', 'error');
@@ -12550,6 +12665,23 @@ document.getElementById('home-scene-members')?.addEventListener('change', (event
     const row = event.target.closest('[data-scene-member]');
     if (!row) return;
     readHomeSceneDraftFromDom();
+    renderHomeSceneEditor();
+});
+document.getElementById('home-scene-members')?.addEventListener('click', (event) => {
+    const heading = event.target.closest('[data-scene-room]');
+    if (!heading) return;
+    event.preventDefault();
+    readHomeSceneDraftFromDom();
+    const roomId = heading.getAttribute('data-scene-room') || '';
+    if (!roomId) return;
+    const collapsed = heading.getAttribute('aria-expanded') !== 'true';
+    if (collapsed) {
+        homeSceneOpenRooms.add(roomId);
+        homeSceneCollapsedRooms.delete(roomId);
+    } else {
+        homeSceneCollapsedRooms.add(roomId);
+        homeSceneOpenRooms.delete(roomId);
+    }
     renderHomeSceneEditor();
 });
 document.getElementById('home-scenes')?.addEventListener('click', async (event) => {

@@ -6,7 +6,7 @@ namespace Yarbo;
 
 final class YarboMatterAgentClient
 {
-    public const MIN_VERSION = 51;
+    public const MIN_VERSION = 52;
     private const SPAWN_COOLDOWN_S = 3.0;
 
     private static bool $spawnAttempted = false;
@@ -108,7 +108,7 @@ final class YarboMatterAgentClient
     {
         $error = strtolower((string) ($result['error'] ?? ''));
 
-        return $error !== '' && str_contains($error, 'unknown matter command');
+        return $error !== '' && (str_contains($error, 'unknown matter command') || str_contains($error, 'unknown op'));
     }
 
     public static function isNotRunningError(array $result): bool
