@@ -767,7 +767,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 </div>
                 <div class="auto-tray-wrap">
                     <h3 class="settings-subtitle">Add</h3>
-                    <p class="hint">Grouped by type, then room. Each chip shows the product (Hue, UniFi Floodlight, USP Sensor). Drag onto When or Then, or tap a chip.</p>
+                    <p class="hint">Search or open When / Then to skip the long list. Grouped by type, then room. Each chip shows the product (Hue, UniFi Floodlight, USP Sensor). Drag onto When or Then, or tap a chip.</p>
+                    <div class="auto-tray-toolbar">
+                        <input type="search" id="auto-tray-filter" class="auto-tray-filter" placeholder="Search devices" autocomplete="off">
+                        <div class="auto-tray-tabs" role="tablist" aria-label="Automation devices">
+                            <button type="button" class="btn btn-secondary btn-compact" id="auto-tray-list-when" data-auto-tray-list="when">When</button>
+                            <button type="button" class="btn btn-secondary btn-compact" id="auto-tray-list-then" data-auto-tray-list="then">Then</button>
+                            <button type="button" class="btn btn-secondary btn-compact is-active" id="auto-tray-list-all" data-auto-tray-list="all">All</button>
+                        </div>
+                    </div>
                     <div id="auto-tray" class="auto-tray"></div>
                 </div>
                 <div class="auto-editor-actions">

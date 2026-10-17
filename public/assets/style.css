@@ -3655,7 +3655,8 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     font-size: 0.9rem;
 }
 
-.home-scene-toolbar {
+.home-scene-toolbar,
+.auto-tray-toolbar {
     display: flex;
     flex-wrap: wrap;
     gap: 0.45rem;
@@ -3663,7 +3664,9 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     margin: 0 0 0.45rem;
 }
 
-.home-scene-filter {
+.home-scene-filter,
+.auto-tray-filter,
+.auto-if-device-filter {
     flex: 1 1 12rem;
     min-width: 8rem;
     padding: 0.4rem 0.55rem;
@@ -3674,12 +3677,14 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     font: inherit;
 }
 
-.home-scene-tabs {
+.home-scene-tabs,
+.auto-tray-tabs {
     display: flex;
     gap: 0.25rem;
 }
 
-.home-scene-tabs .is-active {
+.home-scene-tabs .is-active,
+.auto-tray-tabs .is-active {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 18%, var(--surface));
 }
@@ -4401,9 +4406,17 @@ button.unifi-live-open:focus-visible img {
     align-self: center;
 }
 
+.auto-tray-wrap {
+    display: grid;
+    gap: 0.35rem;
+}
+
 .auto-tray {
     display: grid;
-    gap: 0.85rem;
+    gap: 0.55rem;
+    max-height: min(28rem, 50vh);
+    overflow: auto;
+    padding-right: 0.1rem;
 }
 
 .auto-tray-group {
@@ -4411,12 +4424,32 @@ button.unifi-live-open:focus-visible img {
     gap: 0.35rem;
 }
 
-.auto-tray-label {
+.auto-tray-label,
+.auto-tray-room {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.45rem;
+    width: 100%;
     margin: 0;
+    padding: 0.28rem 0.2rem;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
     font-size: 0.72rem;
     font-weight: 650;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+}
+
+.auto-tray-count {
+    flex-shrink: 0;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--muted);
 }
 
@@ -4443,6 +4476,22 @@ button.unifi-live-open:focus-visible img {
     line-height: 1.2;
 }
 
+.auto-chip.is-in {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.auto-chip--if-device {
+    align-items: center;
+    border-radius: 12px;
+    max-width: 100%;
+}
+
+.auto-chip--if-device .auto-if-device-filter {
+    flex: 1 1 100%;
+    min-width: 8rem;
+    padding: 0.28rem 0.45rem;
+}
+
 .auto-chip-name {
     font-weight: 600;
 }
@@ -4456,13 +4505,13 @@ button.unifi-live-open:focus-visible img {
 }
 
 .auto-tray-room {
-    margin: 0.4rem 0 0.15rem;
+    margin: 0.25rem 0 0;
     font-size: 0.78rem;
-    font-weight: 650;
+    letter-spacing: 0.02em;
     color: var(--text);
 }
 
-.auto-tray-group .auto-tray-room:first-of-type {
+.auto-tray-label + .auto-tray-room {
     margin-top: 0.05rem;
 }
 
@@ -4473,6 +4522,11 @@ button.unifi-live-open:focus-visible img {
     font: inherit;
     font-size: 0.8rem;
     max-width: 7.5rem;
+}
+
+.auto-chip [data-auto-if-id] {
+    max-width: min(18rem, 70vw);
+    min-width: 9rem;
 }
 
 .auto-chip input[type="color"] {

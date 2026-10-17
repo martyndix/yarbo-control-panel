@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.118] - 2026-10-17
+
+### Changed
+- Home Automations Add list: search, **When** / **Then** / **All**, collapsible type groups and rooms, and a shorter scroll, so 100+ devices are not one long chip wall. Only if **Device is…** has a search box too.
+
 ## [4.0.117] - 2026-10-17
 
 ### Changed

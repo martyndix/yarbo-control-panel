@@ -3105,6 +3105,15 @@ const HOME_AUTO_PW_METRICS = {
 let homeAutoPlans = [];
 let autoNameLocked = false;
 let autoDrag = null;
+let homeAutoTrayFilter = '';
+let homeAutoTrayMode = 'all';
+const homeAutoTrayCollapsed = new Set();
+const homeAutoTrayOpen = new Set();
+const homeAutoIfDeviceQuery = new Map();
+const HOME_AUTO_TRAY_FOLD = new Set([
+    'lights', 'heaters', 'plugs', 'switches', 'relays', 'sensors',
+    'cameras', 'doors', 'controllers', 'vacuums', 'other',
+]);
 
 function homeResetSceneDraft() {
     homeSceneDraft = { id: '', name: '', included: {}, states: {} };
@@ -6514,7 +6523,8 @@ function homeAutoIfChipHtml(cond, index) {
         </div>`;
     }
     const devices = homeAutoAllDevices().filter((d) => d.id !== autoDraft?.trigger?.id);
-    const groups = homeAutoDeviceSelectGroups(devices);
+    const query = homeAutoIfDeviceQuery.get(index) || '';
+    const groups = homeAutoIfDeviceSelectGroupsFiltered(devices, cond.id, query);
     const opts = groups.map((group) =>
         `<optgroup label="${escapeHtml(group.label)}">${group.items.map((d) =>
             `<option value="${escapeHtml(d.id)}" ${d.id === cond.id ? 'selected' : ''}>${escapeHtml(homeAutoDeviceOptionLabel(d))}</option>`
@@ -6523,7 +6533,8 @@ function homeAutoIfChipHtml(cond, index) {
     const selected = homeAutoDeviceById(cond.id) || devices[0];
     const states = homeAutoIfStateOptions(selected);
     const state = states.some(([v]) => v === cond.state) ? cond.state : (states[0] ? states[0][0] : 'on');
-    return `<div class="auto-chip" data-auto-if-i="${index}">
+    return `<div class="auto-chip auto-chip--if-device" data-auto-if-i="${index}">
+        <input type="search" class="auto-if-device-filter" data-auto-if-filter="${index}" placeholder="Search devices" value="${escapeHtml(query)}" autocomplete="off" aria-label="Search devices">
         <select data-auto-if-id>${opts}</select>
         is
         <select data-auto-if-state>
@@ -6533,6 +6544,34 @@ function homeAutoIfChipHtml(cond, index) {
         </select>
         <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
     </div>`;
+}
+
+function homeAutoIfDeviceSelectGroupsFiltered(devices, selectedId, query) {
+    const groups = homeAutoDeviceSelectGroups(devices);
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return groups;
+    return groups
+        .map((group) => ({
+            ...group,
+            items: group.items.filter((d) => {
+                if (d.id === selectedId) return true;
+                const hay = `${homeAutoDeviceOptionLabel(d)} ${d.kind || ''} ${d.product || ''} ${d.vendor || ''}`.toLowerCase();
+                return hay.includes(q);
+            }),
+        }))
+        .filter((group) => group.items.length);
+}
+
+function homeAutoFillIfDeviceSelect(select, selectedId, query) {
+    if (!select) return;
+    const devices = homeAutoAllDevices().filter((d) => d.id !== autoDraft?.trigger?.id);
+    const groups = homeAutoIfDeviceSelectGroupsFiltered(devices, selectedId, query);
+    select.innerHTML = groups.map((group) =>
+        `<optgroup label="${escapeHtml(group.label)}">${group.items.map((d) =>
+            `<option value="${escapeHtml(d.id)}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(homeAutoDeviceOptionLabel(d))}</option>`
+        ).join('')}</optgroup>`
+    ).join('');
+    if (selectedId) select.value = selectedId;
 }
 
 function homeAutoIfStateOptions(d) {
@@ -6577,24 +6616,165 @@ function homeAutoDeviceSelectGroups(devices) {
         .map(([id, label]) => ({ id, label, items: buckets[id] }));
 }
 
+function homeAutoTrayQuery() {
+    return homeAutoTrayFilter.trim().toLowerCase();
+}
+
+function homeAutoResetTrayUi() {
+    homeAutoTrayFilter = '';
+    homeAutoTrayMode = 'all';
+    homeAutoTrayCollapsed.clear();
+    homeAutoTrayOpen.clear();
+    homeAutoIfDeviceQuery.clear();
+    const filterEl = document.getElementById('auto-tray-filter');
+    if (filterEl) filterEl.value = '';
+}
+
+function homeAutoTrayUsedKeys() {
+    const keys = new Set();
+    if (!autoDraft) return keys;
+    homeAutoTriggers().forEach((trigger) => {
+        if (!trigger) return;
+        if (trigger.type === 'time') keys.add('time:');
+        else if (trigger.type === 'sun') keys.add(`${trigger.event === 'sunrise' ? 'sunrise' : 'sunset'}:`);
+        else if (trigger.type === 'threshold' && trigger.id === HOME_AUTO_POWERWALL_ID) {
+            keys.add(`powerwall:${trigger.metric || 'battery'}`);
+        } else if (trigger.type === 'robot') {
+            keys.add(`robot:${trigger.id}:${trigger.event || 'error'}`);
+        } else if (trigger.id) keys.add(`device:${trigger.id}`);
+    });
+    (autoDraft.actions || []).forEach((action) => {
+        if (!action) return;
+        if (action.kind === 'scene') keys.add(`scene:${String(action.id || '').replace(/^scene:/, '')}`);
+        else if (action.kind === 'yarbo') keys.add(`yarbo:${action.command || ''}`);
+        else if (action.id) keys.add(`device:${action.id}`);
+    });
+    (autoDraft.conditions || []).forEach((cond) => {
+        if (!cond) return;
+        if (cond.type === 'time_window') keys.add('time:');
+        else if (cond.type === 'sun_window') {
+            keys.add('sunset:');
+            keys.add('sunrise:');
+        } else if (cond.type === 'threshold' && cond.id === HOME_AUTO_POWERWALL_ID) {
+            keys.add(`powerwall:${cond.metric || 'battery'}`);
+        } else if (cond.type === 'robot') {
+            keys.add(`robot:${cond.id}:${cond.event || 'error'}`);
+        } else if (cond.id) keys.add(`device:${cond.id}`);
+    });
+    return keys;
+}
+
+function homeAutoTrayFolded(key, defaultFold) {
+    if (homeAutoTrayOpen.has(key)) return false;
+    if (homeAutoTrayCollapsed.has(key)) return true;
+    return Boolean(defaultFold);
+}
+
+function homeAutoTrayFoldHeading(key, name, usedCount, totalCount, collapsed, isRoom) {
+    const extra = usedCount ? `${usedCount} in this rule · ${totalCount}` : String(totalCount);
+    const cls = isRoom ? 'auto-tray-room' : 'auto-tray-label';
+    return `<button type="button" class="${cls}" data-auto-tray-fold="${escapeHtml(key)}" aria-expanded="${collapsed ? 'false' : 'true'}">
+        ${collapsed ? '▸' : '▾'} ${escapeHtml(name)}
+        <span class="auto-tray-count">${escapeHtml(extra)}</span>
+    </button>`;
+}
+
+function homeAutoTrayChipSpec(kind, id, name, extraClass, meta, zone) {
+    return {
+        kind,
+        id: id || '',
+        name,
+        extraClass: extraClass || '',
+        meta: meta || '',
+        zone: zone || 'both',
+    };
+}
+
+function homeAutoTrayChipHtml(chip) {
+    const extra = [chip.extraClass, chip.used ? 'is-in' : ''].filter(Boolean).join(' ');
+    return homeAutoTrayChip(chip.kind, chip.id, chip.name, extra, chip.meta);
+}
+
+function homeAutoTrayChipMatches(chip, groupLabel, roomLabel, query, mode) {
+    if (mode === 'when' && chip.zone === 'then') return false;
+    if (mode === 'then' && chip.zone === 'when') return false;
+    if (!query) return true;
+    const hay = `${chip.name} ${chip.meta || ''} ${groupLabel} ${roomLabel} ${chip.kind}`.toLowerCase();
+    return hay.includes(query);
+}
+
+function homeAutoTrayFilterGroups(groups, query, mode, used) {
+    return groups.map((group) => {
+        const sourceRooms = Array.isArray(group.rooms) && group.rooms.length
+            ? group.rooms
+            : [{ label: '', chips: group.chips || [] }];
+        const rooms = sourceRooms.map((room) => {
+            const chips = (room.chips || [])
+                .filter((chip) => homeAutoTrayChipMatches(chip, group.label, room.label || '', query, mode))
+                .map((chip) => ({ ...chip, used: used.has(`${chip.kind}:${chip.id || ''}`) }));
+            return {
+                label: room.label,
+                chips,
+                usedCount: chips.filter((chip) => chip.used).length,
+            };
+        }).filter((room) => room.chips.length);
+        const chips = rooms.flatMap((room) => room.chips);
+        return {
+            ...group,
+            rooms: Array.isArray(group.rooms) && group.rooms.length ? rooms : null,
+            chips,
+            usedCount: chips.filter((chip) => chip.used).length,
+        };
+    }).filter((group) => group.chips.length);
+}
+
 function renderHomeAutoTray() {
     const tray = document.getElementById('auto-tray');
     if (!tray) return;
-    const groups = homeAutoTrayGroups(homeAutoAllDevices(), homeDash.scenes || []);
+    const query = homeAutoTrayQuery();
+    const mode = homeAutoTrayMode === 'when' || homeAutoTrayMode === 'then' ? homeAutoTrayMode : 'all';
+    homeAutoTrayMode = mode;
+    document.getElementById('auto-tray-list-when')?.classList.toggle('is-active', mode === 'when');
+    document.getElementById('auto-tray-list-then')?.classList.toggle('is-active', mode === 'then');
+    document.getElementById('auto-tray-list-all')?.classList.toggle('is-active', mode === 'all');
+    const groups = homeAutoTrayFilterGroups(
+        homeAutoTrayGroups(homeAutoAllDevices(), homeDash.scenes || []),
+        query,
+        mode,
+        homeAutoTrayUsedKeys()
+    );
+    if (!groups.length) {
+        tray.innerHTML = `<p class="hint">${query
+            ? 'No matching devices.'
+            : (mode === 'when'
+                ? 'Nothing for When. Open All or Then.'
+                : (mode === 'then'
+                    ? 'Nothing for Then. Open All or When.'
+                    : 'Add devices first.'))}</p>`;
+        return;
+    }
     tray.innerHTML = groups.map((group) => {
+        const groupKey = `g:${group.id}`;
+        const collapsed = homeAutoTrayFolded(groupKey, HOME_AUTO_TRAY_FOLD.has(group.id) && !query);
+        const heading = homeAutoTrayFoldHeading(groupKey, group.label, group.usedCount, group.chips.length, collapsed);
+        if (collapsed) {
+            return `<div class="auto-tray-group" data-auto-group="${escapeHtml(group.id)}">${heading}</div>`;
+        }
         const rooms = Array.isArray(group.rooms) ? group.rooms : [];
         const body = rooms.length
             ? rooms.map((room) => {
-                const heading = room.label
-                    ? `<h5 class="auto-tray-room">${escapeHtml(room.label)}</h5>`
+                const roomKey = `${groupKey}:${room.label || '_'}`;
+                const roomCollapsed = room.label
+                    ? homeAutoTrayFolded(roomKey, room.usedCount === 0 && !query)
+                    : false;
+                const roomHeading = room.label
+                    ? homeAutoTrayFoldHeading(roomKey, room.label, room.usedCount, room.chips.length, roomCollapsed, true)
                     : '';
-                return `${heading}<div class="auto-tray-chips">${(room.chips || []).join('')}</div>`;
+                if (roomCollapsed) return roomHeading;
+                return `${roomHeading}<div class="auto-tray-chips">${room.chips.map(homeAutoTrayChipHtml).join('')}</div>`;
             }).join('')
-            : `<div class="auto-tray-chips">${(group.chips || []).join('')}</div>`;
-        return `<div class="auto-tray-group" data-auto-group="${escapeHtml(group.id)}">
-            <h4 class="auto-tray-label">${escapeHtml(group.label)}</h4>
-            ${body}
-        </div>`;
+            : `<div class="auto-tray-chips">${group.chips.map(homeAutoTrayChipHtml).join('')}</div>`;
+        return `<div class="auto-tray-group" data-auto-group="${escapeHtml(group.id)}">${heading}${body}</div>`;
     }).join('');
 }
 
@@ -6745,7 +6925,14 @@ function homeAutoTrayDeviceRooms(devices) {
             rooms.push({ label, chips: [] });
         }
         rooms[rooms.length - 1].chips.push(
-            homeAutoTrayChip('device', d.id, d.name || d.id, 'auto-chip--device', homeAutoTypeLabel(d))
+            homeAutoTrayChipSpec(
+                'device',
+                d.id,
+                d.name || d.id,
+                'auto-chip--device',
+                homeAutoTypeLabel(d),
+                homeAutoThenOk(d) ? 'both' : 'when'
+            )
         );
     });
     return rooms;
@@ -6775,28 +6962,28 @@ function homeAutoTrayGroups(devices, scenes) {
         buckets[id] = [];
     });
     buckets.time.push(
-        homeAutoTrayChip('time', '', 'Time', 'auto-chip--clock'),
-        homeAutoTrayChip('sunset', '', 'Sunset', 'auto-chip--clock'),
-        homeAutoTrayChip('sunrise', '', 'Sunrise', 'auto-chip--clock')
+        homeAutoTrayChipSpec('time', '', 'Time', 'auto-chip--clock', '', 'when'),
+        homeAutoTrayChipSpec('sunset', '', 'Sunset', 'auto-chip--clock', '', 'when'),
+        homeAutoTrayChipSpec('sunrise', '', 'Sunrise', 'auto-chip--clock', '', 'when')
     );
     if (homeAutoPowerwallOn()) {
         Object.entries(HOME_AUTO_PW_METRICS).forEach(([id, row]) => {
-            buckets.powerwall.push(homeAutoTrayChip('powerwall', id, row.label, 'auto-chip--powerwall'));
+            buckets.powerwall.push(homeAutoTrayChipSpec('powerwall', id, row.label, 'auto-chip--powerwall', '', 'when'));
         });
     }
     if (homeAutoYarboOn()) {
         buckets.yarbo.push(
-            homeAutoTrayChip('robot', `${HOME_AUTO_YARBO_ID}:error`, 'Error', 'auto-chip--robot'),
-            homeAutoTrayChip('robot', `${HOME_AUTO_YARBO_ID}:ok`, 'OK', 'auto-chip--robot'),
-            homeAutoTrayChip('yarbo', 'start_plan', 'Start plan', 'auto-chip--robot'),
-            homeAutoTrayChip('yarbo', 'return_to_dock', 'Dock', 'auto-chip--robot'),
-            homeAutoTrayChip('yarbo', 'stop', 'Stop', 'auto-chip--robot'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:error`, 'Error', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:ok`, 'OK', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('yarbo', 'start_plan', 'Start plan', 'auto-chip--robot', '', 'then'),
+            homeAutoTrayChipSpec('yarbo', 'return_to_dock', 'Dock', 'auto-chip--robot', '', 'then'),
+            homeAutoTrayChipSpec('yarbo', 'stop', 'Stop', 'auto-chip--robot', '', 'then'),
         );
     }
     if (homeAutoLymowOn()) {
         buckets.lymow.push(
-            homeAutoTrayChip('robot', `${HOME_AUTO_LYMOW_ID}:error`, 'Error', 'auto-chip--robot'),
-            homeAutoTrayChip('robot', `${HOME_AUTO_LYMOW_ID}:ok`, 'OK', 'auto-chip--robot'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:error`, 'Error', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:ok`, 'OK', 'auto-chip--robot', '', 'when'),
         );
     }
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
@@ -6815,7 +7002,7 @@ function homeAutoTrayGroups(devices, scenes) {
         buckets[`${gid}__rooms`] = rooms;
     });
     [...scenes].sort(byName).forEach((s) => {
-        buckets.scenes.push(homeAutoTrayChip('scene', s.id, s.name || 'Scene'));
+        buckets.scenes.push(homeAutoTrayChipSpec('scene', s.id, s.name || 'Scene', '', '', 'then'));
     });
     return order
         .filter(([id]) => (buckets[id] || []).length)
@@ -6978,6 +7165,7 @@ function homeAutoClickTray(kind, id) {
 
 function homeAutoStartEditor(partial, options = {}) {
     const asCopy = Boolean(options.asCopy);
+    homeAutoResetTrayUi();
     autoDraft = { ...homeAutoBlankDraft(), ...partial };
     if (asCopy) {
         autoDraft.id = '';
@@ -7323,6 +7511,29 @@ function bindHomeAutomations() {
             }
             return;
         }
+        const trayTab = event.target.closest('[data-auto-tray-list]');
+        if (trayTab && autoDraft) {
+            const next = trayTab.getAttribute('data-auto-tray-list') || 'all';
+            homeAutoTrayMode = next === 'when' || next === 'then' ? next : 'all';
+            renderHomeAutoTray();
+            return;
+        }
+        const fold = event.target.closest('[data-auto-tray-fold]');
+        if (fold && autoDraft) {
+            event.preventDefault();
+            const key = fold.getAttribute('data-auto-tray-fold') || '';
+            if (!key) return;
+            const collapsed = fold.getAttribute('aria-expanded') !== 'true';
+            if (collapsed) {
+                homeAutoTrayOpen.add(key);
+                homeAutoTrayCollapsed.delete(key);
+            } else {
+                homeAutoTrayCollapsed.add(key);
+                homeAutoTrayOpen.delete(key);
+            }
+            renderHomeAutoTray();
+            return;
+        }
         const tray = event.target.closest('[data-auto-tray]');
         if (tray && autoDraft) {
             homeAutoClickTray(tray.getAttribute('data-auto-tray'), tray.getAttribute('data-id') || '');
@@ -7330,6 +7541,20 @@ function bindHomeAutomations() {
     });
     page.addEventListener('input', (event) => {
         if (!autoDraft) return;
+        if (event.target.matches('#auto-tray-filter')) {
+            homeAutoTrayFilter = String(event.target.value || '');
+            renderHomeAutoTray();
+            return;
+        }
+        if (event.target.matches('[data-auto-if-filter]')) {
+            const i = Number(event.target.getAttribute('data-auto-if-filter'));
+            const query = String(event.target.value || '');
+            if (Number.isFinite(i)) homeAutoIfDeviceQuery.set(i, query);
+            const chip = event.target.closest('[data-auto-if-i]');
+            const select = chip?.querySelector('[data-auto-if-id]');
+            homeAutoFillIfDeviceSelect(select, select?.value || '', query);
+            return;
+        }
         if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
             homeAutoApplyThenLook(event.target);
             homeAutoFollowName();

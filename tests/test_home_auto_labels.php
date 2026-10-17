@@ -146,5 +146,9 @@ assert_true(($flood['type_label'] ?? '') === 'UniFi Floodlight', 'flood type: ' 
 $css = (string) file_get_contents(__DIR__ . '/../public/assets/style.css');
 assert_true(str_contains($css, '.auto-chip-meta'), 'css chip meta');
 assert_true(str_contains($css, '.auto-tray-room'), 'css tray room');
+assert_true(str_contains($css, '.auto-tray-filter'), 'css tray search');
+assert_true(str_contains($css, 'max-height: min(28rem, 50vh)'), 'tray scrolls instead of growing');
+assert_true(str_contains($css, '.auto-chip.is-in'), 'chips already in the rule are marked');
+assert_true(str_contains($css, '.auto-if-device-filter'), 'css Only-if device search');
 
 echo "test_home_auto_labels.php ok\n";
