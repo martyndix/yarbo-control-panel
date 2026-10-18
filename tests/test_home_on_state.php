@@ -509,6 +509,71 @@ assert_true(($camById['unifi:light:boiler']['on'] ?? false) === true, 'garage li
 assert_true(($camRooms['drive']['on'] ?? true) === false, 'camera-only room must not go green');
 assert_true(($camRooms['garage']['on'] ?? false) === true, 'room with a light on stays green');
 
+$sceneRelayRoot = sys_get_temp_dir() . '/yarbo-scene-relay-' . bin2hex(random_bytes(3));
+mkdir($sceneRelayRoot . '/data', 0775, true);
+file_put_contents($sceneRelayRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+    'active_module' => 'home',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($sceneRelayRoot . '/data/home.json', json_encode([
+    'names' => [],
+    'room_defs' => [],
+    'rooms' => [],
+    'group_defs' => [],
+    'groups' => [],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [],
+], JSON_UNESCAPED_SLASHES));
+$sceneRelayHome = new YarboHome($sceneRelayRoot);
+$sceneRelaySaved = $sceneRelayHome->saveScene([
+    'name' => 'Patio',
+    'actions' => [
+        [
+            'id' => 'unifi:relay:usl1:0',
+            'on' => true,
+            'brightness' => 80,
+            'color_hex' => '#ff0000',
+            'color_temp' => 2700,
+        ],
+        ['id' => 'unifi:relay:usl1:1', 'on' => false],
+        ['id' => 'unifi:light:flood1', 'on' => true, 'brightness' => 40],
+    ],
+]);
+assert_true(($sceneRelaySaved['ok'] ?? false) === true, 'scene can save UniFi relay outputs');
+$sceneRelayActions = $sceneRelaySaved['scene']['actions'] ?? [];
+$sceneRelayById = [];
+foreach ($sceneRelayActions as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $sceneRelayById[$row['id']] = $row;
+    }
+}
+$out0 = $sceneRelayById['unifi:relay:usl1:0'] ?? [];
+$out1 = $sceneRelayById['unifi:relay:usl1:1'] ?? [];
+$flood = $sceneRelayById['unifi:light:flood1'] ?? [];
+assert_true(($out0['on'] ?? false) === true, 'relay output stays on in the scene');
+assert_true(($out1['on'] ?? true) === false, 'relay output can be off in the scene');
+assert_true(($flood['on'] ?? false) === true, 'UniFi floodlight can join a scene');
+assert_true(($out0['brightness'] ?? null) === null, 'relay scene members are on/off, not dimmable');
+assert_true(($out0['color_hex'] ?? null) === null, 'relay scene members have no colour');
+assert_true(($flood['brightness'] ?? null) === null, 'UniFi lights in scenes are on/off only');
+$sceneRelayRun = $sceneRelayHome->runScene((string) ($sceneRelaySaved['scene']['id'] ?? ''));
+assert_true(($sceneRelayRun['ok'] ?? true) === false, 'scene run without Protect key fails on the UniFi command');
+assert_true(
+    str_contains((string) ($sceneRelayRun['error'] ?? ''), 'Protect API key')
+        || str_contains((string) ($sceneRelayRun['error'] ?? ''), 'Protect'),
+    'scene run sends UniFi on/off, not Matter: ' . json_encode($sceneRelayRun)
+);
+$sceneRelayStop = $sceneRelayHome->stopScene((string) ($sceneRelaySaved['scene']['id'] ?? ''));
+assert_true(($sceneRelayStop['ok'] ?? true) === false, 'scene stop without Protect key fails on the UniFi command');
+assert_true(
+    str_contains((string) ($sceneRelayStop['error'] ?? ''), 'Protect API key')
+        || str_contains((string) ($sceneRelayStop['error'] ?? ''), 'Protect'),
+    'scene stop sends UniFi off: ' . json_encode($sceneRelayStop)
+);
+
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(
     !preg_match('/function homeColorInputsHtml[\s\S]{0,500}d\.kind === [\'"]light[\'"]/', $js),
@@ -546,6 +611,19 @@ assert_true(str_contains($js, "action: 'scan'"), 'Look for devices calls scan');
 assert_true(str_contains($js, 'home-scene-filter'), 'scene editor search');
 assert_true(str_contains($js, "homeSceneListMode === 'in'"), 'scene editor In scene tab');
 assert_true(str_contains($js, 'function homeSceneEligible'), 'scene editor skips vacuums and cameras');
+assert_true(
+    (bool) preg_match(
+        '/function homeSceneEligible\(d\) \{[\s\S]{0,400}return kind === \'light\' \|\| kind === \'relay\';/',
+        $js
+    ),
+    'scene editor includes UniFi lights and relay outputs'
+);
+assert_true(
+    !preg_match('/function homeSceneEligible\(d\) \{\s*if \(!d \|\| homeIsUnifi\(d\)\) return false/', $js),
+    'scene editor must not skip every UniFi device'
+);
+assert_true(str_contains($js, 'Tick lights and relays this scene should change'), 'scene hint mentions relays');
+assert_true(str_contains($homePhp, "empty(\$action['on']) ? 'off' : 'on'"), 'scene run sends UniFi relays on/off');
 assert_true(str_contains($js, 'on: onEl ? Boolean(onEl.checked) : prev.on'), 'ticking a compact scene row keeps the live on state');
 assert_true(str_contains($js, 'loadHomeDashboard({ force: true })'), 'pairing reloads Home even if a poll is in flight');
 assert_true(str_contains($js, 'applyHomeHiddenLocal(id, true)'), 'Hide must move the tile without a full page refresh');

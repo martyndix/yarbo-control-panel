@@ -3121,8 +3121,11 @@ function homeResetSceneDraft() {
 }
 
 function homeSceneEligible(d) {
-    if (!d || homeIsUnifi(d)) return false;
+    if (!d) return false;
     const kind = String(d.kind || '');
+    if (homeIsUnifi(d)) {
+        return kind === 'light' || kind === 'relay';
+    }
     return kind !== 'vacuum' && kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub';
 }
 
@@ -4398,10 +4401,10 @@ function renderHomeSceneEditor() {
     const selected = Object.values(homeSceneDraft.included).filter(Boolean).length;
     if (hint) {
         hint.textContent = homeSceneDraft.id
-            ? `Editing “${homeSceneDraft.name || 'scene'}”. Tick lights this scene should change.`
+            ? `Editing “${homeSceneDraft.name || 'scene'}”. Tick lights and relays this scene should change.`
             : (selected
-                ? `${selected} light${selected === 1 ? '' : 's'} in this scene. Unticked lights are left alone.`
-                : 'Tick only the lights this scene should change, or use lights that are on.');
+                ? `${selected} device${selected === 1 ? '' : 's'} in this scene. Unticked devices are left alone.`
+                : 'Tick only the lights and relays this scene should change, or use devices that are on.');
     }
     const inBtn = document.getElementById('home-scene-list-in');
     const allBtn = document.getElementById('home-scene-list-all');
@@ -4416,13 +4419,13 @@ function renderHomeSceneEditor() {
     });
     if (allBtn) allBtn.textContent = `All (${devices.length})`;
     if (!devices.length) {
-        wrap.innerHTML = '<p class="hint">Add Matter lights first, then pick which ones belong to the scene.</p>';
+        wrap.innerHTML = '<p class="hint">Add Matter lights or UniFi relays first, then pick which ones belong to the scene.</p>';
         return;
     }
     if (!visible.length) {
         wrap.innerHTML = `<p class="hint">${homeSceneListMode === 'in' && !query
             ? 'Nothing in this scene yet. Open All, or use lights that are on.'
-            : 'No matching lights.'}</p>`;
+            : 'No matching lights or relays.'}</p>`;
         return;
     }
     const rooms = homeDash.rooms || [];

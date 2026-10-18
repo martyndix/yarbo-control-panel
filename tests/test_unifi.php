@@ -1462,5 +1462,9 @@ if (!str_contains($change, '## [4.0.122]')) {
     fwrite(STDERR, "changelog 4.0.122\n");
     exit(1);
 }
+if (!str_contains($change, '## [4.0.123]')) {
+    fwrite(STDERR, "changelog 4.0.123\n");
+    exit(1);
+}
 
 echo "ok: unifi\n";

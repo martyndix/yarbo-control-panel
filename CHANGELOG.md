@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.123] - 2026-10-18
+
+### Changed
+- Home scenes can include UniFi **relay outputs** and floodlights as on/off members, like a switch. Relay inputs, cameras, sensors, and doors stay out of the scene editor.
+
 ## [4.0.122] - 2026-10-18
 
 ### Changed

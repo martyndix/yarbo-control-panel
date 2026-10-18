@@ -1055,6 +1055,16 @@ final class YarboHome
             }
             $kind = $kinds[$deviceId] ?? '';
             $isHeater = $kind === self::KIND_HEATER;
+            if (YarboUnifi::isHomeId($deviceId)) {
+                $result = $this->command([
+                    'id' => $deviceId,
+                    'command' => empty($action['on']) ? 'off' : 'on',
+                ]);
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+                continue;
+            }
             if (empty($action['on'])) {
                 $result = $this->command(['id' => $deviceId, 'command' => 'off']);
                 if (!($result['ok'] ?? false)) {
@@ -3145,6 +3155,12 @@ final class YarboHome
             $setpoint = self::optionalCelsius($action['heating_setpoint'] ?? $action['celsius'] ?? null);
             if ($setpoint !== null) {
                 $setpoint = max(5.0, min(35.0, $setpoint));
+            }
+            if (YarboUnifi::isHomeId($deviceId)) {
+                $brightness = null;
+                $hex = null;
+                $kelvin = null;
+                $setpoint = null;
             }
             if (!$on) {
                 $brightness = null;

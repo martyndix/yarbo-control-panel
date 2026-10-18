@@ -627,17 +627,17 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
             <div class="home-manage-extras">
             <h3 class="settings-subtitle">Scene editor</h3>
-            <p class="hint">Pick which lights belong to a scene and set on/off, brightness, and colour. Search or open In scene to skip the long list. PaperMono can run a scene and tap again to turn those lights off. These are not Apple or Hue scenes.</p>
+            <p class="hint">Pick which lights and UniFi relays belong to a scene and set on/off, brightness, and colour. Relays are on/off only. Search or open In scene to skip the long list. PaperMono can run a scene and tap again to turn those devices off. These are not Apple or Hue scenes.</p>
             <div id="home-scene-editor" class="home-scene-editor">
                 <div class="home-scene-add">
                     <input type="text" id="home-scene-name" placeholder="Evening" maxlength="32" aria-label="Scene name">
-                    <button type="button" class="btn btn-secondary" id="home-scene-from-on">Use lights that are on</button>
+                    <button type="button" class="btn btn-secondary" id="home-scene-from-on">Use devices that are on</button>
                     <button type="button" class="btn" id="home-scene-save">Save scene</button>
                     <button type="button" class="btn btn-secondary hidden" id="home-scene-cancel">Cancel edit</button>
                 </div>
-                <p class="hint" id="home-scene-editor-hint">Tick only the lights this scene should change. Unticked lights are left alone.</p>
+                <p class="hint" id="home-scene-editor-hint">Tick only the lights and relays this scene should change. Unticked devices are left alone.</p>
                 <div class="home-scene-toolbar">
-                    <input type="search" id="home-scene-filter" class="home-scene-filter" placeholder="Search lights" autocomplete="off">
+                    <input type="search" id="home-scene-filter" class="home-scene-filter" placeholder="Search lights and relays" autocomplete="off">
                     <div class="home-scene-tabs" role="tablist" aria-label="Scene devices">
                         <button type="button" class="btn btn-secondary btn-compact" id="home-scene-list-in" data-scene-list="in">In scene</button>
                         <button type="button" class="btn btn-secondary btn-compact is-active" id="home-scene-list-all" data-scene-list="all">All</button>
