@@ -1015,6 +1015,8 @@ assert_true(($lyErr['error'] ?? false) === true, 'lymow error from work_status 7
 assert_true(($lyErr['name'] ?? '') === 'Front', 'lymow snapshot name');
 $lyOk = YarboHomeAutomations::lymowSnapshotRow(['work_status' => 2]);
 assert_true(($lyOk['error'] ?? true) === false, 'lymow mowing is not error');
+$lyE77 = YarboHomeAutomations::lymowSnapshotRow(['work_status' => 2, 'error_code' => 77]);
+assert_true(($lyE77['error'] ?? false) === true, 'lymow E77 while mowing is error');
 assert_true(
     YarboHomeAutomations::whenPhrase(['type' => 'robot', 'id' => 'yarbo', 'event' => 'error']) === 'Yarbo Error',
     'yarbo error phrase'
@@ -1542,6 +1544,7 @@ assert_true(str_contains($change, '## [4.0.105]'), 'changelog 4.0.105');
 assert_true(str_contains($change, '## [4.0.116]'), 'changelog 4.0.116');
 assert_true(str_contains($change, '## [4.0.117]'), 'changelog 4.0.117');
 assert_true(str_contains($change, '## [4.0.118]'), 'changelog 4.0.118');
+assert_true(str_contains($change, '## [4.0.119]'), 'changelog 4.0.119');
 assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout');
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');

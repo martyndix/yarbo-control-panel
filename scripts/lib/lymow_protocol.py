@@ -142,9 +142,15 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     fields = _decode_fields(pb_bytes)
 
     error_raw = _first(fields, 3)
-    if isinstance(error_raw, bytes) and error_raw:
+    if error_raw is None:
+        pass
+    elif isinstance(error_raw, bytes) and error_raw:
         state["errorCodes"] = _decode_packed_int32s(error_raw)
         state["errorCode"] = state["errorCodes"][0] if state["errorCodes"] else 0
+    elif isinstance(error_raw, int):
+        code = _signed32(error_raw)
+        state["errorCodes"] = [code] if code else []
+        state["errorCode"] = code
     else:
         state["errorCodes"] = []
         state["errorCode"] = 0

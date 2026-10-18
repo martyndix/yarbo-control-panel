@@ -202,7 +202,9 @@ final class YarboLymow
         $progress = isset($cloud['mow_progress']) && is_numeric($cloud['mow_progress'])
             ? max(0, min(100, (int) round((float) $cloud['mow_progress'])))
             : null;
-        $showProgress = $progress !== null && in_array($work, [2, 3, 8, 9], true);
+        $hasError = self::hasError($cloud);
+        $errorCode = self::errorCodeFromData($cloud);
+        $showProgress = !$hasError && $progress !== null && in_array($work, [2, 3, 8, 9], true);
 
         return [
             'ok' => $camOk || $cloudOk,
@@ -218,7 +220,9 @@ final class YarboLymow
             'battery' => $battery,
             'battery_label' => $battery !== null ? $battery . '%' : '—',
             'work_status' => $work,
-            'work_label' => self::workLabel($work, !empty($cloud['is_charging'])),
+            'work_label' => $hasError ? 'ERROR' : self::workLabel($work, !empty($cloud['is_charging'])),
+            'error_code' => $errorCode,
+            'error_codes' => self::errorCodesFromData($cloud),
             'charging' => !empty($cloud['is_charging']) || !empty($cloud['is_recharging']),
             'charging_label' => !empty($cloud['is_charging']) ? 'Yes' : (!empty($cloud['is_recharging']) ? 'Returning' : 'No'),
             'mow_progress' => $showProgress ? $progress : null,
@@ -327,7 +331,7 @@ final class YarboLymow
             ? YarboVestaboard::COLOR_GREEN
             : YarboVestaboard::batteryPercentChip($battery, true);
 
-        if ($workStatus === 7) {
+        if (self::hasError($data) || $workStatus === 7) {
             return $this->vestaboardResult($board->brandedLayout(
                 'LYMOW',
                 'ERROR',
@@ -821,6 +825,58 @@ final class YarboLymow
         }
 
         return $this->snapshotJpeg();
+    }
+
+    /**
+     * The Lymow app can show E77 (perimeter obstacle) while work_status stays MOWING.
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function hasError(array $data): bool
+    {
+        if (array_key_exists('error', $data) && is_bool($data['error'])) {
+            return $data['error'];
+        }
+        $work = isset($data['work_status']) && is_numeric($data['work_status'])
+            ? (int) $data['work_status']
+            : null;
+        if ($work === 7) {
+            return true;
+        }
+
+        return self::errorCodeFromData($data) !== 0;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return list<int>
+     */
+    public static function errorCodesFromData(array $data): array
+    {
+        $out = [];
+        $codes = $data['error_codes'] ?? null;
+        if (is_array($codes)) {
+            foreach ($codes as $row) {
+                if (is_numeric($row) && (int) $row !== 0) {
+                    $out[] = (int) $row;
+                }
+            }
+        }
+        if ($out === [] && isset($data['error_code']) && is_numeric($data['error_code']) && (int) $data['error_code'] !== 0) {
+            $out[] = (int) $data['error_code'];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    public static function errorCodeFromData(array $data): int
+    {
+        $codes = self::errorCodesFromData($data);
+
+        return $codes[0] ?? 0;
     }
 
     public static function workLabel(?int $status, bool $charging = false): string

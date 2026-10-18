@@ -1101,8 +1101,6 @@ final class YarboPaperDevice
         }
         $errorCode = is_array($parsed) ? ($parsed['error_code'] ?? 0) : 0;
         $powerFault = is_array($parsed) ? (int) ($parsed['power_fault'] ?? 0) : 0;
-        $lyWork = isset($ly['work_status']) ? (int) $ly['work_status'] : null;
-
         $out = [
             'hub' => $hub->publicView(),
             'vestaboard_enabled' => !empty($vb['enabled']),
@@ -1126,7 +1124,7 @@ final class YarboPaperDevice
             'lymow_name' => (string) ($ly['page_name'] ?? ''),
             'yarbo_error' => $yarboEnabled && $online && ((int) $errorCode !== 0 || $powerFault > 0),
             'powerwall_error' => false,
-            'lymow_error' => $lyEnabled && $lyWork === 7,
+            'lymow_error' => $lyEnabled && YarboLymow::hasError($ly),
             'ota_pending' => $this->otaPendingActive($forDevice),
             'remote_url' => (new YarboPaperRemote($this->projectRoot))->tabletOrigin(),
         ] + $this->logoPublicView()

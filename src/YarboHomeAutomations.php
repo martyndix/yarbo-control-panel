@@ -871,20 +871,13 @@ final class YarboHomeAutomations
     }
 
     /**
-     * work_status === 7 (ERROR) — same as Paper lymow_error.
+     * work_status === 7 or a non-zero Lymow error_code (E77 can stay MOWING).
      *
      * @param array<string, mixed> $data
      */
     public static function lymowErrorFromData(array $data): bool
     {
-        if (array_key_exists('error', $data) && is_bool($data['error'])) {
-            return $data['error'];
-        }
-        $work = isset($data['work_status']) && is_numeric($data['work_status'])
-            ? (int) $data['work_status']
-            : null;
-
-        return $work === 7;
+        return YarboLymow::hasError($data);
     }
 
     public function yarboCachePath(): string

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.119] - 2026-10-18
+
+### Fixed
+- Lymow **E77** (perimeter obstacle) and other error codes now count as Error even while work status stays MOWING. Home Automations Lymow Error, the Lymow card, PaperMono, and the Vestaboard Note can fire/show ERROR instead of looking like a normal mow.
+
 ## [4.0.118] - 2026-10-17
 
 ### Changed

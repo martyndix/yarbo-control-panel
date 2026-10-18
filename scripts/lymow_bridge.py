@@ -793,6 +793,7 @@ def mqtt_listen_session(
             state.get("is_charging"),
             state.get("is_recharging"),
             state.get("error_code"),
+            tuple(state.get("error_codes") or []),
         )
         if key == last_key:
             return
@@ -912,8 +913,8 @@ def merge_state(
         "work_status": work,
         "is_charging": charging,
         "is_recharging": recharging,
-        "error_code": mqtt_state.get("errorCode"),
-        "error_codes": mqtt_state.get("errorCodes") or previous.get("error_codes") or [],
+        "error_code": mqtt_state["errorCode"] if "errorCode" in mqtt_state else previous.get("error_code"),
+        "error_codes": mqtt_state["errorCodes"] if "errorCodes" in mqtt_state else (previous.get("error_codes") or []),
         "rtk_status": mqtt_state.get("rtkStatus"),
         "rtk_satellites": mqtt_state.get("rtkSatellites"),
         "mow_progress": mqtt_state.get("mowProgress", previous.get("mow_progress")),
