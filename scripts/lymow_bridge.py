@@ -560,6 +560,8 @@ def extract_shadow_state(obj: Any) -> dict[str, Any]:
                     consider_battery(value)
                 elif lk in {"workstatus", "workstate"} and isinstance(value, int):
                     found["workStatus"] = value
+                elif lk in {"robotstate", "robotstatus"} and isinstance(value, int):
+                    found["robotState"] = value
                 elif lk in {"ischarging", "charging"}:
                     found["isCharging"] = bool(value)
                 elif lk in {"isrecharging", "recharging"}:
@@ -794,6 +796,7 @@ def mqtt_listen_session(
             state.get("is_recharging"),
             state.get("error_code"),
             tuple(state.get("error_codes") or []),
+            state.get("robot_state"),
         )
         if key == last_key:
             return
@@ -893,6 +896,9 @@ def merge_state(
     work = mqtt_state.get("workStatus")
     if work is None:
         work = previous.get("work_status")
+    robot = mqtt_state.get("robotState")
+    if robot is None:
+        robot = previous.get("robot_state")
     charging = mqtt_state.get("isCharging")
     if charging is None:
         charging = previous.get("is_charging")
@@ -911,6 +917,7 @@ def merge_state(
         "mcu_version": str(info.get("mcuVersion") or mqtt_state.get("mcuVersion") or ""),
         "battery": battery,
         "work_status": work,
+        "robot_state": robot,
         "is_charging": charging,
         "is_recharging": recharging,
         "error_code": mqtt_state["errorCode"] if "errorCode" in mqtt_state else previous.get("error_code"),

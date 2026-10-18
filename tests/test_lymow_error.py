@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lymow MQTT must keep E77 even when the next status omits the error field."""
+"""Lymow live error is robotState (f1), not a leftover errorCodes list."""
 
 from __future__ import annotations
 
@@ -31,52 +31,67 @@ def fail(message: str) -> None:
     raise SystemExit(message)
 
 
-def test_decode_keeps_missing_error_field() -> None:
+def test_decode_live_error_and_clear_codes() -> None:
     packed = _field_bytes(3, _encode_varint(77))
     decoded = decode_pboutput(packed)
     if decoded.get("errorCode") != 77 or decoded.get("errorCodes") != [77]:
         fail(f"packed E77 decode: {decoded}")
 
-    robot = _field_bytes(5, _field_i32(6, 2) + _field_i32(2, 92))
-    later = decode_pboutput(robot)
-    if later.get("workStatus") != 2:
-        fail(f"work status missing: {later}")
-    if "errorCode" in later or "errorCodes" in later:
-        fail(f"status without field 3 must not zero errors: {later}")
+    live = decode_pboutput(_field_bytes(5, _field_i32(1, 7) + _field_i32(6, 2) + _field_i32(2, 92)))
+    if live.get("robotState") != 7:
+        fail(f"robotState f1 missing: {live}")
+    if live.get("workStatus") != 2:
+        fail(f"work status missing: {live}")
+    if live.get("errorCode") != 0 or live.get("errorCodes") != []:
+        fail(f"status without field 3 must clear leftover codes: {live}")
+
+    mowing = decode_pboutput(_field_bytes(5, _field_i32(1, 2) + _field_i32(6, 2) + _field_i32(2, 90)))
+    if mowing.get("robotState") != 2 or mowing.get("workStatus") != 2:
+        fail(f"mowing robotState: {mowing}")
 
     empty = decode_pboutput(_field_bytes(3, b""))
     if empty.get("errorCode") != 0 or empty.get("errorCodes") != []:
         fail(f"empty field 3 should clear: {empty}")
 
 
-def test_merge_keeps_previous_e77() -> None:
+def test_merge_does_not_keep_e77_as_live() -> None:
     bridge = load_bridge()
     previous = {
         "battery": 92,
         "work_status": 2,
+        "robot_state": 7,
         "error_code": 77,
         "error_codes": [77],
     }
+    decoded_mowing = {
+        "battery": 90,
+        "workStatus": 2,
+        "robotState": 2,
+        "errorCode": 0,
+        "errorCodes": [],
+    }
     merged = bridge.merge_state(
         {"info": {"deviceState": "online"}, "device": {}, "thing": "t"},
-        {"battery": 90, "workStatus": 2},
+        decoded_mowing,
         previous,
     )
-    if merged.get("error_code") != 77 or merged.get("error_codes") != [77]:
-        fail(f"merge dropped E77: {merged}")
+    if merged.get("robot_state") != 2:
+        fail(f"merge kept error robot_state: {merged}")
+    if merged.get("error_code") not in (0, None) or merged.get("error_codes") not in ([], None):
+        fail(f"merge kept leftover E77: {merged}")
     if merged.get("work_status") != 2:
         fail(f"merge lost mowing: {merged}")
 
-    cleared = bridge.merge_state(
+    live = bridge.merge_state(
         {"info": {}, "device": {}, "thing": "t"},
-        {"errorCode": 0, "errorCodes": [], "workStatus": 2},
+        {"errorCode": 77, "errorCodes": [77], "workStatus": 2, "robotState": 7},
         previous,
     )
-    if cleared.get("error_code") not in (0, None) or cleared.get("error_codes") not in ([], None):
-        fail(f"explicit zero must clear: {cleared}")
+    if live.get("robot_state") != 7 or live.get("error_code") != 77:
+        fail(f"live E77 must keep robot_state 7: {live}")
 
 
 if __name__ == "__main__":
-    test_decode_keeps_missing_error_field()
-    test_merge_keeps_previous_e77()
+    test_decode_live_error_and_clear_codes()
+    test_merge_does_not_keep_e77_as_live()
     print("test_lymow_error.py ok")

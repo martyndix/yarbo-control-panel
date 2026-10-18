@@ -205,6 +205,9 @@ final class YarboLymow
         $hasError = self::hasError($cloud);
         $errorCode = self::errorCodeFromData($cloud);
         $showProgress = !$hasError && $progress !== null && in_array($work, [2, 3, 8, 9], true);
+        $robotState = isset($cloud['robot_state']) && is_numeric($cloud['robot_state'])
+            ? (int) $cloud['robot_state']
+            : null;
 
         return [
             'ok' => $camOk || $cloudOk,
@@ -220,6 +223,7 @@ final class YarboLymow
             'battery' => $battery,
             'battery_label' => $battery !== null ? $battery . '%' : '—',
             'work_status' => $work,
+            'robot_state' => $robotState,
             'work_label' => $hasError ? 'ERROR' : self::workLabel($work, !empty($cloud['is_charging'])),
             'error_code' => $errorCode,
             'error_codes' => self::errorCodesFromData($cloud),
@@ -828,7 +832,9 @@ final class YarboLymow
     }
 
     /**
-     * The Lymow app can show E77 (perimeter obstacle) while work_status stays MOWING.
+     * Live Error is robotState (f1) or work_status in {7, 13}.
+     * work_status stays MOWING through a perimeter obstacle; leftover error_code
+     * 77 after they resume is not a current fault.
      *
      * @param array<string, mixed> $data
      */
@@ -837,14 +843,24 @@ final class YarboLymow
         if (array_key_exists('error', $data) && is_bool($data['error'])) {
             return $data['error'];
         }
-        $work = isset($data['work_status']) && is_numeric($data['work_status'])
-            ? (int) $data['work_status']
-            : null;
-        if ($work === 7) {
-            return true;
+        $robot = self::statusCodeFromData($data, 'robot_state', 'robotState');
+        $work = self::statusCodeFromData($data, 'work_status', 'workStatus');
+
+        return in_array($robot, [7, 13], true) || in_array($work, [7, 13], true);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function statusCodeFromData(array $data, string ...$keys): ?int
+    {
+        foreach ($keys as $key) {
+            if (isset($data[$key]) && is_numeric($data[$key])) {
+                return (int) $data[$key];
+            }
         }
 
-        return self::errorCodeFromData($data) !== 0;
+        return null;
     }
 
     /**

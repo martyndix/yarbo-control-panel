@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.120] - 2026-10-18
+
+### Fixed
+- Lymow no longer stays **Error** from a leftover E77 after the app is mowing again. Error is the live robot state (or work status 7 / emergency stop), same as the Lymow app. A perimeter obstacle still shows Error while it is actually stuck, because that live state is 7 even when work status says MOWING.
+
 ## [4.0.119] - 2026-10-18
 
 ### Fixed

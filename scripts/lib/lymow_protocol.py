@@ -142,9 +142,7 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     fields = _decode_fields(pb_bytes)
 
     error_raw = _first(fields, 3)
-    if error_raw is None:
-        pass
-    elif isinstance(error_raw, bytes) and error_raw:
+    if isinstance(error_raw, bytes) and error_raw:
         state["errorCodes"] = _decode_packed_int32s(error_raw)
         state["errorCode"] = state["errorCodes"][0] if state["errorCodes"] else 0
     elif isinstance(error_raw, int):
@@ -152,12 +150,17 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         state["errorCodes"] = [code] if code else []
         state["errorCode"] = code
     else:
+        # Missing field 3 is "no current codes" (ha-lymow), not "keep the last E77".
         state["errorCodes"] = []
         state["errorCode"] = 0
 
     robot_info_raw = _first(fields, 5)
     if isinstance(robot_info_raw, bytes):
         ri = _decode_fields(robot_info_raw)
+        rs_raw = _first(ri, 1)
+        if rs_raw is not None:
+            # robotState (f1) is live pause/error; workStatus (f6) stays MOWING through both.
+            state["robotState"] = _signed32(rs_raw)
         ws_raw = _first(ri, 6)
         state["workStatus"] = _signed32(ws_raw) if ws_raw is not None else -1
         battery = _first(ri, 2)

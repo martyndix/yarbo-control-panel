@@ -871,7 +871,7 @@ final class YarboHomeAutomations
     }
 
     /**
-     * work_status === 7 or a non-zero Lymow error_code (E77 can stay MOWING).
+     * Live robot_state / work_status in {7, 13} (E77 keeps work_status MOWING).
      *
      * @param array<string, mixed> $data
      */
