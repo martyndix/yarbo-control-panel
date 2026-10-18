@@ -1780,7 +1780,7 @@ final class YarboHome
         if ($kind === 'light' || preg_match('/flood|ufl/i', $product) === 1) {
             return 'UniFi Floodlight';
         }
-        if ($kind === 'relay' || preg_match('/ul-?relay/i', $product) === 1) {
+        if ($kind === 'relay' || preg_match('/\b(usl|ul)[-_ ]?relay\b/i', $product) === 1) {
             return 'UniFi Relay';
         }
         if ($kind === 'hub' || preg_match('/ua-?hub|gate.?hub/i', $product) === 1) {

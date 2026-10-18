@@ -6866,7 +6866,7 @@ function homeAutoTypeLabel(d) {
         if (product === 'Door position sensor' || blob.includes(':dps-') || id.includes('dps-')) return 'Door sensor';
         if (/\b(usp|ufp-?sense|up\s*sense|up-sense)\b/i.test(product)) return 'USP Sensor';
         if (kind === 'light' || /flood|ufl/i.test(product)) return 'UniFi Floodlight';
-        if (kind === 'relay' || /ul-?relay/i.test(product)) return 'UniFi Relay';
+        if (kind === 'relay' || /\b(usl|ul)[-_ ]?relay\b/i.test(product)) return 'UniFi Relay';
         if (kind === 'hub' || /ua-?hub|gate.?hub/i.test(product)) return 'UniFi Hub';
         if (kind === 'door') return 'UniFi Door';
         if (kind === 'camera') {

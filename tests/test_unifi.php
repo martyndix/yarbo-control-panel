@@ -1304,4 +1304,130 @@ if (($authHome['unifi:light:light1']['on'] ?? false) !== true || ($authHome['uni
     exit(1);
 }
 
+$uslRoot = sys_get_temp_dir() . '/yarbo-unifi-usl-' . bin2hex(random_bytes(3));
+mkdir($uslRoot . '/data', 0775, true);
+$usl = new Yarbo\YarboUnifi($uslRoot);
+if (!$usl->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'protect-secret',
+])) {
+    fwrite(STDERR, "usl save failed\n");
+    exit(1);
+}
+$uslPosted = [];
+$usl->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$uslPosted): array {
+    if ($method === 'POST' && str_contains($url, '/relays/') && str_contains($url, '/activate')) {
+        $uslPosted[] = $url;
+        return ['status' => 200, 'body' => '{}', 'content_type' => 'application/json'];
+    }
+    if (str_contains($url, '/relays')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([
+                'relays' => [[
+                    'id' => 'usl1',
+                    'modelKey' => 'relay',
+                    'state' => 'CONNECTED',
+                    'name' => ['name' => 'Garage door'],
+                    'type' => 'USL-Relay',
+                    'outputsExpand' => [
+                        ['id' => 0, 'name' => 'O1', 'state' => 'off'],
+                        ['id' => 1, 'name' => 'O2', 'state' => 'on'],
+                    ],
+                ]],
+            ]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if (str_contains($url, '/proxy/protect/')) {
+        return ['status' => 200, 'body' => '[]', 'content_type' => 'application/json'];
+    }
+    return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'unexpected ' . $url];
+});
+$uslProbe = $usl->probe();
+$uslIds = array_column($uslProbe['devices'] ?? [], 'id');
+if (($uslProbe['counts']['relays'] ?? 0) !== 2) {
+    fwrite(STDERR, 'USL-Relay count ' . json_encode($uslProbe) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:relay:usl1:0', $uslIds, true) || !in_array('unifi:relay:usl1:1', $uslIds, true)) {
+    fwrite(STDERR, 'USL-Relay ids ' . json_encode($uslIds) . "\n");
+    exit(1);
+}
+$uslById = [];
+foreach ($uslProbe['devices'] ?? [] as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $uslById[$row['id']] = $row;
+    }
+}
+if (($uslById['unifi:relay:usl1:0']['name'] ?? '') !== 'O1' || ($uslById['unifi:relay:usl1:0']['product'] ?? '') !== 'USL-Relay') {
+    fwrite(STDERR, 'USL-Relay row ' . json_encode($uslById['unifi:relay:usl1:0'] ?? null) . "\n");
+    exit(1);
+}
+if (($uslById['unifi:relay:usl1:1']['on'] ?? false) !== true) {
+    fwrite(STDERR, 'USL-Relay O2 should be on ' . json_encode($uslById['unifi:relay:usl1:1'] ?? null) . "\n");
+    exit(1);
+}
+$uslOn = $usl->command(['id' => 'unifi:relay:usl1:0', 'command' => 'on']);
+if (!($uslOn['ok'] ?? false) || empty($uslOn['on'])) {
+    fwrite(STDERR, 'USL-Relay on ' . json_encode($uslOn) . "\n");
+    exit(1);
+}
+$uslActivate = $uslPosted[0] ?? '';
+if (!str_contains($uslActivate, '/relays/usl1/outputs/0/activate')) {
+    fwrite(STDERR, "USL-Relay activate path $uslActivate\n");
+    exit(1);
+}
+
+$sensorRelayRoot = sys_get_temp_dir() . '/yarbo-unifi-usl-sensor-' . bin2hex(random_bytes(3));
+mkdir($sensorRelayRoot . '/data', 0775, true);
+$sensorRelay = new Yarbo\YarboUnifi($sensorRelayRoot);
+if (!$sensorRelay->save([
+    'unifi_host' => '192.168.1.1',
+    'unifi_protect_api_key' => 'protect-secret',
+])) {
+    fwrite(STDERR, "sensor relay save failed\n");
+    exit(1);
+}
+$sensorRelay->setTransport(function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary): array {
+    if (str_contains($url, '/relays')) {
+        return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'Protect HTTP 404'];
+    }
+    if (str_contains($url, '/sensors')) {
+        return [
+            'status' => 200,
+            'body' => json_encode([[
+                'id' => 'usl2',
+                'name' => 'Gate',
+                'type' => 'USL-Relay',
+                'modelKey' => 'relay',
+                'state' => 'CONNECTED',
+                'outputs' => [
+                    ['id' => 0, 'state' => 'off'],
+                ],
+            ]]),
+            'content_type' => 'application/json',
+        ];
+    }
+    if (str_contains($url, '/proxy/protect/')) {
+        return ['status' => 200, 'body' => '[]', 'content_type' => 'application/json'];
+    }
+    return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'unexpected ' . $url];
+});
+$sensorProbe = $sensorRelay->probe();
+$sensorIds = array_column($sensorProbe['devices'] ?? [], 'id');
+if (($sensorProbe['counts']['relays'] ?? 0) !== 1 || !in_array('unifi:relay:usl2:0', $sensorIds, true)) {
+    fwrite(STDERR, 'USL-Relay from sensors ' . json_encode($sensorProbe) . "\n");
+    exit(1);
+}
+if (in_array('unifi:sensor:usl2', $sensorIds, true)) {
+    fwrite(STDERR, "USL-Relay should not stay a sensor\n");
+    exit(1);
+}
+
+if (!str_contains($change, '## [4.0.121]')) {
+    fwrite(STDERR, "changelog 4.0.121\n");
+    exit(1);
+}
+
 echo "ok: unifi\n";

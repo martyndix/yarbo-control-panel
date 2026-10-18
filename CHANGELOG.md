@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.121] - 2026-10-18
+
+### Fixed
+- Protect **USL-Relay** devices now show as Relays (Show on Home, the UniFi card, and automations). Nested Protect names/`outputsExpand` and output **0** were dropped before, so SuperLink relays never appeared even when floodlights did.
+
 ## [4.0.120] - 2026-10-18
 
 ### Fixed
