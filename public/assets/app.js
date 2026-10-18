@@ -6863,6 +6863,7 @@ function homeAutoTypeLabel(d) {
     if (unifi) {
         const blob = `${product} ${id}`.toLowerCase();
         if (blob.includes('floodlight motion') || blob.includes(':pir-') || id.includes('pir-')) return 'Floodlight motion';
+        if (id.includes('rin-') || blob.includes('relay input')) return 'UniFi Relay input';
         if (product === 'Door position sensor' || blob.includes(':dps-') || id.includes('dps-')) return 'Door sensor';
         if (/\b(usp|ufp-?sense|up\s*sense|up-sense)\b/i.test(product)) return 'USP Sensor';
         if (kind === 'light' || /flood|ufl/i.test(product)) return 'UniFi Floodlight';

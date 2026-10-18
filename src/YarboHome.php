@@ -1771,6 +1771,9 @@ final class YarboHome
         if (str_contains($blob, 'floodlight motion') || str_contains($blob, ':pir-') || str_contains($id, 'pir-')) {
             return 'Floodlight motion';
         }
+        if (str_contains($id, 'rin-') || str_contains($blob, 'relay input')) {
+            return 'UniFi Relay input';
+        }
         if ($product === 'Door position sensor' || str_contains($blob, ':dps-') || str_contains($id, 'dps-')) {
             return 'Door sensor';
         }

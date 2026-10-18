@@ -79,7 +79,30 @@ final class YarboUnifi
 
         return $parsed !== null
             && $parsed['kind'] === self::KIND_SENSOR
-            && str_starts_with($parsed['native_id'], 'pir-');
+            && (str_starts_with($parsed['native_id'], 'pir-') || str_starts_with($parsed['native_id'], 'rin-'));
+    }
+
+    /**
+     * @param list<string> $ids
+     * @return array<string, true>
+     */
+    private function tickedRelayIds(array $ids): array
+    {
+        $out = [];
+        foreach ($ids as $id) {
+            $parsed = self::parseHomeId((string) $id);
+            if ($parsed === null) {
+                continue;
+            }
+            if ($parsed['kind'] === self::KIND_RELAY) {
+                $native = $parsed['native_id'];
+                $out[preg_match('/^(.*):(\d+)$/', $native, $m) === 1 ? $m[1] : $native] = true;
+            } elseif ($parsed['kind'] === self::KIND_SENSOR && preg_match('/^rin-(.+)-(\d+)$/', $parsed['native_id'], $m) === 1) {
+                $out[$m[1]] = true;
+            }
+        }
+
+        return $out;
     }
 
     public static function normalizeHost(string $value): string
@@ -449,6 +472,7 @@ final class YarboUnifi
             return [];
         }
         $wanted = array_fill_keys($config['show_on_home'], true);
+        $tickedRelays = $this->tickedRelayIds($config['show_on_home']);
         $rows = [];
         foreach ($this->dashboardPayload(false)['devices'] as $device) {
             if (!is_array($device)) {
@@ -456,7 +480,12 @@ final class YarboUnifi
             }
             $id = (string) ($device['id'] ?? '');
             $companionOf = (string) ($device['companion_of'] ?? '');
-            if ($id !== '' && (isset($wanted[$id]) || ($companionOf !== '' && isset($wanted[$companionOf])))) {
+            $relayId = (string) ($device['relay_id'] ?? '');
+            if ($id !== '' && (
+                isset($wanted[$id])
+                || ($companionOf !== '' && isset($wanted[$companionOf]))
+                || ($relayId !== '' && isset($tickedRelays[$relayId]))
+            )) {
                 $rows[] = $device;
             }
         }
@@ -774,19 +803,35 @@ final class YarboUnifi
             $items = $this->protectPrivateRows($config, '/relays', $timeout);
         }
         $mapped = [];
+        $inputs = [];
         foreach ($items as $item) {
             if (!is_array($item)) {
                 continue;
             }
-            foreach ($this->mapRelays($item) as $row) {
+            $bundle = $this->mapRelayBundle($item);
+            foreach ($bundle['relays'] as $row) {
                 $mapped[] = $row;
             }
+            foreach ($bundle['sensors'] as $row) {
+                $inputs[] = $row;
+            }
         }
-        if ($mapped === []) {
+        if ($mapped === [] && $inputs === []) {
             return;
         }
         $inventory = $this->readInventory();
-        $inventory['relays'] = $this->uniqueDeviceRows($mapped);
+        if ($mapped !== []) {
+            $inventory['relays'] = $this->uniqueDeviceRows($mapped);
+        }
+        if ($inputs !== []) {
+            $keep = [];
+            foreach ($inventory['sensors'] ?? [] as $row) {
+                if (is_array($row) && !$this->isRelayInputSensor($row)) {
+                    $keep[] = $row;
+                }
+            }
+            $inventory['sensors'] = array_merge($keep, $this->uniqueDeviceRows($inputs));
+        }
         $inventory['protect_relays_at'] = time();
         $this->writeInventory($inventory);
     }
@@ -1707,7 +1752,11 @@ final class YarboUnifi
                         continue;
                     }
                     if ($key === 'relays' || ($key === 'sensors' && $this->looksLikeProtectRelay($item))) {
-                        foreach ($this->mapRelays($item) as $mapped) {
+                        $bundle = $this->mapRelayBundle($item);
+                        foreach ($bundle['relays'] as $mapped) {
+                            $rows[] = $mapped;
+                        }
+                        foreach ($bundle['sensors'] as $mapped) {
                             $rows[] = $mapped;
                         }
                         continue;
@@ -1742,7 +1791,17 @@ final class YarboUnifi
                     continue;
                 }
                 if ($key === 'relays') {
-                    $out['relays'] = $this->uniqueDeviceRows(array_merge($out['relays'], $rows));
+                    $relayRows = $out['relays'];
+                    $sensorRows = $out['sensors'];
+                    foreach ($rows as $row) {
+                        if (($row['kind'] ?? '') === self::KIND_SENSOR) {
+                            $sensorRows[] = $row;
+                        } else {
+                            $relayRows[] = $row;
+                        }
+                    }
+                    $out['relays'] = $this->uniqueDeviceRows($relayRows);
+                    $out['sensors'] = $this->uniqueDeviceRows($sensorRows);
                     continue;
                 }
                 $out[$key] = $rows;
@@ -1752,11 +1811,16 @@ final class YarboUnifi
                     if (!is_array($item)) {
                         continue;
                     }
-                    foreach ($this->mapRelays($item) as $mapped) {
+                    $bundle = $this->mapRelayBundle($item);
+                    foreach ($bundle['relays'] as $mapped) {
                         $out['relays'][] = $mapped;
+                    }
+                    foreach ($bundle['sensors'] as $mapped) {
+                        $out['sensors'][] = $mapped;
                     }
                 }
                 $out['relays'] = $this->uniqueDeviceRows($out['relays']);
+                $out['sensors'] = $this->uniqueDeviceRows($out['sensors']);
             }
         }
         $out['sensors'] = array_merge($out['sensors'], $pirSensors);
@@ -2032,32 +2096,52 @@ final class YarboUnifi
      */
     private function mapRelays(array $row): array
     {
+        return $this->mapRelayBundle($row)['relays'];
+    }
+
+    /**
+     * USL-Relay has two dry-contact outputs and two inputs. Each is its own Home row.
+     *
+     * @param array<string, mixed> $row
+     * @return array{relays: list<array<string, mixed>>, sensors: list<array<string, mixed>>}
+     */
+    private function mapRelayBundle(array $row): array
+    {
         $id = $this->nativeId($row);
         if ($id === '') {
-            return [];
+            return ['relays' => [], 'sensors' => []];
         }
         $product = $this->relayProduct($row);
         $deviceName = $this->displayName($row, 'Relay');
-        $outputs = $this->relayOutputRows($row);
-        if ($outputs === []) {
+        $available = $this->relayConnected($row);
+        $split = $this->splitUslRelayPorts($row);
+        $outputs = $this->portsById($this->relayOutputRows($row), ['id', 'outputId', 'output_id']);
+        $inputs = $this->portsById($this->relayInputRows($row), ['id', 'inputId', 'input_id']);
+        if ($split) {
+            $outputs = $this->padRelayPorts($outputs, 2);
+            $inputs = $this->padRelayPorts($inputs, 2);
+        } elseif ($outputs === []) {
             $on = $this->truthy($row['relayState'] ?? $row['isOn'] ?? $row['on'] ?? false);
-
-            return [$this->relayDeviceRow($id, 0, $deviceName, $product, $this->relayConnected($row), $on)];
+            $outputs = [0 => ['id' => 0, 'state' => $on ? 'on' : 'off']];
         }
-        $rows = [];
-        foreach ($outputs as $output) {
-            $oid = $this->relayOutputId($output);
-            if ($oid === null) {
-                continue;
-            }
+        $relays = [];
+        foreach ($outputs as $oid => $output) {
             $state = strtolower($this->stringifyApiValue($output['state'] ?? ''));
             $on = $state === 'on' || $this->truthy($output['state'] ?? false);
-            $outName = YarboHub::normalizeDisplayName($this->stringifyApiValue($output['name'] ?? null), 48);
-            $name = $outName !== '' ? $outName : $deviceName;
-            $rows[] = $this->relayDeviceRow($id, $oid, $name, $product, $this->relayConnected($row), $on);
+            $apiName = YarboHub::normalizeDisplayName($this->stringifyApiValue($output['name'] ?? null), 48);
+            $name = $split
+                ? $this->relayPortDisplayName($deviceName, 'Out', (int) $oid, $apiName)
+                : ($apiName !== '' ? $apiName : $deviceName);
+            $relays[] = $this->relayDeviceRow($id, (int) $oid, $name, $product, $available, $on);
+        }
+        $sensors = [];
+        foreach ($inputs as $iid => $input) {
+            $apiName = YarboHub::normalizeDisplayName($this->stringifyApiValue($input['name'] ?? null), 48);
+            $name = $this->relayPortDisplayName($deviceName, 'In', (int) $iid, $apiName);
+            $sensors[] = $this->relayInputSensorRow($id, (int) $iid, $name, $product, $available, $this->relayInputClosed($input));
         }
 
-        return $rows !== [] ? $rows : [$this->relayDeviceRow($id, 0, $deviceName, $product, $this->relayConnected($row), false)];
+        return ['relays' => $relays, 'sensors' => $sensors];
     }
 
     /**
@@ -2083,15 +2167,34 @@ final class YarboUnifi
      */
     private function relayOutputRows(array $row): array
     {
-        foreach (['outputs', 'outputsExpand'] as $key) {
-            $outputs = $row[$key] ?? null;
-            if (!is_array($outputs) || $outputs === []) {
+        return $this->relayPortList($row, ['outputs', 'outputsExpand']);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return list<array<string, mixed>>
+     */
+    private function relayInputRows(array $row): array
+    {
+        return $this->relayPortList($row, ['inputs', 'inputsExpand']);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param list<string> $keys
+     * @return list<array<string, mixed>>
+     */
+    private function relayPortList(array $row, array $keys): array
+    {
+        foreach ($keys as $key) {
+            $ports = $row[$key] ?? null;
+            if (!is_array($ports) || $ports === []) {
                 continue;
             }
             $out = [];
-            foreach ($outputs as $output) {
-                if (is_array($output)) {
-                    $out[] = $output;
+            foreach ($ports as $port) {
+                if (is_array($port)) {
+                    $out[] = $port;
                 }
             }
             if ($out !== []) {
@@ -2103,20 +2206,150 @@ final class YarboUnifi
     }
 
     /**
-     * @param array<string, mixed> $output
+     * @param list<array<string, mixed>> $ports
+     * @param list<string> $idKeys
+     * @return array<int, array<string, mixed>>
      */
-    private function relayOutputId(array $output): ?int
+    private function portsById(array $ports, array $idKeys): array
     {
-        foreach (['id', 'outputId', 'output_id'] as $key) {
-            if (!array_key_exists($key, $output) || $output[$key] === '' || $output[$key] === null) {
+        $out = [];
+        foreach ($ports as $port) {
+            $id = $this->relayPortId($port, $idKeys);
+            if ($id === null) {
                 continue;
             }
-            if (is_numeric($output[$key])) {
-                return (int) $output[$key];
+            $out[$id] = $port;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $ports
+     * @return array<int, array<string, mixed>>
+     */
+    private function padRelayPorts(array $ports, int $count): array
+    {
+        for ($i = 0; $i < $count; $i++) {
+            if (!isset($ports[$i])) {
+                $ports[$i] = ['id' => $i];
+            }
+        }
+        ksort($ports);
+
+        return $ports;
+    }
+
+    /**
+     * @param array<string, mixed> $port
+     * @param list<string> $keys
+     */
+    private function relayPortId(array $port, array $keys): ?int
+    {
+        foreach ($keys as $key) {
+            if (!array_key_exists($key, $port) || $port[$key] === '' || $port[$key] === null) {
+                continue;
+            }
+            if (is_numeric($port[$key])) {
+                return (int) $port[$key];
             }
         }
 
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function splitUslRelayPorts(array $row): bool
+    {
+        $blob = strtolower($this->stringField($row, 'type', 'guid', 'model', 'product'));
+        if (preg_match('/\busl[-_ ]?relay\b/', $blob) === 1) {
+            return true;
+        }
+        if (preg_match('/\bul[-_ ]?relay\b/', $blob) === 1) {
+            return false;
+        }
+
+        return strtolower($this->stringField($row, 'modelKey', 'model_key')) === 'relay';
+    }
+
+    private function relayPortDisplayName(string $deviceName, string $kind, int $apiId, string $apiName): string
+    {
+        $n = $apiId + 1;
+        $fallback = trim($deviceName . ' ' . $kind . ' ' . $n);
+        if ($apiName === '' || strcasecmp($apiName, $deviceName) === 0) {
+            return $fallback;
+        }
+        if (preg_match('/^(o|out|output|i|in|input)\s*\d+$/i', $apiName) === 1) {
+            return $fallback;
+        }
+
+        return YarboHub::normalizeDisplayName($deviceName . ' ' . $apiName, 48) ?: $fallback;
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    private function relayInputClosed(array $input): bool
+    {
+        $state = strtolower($this->stringifyApiValue($input['state'] ?? ''));
+        if (in_array($state, ['short', 'closed', 'on', 'active', 'triggered', 'low'], true)) {
+            return true;
+        }
+        if (in_array($state, ['open', 'off', 'idle', 'high', ''], true)) {
+            return false;
+        }
+
+        return $this->truthy($input['state'] ?? false);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function relayInputSensorRow(
+        string $relayId,
+        int $inputId,
+        string $name,
+        string $product,
+        bool $available,
+        bool $closed
+    ): array {
+        $native = 'rin-' . $relayId . '-' . (string) $inputId;
+        $open = !$closed;
+
+        return [
+            'id' => self::homeId(self::KIND_SENSOR, $native),
+            'native_id' => $native,
+            'relay_id' => $relayId,
+            'input_id' => $inputId,
+            'name' => $name,
+            'kind' => self::KIND_SENSOR,
+            'source' => self::SOURCE,
+            'product' => trim($product . ' input'),
+            'companion_of' => self::homeId(self::KIND_RELAY, $relayId . ':0'),
+            'available' => $available,
+            'on' => $closed,
+            'dimmable' => false,
+            'colorable' => false,
+            'status' => $closed ? 'Closed' : 'Open',
+            'open' => $open,
+            'motion' => null,
+            'has_open' => true,
+            'has_motion' => false,
+            'motion_at' => 0,
+            'temperature' => null,
+            'humidity' => null,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function isRelayInputSensor(array $row): bool
+    {
+        return str_starts_with((string) ($row['native_id'] ?? ''), 'rin-')
+            || str_starts_with((string) ($row['id'] ?? ''), 'unifi:sensor:rin-');
     }
 
     /**
@@ -2138,8 +2371,7 @@ final class YarboUnifi
     private function relayDeviceRow(string $relayId, int $outputId, string $name, string $product, bool $available, bool $on): array
     {
         $native = $relayId . ':' . (string) $outputId;
-
-        return [
+        $row = [
             'id' => self::homeId(self::KIND_RELAY, $native),
             'native_id' => $native,
             'relay_id' => $relayId,
@@ -2154,6 +2386,11 @@ final class YarboUnifi
             'colorable' => false,
             'status' => $on ? 'On' : 'Off',
         ];
+        if ($outputId !== 0) {
+            $row['companion_of'] = self::homeId(self::KIND_RELAY, $relayId . ':0');
+        }
+
+        return $row;
     }
 
     /**

@@ -55,6 +55,14 @@ assert_true(YarboHome::automationTypeLabel([
 ]) === 'UniFi Relay', 'USL-Relay type');
 
 assert_true(YarboHome::automationTypeLabel([
+    'id' => 'unifi:sensor:rin-usl1-0',
+    'kind' => 'sensor',
+    'source' => 'unifi',
+    'product' => 'USL-Relay input',
+    'name' => 'Garage In 1',
+]) === 'UniFi Relay input', 'USL-Relay input type');
+
+assert_true(YarboHome::automationTypeLabel([
     'id' => '31:1',
     'kind' => 'heater',
     'product' => 'Mill Wi-Fi Panel Heater Gen4',

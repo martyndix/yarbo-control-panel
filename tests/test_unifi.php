@@ -1334,6 +1334,10 @@ $usl->setTransport(function (string $method, string $url, array $headers, ?strin
                         ['id' => 0, 'name' => 'O1', 'state' => 'off'],
                         ['id' => 1, 'name' => 'O2', 'state' => 'on'],
                     ],
+                    'inputsExpand' => [
+                        ['id' => 0, 'name' => 'I1', 'state' => 'open'],
+                        ['id' => 1, 'name' => 'I2', 'state' => 'short'],
+                    ],
                 ]],
             ]),
             'content_type' => 'application/json',
@@ -1350,9 +1354,11 @@ if (($uslProbe['counts']['relays'] ?? 0) !== 2) {
     fwrite(STDERR, 'USL-Relay count ' . json_encode($uslProbe) . "\n");
     exit(1);
 }
-if (!in_array('unifi:relay:usl1:0', $uslIds, true) || !in_array('unifi:relay:usl1:1', $uslIds, true)) {
-    fwrite(STDERR, 'USL-Relay ids ' . json_encode($uslIds) . "\n");
-    exit(1);
+foreach (['unifi:relay:usl1:0', 'unifi:relay:usl1:1', 'unifi:sensor:rin-usl1-0', 'unifi:sensor:rin-usl1-1'] as $need) {
+    if (!in_array($need, $uslIds, true)) {
+        fwrite(STDERR, "USL-Relay missing $need " . json_encode($uslIds) . "\n");
+        exit(1);
+    }
 }
 $uslById = [];
 foreach ($uslProbe['devices'] ?? [] as $row) {
@@ -1360,13 +1366,32 @@ foreach ($uslProbe['devices'] ?? [] as $row) {
         $uslById[$row['id']] = $row;
     }
 }
-if (($uslById['unifi:relay:usl1:0']['name'] ?? '') !== 'O1' || ($uslById['unifi:relay:usl1:0']['product'] ?? '') !== 'USL-Relay') {
+if (($uslById['unifi:relay:usl1:0']['name'] ?? '') !== 'Garage door Out 1' || ($uslById['unifi:relay:usl1:0']['product'] ?? '') !== 'USL-Relay') {
     fwrite(STDERR, 'USL-Relay row ' . json_encode($uslById['unifi:relay:usl1:0'] ?? null) . "\n");
     exit(1);
 }
-if (($uslById['unifi:relay:usl1:1']['on'] ?? false) !== true) {
-    fwrite(STDERR, 'USL-Relay O2 should be on ' . json_encode($uslById['unifi:relay:usl1:1'] ?? null) . "\n");
+if (($uslById['unifi:relay:usl1:1']['name'] ?? '') !== 'Garage door Out 2' || ($uslById['unifi:relay:usl1:1']['on'] ?? false) !== true) {
+    fwrite(STDERR, 'USL-Relay O2 ' . json_encode($uslById['unifi:relay:usl1:1'] ?? null) . "\n");
     exit(1);
+}
+if (($uslById['unifi:sensor:rin-usl1-0']['name'] ?? '') !== 'Garage door In 1' || ($uslById['unifi:sensor:rin-usl1-0']['open'] ?? null) !== true) {
+    fwrite(STDERR, 'USL-Relay In 1 ' . json_encode($uslById['unifi:sensor:rin-usl1-0'] ?? null) . "\n");
+    exit(1);
+}
+if (($uslById['unifi:sensor:rin-usl1-1']['name'] ?? '') !== 'Garage door In 2' || ($uslById['unifi:sensor:rin-usl1-1']['on'] ?? false) !== true) {
+    fwrite(STDERR, 'USL-Relay In 2 ' . json_encode($uslById['unifi:sensor:rin-usl1-1'] ?? null) . "\n");
+    exit(1);
+}
+if (!$usl->setShowOnHome('unifi:relay:usl1:0', true)) {
+    fwrite(STDERR, "USL-Relay show on home failed\n");
+    exit(1);
+}
+$uslHomeIds = array_column($usl->homeRows(), 'id');
+foreach (['unifi:relay:usl1:0', 'unifi:relay:usl1:1', 'unifi:sensor:rin-usl1-0', 'unifi:sensor:rin-usl1-1'] as $need) {
+    if (!in_array($need, $uslHomeIds, true)) {
+        fwrite(STDERR, "USL-Relay home missing $need " . json_encode($uslHomeIds) . "\n");
+        exit(1);
+    }
 }
 $uslOn = $usl->command(['id' => 'unifi:relay:usl1:0', 'command' => 'on']);
 if (!($uslOn['ok'] ?? false) || empty($uslOn['on'])) {
@@ -1416,8 +1441,12 @@ $sensorRelay->setTransport(function (string $method, string $url, array $headers
 });
 $sensorProbe = $sensorRelay->probe();
 $sensorIds = array_column($sensorProbe['devices'] ?? [], 'id');
-if (($sensorProbe['counts']['relays'] ?? 0) !== 1 || !in_array('unifi:relay:usl2:0', $sensorIds, true)) {
+if (($sensorProbe['counts']['relays'] ?? 0) !== 2 || !in_array('unifi:relay:usl2:0', $sensorIds, true) || !in_array('unifi:relay:usl2:1', $sensorIds, true)) {
     fwrite(STDERR, 'USL-Relay from sensors ' . json_encode($sensorProbe) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:sensor:rin-usl2-0', $sensorIds, true) || !in_array('unifi:sensor:rin-usl2-1', $sensorIds, true)) {
+    fwrite(STDERR, 'USL-Relay inputs from sensors ' . json_encode($sensorIds) . "\n");
     exit(1);
 }
 if (in_array('unifi:sensor:usl2', $sensorIds, true)) {
@@ -1427,6 +1456,10 @@ if (in_array('unifi:sensor:usl2', $sensorIds, true)) {
 
 if (!str_contains($change, '## [4.0.121]')) {
     fwrite(STDERR, "changelog 4.0.121\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.122]')) {
+    fwrite(STDERR, "changelog 4.0.122\n");
     exit(1);
 }
 

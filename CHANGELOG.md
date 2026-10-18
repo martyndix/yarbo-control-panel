@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.122] - 2026-10-18
+
+### Changed
+- Each Protect **USL-Relay** shows as four Home rows: **Out 1**, **Out 2**, **In 1**, and **In 2**. Outputs stay On/Off relays; inputs are open/closed sensors. A leftover single “Patio Lights” tick still lists every port on that device.
+
 ## [4.0.121] - 2026-10-18
 
 ### Fixed
