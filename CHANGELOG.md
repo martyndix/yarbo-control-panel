@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.131] - 2026-10-19
+
+### Changed
+- Paper Colour Vestaboard viewer uses the PaperMono battery badge (percent in the cell) and the charging bolt when USB is plugged in. Firmware **0.2.25-colour**.
+
 ## [4.0.130] - 2026-10-19
 
 ### Added

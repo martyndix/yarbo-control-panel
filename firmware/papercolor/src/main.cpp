@@ -90,6 +90,10 @@ String clockLocal = "--:--";
 String clockDate = "";
 int tabletBat = -1;
 
+bool tabletPluggedIn();
+void drawChargeBolt(int cx, int cy, int size);
+void drawBatteryBadge(int right, int cy, int pct, bool compact);
+
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
 int planCount = 0;
@@ -318,7 +322,8 @@ String screenKey()
 {
     if (viewerOnly()) {
         return String("vb|") + vestaboardHash + "|" + String(displayRot) + "|"
-            + (vestaboardOn ? "1" : "0") + "|" + lastError + "|" + clockLocal;
+            + (vestaboardOn ? "1" : "0") + "|" + lastError + "|" + clockLocal + "|"
+            + String(tabletBat) + "|" + (tabletPluggedIn() ? "1" : "0");
     }
     String key = String(currentPage) + "|" + String(battery) + "|" + charging + "|" + state + "|" + head + "|"
         + errorLabel + "|" + heading + "|" + rainLabel + "|" + connectionType + "|" + connectionStatus + "|"
@@ -763,6 +768,84 @@ void drawVestaboardGrid(int x, int y, int cell, int gap)
     M5.Display.setTextDatum(TL_DATUM);
 }
 
+void drawChargeBolt(int cx, int cy, int size)
+{
+    int thick = max(3, size / 8);
+    int x0 = cx + size / 5;
+    int y0 = cy - size / 2;
+    int x1 = cx - size / 4;
+    int y1 = cy - size / 18;
+    int x2 = cx + size / 3;
+    int y2 = y1;
+    int x3 = cx - size / 5;
+    int y3 = cy + size / 2;
+    for (int t = -thick; t <= thick; t++) {
+        M5.Display.drawLine(x0 + t, y0, x1 + t, y1, TFT_BLACK);
+        M5.Display.drawLine(x0, y0 + t, x1, y1 + t, TFT_BLACK);
+        M5.Display.drawLine(x1 + t, y1, x2 + t, y2, TFT_BLACK);
+        M5.Display.drawLine(x1, y1 + t, x2, y2 + t, TFT_BLACK);
+        M5.Display.drawLine(x2 + t, y2, x3 + t, y3, TFT_BLACK);
+        M5.Display.drawLine(x2, y2 + t, x3, y3 + t, TFT_BLACK);
+    }
+}
+
+void drawBatteryBadge(int right, int cy, int pct, bool compact)
+{
+    const int w = compact ? 92 : 160;
+    const int h = compact ? 36 : 72;
+    const int cap = compact ? 10 : 16;
+    const int radius = compact ? 8 : 14;
+    const int stroke = compact ? 3 : 5;
+    const int gap = compact ? 2 : 3;
+    int x = right - w - cap;
+    int y = cy - h / 2;
+    int level = constrain(pct, 0, 100);
+    int capH = compact ? 14 : 28;
+    int capR = compact ? 2 : 4;
+
+    M5.Display.fillRoundRect(x, y, w, h, radius, TFT_BLACK);
+    int ir = max(4, radius - stroke + 2);
+    M5.Display.fillRoundRect(
+        x + stroke,
+        y + stroke,
+        w - 2 * stroke,
+        h - 2 * stroke,
+        ir,
+        TFT_WHITE
+    );
+    M5.Display.fillRect(x + w - stroke, y + (h - capH) / 2, stroke, capH, TFT_BLACK);
+    M5.Display.fillRoundRect(x + w - 1, y + (h - capH) / 2, cap + 1, capH, capR, TFT_BLACK);
+
+    int ix = x + stroke + gap;
+    int iy = y + stroke + gap;
+    int iw = w - 2 * (stroke + gap);
+    int ih = h - 2 * (stroke + gap);
+    int fillw = pct >= 0 ? (iw * level / 100) : 0;
+    if (fillw > 0) {
+        M5.Display.fillRect(ix, iy, fillw, ih, TFT_BLACK);
+    }
+
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.setTextSize(compact ? 2 : 3);
+    String s = pct >= 0 ? (String(pct) + "%") : String("--");
+    int tw = M5.Display.textWidth(s);
+    int th = compact ? 14 : 22;
+    int padX = compact ? 3 : 4;
+    int padY = compact ? 1 : 2;
+    M5.Display.fillRoundRect(
+        x + w / 2 - tw / 2 - padX,
+        y + h / 2 - th / 2 - padY,
+        tw + padX * 2,
+        th + padY * 2,
+        compact ? 2 : 4,
+        TFT_WHITE
+    );
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.drawString(s, x + w / 2, y + h / 2);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+}
+
 void drawLockScreen(bool forceFull)
 {
     beginEpdFrame(forceFull);
@@ -806,8 +889,9 @@ void drawBoardPage(bool forceFull)
     int H = M5.Display.height();
     if (viewerOnly()) {
         tabletBat = M5.Power.getBatteryLevel();
+        bool chargingNow = tabletPluggedIn();
         int clockBand = 56;
-        int foot = 18;
+        int foot = 44;
         int gap = 2;
         int side = 8;
         int cellW = (W - side * 2 - 14 * gap) / 15;
@@ -825,15 +909,15 @@ void drawBoardPage(bool forceFull)
         M5.Display.setTextSize(5);
         M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), W / 2, 8);
         drawVestaboardGrid(gridX, gridY, cell, gap);
-        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-        M5.Display.setTextDatum(BL_DATUM);
-        M5.Display.setTextSize(1);
-        String bat = "--";
-        if (tabletBat >= 0) {
-            int pct = tabletBat > 100 ? 100 : tabletBat;
-            bat = String(pct) + "%";
+        int batH = 36;
+        int batW = 92;
+        int batCap = 10;
+        int batCy = H - 4 - batH / 2;
+        int batRight = 8 + batW + batCap;
+        drawBatteryBadge(batRight, batCy, tabletBat, true);
+        if (chargingNow) {
+            drawChargeBolt(batRight + 20, batCy, 28);
         }
-        M5.Display.drawString(bat, 8, H - 4);
         finishEpdFrame();
         return;
     }
