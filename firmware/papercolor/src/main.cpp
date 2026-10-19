@@ -318,7 +318,7 @@ String screenKey()
 {
     if (viewerOnly()) {
         return String("vb|") + vestaboardHash + "|" + String(displayRot) + "|"
-            + (vestaboardOn ? "1" : "0") + "|" + lastError;
+            + (vestaboardOn ? "1" : "0") + "|" + lastError + "|" + clockLocal;
     }
     String key = String(currentPage) + "|" + String(battery) + "|" + charging + "|" + state + "|" + head + "|"
         + errorLabel + "|" + heading + "|" + rainLabel + "|" + connectionType + "|" + connectionStatus + "|"
@@ -733,7 +733,14 @@ uint16_t vestaboardFillColor(int code)
 void drawVestaboardGrid(int x, int y, int cell, int gap)
 {
     M5.Display.setTextDatum(MC_DATUM);
-    M5.Display.setTextSize(cell >= 28 ? 2 : 1);
+    int glyphSize = (cell - 4) / 8;
+    if (glyphSize < 1) {
+        glyphSize = 1;
+    }
+    if (glyphSize > 5) {
+        glyphSize = 5;
+    }
+    M5.Display.setTextSize(glyphSize);
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < 15; c++) {
             int code = vestaboardCodes[r][c];
@@ -752,6 +759,7 @@ void drawVestaboardGrid(int x, int y, int cell, int gap)
         }
     }
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextSize(1);
     M5.Display.setTextDatum(TL_DATUM);
 }
 
@@ -797,17 +805,24 @@ void drawBoardPage(bool forceFull)
     int W = M5.Display.width();
     int H = M5.Display.height();
     if (viewerOnly()) {
-        int gap = 3;
-        int side = 16;
+        int clockBand = 56;
+        int gap = 2;
+        int side = 8;
         int cellW = (W - side * 2 - 14 * gap) / 15;
-        int cellH = (H - side * 2 - 2 * gap) / 3;
+        int cellH = (H - clockBand - 8 - 2 * gap) / 3;
         int cell = cellW < cellH ? cellW : cellH;
         if (cell < 16) {
             cell = 16;
         }
         int gridW = 15 * cell + 14 * gap;
         int gridH = 3 * cell + 2 * gap;
-        drawVestaboardGrid((W - gridW) / 2, (H - gridH) / 2, cell, gap);
+        int gridX = (W - gridW) / 2;
+        int gridY = clockBand + (H - clockBand - 8 - gridH) / 2;
+        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+        M5.Display.setTextDatum(TC_DATUM);
+        M5.Display.setTextSize(5);
+        M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), W / 2, 8);
+        drawVestaboardGrid(gridX, gridY, cell, gap);
         finishEpdFrame();
         return;
     }

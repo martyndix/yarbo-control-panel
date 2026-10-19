@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.129] - 2026-10-19
+
+### Changed
+- Paper Colour Vestaboard viewer uses larger flap letters and shows the time above the board. Firmware **0.2.23-colour**.
+
 ## [4.0.128] - 2026-10-19
 
 ### Added

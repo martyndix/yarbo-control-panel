@@ -103,8 +103,8 @@ $kit = (string) file_get_contents(__DIR__ . '/../scripts/paper_setup_kit.py');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 $mono = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
 
-assert_true(str_contains($ver, '0.2.22-colour'), 'firmware 0.2.22-colour');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.22-colour';"), 'panel colour pin 0.2.22-colour');
+assert_true(str_contains($ver, '0.2.23-colour'), 'firmware 0.2.23-colour');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.23-colour';"), 'panel colour pin 0.2.23-colour');
 assert_true(str_contains($mono, '#define PAPERMONO_FW_VERSION "0.1.69"'), 'PaperMono firmware unchanged');
 assert_true(str_contains($color, 'bool viewerOnly()'), 'viewer-only helper');
 assert_true(str_contains($color, 'void applyDisplayMode()'), 'landscape display mode');
@@ -113,13 +113,15 @@ assert_true(str_contains($color, 'landscapeRot == 1 ? 3 : 1'), 'A/B/C flip lands
 assert_true(str_contains($color, 'jsonFlag(doc, "vestaboard_viewer"'), 'compact/USB parse viewer flag');
 assert_true(str_contains($color, 'prefs.putBool("yon", yarboOn)'), 'persist module flags');
 assert_true(str_contains($color, 'if (viewerOnly())'), 'pager skips to viewer board');
-assert_true(!str_contains($color, 'clockLocal + "|" + String(usingRemote'), 'clock is not in the dirty key');
+assert_true(!str_contains($color, 'clockLocal + "|" + String(usingRemote'), 'clock is not in the paged dirty key');
+assert_true(str_contains($color, 'int clockBand = 56;'), 'viewer reserves a time band');
+assert_true(str_contains($color, 'int glyphSize = (cell - 4) / 8;'), 'flap letters scale with cell size');
 assert_true(str_contains($html, 'id="papermono-vestaboard-viewer"'), 'settings viewer checkbox');
-assert_true(str_contains($html, '0.2.22-colour'), 'settings hint 0.2.22-colour');
+assert_true(str_contains($html, '0.2.23-colour'), 'settings hint 0.2.23-colour');
 assert_true(str_contains($js, 'function applyVestaboardViewerGate()'), 'checkbox gated on Note');
 assert_true(str_contains($js, 'vestaboard_viewer: !!els.papermonoVestaboardViewer?.checked'), 'prefs payload includes viewer');
 assert_true(str_contains($flash, '--vestaboard-viewer'), 'flash CLI flag');
 assert_true(str_contains($kit, 'vestaboard_viewer'), 'setup kit CFG includes viewer');
-assert_true(str_contains($change, '## [4.0.128]'), 'changelog 4.0.128');
+assert_true(str_contains($change, '## [4.0.129]'), 'changelog 4.0.129');
 
 echo "test_papercolor_viewer.php ok\n";
