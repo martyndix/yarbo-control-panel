@@ -647,14 +647,20 @@ final class YarboHomeAutomations
         $applied = [];
         $errors = [];
         foreach ($updates as $row) {
-            $result = $this->runOneAction($home, [
-                'kind' => 'device',
+            $payload = [
                 'id' => $row['id'],
                 'command' => 'color_temp',
-                'kelvin' => $row['kelvin'],
+                'kelvin' => (int) $row['kelvin'],
                 'adaptive' => true,
-                'adaptive_tick' => true,
-            ]);
+            ];
+            if ($this->commandHandler !== null) {
+                $result = ($this->commandHandler)($payload + [
+                    'kind' => 'device',
+                    'adaptive_tick' => true,
+                ]);
+            } else {
+                $result = $home->command($payload);
+            }
             if ($result['ok'] ?? false) {
                 $applied[$row['id']] = (int) $row['kelvin'];
             } else {
@@ -2952,16 +2958,21 @@ final class YarboHomeAutomations
             $hex = '';
         }
         $kelvin = 0;
-        if (!empty($action['adaptive'])) {
-            $hex = '';
-            $kelvin = 0;
-            $home->addAdaptiveExtra($id);
-        } elseif (isset($action['kelvin']) && $action['kelvin'] !== '') {
+        if (isset($action['kelvin']) && $action['kelvin'] !== '') {
             $kelvin = (int) $action['kelvin'];
         } elseif (isset($action['color_temp']) && $action['color_temp'] !== '') {
             $kelvin = (int) $action['color_temp'];
         }
-        if ($kelvin > 0 && !$caps['color_ct']) {
+        $adaptive = !empty($action['adaptive']);
+        if ($adaptive) {
+            $hex = '';
+            if (empty($action['adaptive_tick'])) {
+                $home->addAdaptiveExtra($id);
+            }
+            if ($kelvin <= 0) {
+                $kelvin = $home->adaptiveKelvinForDevice($id);
+            }
+        } elseif ($kelvin > 0 && !$caps['color_ct']) {
             $kelvin = 0;
         }
         if ($hex !== '' && YarboHome::deviceAcceptsCommand($id, 'color', $acceptKind)) {
@@ -2977,7 +2988,7 @@ final class YarboHomeAutomations
             if (!($last['ok'] ?? false)) {
                 $errors[] = (string) ($last['error'] ?? 'failed');
             }
-        } elseif ($kelvin > 0 && YarboHome::deviceAcceptsCommand($id, 'color_temp', $acceptKind)) {
+        } elseif ($kelvin > 0 && ($adaptive || YarboHome::deviceAcceptsCommand($id, 'color_temp', $acceptKind))) {
             if (!$sent) {
                 $last = $home->command(['id' => $id, 'command' => 'on']);
                 $sent = true;
@@ -2985,10 +2996,20 @@ final class YarboHomeAutomations
                     $errors[] = (string) ($last['error'] ?? 'failed');
                 }
             }
-            $last = $home->command(['id' => $id, 'command' => 'color_temp', 'kelvin' => $kelvin]);
+            $ct = [
+                'id' => $id,
+                'command' => 'color_temp',
+                'kelvin' => $kelvin,
+            ];
+            if ($adaptive) {
+                $ct['adaptive'] = true;
+            }
+            $last = $home->command($ct);
             $sent = true;
             if (!($last['ok'] ?? false)) {
                 $errors[] = (string) ($last['error'] ?? 'failed');
+            } elseif ($adaptive) {
+                $home->rememberAdaptiveApplied([$id => $kelvin]);
             }
         }
         if (!$sent) {

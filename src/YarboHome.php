@@ -724,7 +724,7 @@ final class YarboHome
         if ($action === 'colour' || $action === 'set_color' || $action === 'set_colour') {
             $action = 'color';
         }
-        if ($action === 'colour_temp') {
+        if ($action === 'colour_temp' || $action === 'kelvin') {
             $action = 'color_temp';
         }
         if ($id === '' || $action === '') {
@@ -1130,7 +1130,7 @@ final class YarboHome
             if ($hex !== null && !$caps['colorable']) {
                 $hex = null;
             }
-            if ($kelvin && !$caps['color_ct']) {
+            if ($kelvin && !$caps['color_ct'] && !$adaptive) {
                 $kelvin = null;
             }
             if (($hex !== null || $kelvin) && !$sent) {

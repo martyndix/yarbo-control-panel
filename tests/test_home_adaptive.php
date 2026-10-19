@@ -152,10 +152,15 @@ assert_true(str_contains($js, 'data-auto-adaptive'), 'Then Time of day checkbox'
 assert_true(str_contains($js, 'time of day'), 'Then phrase mentions time of day');
 assert_true(str_contains($index, 'Time of day'), 'scene editor hint mentions Time of day');
 assert_true(str_contains($change, '## [4.0.124]'), 'changelog 4.0.124');
+assert_true(str_contains($change, '## [4.0.125]'), 'changelog 4.0.125');
 
 $homePhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 $autoPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHomeAutomations.php');
 assert_true(str_contains($homePhp, 'function adaptiveKelvinAt'), 'kelvin curve is on Home');
 assert_true(str_contains($autoPhp, 'function applyAdaptiveLighting'), 'runner keeps updating Time of day');
+assert_true(str_contains($autoPhp, "\$home->command(\$payload)"), 'Time of day tick sends color_temp to Matter, not On');
+assert_true(!preg_match('/adaptive\'\]\)\) \{\s*\$hex = \'\';\s*\$kelvin = 0;/', $autoPhp), 'Then Time of day must keep kelvin');
+assert_true(str_contains($autoPhp, "\$ct['adaptive'] = true"), 'Then Time of day must not pause itself');
+assert_true(str_contains($homePhp, '!$caps[\'color_ct\'] && !$adaptive'), 'scene Time of day still sends kelvin');
 
 echo "ok\n";

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.125] - 2026-10-19
+
+### Fixed
+- **Time of day** now sends colour temperature (`color_temp` + kelvin) instead of a plain On. The follow-up updates were being turned into On, so Matter never saw a temperature command and the lights did not change.
+
 ## [4.0.124] - 2026-10-19
 
 ### Added
