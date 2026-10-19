@@ -18,7 +18,7 @@ final class YarboPaperDevice
     public const WEB_CLIENT_ID = 'web';
     public const FIRMWARE_VERSION = '0.1.69';
     public const MENU_LABEL_MAX = 20;
-    public const FIRMWARE_VERSION_COLOR = '0.2.20-colour';
+    public const FIRMWARE_VERSION_COLOR = '0.2.21-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const OTA_PENDING_TTL_S = 900;
@@ -1125,6 +1125,15 @@ final class YarboPaperDevice
             'yarbo_error' => $yarboEnabled && $online && ((int) $errorCode !== 0 || $powerFault > 0),
             'powerwall_error' => false,
             'lymow_error' => $lyEnabled && YarboLymow::hasError($ly),
+        ] + $this->vestaboardLedFlags(
+            $vbObj,
+            $vb,
+            $parsed,
+            $online,
+            $yarboEnabled,
+            $lyEnabled,
+            $ly
+        ) + [
             'ota_pending' => $this->otaPendingActive($forDevice),
             'remote_url' => (new YarboPaperRemote($this->projectRoot))->tabletOrigin(),
         ] + $this->logoPublicView()
@@ -1232,6 +1241,53 @@ final class YarboPaperDevice
             'paper_peers' => $peers,
             'paper_messages' => $inbox,
             'radio_sync' => $this->radioSyncWord(),
+        ];
+    }
+
+    /**
+     * Paper Colour RGB LEDs follow the live Vestaboard: red if a shown device
+     * is in error, blue if Yarbo rain is on the Note. Red always wins.
+     *
+     * @param array<string, mixed> $vb
+     * @param array<string, mixed>|null $parsed
+     * @param array<string, mixed> $ly
+     * @return array{vestaboard_error: bool, vestaboard_rain: bool}
+     */
+    private function vestaboardLedFlags(
+        YarboVestaboard $vbObj,
+        array $vb,
+        ?array $parsed,
+        bool $online,
+        bool $yarboEnabled,
+        bool $lyEnabled,
+        array $ly
+    ): array {
+        if (empty($vb['enabled']) || $vbObj->isExternalHoldActive($vb)) {
+            return ['vestaboard_error' => false, 'vestaboard_rain' => false];
+        }
+        $live = (new YarboHub($this->projectRoot))->vestaboardLive();
+        $yarboError = $yarboEnabled && $online && (
+            (int) ($parsed['error_code'] ?? 0) !== 0
+            || (int) ($parsed['power_fault'] ?? 0) > 0
+        );
+        $lymowError = $lyEnabled && YarboLymow::hasError($ly);
+        $rain = $yarboEnabled && $online && !empty($parsed['rain_detected']);
+        $error = false;
+        $showRain = false;
+        if ($live === YarboHub::LIVE_BATTERIES) {
+            $error = $yarboError || $lymowError;
+        } elseif ($live === YarboHub::MODULE_LYMOW) {
+            $error = $lymowError;
+        } elseif ($live === YarboHub::MODULE_POWERWALL) {
+            $error = false;
+        } else {
+            $error = $yarboError;
+            $showRain = $rain;
+        }
+
+        return [
+            'vestaboard_error' => $error,
+            'vestaboard_rain' => $showRain && !$error,
         ];
     }
 

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.127] - 2026-10-19
+
+### Added
+- Paper Colour side **LEDs** follow the live Vestaboard: **red** when a device on the Note is in error, **blue** when Yarbo rain is on the board. Red always wins. Firmware **0.2.21-colour**.
+
 ## [4.0.126] - 2026-10-19
 
 ### Fixed

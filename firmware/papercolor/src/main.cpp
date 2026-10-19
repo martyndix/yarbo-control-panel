@@ -75,6 +75,8 @@ int lockAfterS = 60;
 String lockScreen = "logo";
 String unlockPage = "home";
 bool vestaboardOn = false;
+bool vestaboardError = false;
+bool vestaboardRain = false;
 int vestaboardCodes[3][15];
 String vestaboardHash = "";
 String clockLocal = "--:--";
@@ -825,6 +827,22 @@ bool syncPaperLogo(const String &hash)
     return true;
 }
 
+void applyStatusLeds()
+{
+    if (!M5.Led.isEnabled()) {
+        return;
+    }
+    M5.Led.setBrightness(72);
+    if (vestaboardError) {
+        M5.Led.setAllColor(255, 0, 0);
+    } else if (vestaboardRain) {
+        M5.Led.setAllColor(0, 0, 255);
+    } else {
+        M5.Led.setAllColor(0, 0, 0);
+    }
+    M5.Led.display();
+}
+
 void drawOtaScreen()
 {
     beginEpdFrame(true);
@@ -844,6 +862,9 @@ void runOtaUpdate()
         return;
     }
     otaBusy = true;
+    vestaboardError = false;
+    vestaboardRain = false;
+    applyStatusLeds();
     WiFi.setSleep(false);
     drawOtaScreen();
     delay(1200);
@@ -943,6 +964,11 @@ bool httpGetStatus()
     lymowState = doc["lymow_state"] | lymowState;
     lymowCharging = doc["lymow_charging"] | lymowCharging;
     vestaboardOn = doc["vestaboard_enabled"] | false;
+    vestaboardError = doc["vestaboard_error"] | false;
+    vestaboardRain = doc["vestaboard_rain"] | false;
+    if (vestaboardError) {
+        vestaboardRain = false;
+    }
     String newName = doc["device_name"] | deviceName;
     if (newName.length()) {
         deviceName = newName;
@@ -975,6 +1001,7 @@ bool httpGetStatus()
         }
     }
     lastError = "";
+    applyStatusLeds();
     syncPaperLogo(String((const char *) (doc["logo_hash"] | "")));
     bool otaPending = doc["ota_pending"] | false;
     String latest = doc["firmware_latest"] | "";
@@ -1172,6 +1199,9 @@ void setup()
         delay(20);
     }
     M5.Display.setRotation(0);
+    vestaboardError = false;
+    vestaboardRain = false;
+    applyStatusLeds();
     SPIFFS.begin(true);
     loadConfig();
     lastActivity = millis();

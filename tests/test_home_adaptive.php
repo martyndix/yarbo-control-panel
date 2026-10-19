@@ -154,6 +154,7 @@ assert_true(str_contains($index, 'Time of day'), 'scene editor hint mentions Tim
 assert_true(str_contains($change, '## [4.0.124]'), 'changelog 4.0.124');
 assert_true(str_contains($change, '## [4.0.125]'), 'changelog 4.0.125');
 assert_true(str_contains($change, '## [4.0.126]'), 'changelog 4.0.126');
+assert_true(str_contains($change, '## [4.0.127]'), 'changelog 4.0.127');
 
 $homePhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 $autoPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHomeAutomations.php');
