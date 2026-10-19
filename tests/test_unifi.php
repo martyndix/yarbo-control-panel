@@ -22,6 +22,10 @@ if (Yarbo\YarboUnifi::parseHomeId('1:2') !== null) {
     fwrite(STDERR, "matter id parsed as unifi\n");
     exit(1);
 }
+if (!Yarbo\YarboUnifi::isRelayHomeId('unifi:relay:usl1:1') || Yarbo\YarboUnifi::isRelayHomeId('unifi:sensor:rin-usl1-0')) {
+    fwrite(STDERR, "isRelayHomeId should match relay outputs only\n");
+    exit(1);
+}
 if (Yarbo\YarboUnifi::normalizeHost('https://192.168.1.1/protect') !== '192.168.1.1') {
     fwrite(STDERR, "host normalize failed\n");
     exit(1);
@@ -1393,6 +1397,68 @@ foreach (['unifi:relay:usl1:0', 'unifi:relay:usl1:1', 'unifi:sensor:rin-usl1-0',
         exit(1);
     }
 }
+$uslHub = new Yarbo\YarboHub($uslRoot);
+if (!$uslHub->save(['modules' => ['yarbo' => false, 'home' => true, 'unifi' => true, 'powerwall' => false, 'lymow' => false]])) {
+    fwrite(STDERR, "USL hub save failed\n");
+    exit(1);
+}
+$uslHome = new Yarbo\YarboHome($uslRoot);
+$hideOut2 = $uslHome->hideDevice('unifi:relay:usl1:1', true);
+if (!($hideOut2['ok'] ?? false) || empty($hideOut2['hidden'])) {
+    fwrite(STDERR, 'hide USL Out 2 ' . json_encode($hideOut2) . "\n");
+    exit(1);
+}
+$afterOut2Hide = $uslHome->dashboard();
+$afterOut2Ids = array_column($afterOut2Hide['devices'] ?? [], 'id');
+$afterOut2Hidden = array_column($afterOut2Hide['hidden_devices'] ?? [], 'id');
+$afterOut2Auto = array_column($afterOut2Hide['automation_devices'] ?? [], 'id');
+if (in_array('unifi:relay:usl1:1', $afterOut2Ids, true)) {
+    fwrite(STDERR, 'USL Out 2 stayed on Home after hide ' . json_encode($afterOut2Ids) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:relay:usl1:1', $afterOut2Hidden, true)) {
+    fwrite(STDERR, 'USL Out 2 missing from Hidden after hide ' . json_encode($afterOut2Hidden) . "\n");
+    exit(1);
+}
+if (!in_array('unifi:relay:usl1:1', $afterOut2Auto, true)) {
+    fwrite(STDERR, 'hidden USL Out 2 dropped from Automations ' . json_encode($afterOut2Auto) . "\n");
+    exit(1);
+}
+foreach (['unifi:relay:usl1:0', 'unifi:sensor:rin-usl1-0', 'unifi:sensor:rin-usl1-1'] as $keep) {
+    if (!in_array($keep, $afterOut2Ids, true)) {
+        fwrite(STDERR, "hiding Out 2 must leave $keep on Home " . json_encode($afterOut2Ids) . "\n");
+        exit(1);
+    }
+}
+$unhideOut2 = $uslHome->hideDevice('unifi:relay:usl1:1', false);
+if (!($unhideOut2['ok'] ?? false)) {
+    fwrite(STDERR, 'unhide USL Out 2 ' . json_encode($unhideOut2) . "\n");
+    exit(1);
+}
+$afterOut2Show = array_column($uslHome->dashboard()['devices'] ?? [], 'id');
+if (!in_array('unifi:relay:usl1:1', $afterOut2Show, true)) {
+    fwrite(STDERR, 'USL Out 2 missing from Home after unhide ' . json_encode($afterOut2Show) . "\n");
+    exit(1);
+}
+$hideOut1 = $uslHome->hideDevice('unifi:relay:usl1:0', true);
+if (!($hideOut1['ok'] ?? false)) {
+    fwrite(STDERR, 'hide USL Out 1 ' . json_encode($hideOut1) . "\n");
+    exit(1);
+}
+$afterOut1Hide = $uslHome->dashboard();
+$afterOut1Ids = array_column($afterOut1Hide['devices'] ?? [], 'id');
+$afterOut1Hidden = array_column($afterOut1Hide['hidden_devices'] ?? [], 'id');
+if (in_array('unifi:relay:usl1:0', $afterOut1Ids, true) || !in_array('unifi:relay:usl1:0', $afterOut1Hidden, true)) {
+    fwrite(STDERR, 'USL Out 1 hide ' . json_encode($afterOut1Ids) . json_encode($afterOut1Hidden) . "\n");
+    exit(1);
+}
+foreach (['unifi:relay:usl1:1', 'unifi:sensor:rin-usl1-0', 'unifi:sensor:rin-usl1-1'] as $keep) {
+    if (!in_array($keep, $afterOut1Ids, true)) {
+        fwrite(STDERR, "hiding the ticked Out 1 must leave $keep on Home " . json_encode($afterOut1Ids) . "\n");
+        exit(1);
+    }
+}
+$uslHome->hideDevice('unifi:relay:usl1:0', false);
 $uslOn = $usl->command(['id' => 'unifi:relay:usl1:0', 'command' => 'on']);
 if (!($uslOn['ok'] ?? false) || empty($uslOn['on'])) {
     fwrite(STDERR, 'USL-Relay on ' . json_encode($uslOn) . "\n");
@@ -1472,6 +1538,10 @@ if (!str_contains($change, '## [4.0.124]')) {
 }
 if (!str_contains($change, '## [4.0.125]')) {
     fwrite(STDERR, "changelog 4.0.125\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.126]')) {
+    fwrite(STDERR, "changelog 4.0.126\n");
     exit(1);
 }
 

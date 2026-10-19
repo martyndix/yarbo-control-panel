@@ -916,7 +916,10 @@ final class YarboHome
         if ($id === '') {
             return ['ok' => false, 'error' => 'Pick a device'];
         }
-        if (YarboUnifi::isHomeId($id) && !YarboUnifi::isCompanionSensorId($id)) {
+        // Relay outputs and PIR/rin companions stay on the UniFi Show on Home
+        // tick (one port lists the whole USL-Relay). Hide them on this panel
+        // instead of unticking, or homeRows expansion puts them straight back.
+        if (YarboUnifi::isHomeId($id) && !YarboUnifi::isCompanionSensorId($id) && !YarboUnifi::isRelayHomeId($id)) {
             $ok = (new YarboUnifi($this->projectRoot))->setShowOnHome($id, !$hidden);
             if (!$ok) {
                 return ['ok' => false, 'error' => 'Could not update the UniFi Home list'];

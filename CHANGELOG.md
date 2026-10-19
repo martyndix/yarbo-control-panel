@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.126] - 2026-10-19
+
+### Fixed
+- Home **Hide** of a UniFi **USL-Relay** port (Out 1/2) stayed hidden. Tick any port still lists the other three, so Hide used to untick a row that was never ticked, toast success, then put Cellar Out 2 straight back.
+
 ## [4.0.125] - 2026-10-19
 
 ### Fixed

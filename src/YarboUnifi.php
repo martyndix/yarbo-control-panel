@@ -82,6 +82,13 @@ final class YarboUnifi
             && (str_starts_with($parsed['native_id'], 'pir-') || str_starts_with($parsed['native_id'], 'rin-'));
     }
 
+    public static function isRelayHomeId(string $id): bool
+    {
+        $parsed = self::parseHomeId($id);
+
+        return $parsed !== null && $parsed['kind'] === self::KIND_RELAY;
+    }
+
     /**
      * @param list<string> $ids
      * @return array<string, true>

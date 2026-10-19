@@ -71,7 +71,7 @@ Protect cameras: stills are `GET /cameras/{id}/snapshot`. Live view prefers `GET
 
 ## Home
 
-Turn **Home** on as well. UniFi rows use ids like `unifi:camera:…`. Hide or Remove on Home only unchecks Show on Home — nothing is unpaired on the console. Scenes can include Protect floodlights and relay outputs as on/off members (not cameras, sensors, or doors).
+Turn **Home** on as well. UniFi rows use ids like `unifi:camera:…`. Hide or Remove of a camera or floodlight only unchecks Show on Home — nothing is unpaired on the console. Hide of one **USL-Relay** port (Out 1/2 or In 1/2) stays off Home; the other ports stay listed. Scenes can include Protect floodlights and relay outputs as on/off members (not cameras, sensors, or doors).
 
 White-ambiance Matter bulbs show **brightness** (blue slider) and **colour temperature** (amber slider, warm to cool). Full-colour bulbs keep a colour picker.
 
