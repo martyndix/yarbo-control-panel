@@ -1247,7 +1247,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.21-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B change pages, C locks / unlocks the screensaver (logo, Vestaboard, or both). The two RGB LEDs go <strong>red</strong> when a device on the live Vestaboard is in error, and <strong>blue</strong> for Yarbo rain (red wins). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.22-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B skip modules that are turned off. Tick <strong>Vestaboard viewer only</strong> (Note must be on) to boot a landscape board that fills the 600×400 panel. If the tablet has an IMU it picks landscape left or right; otherwise A/B (or C) flips it. The two RGB LEDs go <strong>red</strong> when a device on the live Vestaboard is in error, and <strong>blue</strong> for Yarbo rain (red wins). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -1347,6 +1347,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="both" selected>Logo and Vestaboard</option>
                                 </select>
                             </label>
+                            <label class="settings-field settings-checkbox is-disabled" id="papermono-vestaboard-viewer-row">
+                                <input type="checkbox" id="papermono-vestaboard-viewer" name="vestaboard_viewer" disabled>
+                                <span>Vestaboard viewer only (Paper Colour)</span>
+                            </label>
+                            <p class="hint" id="papermono-vestaboard-viewer-hint">Paper Colour only. Requires Vestaboard Note. The tablet boots the live board in landscape and skips every other page. Turn the Note off and this stays saved but inactive.</p>
                             <p class="hint">PaperMono Unlock always opens the page menu. One <strong>ROBOTS</strong> button opens Yarbo, Lymow, and Matter vacuums. On a Yarbo screen, A/B still step Status, Health, and Plans. Home is still on A/B, not on the menu.</p>
                             <h3 class="settings-subtitle">Menu buttons</h3>
                             <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. <strong>ROBOTS</strong> holds Yarbo, Lymow, and Matter vacuums — it stays off the menu when both robot modules are off and there are no vacuums. NOTE is the live Vestaboard plus the view buttons. The name on each button is also the title at the top of that page. Names wrap on the tablet and apply on the next poll — no reflash.</p>
@@ -1814,7 +1819,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.69 / 0.2.21-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.69 / 0.2.22-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

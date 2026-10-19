@@ -249,6 +249,7 @@ const els = {
     papermonoLogoClear: document.getElementById('papermono-logo-clear'),
     papermonoLogoResult: document.getElementById('papermono-logo-result'),
     papermonoLockScreen: document.getElementById('papermono-lock-screen'),
+    papermonoVestaboardViewer: document.getElementById('papermono-vestaboard-viewer'),
     papermonoTimezone: document.getElementById('papermono-timezone'),
     papermonoLockAfter: document.getElementById('papermono-lock-after'),
     papermonoLightOff: document.getElementById('papermono-light-off'),
@@ -10579,9 +10580,27 @@ async function downloadPaperSetupKit() {
     }
 }
 
+function applyVestaboardViewerGate() {
+    const on = Boolean(els.settingsVestaboardEnabled?.checked);
+    const box = els.papermonoVestaboardViewer;
+    if (box) {
+        box.disabled = !on;
+        if (!on) {
+            box.title = 'Enable Vestaboard Note to use viewer only';
+        } else {
+            box.removeAttribute('title');
+        }
+    }
+    document.getElementById('papermono-vestaboard-viewer-row')?.classList.toggle('is-disabled', !on);
+}
+
 function applyPaperMonoPrefs(prefs) {
     if (!prefs || typeof prefs !== 'object') return;
     if (els.papermonoLockScreen) els.papermonoLockScreen.value = prefs.lock_screen || 'both';
+    if (els.papermonoVestaboardViewer) {
+        els.papermonoVestaboardViewer.checked = prefs.vestaboard_viewer === true;
+    }
+    applyVestaboardViewerGate();
     applyPaperMenuLabels(prefs.menu_labels);
     applyPaperMenuVisible(prefs.menu_visible);
     applyPaperMenuOrder(prefs.menu_order);
@@ -10692,6 +10711,7 @@ function paperMonoPrefsPayload() {
     return {
         action: 'prefs',
         lock_screen: els.papermonoLockScreen?.value || 'both',
+        vestaboard_viewer: !!els.papermonoVestaboardViewer?.checked,
         menu_labels: paperMenuLabelsPayload(),
         menu_visible: paperMenuVisiblePayload(),
         menu_order: paperMenuOrderPayload(),
@@ -10808,6 +10828,7 @@ async function revokePaperMono(id, button) {
 function applyVestaboardEnabled() {
     const on = Boolean(els.settingsVestaboardEnabled?.checked);
     els.settingsVestaboardFields?.classList.toggle('hidden', !on);
+    applyVestaboardViewerGate();
     if (on) {
         applyVestaboardTransport();
         applyVestaboardQuietHours();

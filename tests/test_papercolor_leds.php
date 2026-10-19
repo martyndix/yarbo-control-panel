@@ -125,7 +125,7 @@ $color = (string) file_get_contents(__DIR__ . '/../firmware/papercolor/src/main.
 $ver = (string) file_get_contents(__DIR__ . '/../firmware/papercolor/src/version.h');
 $php = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
-assert_true(str_contains($ver, '0.2.21-colour'), 'firmware 0.2.21-colour');
+assert_true(str_contains($ver, '0.2.22-colour'), 'firmware 0.2.22-colour');
 assert_true(str_contains($php, 'function vestaboardLedFlags'), 'compact computes Vestaboard LED flags');
 assert_true(str_contains($color, 'void applyStatusLeds()'), 'Paper Colour drives RGB LEDs');
 assert_true(str_contains($color, 'M5.Led.setAllColor(255, 0, 0)'), 'error is red');

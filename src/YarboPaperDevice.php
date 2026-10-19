@@ -18,7 +18,7 @@ final class YarboPaperDevice
     public const WEB_CLIENT_ID = 'web';
     public const FIRMWARE_VERSION = '0.1.69';
     public const MENU_LABEL_MAX = 20;
-    public const FIRMWARE_VERSION_COLOR = '0.2.21-colour';
+    public const FIRMWARE_VERSION_COLOR = '0.2.22-colour';
     public const OTA_ONLINE_MONO_S = 90;
     public const OTA_ONLINE_COLOR_S = 180;
     public const OTA_PENDING_TTL_S = 900;
@@ -1150,6 +1150,7 @@ final class YarboPaperDevice
             ],
             $vacuums !== [],
         );
+        $out['vestaboard_viewer'] = !empty($out['vestaboard_viewer']) && !empty($out['vestaboard_enabled']);
 
         return $out;
     }
@@ -1579,11 +1580,16 @@ final class YarboPaperDevice
         $prefs = $this->publicPrefs();
         $clock = $this->clockCompact(new YarboVestaboard($this->projectRoot));
         $vb = (new YarboVestaboard($this->projectRoot))->load();
+        $hub = new YarboHub($this->projectRoot);
         $out = [
             'brightness' => (int) $prefs['brightness'],
             'lock_screen' => (string) $prefs['lock_screen'],
             'unlock_page' => (string) $prefs['unlock_page'],
+            'yarbo_enabled' => $hub->enabled(YarboHub::MODULE_YARBO),
+            'powerwall_enabled' => $hub->enabled(YarboHub::MODULE_POWERWALL),
+            'lymow_enabled' => $hub->enabled(YarboHub::MODULE_LYMOW),
             'vestaboard_enabled' => !empty($vb['enabled']),
+            'vestaboard_viewer' => !empty($prefs['vestaboard_viewer']) && !empty($vb['enabled']),
             'remote_url' => (new YarboPaperRemote($this->projectRoot))->tabletOrigin(),
         ];
         if (isset($clock['clock_offset'])) {
@@ -1607,8 +1613,16 @@ final class YarboPaperDevice
             (string) $fields['lock_screen'],
             '--unlock-page',
             (string) $fields['unlock_page'],
+            '--yarbo',
+            !empty($fields['yarbo_enabled']) ? '1' : '0',
+            '--powerwall',
+            !empty($fields['powerwall_enabled']) ? '1' : '0',
+            '--lymow',
+            !empty($fields['lymow_enabled']) ? '1' : '0',
             '--vestaboard',
             !empty($fields['vestaboard_enabled']) ? '1' : '0',
+            '--vestaboard-viewer',
+            !empty($fields['vestaboard_viewer']) ? '1' : '0',
             '--remote-url',
             (string) ($fields['remote_url'] ?? ''),
         ];
@@ -1643,6 +1657,7 @@ final class YarboPaperDevice
             'alert_yarbo' => true,
             'alert_lymow' => true,
             'alert_powerwall' => true,
+            'vestaboard_viewer' => false,
         ];
     }
 
@@ -1825,6 +1840,7 @@ final class YarboPaperDevice
             'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),
             'alert_lymow' => $bool($input['alert_lymow'] ?? null, $defaults['alert_lymow']),
             'alert_powerwall' => $bool($input['alert_powerwall'] ?? null, $defaults['alert_powerwall']),
+            'vestaboard_viewer' => $bool($input['vestaboard_viewer'] ?? null, $defaults['vestaboard_viewer']),
         ];
     }
 

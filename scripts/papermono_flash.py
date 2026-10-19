@@ -450,8 +450,16 @@ def extras_from_args(args) -> dict:
         extras["clock_offset"] = args.clock_offset
     if getattr(args, "timezone", None):
         extras["clock_tz"] = args.timezone
+    if getattr(args, "yarbo", None) is not None:
+        extras["yarbo_enabled"] = bool(args.yarbo)
+    if getattr(args, "powerwall", None) is not None:
+        extras["powerwall_enabled"] = bool(args.powerwall)
+    if getattr(args, "lymow", None) is not None:
+        extras["lymow_enabled"] = bool(args.lymow)
     if getattr(args, "vestaboard", None) is not None:
         extras["vestaboard_enabled"] = bool(args.vestaboard)
+    if getattr(args, "vestaboard_viewer", None) is not None:
+        extras["vestaboard_viewer"] = bool(args.vestaboard_viewer)
     if getattr(args, "remote_url", None) is not None:
         extras["remote_url"] = str(args.remote_url).rstrip("/")
     return extras
@@ -562,7 +570,11 @@ def main() -> int:
         p.add_argument("--unlock-page", default=None)
         p.add_argument("--clock-offset", type=int, default=None)
         p.add_argument("--timezone", default=None)
+        p.add_argument("--yarbo", type=int, default=None)
+        p.add_argument("--powerwall", type=int, default=None)
+        p.add_argument("--lymow", type=int, default=None)
         p.add_argument("--vestaboard", type=int, default=None)
+        p.add_argument("--vestaboard-viewer", type=int, default=None, dest="vestaboard_viewer")
         p.add_argument("--remote-url", default=None)
     args = parser.parse_args()
 

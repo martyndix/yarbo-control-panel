@@ -2015,6 +2015,10 @@ body.map-is-fullscreen {
     gap: 0.5rem;
 }
 
+.settings-checkbox.is-disabled {
+    opacity: 0.55;
+}
+
 .head-controls {
     display: grid;
     gap: 0.75rem;

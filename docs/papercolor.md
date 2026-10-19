@@ -6,7 +6,7 @@ Firmware for **[M5Stack PaperColor](https://docs.m5stack.com/en/core/PaperColor)
 | --- | --- |
 | **Model** | M5Stack PaperColor |
 | **Screen** | E Ink Spectra 6 (white, black, red, yellow, green, blue), ~10–20 s full refresh |
-| **Buttons** | **A / B** previous / next page. **C** lock screensaver / unlock (opens Home, or the last **Unlock to** page stored on the tablet) |
+| **Buttons** | **A / B** previous / next **enabled** page (off modules are skipped). **C** lock screensaver / unlock (opens Home, or the last **Unlock to** page stored on the tablet). In **Vestaboard viewer only**, A/B (and C) flip landscape left/right when there is no IMU |
 | **SoC** | ESP32-S3R8, same USB-C flash story as PaperMono |
 
 This is **not** PaperS3 (touch, grayscale) and **not** PaperMono C153.
@@ -38,6 +38,6 @@ The zip contains the Wi-Fi password and pairing token — keep it private. Full 
 
 ## Pages
 
-Yarbo Home / Status / Health / Plans when the Yarbo module is on. Extra pages for Powerwall and Lymow only when those modules are enabled. **BOARD** is a live 3×15 Vestaboard preview when the Note is enabled. The top line is **YARBO · COLOUR**, **POWERWALL**, **LYMOW**, or **VESTABOARD** for that page (Lymow and Powerwall do not repeat the name). **C** shows the lock screensaver (logo, Vestaboard, or both — chosen in Settings). Optional **header logo** is the same Settings upload as PaperMono (reflash **0.2.11-colour**). The two RGB LEDs go **red** when a device on the live Vestaboard is in error, and **blue** when Yarbo rain is on the Note (red wins). Do not expect 15-second redraws — Spectra 6 is a set-and-leave sign.
+Yarbo Home / Status / Health / Plans only when the Yarbo module is on — A/B never land on a turned-off module, including after a reboot (module flags are stored on the tablet and in USB CFG). Extra pages for Powerwall and Lymow only when those modules are enabled. **BOARD** is a live 3×15 Vestaboard preview when the Note is enabled. Settings → E-paper **Vestaboard viewer only** (ticked only while the Note is on) boots Paper Colour as a landscape Vestaboard that fills **600×400**. If `M5.Imu` is present it picks landscape left vs right from gravity; otherwise A/B set rotation 1 vs 3. Viewer mode does not auto-lock. The top line is **YARBO · COLOUR**, **POWERWALL**, **LYMOW**, or **VESTABOARD** for that page (Lymow and Powerwall do not repeat the name). **C** shows the lock screensaver (logo, Vestaboard, or both — chosen in Settings). Optional **header logo** is the same Settings upload as PaperMono (reflash **0.2.11-colour**). The two RGB LEDs go **red** when a device on the live Vestaboard is in error, and **blue** when Yarbo rain is on the Note (red wins). Firmware **0.2.22-colour** skips a full refresh when only the clock changed. Do not expect 15-second redraws — Spectra 6 is a set-and-leave sign.
 
 Compact status is `GET /api/device.php?action=compact`. Off-LAN use is the same Settings → E-paper **Remote access** toggle as PaperMono (`docs/papermono.md`). Firmware **0.2.18-colour** tries the LAN URL first, then HTTPS, and shows **R** at the bottom next to the IP when it is on the remote URL.

@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.128] - 2026-10-19
+
+### Added
+- Paper Colour **Vestaboard viewer only** (Settings, only while the Note is on): boot shows just the live board in landscape, using the IMU for left vs right when the tablet has one. Firmware **0.2.22-colour**.
+
+### Changed
+- Paper Colour A/B paging skips modules that are turned off, including before the first poll. Full Spectra 6 refreshes no longer run just because the clock ticked.
+
 ## [4.0.127] - 2026-10-19
 
 ### Added
