@@ -177,7 +177,7 @@ foreach ([
     'paperNetGet',
     'paperNetLanReachable',
     'WiFi.SSID() != wifiSsid',
-    '#define PAPERMONO_FW_VERSION "0.2.25-colour"',
+    '#define PAPERMONO_FW_VERSION "0.2.26-colour"',
     'void finishEpdFrame()',
     'M5.Display.startWrite();',
 ] as $needle) {

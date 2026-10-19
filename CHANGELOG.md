@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.132] - 2026-10-19
+
+### Changed
+- Paper Colour no longer runs a full Spectra 6 refresh for every clock tick or battery percent on the Vestaboard viewer. Time still draws when the board (or hour / 10% battery / plug) changes. Frames use nearest-palette `epd_fastest` instead of dithered `epd_quality`. A single changed flap still needs a full refresh — the 4″ ED2208 driver has no working regional update. Firmware **0.2.26-colour**.
+
 ## [4.0.131] - 2026-10-19
 
 ### Changed

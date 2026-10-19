@@ -14,13 +14,15 @@
 
 // M5Stack PaperColor (https://docs.m5stack.com/en/core/PaperColor)
 // Spectra 6 400x600, no touch. Buttons A/B change page, C sleep/wake.
-// Spectra 6 has no useful partial refresh (~15–20s per full update). Buffer every
-// frame with startWrite/endWrite and call display() once. Without that, each
-// fillRect/drawString (Vestaboard cell, glyph) kicks a full-panel refresh and
-// the lock screen can take tens of minutes. Skip redraws when status is unchanged.
-// Do not dirty the frame on the clock — a 60s poll would otherwise force a full
-// Spectra 6 cycle every minute. Viewer-only boots landscape Vestaboard and skips
-// every other page. Off modules stay off the A/B pager.
+// Spectra 6 (M5GFX Panel_ED2208) has no useful regional refresh. display(x,y,w,h)
+// still dumps the whole framebuffer (0x10) and runs a full 0x12 waveform
+// (~15–30s). epd_quality / epd_fastest only pick dither vs nearest palette —
+// not a faster LUT. Colour tiles and a changed Vestaboard digit therefore always
+// take a full panel cycle. Buffer every frame with startWrite/endWrite and call
+// display() once. Skip redraws when status is unchanged. Do not dirty the paged
+// UI on the clock, and dirty the viewer clock at most once an hour (minutes and
+// battery percent piggyback on a real board change). Viewer-only boots landscape
+// Vestaboard and skips every other page. Off modules stay off the A/B pager.
 
 Preferences prefs;
 String wifiSsid;
@@ -247,7 +249,9 @@ void beginEpdFrame(bool forceFull)
 {
     (void) forceFull;
     waitEpdReady();
-    M5.Display.setEpdMode(epd_mode_t::epd_quality);
+    // Vestaboard cells and UI are Spectra 6 palette solids. Quality pair-dithers
+    // RGB888 (speckle, longer waveform). Fastest is nearest-palette, same 0x12.
+    M5.Display.setEpdMode(epd_mode_t::epd_fastest);
     M5.Display.startWrite();
 }
 
@@ -318,12 +322,29 @@ void applyDisplayMode()
     }
 }
 
+String clockHourKey()
+{
+    int colon = clockLocal.indexOf(':');
+    if (colon < 1) {
+        return String("--");
+    }
+    return clockLocal.substring(0, colon);
+}
+
+int batteryBucket()
+{
+    if (tabletBat < 0) {
+        return -1;
+    }
+    return (tabletBat / 10) * 10;
+}
+
 String screenKey()
 {
     if (viewerOnly()) {
         return String("vb|") + vestaboardHash + "|" + String(displayRot) + "|"
-            + (vestaboardOn ? "1" : "0") + "|" + lastError + "|" + clockLocal + "|"
-            + String(tabletBat) + "|" + (tabletPluggedIn() ? "1" : "0");
+            + (vestaboardOn ? "1" : "0") + "|" + lastError + "|" + clockHourKey() + "|"
+            + String(batteryBucket()) + "|" + (tabletPluggedIn() ? "1" : "0");
     }
     String key = String(currentPage) + "|" + String(battery) + "|" + charging + "|" + state + "|" + head + "|"
         + errorLabel + "|" + heading + "|" + rainLabel + "|" + connectionType + "|" + connectionStatus + "|"

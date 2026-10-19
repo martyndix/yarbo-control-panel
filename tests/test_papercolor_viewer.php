@@ -103,8 +103,8 @@ $kit = (string) file_get_contents(__DIR__ . '/../scripts/paper_setup_kit.py');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 $mono = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
 
-assert_true(str_contains($ver, '0.2.25-colour'), 'firmware 0.2.25-colour');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.25-colour';"), 'panel colour pin 0.2.25-colour');
+assert_true(str_contains($ver, '0.2.26-colour'), 'firmware 0.2.26-colour');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.26-colour';"), 'panel colour pin 0.2.26-colour');
 assert_true(str_contains($mono, '#define PAPERMONO_FW_VERSION "0.1.69"'), 'PaperMono firmware unchanged');
 assert_true(str_contains($color, 'bool viewerOnly()'), 'viewer-only helper');
 assert_true(str_contains($color, 'void applyDisplayMode()'), 'landscape display mode');
@@ -114,10 +114,16 @@ assert_true(str_contains($color, 'jsonFlag(doc, "vestaboard_viewer"'), 'compact/
 assert_true(str_contains($color, 'prefs.putBool("yon", yarboOn)'), 'persist module flags');
 assert_true(str_contains($color, 'if (viewerOnly())'), 'pager skips to viewer board');
 assert_true(!str_contains($color, 'clockLocal + "|" + String(usingRemote'), 'clock is not in the paged dirty key');
+assert_true(str_contains($color, 'String clockHourKey()'), 'viewer clock buckets to the hour');
+assert_true(str_contains($color, 'clockLocal.substring(0, colon)'), 'hour key uses HH, not MM');
+assert_true(str_contains($color, 'tabletBat / 10'), 'viewer battery buckets to 10%');
+assert_true(str_contains($color, 'epd_mode_t::epd_fastest'), 'Spectra 6 uses nearest palette');
+assert_true(!str_contains($color, 'lastError + "|" + clockLocal'), 'viewer does not dirty every minute');
+assert_true(!str_contains($color, '0x83'), 'Colour firmware does not send undocumented partial-window');
 assert_true(str_contains($color, 'int clockBand = 56;'), 'viewer reserves a time band');
 assert_true(str_contains($color, 'int glyphSize = (cell - 4) / 8;'), 'flap letters scale with cell size');
 assert_true(str_contains($html, 'id="papermono-vestaboard-viewer"'), 'settings viewer checkbox');
-assert_true(str_contains($html, '0.2.25-colour'), 'settings hint 0.2.25-colour');
+assert_true(str_contains($html, '0.2.26-colour'), 'settings hint 0.2.26-colour');
 assert_true(str_contains($color, 'int foot = 44;'), 'viewer leaves a footer for battery badge');
 assert_true(str_contains($color, 'void drawBatteryBadge(int right, int cy, int pct, bool compact)'), 'PaperMono-style battery badge');
 assert_true(str_contains($color, 'void drawChargeBolt(int cx, int cy, int size)'), 'charging bolt');
@@ -127,6 +133,9 @@ assert_true(str_contains($js, 'function applyVestaboardViewerGate()'), 'checkbox
 assert_true(str_contains($js, 'vestaboard_viewer: !!els.papermonoVestaboardViewer?.checked'), 'prefs payload includes viewer');
 assert_true(str_contains($flash, '--vestaboard-viewer'), 'flash CLI flag');
 assert_true(str_contains($kit, 'vestaboard_viewer'), 'setup kit CFG includes viewer');
-assert_true(str_contains($change, '## [4.0.131]'), 'changelog 4.0.131');
+assert_true(str_contains($change, '## [4.0.132]'), 'changelog 4.0.132');
+$docs = (string) file_get_contents(__DIR__ . '/../docs/papercolor.md');
+assert_true(str_contains($docs, '## Refresh'), 'docs explain Spectra 6 refresh options');
+assert_true(str_contains($docs, '0.2.26-colour'), 'docs pin 0.2.26-colour');
 
 echo "test_papercolor_viewer.php ok\n";
