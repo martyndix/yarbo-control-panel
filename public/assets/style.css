@@ -3773,6 +3773,10 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     white-space: nowrap;
 }
 
+.home-scene-member.is-adaptive .home-kelvin {
+    display: none;
+}
+
 .home-scene-member input[type="range"] {
     width: 100%;
     min-width: 4.5rem;

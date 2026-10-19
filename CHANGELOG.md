@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.124] - 2026-10-19
+
+### Added
+- Home scenes and automations can set white lights to **Time of day** (Apple Adaptive Lighting-style). Colour temperature stays warm at night and cooler in the day, and keeps changing gradually while the scene is on. A Then chip can do the same until that light is turned off. Changing colour by hand on the tile pauses it for that light.
+
 ## [4.0.123] - 2026-10-18
 
 ### Changed

@@ -3138,6 +3138,7 @@ function homeSceneStateForDevice(d, fallback) {
             : Number(d.brightness ?? (d.on ? 100 : 0)),
         hex: current.hex || d.color_hex || '#ffd27a',
         kelvin: current.kelvin || d.color_temp || 2700,
+        adaptive: Boolean(current.adaptive),
         setpoint: current.setpoint !== undefined && current.setpoint !== null
             ? Number(current.setpoint)
             : (d.heating_setpoint != null ? Number(d.heating_setpoint) : 21),
@@ -3155,6 +3156,7 @@ function homeFillSceneDraftFromOn() {
             brightness: d.dimmable ? Number(d.brightness ?? 100) : null,
             hex: d.colorable ? (d.color_hex || '#ffd27a') : null,
             kelvin: d.color_ct && !d.colorable ? Number(d.color_temp || 2700) : null,
+            adaptive: false,
             setpoint: d.kind === 'heater' ? Number(d.heating_setpoint ?? 21) : null,
         };
     });
@@ -3173,6 +3175,7 @@ function homeLoadSceneDraft(scene) {
             brightness: action.brightness,
             hex: action.color_hex || null,
             kelvin: action.color_temp || null,
+            adaptive: Boolean(action.adaptive),
             setpoint: action.heating_setpoint != null ? Number(action.heating_setpoint) : null,
         };
     });
@@ -3200,12 +3203,14 @@ function readHomeSceneDraftFromDom() {
         const brightEl = row.querySelector('[data-scene-bright]');
         const colorEl = row.querySelector('[data-scene-color]');
         const kelvinEl = row.querySelector('[data-scene-kelvin]');
+        const adaptiveEl = row.querySelector('[data-scene-adaptive]');
         const setEl = row.querySelector('[data-scene-setpoint]');
         homeSceneDraft.states[id] = {
             on: onEl ? Boolean(onEl.checked) : prev.on,
             brightness: brightEl ? Number(brightEl.value ?? 100) : prev.brightness,
             hex: colorEl ? (colorEl.value || null) : prev.hex,
             kelvin: kelvinEl ? (Number(kelvinEl.value || 0) || null) : prev.kelvin,
+            adaptive: adaptiveEl ? Boolean(adaptiveEl.checked) : Boolean(prev.adaptive),
             setpoint: setEl ? (Number(setEl.value || 0) || null) : prev.setpoint,
         };
     });
@@ -3219,12 +3224,14 @@ function collectHomeSceneActions() {
         const st = homeSceneStateForDevice(d);
         const on = Boolean(st.on);
         const heater = String(d.kind || '') === 'heater';
+        const adaptive = on && !heater && homeSceneCanAdaptive(d) && Boolean(st.adaptive);
         actions.push({
             id: d.id,
             on,
             brightness: on && d.dimmable && !heater ? Number(st.brightness ?? 100) : null,
-            color_hex: on && d.colorable && !heater ? (st.hex || null) : null,
-            color_temp: on && d.color_ct && !d.colorable && !heater ? Number(st.kelvin || 0) || null : null,
+            color_hex: on && !adaptive && d.colorable && !heater ? (st.hex || null) : null,
+            color_temp: on && !adaptive && d.color_ct && !d.colorable && !heater ? Number(st.kelvin || 0) || null : null,
+            adaptive,
             heating_setpoint: on && heater ? Number(st.setpoint || d.heating_setpoint || 21) : null,
         });
     });
@@ -3233,6 +3240,10 @@ function collectHomeSceneActions() {
 
 function homeIsUnifi(d) {
     return d?.source === 'unifi' || String(d?.id || '').startsWith('unifi:');
+}
+
+function homeSceneCanAdaptive(d) {
+    return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && d.kind !== 'vacuum' && d.color_ct);
 }
 
 function homeDeviceCanToggle(d) {
@@ -4471,22 +4482,29 @@ function homeSceneMemberRowHtml(d) {
         <label class="home-heater-set">Set <input type="number" min="${min}" max="${max}" step="0.5" value="${escapeHtml(String(set))}" data-scene-setpoint ${on ? '' : 'disabled'} aria-label="Heating setpoint">°</label>
     </div>`;
     }
+    const adaptive = on && homeSceneCanAdaptive(d) && Boolean(st.adaptive);
     const bright = d.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(st.brightness ?? 100)}" data-scene-bright ${on ? '' : 'disabled'}>`
         : '';
-    const color = homeColorInputsHtml(
-        d,
-        on,
-        st.hex,
-        st.kelvin,
-        'data-scene-color',
-        'data-scene-kelvin'
-    );
-    return `<div class="home-scene-member is-in${on ? ' is-on' : ''}" data-scene-member="${escapeHtml(d.id)}">
+    const color = adaptive
+        ? ''
+        : homeColorInputsHtml(
+            d,
+            on,
+            st.hex,
+            st.kelvin,
+            'data-scene-color',
+            'data-scene-kelvin'
+        );
+    const timeOfDay = homeSceneCanAdaptive(d)
+        ? `<label class="home-scene-on" title="Warm at night, cooler in the day"><input type="checkbox" data-scene-adaptive ${adaptive ? 'checked' : ''} ${on ? '' : 'disabled'}> Time of day</label>`
+        : '';
+    return `<div class="home-scene-member is-in${on ? ' is-on' : ''}${adaptive ? ' is-adaptive' : ''}" data-scene-member="${escapeHtml(d.id)}">
         ${pick}
         <label class="home-scene-on"><input type="checkbox" data-scene-on ${on ? 'checked' : ''}> On</label>
         ${bright}
         ${color}
+        ${timeOfDay}
     </div>`;
 }
 
@@ -5474,6 +5492,10 @@ function homeAutoThenCanKelvin(d) {
     return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && d.color_ct && !homeAutoThenCanColor(d));
 }
 
+function homeAutoThenCanAdaptive(d) {
+    return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && d.kind !== 'vacuum' && d.color_ct);
+}
+
 function homeAutoSanitizeThenLooks() {
     if (!autoDraft || !Array.isArray(autoDraft.actions)) return;
     autoDraft.actions = autoDraft.actions.map((action) => {
@@ -5485,6 +5507,7 @@ function homeAutoSanitizeThenLooks() {
             delete next.brightness;
             delete next.kelvin;
             delete next.color_temp;
+            delete next.adaptive;
             delete next.celsius;
             delete next.heating_setpoint;
             delete next.off_after_sec;
@@ -5498,7 +5521,14 @@ function homeAutoSanitizeThenLooks() {
             delete next.hex;
             delete next.color_hex;
         }
-        if (!homeAutoThenCanKelvin(d)) {
+        if (!homeAutoThenCanKelvin(d) && !next.adaptive) {
+            delete next.kelvin;
+            delete next.color_temp;
+        }
+        if (!homeAutoThenCanAdaptive(d)) delete next.adaptive;
+        if (next.adaptive) {
+            delete next.hex;
+            delete next.color_hex;
             delete next.kelvin;
             delete next.color_temp;
         }
@@ -5535,10 +5565,14 @@ function homeAutoThenParamsHtml(d, action, cmd) {
         const bright = Number.isFinite(n) && n > 0 ? n : 100;
         html += `<label class="auto-then-set"><input type="number" min="1" max="100" data-auto-bright value="${bright}" aria-label="Brightness" title="Brightness">%</label>`;
     }
-    if (homeAutoThenCanColor(d)) {
+    const adaptive = homeAutoThenCanAdaptive(d) && Boolean(action.adaptive);
+    if (homeAutoThenCanAdaptive(d)) {
+        html += `<label class="auto-then-set" title="Warm at night, cooler in the day"><input type="checkbox" data-auto-adaptive ${adaptive ? 'checked' : ''}> Time of day</label>`;
+    }
+    if (!adaptive && homeAutoThenCanColor(d)) {
         const hex = action.hex || action.color_hex || d.color_hex || '#ffd27a';
         html += `<input type="color" data-auto-hex value="${escapeHtml(hex)}" aria-label="Colour" title="Colour">`;
-    } else if (homeAutoThenCanKelvin(d)) {
+    } else if (!adaptive && homeAutoThenCanKelvin(d)) {
         const min = Number(d.color_temp_min || 2000);
         const max = Number(d.color_temp_max || 6500);
         const kelvinRaw = Number(action.kelvin ?? action.color_temp ?? d.color_temp ?? 2700);
@@ -5693,6 +5727,15 @@ function homeAutoApplyThenLook(el) {
         const n = Number(el.value);
         if (Number.isFinite(n)) action.kelvin = Math.round(n);
     }
+    if (el.matches('[data-auto-adaptive]')) {
+        action.adaptive = Boolean(el.checked);
+        if (action.adaptive) {
+            delete action.kelvin;
+            delete action.color_temp;
+            delete action.hex;
+            delete action.color_hex;
+        }
+    }
     if (el.matches('[data-auto-celsius]')) {
         const n = Number(el.value);
         if (Number.isFinite(n)) action.celsius = n;
@@ -5705,7 +5748,7 @@ function homeAutoApplyThenLook(el) {
 
 function homeAutoReadThenLooks() {
     if (!autoDraft) return;
-    document.querySelectorAll('#auto-then-chips [data-auto-bright], #auto-then-chips [data-auto-hex], #auto-then-chips [data-auto-kelvin], #auto-then-chips [data-auto-celsius], #auto-then-chips [data-auto-pulse-count]').forEach((el) => {
+    document.querySelectorAll('#auto-then-chips [data-auto-bright], #auto-then-chips [data-auto-hex], #auto-then-chips [data-auto-kelvin], #auto-then-chips [data-auto-celsius], #auto-then-chips [data-auto-pulse-count], #auto-then-chips [data-auto-adaptive]').forEach((el) => {
         homeAutoApplyThenLook(el);
     });
 }
@@ -5743,6 +5786,13 @@ function homeAutoThenPhrase(action, names) {
     }
     if (action.brightness != null || action.command === 'brightness') {
         let text = `${name} ${action.brightness || 100}%`;
+        if (action.adaptive) text += ', time of day';
+        const off = Number(action.off_after_sec || 0);
+        if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+        return text;
+    }
+    if (action.adaptive) {
+        let text = `${name} time of day`;
         const off = Number(action.off_after_sec || 0);
         if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
         return text;
@@ -7559,7 +7609,7 @@ function bindHomeAutomations() {
             homeAutoFillIfDeviceSelect(select, select?.value || '', query);
             return;
         }
-        if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
+        if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-adaptive]')) {
             homeAutoApplyThenLook(event.target);
             homeAutoFollowName();
         }
@@ -7682,7 +7732,7 @@ function bindHomeAutomations() {
         if (event.target.matches('[data-auto-pulse-count]')) {
             homeAutoApplyThenLook(event.target);
         }
-        if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius]')) {
+        if (event.target.matches('[data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-adaptive]')) {
             homeAutoApplyThenLook(event.target);
         }
         if (event.target.matches('[data-auto-if-start]')) {
@@ -7716,12 +7766,12 @@ function bindHomeAutomations() {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
         }
-        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count]')) {
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) {
             homeAutoFollowName();
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

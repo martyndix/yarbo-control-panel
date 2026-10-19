@@ -520,6 +520,7 @@ final class YarboHomeAutomations
             $state['release'] = [];
             $state['clock'] = $now;
             $this->writeState($state);
+            $this->applyAdaptiveLighting($now);
 
             return ['ok' => true, 'fired' => [], 'turned_off' => [], 'errors' => []];
         }
@@ -615,6 +616,7 @@ final class YarboHomeAutomations
             'errors' => $errors,
         ];
         $this->writeState($state);
+        $this->applyAdaptiveLighting($now);
 
         return [
             'ok' => $errors === [],
@@ -624,6 +626,44 @@ final class YarboHomeAutomations
             'hm' => $hm,
             'timezone' => $tzName,
         ];
+    }
+
+    /**
+     * Follow Time of day on active scene members and Then lights that opted in.
+     *
+     * @return array{ok: bool, applied: list<string>, errors: list<string>}
+     */
+    public function applyAdaptiveLighting(?int $now = null): array
+    {
+        $now ??= time();
+        $home = new YarboHome($this->projectRoot);
+        $updates = $home->adaptiveUpdates($now);
+        if ($updates === []) {
+            return ['ok' => true, 'applied' => [], 'errors' => []];
+        }
+        if ($this->commandHandler === null) {
+            YarboMatterAgentClient::fromEnv()->ensureStarted();
+        }
+        $applied = [];
+        $errors = [];
+        foreach ($updates as $row) {
+            $result = $this->runOneAction($home, [
+                'kind' => 'device',
+                'id' => $row['id'],
+                'command' => 'color_temp',
+                'kelvin' => $row['kelvin'],
+                'adaptive' => true,
+                'adaptive_tick' => true,
+            ]);
+            if ($result['ok'] ?? false) {
+                $applied[$row['id']] = (int) $row['kelvin'];
+            } else {
+                $errors[] = (string) ($result['error'] ?? 'failed');
+            }
+        }
+        $home->rememberAdaptiveApplied($applied, $now);
+
+        return ['ok' => $errors === [], 'applied' => array_keys($applied), 'errors' => $errors];
     }
 
     public function refreshUnifiIfDue(int $now, int $everySec = 5): void
@@ -1708,6 +1748,10 @@ final class YarboHomeAutomations
             if ($celsius !== null && $celsius !== '') {
                 $out['celsius'] = max(5.0, min(35.0, (float) $celsius));
             }
+            if (!empty($action['adaptive'])) {
+                $out['adaptive'] = true;
+                unset($out['kelvin'], $out['hex']);
+            }
         }
 
         return $out + self::actionOffAfter($action);
@@ -2707,6 +2751,13 @@ final class YarboHomeAutomations
         if ((string) ($action['command'] ?? '') === 'pulse') {
             return $this->runPulseAction($home, $action);
         }
+        if (!empty($action['adaptive']) && empty($action['adaptive_tick'])
+            && ($action['kind'] ?? '') !== 'scene' && ($action['kind'] ?? '') !== 'yarbo') {
+            $id = trim((string) ($action['id'] ?? ''));
+            if ($id !== '') {
+                $home->addAdaptiveExtra($id);
+            }
+        }
         if ($this->commandHandler !== null) {
             return ($this->commandHandler)($action);
         }
@@ -2901,7 +2952,11 @@ final class YarboHomeAutomations
             $hex = '';
         }
         $kelvin = 0;
-        if (isset($action['kelvin']) && $action['kelvin'] !== '') {
+        if (!empty($action['adaptive'])) {
+            $hex = '';
+            $kelvin = 0;
+            $home->addAdaptiveExtra($id);
+        } elseif (isset($action['kelvin']) && $action['kelvin'] !== '') {
             $kelvin = (int) $action['kelvin'];
         } elseif (isset($action['color_temp']) && $action['color_temp'] !== '') {
             $kelvin = (int) $action['color_temp'];

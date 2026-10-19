@@ -627,7 +627,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
             <div class="home-manage-extras">
             <h3 class="settings-subtitle">Scene editor</h3>
-            <p class="hint">Pick which lights and UniFi relays belong to a scene and set on/off, brightness, and colour. Relays are on/off only. Search or open In scene to skip the long list. PaperMono can run a scene and tap again to turn those devices off. These are not Apple or Hue scenes.</p>
+            <p class="hint">Pick which lights and UniFi relays belong to a scene and set on/off, brightness, and colour. Relays are on/off only. White lights can tick <strong>Time of day</strong> (warm at night, cooler in the day) and keep changing while the scene is on. Search or open In scene to skip the long list. PaperMono can run a scene and tap again to turn those devices off. These are not Apple or Hue scenes.</p>
             <div id="home-scene-editor" class="home-scene-editor">
                 <div class="home-scene-add">
                     <input type="text" id="home-scene-name" placeholder="Evening" maxlength="32" aria-label="Scene name">

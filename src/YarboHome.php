@@ -21,6 +21,13 @@ final class YarboHome
     /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
     public const PAPER_NAME_MAX = 40;
     public const PAPER_ROBOT_AREA_MAX = 8;
+    /** Warm night / cool midday for Time of day (Apple Adaptive Lighting-style). */
+    public const ADAPTIVE_NIGHT_K = 2200;
+    public const ADAPTIVE_SUNRISE_K = 3000;
+    public const ADAPTIVE_NOON_K = 5000;
+    public const ADAPTIVE_SUNSET_K = 2700;
+    public const ADAPTIVE_STEP_K = 50;
+    public const ADAPTIVE_MIN_INTERVAL_SEC = 60;
 
     public function __construct(private readonly string $projectRoot)
     {
@@ -58,6 +65,7 @@ final class YarboHome
             'device_order' => [],
             'active_scene_id' => '',
             'last_devices' => [],
+            'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
         ];
         if (!is_file($this->storePath())) {
             return $defaults;
@@ -178,6 +186,7 @@ final class YarboHome
             'last_devices' => $this->normalizeLastDevices(
                 is_array($decoded['last_devices'] ?? null) ? $decoded['last_devices'] : []
             ),
+            'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
         ];
         if ($migrated) {
             $this->write($store);
@@ -721,6 +730,13 @@ final class YarboHome
         if ($id === '' || $action === '') {
             return ['ok' => false, 'error' => 'Device and action are required'];
         }
+        if (!YarboUnifi::isHomeId($id)) {
+            if ($action === 'off') {
+                $this->clearAdaptiveDevice($id);
+            } elseif (in_array($action, ['color', 'color_temp', 'kelvin'], true) && empty($input['adaptive'])) {
+                $this->pauseAdaptiveDevice($id);
+            }
+        }
         if (YarboUnifi::isHomeId($id)) {
             return (new YarboUnifi($this->projectRoot))->command($input);
         }
@@ -1101,7 +1117,15 @@ final class YarboHome
                 }
             }
             $hex = $this->normalizeHex((string) ($action['color_hex'] ?? ''));
-            $kelvin = !empty($action['color_temp']) ? (int) $action['color_temp'] : null;
+            $adaptive = !empty($action['adaptive']);
+            $kelvin = null;
+            if ($adaptive) {
+                $hex = null;
+                $this->unpauseAdaptiveDevice($deviceId);
+                $kelvin = $this->adaptiveKelvinForDevice($deviceId);
+            } elseif (!empty($action['color_temp'])) {
+                $kelvin = (int) $action['color_temp'];
+            }
             $caps = $this->deviceControlCaps($deviceId);
             if ($hex !== null && !$caps['colorable']) {
                 $hex = null;
@@ -1123,14 +1147,20 @@ final class YarboHome
                     $errors[] = (string) ($result['error'] ?? 'failed');
                 }
             } elseif ($kelvin) {
-                $result = $this->command([
+                $payload = [
                     'id' => $deviceId,
                     'command' => 'color_temp',
                     'kelvin' => $kelvin,
-                ]);
+                ];
+                if ($adaptive) {
+                    $payload['adaptive'] = true;
+                }
+                $result = $this->command($payload);
                 $sent = true;
                 if (!($result['ok'] ?? false)) {
                     $errors[] = (string) ($result['error'] ?? 'failed');
+                } elseif ($adaptive) {
+                    $this->rememberAdaptiveApplied([$deviceId => $kelvin]);
                 }
             }
             if (!$sent) {
@@ -3127,7 +3157,7 @@ final class YarboHome
 
     /**
      * @param array<string, mixed> $scene
-     * @return array{id: string, name: string, actions: list<array{id: string, on: bool, brightness: ?int, color_hex: ?string, color_temp: ?int, heating_setpoint: ?float}>}|null
+     * @return array{id: string, name: string, actions: list<array{id: string, on: bool, brightness: ?int, color_hex: ?string, color_temp: ?int, heating_setpoint: ?float, adaptive: bool}>}|null
      */
     private function normalizeScene(array $scene): ?array
     {
@@ -3156,17 +3186,24 @@ final class YarboHome
             if ($setpoint !== null) {
                 $setpoint = max(5.0, min(35.0, $setpoint));
             }
+            $adaptive = !empty($action['adaptive']) && $on && !YarboUnifi::isHomeId($deviceId);
             if (YarboUnifi::isHomeId($deviceId)) {
                 $brightness = null;
                 $hex = null;
                 $kelvin = null;
                 $setpoint = null;
+                $adaptive = false;
+            }
+            if ($adaptive) {
+                $hex = null;
+                $kelvin = null;
             }
             if (!$on) {
                 $brightness = null;
                 $hex = null;
                 $kelvin = null;
                 $setpoint = null;
+                $adaptive = false;
             }
             $actions[] = [
                 'id' => $deviceId,
@@ -3175,6 +3212,7 @@ final class YarboHome
                 'color_hex' => $hex,
                 'color_temp' => $kelvin,
                 'heating_setpoint' => $setpoint,
+                'adaptive' => $adaptive,
             ];
         }
         if ($id === '' || $name === '' || $actions === []) {
@@ -3823,6 +3861,347 @@ final class YarboHome
         }
 
         return $ids;
+    }
+
+    /**
+     * Colour temperature (K) for Time of day at $now.
+     * Uses sunrise/sunset when lat/lon are set, otherwise a clock curve.
+     */
+    public static function adaptiveKelvinAt(int $now, ?float $lat, ?float $lon, string $timezone = 'UTC'): int
+    {
+        $raw = self::adaptiveKelvinRaw($now, $lat, $lon, $timezone);
+
+        return (int) (round($raw / self::ADAPTIVE_STEP_K) * self::ADAPTIVE_STEP_K);
+    }
+
+    /**
+     * Devices that should follow Time of day right now, and the kelvin to write.
+     *
+     * @return list<array{id: string, kelvin: int}>
+     */
+    public function adaptiveUpdates(int $now, bool $force = false): array
+    {
+        $ids = $this->adaptiveDeviceIds();
+        if ($ids === []) {
+            return [];
+        }
+        $store = $this->load();
+        $last = is_array($store['adaptive']['last'] ?? null) ? $store['adaptive']['last'] : [];
+        $byId = [];
+        foreach ($store['last_devices'] as $row) {
+            if (is_array($row) && ($row['id'] ?? '') !== '') {
+                $byId[(string) $row['id']] = $row;
+            }
+        }
+        $out = [];
+        foreach ($ids as $id) {
+            $row = $byId[$id] ?? [];
+            if ($row !== [] && array_key_exists('on', $row) && empty($row['on'])) {
+                continue;
+            }
+            $kelvin = $this->adaptiveKelvinForDevice($id, $now);
+            $prev = is_array($last[$id] ?? null) ? $last[$id] : [];
+            $prevK = isset($prev['kelvin']) ? (int) $prev['kelvin'] : null;
+            $prevAt = isset($prev['at']) ? (int) $prev['at'] : 0;
+            if (!$force && $prevK !== null && $prevK === $kelvin) {
+                continue;
+            }
+            if (!$force && $prevAt > 0 && ($now - $prevAt) < self::ADAPTIVE_MIN_INTERVAL_SEC) {
+                continue;
+            }
+            $out[] = ['id' => $id, 'kelvin' => $kelvin];
+        }
+
+        return $out;
+    }
+
+    public function addAdaptiveExtra(string $id): void
+    {
+        $id = trim($id);
+        if ($id === '' || YarboUnifi::isHomeId($id)) {
+            return;
+        }
+        $store = $this->load();
+        $extra = $store['adaptive']['extra'] ?? [];
+        if (!is_array($extra)) {
+            $extra = [];
+        }
+        if (!in_array($id, $extra, true)) {
+            $extra[] = $id;
+        }
+        $store['adaptive']['extra'] = array_values($extra);
+        unset($store['adaptive']['paused'][$id]);
+        $this->write($store);
+    }
+
+    /**
+     * @param array<string, int> $applied id => kelvin
+     */
+    public function rememberAdaptiveApplied(array $applied, ?int $now = null): void
+    {
+        if ($applied === []) {
+            return;
+        }
+        $now ??= time();
+        $store = $this->load();
+        $last = is_array($store['adaptive']['last'] ?? null) ? $store['adaptive']['last'] : [];
+        foreach ($applied as $id => $kelvin) {
+            $id = trim((string) $id);
+            if ($id === '') {
+                continue;
+            }
+            $last[$id] = ['kelvin' => (int) $kelvin, 'at' => $now];
+        }
+        $store['adaptive']['last'] = $last;
+        $this->write($store);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function adaptiveDeviceIds(): array
+    {
+        $store = $this->load();
+        $paused = is_array($store['adaptive']['paused'] ?? null) ? $store['adaptive']['paused'] : [];
+        $ids = [];
+        foreach (is_array($store['adaptive']['extra'] ?? null) ? $store['adaptive']['extra'] : [] as $id) {
+            $id = trim((string) $id);
+            if ($id !== '' && !isset($paused[$id])) {
+                $ids[$id] = true;
+            }
+        }
+        $sceneId = (string) ($store['active_scene_id'] ?? '');
+        if ($sceneId !== '') {
+            foreach ($store['scenes'] as $scene) {
+                if (!is_array($scene) || (string) ($scene['id'] ?? '') !== $sceneId) {
+                    continue;
+                }
+                foreach (is_array($scene['actions'] ?? null) ? $scene['actions'] : [] as $action) {
+                    if (!is_array($action) || empty($action['adaptive']) || empty($action['on'])) {
+                        continue;
+                    }
+                    $id = trim((string) ($action['id'] ?? ''));
+                    if ($id !== '' && !isset($paused[$id])) {
+                        $ids[$id] = true;
+                    }
+                }
+            }
+        }
+
+        return array_keys($ids);
+    }
+
+    public function adaptiveKelvinForDevice(string $id, ?int $now = null): int
+    {
+        $now ??= time();
+        $auto = new YarboHomeAutomations($this->projectRoot);
+        $coords = $auto->resolveCoords();
+        $kelvin = self::adaptiveKelvinAt(
+            $now,
+            $coords['latitude'],
+            $coords['longitude'],
+            $auto->timezoneName()
+        );
+        $row = [];
+        foreach ($this->load()['last_devices'] as $one) {
+            if (is_array($one) && trim((string) ($one['id'] ?? '')) === $id) {
+                $row = $one;
+                break;
+            }
+        }
+        $min = isset($row['color_temp_min']) && is_numeric($row['color_temp_min'])
+            ? (int) $row['color_temp_min']
+            : 2000;
+        $max = isset($row['color_temp_max']) && is_numeric($row['color_temp_max'])
+            ? (int) $row['color_temp_max']
+            : 6500;
+        if ($min > $max) {
+            return $kelvin;
+        }
+
+        return max($min, min($max, $kelvin));
+    }
+
+    private function pauseAdaptiveDevice(string $id): void
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return;
+        }
+        $store = $this->load();
+        if (!isset($store['adaptive']['paused']) || !is_array($store['adaptive']['paused'])) {
+            $store['adaptive']['paused'] = [];
+        }
+        $store['adaptive']['paused'][$id] = time();
+        $this->write($store);
+    }
+
+    private function unpauseAdaptiveDevice(string $id): void
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return;
+        }
+        $store = $this->load();
+        if (isset($store['adaptive']['paused']) && is_array($store['adaptive']['paused'])) {
+            unset($store['adaptive']['paused'][$id]);
+            $this->write($store);
+        }
+    }
+
+    private function clearAdaptiveDevice(string $id): void
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return;
+        }
+        $store = $this->load();
+        $extra = [];
+        foreach (is_array($store['adaptive']['extra'] ?? null) ? $store['adaptive']['extra'] : [] as $one) {
+            $one = trim((string) $one);
+            if ($one !== '' && $one !== $id) {
+                $extra[] = $one;
+            }
+        }
+        $store['adaptive']['extra'] = $extra;
+        unset($store['adaptive']['paused'][$id], $store['adaptive']['last'][$id]);
+        $this->write($store);
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array{extra: list<string>, paused: array<string, int>, last: array<string, array{kelvin: int, at: int}>}
+     */
+    private function normalizeAdaptiveState(mixed $raw): array
+    {
+        $out = ['extra' => [], 'paused' => [], 'last' => []];
+        if (!is_array($raw)) {
+            return $out;
+        }
+        foreach (is_array($raw['extra'] ?? null) ? $raw['extra'] : [] as $id) {
+            $id = trim((string) $id);
+            if ($id !== '' && !YarboUnifi::isHomeId($id)) {
+                $out['extra'][] = $id;
+            }
+        }
+        $out['extra'] = array_values(array_unique($out['extra']));
+        foreach (is_array($raw['paused'] ?? null) ? $raw['paused'] : [] as $id => $at) {
+            $id = trim((string) $id);
+            if ($id !== '') {
+                $out['paused'][$id] = (int) $at;
+            }
+        }
+        foreach (is_array($raw['last'] ?? null) ? $raw['last'] : [] as $id => $row) {
+            $id = trim((string) $id);
+            if ($id === '' || !is_array($row)) {
+                continue;
+            }
+            $kelvin = isset($row['kelvin']) ? (int) $row['kelvin'] : 0;
+            $at = isset($row['at']) ? (int) $row['at'] : 0;
+            if ($kelvin > 0) {
+                $out['last'][$id] = ['kelvin' => $kelvin, 'at' => $at];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array{dawn: int, sunrise: int, noon: int, sunset: int, dusk: int}|null
+     */
+    private static function adaptiveSunAnchors(int $now, float $lat, float $lon): ?array
+    {
+        $info = @date_sun_info($now, $lat, $lon);
+        if (!is_array($info)) {
+            return null;
+        }
+        $sunrise = $info['sunrise'] ?? null;
+        $sunset = $info['sunset'] ?? null;
+        $noon = $info['transit'] ?? null;
+        if (!is_int($sunrise) || !is_int($sunset) || !is_int($noon) || $sunrise <= 0 || $sunset <= 0 || $noon <= 0) {
+            return null;
+        }
+        $dawn = $info['civil_twilight_begin'] ?? null;
+        $dusk = $info['civil_twilight_end'] ?? null;
+        if (!is_int($dawn) || $dawn <= 0) {
+            $dawn = $sunrise - 3600;
+        }
+        if (!is_int($dusk) || $dusk <= 0) {
+            $dusk = $sunset + 3600;
+        }
+        if (!($dawn < $sunrise && $sunrise < $noon && $noon < $sunset && $sunset < $dusk)) {
+            return null;
+        }
+
+        return [
+            'dawn' => $dawn,
+            'sunrise' => $sunrise,
+            'noon' => $noon,
+            'sunset' => $sunset,
+            'dusk' => $dusk,
+        ];
+    }
+
+    private static function adaptiveKelvinRaw(int $now, ?float $lat, ?float $lon, string $timezone): float
+    {
+        if ($lat !== null && $lon !== null && $lat >= -90.0 && $lat <= 90.0 && $lon >= -180.0 && $lon <= 180.0) {
+            $sun = self::adaptiveSunAnchors($now, $lat, $lon);
+            if ($sun !== null) {
+                return self::adaptiveKelvinFromAnchors($now, $sun);
+            }
+        }
+        try {
+            $tz = new \DateTimeZone($timezone !== '' ? $timezone : 'UTC');
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('UTC');
+        }
+        $local = (new \DateTimeImmutable('@' . $now))->setTimezone($tz);
+        $sec = ((int) $local->format('G')) * 3600 + ((int) $local->format('i')) * 60 + (int) $local->format('s');
+
+        return self::adaptiveKelvinFromAnchors($sec, [
+            'dawn' => 5 * 3600 + 30 * 60,
+            'sunrise' => 7 * 3600,
+            'noon' => 12 * 3600,
+            'sunset' => 18 * 3600,
+            'dusk' => 21 * 3600,
+        ]);
+    }
+
+    /**
+     * @param array{dawn: int, sunrise: int, noon: int, sunset: int, dusk: int} $anchors
+     */
+    private static function adaptiveKelvinFromAnchors(int $t, array $anchors): float
+    {
+        if ($t < $anchors['dawn'] || $t >= $anchors['dusk']) {
+            return (float) self::ADAPTIVE_NIGHT_K;
+        }
+        if ($t < $anchors['sunrise']) {
+            return self::lerpKelvin($t, $anchors['dawn'], $anchors['sunrise'], self::ADAPTIVE_NIGHT_K, self::ADAPTIVE_SUNRISE_K);
+        }
+        if ($t < $anchors['noon']) {
+            return self::lerpKelvin($t, $anchors['sunrise'], $anchors['noon'], self::ADAPTIVE_SUNRISE_K, self::ADAPTIVE_NOON_K);
+        }
+        if ($t < $anchors['sunset']) {
+            return self::lerpKelvin($t, $anchors['noon'], $anchors['sunset'], self::ADAPTIVE_NOON_K, self::ADAPTIVE_SUNSET_K);
+        }
+
+        return self::lerpKelvin($t, $anchors['sunset'], $anchors['dusk'], self::ADAPTIVE_SUNSET_K, self::ADAPTIVE_NIGHT_K);
+    }
+
+    private static function lerpKelvin(int $t, int $t0, int $t1, int $k0, int $k1): float
+    {
+        if ($t1 === $t0) {
+            return (float) $k1;
+        }
+        $u = ($t - $t0) / ($t1 - $t0);
+        if ($u < 0.0) {
+            $u = 0.0;
+        }
+        if ($u > 1.0) {
+            $u = 1.0;
+        }
+
+        return $k0 + ($k1 - $k0) * $u;
     }
 
     private function setActiveSceneId(string $id): void
