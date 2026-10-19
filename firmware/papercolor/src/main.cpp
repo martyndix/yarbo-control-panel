@@ -805,11 +805,13 @@ void drawBoardPage(bool forceFull)
     int W = M5.Display.width();
     int H = M5.Display.height();
     if (viewerOnly()) {
+        tabletBat = M5.Power.getBatteryLevel();
         int clockBand = 56;
+        int foot = 18;
         int gap = 2;
         int side = 8;
         int cellW = (W - side * 2 - 14 * gap) / 15;
-        int cellH = (H - clockBand - 8 - 2 * gap) / 3;
+        int cellH = (H - clockBand - foot - 2 * gap) / 3;
         int cell = cellW < cellH ? cellW : cellH;
         if (cell < 16) {
             cell = 16;
@@ -817,12 +819,21 @@ void drawBoardPage(bool forceFull)
         int gridW = 15 * cell + 14 * gap;
         int gridH = 3 * cell + 2 * gap;
         int gridX = (W - gridW) / 2;
-        int gridY = clockBand + (H - clockBand - 8 - gridH) / 2;
+        int gridY = clockBand + (H - clockBand - foot - gridH) / 2;
         M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
         M5.Display.setTextDatum(TC_DATUM);
         M5.Display.setTextSize(5);
         M5.Display.drawString(clockLocal.length() ? clockLocal : String("--:--"), W / 2, 8);
         drawVestaboardGrid(gridX, gridY, cell, gap);
+        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+        M5.Display.setTextDatum(BL_DATUM);
+        M5.Display.setTextSize(1);
+        String bat = "--";
+        if (tabletBat >= 0) {
+            int pct = tabletBat > 100 ? 100 : tabletBat;
+            bat = String(pct) + "%";
+        }
+        M5.Display.drawString(bat, 8, H - 4);
         finishEpdFrame();
         return;
     }

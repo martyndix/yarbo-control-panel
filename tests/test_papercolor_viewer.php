@@ -103,8 +103,8 @@ $kit = (string) file_get_contents(__DIR__ . '/../scripts/paper_setup_kit.py');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 $mono = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
 
-assert_true(str_contains($ver, '0.2.23-colour'), 'firmware 0.2.23-colour');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.23-colour';"), 'panel colour pin 0.2.23-colour');
+assert_true(str_contains($ver, '0.2.24-colour'), 'firmware 0.2.24-colour');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.24-colour';"), 'panel colour pin 0.2.24-colour');
 assert_true(str_contains($mono, '#define PAPERMONO_FW_VERSION "0.1.69"'), 'PaperMono firmware unchanged');
 assert_true(str_contains($color, 'bool viewerOnly()'), 'viewer-only helper');
 assert_true(str_contains($color, 'void applyDisplayMode()'), 'landscape display mode');
@@ -117,11 +117,13 @@ assert_true(!str_contains($color, 'clockLocal + "|" + String(usingRemote'), 'clo
 assert_true(str_contains($color, 'int clockBand = 56;'), 'viewer reserves a time band');
 assert_true(str_contains($color, 'int glyphSize = (cell - 4) / 8;'), 'flap letters scale with cell size');
 assert_true(str_contains($html, 'id="papermono-vestaboard-viewer"'), 'settings viewer checkbox');
-assert_true(str_contains($html, '0.2.23-colour'), 'settings hint 0.2.23-colour');
+assert_true(str_contains($html, '0.2.24-colour'), 'settings hint 0.2.24-colour');
+assert_true(str_contains($color, 'int foot = 18;'), 'viewer leaves a footer for tablet battery');
+assert_true(str_contains($color, 'M5.Display.drawString(bat, 8, H - 4);'), 'tablet battery bottom-left');
 assert_true(str_contains($js, 'function applyVestaboardViewerGate()'), 'checkbox gated on Note');
 assert_true(str_contains($js, 'vestaboard_viewer: !!els.papermonoVestaboardViewer?.checked'), 'prefs payload includes viewer');
 assert_true(str_contains($flash, '--vestaboard-viewer'), 'flash CLI flag');
 assert_true(str_contains($kit, 'vestaboard_viewer'), 'setup kit CFG includes viewer');
-assert_true(str_contains($change, '## [4.0.129]'), 'changelog 4.0.129');
+assert_true(str_contains($change, '## [4.0.130]'), 'changelog 4.0.130');
 
 echo "test_papercolor_viewer.php ok\n";

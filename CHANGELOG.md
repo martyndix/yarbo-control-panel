@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.130] - 2026-10-19
+
+### Added
+- Paper Colour Vestaboard viewer shows the tablet battery percent in the bottom-left. Firmware **0.2.24-colour**.
+
 ## [4.0.129] - 2026-10-19
 
 ### Changed
