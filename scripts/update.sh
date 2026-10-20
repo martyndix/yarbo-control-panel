@@ -227,6 +227,10 @@ CREDENTIAL_FILES=(
   hub-config.json
   cloud-config.json
   home.json
+  home.json.bak
+  home.json.bak.1
+  home-automations.json
+  home-automations-state.json
   papermono-devices.json
   paper-remote.json
   robot-name.json
@@ -242,6 +246,10 @@ for name in "${CREDENTIAL_FILES[@]}"; do
     PRESERVED=$((PRESERVED + 1))
   fi
 done
+if [[ -d "${ROOT}/data/home-backups" ]]; then
+  cp -a "${ROOT}/data/home-backups" "${PRESERVE_DIR}/home-backups"
+  PRESERVED=$((PRESERVED + 1))
+fi
 TESLA_PUB="${ROOT}/public/.well-known/appspecific/com.tesla.3p.public-key.pem"
 if [[ -f "$TESLA_PUB" ]]; then
   mkdir -p "${PRESERVE_DIR}/tesla-well-known"
@@ -269,6 +277,10 @@ if [[ -d "${PRESERVE_DIR}" ]]; then
     mkdir -p "${ROOT}/public/.well-known/appspecific"
     cp -a "${PRESERVE_DIR}/tesla-well-known/com.tesla.3p.public-key.pem" \
       "${ROOT}/public/.well-known/appspecific/"
+  fi
+  if [[ -d "${PRESERVE_DIR}/home-backups" ]]; then
+    rm -rf "${ROOT}/data/home-backups"
+    cp -a "${PRESERVE_DIR}/home-backups" "${ROOT}/data/home-backups"
   fi
   rm -rf "${PRESERVE_DIR}"
 fi

@@ -29,6 +29,9 @@ final class YarboHome
     public const ADAPTIVE_STEP_K = 50;
     public const ADAPTIVE_MIN_INTERVAL_SEC = 60;
 
+    /** Set when load() puts rooms/scenes back from a backup. */
+    private string $restoredHomeFrom = '';
+
     public function __construct(private readonly string $projectRoot)
     {
     }
@@ -68,12 +71,25 @@ final class YarboHome
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
         ];
         if (!is_file($this->storePath())) {
-            return $defaults;
+            $recovered = $this->recoverUserMeta($defaults);
+            if ($recovered === null) {
+                return $defaults;
+            }
+            $this->writeRaw($recovered);
+            return $recovered;
         }
         $raw = file_get_contents($this->storePath());
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
         if (!is_array($decoded)) {
-            return $defaults;
+            if (is_string($raw) && trim($raw) !== '') {
+                @file_put_contents($this->storePath() . '.corrupt', $raw);
+            }
+            $recovered = $this->recoverUserMeta($defaults);
+            if ($recovered === null) {
+                return $defaults;
+            }
+            $this->writeRaw($recovered);
+            return $recovered;
         }
         $names = [];
         foreach (is_array($decoded['names'] ?? null) ? $decoded['names'] : [] as $id => $name) {
@@ -188,7 +204,11 @@ final class YarboHome
             ),
             'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
         ];
-        if ($migrated) {
+        $recovered = $this->recoverUserMeta($store);
+        if ($recovered !== null) {
+            $store = $recovered;
+            $this->writeRaw($store);
+        } elseif ($migrated) {
             $this->write($store);
         } elseif ($store['last_devices'] === []) {
             $cached = $this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json');
@@ -196,6 +216,9 @@ final class YarboHome
                 $store['last_devices'] = $this->normalizeLastDevices($cached);
                 $this->write($store);
             }
+        }
+        if ($this->storeMetaScore($store) >= 4) {
+            $this->snapshotStore($store);
         }
 
         return $store;
@@ -417,6 +440,7 @@ final class YarboHome
             'timezone' => $auto->timezonePublic(),
             'runner' => $auto->runnerPublic(),
             'sun_coords' => $auto->coordsPublic(),
+            'restored_home' => $this->restoredHomeFrom,
         ];
     }
 
@@ -4219,6 +4243,32 @@ final class YarboHome
      */
     private function write(array $store): bool
     {
+        $path = $this->storePath();
+        $existing = $this->readDecodedFile($path);
+        if (is_array($existing)) {
+            $store = $this->preserveUserMeta($store, $existing);
+            $keep = $this->storeMetaScore($existing) >= $this->storeMetaScore($store) ? $existing : $store;
+            $this->snapshotStore($keep);
+        } elseif (is_file($path)) {
+            $raw = (string) file_get_contents($path);
+            if (trim($raw) !== '' && $this->storeMetaScore($store) < 4) {
+                @file_put_contents($path . '.corrupt', $raw);
+                $backup = $this->bestBackupStore();
+                if (!is_array($backup) || $this->storeMetaScore($backup) < 4) {
+                    return false;
+                }
+                $store = $this->preserveUserMeta($store, $backup);
+            }
+        }
+
+        return $this->writeRaw($store);
+    }
+
+    /**
+     * @param array<string, mixed> $store
+     */
+    private function writeRaw(array $store): bool
+    {
         $dir = dirname($this->storePath());
         if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
             return false;
@@ -4227,7 +4277,212 @@ final class YarboHome
         if ($json === false) {
             return false;
         }
+        if ($this->storeMetaScore($store) >= 4) {
+            $this->snapshotStore($store);
+        }
+        $path = $this->storePath();
+        $tmp = $path . '.tmp';
+        if (file_put_contents($tmp, $json . "\n", LOCK_EX) === false) {
+            return false;
+        }
 
-        return file_put_contents($this->storePath(), $json . "\n", LOCK_EX) !== false;
+        return @rename($tmp, $path);
+    }
+
+    /**
+     * @param array<string, mixed> $incoming
+     * @param array<string, mixed> $existing
+     * @return array<string, mixed>
+     */
+    private function preserveUserMeta(array $incoming, array $existing): array
+    {
+        $incomingEmpty = ($incoming['room_defs'] ?? []) === [] && ($incoming['scenes'] ?? []) === [];
+        $existingRich = ($existing['room_defs'] ?? []) !== [] || ($existing['scenes'] ?? []) !== [];
+        if (!$incomingEmpty || !$existingRich) {
+            return $incoming;
+        }
+        foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order'] as $key) {
+            if (($existing[$key] ?? []) !== []) {
+                $incoming[$key] = $existing[$key];
+            }
+        }
+
+        return $incoming;
+    }
+
+    /**
+     * @param array<string, mixed> $store
+     * @return array<string, mixed>|null
+     */
+    private function recoverUserMeta(array $store): ?array
+    {
+        $best = $this->bestBackupStore();
+        if ($best === null || $this->storeMetaScore($best) <= $this->storeMetaScore($store)) {
+            return null;
+        }
+        $needRooms = ($store['room_defs'] ?? []) === [] && ($store['rooms'] ?? []) === [];
+        $needScenes = ($store['scenes'] ?? []) === [];
+        $needNames = ($store['names'] ?? []) === [];
+        $needPaper = ($store['paper'] ?? []) === [];
+        $tinyCurrent = count($store['room_defs'] ?? []) <= 3
+            && count($store['rooms'] ?? []) < 8
+            && count($store['scenes'] ?? []) === 0;
+        $richBackup = count($best['room_defs'] ?? []) >= 8
+            || count($best['rooms'] ?? []) >= 10
+            || count($best['scenes'] ?? []) >= 2;
+        if (!$needRooms && !$needScenes && !($tinyCurrent && $richBackup)) {
+            return null;
+        }
+        if ($tinyCurrent && $richBackup) {
+            $needRooms = true;
+            $needScenes = true;
+            $needNames = $needNames || count($store['names'] ?? []) < 8;
+            $needPaper = true;
+        }
+        $changed = false;
+        if ($needRooms && ($best['room_defs'] ?? []) !== []) {
+            $store['room_defs'] = $best['room_defs'];
+            $store['rooms'] = is_array($best['rooms'] ?? null) ? $best['rooms'] : [];
+            $store['group_defs'] = is_array($best['group_defs'] ?? null) ? $best['group_defs'] : [];
+            $store['groups'] = is_array($best['groups'] ?? null) ? $best['groups'] : [];
+            $changed = true;
+        }
+        if ($needScenes && ($best['scenes'] ?? []) !== []) {
+            $store['scenes'] = $best['scenes'];
+            $changed = true;
+        }
+        if ($needPaper && ($best['paper'] ?? []) !== []) {
+            $store['paper'] = $best['paper'];
+            $changed = true;
+        }
+        if ($needNames && ($best['names'] ?? []) !== []) {
+            $store['names'] = $best['names'];
+            $changed = true;
+        }
+        if (!$changed) {
+            return null;
+        }
+        $this->restoredHomeFrom = 'backup';
+
+        return $store;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function bestBackupStore(): ?array
+    {
+        $best = null;
+        $bestScore = 0;
+        foreach ($this->backupCandidatePaths() as $path) {
+            $decoded = $this->readDecodedFile($path);
+            if (!is_array($decoded)) {
+                continue;
+            }
+            $score = $this->storeMetaScore($decoded);
+            if ($score > $bestScore) {
+                $best = $decoded;
+                $bestScore = $score;
+            }
+        }
+
+        return $bestScore >= 4 ? $best : null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function backupCandidatePaths(): array
+    {
+        $dir = $this->projectRoot . '/data';
+        $paths = [
+            $dir . '/home.json.bak',
+            $dir . '/home.json.bak.1',
+            $dir . '/home.json.bak.2',
+            $dir . '/home.json~',
+            $dir . '/home.json.corrupt',
+            $dir . '/.update-preserve/home.json',
+        ];
+        $backupDir = $dir . '/home-backups';
+        if (is_dir($backupDir)) {
+            $files = glob($backupDir . '/home-*.json') ?: [];
+            rsort($files);
+            $paths = array_merge($paths, $files);
+        }
+
+        return $paths;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function readDecodedFile(string $path): ?array
+    {
+        if ($path === '' || !is_file($path)) {
+            return null;
+        }
+        $raw = file_get_contents($path);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * @param array<string, mixed> $store
+     */
+    private function storeMetaScore(array $store): int
+    {
+        $rooms = is_array($store['room_defs'] ?? null) ? $store['room_defs'] : [];
+        $scenes = is_array($store['scenes'] ?? null) ? $store['scenes'] : [];
+        $assigned = is_array($store['rooms'] ?? null) ? $store['rooms'] : [];
+        $names = is_array($store['names'] ?? null) ? $store['names'] : [];
+        $groups = is_array($store['group_defs'] ?? null) ? $store['group_defs'] : [];
+        $paper = is_array($store['paper'] ?? null) ? $store['paper'] : [];
+
+        return (count($rooms) * 100)
+            + (count($scenes) * 50)
+            + count($assigned)
+            + count($names)
+            + (count($groups) * 10)
+            + count($paper);
+    }
+
+    /**
+     * @param array<string, mixed> $store
+     */
+    private function snapshotStore(array $store): void
+    {
+        if ($this->storeMetaScore($store) < 4) {
+            return;
+        }
+        $json = json_encode($store, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            return;
+        }
+        $dir = $this->projectRoot . '/data';
+        $bak = $dir . '/home.json.bak';
+        $existing = $this->readDecodedFile($bak);
+        $existingScore = is_array($existing) ? $this->storeMetaScore($existing) : 0;
+        $score = $this->storeMetaScore($store);
+        if ($score <= $existingScore) {
+            return;
+        }
+        if (is_file($bak) && $score > $existingScore) {
+            @copy($bak, $dir . '/home.json.bak.1');
+        }
+        @file_put_contents($bak, $json . "\n", LOCK_EX);
+        $stampDir = $dir . '/home-backups';
+        if (!is_dir($stampDir) && !mkdir($stampDir, 0755, true) && !is_dir($stampDir)) {
+            return;
+        }
+        $stamp = $stampDir . '/home-' . gmdate('Ymd-His') . '.json';
+        if (!is_file($stamp)) {
+            @file_put_contents($stamp, $json . "\n", LOCK_EX);
+        }
+        $stamped = glob($stampDir . '/home-*.json') ?: [];
+        rsort($stamped);
+        foreach (array_slice($stamped, 12) as $old) {
+            @unlink($old);
+        }
     }
 }

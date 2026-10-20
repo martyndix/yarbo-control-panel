@@ -20,6 +20,9 @@ foreach ([
     'unifi-config.json',
     'vestaboard-config.json',
     'hub-config.json',
+    'home.json',
+    'home.json.bak',
+    'home-automations.json',
 ] as $name) {
     if (!str_contains($update, $name)) {
         fwrite(STDERR, "update.sh must preserve {$name}\n");

@@ -4512,6 +4512,10 @@ function homeSceneMemberRowHtml(d) {
 function renderHomeDashboard(data, opts = {}) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
+    if (data.restored_home && !renderHomeDashboard._restoredToast) {
+        renderHomeDashboard._restoredToast = true;
+        showToast('Restored rooms and scenes from a backup on this Pi', 'success');
+    }
     const naming = opts.replace
         ? null
         : document.activeElement?.closest?.('[data-home-name], [data-home-room-name], [data-home-group-name], [data-home-room-assign], [data-home-group-assign], [data-home-group-new], [data-home-color], [data-home-kelvin], [data-home-setpoint]');

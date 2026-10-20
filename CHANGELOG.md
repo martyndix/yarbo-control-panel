@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.133] - 2026-10-20
+
+### Fixed
+- Home rooms and scenes are restored from `data/home.json.bak` (and dated copies in `data/home-backups/`) when the live file is empty or unreadable. Saving last_devices no longer writes an empty room/scene list over a good file. Panel updates also keep those backups.
+
 ## [4.0.132] - 2026-10-19
 
 ### Changed

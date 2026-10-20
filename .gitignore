@@ -47,6 +47,10 @@
 /data/unifi-inventory.json
 /data/unifi-snap-*.jpg
 /data/home.json
+/data/home.json.bak
+/data/home.json.bak.*
+/data/home.json.corrupt
+/data/home-backups/
 /data/home-nodes-cache.json
 /data/home-automations.json
 /data/home-automations-state.json
