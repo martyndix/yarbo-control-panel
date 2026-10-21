@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.137] - 2026-10-21
+
+### Fixed
+- Home no longer shows an extra **Spot 5** (or other named light) that is **not available** when the live Hue light with that name already works. Those rows were leftover Matter nodes from an older pairing, not a second bulb. Remaining unavailable lights say **Unavailable** instead of On/Off.
+
 ## [4.0.136] - 2026-10-21
 
 ### Fixed

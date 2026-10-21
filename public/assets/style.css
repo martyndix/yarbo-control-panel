@@ -3145,6 +3145,15 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.home-device--unavailable {
+    opacity: 0.72;
+}
+
+.home-device--unavailable .home-device-meta {
+    color: var(--muted);
+    font-weight: 650;
+}
+
 .home-device--camera.is-on {
     background: var(--surface);
     border-color: var(--border);

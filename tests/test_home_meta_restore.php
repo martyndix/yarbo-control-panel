@@ -166,5 +166,6 @@ assert_true(str_contains($js, 'function applyHomeDeviceRoom'), 'room assign upda
 assert_true(str_contains($change, '## [4.0.133]'), 'changelog 4.0.133');
 assert_true(str_contains($change, '## [4.0.135]'), 'changelog 4.0.135');
 assert_true(str_contains($change, '## [4.0.136]'), 'changelog 4.0.136');
+assert_true(str_contains($change, '## [4.0.137]'), 'changelog 4.0.137');
 
 echo "test_home_meta_restore.php ok\n";

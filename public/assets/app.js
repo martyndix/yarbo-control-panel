@@ -4218,6 +4218,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const camera = String(d.kind || '') === 'camera';
     const canToggle = !hidden && homeDeviceCanToggle(d) && !heater && !vacuum && !camera;
     const toggleClass = canToggle ? ' home-device--toggle' : '';
+    const unavailableClass = d.available === false ? ' home-device--unavailable' : '';
     const lit = on && !camera;
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
@@ -4233,7 +4234,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
     const actions = hidden ? '' : homeDeviceActionsHtml(d, bright, color);
-    return `<article class="home-device${lit ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${toggleClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
+    return `<article class="home-device${lit ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${toggleClass}${unavailableClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
@@ -4282,6 +4283,9 @@ function homeDeviceActionsHtml(d, bright, color) {
     }
     if (String(d.kind || '') === 'vacuum') {
         return homeVacuumActionsHtml(d);
+    }
+    if (d.available === false) {
+        return `<div class="home-device-actions"><span class="home-device-meta">Unavailable</span></div>`;
     }
     const on = Boolean(d.on);
     return `<div class="home-device-actions">

@@ -611,6 +611,7 @@ final class YarboHome
                 $devices[] = $row;
             }
         }
+        $devices = self::dropUnavailableNameDuplicates($devices);
         $devices = $this->applyIdOrder($devices, $store['device_order'] ?? []);
         $auto = new YarboHomeAutomations($this->projectRoot);
         $auto->adoptClientTimezone();
@@ -2438,6 +2439,61 @@ final class YarboHome
      *
      * @param array<string, mixed> $row
      */
+    /**
+     * @param list<array<string, mixed>> $devices
+     * @return list<array<string, mixed>>
+     */
+    /**
+     * An old Matter node that is offline but still named "Spot 5" next to the live Hue Spot 5.
+     *
+     * @param list<array<string, mixed>> $devices
+     * @return list<array<string, mixed>>
+     */
+    public static function dropUnavailableNameDuplicates(array $devices): array
+    {
+        $liveNames = [];
+        foreach ($devices as $row) {
+            if (!is_array($row) || ($row['available'] ?? true) === false) {
+                continue;
+            }
+            if (YarboUnifi::isHomeId((string) ($row['id'] ?? ''))) {
+                continue;
+            }
+            $name = self::duplicateNameKey($row);
+            if ($name !== '') {
+                $liveNames[$name] = true;
+            }
+        }
+        $out = [];
+        foreach ($devices as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            if (($row['available'] ?? true) === false
+                && !YarboUnifi::isHomeId($id)
+                && isset($liveNames[self::duplicateNameKey($row)])) {
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    public static function duplicateNameKey(array $row): string
+    {
+        $name = strtolower(trim((string) ($row['name'] ?? '')));
+        if ($name === '' || str_contains($name, ':') || str_starts_with($name, 'matter node ')) {
+            return '';
+        }
+
+        return $name;
+    }
+
     /**
      * @param list<array<string, mixed>> $devices
      * @return list<array<string, mixed>>

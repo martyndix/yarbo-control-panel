@@ -138,6 +138,22 @@ assert_true(YarboHome::dropLeftoverHueEndpoints([
     ['id' => '1:2', 'name' => 'Hall', 'kind' => 'light'],
     ['id' => '1:96', 'name' => 'BSB003 96', 'kind' => 'light'],
 ]) === [['id' => '1:2', 'name' => 'Hall', 'kind' => 'light']], 'drop leftover Hue from a saved list');
+$spotDup = YarboHome::dropUnavailableNameDuplicates([
+    ['id' => '1:12', 'name' => 'Spot 5', 'kind' => 'light', 'available' => true, 'on' => true],
+    ['id' => '7:1', 'name' => 'Spot 5', 'kind' => 'light', 'available' => false, 'on' => false],
+    ['id' => '1:4', 'name' => 'Lamp', 'kind' => 'light', 'available' => true],
+]);
+$spotIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $spotDup);
+assert_true($spotIds === ['1:12', '1:4'], 'unavailable Spot 5 leftover must not sit next to the live Hue light');
+$offlineOnly = YarboHome::dropUnavailableNameDuplicates([
+    ['id' => '3:1', 'name' => 'Cellar', 'kind' => 'light', 'available' => false],
+]);
+assert_true(($offlineOnly[0]['id'] ?? '') === '3:1', 'a uniquely named unavailable light stays so it can be removed');
+$twoLive = YarboHome::dropUnavailableNameDuplicates([
+    ['id' => '1:2', 'name' => 'Lamp', 'available' => true],
+    ['id' => '1:3', 'name' => 'Lamp', 'available' => true],
+]);
+assert_true(count($twoLive) === 2, 'two live lamps with the same name are not merged');
 assert_true(YarboHome::looksLikeLeftoverHueEndpoint(['id' => '1:96', 'name' => 'BSB003 96']), 'BSB003 96 is a leftover Hue endpoint');
 assert_true(!YarboHome::looksLikeLeftoverHueEndpoint(['id' => '1:12', 'name' => 'Hall', 'kind' => 'light']), 'named Hue lights are not leftover');
 assert_true(!YarboHome::looksLikeLeftoverHueEndpoint([
@@ -680,5 +696,9 @@ assert_true(str_contains($css, '.home-device--camera.is-on'), 'camera is-on must
 assert_true(str_contains($css, '.home-scene-filter'), 'scene editor search field');
 assert_true(str_contains($css, 'max-height: min(28rem, 60vh)'), 'scene member list scrolls instead of growing');
 assert_true(str_contains($css, '.home-scene-member:not(.is-in)'), 'unticked scene rows stay compact');
+assert_true(str_contains($js, 'home-device--unavailable'), 'unavailable leftover nodes are marked');
+assert_true(str_contains($js, 'Unavailable'), 'unavailable lights say Unavailable instead of On');
+assert_true(str_contains($css, '.home-device--unavailable'), 'unavailable row is visually muted');
+assert_true(str_contains($homePhp, 'function dropUnavailableNameDuplicates'), 'unavailable namesakes are dropped');
 
 echo "ok\n";
