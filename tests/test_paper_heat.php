@@ -88,6 +88,81 @@ assert_true(($items[1]['on'] ?? false) === true, 'Kitchen is on');
 assert_true(($items[1]['temp'] ?? null) === 19.2, 'Kitchen now temp');
 assert_true(($items[1]['set'] ?? null) === 21.0, 'Kitchen set temp');
 assert_true(($items[0]['on'] ?? true) === false, 'Living room is off');
+assert_true(($items[0]['name'] ?? '') === 'Living room', 'uses Matter name when no room: ' . json_encode($items[0]));
+assert_true(($items[1]['name'] ?? '') === 'Kitchen', 'uses Matter name when no room: ' . json_encode($items[1]));
+
+$roomRoot = sys_get_temp_dir() . '/yarbo-paper-heat-rooms-' . bin2hex(random_bytes(3));
+mkdir($roomRoot . '/data', 0775, true);
+file_put_contents($roomRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => false],
+], JSON_UNESCAPED_SLASHES));
+$stockHeaters = [
+    [
+        'id' => '5:2',
+        'name' => 'Heater',
+        'kind' => 'heater',
+        'on' => true,
+        'local_temperature' => 21.0,
+        'heating_setpoint' => 23.0,
+        'has_thermostat' => true,
+        'available' => true,
+    ],
+    [
+        'id' => '6:2',
+        'name' => 'Mill Wi-Fi Panel Heater Gen4',
+        'kind' => 'heater',
+        'on' => false,
+        'local_temperature' => 20.0,
+        'heating_setpoint' => 19.0,
+        'has_thermostat' => true,
+        'available' => true,
+    ],
+    [
+        'id' => '7:2',
+        'name' => 'Heater',
+        'kind' => 'heater',
+        'on' => false,
+        'local_temperature' => 18.0,
+        'heating_setpoint' => 18.0,
+        'has_thermostat' => true,
+        'available' => true,
+    ],
+];
+file_put_contents($roomRoot . '/data/home.json', json_encode([
+    'hidden' => [],
+    'last_devices' => $stockHeaters,
+    'device_order' => ['5:2', '6:2', '7:2'],
+    'names' => ['7:2' => 'Towel rail'],
+    'rooms' => [
+        '5:2' => 'r-kit',
+        '6:2' => 'r-liv',
+        '7:2' => 'r-bath',
+    ],
+    'room_defs' => [
+        ['id' => 'r-kit', 'name' => 'Kitchen'],
+        ['id' => 'r-liv', 'name' => 'Living room'],
+        ['id' => 'r-bath', 'name' => 'Bathroom'],
+    ],
+    'groups' => [],
+    'scenes' => [],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($roomRoot . '/data/home-nodes-cache.json', json_encode([
+    'v' => 6,
+    'saved_at' => time(),
+    'fabric_mtime' => time() + 100000,
+    'disk_ids' => ['5:2', '6:2', '7:2'],
+    'devices' => $stockHeaters,
+], JSON_UNESCAPED_SLASHES));
+$roomHome = new YarboHome($roomRoot);
+$roomItems = $roomHome->paperHeatItems();
+$roomNames = array_column($roomItems, 'name', 'id');
+assert_true(($roomNames['5:2'] ?? '') === 'Kitchen', 'stock Heater uses room: ' . json_encode($roomNames));
+assert_true(($roomNames['6:2'] ?? '') === 'Living room', 'Mill product name uses room: ' . json_encode($roomNames));
+assert_true(($roomNames['7:2'] ?? '') === 'Towel rail', 'custom Home name wins over room: ' . json_encode($roomNames));
+assert_true(YarboHome::paperHeatLabelIsGeneric('Heater'), 'Heater is generic');
+assert_true(YarboHome::paperHeatLabelIsGeneric('Mill Wi-Fi Panel Heater Gen4'), 'Mill product is generic');
+assert_true(!YarboHome::paperHeatLabelIsGeneric('Towel rail'), 'custom label is not generic');
+assert_true(!YarboHome::paperHeatLabelIsGeneric('Kitchen'), 'room-like name is not generic');
 
 $compact = new ReflectionMethod(YarboPaperDevice::class, 'companionCompact');
 $compact->setAccessible(true);
@@ -151,6 +226,8 @@ assert_true(str_contains($api, "\$cmd === 'home_setpoint'"), 'device API home_se
 assert_true(str_contains($api, "device_json_ack_continue(['ok' => true, 'command' => \$cmd])"), 'setpoint ACKs before Matter');
 assert_true(str_contains($html, 'data-menu-id="heat"'), 'settings HEAT row');
 assert_true(str_contains($html, 'PaperMono HEAT page mock'), 'settings HEAT preview');
-assert_true(str_contains($change, '## [4.0.154]'), 'changelog 4.0.154');
+assert_true(str_contains($change, '## [4.0.155]'), 'changelog 4.0.155');
+assert_true(str_contains($homePhp, 'function paperHeatLabel'), 'HEAT room label helper');
+assert_true(str_contains($homePhp, 'paperHeatLabelIsGeneric'), 'generic Heater detection');
 
 echo "ok: paper heat\n";

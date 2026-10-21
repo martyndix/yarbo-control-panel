@@ -4155,6 +4155,7 @@ final class YarboHome
 
     /**
      * Matter heaters for the PaperMono HEAT page. Not tablet HOUSE assignment.
+     * Row titles prefer the Home room when the device still has a stock Heater name.
      *
      * @return list<array{id: string, name: string, on: bool, set: float, min: float, max: float, temp?: float}>
      */
@@ -4195,10 +4196,7 @@ final class YarboHome
             $set = max($min, min($max, $set));
             $row = [
                 'id' => $id,
-                'name' => YarboHub::normalizeDisplayName(
-                    (string) ($store['names'][$id] ?? $device['name'] ?? $id),
-                    self::PAPER_NAME_MAX,
-                ) ?: $id,
+                'name' => $this->paperHeatLabel($store, $id, (string) ($device['name'] ?? '')),
                 'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
                 'set' => $set,
                 'min' => $min,
@@ -4216,6 +4214,52 @@ final class YarboHome
         }
 
         return $items;
+    }
+
+    /**
+     * HEAT row title: Home room when the heater still has a stock name (Mill “Heater”),
+     * otherwise the custom Home name, then the Matter name.
+     *
+     * @param array{names?: array<string, string>, rooms?: array<string, string>, room_defs?: list<array{id?: string, name?: string}>} $store
+     */
+    private function paperHeatLabel(array $store, string $id, string $deviceName): string
+    {
+        $custom = YarboHub::normalizeDisplayName((string) ($store['names'][$id] ?? ''), self::PAPER_NAME_MAX);
+        $fallback = YarboHub::normalizeDisplayName($deviceName, self::PAPER_NAME_MAX);
+        $candidate = $custom !== '' ? $custom : $fallback;
+        $roomName = '';
+        $roomId = trim((string) ($store['rooms'][$id] ?? ''));
+        if ($roomId !== '') {
+            foreach ($store['room_defs'] ?? [] as $def) {
+                if (!is_array($def) || (string) ($def['id'] ?? '') !== $roomId) {
+                    continue;
+                }
+                $roomName = YarboHub::normalizeDisplayName((string) ($def['name'] ?? ''), self::PAPER_NAME_MAX);
+                break;
+            }
+        }
+        if ($roomName !== '' && ($candidate === '' || self::paperHeatLabelIsGeneric($candidate))) {
+            return $roomName;
+        }
+        if ($candidate !== '') {
+            return $candidate;
+        }
+        if ($roomName !== '') {
+            return $roomName;
+        }
+
+        return $id;
+    }
+
+    /** Stock Matter / kind labels that are useless on a multi-heater HEAT list. */
+    public static function paperHeatLabelIsGeneric(string $name): bool
+    {
+        $n = strtolower(trim($name));
+        if ($n === '' || $n === 'heater' || $n === 'radiator' || $n === 'thermostat') {
+            return true;
+        }
+
+        return (bool) preg_match('/\bmill\b.*\b(heater|panel|radiator|thermostat)\b/', $n);
     }
 
     /**
