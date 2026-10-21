@@ -495,6 +495,25 @@ def main() -> int:
     if agent.looks_like_leftover_hue_endpoint("Hall", "BSB003", "Hue Bridge", 12):
         raise SystemExit("named Hall should not look leftover")
 
+    pending_node = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            "0/40/1": "Signify Netherlands B.V.",
+            "0/40/3": "Hue Bridge",
+            "12/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "12/57/5": "Porch",
+            "96/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "96/57/5": "BSB003 96",
+        },
+    }
+    pending_ids = {str(row.get("id") or "") for row in agent.flatten_nodes([pending_node])}
+    if "1:12" not in pending_ids:
+        raise SystemExit(f"named Hue Bridged Node without OnOff missing {pending_ids}")
+    if "1:96" in pending_ids:
+        raise SystemExit(f"leftover Hue without OnOff flattened {pending_ids}")
+
     mill = {
         "node_id": 26,
         "available": True,
@@ -517,6 +536,8 @@ def main() -> int:
             return {"ok": True}
         return {"ok": False, "error": "no"}
 
+    agent.SCAN_POST_INTERVIEW_S = 0
+    agent.SCAN_RETRY_WAIT_S = 0
     agent.matter_rpc = fake_scan_rpc  # type: ignore[method-assign]
     agent._live_devices = []
     scanned = agent.dispatch({"op": "scan"})
@@ -527,6 +548,59 @@ def main() -> int:
     scanned_ids = {str(row.get("id") or "") for row in scanned.get("devices") or []}
     if "1:2" not in scanned_ids or "1:96" in scanned_ids:
         raise SystemExit(f"scan devices {scanned_ids}")
+
+    get_nodes_n = {"n": 0}
+    incomplete = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            "0/40/1": "Signify Netherlands B.V.",
+            "0/40/3": "Hue Bridge",
+            "2/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "2/6/0": True,
+            "2/57/5": "Hall",
+        },
+    }
+    complete = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            **incomplete["attributes"],
+            "12/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "12/6/0": True,
+            "12/57/5": "Porch",
+            "13/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "13/6/0": False,
+            "13/57/5": "Path",
+            "14/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "14/6/0": True,
+            "14/57/5": "Gate",
+            "15/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "15/6/0": False,
+            "15/57/5": "Shed",
+        },
+    }
+
+    def growing_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True, **_kwargs):
+        if command == "get_nodes":
+            get_nodes_n["n"] += 1
+            node = incomplete if get_nodes_n["n"] < 3 else complete
+            return {"ok": True, "result": [node]}
+        if command == "interview_node":
+            return {"ok": True}
+        return {"ok": False, "error": "no"}
+
+    agent.matter_rpc = growing_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{"id": "1:2", "name": "Hall", "kind": "light", "on": True}]
+    grown = agent.dispatch({"op": "scan"})
+    grown_ids = {str(row.get("id") or "") for row in grown.get("devices") or []}
+    if "1:2" not in grown_ids:
+        raise SystemExit(f"scan merge dropped Hall {grown_ids}")
+    missing = {"1:12", "1:13", "1:14", "1:15"} - grown_ids
+    if missing:
+        raise SystemExit(f"scan retry missed Apple Home Hue lights {missing} in {grown_ids}")
 
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0

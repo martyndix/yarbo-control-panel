@@ -13084,11 +13084,11 @@ document.getElementById('home-scan')?.addEventListener('click', async () => {
         btn.textContent = 'Looking…';
     }
     if (status) {
-        status.textContent = 'Looking for new Hue lights on the paired Bridge. This can take up to a minute.';
+        status.textContent = 'Looking for new Hue lights on the paired Bridge. This can take a couple of minutes.';
         status.classList.remove('hidden');
     }
     try {
-        const data = await homeApi({ action: 'scan' }, 110000);
+        const data = await homeApi({ action: 'scan' }, 125000);
         if (!data.ok) throw new Error(data.error || 'Look for devices failed');
         const message = data.message || 'Looked for devices';
         if (status) status.textContent = message;

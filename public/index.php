@@ -595,7 +595,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-                            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. Tick UniFi devices in Settings → UniFi to show them here too. A Hue Bridge is one pairing: every Hue light then appears as its own row. New Hue bulbs show up after Look for devices, or within about 15 minutes — do not pair the Bridge again. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps. Tap ⚙️ to drag rooms, groups, lights, and scenes into the order you want.</p>
+                            <p class="hint">Matter devices. Pair with a code from the Hue app, Apple Home, or the device itself. Tick UniFi devices in Settings → UniFi to show them here too. A Hue Bridge is one pairing: every Hue light then appears as its own row. New Hue bulbs show up after Look for devices, or within about 15 minutes — do not pair the Bridge again. If a light is in Apple Home but missing here, tap ⚙️, check Hidden, then Look for devices. This is not a clone of the Home app — Hue scenes and Apple scenes stay in those apps. Tap ⚙️ to drag rooms, groups, lights, and scenes into the order you want.</p>
             <p id="home-server-status" class="updated">Matter server: —</p>
             <p id="home-setup-status" class="hint hidden"></p>
             <button type="button" class="btn btn-secondary hidden" id="home-setup">Set up Matter server</button>
@@ -609,7 +609,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="btn btn-secondary" id="home-scan">Look for devices</button>
                 </div>
                 <p id="home-pair-status" class="hint hidden" role="status"></p>
-                <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice. Lights you later add in Hue or Apple Home appear here after Look for devices, or on the next hunt (about every 15 minutes).</p>
+                <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice. Lights you later add in Hue or Apple Home appear here after Look for devices (wait for it to finish, try once more if needed), or on the next hunt (about every 15 minutes). Check Hidden before pairing anything again.</p>
             </div>
             <div id="home-room-add" class="home-room-add">
                 <input type="text" id="home-room-name" placeholder="Kitchen" maxlength="32" aria-label="New room name">

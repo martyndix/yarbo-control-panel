@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 52
+AGENT_VERSION = 53
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -185,6 +185,8 @@ _scan_due_at = 0.0
 SCAN_INTERVAL_S = 15 * 60
 FIRST_SCAN_DELAY_S = 90.0
 SCAN_NODE_CAP = 2
+SCAN_POST_INTERVIEW_S = 6.0
+SCAN_RETRY_WAIT_S = 10.0
 _command_busy = 0
 _command_busy_lock = threading.Lock()
 _listen_starting = False
@@ -1676,7 +1678,23 @@ def node_endpoint_count(node: dict[str, Any]) -> int:
     return sum(1 for endpoint in endpoint_ids(attributes) if endpoint > 0)
 
 
-def scan_candidate_node_ids(nodes: list[dict[str, Any]], cap: int = SCAN_NODE_CAP) -> list[int]:
+def node_looks_hue_bridge(node: dict[str, Any]) -> bool:
+    if bool(node.get("is_bridge") or node.get("isBridge") or False):
+        return True
+    attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
+    vendor = attr_str(attributes, 0, BASIC_INFO, ATTR_VENDOR_NAME)
+    product = attr_str(attributes, 0, BASIC_INFO, ATTR_PRODUCT_NAME)
+    name = attr_str(attributes, 0, BASIC_INFO, ATTR_NODE_LABEL)
+    blob = f"{vendor} {product} {name}".lower()
+    return "hue" in blob or "signify" in blob
+
+
+def scan_candidate_node_ids(
+    nodes: list[dict[str, Any]],
+    cap: int = SCAN_NODE_CAP,
+    *,
+    hue_only: bool = False,
+) -> list[int]:
     scored: list[tuple[int, int, int]] = []
     for node in nodes:
         if not isinstance(node, dict):
@@ -1688,10 +1706,13 @@ def scan_candidate_node_ids(nodes: list[dict[str, Any]], cap: int = SCAN_NODE_CA
         if node_id <= 0:
             continue
         is_bridge = bool(node.get("is_bridge") or node.get("isBridge") or False)
+        looks_hue = node_looks_hue_bridge(node)
         ep_count = node_endpoint_count(node)
-        if not is_bridge and ep_count <= 3:
+        if hue_only and not looks_hue:
             continue
-        scored.append((0 if is_bridge else 1, -ep_count, node_id))
+        if not is_bridge and not looks_hue and ep_count <= 3:
+            continue
+        scored.append((0 if looks_hue or is_bridge else 1, -ep_count, node_id))
     scored.sort()
     out: list[int] = []
     seen: set[int] = set()
@@ -1705,6 +1726,41 @@ def scan_candidate_node_ids(nodes: list[dict[str, Any]], cap: int = SCAN_NODE_CA
     return out
 
 
+def _scan_wait(seconds: float) -> None:
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def _merge_device_rows(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        for row in group:
+            if not isinstance(row, dict):
+                continue
+            did = str(row.get("id") or "")
+            if did:
+                by_id[did] = dict(row)
+    return list(by_id.values())
+
+
+def _scan_collect_devices(*, wait: bool) -> list[dict[str, Any]]:
+    rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
+    devices = flatten_nodes(nodes_from_result(rpc.get("result"))) if rpc.get("ok") else []
+    if not wait:
+        return devices
+    first_count = len(devices)
+    _scan_wait(SCAN_POST_INTERVIEW_S)
+    rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
+    retry = flatten_nodes(nodes_from_result(rpc.get("result"))) if rpc.get("ok") else []
+    devices = _merge_device_rows(devices, retry)
+    if len(devices) <= first_count:
+        _scan_wait(SCAN_RETRY_WAIT_S)
+        rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
+        more = flatten_nodes(nodes_from_result(rpc.get("result"))) if rpc.get("ok") else []
+        devices = _merge_device_rows(devices, more)
+    return devices
+
+
 def scan_existing_nodes(*, force: bool = False) -> dict[str, Any]:
     global _scan_due_at
     if not _scan_lock.acquire(blocking=force):
@@ -1714,18 +1770,19 @@ def scan_existing_nodes(*, force: bool = False) -> dict[str, Any]:
         nodes = nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
         if not nodes:
             nodes = nodes_from_disk()
-        candidates = scan_candidate_node_ids(nodes)
+        cap = 1 if force else SCAN_NODE_CAP
+        candidates = scan_candidate_node_ids(nodes, cap=cap, hue_only=force)
+        if force and not candidates:
+            candidates = scan_candidate_node_ids(nodes, cap=SCAN_NODE_CAP)
         interviewed: list[int] = []
         for node_id in candidates:
             if command_in_flight() and not force:
                 break
             matter_rpc("interview_node", {"node_id": node_id}, timeout=45.0, channel=CMD_CHANNEL)
             interviewed.append(node_id)
-        rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
-        if rpc.get("ok"):
-            devices = flatten_nodes(nodes_from_result(rpc.get("result")))
-            if devices:
-                remember_live_devices(devices)
+        devices = _scan_collect_devices(wait=force and bool(interviewed))
+        if devices:
+            merge_live_devices(devices)
         _scan_due_at = time.time() + SCAN_INTERVAL_S
         return {
             "ok": True,
@@ -4848,7 +4905,18 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 continue
             has_on_off = on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF)
             if not has_on_off and kind not in ("heater", "vacuum"):
-                continue
+                hue_child = (
+                    DEVTYPE_BRIDGED_NODE in type_ids
+                    and DEVTYPE_AGGREGATOR not in type_ids
+                    and (
+                        is_bridge
+                        or "hue" in f"{vendor} {product} {source}".lower()
+                        or "signify" in f"{vendor} {product} {source}".lower()
+                    )
+                )
+                if not hue_child:
+                    continue
+                kind = "light"
             is_light = kind == "light"
             thermo = thermostat_payload(attributes, endpoint) if kind == "heater" else {
                 "has_thermostat": False,

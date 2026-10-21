@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.139] - 2026-10-21
+
+### Fixed
+- **Look for devices** waits after interviewing the Hue Bridge and keeps lights a partial scan had dropped, so bulbs that already show in Apple Home appear on Home. Check **Hidden**, then tap Look for devices (wait for it to finish; try once more if needed). Do not pair the Hue Bridge again.
+
 ## [4.0.138] - 2026-10-21
 
 ### Fixed

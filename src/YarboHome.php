@@ -872,9 +872,9 @@ final class YarboHome
     public function scanDevices(): array
     {
         $agent = YarboMatterAgentClient::fromEnv();
-        $result = $agent->request(['op' => 'scan'], 95.0);
+        $result = $agent->request(['op' => 'scan'], 120.0);
         if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
-            $result = $agent->request(['op' => 'nodes', 'quick' => false], 95.0);
+            $result = $agent->request(['op' => 'nodes', 'quick' => false], 120.0);
         }
         if (!($result['ok'] ?? false)) {
             return [
@@ -934,7 +934,7 @@ final class YarboHome
             $this->rememberDevices($merged);
         }
         $message = $added === 0
-            ? 'No new devices. Hue lights added in the Hue or Apple Home app can take a minute to appear.'
+            ? 'No new devices. Check Hidden, then tap Look for devices again. Do not pair the Hue Bridge a second time.'
             : ($added === 1 ? 'Found 1 new device.' : 'Found ' . $added . ' new devices.');
 
         return ['ok' => true, 'message' => $message, 'added' => $added];
