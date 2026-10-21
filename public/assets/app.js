@@ -3295,6 +3295,60 @@ function homeMembersDimmable(members) {
     return (members || []).some((d) => homeIsLight(d) && (d.dimmable || (d.brightness != null && d.brightness !== '')));
 }
 
+function homeMembersAdaptive(members) {
+    return (members || []).filter((d) => homeCanAdaptive(d));
+}
+
+function homeBrightPct(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function syncHomeBrightPct(input) {
+    if (!input) return;
+    const label = input.closest('.home-bright-wrap')?.querySelector('.home-bright-pct');
+    if (label) label.textContent = `${homeBrightPct(input.value)}%`;
+}
+
+function homeBrightControlHtml(attr, value) {
+    const pct = homeBrightPct(value);
+    return `<span class="home-bright-wrap"><input type="range" min="0" max="100" value="${pct}" ${attr} class="home-bright" title="Brightness" aria-label="Brightness"><span class="home-bright-pct" aria-hidden="true">${pct}%</span></span>`;
+}
+
+function homeClusterAdaptiveHtml(attr, members) {
+    const list = homeMembersAdaptive(members);
+    if (!list.length) return '';
+    const checked = list.every((d) => d.adaptive);
+    return `<label class="home-adaptive" title="Warm at night, cooler in the day"><input type="checkbox" ${attr} ${checked ? 'checked' : ''}> Time of day</label>`;
+}
+
+function applyHomeClusterAdaptive(kind, id, on) {
+    const devices = [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])];
+    devices
+        .filter((d) => (kind === 'group' ? d.group_id === id : d.room_id === id))
+        .filter((d) => homeCanAdaptive(d))
+        .forEach((d) => {
+            d.adaptive = on;
+            const box = document.querySelector(`[data-home-id="${CSS.escape(d.id)}"] [data-home-adaptive]`);
+            if (box) box.checked = on;
+        });
+}
+
+function patchHomeBrightInput(input, value) {
+    if (!input || value == null || value === '') return;
+    if (document.activeElement !== input) input.value = String(homeBrightPct(value));
+    syncHomeBrightPct(input);
+}
+
+function patchHomeClusterAdaptive(el, members) {
+    const box = el?.querySelector('[data-home-group-adaptive], [data-home-room-adaptive]');
+    if (!box) return;
+    const list = homeMembersAdaptive(members);
+    if (!list.length) return;
+    box.checked = list.every((d) => d.adaptive);
+}
+
 function homeRoomSwitchable(room) {
     if (!room) return false;
     if (typeof room.switchable === 'boolean') return room.switchable;
@@ -3651,7 +3705,10 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         const device = homeDeviceRecord(id);
         if (device) device.brightness = extras.brightness;
         const bright = card.querySelector('[data-home-bright]');
-        if (bright && document.activeElement !== bright) bright.value = String(extras.brightness);
+        if (bright) {
+            if (document.activeElement !== bright) bright.value = String(homeBrightPct(extras.brightness));
+            syncHomeBrightPct(bright);
+        }
     }
     if (extras.color_hex) {
         const device = homeDeviceRecord(id);
@@ -3794,12 +3851,17 @@ function patchHomeDashboard(data) {
         el.classList.toggle('is-on', Boolean(room.on));
         const btn = el.querySelector('[data-home-room-toggle]');
         if (btn) btn.textContent = room.on ? 'Off' : 'On';
+        const roomMembers = next.filter((d) => d.room_id === room.id);
+        patchHomeBrightInput(el.querySelector('[data-home-room-bright]'), room.brightness);
+        patchHomeClusterAdaptive(el, roomMembers);
         (room.groups || []).forEach((group) => {
             const wrap = document.querySelector(`[data-home-group="${CSS.escape(group.id)}"]`);
             if (!wrap) return;
             wrap.querySelector('.home-group-heading')?.classList.toggle('is-on', Boolean(group.on));
             const gbtn = wrap.querySelector('[data-home-group-toggle]');
             if (gbtn) gbtn.textContent = group.on ? 'Off' : 'On';
+            patchHomeBrightInput(wrap.querySelector('[data-home-group-bright]'), group.brightness);
+            patchHomeClusterAdaptive(wrap, roomMembers.filter((d) => d.group_id === group.id));
         });
     });
     if (!homeManageOpen) {
@@ -4157,8 +4219,9 @@ function homeRoomHeadingHtml(room, members) {
     const dimmable = homeMembersDimmable(members) || Boolean(room.dimmable);
     const expanded = homeExpandedRooms.has(room.id);
     const bright = switchable && dimmable
-        ? `<input type="range" min="0" max="100" value="${Number(room.brightness ?? (on ? 100 : 0))}" data-home-room-bright="${escapeHtml(room.id)}" class="home-bright" title="Brightness" aria-label="Brightness">`
+        ? homeBrightControlHtml(`data-home-room-bright="${escapeHtml(room.id)}"`, room.brightness ?? (on ? 100 : 0))
         : '';
+    const tod = homeClusterAdaptiveHtml(`data-home-room-adaptive="${escapeHtml(room.id)}"`, members);
     const toggle = switchable
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-room-toggle="${escapeHtml(room.id)}">${on ? 'Off' : 'On'}</button>`
         : '';
@@ -4178,6 +4241,7 @@ function homeRoomHeadingHtml(room, members) {
         <div class="home-device-actions">
             ${toggle}
             ${bright}
+            ${tod}
         </div>
         <div class="home-device-manage">
             <button type="button" class="btn btn-secondary btn-compact" data-home-room-del="${escapeHtml(room.id)}">Delete room</button>
@@ -4191,8 +4255,9 @@ function homeGroupHeadingHtml(group, members) {
     const dimmable = homeMembersDimmable(members) || Boolean(group.dimmable);
     const expanded = homeExpandedGroups.has(group.id);
     const bright = switchable && dimmable
-        ? `<input type="range" min="0" max="100" value="${Number(group.brightness ?? (on ? 100 : 0))}" data-home-group-bright="${escapeHtml(group.id)}" class="home-bright" title="Brightness" aria-label="Brightness">`
+        ? homeBrightControlHtml(`data-home-group-bright="${escapeHtml(group.id)}"`, group.brightness ?? (on ? 100 : 0))
         : '';
+    const tod = homeClusterAdaptiveHtml(`data-home-group-adaptive="${escapeHtml(group.id)}"`, members);
     const toggle = switchable
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-group-toggle="${escapeHtml(group.id)}">${on ? 'Off' : 'On'}</button>`
         : '';
@@ -4212,6 +4277,7 @@ function homeGroupHeadingHtml(group, members) {
         <div class="home-device-actions">
             ${toggle}
             ${bright}
+            ${tod}
         </div>
         <div class="home-device-manage">
             <button type="button" class="btn btn-secondary btn-compact" data-home-group-del="${escapeHtml(group.id)}">Delete group</button>
@@ -4259,7 +4325,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const on = Boolean(d.on);
     const unifi = homeIsUnifi(d);
     const bright = !hidden && !unifi && homeIsLight(d) && d.dimmable
-        ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}" class="home-bright" title="Brightness" aria-label="Brightness">`
+        ? homeBrightControlHtml(`data-home-bright="${escapeHtml(d.id)}"`, d.brightness ?? (on ? 100 : 0))
         : '';
     const adaptive = Boolean(d.adaptive);
     const color = hidden || unifi || adaptive ? '' : homeColorInputsHtml(
@@ -5514,6 +5580,10 @@ function bindHomeDashboard() {
         }
         await sendHomeDeviceToggle(row.getAttribute('data-home-id') || '');
     });
+    document.getElementById('home-devices')?.addEventListener('input', (event) => {
+        const bright = event.target.closest('.home-bright');
+        if (bright) syncHomeBrightPct(bright);
+    });
     document.getElementById('home-devices')?.addEventListener('change', async (event) => {
         const assign = event.target.closest('[data-home-room-assign]');
         if (assign) {
@@ -5594,6 +5664,48 @@ function bindHomeDashboard() {
                 return;
             }
             queueHomeHeaterSetpoint(setpoint.getAttribute('data-home-setpoint') || '', celsius, setpoint);
+            return;
+        }
+        const groupAdaptive = event.target.closest('[data-home-group-adaptive]');
+        if (groupAdaptive) {
+            const id = groupAdaptive.getAttribute('data-home-group-adaptive') || '';
+            const on = Boolean(groupAdaptive.checked);
+            applyHomeClusterAdaptive('group', id, on);
+            try {
+                const data = await homeApi({
+                    action: 'group_command',
+                    group_id: id,
+                    command: 'adaptive',
+                    adaptive: on,
+                }, 90000);
+                if (!data.ok) throw new Error(data.error || 'Failed');
+                await loadHomeDashboard();
+            } catch (err) {
+                groupAdaptive.checked = !on;
+                applyHomeClusterAdaptive('group', id, !on);
+                showToast(err.message || 'Time of day failed', 'error');
+            }
+            return;
+        }
+        const roomAdaptive = event.target.closest('[data-home-room-adaptive]');
+        if (roomAdaptive) {
+            const id = roomAdaptive.getAttribute('data-home-room-adaptive') || '';
+            const on = Boolean(roomAdaptive.checked);
+            applyHomeClusterAdaptive('room', id, on);
+            try {
+                const data = await homeApi({
+                    action: 'room_command',
+                    room_id: id,
+                    command: 'adaptive',
+                    adaptive: on,
+                }, 90000);
+                if (!data.ok) throw new Error(data.error || 'Failed');
+                await loadHomeDashboard();
+            } catch (err) {
+                roomAdaptive.checked = !on;
+                applyHomeClusterAdaptive('room', id, !on);
+                showToast(err.message || 'Time of day failed', 'error');
+            }
             return;
         }
         const adaptive = event.target.closest('[data-home-adaptive]');

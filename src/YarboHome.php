@@ -1640,6 +1640,9 @@ final class YarboHome
         if ($action === 'brightness') {
             $ids = $this->dimmableIdsAmong($ids);
         }
+        if ($action === 'adaptive') {
+            $ids = $this->adaptiveIdsAmong($ids);
+        }
 
         return $this->commandIdList($ids, $action, $input, 'No controllable devices', 'Room partly failed: ');
     }
@@ -1763,6 +1766,9 @@ final class YarboHome
         if ($action === 'brightness') {
             $ids = $this->dimmableIdsAmong($ids);
         }
+        if ($action === 'adaptive') {
+            $ids = $this->adaptiveIdsAmong($ids);
+        }
 
         return $this->commandIdList($ids, $action, $input, 'No controllable devices', 'Group partly failed: ');
     }
@@ -1786,6 +1792,9 @@ final class YarboHome
             $payload = ['id' => $id, 'command' => $action];
             if ($action === 'brightness' && array_key_exists('brightness', $input)) {
                 $payload['brightness'] = (int) $input['brightness'];
+            }
+            if ($action === 'adaptive' && array_key_exists('adaptive', $input)) {
+                $payload['adaptive'] = !empty($input['adaptive']);
             }
             if ($action === 'color' || $action === 'colour') {
                 if (array_key_exists('hex', $input)) {
@@ -4526,6 +4535,40 @@ final class YarboHome
         }
 
         return $dimmable;
+    }
+
+    /**
+     * Colour lights that can follow Time of day (CT or RGB white).
+     *
+     * @param list<string> $ids
+     * @return list<string>
+     */
+    private function adaptiveIdsAmong(array $ids): array
+    {
+        $adaptive = [];
+        $live = $this->localHomeDevices();
+        foreach ($live['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = (string) ($device['id'] ?? '');
+            if ($id === '' || !in_array($id, $ids, true)) {
+                continue;
+            }
+            if (YarboUnifi::isHomeId($id) || strtolower((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE) {
+                continue;
+            }
+            $kind = strtolower(trim((string) ($device['kind'] ?? self::KIND_LIGHT)));
+            if ($kind !== '' && $kind !== self::KIND_LIGHT) {
+                continue;
+            }
+            if (!empty($device['color_ct']) || !empty($device['colorable'])
+                || !empty($device['color_hs']) || !empty($device['color_xy'])) {
+                $adaptive[] = $id;
+            }
+        }
+
+        return $adaptive;
     }
 
     /**

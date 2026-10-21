@@ -166,10 +166,19 @@ assert_true(str_contains($homePhp, "'adaptive' => true"), 'Time of day commands 
 assert_true(str_contains($homePhp, '!$caps[\'color_ct\'] && !$adaptive'), 'scene Time of day still sends kelvin');
 assert_true(str_contains($homePhp, 'function kelvinToHex'), 'colour lights get a white from kelvin');
 assert_true(str_contains($homePhp, 'function commandAdaptiveFollow'), 'light tiles can set Time of day');
+assert_true(str_contains($homePhp, 'function adaptiveIdsAmong'), 'group Time of day only hits colour lights');
+assert_true(str_contains($homePhp, "\$payload['adaptive'] = !empty(\$input['adaptive'])"), 'group command forwards Time of day');
 assert_true(!preg_match('/\$action === \'off\'\) \{\s*\$this->clearAdaptiveDevice/', $homePhp), 'Off keeps Time of day so it can resume');
 assert_true(str_contains($js, 'function homeCanAdaptive'), 'colour lights can use Time of day');
 assert_true(str_contains($js, 'data-home-adaptive'), 'light tile Time of day checkbox');
 assert_true(str_contains($js, 'function homeMembersDimmable'), 'group brightness uses dimmable members');
+assert_true(str_contains($js, 'function homeClusterAdaptiveHtml'), 'group headings can tick Time of day');
+assert_true(str_contains($js, 'data-home-group-adaptive'), 'group heading Time of day checkbox');
+assert_true(str_contains($js, 'data-home-room-adaptive'), 'room heading Time of day checkbox');
+assert_true(str_contains($js, "command: 'adaptive'"), 'group Time of day posts adaptive');
+assert_true(str_contains($js, 'function homeBrightControlHtml'), 'brightness slider wraps a percent');
+assert_true(str_contains($js, 'home-bright-pct'), 'brightness percent label');
+assert_true(str_contains($js, 'function syncHomeBrightPct'), 'percent updates while dragging');
 
 $warmHex = YarboHome::kelvinToHex(2200);
 $coolHex = YarboHome::kelvinToHex(5000);
@@ -191,5 +200,55 @@ $colorScene = $home->saveScene([
     ]],
 ]);
 assert_true(!empty($colorScene['scene']['actions'][0]['adaptive']), 'colour lights can save Time of day in a scene');
+
+$groupRoot = sys_get_temp_dir() . '/yarbo-group-tod-' . bin2hex(random_bytes(3));
+mkdir($groupRoot . '/data', 0775, true);
+file_put_contents($groupRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true],
+    'active_module' => 'home',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($groupRoot . '/data/home.json', json_encode([
+    'names' => [
+        '1:2' => 'Lamp 2',
+        '1:3' => 'Lamp 3',
+        '1:4' => 'Lamp',
+        '1:5' => 'On only',
+    ],
+    'room_defs' => [['id' => 'r1', 'name' => 'Lounge']],
+    'rooms' => ['1:2' => 'r1', '1:3' => 'r1', '1:4' => 'r1', '1:5' => 'r1'],
+    'group_defs' => [['id' => 'g-lamps', 'name' => 'Lamps', 'room_id' => 'r1']],
+    'groups' => ['1:2' => 'g-lamps', '1:3' => 'g-lamps', '1:4' => 'g-lamps', '1:5' => 'g-lamps'],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [
+        ['id' => '1:2', 'name' => 'Lamp 2', 'kind' => 'light', 'on' => false, 'color_ct' => true, 'dimmable' => true, 'brightness' => 40],
+        ['id' => '1:3', 'name' => 'Lamp 3', 'kind' => 'light', 'on' => false, 'colorable' => true, 'dimmable' => true, 'brightness' => 40],
+        ['id' => '1:4', 'name' => 'Lamp', 'kind' => 'plug', 'on' => true],
+        ['id' => '1:5', 'name' => 'On only', 'kind' => 'light', 'on' => false],
+    ],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($groupRoot . '/data/home-automations.json', json_encode([
+    'timezone' => 'Europe/Zurich',
+    'latitude' => 47.37,
+    'longitude' => 8.54,
+    'automations' => [],
+], JSON_UNESCAPED_SLASHES));
+
+$groupHome = new YarboHome($groupRoot);
+$grouped = $groupHome->commandGroup(['group_id' => 'g-lamps', 'command' => 'adaptive', 'adaptive' => true]);
+assert_true(($grouped['ok'] ?? false) === true, 'group Time of day succeeds: ' . json_encode($grouped));
+$following = $groupHome->adaptiveDeviceIds();
+sort($following);
+assert_true($following === ['1:2', '1:3'], 'group Time of day hits colour lamps only: ' . json_encode($following));
+
+$cleared = $groupHome->commandGroup(['group_id' => 'g-lamps', 'command' => 'adaptive', 'adaptive' => false]);
+assert_true(($cleared['ok'] ?? false) === true, 'group can clear Time of day: ' . json_encode($cleared));
+assert_true($groupHome->adaptiveDeviceIds() === [], 'unticking the group clears Time of day');
+
+$css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
+assert_true(str_contains($css, '.home-bright-pct'), 'brightness percent has styles');
+assert_true(str_contains($change, '## [4.0.146]'), 'changelog 4.0.146');
 
 echo "ok\n";

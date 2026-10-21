@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.146] - 2026-10-21
+
+### Added
+- Group and room headings can tick **Time of day** so every colour light in that group follows morning-cool to evening-warm. Plugs and on/off-only lights in a mixed group are skipped.
+- Brightness sliders show the percent next to the handle (for example **40%**).
+
 ## [4.0.145] - 2026-10-21
 
 ### Fixed

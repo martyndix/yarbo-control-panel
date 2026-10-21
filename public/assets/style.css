@@ -3274,8 +3274,25 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     flex: 0 0 5.5rem;
 }
 
+.home-bright-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+}
+
+.home-bright-pct {
+    min-width: 2.35rem;
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 650;
+    color: var(--muted);
+    white-space: nowrap;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
 .home-room .home-device-actions {
-    min-width: 7.5rem;
+    min-width: 10.5rem;
 }
 
 .home-adaptive {
@@ -3295,7 +3312,13 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
 }
 
 .home-device.is-on .home-adaptive,
+.home-room.is-on .home-adaptive,
 .home-adaptive:has(input:checked) {
+    color: var(--accent-hover);
+}
+
+.home-device.is-on .home-bright-pct,
+.home-room.is-on .home-bright-pct {
     color: var(--accent-hover);
 }
 

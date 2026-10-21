@@ -845,7 +845,9 @@ assert_true(str_contains($homePhp, 'lightIdsAmong'), 'room and group commands on
 assert_true(str_contains($js, 'function homeRoomSwitchable'), 'room heading hides On without lights');
 assert_true(str_contains($js, 'function homeGroupSwitchable'), 'group heading hides On without lights');
 assert_true(str_contains($js, 'homeMembersDimmable(members)'), 'group heading slider uses member brightness');
+assert_true(str_contains($js, 'homeBrightControlHtml'), 'group slider shows a brightness percent');
 assert_true(str_contains($js, 'data-home-adaptive'), 'colour lights have Time of day on the tile');
+assert_true(str_contains($js, 'data-home-group-adaptive'), 'group heading has Time of day');
 assert_true(str_contains($js, 'd.group_id === id && homeIsLight(d)'), 'group On only paints lights');
 assert_true(str_contains($js, 'd.room_id === id && homeIsLight(d)'), 'room On only paints lights');
 assert_true(str_contains($js, "btn.textContent = 'Adding…'"), 'Add device shows Adding while pairing');
