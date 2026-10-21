@@ -655,6 +655,8 @@ final class YarboHome
             'runner' => $auto->runnerPublic(),
             'sun_coords' => $auto->coordsPublic(),
             'restored_home' => $this->restoredHomeFrom,
+            'doors_tile' => $this->unifiDoorsTileConfigured(),
+            'unifi_doors' => $this->unifiDoorsPayload($store),
         ];
     }
 
@@ -2599,6 +2601,66 @@ final class YarboHome
                 'hint' => $hint,
             ],
         ];
+    }
+
+    private function unifiDoorsTileConfigured(): bool
+    {
+        try {
+            return (new YarboUnifi($this->projectRoot))->doorsTileEnabled();
+        } catch (\Throwable) {
+            return true;
+        }
+    }
+
+    /**
+     * Compact Access door/hub rows for the Home strip under Vestaboard.
+     * Independent of Show on Home — every lockable door is listed.
+     *
+     * @param array<string, mixed> $store
+     * @return list<array<string, mixed>>
+     */
+    private function unifiDoorsPayload(array $store): array
+    {
+        if (!(new YarboHub($this->projectRoot))->enabled(YarboHub::MODULE_UNIFI)) {
+            return [];
+        }
+        if (!$this->unifiDoorsTileConfigured()) {
+            return [];
+        }
+        try {
+            $rows = (new YarboUnifi($this->projectRoot))->lockableDoors();
+        } catch (\Throwable) {
+            return [];
+        }
+        $names = is_array($store['names'] ?? null) ? $store['names'] : [];
+        $out = [];
+        foreach ($rows as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = (string) ($device['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $defaultName = (string) ($device['name'] ?? $id);
+            $row = [
+                'id' => $id,
+                'name' => is_string($names[$id] ?? null) && $names[$id] !== '' ? $names[$id] : $defaultName,
+                'kind' => (string) ($device['kind'] ?? YarboUnifi::KIND_DOOR),
+                'source' => YarboUnifi::SOURCE,
+                'gate' => (bool) ($device['gate'] ?? false),
+                'locked' => array_key_exists('locked', $device) ? (bool) $device['locked'] : null,
+                'status' => (string) ($device['status'] ?? ''),
+            ];
+            foreach (['native_id', 'door_id', 'dps', 'dps_label', 'has_dps', 'open'] as $key) {
+                if (array_key_exists($key, $device)) {
+                    $row[$key] = $device[$key];
+                }
+            }
+            $out[] = $row;
+        }
+
+        return $out;
     }
 
     /**

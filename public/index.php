@@ -186,6 +186,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <button type="button" class="btn btn-secondary vestaboard-resume hidden" id="vestaboard-resume">Resume previous status</button>
         </section>
 
+        <section class="card panel-section home-doors-card hidden module-pane-hidden" id="home-doors-card" data-panel-id="home-doors" data-module="home">
+            <div class="section-header section-header--simple">
+                <h2>Doors</h2>
+            </div>
+            <div id="home-doors-grid" class="home-device-grid home-doors-grid"></div>
+        </section>
+
         <section class="card panel-section diagnostics-card" data-panel-id="diagnostics" data-module="yarbo">
             <div class="section-header section-header--simple">
                 <h2>Connection &amp; Health</h2>
@@ -626,6 +633,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div id="home-scenes" class="home-scene-list"></div>
             </div>
             <div class="home-manage-extras">
+            <label class="settings-field settings-checkbox" id="home-doors-tile-row">
+                <input type="checkbox" id="home-doors-tile" checked>
+                <span>Show UniFi doors under Vestaboard</span>
+            </label>
             <div class="home-backup">
                 <h3 class="settings-subtitle">Backup</h3>
                 <p class="hint">Download names, rooms, groups, scenes, HOUSE buttons, and automations to this computer. Restore replaces those on the Pi — Matter pairing stays. Keep a copy after you finish grouping, and after you change automations.</p>
@@ -1148,6 +1159,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             <h3 class="settings-subtitle">Show on Home</h3>
                             <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Protect floodlights use On/Off to force the LED (not the motion schedule). Protect relays (USL-Relay) are switches, not Access doors. Door controllers (UA Hub / Gate Hub) unlock the bound Access door. If a wired door-position sensor shows <strong>Open</strong>, that button is labelled <strong>Lock</strong> but still sends unlock. With no DPS it stays Unlock. If Test shows 0 doors and “permission”, the Access token is missing <code>view:space</code> / <code>view:device</code> — recreate it in Access → Settings → General → Advanced → API Token.</p>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-unifi-doors-tile" name="unifi_doors_tile" checked>
+                                <span>Show a doors tile under Vestaboard on Home (Unlock/Lock and live Open/Closed)</span>
+                            </label>
                             <div id="settings-unifi-devices" class="unifi-pick"></div>
                         </section>
 

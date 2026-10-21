@@ -66,6 +66,10 @@ if ($view['show_on_home'] !== ['unifi:camera:cam1']) {
     fwrite(STDERR, 'show_on_home ' . json_encode($view['show_on_home']) . "\n");
     exit(1);
 }
+if (($view['doors_tile'] ?? null) !== true) {
+    fwrite(STDERR, 'doors_tile default ' . json_encode($view['doors_tile'] ?? null) . "\n");
+    exit(1);
+}
 
 $calls = [];
 $doorDps = 'close';

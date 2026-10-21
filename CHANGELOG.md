@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.149] - 2026-10-21
+
+### Added
+- Home can show a compact **Doors** tile under Vestaboard with every UniFi Access door that has Unlock/Lock, plus live Open/Closed. It does not need a Show on Home tick. Turn it off from Home ⚙️ or Settings → UniFi.
+
 ## [4.0.148] - 2026-10-21
 
 ### Added

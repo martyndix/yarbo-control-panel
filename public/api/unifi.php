@@ -85,6 +85,14 @@ if ($action === 'show_on_home') {
     json_response(['ok' => true, 'show_on_home' => $unifi->load()['show_on_home']]);
 }
 
+if ($action === 'doors_tile') {
+    $show = YarboHub::asBool($input['show'] ?? $input['on'] ?? $input['doors_tile'] ?? true);
+    if (!$unifi->setDoorsTile($show)) {
+        json_response(['ok' => false, 'error' => 'Could not update doors tile'], 400);
+    }
+    json_response(['ok' => true, 'doors_tile' => $unifi->doorsTileEnabled()]);
+}
+
 if ($action === 'command' || $action === 'unlock' || $action === 'light') {
     json_response($unifi->command($input));
 }

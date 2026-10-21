@@ -114,6 +114,7 @@ const els = {
     settingsVestaboardQuietPalette: document.getElementById('settings-vestaboard-quiet-palette'),
     settingsRainSensitivity: document.getElementById('settings-rain-sensitivity'),
     vestaboardCard: document.getElementById('vestaboard-card'),
+    homeDoorsCard: document.getElementById('home-doors-card'),
     vestaboardBoard: document.getElementById('vestaboard-board'),
     vestaboardUpdatedAt: document.getElementById('vestaboard-updated-at'),
     vestaboardUpdatedDetail: document.getElementById('vestaboard-updated-detail'),
@@ -140,6 +141,7 @@ const els = {
     settingsUnifiResult: document.getElementById('settings-unifi-result'),
     settingsUnifiTest: document.getElementById('settings-unifi-test'),
     settingsUnifiDevices: document.getElementById('settings-unifi-devices'),
+    settingsUnifiDoorsTile: document.getElementById('settings-unifi-doors-tile'),
     unifiLiveModal: document.getElementById('unifi-live-modal'),
     unifiLiveTitle: document.getElementById('unifi-live-title'),
     unifiLiveImg: document.getElementById('unifi-live-img'),
@@ -494,10 +496,19 @@ function applyPanelOrder(order) {
 
     getPanelSections().forEach((section) => {
         const id = section.dataset.panelId;
-        if (id && !order.includes(id)) {
+        if (id && !order.includes(id) && id !== 'home-doors') {
             container.appendChild(section);
         }
     });
+    pinHomeDoorsAfterVestaboard();
+}
+
+function pinHomeDoorsAfterVestaboard() {
+    const vb = els.vestaboardCard || document.getElementById('vestaboard-card');
+    const doors = els.homeDoorsCard || document.getElementById('home-doors-card');
+    if (!doors) return;
+    if (vb) vb.after(doors);
+    else if (doors.parentElement) doors.parentElement.insertBefore(doors, doors.parentElement.firstChild);
 }
 
 function resetPanelOrder() {
@@ -627,6 +638,7 @@ function initPanelDragDrop() {
             } else {
                 container.insertBefore(source, section.nextSibling);
             }
+            pinHomeDoorsAfterVestaboard();
             savePanelOrder();
         });
     });
@@ -2909,6 +2921,95 @@ function unifiDoorLockButtonHtml(d, { home = false } = {}) {
     return `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="unlock">${escapeHtml(label)}</button>`;
 }
 
+function homeDoorsTileCardHtml(d) {
+    const gate = d.gate
+        ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="open">Open</button>
+           <button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="close">Close</button>
+           <button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="stop">Stop</button>`
+        : '';
+    return `<article class="home-device home-device--door home-device--unifi" data-home-id="${escapeHtml(d.id)}">
+        <div class="home-device-label">
+            <span class="home-device-dot" aria-hidden="true"></span>
+            <p class="home-device-name">${escapeHtml(d.name || 'Door')}</p>
+        </div>
+        <div class="home-device-actions">
+            ${unifiDpsMetaHtml(d, 'data-home-dps')}
+            ${unifiDoorLockButtonHtml(d, { home: true })}
+            ${gate}
+        </div>
+    </article>`;
+}
+
+function homeDoorsTileEnabled(data) {
+    const src = data || homeDash;
+    if (src && Object.prototype.hasOwnProperty.call(src, 'doors_tile')) {
+        return src.doors_tile !== false;
+    }
+    return true;
+}
+
+function renderHomeDoorsTile(data) {
+    const card = els.homeDoorsCard || document.getElementById('home-doors-card');
+    const grid = document.getElementById('home-doors-grid');
+    if (!card || !grid) return;
+    pinHomeDoorsAfterVestaboard();
+    const enabled = homeDoorsTileEnabled(data);
+    const doors = enabled && Array.isArray(data?.unifi_doors) ? data.unifi_doors : [];
+    const show = enabled && doors.length > 0;
+    card.classList.toggle('hidden', !show);
+    syncHomeDoorsTileChecks(enabled);
+    if (!show) {
+        if (grid.children.length) grid.innerHTML = '';
+        return;
+    }
+    const shown = [...grid.querySelectorAll('[data-home-id]')].map((el) => el.getAttribute('data-home-id') || '');
+    const nextIds = doors.map((d) => String(d.id || '')).filter(Boolean);
+    if (shown.join('\n') !== nextIds.join('\n')) {
+        grid.innerHTML = doors.map((d) => homeDoorsTileCardHtml(d)).join('');
+        return;
+    }
+    doors.forEach((d) => {
+        const id = String(d.id || '');
+        if (id === '') return;
+        const el = grid.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
+        if (!el) return;
+        const name = el.querySelector('.home-device-name');
+        if (name && d.name) name.textContent = d.name;
+        const status = el.querySelector('[data-home-dps]');
+        if (status) {
+            const label = String(d.dps_label || '').trim()
+                || (d.open === true ? 'Open' : (d.open === false && (d.has_dps || d.dps) ? 'Closed' : status.textContent));
+            if (label) status.textContent = label;
+            status.classList.toggle('is-open', d.open === true || d.dps === 'open' || d.dps === 'opened' || /^Open\b/i.test(String(label || '')));
+        }
+        patchUnifiDoorLockButton(el, d);
+    });
+}
+
+function syncHomeDoorsTileChecks(enabled) {
+    const on = enabled !== false;
+    const homeBox = document.getElementById('home-doors-tile');
+    if (homeBox) homeBox.checked = on;
+    if (els.settingsUnifiDoorsTile) els.settingsUnifiDoorsTile.checked = on;
+}
+
+async function saveHomeDoorsTile(show) {
+    syncHomeDoorsTileChecks(show);
+    if (homeDash) homeDash.doors_tile = Boolean(show);
+    if (!show && homeDash) homeDash.unifi_doors = [];
+    renderHomeDoorsTile(homeDash);
+    try {
+        const data = await unifiApi({ action: 'doors_tile', show: Boolean(show) }, 8000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not update doors tile');
+        if (show) loadHomeDashboard({ patch: true });
+    } catch (err) {
+        showToast(err.message || 'Could not update doors tile', 'error');
+        if (homeDash) homeDash.doors_tile = !show;
+        syncHomeDoorsTileChecks(!show);
+        renderHomeDoorsTile(homeDash);
+    }
+}
+
 function patchUnifiDoorLockButton(root, d) {
     if (!root) return;
     const btn = root.querySelector('[data-unifi-cmd="unlock"], [data-unifi-cmd="lock"], [data-home-unifi-cmd="unlock"], [data-home-unifi-cmd="lock"], [data-home-unifi-unlock]');
@@ -3766,13 +3867,17 @@ function ensureHomeStatePoll() {
 }
 
 function homeDeviceRecord(id) {
-    return [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])]
+    return [...(homeDash.devices || []), ...(homeDash.hidden_devices || []), ...(homeDash.unifi_doors || [])]
         .find((d) => d.id === id);
 }
 
 function patchHomeDeviceVisual(id, on, extras = {}) {
-    const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
-    if (!card) return;
+    const cards = document.querySelectorAll(`[data-home-id="${CSS.escape(id)}"]`);
+    if (!cards.length) return;
+    cards.forEach((card) => patchOneHomeDeviceVisual(card, id, on, extras));
+}
+
+function patchOneHomeDeviceVisual(card, id, on, extras = {}) {
     const lit = Boolean(on)
         && !card.classList.contains('home-device--camera')
         && !card.classList.contains('home-device--sensor')
@@ -3931,11 +4036,13 @@ function patchHomeDashboard(data) {
             if (d.last_trigger) rec.last_trigger = d.last_trigger;
         }
         patchHomeDeviceVisual(d.id, d.on, d);
-        const card = document.querySelector(`[data-home-id="${CSS.escape(d.id)}"]`);
-        const box = card?.querySelector('[data-home-adaptive]');
-        if (box && typeof d.adaptive === 'boolean') box.checked = d.adaptive;
-        if (card) card.title = homeDeviceHoverTitle(rec || d);
+        document.querySelectorAll(`[data-home-id="${CSS.escape(d.id)}"]`).forEach((card) => {
+            const box = card.querySelector('[data-home-adaptive]');
+            if (box && typeof d.adaptive === 'boolean') box.checked = d.adaptive;
+            card.title = homeDeviceHoverTitle(rec || d);
+        });
     });
+    renderHomeDoorsTile(data);
     (data.rooms || []).forEach((room) => {
         const el = document.querySelector(`[data-home-room="${CSS.escape(room.id)}"]`);
         if (!el) return;
@@ -3971,6 +4078,7 @@ function applyHomeManageUi() {
     const card = document.getElementById('home-card');
     const btn = document.getElementById('home-manage-toggle');
     card?.classList.toggle('home-card--manage', homeManageOpen);
+    syncHomeDoorsTileChecks(homeDoorsTileEnabled(homeDash));
     if (btn) {
         btn.setAttribute('aria-pressed', homeManageOpen ? 'true' : 'false');
         btn.setAttribute('aria-label', homeManageOpen ? 'Hide Home settings' : 'Show Home settings');
@@ -4872,6 +4980,7 @@ function renderHomeDashboard(data, opts = {}) {
         renderHomeSceneEditor();
     }
     renderHomePaperAssign(data);
+    renderHomeDoorsTile(data);
     ensureUnifiStillRefresh();
 }
 
@@ -5306,8 +5415,42 @@ async function restoreHomeBackupFromInput(event) {
     }
 }
 
+async function homeUnifiDoorClick(event) {
+    const unifiBtn = event.target.closest('[data-home-unifi-unlock], [data-home-unifi-cmd]');
+    if (!unifiBtn) return false;
+    const card = unifiBtn.closest('[data-home-id]');
+    const id = card?.getAttribute('data-home-id') || '';
+    const cmd = unifiBtn.getAttribute('data-home-unifi-cmd') || 'unlock';
+    unifiBtn.disabled = true;
+    try {
+        const data = await homeApi({
+            action: 'command',
+            id,
+            command: (cmd === 'lock' ? 'unlock' : cmd),
+            control_cmd: (cmd === 'unlock' || cmd === 'lock') ? '' : cmd,
+        });
+        if (!data.ok) throw new Error(data.error || 'Failed');
+        showToast(unifiDoorCommandToast(cmd), 'success');
+        await loadHomeDashboard();
+    } catch (err) {
+        showToast(err.message || 'UniFi command failed', 'error');
+    } finally {
+        unifiBtn.disabled = false;
+    }
+    return true;
+}
+
 function bindHomeDashboard() {
     bindHomeReorder();
+    document.getElementById('home-doors-card')?.addEventListener('click', async (event) => {
+        await homeUnifiDoorClick(event);
+    });
+    document.getElementById('home-doors-tile')?.addEventListener('change', (event) => {
+        saveHomeDoorsTile(Boolean(event.currentTarget?.checked));
+    });
+    els.settingsUnifiDoorsTile?.addEventListener('change', (event) => {
+        saveHomeDoorsTile(Boolean(event.currentTarget?.checked));
+    });
     document.getElementById('home-manage-toggle')?.addEventListener('click', () => {
         homeManageOpen = !homeManageOpen;
         if (homeManageOpen) abortPanelGets();
@@ -5609,29 +5752,7 @@ function bindHomeDashboard() {
             }
             return;
         }
-        const unifiBtn = event.target.closest('[data-home-unifi-unlock], [data-home-unifi-cmd]');
-        if (unifiBtn) {
-            const card = unifiBtn.closest('[data-home-id]');
-            const id = card?.getAttribute('data-home-id') || '';
-            const cmd = unifiBtn.getAttribute('data-home-unifi-cmd') || 'unlock';
-            unifiBtn.disabled = true;
-            try {
-                const data = await homeApi({
-                    action: 'command',
-                    id,
-                    command: (cmd === 'lock' ? 'unlock' : cmd),
-                    control_cmd: (cmd === 'unlock' || cmd === 'lock') ? '' : cmd,
-                });
-                if (!data.ok) throw new Error(data.error || 'Failed');
-                showToast(unifiDoorCommandToast(cmd), 'success');
-                await loadHomeDashboard();
-            } catch (err) {
-                showToast(err.message || 'UniFi command failed', 'error');
-            } finally {
-                unifiBtn.disabled = false;
-            }
-            return;
-        }
+        if (await homeUnifiDoorClick(event)) return;
         const btn = event.target.closest('[data-home-toggle]');
         if (btn) {
             await sendHomeDeviceToggle(btn.getAttribute('data-home-toggle') || '', btn);
@@ -9935,6 +10056,9 @@ async function loadSettings() {
         if (els.settingsUnifiAccessStandalone) {
             els.settingsUnifiAccessStandalone.checked = Boolean(data.unifi?.access_standalone);
         }
+        if (els.settingsUnifiDoorsTile) {
+            els.settingsUnifiDoorsTile.checked = data.unifi?.doors_tile !== false;
+        }
         if (Array.isArray(data.unifi?.devices) && data.unifi.devices.length) {
             renderUnifiHomePicker(data.unifi, { replace: !unifiPickerDirty });
         }
@@ -11716,6 +11840,7 @@ async function saveSettings(event) {
             unifi_verify_tls: Boolean(els.settingsUnifiVerifyTls?.checked),
             unifi_protect_username: els.settingsUnifiProtectUser?.value.trim() || '',
             unifi_access_standalone: Boolean(els.settingsUnifiAccessStandalone?.checked),
+            unifi_doors_tile: Boolean(els.settingsUnifiDoorsTile?.checked ?? true),
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;

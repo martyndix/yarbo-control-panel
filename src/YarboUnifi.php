@@ -138,6 +138,7 @@ final class YarboUnifi
      *   access_path: string,
      *   access_use_protect_key: bool,
      *   show_on_home: list<string>,
+     *   doors_tile: bool,
      *   last_ok: bool,
      *   last_error: string,
      *   last_check: ?string
@@ -157,6 +158,7 @@ final class YarboUnifi
             'access_path' => '',
             'access_use_protect_key' => false,
             'show_on_home' => [],
+            'doors_tile' => true,
             'last_ok' => false,
             'last_error' => '',
             'last_check' => null,
@@ -186,6 +188,9 @@ final class YarboUnifi
                 : '',
             'access_use_protect_key' => (bool) ($decoded['access_use_protect_key'] ?? false),
             'show_on_home' => $this->normalizeIdList($decoded['show_on_home'] ?? []),
+            'doors_tile' => array_key_exists('doors_tile', $decoded)
+                ? (bool) $decoded['doors_tile']
+                : true,
             'last_ok' => (bool) ($decoded['last_ok'] ?? false),
             'last_error' => (string) ($decoded['last_error'] ?? ''),
             'last_check' => isset($decoded['last_check']) && is_string($decoded['last_check'])
@@ -268,6 +273,9 @@ final class YarboUnifi
         $show = array_key_exists('unifi_show_on_home', $input) || array_key_exists('show_on_home', $input)
             ? $this->normalizeIdList($input['unifi_show_on_home'] ?? $input['show_on_home'] ?? [])
             : $current['show_on_home'];
+        $doorsTile = array_key_exists('unifi_doors_tile', $input) || array_key_exists('doors_tile', $input)
+            ? YarboHub::asBool($input['unifi_doors_tile'] ?? $input['doors_tile'] ?? true)
+            : $current['doors_tile'];
         $next = [
             'host' => $host,
             'verify_tls' => $verify,
@@ -280,6 +288,7 @@ final class YarboUnifi
             'access_path' => $accessPath,
             'access_use_protect_key' => $useProtect,
             'show_on_home' => $show,
+            'doors_tile' => $doorsTile,
             'last_ok' => array_key_exists('last_ok', $input) ? (bool) $input['last_ok'] : $current['last_ok'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
             'last_check' => $input['last_check'] ?? $current['last_check'],
@@ -312,6 +321,64 @@ final class YarboUnifi
         return $this->save(['show_on_home' => $list]);
     }
 
+    public function doorsTileEnabled(): bool
+    {
+        return $this->load()['doors_tile'] !== false;
+    }
+
+    public function setDoorsTile(bool $show): bool
+    {
+        return $this->save(['doors_tile' => $show]);
+    }
+
+    /**
+     * Access doors (and bound hubs) that have Unlock/Lock, for the Home strip.
+     * Hubs bound to a door that is already listed are skipped so the same
+     * physical door is not shown twice.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function lockableDoors(): array
+    {
+        $this->kickAccessDoorRefresh();
+        $payload = $this->dashboardPayload(false);
+        $out = [];
+        $doorNative = [];
+        foreach ($payload['doors'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $out[] = $row;
+            $native = (string) ($row['native_id'] ?? '');
+            if ($native !== '') {
+                $doorNative[$native] = true;
+            }
+        }
+        foreach ($payload['hubs'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $doorId = trim((string) ($row['door_id'] ?? ''));
+            if ($doorId === '') {
+                continue;
+            }
+            if (isset($doorNative[$doorId])) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -330,6 +397,7 @@ final class YarboUnifi
             'access_port' => $config['access_port'],
             'access_standalone' => $config['access_port'] === 12445,
             'show_on_home' => $config['show_on_home'],
+            'doors_tile' => $config['doors_tile'] !== false,
             'last_ok' => $config['last_ok'],
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
             'last_check' => $config['last_check'],
