@@ -4155,6 +4155,7 @@ final class YarboHome
 
     /**
      * Matter heaters for the PaperMono HEAT page. Not tablet HOUSE assignment.
+     * Row titles prefer the Home room when the device still has a stock Heater name.
      *
      * @return list<array{id: string, name: string, on: bool, set: float, min: float, max: float, temp?: float}>
      */
