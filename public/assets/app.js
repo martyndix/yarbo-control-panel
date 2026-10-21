@@ -3483,7 +3483,7 @@ async function loadHomeDashboard(opts = {}) {
             const paper = (homeDash.paper_devices || []).find((p) => p.id === savingId);
             if (paper) paper.assigned = localAssigned;
         }
-        if (opts.patch && !homeManageOpen && !homeDrag && document.querySelector('#home-devices [data-home-id]')) {
+        if (opts.patch && !homeDrag && document.querySelector('#home-devices [data-home-id]')) {
             patchHomeDashboard(data);
         } else {
             renderHomeDashboard(data, { replace: Boolean(opts.replace || opts.force) });
@@ -3573,7 +3573,7 @@ function homeCardIsWatching() {
 function ensureHomeStatePoll() {
     if (homeStateTimer) return;
     homeStateTimer = window.setInterval(() => {
-        if (homePollBlocked()) return;
+        if (homePollBlocked() || homeManageOpen) return;
         if (homeCardIsWatching() || autoPageOpen) loadHomeDashboard({ patch: true });
     }, 3000);
 }
@@ -4706,6 +4706,67 @@ function homeCommandErrorMessage(err, fallback, heater = false) {
     return err?.message || fallback;
 }
 
+function homeMetaErrorMessage(err, fallback) {
+    if (isAbortError(err)) return 'Home was busy — try that again';
+    return err?.message || fallback;
+}
+
+function patchHomeDashDevice(id, fields) {
+    const apply = (list) => {
+        if (!Array.isArray(list)) return;
+        list.forEach((row) => {
+            if (row && row.id === id) Object.assign(row, fields);
+        });
+    };
+    apply(homeDash?.devices);
+    apply(homeDash?.hidden_devices);
+}
+
+function applyHomeDeviceRoom(id, roomId) {
+    const room = (homeDash?.rooms || []).find((r) => r.id === roomId);
+    patchHomeDashDevice(id, {
+        room_id: roomId || '',
+        room: room?.name || '',
+        group_id: '',
+    });
+    refreshHomeRoomCounts();
+}
+
+function refreshHomeRoomCounts() {
+    const rooms = homeDash?.rooms || [];
+    const devices = [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])];
+    rooms.forEach((room) => {
+        const members = devices.filter((d) => d.room_id === room.id);
+        room.count = members.length;
+        room.on = members.some((d) => d.on && d.kind !== 'camera' && d.kind !== 'sensor');
+        (room.groups || []).forEach((group) => {
+            const gm = members.filter((d) => d.group_id === group.id);
+            group.count = gm.length;
+            group.on = gm.some((d) => d.on && d.kind !== 'camera' && d.kind !== 'sensor');
+        });
+    });
+}
+
+function applyHomeDeviceGroup(id, groupId) {
+    let roomId = '';
+    let roomName = '';
+    (homeDash?.rooms || []).forEach((room) => {
+        (room.groups || []).forEach((group) => {
+            if (group.id === groupId) {
+                roomId = room.id;
+                roomName = room.name;
+            }
+        });
+    });
+    const fields = { group_id: groupId || '' };
+    if (groupId) {
+        fields.room_id = roomId;
+        fields.room = roomName;
+    }
+    patchHomeDashDevice(id, fields);
+    refreshHomeRoomCounts();
+}
+
 async function homeVacuumToggleArea(id, which) {
     const device = homeDeviceRecord(id);
     if (!device) return;
@@ -4975,8 +5036,10 @@ function bindHomeDashboard() {
     bindHomeReorder();
     document.getElementById('home-manage-toggle')?.addEventListener('click', () => {
         homeManageOpen = !homeManageOpen;
+        if (homeManageOpen) abortPanelGets();
         applyHomeManageUi();
         if (homeDash) renderHomeDashboard(homeDash);
+        if (!homeManageOpen) loadHomeDashboard({ patch: true });
     });
     document.getElementById('home-card')?.addEventListener('focusout', (event) => {
         const deviceName = event.target.closest?.('[data-home-name]');
@@ -5340,31 +5403,41 @@ function bindHomeDashboard() {
     document.getElementById('home-devices')?.addEventListener('change', async (event) => {
         const assign = event.target.closest('[data-home-room-assign]');
         if (assign) {
+            const id = assign.getAttribute('data-home-room-assign') || '';
+            const roomId = assign.value || '';
+            const previous = homeDeviceRecord(id);
+            const prevRoom = previous?.room_id || '';
+            const prevGroup = previous?.group_id || '';
+            applyHomeDeviceRoom(id, roomId);
+            renderHomeDashboard(homeDash, { replace: true });
             try {
-                const data = await homeApi({
-                    action: 'room',
-                    id: assign.getAttribute('data-home-room-assign'),
-                    room_id: assign.value,
-                });
+                const data = await homeApi({ action: 'room', id, room_id: roomId });
                 if (!data.ok) throw new Error(data.error || 'Could not assign room');
-                await loadHomeDashboard();
             } catch (err) {
-                showToast(err.message || 'Could not assign room', 'error');
+                applyHomeDeviceRoom(id, prevRoom);
+                applyHomeDeviceGroup(id, prevGroup);
+                renderHomeDashboard(homeDash, { replace: true });
+                showToast(homeMetaErrorMessage(err, 'Could not assign room'), 'error');
             }
             return;
         }
         const groupAssign = event.target.closest('[data-home-group-assign]');
         if (groupAssign) {
+            const id = groupAssign.getAttribute('data-home-group-assign') || '';
+            const groupId = groupAssign.value || '';
+            const previous = homeDeviceRecord(id);
+            const prevRoom = previous?.room_id || '';
+            const prevGroup = previous?.group_id || '';
+            applyHomeDeviceGroup(id, groupId);
+            renderHomeDashboard(homeDash, { replace: true });
             try {
-                const data = await homeApi({
-                    action: 'group',
-                    id: groupAssign.getAttribute('data-home-group-assign'),
-                    group_id: groupAssign.value,
-                });
+                const data = await homeApi({ action: 'group', id, group_id: groupId });
                 if (!data.ok) throw new Error(data.error || 'Could not assign group');
-                await loadHomeDashboard();
             } catch (err) {
-                showToast(err.message || 'Could not assign group', 'error');
+                applyHomeDeviceRoom(id, prevRoom);
+                applyHomeDeviceGroup(id, prevGroup);
+                renderHomeDashboard(homeDash, { replace: true });
+                showToast(homeMetaErrorMessage(err, 'Could not assign group'), 'error');
             }
             return;
         }

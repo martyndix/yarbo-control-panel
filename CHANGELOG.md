@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.135] - 2026-10-21
+
+### Fixed
+- Home no longer full-refreshes every few seconds while ⚙️ is open, so putting lights back into rooms does not abort fetches or lock out On/Off. Room/group changes save without waiting on Matter. Stale remembered device ids and leftover Hue endpoints are not shown as duplicates. Empty scenes no longer re-scan Pi backups on every poll.
+
 ## [4.0.134] - 2026-10-20
 
 ### Added

@@ -34,6 +34,13 @@ final class YarboHome
     /** Set when load() puts rooms/scenes back from a backup. */
     private string $restoredHomeFrom = '';
 
+    /** @var array<string, mixed>|null */
+    private ?array $loadedStore = null;
+
+    private int $loadedMtime = -1;
+
+    private int $loadedSize = -1;
+
     public function __construct(private readonly string $projectRoot)
     {
     }
@@ -58,6 +65,13 @@ final class YarboHome
      */
     public function load(): array
     {
+        $path = $this->storePath();
+        $stat = is_file($path) ? @stat($path) : false;
+        $mtime = is_array($stat) ? (int) $stat['mtime'] : 0;
+        $size = is_array($stat) ? (int) $stat['size'] : 0;
+        if ($this->loadedStore !== null && $mtime === $this->loadedMtime && $size === $this->loadedSize) {
+            return $this->loadedStore;
+        }
         $defaults = [
             'names' => [],
             'room_defs' => [],
@@ -72,15 +86,15 @@ final class YarboHome
             'last_devices' => [],
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
         ];
-        if (!is_file($this->storePath())) {
+        if (!is_file($path)) {
             $recovered = $this->recoverUserMeta($defaults);
             if ($recovered === null) {
-                return $defaults;
+                return $this->rememberLoaded($defaults, 0, 0);
             }
             $this->writeRaw($recovered);
             return $recovered;
         }
-        $raw = file_get_contents($this->storePath());
+        $raw = file_get_contents($path);
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
         if (!is_array($decoded)) {
             if (is_string($raw) && trim($raw) !== '') {
@@ -88,7 +102,7 @@ final class YarboHome
             }
             $recovered = $this->recoverUserMeta($defaults);
             if ($recovered === null) {
-                return $defaults;
+                return $this->rememberLoaded($defaults, $mtime, $size);
             }
             $this->writeRaw($recovered);
             return $recovered;
@@ -223,7 +237,13 @@ final class YarboHome
             $this->snapshotStore($store);
         }
 
-        return $store;
+        $saved = is_file($path) ? @stat($path) : false;
+
+        return $this->rememberLoaded(
+            $store,
+            is_array($saved) ? (int) $saved['mtime'] : $mtime,
+            is_array($saved) ? (int) $saved['size'] : $size
+        );
     }
 
     /**
@@ -473,14 +493,16 @@ final class YarboHome
         $hidden = array_fill_keys($store['hidden'], true);
         $devices = [];
         $hiddenDevices = [];
+        $seenIds = [];
         foreach ($live['devices'] as $device) {
             if (!is_array($device)) {
                 continue;
             }
             $id = (string) ($device['id'] ?? '');
-            if ($id === '') {
+            if ($id === '' || isset($seenIds[$id]) || self::looksLikeLeftoverHueEndpoint($device)) {
                 continue;
             }
+            $seenIds[$id] = true;
             $isUnifi = YarboUnifi::isHomeId($id) || ((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE;
             if (!$isUnifi) {
                 $device = YarboMatterFabric::reclassifyRow($device);
@@ -2178,7 +2200,7 @@ final class YarboHome
         $diskReady = $fromDisk !== [] && !self::looksLikeUninterviewedStub($fromDisk);
         if ($diskReady) {
             $devices = $remembered !== []
-                ? self::overlayDeviceStates($fromDisk, $remembered)
+                ? self::overlayDeviceStates($fromDisk, $remembered, false)
                 : $fromDisk;
             $source = 'disk';
             $this->writeDeviceCache($cachePath, $devices, $fabricMtime);
@@ -2309,7 +2331,7 @@ final class YarboHome
      * @param list<array<string, mixed>> $states
      * @return list<array<string, mixed>>
      */
-    public static function overlayDeviceStates(array $devices, array $states): array
+    public static function overlayDeviceStates(array $devices, array $states, bool $appendMissing = true): array
     {
         $byId = [];
         foreach ($states as $row) {
@@ -2363,7 +2385,7 @@ final class YarboHome
             $out[] = $device;
         }
         foreach ($byId as $liveId => $live) {
-            if (isset($used[$liveId]) || self::looksLikeLeftoverHueEndpoint($live)) {
+            if (!$appendMissing || isset($used[$liveId]) || self::looksLikeLeftoverHueEndpoint($live)) {
                 continue;
             }
             if (self::liveRowLooksHeater($live)) {
@@ -3111,11 +3133,36 @@ final class YarboHome
             return;
         }
         $store = $this->load();
-        if (($store['last_devices'] ?? []) === $slim) {
+        $existing = $store['last_devices'] ?? [];
+        if ($existing === $slim || self::lastDevicesTopologyKey($existing) === self::lastDevicesTopologyKey($slim)) {
             return;
         }
         $store['last_devices'] = $slim;
         $this->write($store);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     */
+    public static function lastDevicesTopologyKey(array $rows): string
+    {
+        $parts = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $parts[] = $id
+                . ':' . (string) ($row['kind'] ?? '')
+                . ':' . (int) ($row['node_id'] ?? 0)
+                . ':' . (int) ($row['endpoint'] ?? 0);
+        }
+        sort($parts);
+
+        return implode('|', $parts);
     }
 
     /**
@@ -4458,8 +4505,25 @@ final class YarboHome
         if (file_put_contents($tmp, $json . "\n", LOCK_EX) === false) {
             return false;
         }
+        if (!@rename($tmp, $path)) {
+            return false;
+        }
+        $this->rememberLoaded($store, (int) @filemtime($path), strlen($json) + 1);
 
-        return @rename($tmp, $path);
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $store
+     * @return array<string, mixed>
+     */
+    private function rememberLoaded(array $store, int $mtime, int $size): array
+    {
+        $this->loadedStore = $store;
+        $this->loadedMtime = $mtime;
+        $this->loadedSize = $size;
+
+        return $store;
     }
 
     /**
@@ -4489,21 +4553,25 @@ final class YarboHome
      */
     private function recoverUserMeta(array $store): ?array
     {
+        $needRooms = ($store['room_defs'] ?? []) === [] && ($store['rooms'] ?? []) === [];
+        $tinyCurrent = count($store['room_defs'] ?? []) <= 3
+            && count($store['rooms'] ?? []) < 8
+            && count($store['scenes'] ?? []) === 0;
+        // Empty scenes alone must not scan backups on every Home poll while regrouping.
+        if (!$needRooms && !$tinyCurrent) {
+            return null;
+        }
         $best = $this->bestBackupStore();
         if ($best === null || $this->storeMetaScore($best) <= $this->storeMetaScore($store)) {
             return null;
         }
-        $needRooms = ($store['room_defs'] ?? []) === [] && ($store['rooms'] ?? []) === [];
         $needScenes = ($store['scenes'] ?? []) === [];
         $needNames = ($store['names'] ?? []) === [];
         $needPaper = ($store['paper'] ?? []) === [];
-        $tinyCurrent = count($store['room_defs'] ?? []) <= 3
-            && count($store['rooms'] ?? []) < 8
-            && count($store['scenes'] ?? []) === 0;
         $richBackup = count($best['room_defs'] ?? []) >= 8
             || count($best['rooms'] ?? []) >= 10
             || count($best['scenes'] ?? []) >= 2;
-        if (!$needRooms && !$needScenes && !($tinyCurrent && $richBackup)) {
+        if (!$needRooms && !($tinyCurrent && $richBackup)) {
             return null;
         }
         if ($tinyCurrent && $richBackup) {
@@ -4547,7 +4615,7 @@ final class YarboHome
     {
         $best = null;
         $bestScore = 0;
-        foreach ($this->backupCandidatePaths() as $path) {
+        foreach ($this->backupCandidatePaths(false) as $path) {
             $decoded = $this->readDecodedFile($path);
             if (!is_array($decoded)) {
                 continue;
@@ -4558,6 +4626,19 @@ final class YarboHome
                 $bestScore = $score;
             }
         }
+        if ($bestScore < 4) {
+            foreach ($this->backupCandidatePaths(true) as $path) {
+                $decoded = $this->readDecodedFile($path);
+                if (!is_array($decoded)) {
+                    continue;
+                }
+                $score = $this->storeMetaScore($decoded);
+                if ($score > $bestScore) {
+                    $best = $decoded;
+                    $bestScore = $score;
+                }
+            }
+        }
 
         return $bestScore >= 4 ? $best : null;
     }
@@ -4565,10 +4646,21 @@ final class YarboHome
     /**
      * @return list<string>
      */
-    private function backupCandidatePaths(): array
+    private function backupCandidatePaths(bool $datedOnly = false): array
     {
         $dir = $this->projectRoot . '/data';
-        $paths = [
+        if ($datedOnly) {
+            $backupDir = $dir . '/home-backups';
+            if (!is_dir($backupDir)) {
+                return [];
+            }
+            $files = glob($backupDir . '/home-*.json') ?: [];
+            rsort($files);
+
+            return $files;
+        }
+
+        return [
             $dir . '/home.json.bak',
             $dir . '/home.json.bak.1',
             $dir . '/home.json.bak.2',
@@ -4576,14 +4668,6 @@ final class YarboHome
             $dir . '/home.json.corrupt',
             $dir . '/.update-preserve/home.json',
         ];
-        $backupDir = $dir . '/home-backups';
-        if (is_dir($backupDir)) {
-            $files = glob($backupDir . '/home-*.json') ?: [];
-            rsort($files);
-            $paths = array_merge($paths, $files);
-        }
-
-        return $paths;
     }
 
     /**

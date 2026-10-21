@@ -154,6 +154,22 @@ $newHue = YarboHome::overlayDeviceStates(
 $newHueIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $newHue);
 assert_true(in_array('1:12', $newHueIds, true), 'overlay must add a new named Hue light');
 assert_true(!in_array('1:96', $newHueIds, true) && !in_array('1:100', $newHueIds, true), 'overlay still drops leftover Hue endpoints when adding a new light');
+$noStale = YarboHome::overlayDeviceStates(
+    [['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => false]],
+    [
+        ['id' => '1:2', 'on' => true],
+        ['id' => '1:9', 'name' => 'Ghost', 'kind' => 'light', 'on' => true],
+    ],
+    false
+);
+$noStaleIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $noStale);
+assert_true(count($noStale) === 1 && ($noStale[0]['on'] ?? false) === true, 'disk overlay copies live On/Off');
+assert_true(!in_array('1:9', $noStaleIds, true), 'disk overlay must not keep stale remembered ids');
+assert_true(YarboHome::lastDevicesTopologyKey([
+    ['id' => '1:2', 'kind' => 'light', 'node_id' => 1, 'endpoint' => 2, 'on' => true],
+]) === YarboHome::lastDevicesTopologyKey([
+    ['id' => '1:2', 'kind' => 'light', 'node_id' => 1, 'endpoint' => 2, 'on' => false],
+]), 'topology key ignores On/Off');
 
 $root = sys_get_temp_dir() . '/yarbo-home-on-' . bin2hex(random_bytes(3));
 mkdir($root . '/data/matter-server', 0775, true);

@@ -135,6 +135,18 @@ assert_true(($fromSample['rooms']['1:1'] ?? '') === 'r1', 'sample map is replace
 assert_true(count($fromSample['scenes']) === 2, 'scenes replace the empty sample');
 assert_true(count($fromSample['rooms']) >= 10, 'assignments replace the sample map');
 
+$root6 = homeRoot();
+$regroup = richStore();
+$regroup['room_defs'][] = ['id' => 'r4', 'name' => 'Loft'];
+$regroup['scenes'] = [];
+$regroup['rooms']['1:3'] = 'r4';
+file_put_contents($root6 . '/data/home.json', json_encode($regroup, JSON_UNESCAPED_SLASHES));
+file_put_contents($root6 . '/data/home.json.bak', json_encode(richStore(), JSON_UNESCAPED_SLASHES));
+$kept = (new YarboHome($root6))->load();
+assert_true(count($kept['room_defs']) === 4, 'regrouping rooms are not replaced from bak');
+assert_true(($kept['rooms']['1:3'] ?? '') === 'r4', 'new room assignment is kept');
+assert_true(($kept['scenes'] ?? []) === [], 'empty scenes are not restored while rooms are being rebuilt');
+
 $php = (string) file_get_contents(__DIR__ . '/../src/YarboHome.php');
 $sh = (string) file_get_contents(__DIR__ . '/../scripts/update.sh');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -146,6 +158,9 @@ assert_true(str_contains($sh, 'home.json.bak'), 'panel update preserves home.jso
 assert_true(str_contains($sh, 'home-backups'), 'panel update preserves dated home backups');
 assert_true(str_contains($sh, 'home-automations.json'), 'panel update preserves automations');
 assert_true(str_contains($js, 'Restored rooms and scenes from a backup'), 'Home toasts a restore');
+assert_true(str_contains($js, 'homeManageOpen) return'), 'Home poll pauses while ⚙️ is open');
+assert_true(str_contains($js, 'function applyHomeDeviceRoom'), 'room assign updates locally');
 assert_true(str_contains($change, '## [4.0.133]'), 'changelog 4.0.133');
+assert_true(str_contains($change, '## [4.0.135]'), 'changelog 4.0.135');
 
 echo "test_home_meta_restore.php ok\n";
