@@ -70,6 +70,10 @@ if (($view['doors_tile'] ?? null) !== true) {
     fwrite(STDERR, 'doors_tile default ' . json_encode($view['doors_tile'] ?? null) . "\n");
     exit(1);
 }
+if (($view['doors_tile_sensors'] ?? null) !== false) {
+    fwrite(STDERR, 'doors_tile_sensors default ' . json_encode($view['doors_tile_sensors'] ?? null) . "\n");
+    exit(1);
+}
 
 $calls = [];
 $doorDps = 'close';

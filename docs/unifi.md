@@ -13,7 +13,7 @@ Not affiliated with Ubiquiti.
 - Unlock Access doors and **door controllers** (UA Hub / Gate Hub) from the Access OpenAPI (`/api/v1/developer/doors` and `/devices`). When a door-position sensor shows **Open**, that button is labelled **Lock** but still sends the same remote unlock. With no DPS, it stays Unlock. Gate Hub three-button mode can send Open / Close / Stop (`control_cmd`).
 - Show **Open / Closed** on the door controller (and door) tile, next to Unlock/Lock, from the Access door-position sensor (`door_position_status`). Home refreshes that in the background so the chip and button can change without blocking light clicks. A separate door-position row is still listed if you want it on Home on its own.
 - Tick **Show on Home** per device so it behaves like another Home row (camera still, light/relay on/off, door/controller Unlock/Lock + position, sensor text). Ticks save as you click.
-- Optional **doors tile** under Vestaboard on the Home tab lists every Access door with Unlock/Lock and live Open/Closed, even if it is not ticked for the room grid. Untick it in Settings → UniFi or Home ⚙️.
+- Optional **doors tile** under Vestaboard on the Home tab lists every Access door with Unlock/Lock and live Open/Closed, even if it is not ticked for the room grid. Untick it in Settings → UniFi or Home ⚙️. A second tick adds door sensors (Access position and Protect contacts) that have Open/Closed but no unlock.
 
 ## What it cannot do (this version)
 

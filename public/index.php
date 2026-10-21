@@ -637,6 +637,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <input type="checkbox" id="home-doors-tile" checked>
                 <span>Show UniFi doors under Vestaboard</span>
             </label>
+            <label class="settings-field settings-checkbox" id="home-doors-tile-sensors-row">
+                <input type="checkbox" id="home-doors-tile-sensors">
+                <span>Also show door sensors (Open/Closed, no unlock)</span>
+            </label>
             <div class="home-backup">
                 <h3 class="settings-subtitle">Backup</h3>
                 <p class="hint">Download names, rooms, groups, scenes, HOUSE buttons, and automations to this computer. Restore replaces those on the Pi — Matter pairing stays. Keep a copy after you finish grouping, and after you change automations.</p>
@@ -1162,6 +1166,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-unifi-doors-tile" name="unifi_doors_tile" checked>
                                 <span>Show a doors tile under Vestaboard on Home (Unlock/Lock and live Open/Closed)</span>
+                            </label>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-unifi-doors-tile-sensors" name="unifi_doors_tile_sensors">
+                                <span>Also list door sensors on that tile (Access position sensors and Protect contacts)</span>
                             </label>
                             <div id="settings-unifi-devices" class="unifi-pick"></div>
                         </section>

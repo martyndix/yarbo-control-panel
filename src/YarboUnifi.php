@@ -139,6 +139,7 @@ final class YarboUnifi
      *   access_use_protect_key: bool,
      *   show_on_home: list<string>,
      *   doors_tile: bool,
+     *   doors_tile_sensors: bool,
      *   last_ok: bool,
      *   last_error: string,
      *   last_check: ?string
@@ -159,6 +160,7 @@ final class YarboUnifi
             'access_use_protect_key' => false,
             'show_on_home' => [],
             'doors_tile' => true,
+            'doors_tile_sensors' => false,
             'last_ok' => false,
             'last_error' => '',
             'last_check' => null,
@@ -191,6 +193,9 @@ final class YarboUnifi
             'doors_tile' => array_key_exists('doors_tile', $decoded)
                 ? (bool) $decoded['doors_tile']
                 : true,
+            'doors_tile_sensors' => array_key_exists('doors_tile_sensors', $decoded)
+                ? (bool) $decoded['doors_tile_sensors']
+                : false,
             'last_ok' => (bool) ($decoded['last_ok'] ?? false),
             'last_error' => (string) ($decoded['last_error'] ?? ''),
             'last_check' => isset($decoded['last_check']) && is_string($decoded['last_check'])
@@ -276,6 +281,10 @@ final class YarboUnifi
         $doorsTile = array_key_exists('unifi_doors_tile', $input) || array_key_exists('doors_tile', $input)
             ? YarboHub::asBool($input['unifi_doors_tile'] ?? $input['doors_tile'] ?? true)
             : $current['doors_tile'];
+        $doorsTileSensors = array_key_exists('unifi_doors_tile_sensors', $input)
+            || array_key_exists('doors_tile_sensors', $input)
+            ? YarboHub::asBool($input['unifi_doors_tile_sensors'] ?? $input['doors_tile_sensors'] ?? false)
+            : $current['doors_tile_sensors'];
         $next = [
             'host' => $host,
             'verify_tls' => $verify,
@@ -289,6 +298,7 @@ final class YarboUnifi
             'access_use_protect_key' => $useProtect,
             'show_on_home' => $show,
             'doors_tile' => $doorsTile,
+            'doors_tile_sensors' => $doorsTileSensors,
             'last_ok' => array_key_exists('last_ok', $input) ? (bool) $input['last_ok'] : $current['last_ok'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
             'last_check' => $input['last_check'] ?? $current['last_check'],
@@ -379,6 +389,107 @@ final class YarboUnifi
         return $out;
     }
 
+    public function doorSensorsTileEnabled(): bool
+    {
+        return !empty($this->load()['doors_tile_sensors']);
+    }
+
+    public function setDoorSensorsTile(bool $show): bool
+    {
+        return $this->save(['doors_tile_sensors' => $show]);
+    }
+
+    /**
+     * Protect/Access Open/Closed sensors that are not lockable doors.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function isDoorSensor(array $row): bool
+    {
+        if ((string) ($row['kind'] ?? '') !== self::KIND_SENSOR) {
+            return false;
+        }
+        $native = (string) ($row['native_id'] ?? $row['id'] ?? '');
+        $product = (string) ($row['product'] ?? '');
+        if (str_starts_with($native, 'pir-') || str_contains($native, ':pir-')) {
+            return false;
+        }
+        if (str_starts_with($native, 'rin-') || str_contains($native, ':rin-')) {
+            return false;
+        }
+        if ($product === 'Door position sensor' || str_starts_with($native, 'dps-') || str_contains($native, ':dps-')) {
+            return true;
+        }
+
+        return !empty($row['has_open']);
+    }
+
+    /**
+     * Door-position and contact sensors for the Home doors strip.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function doorSensorRows(): array
+    {
+        $this->kickAccessDoorRefresh();
+        $out = [];
+        foreach ($this->dashboardPayload(false)['sensors'] ?? [] as $row) {
+            if (!is_array($row) || !self::isDoorSensor($row)) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Lockable Access doors, plus door sensors when that tick is on.
+     * A door-position sensor is skipped when its Access door is already listed.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function doorsTileRows(): array
+    {
+        $out = $this->lockableDoors();
+        if (!$this->doorSensorsTileEnabled()) {
+            return $out;
+        }
+        $covered = [];
+        foreach ($out as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if ((string) ($row['kind'] ?? '') === self::KIND_DOOR) {
+                $native = (string) ($row['native_id'] ?? '');
+                if ($native !== '') {
+                    $covered[$native] = true;
+                }
+            }
+            $doorId = trim((string) ($row['door_id'] ?? ''));
+            if ($doorId !== '') {
+                $covered[$doorId] = true;
+            }
+        }
+        foreach ($this->doorSensorRows() as $row) {
+            $doorId = trim((string) ($row['door_id'] ?? ''));
+            $native = (string) ($row['native_id'] ?? '');
+            if ($doorId !== '' && isset($covered[$doorId])) {
+                continue;
+            }
+            if (str_starts_with($native, 'dps-') && isset($covered[substr($native, 4)])) {
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -398,6 +509,7 @@ final class YarboUnifi
             'access_standalone' => $config['access_port'] === 12445,
             'show_on_home' => $config['show_on_home'],
             'doors_tile' => $config['doors_tile'] !== false,
+            'doors_tile_sensors' => !empty($config['doors_tile_sensors']),
             'last_ok' => $config['last_ok'],
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
             'last_check' => $config['last_check'],

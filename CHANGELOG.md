@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.150] - 2026-10-21
+
+### Added
+- The Home **Doors** tile can also list door sensors (Open/Closed, no unlock): Access position sensors and Protect contacts. Tick **Also show door sensors** on Home ⚙️ or Settings → UniFi. Sensors for a door that already has Unlock/Lock are not duplicated.
+
 ## [4.0.149] - 2026-10-21
 
 ### Added

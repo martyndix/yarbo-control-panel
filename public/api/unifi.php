@@ -93,6 +93,14 @@ if ($action === 'doors_tile') {
     json_response(['ok' => true, 'doors_tile' => $unifi->doorsTileEnabled()]);
 }
 
+if ($action === 'doors_tile_sensors') {
+    $show = YarboHub::asBool($input['show'] ?? $input['on'] ?? $input['doors_tile_sensors'] ?? false);
+    if (!$unifi->setDoorSensorsTile($show)) {
+        json_response(['ok' => false, 'error' => 'Could not update door sensors on the tile'], 400);
+    }
+    json_response(['ok' => true, 'doors_tile_sensors' => $unifi->doorSensorsTileEnabled()]);
+}
+
 if ($action === 'command' || $action === 'unlock' || $action === 'light') {
     json_response($unifi->command($input));
 }

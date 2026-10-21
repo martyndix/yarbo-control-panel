@@ -656,6 +656,7 @@ final class YarboHome
             'sun_coords' => $auto->coordsPublic(),
             'restored_home' => $this->restoredHomeFrom,
             'doors_tile' => $this->unifiDoorsTileConfigured(),
+            'doors_tile_sensors' => $this->unifiDoorSensorsTileConfigured(),
             'unifi_doors' => $this->unifiDoorsPayload($store),
         ];
     }
@@ -2612,6 +2613,15 @@ final class YarboHome
         }
     }
 
+    private function unifiDoorSensorsTileConfigured(): bool
+    {
+        try {
+            return (new YarboUnifi($this->projectRoot))->doorSensorsTileEnabled();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     /**
      * Compact Access door/hub rows for the Home strip under Vestaboard.
      * Independent of Show on Home — every lockable door is listed.
@@ -2628,7 +2638,7 @@ final class YarboHome
             return [];
         }
         try {
-            $rows = (new YarboUnifi($this->projectRoot))->lockableDoors();
+            $rows = (new YarboUnifi($this->projectRoot))->doorsTileRows();
         } catch (\Throwable) {
             return [];
         }
@@ -2652,7 +2662,7 @@ final class YarboHome
                 'locked' => array_key_exists('locked', $device) ? (bool) $device['locked'] : null,
                 'status' => (string) ($device['status'] ?? ''),
             ];
-            foreach (['native_id', 'door_id', 'dps', 'dps_label', 'has_dps', 'open'] as $key) {
+            foreach (['native_id', 'door_id', 'dps', 'dps_label', 'has_dps', 'has_open', 'open', 'product'] as $key) {
                 if (array_key_exists($key, $device)) {
                     $row[$key] = $device[$key];
                 }
