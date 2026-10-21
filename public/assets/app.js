@@ -3287,6 +3287,81 @@ function homeIsLight(d) {
     return !d?.kind || d.kind === 'light';
 }
 
+function homeIsSensorKind(d) {
+    return String(d?.kind || '') === 'sensor';
+}
+
+function homeIsDoorKind(d) {
+    const kind = String(d?.kind || '');
+    return kind === 'door' || kind === 'hub';
+}
+
+function homeTileLightsUp(d) {
+    return !homeIsSensorKind(d) && !homeIsDoorKind(d) && String(d?.kind || '') !== 'camera';
+}
+
+function homeMemberIsOpen(d) {
+    if (!d) return false;
+    if (d.open === true) return true;
+    const dps = String(d.dps || '').toLowerCase();
+    if (dps === 'open' || dps === 'opened') return true;
+    const label = String(d.dps_label || d.status || '');
+    return /^Open\b/i.test(label);
+}
+
+function homeMemberHasMotion(d) {
+    if (!d) return false;
+    if (d.motion === true) return true;
+    if (/\bMotion\b/i.test(String(d.status || ''))) return true;
+    if (d.has_motion && d.on && !homeMemberIsOpen(d)) return true;
+    return false;
+}
+
+function homeAlertIconsHtml(members) {
+    const motion = (members || []).some((d) => homeMemberHasMotion(d));
+    const door = (members || []).some((d) => homeMemberIsOpen(d));
+    if (!motion && !door) return '';
+    return `<span class="home-room-alerts">${
+        (motion ? '<span class="home-room-alert" title="Motion" aria-label="Motion">👤</span>' : '')
+        + (door ? '<span class="home-room-alert" title="Door open" aria-label="Door open">🚪</span>' : '')
+    }</span>`;
+}
+
+function syncHomeHeadingAlerts(heading, members) {
+    const label = heading?.querySelector('.home-device-label');
+    if (!label) return;
+    const html = homeAlertIconsHtml(members);
+    const prev = label.querySelector('.home-room-alerts');
+    if (!html) {
+        prev?.remove();
+        return;
+    }
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    const node = wrap.firstElementChild;
+    if (!node) return;
+    if (prev) prev.replaceWith(node);
+    else {
+        const count = label.querySelector('.home-room-count');
+        if (count) count.after(node);
+        else label.append(node);
+    }
+}
+
+function syncHomeAlertsForDevice(id) {
+    const device = homeDeviceRecord(id);
+    if (!device?.room_id) return;
+    const devices = [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])];
+    const roomMembers = devices.filter((d) => d.room_id === device.room_id);
+    syncHomeHeadingAlerts(document.querySelector(`[data-home-room="${CSS.escape(device.room_id)}"]`), roomMembers);
+    if (!device.group_id) return;
+    const wrap = document.querySelector(`[data-home-group="${CSS.escape(device.group_id)}"]`);
+    syncHomeHeadingAlerts(
+        wrap?.querySelector('.home-group-heading') || wrap,
+        roomMembers.filter((d) => d.group_id === device.group_id)
+    );
+}
+
 function homeMembersHaveLight(members) {
     return (members || []).some((d) => homeIsLight(d));
 }
@@ -3690,7 +3765,10 @@ function homeDeviceRecord(id) {
 function patchHomeDeviceVisual(id, on, extras = {}) {
     const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
     if (!card) return;
-    const lit = Boolean(on) && !card.classList.contains('home-device--camera');
+    const lit = Boolean(on)
+        && !card.classList.contains('home-device--camera')
+        && !card.classList.contains('home-device--sensor')
+        && !card.classList.contains('home-device--door');
     card.classList.toggle('is-on', lit);
     const btn = card.querySelector('[data-home-toggle]');
     if (btn) btn.textContent = on ? 'Off' : 'On';
@@ -3743,12 +3821,13 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
         if (set && document.activeElement !== set) set.value = String(extras.heating_setpoint);
     }
     const dpsLabel = String(extras.dps_label || '').trim();
-    if (dpsLabel || extras.dps != null || extras.open != null || extras.status) {
+    if (dpsLabel || extras.dps != null || extras.open != null || extras.status || extras.motion != null) {
         const device = homeDeviceRecord(id);
         if (device) {
             if (dpsLabel) device.dps_label = dpsLabel;
             if (extras.dps != null) device.dps = extras.dps;
             if (extras.open != null) device.open = extras.open;
+            if (typeof extras.motion === 'boolean') device.motion = extras.motion;
             if (extras.status) device.status = extras.status;
         }
         const meta = card.querySelector('[data-home-dps], [data-home-status]');
@@ -3770,6 +3849,7 @@ function patchHomeDeviceVisual(id, on, extras = {}) {
             );
         }
         patchUnifiDoorLockButton(card, device || extras);
+        syncHomeAlertsForDevice(id);
     }
     if (card.classList.contains('home-device--vacuum')) {
         const device = homeDeviceRecord(id);
@@ -3834,6 +3914,7 @@ function patchHomeDashboard(data) {
             if (d.dps_label) rec.dps_label = d.dps_label;
             if (d.dps != null) rec.dps = d.dps;
             if (d.open != null) rec.open = d.open;
+            if (typeof d.motion === 'boolean') rec.motion = d.motion;
             if (d.status) rec.status = d.status;
             if (d.vacuum_status) rec.vacuum_status = d.vacuum_status;
             if (d.vacuum_battery != null) rec.vacuum_battery = d.vacuum_battery;
@@ -3854,14 +3935,17 @@ function patchHomeDashboard(data) {
         const roomMembers = next.filter((d) => d.room_id === room.id);
         patchHomeBrightInput(el.querySelector('[data-home-room-bright]'), room.brightness);
         patchHomeClusterAdaptive(el, roomMembers);
+        syncHomeHeadingAlerts(el, roomMembers);
         (room.groups || []).forEach((group) => {
             const wrap = document.querySelector(`[data-home-group="${CSS.escape(group.id)}"]`);
             if (!wrap) return;
             wrap.querySelector('.home-group-heading')?.classList.toggle('is-on', Boolean(group.on));
             const gbtn = wrap.querySelector('[data-home-group-toggle]');
             if (gbtn) gbtn.textContent = group.on ? 'Off' : 'On';
+            const groupMembers = roomMembers.filter((d) => d.group_id === group.id);
             patchHomeBrightInput(wrap.querySelector('[data-home-group-bright]'), group.brightness);
-            patchHomeClusterAdaptive(wrap, roomMembers.filter((d) => d.group_id === group.id));
+            patchHomeClusterAdaptive(wrap, groupMembers);
+            syncHomeHeadingAlerts(wrap.querySelector('.home-group-heading') || wrap, groupMembers);
         });
     });
     if (!homeManageOpen) {
@@ -4237,6 +4321,7 @@ function homeRoomHeadingHtml(room, members) {
             <span class="home-device-dot" aria-hidden="true"></span>
             ${name}
             ${count ? `<span class="home-room-count">${count}</span>` : ''}
+            ${homeAlertIconsHtml(members)}
         </div>
         <div class="home-device-actions">
             ${toggle}
@@ -4273,6 +4358,7 @@ function homeGroupHeadingHtml(group, members) {
             <span class="home-device-dot" aria-hidden="true"></span>
             ${name}
             ${count ? `<span class="home-room-count">${count}</span>` : ''}
+            ${homeAlertIconsHtml(members)}
         </div>
         <div class="home-device-actions">
             ${toggle}
@@ -4345,10 +4431,12 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const heater = String(d.kind || '') === 'heater';
     const vacuum = String(d.kind || '') === 'vacuum';
     const camera = String(d.kind || '') === 'camera';
+    const sensor = homeIsSensorKind(d);
+    const doorLike = homeIsDoorKind(d);
     const canToggle = !hidden && homeDeviceCanToggle(d) && !heater && !vacuum && !camera;
     const toggleClass = canToggle ? ' home-device--toggle' : '';
     const unavailableClass = d.available === false ? ' home-device--unavailable' : '';
-    const lit = on && !camera;
+    const lit = on && homeTileLightsUp(d);
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
@@ -4363,7 +4451,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
     const actions = hidden ? '' : homeDeviceActionsHtml(d, bright, color);
-    return `<article class="home-device${lit ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${toggleClass}${unavailableClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
+    return `<article class="home-device${lit ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${sensor ? ' home-device--sensor' : ''}${doorLike ? ' home-device--door' : ''}${toggleClass}${unavailableClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>

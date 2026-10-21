@@ -485,6 +485,8 @@ assert_true(YarboHome::countsTowardRoomOn(['kind' => 'light', 'on' => true]) ===
 assert_true(YarboHome::countsTowardRoomOn(['kind' => 'heater', 'on' => true]) === false, 'heaters must not count toward room on');
 assert_true(YarboHome::countsTowardRoomOn(['kind' => 'vacuum', 'on' => true]) === false, 'vacuums must not count toward room on');
 assert_true(YarboHome::countsTowardRoomOn(['kind' => 'camera', 'on' => true]) === false, 'cameras must not count toward room on');
+assert_true(YarboHome::countsTowardRoomOn(['kind' => 'sensor', 'on' => true]) === false, 'sensors must not count toward room on');
+assert_true(YarboHome::countsTowardRoomOn(['kind' => 'door', 'on' => true]) === false, 'doors must not count toward room on');
 
 $camRoomRoot = sys_get_temp_dir() . '/yarbo-home-cam-room-' . bin2hex(random_bytes(3));
 mkdir($camRoomRoot . '/data', 0775, true);
@@ -891,8 +893,12 @@ assert_true(str_contains($js, 'on: onEl ? Boolean(onEl.checked) : prev.on'), 'ti
 assert_true(str_contains($js, 'loadHomeDashboard({ force: true })'), 'pairing reloads Home even if a poll is in flight');
 assert_true(str_contains($js, 'applyHomeHiddenLocal(id, true)'), 'Hide must move the tile without a full page refresh');
 assert_true(str_contains($js, 'await reloadHomeList()'), 'Hide must force-reload Home');
-assert_true(str_contains($js, 'const lit = on && !camera'), 'camera cards must not render as green on');
-assert_true(str_contains($js, "Boolean(on) && !card.classList.contains('home-device--camera')"), 'camera patch must not add is-on');
+assert_true(str_contains($js, 'const lit = on && homeTileLightsUp(d)'), 'camera cards must not render as green on');
+assert_true(str_contains($js, "card.classList.contains('home-device--camera')"), 'camera patch must not add is-on');
+assert_true(str_contains($js, 'home-device--sensor'), 'sensor tiles are marked so they stay off the green on style');
+assert_true(str_contains($js, 'function homeAlertIconsHtml'), 'room headings show motion and open-door icons');
+assert_true(str_contains($js, '👤'), 'motion on a collapsed room is a person');
+assert_true(str_contains($js, '🚪'), 'an open door on a collapsed room is a door');
 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(
@@ -903,6 +909,8 @@ assert_true(str_contains($css, 'grid-area: label'), 'manage name box sits in its
 assert_true(str_contains($css, 'handle label label label manage'), 'manage name row is not shared with heater controls');
 assert_true(str_contains($css, 'flex: 1 1 8rem'), 'manage name input can grow once it has a row');
 assert_true(str_contains($css, '.home-device--camera.is-on'), 'camera is-on must reset to the neutral row');
+assert_true(str_contains($css, '.home-device--sensor.is-on'), 'open sensors stay a neutral row');
+assert_true(str_contains($css, '.home-room-alerts'), 'room heading alerts sit next to the name');
 assert_true(str_contains($css, '.home-scene-filter'), 'scene editor search field');
 assert_true(str_contains($css, 'max-height: min(28rem, 60vh)'), 'scene member list scrolls instead of growing');
 assert_true(str_contains($css, '.home-scene-member:not(.is-in)'), 'unticked scene rows stay compact');

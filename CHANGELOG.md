@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.147] - 2026-10-21
+
+### Changed
+- Open sensors and doors no longer paint the whole Home tile green (that looked like a light on). Collapsed rooms stay green only when a light is on. The room name shows 👤 while a sensor sees motion and 🚪 when a door or contact is open.
+
 ## [4.0.146] - 2026-10-21
 
 ### Added

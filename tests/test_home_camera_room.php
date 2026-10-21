@@ -17,7 +17,7 @@ if (!str_contains($js, "camera ? ' home-device--camera' : ''") && !str_contains(
     exit(1);
 }
 
-if (!str_contains($js, 'const lit = on && !camera') && !str_contains($js, 'Boolean(on) && !card.classList.contains(\'home-device--camera\')')) {
+if (!str_contains($js, 'function homeTileLightsUp') && !str_contains($js, 'const lit = on && !camera')) {
     fwrite(STDERR, "camera tiles must not take the green is-on class\n");
     exit(1);
 }
