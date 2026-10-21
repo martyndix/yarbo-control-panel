@@ -3280,6 +3280,24 @@ function homeIsLight(d) {
     return !d?.kind || d.kind === 'light';
 }
 
+function homeMembersHaveLight(members) {
+    return (members || []).some((d) => homeIsLight(d));
+}
+
+function homeRoomSwitchable(room) {
+    if (!room) return false;
+    if (typeof room.switchable === 'boolean') return room.switchable;
+    const devices = [...(homeDash?.devices || []), ...(homeDash?.hidden_devices || [])];
+    return homeMembersHaveLight(devices.filter((d) => d.room_id === room.id));
+}
+
+function homeGroupSwitchable(group) {
+    if (!group) return false;
+    if (typeof group.switchable === 'boolean') return group.switchable;
+    const devices = [...(homeDash?.devices || []), ...(homeDash?.hidden_devices || [])];
+    return homeMembersHaveLight(devices.filter((d) => d.group_id === group.id));
+}
+
 function homeKindLabel(d) {
     if (homeIsUnifi(d)) {
         switch (String(d?.kind || '')) {
@@ -4120,9 +4138,13 @@ function homeGroupSelectHtml(d, rooms) {
 
 function homeRoomHeadingHtml(room) {
     const on = Boolean(room.on);
+    const switchable = homeRoomSwitchable(room);
     const expanded = homeExpandedRooms.has(room.id);
-    const bright = room.dimmable
+    const bright = switchable && room.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(room.brightness ?? (on ? 100 : 0))}" data-home-room-bright="${escapeHtml(room.id)}">`
+        : '';
+    const toggle = switchable
+        ? `<button type="button" class="btn btn-secondary btn-compact" data-home-room-toggle="${escapeHtml(room.id)}">${on ? 'Off' : 'On'}</button>`
         : '';
     const name = homeManageOpen
         ? `<input type="text" class="home-device-name-input" data-home-room-name="${escapeHtml(room.id)}" value="${escapeHtml(room.name)}" maxlength="32" aria-label="Room name">`
@@ -4138,7 +4160,7 @@ function homeRoomHeadingHtml(room) {
             ${count ? `<span class="home-room-count">${count}</span>` : ''}
         </div>
         <div class="home-device-actions">
-            <button type="button" class="btn btn-secondary btn-compact" data-home-room-toggle="${escapeHtml(room.id)}">${on ? 'Off' : 'On'}</button>
+            ${toggle}
             ${bright}
         </div>
         <div class="home-device-manage">
@@ -4149,9 +4171,13 @@ function homeRoomHeadingHtml(room) {
 
 function homeGroupHeadingHtml(group) {
     const on = Boolean(group.on);
+    const switchable = homeGroupSwitchable(group);
     const expanded = homeExpandedGroups.has(group.id);
-    const bright = group.dimmable
+    const bright = switchable && group.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(group.brightness ?? (on ? 100 : 0))}" data-home-group-bright="${escapeHtml(group.id)}">`
+        : '';
+    const toggle = switchable
+        ? `<button type="button" class="btn btn-secondary btn-compact" data-home-group-toggle="${escapeHtml(group.id)}">${on ? 'Off' : 'On'}</button>`
         : '';
     const name = homeManageOpen
         ? `<input type="text" class="home-device-name-input" data-home-group-name="${escapeHtml(group.id)}" value="${escapeHtml(group.name)}" maxlength="32" aria-label="Group name">`
@@ -4167,7 +4193,7 @@ function homeGroupHeadingHtml(group) {
             ${count ? `<span class="home-room-count">${count}</span>` : ''}
         </div>
         <div class="home-device-actions">
-            <button type="button" class="btn btn-secondary btn-compact" data-home-group-toggle="${escapeHtml(group.id)}">${on ? 'Off' : 'On'}</button>
+            ${toggle}
             ${bright}
         </div>
         <div class="home-device-manage">
@@ -4769,11 +4795,13 @@ function refreshHomeRoomCounts() {
     rooms.forEach((room) => {
         const members = devices.filter((d) => d.room_id === room.id);
         room.count = members.length;
-        room.on = members.some((d) => d.on && d.kind !== 'camera' && d.kind !== 'sensor');
+        room.switchable = homeMembersHaveLight(members);
+        room.on = members.some((d) => d.on && homeIsLight(d));
         (room.groups || []).forEach((group) => {
             const gm = members.filter((d) => d.group_id === group.id);
             group.count = gm.length;
-            group.on = gm.some((d) => d.on && d.kind !== 'camera' && d.kind !== 'sensor');
+            group.switchable = homeMembersHaveLight(gm);
+            group.on = gm.some((d) => d.on && homeIsLight(d));
         });
     });
 }
@@ -5342,12 +5370,13 @@ function bindHomeDashboard() {
         if (groupToggle) {
             const id = groupToggle.getAttribute('data-home-group-toggle') || '';
             const group = (homeDash.rooms || []).flatMap((r) => r.groups || []).find((g) => g.id === id);
+            if (!homeGroupSwitchable(group)) return;
             const currentlyOn = Boolean(group?.on);
             const nextOn = !currentlyOn;
             if (group) group.on = nextOn;
             groupToggle.textContent = nextOn ? 'Off' : 'On';
             groupToggle.closest('.home-group-heading')?.classList.toggle('is-on', nextOn);
-            (homeDash.devices || []).filter((d) => d.group_id === id).forEach((d) => setHomeDeviceOn(d.id, nextOn));
+            (homeDash.devices || []).filter((d) => d.group_id === id && homeIsLight(d)).forEach((d) => setHomeDeviceOn(d.id, nextOn));
             groupToggle.disabled = true;
             try {
                 const data = await homeApi({
@@ -5358,7 +5387,7 @@ function bindHomeDashboard() {
                 if (!data.ok) throw new Error(data.error || 'Failed');
             } catch (err) {
                 if (group) group.on = currentlyOn;
-                (homeDash.devices || []).filter((d) => d.group_id === id).forEach((d) => setHomeDeviceOn(d.id, currentlyOn));
+                (homeDash.devices || []).filter((d) => d.group_id === id && homeIsLight(d)).forEach((d) => setHomeDeviceOn(d.id, currentlyOn));
                 showToast(err.message || 'Group command failed', 'error');
             } finally {
                 groupToggle.disabled = false;
@@ -5369,12 +5398,13 @@ function bindHomeDashboard() {
         if (roomToggle) {
             const id = roomToggle.getAttribute('data-home-room-toggle') || '';
             const room = (homeDash.rooms || []).find((r) => r.id === id);
+            if (!homeRoomSwitchable(room)) return;
             const currentlyOn = Boolean(room?.on);
             const nextOn = !currentlyOn;
             if (room) room.on = nextOn;
             roomToggle.textContent = nextOn ? 'Off' : 'On';
             roomToggle.closest('[data-home-room]')?.classList.toggle('is-on', nextOn);
-            (homeDash.devices || []).filter((d) => d.room_id === id).forEach((d) => setHomeDeviceOn(d.id, nextOn));
+            (homeDash.devices || []).filter((d) => d.room_id === id && homeIsLight(d)).forEach((d) => setHomeDeviceOn(d.id, nextOn));
             roomToggle.disabled = true;
             try {
                 const data = await homeApi({
@@ -5385,7 +5415,7 @@ function bindHomeDashboard() {
                 if (!data.ok) throw new Error(data.error || 'Failed');
             } catch (err) {
                 if (room) room.on = currentlyOn;
-                (homeDash.devices || []).filter((d) => d.room_id === id).forEach((d) => setHomeDeviceOn(d.id, currentlyOn));
+                (homeDash.devices || []).filter((d) => d.room_id === id && homeIsLight(d)).forEach((d) => setHomeDeviceOn(d.id, currentlyOn));
                 showToast(err.message || 'Room command failed', 'error');
             } finally {
                 roomToggle.disabled = false;

@@ -180,6 +180,7 @@ assert_true(str_contains($change, '## [4.0.140]'), 'changelog 4.0.140');
 assert_true(str_contains($change, '## [4.0.141]'), 'changelog 4.0.141');
 assert_true(str_contains($change, '## [4.0.142]'), 'changelog 4.0.142');
 assert_true(str_contains($change, '## [4.0.143]'), 'changelog 4.0.143');
+assert_true(str_contains($change, '## [4.0.144]'), 'changelog 4.0.144');
 
 $rootUnifi = homeRoot();
 $storeUnifi = richStore();

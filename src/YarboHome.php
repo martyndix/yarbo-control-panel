@@ -1622,10 +1622,15 @@ final class YarboHome
             return ['ok' => false, 'error' => 'Unknown room'];
         }
         $ids = $this->visibleDeviceIdsInRoom($roomId);
+        if ($ids === []) {
+            return ['ok' => false, 'error' => 'No devices in that room'];
+        }
+        $ids = $this->lightIdsAmong($ids);
         if ($action === 'brightness') {
             $ids = $this->dimmableIdsAmong($ids);
         }
-        return $this->commandIdList($ids, $action, $input, 'No devices in that room', 'Room partly failed: ');
+
+        return $this->commandIdList($ids, $action, $input, 'No controllable devices', 'Room partly failed: ');
     }
 
     /**
@@ -1740,11 +1745,15 @@ final class YarboHome
             return ['ok' => false, 'error' => 'Unknown group'];
         }
         $ids = $this->visibleDeviceIdsInGroup($groupId);
+        if ($ids === []) {
+            return ['ok' => false, 'error' => 'No devices in that group'];
+        }
+        $ids = $this->lightIdsAmong($ids);
         if ($action === 'brightness') {
             $ids = $this->dimmableIdsAmong($ids);
         }
 
-        return $this->commandIdList($ids, $action, $input, 'No devices in that group', 'Group partly failed: ');
+        return $this->commandIdList($ids, $action, $input, 'No controllable devices', 'Group partly failed: ');
     }
 
     /**
@@ -1791,16 +1800,36 @@ final class YarboHome
     }
 
     /**
-     * Cameras can be online without being “on”. Room headers stay green only for
-     * devices that actually switch.
+     * Room and group On/Off only switch lights (Hue, Matter bulbs, UniFi floodlights).
+     * Cameras, sensors, heaters, vacuums, relays, plugs, and switches are not lights.
+     *
+     * @param array<string, mixed> $device
+     */
+    public static function isRoomLight(array $device): bool
+    {
+        $id = trim((string) ($device['id'] ?? ''));
+        $kind = strtolower(trim((string) ($device['kind'] ?? '')));
+        $parsed = $id !== '' ? YarboUnifi::parseHomeId($id) : null;
+        $isUnifi = $parsed !== null || strtolower((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE;
+        if ($isUnifi) {
+            if ($parsed !== null) {
+                $kind = strtolower((string) ($parsed['kind'] ?? $kind));
+            }
+
+            return $kind === self::KIND_LIGHT;
+        }
+
+        return $kind === '' || $kind === self::KIND_LIGHT;
+    }
+
+    /**
+     * Room headers stay green only when a light is on.
      *
      * @param array<string, mixed> $device
      */
     public static function countsTowardRoomOn(array $device): bool
     {
-        $kind = strtolower((string) ($device['kind'] ?? ''));
-
-        return $kind !== 'camera' && $kind !== 'switch';
+        return self::isRoomLight($device);
     }
 
     /**
@@ -4317,7 +4346,7 @@ final class YarboHome
     /**
      * @param array{room_defs?: list<array{id: string, name: string}>, group_defs?: list<array{id: string, name: string, room_id: string}>} $store
      * @param list<array<string, mixed>> $visibleDevices
-     * @return list<array{id: string, name: string, on: bool, brightness: ?int, dimmable: bool, count: int, groups: list<array<string, mixed>>}>
+     * @return list<array{id: string, name: string, on: bool, brightness: ?int, dimmable: bool, switchable: bool, count: int, groups: list<array<string, mixed>>}>
      */
     private function roomsPayload(array $store, array $visibleDevices): array
     {
@@ -4339,6 +4368,7 @@ final class YarboHome
                 'on' => $stats['on'],
                 'brightness' => $stats['brightness'],
                 'dimmable' => $stats['dimmable'],
+                'switchable' => $stats['switchable'],
                 'count' => $stats['count'],
                 'groups' => $this->groupsPayload($store, $id, $inRoom),
             ];
@@ -4350,7 +4380,7 @@ final class YarboHome
     /**
      * @param array{group_defs?: list<array{id: string, name: string, room_id: string}>} $store
      * @param list<array<string, mixed>> $inRoom
-     * @return list<array{id: string, name: string, room_id: string, on: bool, brightness: ?int, dimmable: bool, count: int}>
+     * @return list<array{id: string, name: string, room_id: string, on: bool, brightness: ?int, dimmable: bool, switchable: bool, count: int}>
      */
     private function groupsPayload(array $store, string $roomId, array $inRoom): array
     {
@@ -4373,6 +4403,7 @@ final class YarboHome
                 'on' => $stats['on'],
                 'brightness' => $stats['brightness'],
                 'dimmable' => $stats['dimmable'],
+                'switchable' => $stats['switchable'],
                 'count' => $stats['count'],
             ];
         }
@@ -4382,16 +4413,21 @@ final class YarboHome
 
     /**
      * @param list<array<string, mixed>> $devices
-     * @return array{on: bool, dimmable: bool, brightness: ?int, count: int}
+     * @return array{on: bool, dimmable: bool, switchable: bool, brightness: ?int, count: int}
      */
     private function aggregateDeviceStats(array $devices): array
     {
         $on = false;
         $dimmable = false;
+        $switchable = false;
         $brightSum = 0;
         $brightN = 0;
         foreach ($devices as $device) {
-            if (self::countsTowardRoomOn($device) && !empty($device['on'])) {
+            if (!self::isRoomLight($device)) {
+                continue;
+            }
+            $switchable = true;
+            if (!empty($device['on'])) {
                 $on = true;
             }
             if (!empty($device['dimmable'])) {
@@ -4405,6 +4441,7 @@ final class YarboHome
         return [
             'on' => $on,
             'dimmable' => $dimmable,
+            'switchable' => $switchable,
             'brightness' => $brightN > 0 ? (int) round($brightSum / $brightN) : null,
             'count' => count($devices),
         ];
@@ -4435,6 +4472,27 @@ final class YarboHome
         }
 
         return '';
+    }
+
+    /**
+     * @param list<string> $ids
+     * @return list<string>
+     */
+    private function lightIdsAmong(array $ids): array
+    {
+        $kinds = $this->deviceKindMap();
+        $out = [];
+        foreach ($ids as $id) {
+            $id = trim((string) $id);
+            if ($id === '') {
+                continue;
+            }
+            if (self::isRoomLight(['id' => $id, 'kind' => $kinds[$id] ?? ''])) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
     }
 
     /**

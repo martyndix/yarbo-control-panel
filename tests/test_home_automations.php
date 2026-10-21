@@ -31,20 +31,40 @@ file_put_contents($root . '/data/home.json', json_encode([
         'unifi:light:porch' => 'Porch',
         'unifi:hub:door1' => 'Front door',
     ],
-    'room_defs' => [['id' => 'r1', 'name' => 'Kitchen']],
+    'room_defs' => [
+        ['id' => 'r1', 'name' => 'Kitchen'],
+        ['id' => 'r-cam', 'name' => 'Driveway'],
+        ['id' => 'r-heat', 'name' => 'Plant room'],
+        ['id' => 'r-vac', 'name' => 'Hall'],
+    ],
     'rooms' => [
         '1:2' => 'r1',
         'unifi:sensor:s1' => 'r1',
         'unifi:light:porch' => 'r1',
+        'unifi:camera:c1' => 'r-cam',
+        '31:1' => 'r-heat',
+        '40:1' => 'r-vac',
     ],
-    'group_defs' => [['id' => 'g1', 'name' => 'Sensors', 'room_id' => 'r1']],
-    'groups' => ['unifi:sensor:s1' => 'g1'],
+    'group_defs' => [
+        ['id' => 'g1', 'name' => 'Sensors', 'room_id' => 'r1'],
+        ['id' => 'g-cam', 'name' => 'Cams', 'room_id' => 'r-cam'],
+        ['id' => 'g-heat', 'name' => 'Heaters', 'room_id' => 'r-heat'],
+        ['id' => 'g-vac', 'name' => 'Robots', 'room_id' => 'r-vac'],
+    ],
+    'groups' => [
+        'unifi:sensor:s1' => 'g1',
+        'unifi:camera:c1' => 'g-cam',
+        '31:1' => 'g-heat',
+        '40:1' => 'g-vac',
+    ],
     'scenes' => [['id' => 'sc-outdoor', 'name' => 'Outdoor Lights']],
     'paper' => [],
     'hidden' => [],
     'device_order' => [],
     'last_devices' => [
         ['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => false],
+        ['id' => '31:1', 'name' => 'Boiler', 'kind' => 'heater', 'on' => true],
+        ['id' => '40:1', 'name' => 'Vacuum', 'kind' => 'vacuum', 'on' => false],
     ],
 ], JSON_UNESCAPED_SLASHES));
 
@@ -77,6 +97,30 @@ assert_true($unlockOnly === ['unifi:hub:door1'], 'unlock must keep the door only
 $groupOnlySensor = $home->commandGroup(['group_id' => 'g1', 'command' => 'on']);
 assert_true(($groupOnlySensor['ok'] ?? true) === false, 'sensor-only group must not pretend to succeed');
 assert_true(($groupOnlySensor['error'] ?? '') === 'No controllable devices', 'sensor-only group: ' . json_encode($groupOnlySensor));
+
+$groupOnlyCam = $home->commandGroup(['group_id' => 'g-cam', 'command' => 'on']);
+assert_true(($groupOnlyCam['ok'] ?? true) === false, 'camera-only group must not pretend to succeed');
+assert_true(($groupOnlyCam['error'] ?? '') === 'No controllable devices', 'camera-only group: ' . json_encode($groupOnlyCam));
+
+$groupOnlyHeat = $home->commandGroup(['group_id' => 'g-heat', 'command' => 'on']);
+assert_true(($groupOnlyHeat['ok'] ?? true) === false, 'heater-only group must not turn heaters on');
+assert_true(($groupOnlyHeat['error'] ?? '') === 'No controllable devices', 'heater-only group: ' . json_encode($groupOnlyHeat));
+
+$groupOnlyVac = $home->commandGroup(['group_id' => 'g-vac', 'command' => 'on']);
+assert_true(($groupOnlyVac['ok'] ?? true) === false, 'vacuum-only group must not start the vacuum');
+assert_true(($groupOnlyVac['error'] ?? '') === 'No controllable devices', 'vacuum-only group: ' . json_encode($groupOnlyVac));
+
+$roomOnlyCam = $home->commandRoom(['room_id' => 'r-cam', 'command' => 'on']);
+assert_true(($roomOnlyCam['ok'] ?? true) === false, 'camera-only room must not pretend to succeed');
+assert_true(($roomOnlyCam['error'] ?? '') === 'No controllable devices', 'camera-only room: ' . json_encode($roomOnlyCam));
+
+$roomOnlyHeat = $home->commandRoom(['room_id' => 'r-heat', 'command' => 'on']);
+assert_true(($roomOnlyHeat['ok'] ?? true) === false, 'heater-only room must not turn heaters on');
+assert_true(($roomOnlyHeat['error'] ?? '') === 'No controllable devices', 'heater-only room: ' . json_encode($roomOnlyHeat));
+
+$roomOnlyVac = $home->commandRoom(['room_id' => 'r-vac', 'command' => 'on']);
+assert_true(($roomOnlyVac['ok'] ?? true) === false, 'vacuum-only room must not start the vacuum');
+assert_true(($roomOnlyVac['error'] ?? '') === 'No controllable devices', 'vacuum-only room: ' . json_encode($roomOnlyVac));
 
 $auto = new YarboHomeAutomations($root);
 $commands = [];

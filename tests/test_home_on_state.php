@@ -471,8 +471,19 @@ assert_true(isset($byHomeId['unifi:sensor:s1']), 'Home must include the UniFi se
 assert_true(($byHomeId['unifi:sensor:s1']['status'] ?? '') === '21.4° · 48% RH', 'Home sensor must keep temperature status');
 assert_true((float) ($byHomeId['unifi:sensor:s1']['humidity'] ?? 0) === 48.0, 'Home sensor must keep humidity');
 
+assert_true(YarboHome::isRoomLight(['kind' => 'light']) === true, 'lights are room lights');
+assert_true(YarboHome::isRoomLight(['id' => 'unifi:light:porch']) === true, 'UniFi floodlights are room lights');
+assert_true(YarboHome::isRoomLight(['id' => '1:2']) === true, 'Matter id with no kind is a light');
+assert_true(YarboHome::isRoomLight(['kind' => 'heater']) === false, 'heaters are not room lights');
+assert_true(YarboHome::isRoomLight(['kind' => 'vacuum']) === false, 'vacuums are not room lights');
+assert_true(YarboHome::isRoomLight(['kind' => 'sensor']) === false, 'sensors are not room lights');
+assert_true(YarboHome::isRoomLight(['kind' => 'plug']) === false, 'plugs are not room lights');
+assert_true(YarboHome::isRoomLight(['kind' => 'switch']) === false, 'switches are not room lights');
+assert_true(YarboHome::isRoomLight(['id' => 'unifi:camera:c1']) === false, 'cameras are not room lights');
+assert_true(YarboHome::isRoomLight(['id' => 'unifi:relay:usl1:1']) === false, 'relays are not room lights');
 assert_true(YarboHome::countsTowardRoomOn(['kind' => 'light', 'on' => true]) === true, 'lights count toward room on');
-assert_true(YarboHome::countsTowardRoomOn(['kind' => 'heater', 'on' => true]) === true, 'heaters count toward room on');
+assert_true(YarboHome::countsTowardRoomOn(['kind' => 'heater', 'on' => true]) === false, 'heaters must not count toward room on');
+assert_true(YarboHome::countsTowardRoomOn(['kind' => 'vacuum', 'on' => true]) === false, 'vacuums must not count toward room on');
 assert_true(YarboHome::countsTowardRoomOn(['kind' => 'camera', 'on' => true]) === false, 'cameras must not count toward room on');
 
 $camRoomRoot = sys_get_temp_dir() . '/yarbo-home-cam-room-' . bin2hex(random_bytes(3));
@@ -561,7 +572,61 @@ assert_true(empty($camById['unifi:camera:cam-drive']['on']), 'stale camera on mu
 assert_true(empty($camById['unifi:camera:cam-garage']['on']), 'garage camera must not look on');
 assert_true(($camById['unifi:light:boiler']['on'] ?? false) === true, 'garage light stays on');
 assert_true(($camRooms['drive']['on'] ?? true) === false, 'camera-only room must not go green');
+assert_true(($camRooms['drive']['switchable'] ?? true) === false, 'camera-only room has no On/Off');
 assert_true(($camRooms['garage']['on'] ?? false) === true, 'room with a light on stays green');
+assert_true(($camRooms['garage']['switchable'] ?? false) === true, 'room with a light keeps On/Off');
+
+$heatRoomRoot = sys_get_temp_dir() . '/yarbo-home-heat-room-' . bin2hex(random_bytes(3));
+mkdir($heatRoomRoot . '/data', 0775, true);
+file_put_contents($heatRoomRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true],
+    'active_module' => 'home',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($heatRoomRoot . '/data/home.json', json_encode([
+    'names' => ['31:1' => 'Boiler', '40:1' => 'Vacuum'],
+    'room_defs' => [
+        ['id' => 'plant', 'name' => 'Plant room'],
+        ['id' => 'hall', 'name' => 'Hall'],
+    ],
+    'rooms' => [
+        '31:1' => 'plant',
+        '40:1' => 'hall',
+    ],
+    'group_defs' => [
+        ['id' => 'g-heat', 'name' => 'Heaters', 'room_id' => 'plant'],
+        ['id' => 'g-vac', 'name' => 'Robots', 'room_id' => 'hall'],
+    ],
+    'groups' => [
+        '31:1' => 'g-heat',
+        '40:1' => 'g-vac',
+    ],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [
+        ['id' => '31:1', 'name' => 'Boiler', 'kind' => 'heater', 'on' => true, 'available' => true],
+        ['id' => '40:1', 'name' => 'Vacuum', 'kind' => 'vacuum', 'on' => false, 'available' => true],
+    ],
+], JSON_UNESCAPED_SLASHES));
+$heatHome = new YarboHome($heatRoomRoot);
+$heatDash = $heatHome->dashboard();
+$heatRooms = [];
+foreach ($heatDash['rooms'] ?? [] as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $heatRooms[$row['id']] = $row;
+    }
+}
+assert_true(($heatRooms['plant']['switchable'] ?? true) === false, 'heater-only room has no On/Off');
+assert_true(($heatRooms['plant']['on'] ?? true) === false, 'heater on must not turn the room green');
+assert_true(($heatRooms['hall']['switchable'] ?? true) === false, 'vacuum-only room has no On/Off');
+$heatGroups = [];
+foreach (($heatRooms['plant']['groups'] ?? []) as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $heatGroups[$row['id']] = $row;
+    }
+}
+assert_true(($heatGroups['g-heat']['switchable'] ?? true) === false, 'heater-only group has no On/Off');
 
 $sceneRelayRoot = sys_get_temp_dir() . '/yarbo-scene-relay-' . bin2hex(random_bytes(3));
 mkdir($sceneRelayRoot . '/data', 0775, true);
@@ -723,8 +788,13 @@ assert_true(($adopted['scenes'][0]['actions'][0]['id'] ?? '') === '1:12', 'scene
 assert_true(str_contains($homePhp, 'function replaceHueNodeDevices'), 'Look for devices replaces Hue node ids');
 assert_true(str_contains($homePhp, 'function adoptHueEndpointAliases'), 'Look for devices keeps rooms on the remapped Hue id');
 assert_true(str_contains($homePhp, 'looksLikeLeftoverHueEndpoint'), 'new Hue lights skip leftover Bridge endpoints');
+assert_true(str_contains($homePhp, 'function isRoomLight'), 'room On/Off is lights only');
 assert_true(str_contains($homePhp, 'function countsTowardRoomOn'), 'rooms ignore cameras when choosing green');
-assert_true(str_contains($homePhp, "if (self::countsTowardRoomOn(\$device) && !empty(\$device['on']))"), 'room on only from switchable devices');
+assert_true(str_contains($homePhp, 'lightIdsAmong'), 'room and group commands only target lights');
+assert_true(str_contains($js, 'function homeRoomSwitchable'), 'room heading hides On without lights');
+assert_true(str_contains($js, 'function homeGroupSwitchable'), 'group heading hides On without lights');
+assert_true(str_contains($js, 'd.group_id === id && homeIsLight(d)'), 'group On only paints lights');
+assert_true(str_contains($js, 'd.room_id === id && homeIsLight(d)'), 'room On only paints lights');
 assert_true(str_contains($js, "btn.textContent = 'Adding…'"), 'Add device shows Adding while pairing');
 assert_true(str_contains($js, "action: 'scan'"), 'Look for devices calls scan');
 assert_true(str_contains($js, "homeApi({ action: 'scan' }, 140000)"), 'Look for devices waits for the Hue Bridge interview');

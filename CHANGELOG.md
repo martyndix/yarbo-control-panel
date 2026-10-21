@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.144] - 2026-10-21
+
+### Fixed
+- Room and group **On** / **Off** only switch lights. Camera groups, sensors, vacuums, heaters, and relays no longer show those buttons, and a mixed room no longer starts the vacuum or heater.
+
 ## [4.0.143] - 2026-10-21
 
 ### Fixed
