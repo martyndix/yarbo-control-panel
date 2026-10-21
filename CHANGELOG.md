@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.141] - 2026-10-21
+
+### Fixed
+- Hue **dimmer** and **tap dial** switches are switches again, not lights with brightness and colour. Real Hue bulbs that only had On/Off are interviewed for brightness and colour. Tap **Look for devices** after the update.
+
 ## [4.0.140] - 2026-10-21
 
 ### Fixed

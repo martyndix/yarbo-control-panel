@@ -485,6 +485,51 @@ def main() -> int:
             "100/6/0": True,
         },
     }
+    dimmer_node = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            "0/40/1": "Signify Netherlands B.V.",
+            "0/40/3": "Hue Bridge",
+            "8/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "8/6/0": True,
+            "8/8/0": 80,
+            "8/768/3": 200,
+            "8/57/5": "Hue dimmer switch 2",
+            "9/29/0": [{"deviceType": 0x0104, "revision": 1}],
+            "9/6/0": False,
+            "9/57/5": "Hue tap dial switch 3",
+        },
+    }
+    dimmer_rows = {d["id"]: d for d in agent.flatten_nodes([dimmer_node])}
+    dim2 = dimmer_rows.get("1:8") or {}
+    tap3 = dimmer_rows.get("1:9") or {}
+    if dim2.get("kind") != "switch" or dim2.get("dimmable") or dim2.get("colorable"):
+        raise SystemExit(f"Hue dimmer switch must not be a light {dim2}")
+    if tap3.get("kind") != "switch" or tap3.get("dimmable") or tap3.get("colorable"):
+        raise SystemExit(f"Hue tap dial must not be a light {tap3}")
+    if agent.incomplete_hue_child_endpoints([dimmer_node]):
+        raise SystemExit("Hue switches must not be queued for light colour reads")
+    on_only_light = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            "0/40/1": "Signify Netherlands B.V.",
+            "0/40/3": "Hue Bridge",
+            "12/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "12/6/0": True,
+            "12/57/5": "Landing",
+        },
+    }
+    if (1, 12) not in agent.incomplete_hue_child_endpoints([on_only_light]):
+        raise SystemExit("On-only Hue lights should still be read for brightness")
+    if not agent.name_looks_switch("Hue dimmer switch 2"):
+        raise SystemExit("dimmer switch name")
+    if agent.name_looks_switch("Hall"):
+        raise SystemExit("Hall is a light")
+
     leftover_ids = {str(row.get("id") or "") for row in agent.flatten_nodes([leftover_node])}
     if "1:2" not in leftover_ids:
         raise SystemExit(f"named Hue light missing {leftover_ids}")

@@ -686,6 +686,20 @@ assert_true(str_contains($js, "btn.textContent = 'Adding…'"), 'Add device show
 assert_true(str_contains($js, "action: 'scan'"), 'Look for devices calls scan');
 assert_true(str_contains($js, "homeApi({ action: 'scan' }, 140000)"), 'Look for devices waits for the Hue Bridge interview');
 assert_true(str_contains($js, 'Reading…'), 'unready Hue lights say Reading instead of On');
+assert_true(str_contains($js, "kind !== 'switch'"), 'Hue switches are not On/Off lights');
+assert_true(YarboMatterFabric::classifyByName('light', 'Hue dimmer switch 2') === 'switch', 'dimmer switch name is a switch');
+assert_true(YarboMatterFabric::classifyByName('light', 'Hue tap dial switch 3') === 'switch', 'tap dial name is a switch');
+assert_true(YarboMatterFabric::classifyByName('light', 'Hall') === 'light', 'Hall stays a light');
+$dimmer = YarboMatterFabric::reclassifyRow([
+    'id' => '1:8',
+    'name' => 'Hue dimmer switch 2',
+    'kind' => 'light',
+    'dimmable' => true,
+    'colorable' => true,
+    'brightness' => 40,
+]);
+assert_true(($dimmer['kind'] ?? '') === 'switch', 'cached dimmer rows reclassify to switch');
+assert_true(empty($dimmer['dimmable']) && empty($dimmer['colorable']), 'switches lose light controls');
 $index = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
 assert_true(str_contains($index, 'check Hidden, then Look for devices'), 'Home hint says to check Hidden for missing Hue lights');
 assert_true(str_contains($index, 'Do not pair the same Hue Bridge twice'), 'Home still warns not to pair the Hue Bridge again');

@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 54
+AGENT_VERSION = 55
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -134,7 +134,11 @@ CHIP_STATUS_CONSTRAINT = 0x87
 CHIP_STATUS_UNSUPPORTED_WRITE = 0x88
 CHIP_STATUS_UNSUPPORTED_CLUSTER = 0xC3
 DEVTYPE_AGGREGATOR = 0x000E
+DEVTYPE_GENERIC_SWITCH = 0x000F
 DEVTYPE_BRIDGED_NODE = 0x0013
+DEVTYPE_ONOFF_LIGHT_SWITCH = 0x0103
+DEVTYPE_DIMMER_SWITCH = 0x0104
+DEVTYPE_COLOR_DIMMER_SWITCH = 0x0105
 DEVTYPE_ONOFF_LIGHT = 0x0100
 DEVTYPE_DIMMABLE_LIGHT = 0x0101
 DEVTYPE_COLOR_LIGHT = 0x0102
@@ -1747,8 +1751,38 @@ def _row_control_score(row: dict[str, Any]) -> int:
     return score
 
 
+def _strip_light_controls(row: dict[str, Any]) -> dict[str, Any]:
+    item = dict(row)
+    item["kind"] = "switch"
+    item["dimmable"] = False
+    item["colorable"] = False
+    item["color_hs"] = False
+    item["color_xy"] = False
+    item["color_ct"] = False
+    item["brightness"] = None
+    item["color_hex"] = ""
+    return item
+
+
+def _row_looks_switch(row: dict[str, Any]) -> bool:
+    if str(row.get("kind") or "") == "switch":
+        return True
+    return name_looks_switch(
+        " ".join(
+            (
+                str(row.get("name") or ""),
+                str(row.get("product") or ""),
+                str(row.get("source") or ""),
+                str(row.get("vendor") or ""),
+            )
+        )
+    )
+
+
 def _prefer_richer_row(current: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
     item = dict(incoming)
+    if _row_looks_switch(item) or (current is not None and _row_looks_switch(current)):
+        return _strip_light_controls(item if _row_looks_switch(item) else current)
     if current is None:
         return item
     if _row_control_score(item) >= _row_control_score(current):
@@ -1776,7 +1810,7 @@ def _merge_device_rows(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def incomplete_hue_child_endpoints(nodes: list[dict[str, Any]]) -> list[tuple[int, int]]:
-    """Named Hue Bridge children that interview has not filled On/Off for yet."""
+    """Hue Bridge lights that still need On/Off, brightness, or colour — not switches."""
     out: list[tuple[int, int]] = []
     for node in nodes:
         if not isinstance(node, dict):
@@ -1799,15 +1833,27 @@ def incomplete_hue_child_endpoints(nodes: list[dict[str, Any]]) -> list[tuple[in
         for endpoint in sorted(endpoint_ids(attributes)):
             if endpoint == 0:
                 continue
-            on_val = attr_raw(attributes, endpoint, ON_OFF, ATTR_ON_OFF)
-            if on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF):
-                continue
             types = attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES)
             type_ids = device_type_ids(types)
             if DEVTYPE_AGGREGATOR in type_ids:
                 continue
             label = endpoint_name(attributes, endpoint, vendor, product)
             if looks_like_leftover_hue_endpoint(label, product, source, endpoint):
+                continue
+            if name_looks_switch(" ".join((label, product, source, vendor))):
+                continue
+            if device_kind(types) == "switch":
+                continue
+            on_val = attr_raw(attributes, endpoint, ON_OFF, ATTR_ON_OFF)
+            has_on = on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF)
+            has_level = (
+                attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None
+                or endpoint_has_cluster(attributes, endpoint, LEVEL_CONTROL)
+            )
+            has_color = endpoint_has_cluster(attributes, endpoint, COLOR_CONTROL)
+            if has_on and has_level:
+                continue
+            if has_on and has_color:
                 continue
             out.append((node_id, endpoint))
     return out
@@ -2490,28 +2536,34 @@ def apply_attribute_event(data: Any) -> None:
             return
         # Hue keeps CurrentLevel at the last brightness while Off. Never infer On from it.
         fields["brightness"] = max(0, min(100, int(round(level * 100 / 254)))) if level else 0
-        fields["dimmable"] = True
-        fields["has_on_off"] = True
+        live = live_device_snapshot(device_id)
+        if not _row_looks_switch(live):
+            fields["dimmable"] = True
+            fields["has_on_off"] = True
     elif cluster == COLOR_CONTROL:
-        fields = apply_color_attribute(device_id, attr, value)
-        if attr in (ATTR_CURRENT_HUE, ATTR_CURRENT_SATURATION, ATTR_ENHANCED_CURRENT_HUE):
-            fields["color_hs"] = True
-            fields["colorable"] = True
-        elif attr in (ATTR_CURRENT_X, ATTR_CURRENT_Y):
-            fields["color_xy"] = True
-            fields["colorable"] = True
-        elif attr == ATTR_COLOR_TEMP_MIREDS:
-            fields["color_ct"] = True
-        elif attr == ATTR_COLOR_CAPABILITIES:
-            cap_bits = int(event_number(value) or 0)
-            if cap_bits & (COLOR_CAP_HS | COLOR_CAP_EHUE):
+        live = live_device_snapshot(device_id)
+        if _row_looks_switch(live):
+            fields = {}
+        else:
+            fields = apply_color_attribute(device_id, attr, value)
+            if attr in (ATTR_CURRENT_HUE, ATTR_CURRENT_SATURATION, ATTR_ENHANCED_CURRENT_HUE):
                 fields["color_hs"] = True
                 fields["colorable"] = True
-            if cap_bits & COLOR_CAP_XY:
+            elif attr in (ATTR_CURRENT_X, ATTR_CURRENT_Y):
                 fields["color_xy"] = True
                 fields["colorable"] = True
-            if cap_bits & COLOR_CAP_CT:
+            elif attr == ATTR_COLOR_TEMP_MIREDS:
                 fields["color_ct"] = True
+            elif attr == ATTR_COLOR_CAPABILITIES:
+                cap_bits = int(event_number(value) or 0)
+                if cap_bits & (COLOR_CAP_HS | COLOR_CAP_EHUE):
+                    fields["color_hs"] = True
+                    fields["colorable"] = True
+                if cap_bits & COLOR_CAP_XY:
+                    fields["color_xy"] = True
+                    fields["colorable"] = True
+                if cap_bits & COLOR_CAP_CT:
+                    fields["color_ct"] = True
     elif cluster == RVC_OPERATIONAL and attr == ATTR_OPERATIONAL_STATE:
         fields.update(vacuum_runtime_fields(device_id, {"vacuum_op": int(event_number(value) or 0)}))
     elif cluster == RVC_OPERATIONAL and attr == ATTR_OPERATIONAL_ERROR:
@@ -2679,12 +2731,28 @@ def name_looks_vacuum(text: str) -> bool:
     )
 
 
+def name_looks_switch(text: str) -> bool:
+    t = (text or "").lower()
+    if not t:
+        return False
+    if re.search(
+        r"\b(dimmer\s*switch|tap\s*dial|smart\s*button|wall\s*module|hue\s*button)\b",
+        t,
+    ):
+        return True
+    if re.search(r"\b(button|remote)\b", t) and "hue" in t:
+        return True
+    return bool(re.search(r"\bswitch\b", t) and not re.search(r"\b(light|lamp|bulb|spot|downlight)\b", t))
+
+
 def classify_by_name(kind: str, *labels: str) -> str:
     text = " ".join(labels)
     if name_looks_vacuum(text):
         return "vacuum"
     if name_looks_heater(text):
         return "heater"
+    if name_looks_switch(text):
+        return "switch"
     return kind or "light"
 
 
@@ -2696,7 +2764,16 @@ def device_kind(types: Any) -> str:
         return "heater"
     if any(i in (0x010A, 0x010B) for i in ids):
         return "plug"
-    if any(i in (0x0103, 0x010F) for i in ids):
+    if any(
+        i in (
+            DEVTYPE_GENERIC_SWITCH,
+            DEVTYPE_ONOFF_LIGHT_SWITCH,
+            DEVTYPE_DIMMER_SWITCH,
+            DEVTYPE_COLOR_DIMMER_SWITCH,
+            0x010F,
+        )
+        for i in ids
+    ):
         return "switch"
     if any(i in (0x0100, 0x0101, 0x0102, 0x010C, 0x010D) for i in ids):
         return "light"

@@ -3256,7 +3256,7 @@ function homeDeviceCanToggle(d) {
         return kind === 'light' || kind === 'relay';
     }
     const kind = String(d.kind || 'light');
-    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub' && kind !== 'vacuum';
+    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub' && kind !== 'vacuum' && kind !== 'switch';
 }
 
 function homeIsLight(d) {
@@ -4284,6 +4284,9 @@ function homeDeviceActionsHtml(d, bright, color) {
     }
     if (String(d.kind || '') === 'vacuum') {
         return homeVacuumActionsHtml(d);
+    }
+    if (String(d.kind || '') === 'switch') {
+        return `<div class="home-device-actions"><span class="home-device-meta">Switch</span></div>`;
     }
     if (d.available === false) {
         return `<div class="home-device-actions"><span class="home-device-meta">Unavailable</span></div>`;

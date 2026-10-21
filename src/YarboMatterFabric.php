@@ -492,7 +492,7 @@ final class YarboMatterFabric
             }
         }
         foreach ($ids as $id) {
-            if ($id === 0x0103 || $id === 0x010F) {
+            if (in_array($id, [0x000F, 0x0103, 0x0104, 0x0105, 0x010F], true)) {
                 return 'switch';
             }
         }
@@ -538,6 +538,23 @@ final class YarboMatterFabric
         return (bool) preg_match('/\b(vacuum|robot\s*vac|roborock|roomba|deebot|ecovacs|dreame|narwal|k11)\b/', $text);
     }
 
+    public static function nameLooksSwitch(string $text): bool
+    {
+        $text = strtolower($text);
+        if ($text === '') {
+            return false;
+        }
+        if (preg_match('/\b(dimmer\s*switch|tap\s*dial|smart\s*button|wall\s*module|hue\s*button)\b/', $text) === 1) {
+            return true;
+        }
+        if (preg_match('/\b(button|remote)\b/', $text) === 1 && str_contains($text, 'hue')) {
+            return true;
+        }
+
+        return preg_match('/\bswitch\b/', $text) === 1
+            && preg_match('/\b(light|lamp|bulb|spot|downlight)\b/', $text) !== 1;
+    }
+
     public static function classifyByName(string $kind, string ...$labels): string
     {
         $text = strtolower(trim(implode(' ', $labels)));
@@ -546,6 +563,9 @@ final class YarboMatterFabric
         }
         if (self::nameLooksHeater($text)) {
             return 'heater';
+        }
+        if (self::nameLooksSwitch($text)) {
+            return 'switch';
         }
 
         return $kind === '' ? 'light' : $kind;
@@ -572,13 +592,14 @@ final class YarboMatterFabric
             (string) ($row['source'] ?? '')
         );
         $row['kind'] = $kind;
-        if ($kind === 'heater' || $kind === 'vacuum') {
+        if ($kind === 'heater' || $kind === 'vacuum' || $kind === 'switch') {
             $row['colorable'] = false;
             $row['dimmable'] = false;
             $row['color_hs'] = false;
             $row['color_xy'] = false;
             $row['color_ct'] = false;
             $row['brightness'] = null;
+            $row['color_hex'] = '';
         }
 
         return $row;

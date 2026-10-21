@@ -958,6 +958,9 @@ final class YarboHome
             if (is_array($cached) && self::looksLikeUnreadyHueLight($cached)) {
                 return ['ok' => false, 'error' => 'That light is still being read from the Hue Bridge. Tap Look for devices.'];
             }
+            if (is_array($cached) && (YarboMatterFabric::reclassifyRow($cached)['kind'] ?? '') === 'switch') {
+                return ['ok' => false, 'error' => 'That is a Hue switch, not a light.'];
+            }
         }
         if ($action === 'colour' || $action === 'set_color' || $action === 'set_colour') {
             $action = 'color';
@@ -1775,7 +1778,9 @@ final class YarboHome
      */
     public static function countsTowardRoomOn(array $device): bool
     {
-        return strtolower((string) ($device['kind'] ?? '')) !== 'camera';
+        $kind = strtolower((string) ($device['kind'] ?? ''));
+
+        return $kind !== 'camera' && $kind !== 'switch';
     }
 
     /**
@@ -1812,7 +1817,7 @@ final class YarboHome
         if ($kind === '') {
             $kind = self::KIND_LIGHT;
         }
-        if (in_array($kind, ['camera', 'sensor', 'door', 'hub'], true)) {
+        if (in_array($kind, ['camera', 'sensor', 'door', 'hub', 'switch'], true)) {
             return false;
         }
         if ($kind === self::KIND_HEATER) {
@@ -2575,7 +2580,7 @@ final class YarboHome
             return false;
         }
         $kind = strtolower(trim((string) ($row['kind'] ?? 'light')));
-        if ($kind !== '' && $kind !== 'light' && $kind !== 'switch') {
+        if ($kind !== '' && $kind !== 'light') {
             return false;
         }
         if (array_key_exists('has_on_off', $row)) {

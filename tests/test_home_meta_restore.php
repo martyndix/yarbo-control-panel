@@ -170,5 +170,6 @@ assert_true(str_contains($change, '## [4.0.137]'), 'changelog 4.0.137');
 assert_true(str_contains($change, '## [4.0.138]'), 'changelog 4.0.138');
 assert_true(str_contains($change, '## [4.0.139]'), 'changelog 4.0.139');
 assert_true(str_contains($change, '## [4.0.140]'), 'changelog 4.0.140');
+assert_true(str_contains($change, '## [4.0.141]'), 'changelog 4.0.141');
 
 echo "test_home_meta_restore.php ok\n";
