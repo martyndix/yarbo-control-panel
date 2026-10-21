@@ -159,8 +159,12 @@ assert_true(str_contains($sh, 'home-backups'), 'panel update preserves dated hom
 assert_true(str_contains($sh, 'home-automations.json'), 'panel update preserves automations');
 assert_true(str_contains($js, 'Restored rooms and scenes from a backup'), 'Home toasts a restore');
 assert_true(str_contains($js, 'homeManageOpen) return'), 'Home poll pauses while ⚙️ is open');
+assert_true(str_contains($js, 'homeManageOpen && !opts.force'), 'Home GET does not retry while ⚙️ is open');
+assert_true(str_contains($js, 'homePollBlocked() || homeManageOpen'), 'aborted Home GET does not retry while ⚙️ is open');
+assert_true(str_contains($js, 'function saveHomeAssignment'), 'room assign retries once if Home was busy');
 assert_true(str_contains($js, 'function applyHomeDeviceRoom'), 'room assign updates locally');
 assert_true(str_contains($change, '## [4.0.133]'), 'changelog 4.0.133');
 assert_true(str_contains($change, '## [4.0.135]'), 'changelog 4.0.135');
+assert_true(str_contains($change, '## [4.0.136]'), 'changelog 4.0.136');
 
 echo "test_home_meta_restore.php ok\n";

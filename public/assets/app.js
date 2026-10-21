@@ -2469,7 +2469,7 @@ function applyHubFromStatus(data) {
     const ids = applyModuleSwitcher(hub);
     updatePowerwallDashboard(data.powerwall);
     updateLymowDashboard(data.lymow);
-    if (ids.includes('home') && !homeStateTimer && !homeLoadBusy && !homePollBlocked()) {
+    if (ids.includes('home') && !homeStateTimer && !homeLoadBusy && !homePollBlocked() && !homeManageOpen) {
         loadHomeDashboard();
     }
     if (ids.includes('unifi') && activeModuleId === 'unifi' && !settingsModalOpen) {
@@ -3249,6 +3249,7 @@ function homeSceneCanAdaptive(d) {
 
 function homeDeviceCanToggle(d) {
     if (!d) return false;
+    if (d.available === false) return false;
     if (homeIsUnifi(d)) {
         const kind = String(d.kind || '');
         return kind === 'light' || kind === 'relay';
@@ -3461,6 +3462,7 @@ async function startHomeSetup(button) {
 
 async function loadHomeDashboard(opts = {}) {
     if (homeDrag) return;
+    if (homeManageOpen && !opts.force) return;
     if (opts.patch && homePollBlocked()) return;
     if (homeLoadBusy && !opts.force) return;
     const card = document.getElementById('home-card');
@@ -3502,7 +3504,7 @@ async function loadHomeDashboard(opts = {}) {
     } catch (err) {
         if (isAbortError(err)) {
             aborted = true;
-            if (homePollBlocked()) {
+            if (homePollBlocked() || homeManageOpen) {
                 homeLoadBusy = false;
                 return;
             }
@@ -4747,6 +4749,28 @@ function refreshHomeRoomCounts() {
     });
 }
 
+async function saveHomeAssignment(payload, id, prevRoom, prevGroup, fallback) {
+    try {
+        const data = await homeApi(payload);
+        if (!data.ok) throw new Error(data.error || fallback);
+    } catch (err) {
+        let failed = err;
+        if (isAbortError(err)) {
+            try {
+                const data = await homeApi(payload);
+                if (!data.ok) throw new Error(data.error || fallback);
+                return;
+            } catch (retryErr) {
+                failed = retryErr;
+            }
+        }
+        applyHomeDeviceRoom(id, prevRoom);
+        applyHomeDeviceGroup(id, prevGroup);
+        renderHomeDashboard(homeDash, { replace: true });
+        showToast(homeMetaErrorMessage(failed, fallback), 'error');
+    }
+}
+
 function applyHomeDeviceGroup(id, groupId) {
     let roomId = '';
     let roomName = '';
@@ -4846,6 +4870,10 @@ async function sendHomeVacuumCommand(id, command, button) {
 async function sendHomeDeviceToggle(id, button, forceOn) {
     const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
     const device = homeDeviceRecord(id);
+    if (device?.available === false) {
+        showToast('That light is not available yet', 'error');
+        return;
+    }
     if (!homeDeviceCanToggle(device || { id })) return;
     const currentlyOn = card?.classList.contains('is-on') || Boolean(device?.on);
     const nextOn = typeof forceOn === 'boolean' ? forceOn : !currentlyOn;
@@ -5410,15 +5438,7 @@ function bindHomeDashboard() {
             const prevGroup = previous?.group_id || '';
             applyHomeDeviceRoom(id, roomId);
             renderHomeDashboard(homeDash, { replace: true });
-            try {
-                const data = await homeApi({ action: 'room', id, room_id: roomId });
-                if (!data.ok) throw new Error(data.error || 'Could not assign room');
-            } catch (err) {
-                applyHomeDeviceRoom(id, prevRoom);
-                applyHomeDeviceGroup(id, prevGroup);
-                renderHomeDashboard(homeDash, { replace: true });
-                showToast(homeMetaErrorMessage(err, 'Could not assign room'), 'error');
-            }
+            await saveHomeAssignment({ action: 'room', id, room_id: roomId }, id, prevRoom, prevGroup, 'Could not assign room');
             return;
         }
         const groupAssign = event.target.closest('[data-home-group-assign]');
@@ -5430,15 +5450,7 @@ function bindHomeDashboard() {
             const prevGroup = previous?.group_id || '';
             applyHomeDeviceGroup(id, groupId);
             renderHomeDashboard(homeDash, { replace: true });
-            try {
-                const data = await homeApi({ action: 'group', id, group_id: groupId });
-                if (!data.ok) throw new Error(data.error || 'Could not assign group');
-            } catch (err) {
-                applyHomeDeviceRoom(id, prevRoom);
-                applyHomeDeviceGroup(id, prevGroup);
-                renderHomeDashboard(homeDash, { replace: true });
-                showToast(homeMetaErrorMessage(err, 'Could not assign group'), 'error');
-            }
+            await saveHomeAssignment({ action: 'group', id, group_id: groupId }, id, prevRoom, prevGroup, 'Could not assign group');
             return;
         }
         const groupBright = event.target.closest('[data-home-group-bright]');

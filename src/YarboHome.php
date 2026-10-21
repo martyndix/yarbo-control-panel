@@ -940,6 +940,12 @@ final class YarboHome
     {
         $id = trim((string) ($input['id'] ?? ''));
         $action = strtolower(trim((string) ($input['command'] ?? $input['home_action'] ?? '')));
+        if ($id !== '' && !YarboUnifi::isHomeId($id)) {
+            $cached = $this->cachedDeviceRow($id);
+            if (is_array($cached) && self::looksLikeLeftoverHueEndpoint($cached)) {
+                return ['ok' => false, 'error' => 'That row is not a real light. Hide or Remove it.'];
+            }
+        }
         if ($action === 'colour' || $action === 'set_color' || $action === 'set_colour') {
             $action = 'color';
         }
@@ -2171,14 +2177,24 @@ final class YarboHome
         $remembered = $bundle['devices'] !== [] ? $bundle['devices'] : ($store['last_devices'] ?? []);
         $fromMeta = $this->devicesFromStoreHints($store);
         $fabricMtime = YarboMatterFabric::storageMtime($storageDir);
+        $diskIds = $bundle['disk_ids'];
         $cacheFresh = $remembered !== []
             && !self::looksLikeUninterviewedStub($remembered)
             && $bundle['fabric_mtime'] > 0
-            && $bundle['fabric_mtime'] >= $fabricMtime;
+            && $bundle['fabric_mtime'] >= $fabricMtime
+            && $diskIds !== [];
         if ($cacheFresh) {
             $devices = [];
+            $allow = array_fill_keys($diskIds, true);
             foreach ($remembered as $row) {
-                $devices[] = is_array($row) ? YarboMatterFabric::reclassifyRow($row) : $row;
+                if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
+                    continue;
+                }
+                $id = trim((string) ($row['id'] ?? ''));
+                if ($id === '' || !isset($allow[$id])) {
+                    continue;
+                }
+                $devices[] = YarboMatterFabric::reclassifyRow($row);
             }
 
             return [
@@ -2202,8 +2218,9 @@ final class YarboHome
             $devices = $remembered !== []
                 ? self::overlayDeviceStates($fromDisk, $remembered, false)
                 : $fromDisk;
+            $devices = self::dropLeftoverHueEndpoints($devices);
             $source = 'disk';
-            $this->writeDeviceCache($cachePath, $devices, $fabricMtime);
+            $this->writeDeviceCache($cachePath, $devices, $fabricMtime, self::deviceIdList($fromDisk));
             $this->rememberDevices($devices);
         } else {
             $devices = self::preferLiveOrRemembered($fromDisk, $remembered);
@@ -2359,7 +2376,7 @@ final class YarboHome
         $used = [];
         $out = [];
         foreach ($devices as $device) {
-            if (!is_array($device)) {
+            if (!is_array($device) || self::looksLikeLeftoverHueEndpoint($device)) {
                 continue;
             }
             $id = (string) ($device['id'] ?? '');
@@ -2421,6 +2438,68 @@ final class YarboHome
      *
      * @param array<string, mixed> $row
      */
+    /**
+     * @param list<array<string, mixed>> $devices
+     * @return list<array<string, mixed>>
+     */
+    public static function dropLeftoverHueEndpoints(array $devices): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($devices as $row) {
+            if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '' || isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $devices
+     * @return list<string>
+     */
+    public static function deviceIdList(array $devices): array
+    {
+        $ids = [];
+        foreach ($devices as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '') {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function cachedDeviceRow(string $id): ?array
+    {
+        foreach ($this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json') as $row) {
+            if (is_array($row) && (string) ($row['id'] ?? '') === $id) {
+                return $row;
+            }
+        }
+        foreach ($this->load()['last_devices'] ?? [] as $row) {
+            if (is_array($row) && (string) ($row['id'] ?? '') === $id) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
     public static function looksLikeLeftoverHueEndpoint(array $row): bool
     {
         $name = trim((string) ($row['name'] ?? ''));
@@ -2791,7 +2870,7 @@ final class YarboHome
     {
         $byId = [];
         foreach ($base as $row) {
-            if (!is_array($row)) {
+            if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
                 continue;
             }
             $id = trim((string) ($row['id'] ?? ''));
@@ -2800,7 +2879,7 @@ final class YarboHome
             }
         }
         foreach ($incoming as $row) {
-            if (!is_array($row)) {
+            if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
                 continue;
             }
             $id = trim((string) ($row['id'] ?? ''));
@@ -2877,7 +2956,7 @@ final class YarboHome
                 continue;
             }
             $id = trim((string) ($row['id'] ?? ''));
-            if ($id === '' || YarboUnifi::isHomeId($id)) {
+            if ($id === '' || YarboUnifi::isHomeId($id) || self::looksLikeLeftoverHueEndpoint($row)) {
                 continue;
             }
             $slim = [
@@ -2922,11 +3001,11 @@ final class YarboHome
     }
 
     /**
-     * @return array{devices: list<array<string, mixed>>, fabric_mtime: int}
+     * @return array{devices: list<array<string, mixed>>, fabric_mtime: int, disk_ids: list<string>}
      */
     private function readDeviceCacheBundle(string $path): array
     {
-        $empty = ['devices' => [], 'fabric_mtime' => 0];
+        $empty = ['devices' => [], 'fabric_mtime' => 0, 'disk_ids' => []];
         if (!is_file($path)) {
             return $empty;
         }
@@ -2940,10 +3019,18 @@ final class YarboHome
                 $devices[] = $row;
             }
         }
+        $diskIds = [];
+        foreach (is_array($cached['disk_ids'] ?? null) ? $cached['disk_ids'] : [] as $id) {
+            $id = trim((string) $id);
+            if ($id !== '') {
+                $diskIds[] = $id;
+            }
+        }
 
         return [
             'devices' => $devices,
             'fabric_mtime' => (int) ($cached['fabric_mtime'] ?? 0),
+            'disk_ids' => $diskIds,
         ];
     }
 
@@ -2957,18 +3044,19 @@ final class YarboHome
 
     /**
      * @param list<array<string, mixed>> $devices
+     * @param list<string>|null $diskIds
      */
-    private function writeDeviceCache(string $path, array $devices, ?int $fabricMtime = null): void
+    private function writeDeviceCache(string $path, array $devices, ?int $fabricMtime = null, ?array $diskIds = null): void
     {
-        $mtime = $fabricMtime;
-        if ($mtime === null) {
-            $mtime = $this->readDeviceCacheBundle($path)['fabric_mtime'];
-        }
+        $prev = $this->readDeviceCacheBundle($path);
+        $mtime = $fabricMtime ?? $prev['fabric_mtime'];
+        $ids = $diskIds ?? $prev['disk_ids'];
         @file_put_contents($path, json_encode([
-            'v' => 5,
+            'v' => 6,
             'saved_at' => time(),
             'fabric_mtime' => $mtime,
-            'devices' => $devices,
+            'disk_ids' => array_values($ids),
+            'devices' => self::dropLeftoverHueEndpoints($devices),
         ], JSON_UNESCAPED_SLASHES));
     }
 
@@ -3029,7 +3117,7 @@ final class YarboHome
             if ($nodeId <= 0 || $endpoint < 0) {
                 continue;
             }
-            $out[] = YarboMatterFabric::reclassifyRow([
+            $row = YarboMatterFabric::reclassifyRow([
                 'id' => $id,
                 'node_id' => $nodeId,
                 'endpoint' => $endpoint,
@@ -3049,6 +3137,10 @@ final class YarboHome
                 'color_hex' => '',
                 'available' => false,
             ]);
+            if (self::looksLikeLeftoverHueEndpoint($row)) {
+                continue;
+            }
+            $out[] = $row;
         }
 
         return $out;

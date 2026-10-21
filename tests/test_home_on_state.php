@@ -123,6 +123,21 @@ $noHue = YarboHome::overlayDeviceStates(
 );
 $noHueIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $noHue);
 assert_true(!in_array('1:96', $noHueIds, true) && !in_array('1:100', $noHueIds, true), 'overlay must not dump leftover Hue endpoints');
+$cachedHue = YarboHome::overlayDeviceStates(
+    [
+        ['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => false],
+        ['id' => '1:96', 'name' => 'BSB003 96', 'kind' => 'light', 'on' => true],
+        ['id' => '1:100', 'name' => 'BSB003 100', 'kind' => 'light', 'on' => true],
+    ],
+    [['id' => '1:2', 'kind' => 'light', 'on' => true]]
+);
+$cachedHueIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $cachedHue);
+assert_true(in_array('1:2', $cachedHueIds, true), 'overlay keeps the real lamp');
+assert_true(!in_array('1:96', $cachedHueIds, true) && !in_array('1:100', $cachedHueIds, true), 'overlay must drop leftover Hue endpoints already in the cache');
+assert_true(YarboHome::dropLeftoverHueEndpoints([
+    ['id' => '1:2', 'name' => 'Hall', 'kind' => 'light'],
+    ['id' => '1:96', 'name' => 'BSB003 96', 'kind' => 'light'],
+]) === [['id' => '1:2', 'name' => 'Hall', 'kind' => 'light']], 'drop leftover Hue from a saved list');
 assert_true(YarboHome::looksLikeLeftoverHueEndpoint(['id' => '1:96', 'name' => 'BSB003 96']), 'BSB003 96 is a leftover Hue endpoint');
 assert_true(!YarboHome::looksLikeLeftoverHueEndpoint(['id' => '1:12', 'name' => 'Hall', 'kind' => 'light']), 'named Hue lights are not leftover');
 assert_true(!YarboHome::looksLikeLeftoverHueEndpoint([
@@ -296,14 +311,19 @@ file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
     'v' => 5,
     'saved_at' => time(),
     'fabric_mtime' => $fabricMtime,
+    'disk_ids' => ['1:2'],
     'devices' => [
         ['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => false],
+        ['id' => '1:96', 'name' => 'BSB003 96', 'kind' => 'light', 'on' => true],
+        ['id' => '1:9', 'name' => 'Ghost', 'kind' => 'light', 'on' => true],
     ],
 ], JSON_UNESCAPED_SLASHES));
 $skipped = $home->localHomeDevices();
 $skippedIds = array_column($skipped['devices'], 'id');
 assert_true($skipped['fabric']['source'] === 'cache', 'fresh cache should skip re-parsing Hue fabric');
 assert_true(!in_array('1:5', $skippedIds, true), 'stale fabric extra light must wait until the fabric file changes');
+assert_true(!in_array('1:96', $skippedIds, true), 'fresh cache must drop leftover Hue endpoints');
+assert_true(!in_array('1:9', $skippedIds, true), 'fresh cache must drop remembered ids that are not on the fabric');
 
 touch($fabricPath, $fabricMtime + 5);
 $refreshed = $home->localHomeDevices();
@@ -355,6 +375,7 @@ file_put_contents($millRoot . '/data/home-nodes-cache.json', json_encode([
     'v' => 5,
     'saved_at' => time(),
     'fabric_mtime' => $millMtime,
+    'disk_ids' => ['25:1'],
     'devices' => [[
         'id' => '25:1',
         'name' => 'Mill Wi-Fi Panel Heater Gen4',

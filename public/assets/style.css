@@ -3068,20 +3068,28 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     align-items: start;
 }
 
-.home-card--manage .home-device:not(.home-device--hidden):not(.home-device--camera) {
+.home-card--manage .home-device:not(.home-device--hidden):not(.home-device--camera):not(.home-device--vacuum) {
     grid-template-columns: auto minmax(0, 1fr) minmax(6.5rem, auto) minmax(6.5rem, auto) auto;
     grid-template-areas:
         "handle label label label manage"
         "handle room group actions manage";
 }
 
-.home-card--manage .home-device--vacuum:not(.home-device--hidden) {
+.home-card--manage .home-device.home-device--vacuum:not(.home-device--hidden) {
     grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
         "handle label manage"
         "handle room manage"
         "handle group manage"
         "handle actions manage";
+}
+
+.home-card--manage .home-device.home-device--vacuum:not(.home-device--hidden) > .home-device-room-select,
+.home-card--manage .home-device.home-device--vacuum:not(.home-device--hidden) > .home-device-group-select {
+    max-width: none;
+    width: 100%;
+    min-width: 12rem;
+    min-height: 2rem;
 }
 
 .home-card--manage .home-device:not(.home-device--hidden) > .home-reorder-controls {
@@ -4104,13 +4112,18 @@ body.home-is-reordering {
         grid-column: 1 / -1;
     }
 
-    .home-card--manage .home-device:not(.home-device--hidden):not(.home-device--camera) {
+    .home-card--manage .home-device:not(.home-device--hidden):not(.home-device--camera):not(.home-device--vacuum) {
         grid-template-columns: auto minmax(0, 1fr) auto;
         grid-template-areas:
             "handle label manage"
             "handle room manage"
             "handle group manage"
             "handle actions manage";
+    }
+
+    .home-card--manage .home-device.home-device--vacuum:not(.home-device--hidden) > .home-device-room-select,
+    .home-card--manage .home-device.home-device--vacuum:not(.home-device--hidden) > .home-device-group-select {
+        min-width: 0;
     }
 
     .home-card--manage .home-room {

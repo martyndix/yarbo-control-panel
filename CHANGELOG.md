@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.136] - 2026-10-21
+
+### Fixed
+- Home ⚙️ vacuum room and group dropdowns sit on their own rows at a usable width, instead of shrinking to a sliver next to Start and the clean-area chips.
+- Home does not retry a dashboard GET while ⚙️ is open, so putting lights in rooms no longer toasts **Home was busy**. Leftover Hue endpoints and remembered ids that are not on the fabric are dropped from the saved list, so dead extra rows stop timing out On/Off.
+
 ## [4.0.135] - 2026-10-21
 
 ### Fixed
