@@ -491,6 +491,7 @@ final class YarboHome
         $live['devices'] = $this->mergeUnifiDevices($live['devices']);
         $store = $this->adoptLoneHeaterIds($this->load(), $live['devices']);
         $hidden = array_fill_keys($store['hidden'], true);
+        $adaptiveIds = array_fill_keys($this->adaptiveDeviceIds(), true);
         $devices = [];
         $hiddenDevices = [];
         $seenIds = [];
@@ -519,7 +520,7 @@ final class YarboHome
                     }
                 }
             }
-            $isLight = ((string) ($device['kind'] ?? self::KIND_LIGHT)) === self::KIND_LIGHT;
+            $isLight = self::isRoomLight($device);
             $colorable = $isLight && !$isUnifi && (
                 (bool) ($device['colorable'] ?? false)
                 || (bool) ($device['color_hs'] ?? false)
@@ -554,6 +555,7 @@ final class YarboHome
                 'available' => (bool) ($device['available'] ?? true),
                 'has_on_off' => array_key_exists('has_on_off', $device) ? (bool) $device['has_on_off'] : null,
                 'unready' => !$isUnifi && self::looksLikeUnreadyHueLight($device),
+                'adaptive' => !$isUnifi && $isLight && isset($adaptiveIds[$id]),
                 'room_id' => $roomName !== '' ? $roomId : '',
                 'room' => $roomName,
                 'group_id' => $this->deviceGroupId($store, $id, $roomId),
@@ -991,10 +993,11 @@ final class YarboHome
         if ($id === '' || $action === '') {
             return ['ok' => false, 'error' => 'Device and action are required'];
         }
+        if (!YarboUnifi::isHomeId($id) && $action === 'adaptive') {
+            return $this->commandAdaptiveFollow($id, $input);
+        }
         if (!YarboUnifi::isHomeId($id)) {
-            if ($action === 'off') {
-                $this->clearAdaptiveDevice($id);
-            } elseif (in_array($action, ['color', 'color_temp', 'kelvin'], true) && empty($input['adaptive'])) {
+            if (in_array($action, ['color', 'color_temp', 'kelvin'], true) && empty($input['adaptive'])) {
                 $this->pauseAdaptiveDevice($id);
             }
         }
@@ -1078,6 +1081,13 @@ final class YarboHome
             $result = $agent->request($body, 60.0);
         }
         $dropColor = [];
+        if (in_array($action, ['color_temp', 'kelvin'], true) && !($result['ok'] ?? false)
+            && YarboMatterFabric::isUnsupportedCluster((string) ($result['error'] ?? ''))) {
+            $hex = self::kelvinToHex((int) ($body['kelvin'] ?? $this->adaptiveKelvinForDevice($id)));
+            $action = 'color';
+            $body = ['op' => 'command', 'id' => $id, 'action' => 'color', 'hex' => $hex];
+            $result = $agent->request($body, 60.0);
+        }
         if (in_array($action, ['color', 'color_temp', 'kelvin'], true) && !($result['ok'] ?? false)
             && YarboMatterFabric::isUnsupportedCluster((string) ($result['error'] ?? ''))) {
             $dropColor = $action === 'color'
@@ -1097,8 +1107,17 @@ final class YarboHome
         if ($patch !== []) {
             $this->patchCachedDeviceState($id, $patch);
         }
+        $out = ['ok' => true] + $patch;
+        if (in_array($action, ['on', 'toggle'], true) && empty($input['adaptive'])) {
+            $follow = $this->followAdaptiveAfterOn($id);
+            if ($follow !== []) {
+                $out = $follow + $out;
+                $out['ok'] = true;
+                $out['adaptive'] = true;
+            }
+        }
 
-        return ['ok' => true] + $patch;
+        return $out;
     }
 
     public function friendlyMatterError(string $error): string
@@ -1411,20 +1430,12 @@ final class YarboHome
                     $errors[] = (string) ($result['error'] ?? 'failed');
                 }
             } elseif ($kelvin) {
-                $payload = [
-                    'id' => $deviceId,
-                    'command' => 'color_temp',
-                    'kelvin' => $kelvin,
-                ];
-                if ($adaptive) {
-                    $payload['adaptive'] = true;
-                }
-                $result = $this->command($payload);
+                $result = $this->commandAdaptiveColor($deviceId, (int) $kelvin, $adaptive, $caps);
                 $sent = true;
                 if (!($result['ok'] ?? false)) {
                     $errors[] = (string) ($result['error'] ?? 'failed');
                 } elseif ($adaptive) {
-                    $this->rememberAdaptiveApplied([$deviceId => $kelvin]);
+                    $this->rememberAdaptiveApplied([$deviceId => (int) $kelvin]);
                 }
             }
             if (!$sent) {
@@ -1879,7 +1890,7 @@ final class YarboHome
             ], true);
         }
         if ($kind === self::KIND_LIGHT) {
-            return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp', 'pulse'], true);
+            return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp', 'pulse', 'adaptive'], true);
         }
 
         return in_array($action, ['on', 'off', 'toggle', 'brightness', 'color', 'color_temp'], true);
@@ -4430,7 +4441,7 @@ final class YarboHome
             if (!empty($device['on'])) {
                 $on = true;
             }
-            if (!empty($device['dimmable'])) {
+            if (!empty($device['dimmable']) || (isset($device['brightness']) && is_numeric($device['brightness']))) {
                 $dimmable = true;
                 $value = isset($device['brightness']) ? (int) $device['brightness'] : (!empty($device['on']) ? 100 : 0);
                 $brightSum += $value;
@@ -4508,7 +4519,8 @@ final class YarboHome
                 continue;
             }
             $id = (string) ($device['id'] ?? '');
-            if ($id !== '' && in_array($id, $ids, true) && !empty($device['dimmable'])) {
+            if ($id !== '' && in_array($id, $ids, true)
+                && (!empty($device['dimmable']) || (isset($device['brightness']) && is_numeric($device['brightness'])))) {
                 $dimmable[] = $id;
             }
         }
@@ -4550,6 +4562,112 @@ final class YarboHome
         }
 
         return $ids;
+    }
+
+    /**
+     * Approximate RGB white for colour lights that have no Colour Temperature cluster.
+     * Tanner Helland's Kelvin-to-RGB curve, clamped to sRGB.
+     */
+    public static function kelvinToHex(int $kelvin): string
+    {
+        $k = max(1000, min(40000, $kelvin)) / 100.0;
+        if ($k <= 66) {
+            $r = 255.0;
+            $g = 99.4708025861 * log($k) - 161.1195681661;
+        } else {
+            $r = 329.698727446 * (($k - 60.0) ** -0.1332047592);
+            $g = 288.1221695283 * (($k - 60.0) ** -0.0755148492);
+        }
+        if ($k >= 66) {
+            $b = 255.0;
+        } elseif ($k <= 19) {
+            $b = 0.0;
+        } else {
+            $b = 138.5177312231 * log($k - 10.0) - 305.0447927307;
+        }
+        $clamp = static fn (float $n): int => max(0, min(255, (int) round($n)));
+
+        return sprintf('#%02x%02x%02x', $clamp($r), $clamp($g), $clamp($b));
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    private function commandAdaptiveFollow(string $id, array $input): array
+    {
+        $enable = array_key_exists('adaptive', $input) ? !empty($input['adaptive']) : true;
+        if (!$enable) {
+            $this->clearAdaptiveDevice($id);
+
+            return ['ok' => true, 'adaptive' => false];
+        }
+        $this->addAdaptiveExtra($id);
+        $cached = $this->cachedDeviceRow($id);
+        if (is_array($cached) && array_key_exists('on', $cached) && empty($cached['on'])) {
+            return ['ok' => true, 'adaptive' => true];
+        }
+        $kelvin = $this->adaptiveKelvinForDevice($id);
+        $result = $this->commandAdaptiveColor($id, $kelvin, true, $this->deviceControlCaps($id));
+        if (!($result['ok'] ?? false)) {
+            return $result;
+        }
+
+        return ['ok' => true, 'adaptive' => true] + $result;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function followAdaptiveAfterOn(string $id): array
+    {
+        if (!in_array($id, $this->adaptiveDeviceIds(), true)) {
+            return [];
+        }
+        $kelvin = $this->adaptiveKelvinForDevice($id);
+        $result = $this->commandAdaptiveColor($id, $kelvin, true, $this->deviceControlCaps($id));
+        if (!($result['ok'] ?? false)) {
+            return [];
+        }
+        $this->rememberAdaptiveApplied([$id => $kelvin]);
+
+        return $result;
+    }
+
+    /**
+     * @param array{kind?: string, dimmable?: bool, colorable?: bool, color_ct?: bool} $caps
+     * @return array<string, mixed>
+     */
+    public function commandAdaptiveColor(string $id, int $kelvin, bool $adaptive = true, ?array $caps = null): array
+    {
+        $caps ??= $this->deviceControlCaps($id);
+        $kelvin = max(1500, min(8000, $kelvin));
+        if (!empty($caps['color_ct'])) {
+            $payload = [
+                'id' => $id,
+                'command' => 'color_temp',
+                'kelvin' => $kelvin,
+            ];
+            if ($adaptive) {
+                $payload['adaptive'] = true;
+            }
+
+            return $this->command($payload);
+        }
+        if (!empty($caps['colorable'])) {
+            $payload = [
+                'id' => $id,
+                'command' => 'color',
+                'hex' => self::kelvinToHex($kelvin),
+            ];
+            if ($adaptive) {
+                $payload['adaptive'] = true;
+            }
+
+            return $this->command($payload);
+        }
+
+        return ['ok' => false, 'error' => 'This device does not support that control'];
     }
 
     /**

@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.145] - 2026-10-21
+
+### Fixed
+- A group of dimmable lights (such as **TV** with Hue Play bars) now shows a brightness slider next to On/Off.
+- **Time of day** is on colour lights as well as white ones: on the light tile, in a scene, and in a Then. Once ticked, the white keeps following morning-cool to evening-warm while that light stays on. Turning the light off no longer forgets it.
+- UniFi **relay outputs** show on Home without a separate Show on Home tick, so they can be put in a room. Relay inputs still need the tick.
+
 ## [4.0.144] - 2026-10-21
 
 ### Fixed

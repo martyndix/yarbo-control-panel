@@ -160,9 +160,36 @@ $homePhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 $autoPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHomeAutomations.php');
 assert_true(str_contains($homePhp, 'function adaptiveKelvinAt'), 'kelvin curve is on Home');
 assert_true(str_contains($autoPhp, 'function applyAdaptiveLighting'), 'runner keeps updating Time of day');
-assert_true(str_contains($autoPhp, "\$home->command(\$payload)"), 'Time of day tick sends color_temp to Matter, not On');
-assert_true(!preg_match('/adaptive\'\]\)\) \{\s*\$hex = \'\';\s*\$kelvin = 0;/', $autoPhp), 'Then Time of day must keep kelvin');
-assert_true(str_contains($autoPhp, "\$ct['adaptive'] = true"), 'Then Time of day must not pause itself');
+assert_true(str_contains($autoPhp, 'commandAdaptiveColor'), 'Time of day tick sends colour temp or RGB white, not On');
+assert_true(!str_contains($autoPhp, "\$hex = '';\n        \$kelvin = 0;"), 'Then Time of day must keep kelvin');
+assert_true(str_contains($homePhp, "'adaptive' => true"), 'Time of day commands must not pause themselves');
 assert_true(str_contains($homePhp, '!$caps[\'color_ct\'] && !$adaptive'), 'scene Time of day still sends kelvin');
+assert_true(str_contains($homePhp, 'function kelvinToHex'), 'colour lights get a white from kelvin');
+assert_true(str_contains($homePhp, 'function commandAdaptiveFollow'), 'light tiles can set Time of day');
+assert_true(!preg_match('/\$action === \'off\'\) \{\s*\$this->clearAdaptiveDevice/', $homePhp), 'Off keeps Time of day so it can resume');
+assert_true(str_contains($js, 'function homeCanAdaptive'), 'colour lights can use Time of day');
+assert_true(str_contains($js, 'data-home-adaptive'), 'light tile Time of day checkbox');
+assert_true(str_contains($js, 'function homeMembersDimmable'), 'group brightness uses dimmable members');
+
+$warmHex = YarboHome::kelvinToHex(2200);
+$coolHex = YarboHome::kelvinToHex(5000);
+assert_true(preg_match('/^#[0-9a-f]{6}$/', $warmHex) === 1, 'warm white is a hex colour');
+assert_true(preg_match('/^#[0-9a-f]{6}$/', $coolHex) === 1, 'cool white is a hex colour');
+$warmB = hexdec(substr($warmHex, 5, 2));
+$coolB = hexdec(substr($coolHex, 5, 2));
+assert_true($coolB > $warmB, 'daytime white is cooler than night: ' . $warmHex . ' vs ' . $coolHex);
+
+$home->addAdaptiveExtra('1:2');
+assert_true(in_array('1:2', $home->adaptiveDeviceIds(), true), 'tile Time of day stays in extra');
+$colorScene = $home->saveScene([
+    'name' => 'Play',
+    'actions' => [[
+        'id' => '1:2',
+        'on' => true,
+        'adaptive' => true,
+        'color_hex' => '#00ff00',
+    ]],
+]);
+assert_true(!empty($colorScene['scene']['actions'][0]['adaptive']), 'colour lights can save Time of day in a scene');
 
 echo "ok\n";

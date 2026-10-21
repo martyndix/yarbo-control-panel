@@ -628,6 +628,57 @@ foreach (($heatRooms['plant']['groups'] ?? []) as $row) {
 }
 assert_true(($heatGroups['g-heat']['switchable'] ?? true) === false, 'heater-only group has no On/Off');
 
+$tvRoot = sys_get_temp_dir() . '/yarbo-home-tv-group-' . bin2hex(random_bytes(3));
+mkdir($tvRoot . '/data', 0775, true);
+file_put_contents($tvRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true],
+    'active_module' => 'home',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($tvRoot . '/data/home.json', json_encode([
+    'names' => [],
+    'room_defs' => [['id' => 'lounge', 'name' => 'Lounge']],
+    'rooms' => [
+        '10:1' => 'lounge',
+        '10:2' => 'lounge',
+        '10:3' => 'lounge',
+        '10:4' => 'lounge',
+    ],
+    'group_defs' => [['id' => 'g-tv', 'name' => 'TV', 'room_id' => 'lounge']],
+    'groups' => [
+        '10:1' => 'g-tv',
+        '10:2' => 'g-tv',
+        '10:3' => 'g-tv',
+        '10:4' => 'g-tv',
+    ],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'last_devices' => [
+        ['id' => '10:1', 'name' => 'Hue Play Centre', 'kind' => 'light', 'on' => true, 'dimmable' => true, 'brightness' => 80, 'colorable' => true, 'color_ct' => true, 'available' => true],
+        ['id' => '10:2', 'name' => 'Hue Play Left', 'kind' => 'light', 'on' => true, 'dimmable' => true, 'brightness' => 40, 'colorable' => true, 'available' => true],
+        ['id' => '10:3', 'name' => 'Hue Play Right', 'kind' => 'light', 'on' => true, 'dimmable' => true, 'brightness' => 40, 'colorable' => true, 'available' => true],
+        ['id' => '10:4', 'name' => 'TV Stand', 'kind' => 'light', 'on' => true, 'dimmable' => true, 'brightness' => 50, 'colorable' => true, 'available' => true],
+    ],
+], JSON_UNESCAPED_SLASHES));
+$tvHome = new YarboHome($tvRoot);
+$tvDash = $tvHome->dashboard();
+$tvRooms = [];
+foreach ($tvDash['rooms'] ?? [] as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $tvRooms[$row['id']] = $row;
+    }
+}
+$tvGroups = [];
+foreach (($tvRooms['lounge']['groups'] ?? []) as $row) {
+    if (is_array($row) && isset($row['id'])) {
+        $tvGroups[$row['id']] = $row;
+    }
+}
+assert_true(($tvGroups['g-tv']['switchable'] ?? false) === true, 'TV group of lights keeps On/Off');
+assert_true(($tvGroups['g-tv']['dimmable'] ?? false) === true, 'TV group of dimmable lights has a brightness slider');
+assert_true(($tvRooms['lounge']['dimmable'] ?? false) === true, 'room of dimmable lights has a brightness slider');
+
 $sceneRelayRoot = sys_get_temp_dir() . '/yarbo-scene-relay-' . bin2hex(random_bytes(3));
 mkdir($sceneRelayRoot . '/data', 0775, true);
 file_put_contents($sceneRelayRoot . '/data/hub-config.json', json_encode([
@@ -793,6 +844,8 @@ assert_true(str_contains($homePhp, 'function countsTowardRoomOn'), 'rooms ignore
 assert_true(str_contains($homePhp, 'lightIdsAmong'), 'room and group commands only target lights');
 assert_true(str_contains($js, 'function homeRoomSwitchable'), 'room heading hides On without lights');
 assert_true(str_contains($js, 'function homeGroupSwitchable'), 'group heading hides On without lights');
+assert_true(str_contains($js, 'homeMembersDimmable(members)'), 'group heading slider uses member brightness');
+assert_true(str_contains($js, 'data-home-adaptive'), 'colour lights have Time of day on the tile');
 assert_true(str_contains($js, 'd.group_id === id && homeIsLight(d)'), 'group On only paints lights');
 assert_true(str_contains($js, 'd.room_id === id && homeIsLight(d)'), 'room On only paints lights');
 assert_true(str_contains($js, "btn.textContent = 'Adding…'"), 'Add device shows Adding while pairing');

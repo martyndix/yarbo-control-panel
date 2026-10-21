@@ -1420,6 +1420,19 @@ foreach (['unifi:relay:usl1:0', 'unifi:relay:usl1:1', 'unifi:sensor:rin-usl1-0',
         exit(1);
     }
 }
+$usl->save(['show_on_home' => []]);
+$alwaysRelayIds = array_column($usl->homeRows(), 'id');
+foreach (['unifi:relay:usl1:0', 'unifi:relay:usl1:1'] as $need) {
+    if (!in_array($need, $alwaysRelayIds, true)) {
+        fwrite(STDERR, "relay missing from Home without Show on Home tick $need " . json_encode($alwaysRelayIds) . "\n");
+        exit(1);
+    }
+}
+if (in_array('unifi:sensor:rin-usl1-0', $alwaysRelayIds, true)) {
+    fwrite(STDERR, 'relay input should still need a Show on Home tick ' . json_encode($alwaysRelayIds) . "\n");
+    exit(1);
+}
+$usl->setShowOnHome('unifi:relay:usl1:0', true);
 $uslHub = new Yarbo\YarboHub($uslRoot);
 if (!$uslHub->save(['modules' => ['yarbo' => false, 'home' => true, 'unifi' => true, 'powerwall' => false, 'lymow' => false]])) {
     fwrite(STDERR, "USL hub save failed\n");

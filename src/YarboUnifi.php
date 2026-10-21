@@ -475,9 +475,6 @@ final class YarboUnifi
     {
         $this->kickAccessDoorRefresh();
         $config = $this->load();
-        if ($config['show_on_home'] === []) {
-            return [];
-        }
         $wanted = array_fill_keys($config['show_on_home'], true);
         $tickedRelays = $this->tickedRelayIds($config['show_on_home']);
         $rows = [];
@@ -486,13 +483,19 @@ final class YarboUnifi
                 continue;
             }
             $id = (string) ($device['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $kind = (string) ($device['kind'] ?? '');
             $companionOf = (string) ($device['companion_of'] ?? '');
             $relayId = (string) ($device['relay_id'] ?? '');
-            if ($id !== '' && (
-                isset($wanted[$id])
+            // Relay outputs always belong on Home so they can go in a room
+            // without a separate Show on Home tick (cameras still need one).
+            if ($kind === self::KIND_RELAY
+                || isset($wanted[$id])
                 || ($companionOf !== '' && isset($wanted[$companionOf]))
                 || ($relayId !== '' && isset($tickedRelays[$relayId]))
-            )) {
+            ) {
                 $rows[] = $device;
             }
         }

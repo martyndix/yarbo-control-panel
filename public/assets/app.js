@@ -3259,8 +3259,15 @@ function homeIsUnifi(d) {
     return d?.source === 'unifi' || String(d?.id || '').startsWith('unifi:');
 }
 
+function homeCanAdaptive(d) {
+    if (!d || homeIsUnifi(d)) return false;
+    const kind = String(d.kind || 'light');
+    if (kind === 'heater' || kind === 'vacuum' || kind === 'switch' || kind === 'plug') return false;
+    return Boolean(d.color_ct || d.colorable || d.color_hs || d.color_xy);
+}
+
 function homeSceneCanAdaptive(d) {
-    return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && d.kind !== 'vacuum' && d.color_ct);
+    return homeCanAdaptive(d);
 }
 
 function homeDeviceCanToggle(d) {
@@ -3282,6 +3289,10 @@ function homeIsLight(d) {
 
 function homeMembersHaveLight(members) {
     return (members || []).some((d) => homeIsLight(d));
+}
+
+function homeMembersDimmable(members) {
+    return (members || []).some((d) => homeIsLight(d) && (d.dimmable || (d.brightness != null && d.brightness !== '')));
 }
 
 function homeRoomSwitchable(room) {
@@ -3770,8 +3781,12 @@ function patchHomeDashboard(data) {
             if (d.vacuum_status) rec.vacuum_status = d.vacuum_status;
             if (d.vacuum_battery != null) rec.vacuum_battery = d.vacuum_battery;
             if (d.vacuum_clean) rec.vacuum_clean = d.vacuum_clean;
+            if (typeof d.adaptive === 'boolean') rec.adaptive = d.adaptive;
         }
         patchHomeDeviceVisual(d.id, d.on, d);
+        const card = document.querySelector(`[data-home-id="${CSS.escape(d.id)}"]`);
+        const box = card?.querySelector('[data-home-adaptive]');
+        if (box && typeof d.adaptive === 'boolean') box.checked = d.adaptive;
     });
     (data.rooms || []).forEach((room) => {
         const el = document.querySelector(`[data-home-room="${CSS.escape(room.id)}"]`);
@@ -4136,12 +4151,13 @@ function homeGroupSelectHtml(d, rooms) {
     return `<select class="home-device-group-select" data-home-group-assign="${escapeHtml(d.id)}" aria-label="Group">${opts.join('')}</select>`;
 }
 
-function homeRoomHeadingHtml(room) {
+function homeRoomHeadingHtml(room, members) {
     const on = Boolean(room.on);
-    const switchable = homeRoomSwitchable(room);
+    const switchable = homeMembersHaveLight(members) || homeRoomSwitchable(room);
+    const dimmable = homeMembersDimmable(members) || Boolean(room.dimmable);
     const expanded = homeExpandedRooms.has(room.id);
-    const bright = switchable && room.dimmable
-        ? `<input type="range" min="0" max="100" value="${Number(room.brightness ?? (on ? 100 : 0))}" data-home-room-bright="${escapeHtml(room.id)}">`
+    const bright = switchable && dimmable
+        ? `<input type="range" min="0" max="100" value="${Number(room.brightness ?? (on ? 100 : 0))}" data-home-room-bright="${escapeHtml(room.id)}" class="home-bright" title="Brightness" aria-label="Brightness">`
         : '';
     const toggle = switchable
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-room-toggle="${escapeHtml(room.id)}">${on ? 'Off' : 'On'}</button>`
@@ -4169,12 +4185,13 @@ function homeRoomHeadingHtml(room) {
     </div>`;
 }
 
-function homeGroupHeadingHtml(group) {
+function homeGroupHeadingHtml(group, members) {
     const on = Boolean(group.on);
-    const switchable = homeGroupSwitchable(group);
+    const switchable = homeMembersHaveLight(members) || homeGroupSwitchable(group);
+    const dimmable = homeMembersDimmable(members) || Boolean(group.dimmable);
     const expanded = homeExpandedGroups.has(group.id);
-    const bright = switchable && group.dimmable
-        ? `<input type="range" min="0" max="100" value="${Number(group.brightness ?? (on ? 100 : 0))}" data-home-group-bright="${escapeHtml(group.id)}">`
+    const bright = switchable && dimmable
+        ? `<input type="range" min="0" max="100" value="${Number(group.brightness ?? (on ? 100 : 0))}" data-home-group-bright="${escapeHtml(group.id)}" class="home-bright" title="Brightness" aria-label="Brightness">`
         : '';
     const toggle = switchable
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-group-toggle="${escapeHtml(group.id)}">${on ? 'Off' : 'On'}</button>`
@@ -4244,7 +4261,8 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const bright = !hidden && !unifi && homeIsLight(d) && d.dimmable
         ? `<input type="range" min="0" max="100" value="${Number(d.brightness ?? (on ? 100 : 0))}" data-home-bright="${escapeHtml(d.id)}" class="home-bright" title="Brightness" aria-label="Brightness">`
         : '';
-    const color = hidden || unifi ? '' : homeColorInputsHtml(
+    const adaptive = Boolean(d.adaptive);
+    const color = hidden || unifi || adaptive ? '' : homeColorInputsHtml(
         d,
         on,
         d.color_hex,
@@ -4339,10 +4357,15 @@ function homeDeviceActionsHtml(d, bright, color) {
         return `<div class="home-device-actions"><span class="home-device-meta">Reading…</span></div>`;
     }
     const on = Boolean(d.on);
+    const adaptive = Boolean(d.adaptive);
+    const tod = homeCanAdaptive(d)
+        ? `<label class="home-adaptive" title="Warm at night, cooler in the day"><input type="checkbox" data-home-adaptive="${escapeHtml(d.id)}" ${adaptive ? 'checked' : ''}> Time of day</label>`
+        : '';
     return `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
             ${bright}
             ${color}
+            ${tod}
         </div>`;
 }
 
@@ -4621,13 +4644,13 @@ function renderHomeDashboard(data, opts = {}) {
                 if (!list.length && !homeManageOpen) return;
                 const expanded = homeExpandedRooms.has(room.id);
                 const groups = room.groups || [];
-                html += homeRoomHeadingHtml(room);
+                html += homeRoomHeadingHtml(room, list);
                 html += `<div class="home-room-devices"${expanded ? '' : ' hidden'}>`;
                 groups.forEach((group) => {
                     const members = list.filter((d) => d.group_id === group.id);
                     if (!members.length && !homeManageOpen) return;
                     const groupOpen = homeExpandedGroups.has(group.id);
-                    html += homeGroupHeadingHtml(group);
+                    html += homeGroupHeadingHtml(group, members);
                     html += `<div class="home-group-devices"${groupOpen ? '' : ' hidden'}>`;
                     html += members.length
                         ? members.map((d) => homeDeviceCardHtml(d, false, rooms)).join('')
@@ -4796,11 +4819,13 @@ function refreshHomeRoomCounts() {
         const members = devices.filter((d) => d.room_id === room.id);
         room.count = members.length;
         room.switchable = homeMembersHaveLight(members);
+        room.dimmable = homeMembersDimmable(members);
         room.on = members.some((d) => d.on && homeIsLight(d));
         (room.groups || []).forEach((group) => {
             const gm = members.filter((d) => d.group_id === group.id);
             group.count = gm.length;
             group.switchable = homeMembersHaveLight(gm);
+            group.dimmable = homeMembersDimmable(gm);
             group.on = gm.some((d) => d.on && homeIsLight(d));
         });
     });
@@ -5571,6 +5596,28 @@ function bindHomeDashboard() {
             queueHomeHeaterSetpoint(setpoint.getAttribute('data-home-setpoint') || '', celsius, setpoint);
             return;
         }
+        const adaptive = event.target.closest('[data-home-adaptive]');
+        if (adaptive) {
+            const id = adaptive.getAttribute('data-home-adaptive') || '';
+            const on = Boolean(adaptive.checked);
+            const device = homeDeviceRecord(id);
+            if (device) device.adaptive = on;
+            try {
+                const data = await homeApi({
+                    action: 'command',
+                    id,
+                    command: 'adaptive',
+                    adaptive: on,
+                });
+                if (!data.ok) throw new Error(data.error || 'Failed');
+                await loadHomeDashboard();
+            } catch (err) {
+                adaptive.checked = !on;
+                if (device) device.adaptive = !on;
+                showToast(err.message || 'Time of day failed', 'error');
+            }
+            return;
+        }
         const color = event.target.closest('[data-home-color]');
         if (color) {
             const id = color.getAttribute('data-home-color');
@@ -5578,6 +5625,8 @@ function bindHomeDashboard() {
             try {
                 setHomeDeviceOn(id, true);
                 patchHomeDeviceVisual(id, true, { color_hex: hex });
+                const rec = homeDeviceRecord(id);
+                if (rec) rec.adaptive = false;
                 const data = await homeApi({
                     action: 'command',
                     id,
@@ -5754,7 +5803,7 @@ function homeAutoThenCanKelvin(d) {
 }
 
 function homeAutoThenCanAdaptive(d) {
-    return Boolean(d && !homeIsUnifi(d) && d.kind !== 'heater' && d.kind !== 'vacuum' && d.color_ct);
+    return homeCanAdaptive(d);
 }
 
 function homeAutoSanitizeThenLooks() {

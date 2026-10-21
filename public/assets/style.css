@@ -3271,6 +3271,32 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     max-width: 28vw;
     height: 1.1rem;
     margin: 0;
+    flex: 0 0 5.5rem;
+}
+
+.home-room .home-device-actions {
+    min-width: 7.5rem;
+}
+
+.home-adaptive {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 650;
+    color: var(--muted);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.home-adaptive input {
+    margin: 0;
+}
+
+.home-device.is-on .home-adaptive,
+.home-adaptive:has(input:checked) {
+    color: var(--accent-hover);
 }
 
 .home-device-actions input.home-bright {
