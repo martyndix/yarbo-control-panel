@@ -61,6 +61,8 @@ try {
         'scene_off' => $home->stopScene((string) ($input['id'] ?? '')),
         'paper_assign' => $home->assignPaper((string) ($input['tablet_id'] ?? ''), is_array($input['ids'] ?? null) ? $input['ids'] : []),
         'reorder' => $home->reorder($input),
+        'backup_export' => $home->exportBackup(),
+        'backup_import' => $home->importBackup($input),
         'automation_save' => (new YarboHomeAutomations($projectRoot))->save($input),
         'automation_delete' => (new YarboHomeAutomations($projectRoot))->delete((string) ($input['id'] ?? '')),
         'automation_enable' => (new YarboHomeAutomations($projectRoot))->setEnabled(

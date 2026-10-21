@@ -310,6 +310,57 @@ final class YarboHomeAutomations
     }
 
     /**
+     * @return array{latitude: ?float, longitude: ?float, timezone: string, automations: list<array<string, mixed>>}
+     */
+    public function exportStore(): array
+    {
+        $store = $this->load();
+
+        return [
+            'latitude' => $store['latitude'],
+            'longitude' => $store['longitude'],
+            'timezone' => $store['timezone'],
+            'automations' => $store['automations'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function importStore(array $input): array
+    {
+        $store = $this->load();
+        if (array_key_exists('latitude', $input)) {
+            $store['latitude'] = self::optionalFloat($input['latitude']);
+        }
+        if (array_key_exists('longitude', $input)) {
+            $store['longitude'] = self::optionalFloat($input['longitude']);
+        }
+        if (array_key_exists('timezone', $input)) {
+            $store['timezone'] = YarboVestaboard::normalizeTimezone((string) $input['timezone']);
+        }
+        if (isset($input['automations']) && is_array($input['automations'])) {
+            $list = [];
+            foreach ($input['automations'] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $rule = $this->normalizeRule($row, false);
+                if ($rule !== null) {
+                    $list[] = $rule;
+                }
+            }
+            $store['automations'] = $list;
+        }
+        if (!$this->write($store)) {
+            return ['ok' => false, 'error' => 'Could not save automations'];
+        }
+
+        return ['ok' => true, 'count' => count($store['automations'])];
+    }
+
+    /**
      * @return array{latitude: ?float, longitude: ?float, source: ?string, needs_coords: bool}
      */
     public function coordsPublic(): array

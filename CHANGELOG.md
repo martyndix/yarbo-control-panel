@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.134] - 2026-10-20
+
+### Added
+- Home ⚙️ **Download backup** / **Restore from file** saves names, rooms, groups, scenes, HOUSE buttons, and automations as a JSON file on this computer. Restore replaces those on the Pi; Matter pairing is not changed.
+
 ## [4.0.133] - 2026-10-20
 
 ### Fixed

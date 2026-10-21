@@ -591,7 +591,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Home</h2>
                 <div class="section-header-actions">
                     <button type="button" class="btn btn-secondary btn-compact" id="home-automations-open" aria-controls="home-automations-page" aria-expanded="false">Automations</button>
-                    <button type="button" class="home-manage-toggle" id="home-manage-toggle" aria-pressed="false" aria-label="Show device settings" title="Rename, rooms, hide, and remove devices">⚙️</button>
+                    <button type="button" class="home-manage-toggle" id="home-manage-toggle" aria-pressed="false" aria-label="Show Home settings" title="Rename, reorder, rooms, scenes, backup, PaperMono assignment, hide, and add devices">⚙️</button>
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
@@ -626,6 +626,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div id="home-scenes" class="home-scene-list"></div>
             </div>
             <div class="home-manage-extras">
+            <div class="home-backup">
+                <h3 class="settings-subtitle">Backup</h3>
+                <p class="hint">Download names, rooms, groups, scenes, HOUSE buttons, and automations to this computer. Restore replaces those on the Pi — Matter pairing stays. Keep a copy after you finish grouping, and after you change automations.</p>
+                <div class="home-backup-actions">
+                    <button type="button" class="btn" id="home-backup-download">Download backup</button>
+                    <button type="button" class="btn btn-secondary" id="home-backup-restore">Restore from file</button>
+                    <input type="file" id="home-backup-file" class="home-backup-file" accept="application/json,.json" hidden>
+                </div>
+            </div>
             <h3 class="settings-subtitle">Scene editor</h3>
             <p class="hint">Pick which lights and UniFi relays belong to a scene and set on/off, brightness, and colour. Relays are on/off only. White lights can tick <strong>Time of day</strong> (warm at night, cooler in the day) and keep changing while the scene is on. Search or open In scene to skip the long list. PaperMono can run a scene and tap again to turn those devices off. These are not Apple or Hue scenes.</p>
             <div id="home-scene-editor" class="home-scene-editor">
@@ -1098,6 +1107,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p id="settings-home-setup-status" class="updated">Matter server: —</p>
                             <button type="button" class="btn" id="settings-home-setup">Set up Matter server</button>
                             <p class="hint">On a Raspberry Pi, Settings → Panel updates installs Docker and starts the Matter server. Tap the button if pairing is not ready yet. Pairing works on the Pi (IPv6 on). See <code>docs/home.md</code>.</p>
+                            <p class="hint">Tap ⚙️ on Home for <strong>Download backup</strong> / <strong>Restore from file</strong> — names, rooms, scenes, HOUSE buttons, and automations as a JSON file on this computer.</p>
                         </section>
 
                         <section class="settings-section hidden" id="settings-unifi-section" data-settings-pane="unifi">

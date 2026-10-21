@@ -3397,6 +3397,17 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     display: flex;
 }
 
+.home-backup {
+    margin: 0 0 1rem;
+}
+
+.home-backup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+}
+
 .home-room-add input {
     flex: 1 1 10rem;
     min-width: 0;

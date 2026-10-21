@@ -28,6 +28,8 @@ final class YarboHome
     public const ADAPTIVE_SUNSET_K = 2700;
     public const ADAPTIVE_STEP_K = 50;
     public const ADAPTIVE_MIN_INTERVAL_SEC = 60;
+    public const BACKUP_KIND = 'yarbo-home-backup';
+    public const BACKUP_VERSION = 1;
 
     /** Set when load() puts rooms/scenes back from a backup. */
     private string $restoredHomeFrom = '';
@@ -269,6 +271,177 @@ final class YarboHome
         }
 
         return $this->write($store);
+    }
+
+    /**
+     * Names, rooms, groups, scenes, HOUSE buttons, and automations for a local file.
+     *
+     * @return array<string, mixed>
+     */
+    public function exportBackup(): array
+    {
+        $store = $this->load();
+        $backup = [
+            'kind' => self::BACKUP_KIND,
+            'version' => self::BACKUP_VERSION,
+            'saved_at' => gmdate('c'),
+            'home' => [
+                'names' => $store['names'],
+                'room_defs' => $store['room_defs'],
+                'rooms' => $store['rooms'],
+                'group_defs' => $store['group_defs'],
+                'groups' => $store['groups'],
+                'scenes' => $store['scenes'],
+                'paper' => $store['paper'],
+                'hidden' => $store['hidden'],
+                'device_order' => $store['device_order'],
+                'last_devices' => $store['last_devices'],
+            ],
+            'automations' => (new YarboHomeAutomations($this->projectRoot))->exportStore(),
+        ];
+
+        return [
+            'ok' => true,
+            'backup' => $backup,
+            'summary' => self::backupSummary($backup),
+        ];
+    }
+
+    /**
+     * Replace rooms/scenes/names/HOUSE and/or automations from a downloaded backup.
+     * Matter pairing is not changed.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public function importBackup(array $payload): array
+    {
+        $backup = self::normalizeBackupPayload($payload);
+        if ($backup === null) {
+            return ['ok' => false, 'error' => 'That file is not a Home backup'];
+        }
+        $homeIn = is_array($backup['home'] ?? null) ? $backup['home'] : null;
+        $autoIn = is_array($backup['automations'] ?? null) ? $backup['automations'] : null;
+        if ($homeIn === [] || $homeIn === null) {
+            $homeIn = null;
+        }
+        if ($autoIn === [] || $autoIn === null) {
+            $autoIn = null;
+        }
+        if ($homeIn === null && $autoIn === null) {
+            return ['ok' => false, 'error' => 'That backup has no rooms, scenes, or automations'];
+        }
+        $current = $this->load();
+        if ($homeIn !== null) {
+            $this->snapshotStore($current);
+            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order'] as $key) {
+                if (isset($homeIn[$key]) && is_array($homeIn[$key])) {
+                    $current[$key] = $homeIn[$key];
+                }
+            }
+            if (isset($homeIn['last_devices']) && is_array($homeIn['last_devices'])) {
+                $remembered = $this->normalizeLastDevices($homeIn['last_devices']);
+                if ($remembered !== []) {
+                    $current['last_devices'] = $remembered;
+                }
+            }
+            if (!$this->writeRaw($current)) {
+                return ['ok' => false, 'error' => 'Could not save rooms and scenes'];
+            }
+        }
+        if ($autoIn !== null) {
+            $autoResult = (new YarboHomeAutomations($this->projectRoot))->importStore($autoIn);
+            if (!($autoResult['ok'] ?? false)) {
+                return ['ok' => false, 'error' => (string) ($autoResult['error'] ?? 'Could not save automations')];
+            }
+        }
+        $fresh = $this->load();
+
+        return [
+            'ok' => true,
+            'summary' => [
+                'rooms' => count($fresh['room_defs']),
+                'named' => count($fresh['names']),
+                'assigned' => count($fresh['rooms']),
+                'scenes' => count($fresh['scenes']),
+                'automations' => count((new YarboHomeAutomations($this->projectRoot))->publicList()),
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array{kind: string, home: ?array<string, mixed>, automations: ?array<string, mixed>}|null
+     */
+    public static function normalizeBackupPayload(array $payload): ?array
+    {
+        $data = $payload;
+        for ($i = 0; $i < 3; $i++) {
+            if (($data['kind'] ?? '') === self::BACKUP_KIND) {
+                break;
+            }
+            if (isset($data['backup']) && is_array($data['backup'])) {
+                $data = $data['backup'];
+                continue;
+            }
+            break;
+        }
+        $autoWrap = static function (mixed $auto): ?array {
+            if (!is_array($auto)) {
+                return null;
+            }
+            if (array_is_list($auto)) {
+                return ['automations' => $auto];
+            }
+            if (isset($auto['automations']) && is_array($auto['automations'])) {
+                return $auto;
+            }
+
+            return null;
+        };
+        if (($data['kind'] ?? '') === self::BACKUP_KIND) {
+            $home = is_array($data['home'] ?? null) ? $data['home'] : null;
+            $auto = $autoWrap($data['automations'] ?? null);
+
+            return ($home === null && $auto === null)
+                ? null
+                : ['kind' => self::BACKUP_KIND, 'home' => $home, 'automations' => $auto];
+        }
+        if (isset($data['room_defs']) || isset($data['scenes']) || isset($data['names']) || isset($data['rooms'])) {
+            return [
+                'kind' => self::BACKUP_KIND,
+                'home' => $data,
+                'automations' => $autoWrap($data['automations'] ?? null),
+            ];
+        }
+        if (isset($data['automations']) && is_array($data['automations'])) {
+            return [
+                'kind' => self::BACKUP_KIND,
+                'home' => null,
+                'automations' => $autoWrap($data),
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $backup
+     * @return array{rooms: int, named: int, assigned: int, scenes: int, automations: int}
+     */
+    public static function backupSummary(array $backup): array
+    {
+        $home = is_array($backup['home'] ?? null) ? $backup['home'] : [];
+        $auto = is_array($backup['automations'] ?? null) ? $backup['automations'] : [];
+        $rules = is_array($auto['automations'] ?? null) ? $auto['automations'] : [];
+
+        return [
+            'rooms' => count(is_array($home['room_defs'] ?? null) ? $home['room_defs'] : []),
+            'named' => count(is_array($home['names'] ?? null) ? $home['names'] : []),
+            'assigned' => count(is_array($home['rooms'] ?? null) ? $home['rooms'] : []),
+            'scenes' => count(is_array($home['scenes'] ?? null) ? $home['scenes'] : []),
+            'automations' => count($rules),
+        ];
     }
 
     /**

@@ -3765,8 +3765,8 @@ function applyHomeManageUi() {
         btn.setAttribute('aria-pressed', homeManageOpen ? 'true' : 'false');
         btn.setAttribute('aria-label', homeManageOpen ? 'Hide Home settings' : 'Show Home settings');
         btn.title = homeManageOpen
-            ? 'Done with names, rooms, order, scenes, and PaperMono assignment'
-            : 'Rename, reorder, rooms, scenes, PaperMono assignment, hide, and add devices';
+            ? 'Done with names, rooms, order, scenes, backup, and PaperMono assignment'
+            : 'Rename, reorder, rooms, scenes, backup, PaperMono assignment, hide, and add devices';
     }
 }
 
@@ -4868,6 +4868,109 @@ async function sendHomeHeaterSetpoint(id, celsius, input) {
     }
 }
 
+function homeBackupStamp() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}${m}${d}`;
+}
+
+function homeBackupCountsLabel(summary) {
+    const rooms = Number(summary?.rooms || 0);
+    const scenes = Number(summary?.scenes || 0);
+    const automations = Number(summary?.automations || 0);
+    const roomsLabel = rooms === 1 ? '1 room' : `${rooms} rooms`;
+    const scenesLabel = scenes === 1 ? '1 scene' : `${scenes} scenes`;
+    const autoLabel = automations === 1 ? '1 automation' : `${automations} automations`;
+    return `${roomsLabel}, ${scenesLabel}, ${autoLabel}`;
+}
+
+function peekHomeBackup(parsed) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    let data = parsed;
+    for (let i = 0; i < 3; i += 1) {
+        if (data.kind === 'yarbo-home-backup') break;
+        if (data.backup && typeof data.backup === 'object' && !Array.isArray(data.backup)) {
+            data = data.backup;
+            continue;
+        }
+        break;
+    }
+    const nestedHome = data.home && typeof data.home === 'object' && !Array.isArray(data.home) ? data.home : null;
+    const looksHome = Boolean(nestedHome || data.room_defs || data.scenes || data.names || data.rooms);
+    const looksAuto = data.automations !== undefined;
+    if (data.kind !== 'yarbo-home-backup' && !looksHome && !looksAuto) return null;
+    const home = nestedHome || (looksHome ? data : {});
+    const autoBlock = data.automations;
+    const rules = Array.isArray(autoBlock)
+        ? autoBlock
+        : (autoBlock && typeof autoBlock === 'object' && Array.isArray(autoBlock.automations) ? autoBlock.automations : []);
+    return {
+        rooms: Array.isArray(home.room_defs) ? home.room_defs.length : 0,
+        scenes: Array.isArray(home.scenes) ? home.scenes.length : 0,
+        automations: rules.length,
+    };
+}
+
+async function downloadHomeBackup() {
+    const btn = document.getElementById('home-backup-download');
+    if (btn) btn.disabled = true;
+    try {
+        const data = await homeApi({ action: 'backup_export' });
+        if (!data.ok || !data.backup) throw new Error(data.error || 'Could not make a backup');
+        const blob = new Blob([JSON.stringify(data.backup, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `yarbo-home-${homeBackupStamp()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showToast(`Saved backup (${homeBackupCountsLabel(data.summary)})`, 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not download backup', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function restoreHomeBackupFromInput(event) {
+    const input = event.currentTarget;
+    const file = input?.files?.[0];
+    if (input) input.value = '';
+    if (!file) return;
+    let parsed;
+    try {
+        parsed = JSON.parse(await file.text());
+    } catch {
+        showToast('That file is not valid JSON', 'error');
+        return;
+    }
+    const peek = peekHomeBackup(parsed);
+    if (!peek) {
+        showToast('That file is not a Home backup', 'error');
+        return;
+    }
+    if (!window.confirm(`Replace names, rooms, scenes, HOUSE buttons, and automations on this Pi with this file?\n\n${homeBackupCountsLabel(peek)}.\n\nMatter pairing is not changed.`)) {
+        return;
+    }
+    const btn = document.getElementById('home-backup-restore');
+    if (btn) btn.disabled = true;
+    try {
+        const data = await homeApi({ action: 'backup_import', backup: parsed }, 60000);
+        if (!data.ok) throw new Error(data.error || 'Could not restore');
+        homeManageOpen = true;
+        showToast(`Restored ${homeBackupCountsLabel(data.summary)}`, 'success');
+        await loadHomeDashboard({ replace: true, force: true });
+    } catch (err) {
+        showToast(err.message || 'Could not restore backup', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 function bindHomeDashboard() {
     bindHomeReorder();
     document.getElementById('home-manage-toggle')?.addEventListener('click', () => {
@@ -4896,6 +4999,11 @@ function bindHomeDashboard() {
         event.preventDefault();
         input.blur();
     });
+    document.getElementById('home-backup-download')?.addEventListener('click', downloadHomeBackup);
+    document.getElementById('home-backup-restore')?.addEventListener('click', () => {
+        document.getElementById('home-backup-file')?.click();
+    });
+    document.getElementById('home-backup-file')?.addEventListener('change', restoreHomeBackupFromInput);
     document.getElementById('home-room-save')?.addEventListener('click', async () => {
         const input = document.getElementById('home-room-name');
         const name = input?.value.trim() || '';
