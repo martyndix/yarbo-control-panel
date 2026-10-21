@@ -41,6 +41,9 @@ final class YarboHome
 
     private int $loadedSize = -1;
 
+    /** @var array{via: string, name: string}|null */
+    private ?array $commandTrigger = null;
+
     public function __construct(private readonly string $projectRoot)
     {
     }
@@ -84,6 +87,7 @@ final class YarboHome
             'device_order' => [],
             'active_scene_id' => '',
             'last_devices' => [],
+            'last_trigger' => [],
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
         ];
         if (!is_file($path)) {
@@ -218,6 +222,7 @@ final class YarboHome
             'last_devices' => $this->normalizeLastDevices(
                 is_array($decoded['last_devices'] ?? null) ? $decoded['last_devices'] : []
             ),
+            'last_trigger' => $this->normalizeLastTrigger($decoded['last_trigger'] ?? null),
             'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
         ];
         $recovered = $this->recoverUserMeta($store);
@@ -492,6 +497,7 @@ final class YarboHome
         $store = $this->adoptLoneHeaterIds($this->load(), $live['devices']);
         $hidden = array_fill_keys($store['hidden'], true);
         $adaptiveIds = array_fill_keys($this->adaptiveDeviceIds(), true);
+        $triggers = is_array($store['last_trigger'] ?? null) ? $store['last_trigger'] : [];
         $devices = [];
         $hiddenDevices = [];
         $seenIds = [];
@@ -608,6 +614,14 @@ final class YarboHome
                         $row[$key] = $device[$key];
                     }
                 }
+            }
+            $trig = $this->publicLastTrigger(
+                is_array($triggers[$id] ?? null) ? $triggers[$id] : null,
+                (bool) $row['on'],
+                (string) ($row['kind'] ?? '')
+            );
+            if ($trig !== null) {
+                $row['last_trigger'] = $trig;
             }
             if ($row['hidden']) {
                 $hiddenDevices[] = $row;
@@ -1002,7 +1016,12 @@ final class YarboHome
             }
         }
         if (YarboUnifi::isHomeId($id)) {
-            return (new YarboUnifi($this->projectRoot))->command($input);
+            $result = (new YarboUnifi($this->projectRoot))->command($input);
+            if ($result['ok'] ?? false) {
+                $this->rememberCommandTrigger($id, $action, $input, $result);
+            }
+
+            return $result;
         }
         $agent = YarboMatterAgentClient::fromEnv();
         $body = ['op' => 'command', 'id' => $id, 'action' => $action];
@@ -1116,6 +1135,7 @@ final class YarboHome
                 $out['adaptive'] = true;
             }
         }
+        $this->rememberCommandTrigger($id, $action, $input, $out);
 
         return $out;
     }
@@ -1345,6 +1365,7 @@ final class YarboHome
         if ($scene === null) {
             return ['ok' => false, 'error' => 'Scene not found'];
         }
+        return $this->withTrigger('scene', (string) ($scene['name'] ?? ''), function () use ($scene, $id) {
         $errors = [];
         $kinds = $this->deviceKindMap();
         foreach ($scene['actions'] as $action) {
@@ -1451,6 +1472,7 @@ final class YarboHome
         $this->setActiveSceneId($id);
 
         return ['ok' => true, 'on' => true];
+        });
     }
 
     /**
@@ -1464,6 +1486,8 @@ final class YarboHome
         if ($scene === null) {
             return ['ok' => false, 'error' => 'Scene not found'];
         }
+
+        return $this->withTrigger('scene', (string) ($scene['name'] ?? ''), function () use ($scene, $id) {
         $errors = [];
         foreach ($scene['actions'] as $action) {
             $deviceId = (string) ($action['id'] ?? '');
@@ -1483,6 +1507,7 @@ final class YarboHome
         }
 
         return ['ok' => true, 'on' => false];
+        });
     }
 
     /**
@@ -1623,9 +1648,11 @@ final class YarboHome
             return ['ok' => false, 'error' => 'Room and action are required'];
         }
         $known = false;
+        $roomName = '';
         foreach ($this->load()['room_defs'] as $def) {
             if (($def['id'] ?? '') === $roomId) {
                 $known = true;
+                $roomName = (string) ($def['name'] ?? '');
                 break;
             }
         }
@@ -1644,7 +1671,9 @@ final class YarboHome
             $ids = $this->adaptiveIdsAmong($ids);
         }
 
-        return $this->commandIdList($ids, $action, $input, 'No controllable devices', 'Room partly failed: ');
+        return $this->withTrigger('room', $roomName, function () use ($ids, $action, $input) {
+            return $this->commandIdList($ids, $action, $input, 'No controllable devices', 'Room partly failed: ');
+        });
     }
 
     /**
@@ -1755,7 +1784,14 @@ final class YarboHome
         if ($groupId === '' || $action === '') {
             return ['ok' => false, 'error' => 'Group and action are required'];
         }
-        if ($this->groupRoomId($this->load(), $groupId) === '') {
+        $groupName = '';
+        foreach ($this->load()['group_defs'] as $def) {
+            if (($def['id'] ?? '') === $groupId) {
+                $groupName = (string) ($def['name'] ?? '');
+                break;
+            }
+        }
+        if ($groupName === '' || $this->groupRoomId($this->load(), $groupId) === '') {
             return ['ok' => false, 'error' => 'Unknown group'];
         }
         $ids = $this->visibleDeviceIdsInGroup($groupId);
@@ -1770,7 +1806,9 @@ final class YarboHome
             $ids = $this->adaptiveIdsAmong($ids);
         }
 
-        return $this->commandIdList($ids, $action, $input, 'No controllable devices', 'Group partly failed: ');
+        return $this->withTrigger('group', $groupName, function () use ($ids, $action, $input) {
+            return $this->commandIdList($ids, $action, $input, 'No controllable devices', 'Group partly failed: ');
+        });
     }
 
     /**
@@ -1817,6 +1855,232 @@ final class YarboHome
         }
 
         return ['ok' => true];
+    }
+
+    /**
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    public function withTrigger(string $via, string $name, callable $fn): mixed
+    {
+        $prev = $this->commandTrigger;
+        $this->commandTrigger = ['via' => $via, 'name' => $name];
+        try {
+            return $fn();
+        } finally {
+            $this->commandTrigger = $prev;
+        }
+    }
+
+    public function recordLastTrigger(string $id, bool $on, string $via = 'home', string $name = '', ?int $at = null): void
+    {
+        $id = trim($id);
+        if ($id === '' || !$this->recordsLastTrigger($id)) {
+            return;
+        }
+        $via = strtolower(trim($via));
+        if (!in_array($via, ['home', 'room', 'group', 'scene', 'automation', 'elsewhere'], true)) {
+            $via = 'home';
+        }
+        $name = YarboHub::normalizeDisplayName($name, 48);
+        $at = $at ?? time();
+        $store = $this->load();
+        $all = is_array($store['last_trigger'] ?? null) ? $store['last_trigger'] : [];
+        $all[$id] = [
+            'on' => $on,
+            'at' => $at,
+            'via' => $via,
+            'name' => $name,
+            'text' => self::lastTriggerText($on, $via, $name, $at, $this->triggerTimezone()),
+        ];
+        if (count($all) > 300) {
+            uasort($all, static fn (array $a, array $b): int => ((int) ($a['at'] ?? 0)) <=> ((int) ($b['at'] ?? 0)));
+            $all = array_slice($all, -250, null, true);
+        }
+        $store['last_trigger'] = $all;
+        $this->write($store);
+    }
+
+    public static function lastTriggerText(bool $on, string $via, string $name, int $at, string $timezone = 'Europe/Zurich'): string
+    {
+        $state = $on ? 'On' : 'Off';
+        if ($via === 'elsewhere') {
+            return $state . ' by something else (Apple Home or a switch)';
+        }
+        $who = match ($via) {
+            'scene' => $name !== '' ? 'scene ' . $name : 'a scene',
+            'automation' => $name !== '' ? 'automation ' . $name : 'an automation',
+            'room' => $name !== '' ? 'room ' . $name : 'the room',
+            'group' => $name !== '' ? 'group ' . $name : 'the group',
+            default => 'Home',
+        };
+        $when = self::lastTriggerClock($at, $timezone);
+
+        return $state . ' by ' . $who . ($when !== '' ? ' · ' . $when : '');
+    }
+
+    /**
+     * @param array<string, mixed>|null $trig
+     * @return array{on: bool, at: int, via: string, name: string, text: string}|null
+     */
+    private function publicLastTrigger(?array $trig, bool $on, string $kind): ?array
+    {
+        $kind = strtolower(trim($kind));
+        if (in_array($kind, ['sensor', 'camera', 'door', 'hub', 'switch'], true)) {
+            return null;
+        }
+        if ($trig === null) {
+            return null;
+        }
+        $via = strtolower(trim((string) ($trig['via'] ?? 'home')));
+        $name = (string) ($trig['name'] ?? '');
+        $at = (int) ($trig['at'] ?? 0);
+        if ((bool) ($trig['on'] ?? false) !== $on) {
+            return [
+                'on' => $on,
+                'at' => 0,
+                'via' => 'elsewhere',
+                'name' => '',
+                'text' => self::lastTriggerText($on, 'elsewhere', '', 0, $this->triggerTimezone()),
+            ];
+        }
+        $text = trim((string) ($trig['text'] ?? ''));
+        if ($text === '') {
+            $text = self::lastTriggerText($on, $via, $name, $at, $this->triggerTimezone());
+        }
+
+        return [
+            'on' => $on,
+            'at' => $at,
+            'via' => $via,
+            'name' => $name,
+            'text' => $text,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @param array<string, mixed> $result
+     */
+    private function rememberCommandTrigger(string $id, string $action, array $input, array $result): void
+    {
+        if (!$this->recordsLastTrigger($id) || !empty($input['adaptive'])) {
+            return;
+        }
+        $on = $this->triggerOnFromCommand($action, $input, $result);
+        if ($on === null) {
+            return;
+        }
+        $via = trim((string) ($input['trigger_via'] ?? $this->commandTrigger['via'] ?? 'home'));
+        $name = trim((string) ($input['trigger_name'] ?? $this->commandTrigger['name'] ?? ''));
+        $this->recordLastTrigger($id, $on, $via !== '' ? $via : 'home', $name);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @param array<string, mixed> $result
+     */
+    private function triggerOnFromCommand(string $action, array $input, array $result): ?bool
+    {
+        if (array_key_exists('on', $result)) {
+            if (in_array($action, ['on', 'off', 'toggle', 'brightness'], true)) {
+                return (bool) $result['on'];
+            }
+
+            return null;
+        }
+        if ($action === 'on') {
+            return true;
+        }
+        if ($action === 'off') {
+            return false;
+        }
+        if ($action === 'brightness') {
+            $pct = (int) ($input['brightness'] ?? $result['brightness'] ?? -1);
+
+            return $pct < 0 ? null : $pct > 0;
+        }
+
+        return null;
+    }
+
+    private function recordsLastTrigger(string $id): bool
+    {
+        $parsed = YarboUnifi::parseHomeId($id);
+        if ($parsed !== null) {
+            $kind = (string) ($parsed['kind'] ?? '');
+
+            return $kind === YarboUnifi::KIND_LIGHT || $kind === YarboUnifi::KIND_RELAY;
+        }
+        $kind = strtolower(trim((string) ($this->deviceKindMap()[$id] ?? self::KIND_LIGHT)));
+
+        return !in_array($kind, ['sensor', 'camera', 'door', 'hub', 'switch'], true);
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array<string, array{on: bool, at: int, via: string, name: string, text: string}>
+     */
+    private function normalizeLastTrigger(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $tz = $this->triggerTimezone();
+        $out = [];
+        foreach ($raw as $id => $row) {
+            $id = trim((string) $id);
+            if ($id === '' || !is_array($row)) {
+                continue;
+            }
+            $on = !empty($row['on']);
+            $via = strtolower(trim((string) ($row['via'] ?? 'home')));
+            if (!in_array($via, ['home', 'room', 'group', 'scene', 'automation', 'elsewhere'], true)) {
+                $via = 'home';
+            }
+            $name = YarboHub::normalizeDisplayName((string) ($row['name'] ?? ''), 48);
+            $at = isset($row['at']) && is_numeric($row['at']) ? (int) $row['at'] : 0;
+            $out[$id] = [
+                'on' => $on,
+                'at' => $at,
+                'via' => $via,
+                'name' => $name,
+                'text' => self::lastTriggerText($on, $via, $name, $at, $tz),
+            ];
+        }
+
+        return $out;
+    }
+
+    private function triggerTimezone(): string
+    {
+        try {
+            $name = (new YarboHomeAutomations($this->projectRoot))->timezoneName();
+        } catch (\Throwable) {
+            $name = 'Europe/Zurich';
+        }
+
+        return $name !== '' ? $name : 'Europe/Zurich';
+    }
+
+    public static function lastTriggerClock(int $at, string $timezone = 'Europe/Zurich'): string
+    {
+        if ($at <= 0) {
+            return '';
+        }
+        try {
+            $tz = new \DateTimeZone($timezone !== '' ? $timezone : 'Europe/Zurich');
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('Europe/Zurich');
+        }
+        $when = (new \DateTimeImmutable('@' . $at))->setTimezone($tz);
+        $now = new \DateTimeImmutable('now', $tz);
+        if ($when->format('Y-m-d') === $now->format('Y-m-d')) {
+            return $when->format('H:i');
+        }
+
+        return $when->format('j M H:i');
     }
 
     /**

@@ -3287,6 +3287,14 @@ function homeIsLight(d) {
     return !d?.kind || d.kind === 'light';
 }
 
+function homeDeviceHoverTitle(d) {
+    const bits = [d?.kind, d?.room, d?.product && d.product !== d.name ? d.product : '']
+        .filter(Boolean);
+    const extra = String(d?.last_trigger?.text || '').trim();
+    if (!extra) return bits.join(' · ');
+    return bits.length ? `${bits.join(' · ')}\n${extra}` : extra;
+}
+
 function homeIsSensorKind(d) {
     return String(d?.kind || '') === 'sensor';
 }
@@ -3920,11 +3928,13 @@ function patchHomeDashboard(data) {
             if (d.vacuum_battery != null) rec.vacuum_battery = d.vacuum_battery;
             if (d.vacuum_clean) rec.vacuum_clean = d.vacuum_clean;
             if (typeof d.adaptive === 'boolean') rec.adaptive = d.adaptive;
+            if (d.last_trigger) rec.last_trigger = d.last_trigger;
         }
         patchHomeDeviceVisual(d.id, d.on, d);
         const card = document.querySelector(`[data-home-id="${CSS.escape(d.id)}"]`);
         const box = card?.querySelector('[data-home-adaptive]');
         if (box && typeof d.adaptive === 'boolean') box.checked = d.adaptive;
+        if (card) card.title = homeDeviceHoverTitle(rec || d);
     });
     (data.rooms || []).forEach((room) => {
         const el = document.querySelector(`[data-home-room="${CSS.escape(room.id)}"]`);
@@ -4422,9 +4432,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         `data-home-color="${escapeHtml(d.id)}"`,
         `data-home-kelvin="${escapeHtml(d.id)}"`
     );
-    const meta = [d.kind, d.room, d.product && d.product !== d.name ? d.product : '']
-        .filter(Boolean)
-        .join(' · ');
+    const meta = homeDeviceHoverTitle(d);
     const defaultName = d.default_name || d.name || '';
     const kindName = homeKindLabel(d);
     const kindChip = kindName ? `<span class="home-device-kind">${escapeHtml(kindName)}</span>` : '';

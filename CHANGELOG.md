@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.148] - 2026-10-21
+
+### Added
+- Hover a light on Home to see what last turned it on or off: Home, a room or group, a scene, an automation, or something else (Apple Home or a wall switch).
+
 ## [4.0.147] - 2026-10-21
 
 ### Changed

@@ -628,7 +628,10 @@ final class YarboHomeAutomations
                 }
                 continue;
             }
-            $result = $this->runActions($rule['actions'] ?? []);
+            $result = $this->runActions($rule['actions'] ?? [], [
+                'via' => 'automation',
+                'name' => (string) ($rule['name'] ?? ''),
+            ]);
             $state['last_fire'][$id] = $now;
             $this->markHoldFired($state, $id);
             if (!($result['ok'] ?? false)) {
@@ -2489,25 +2492,34 @@ final class YarboHomeAutomations
 
     /**
      * @param list<array<string, mixed>> $actions
+     * @param array{via?: string, name?: string} $trigger
      * @return array<string, mixed>
      */
-    private function runActions(array $actions): array
+    private function runActions(array $actions, array $trigger = []): array
     {
         $home = new YarboHome($this->projectRoot);
-        $store = $home->load();
-        $names = is_array($store['names'] ?? null) ? $store['names'] : [];
-        $errors = [];
-        foreach ($actions as $action) {
-            $result = $this->runOneAction($home, $action);
-            if (!($result['ok'] ?? false)) {
-                $errors[] = $this->namedActionError($action, (string) ($result['error'] ?? 'failed'), $names);
+        $run = function () use ($home, $actions): array {
+            $store = $home->load();
+            $names = is_array($store['names'] ?? null) ? $store['names'] : [];
+            $errors = [];
+            foreach ($actions as $action) {
+                $result = $this->runOneAction($home, $action);
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = $this->namedActionError($action, (string) ($result['error'] ?? 'failed'), $names);
+                }
             }
-        }
-        if ($errors !== []) {
-            return ['ok' => false, 'error' => $errors[0]];
+            if ($errors !== []) {
+                return ['ok' => false, 'error' => $errors[0]];
+            }
+
+            return ['ok' => true];
+        };
+        $via = trim((string) ($trigger['via'] ?? ''));
+        if ($via === '') {
+            return $run();
         }
 
-        return ['ok' => true];
+        return $home->withTrigger($via, (string) ($trigger['name'] ?? ''), $run);
     }
 
     /**
@@ -2722,7 +2734,10 @@ final class YarboHomeAutomations
             if ($offs === []) {
                 continue;
             }
-            $result = $this->runActions($offs);
+            $result = $this->runActions($offs, [
+                'via' => 'automation',
+                'name' => (string) ($rule['name'] ?? ''),
+            ]);
             if (!($result['ok'] ?? false)) {
                 $errors[] = (string) ($result['error'] ?? 'failed');
             }
@@ -2785,7 +2800,10 @@ final class YarboHomeAutomations
                     continue;
                 }
                 $actions = is_array($one['actions'] ?? null) ? $one['actions'] : [];
-                $result = $this->runActions($actions);
+                $result = $this->runActions($actions, [
+                    'via' => 'automation',
+                    'name' => (string) ($enabledById[$id]['name'] ?? ''),
+                ]);
                 if (!($result['ok'] ?? false)) {
                     $errors[] = (string) ($result['error'] ?? 'failed');
                 }
