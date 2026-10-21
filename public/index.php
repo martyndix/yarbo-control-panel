@@ -1388,7 +1388,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint" id="papermono-vestaboard-viewer-hint">Paper Colour only. Requires Vestaboard Note. The tablet boots the live board in landscape and skips every other page. Turn the Note off and this stays saved but inactive.</p>
                             <p class="hint">PaperMono Unlock always opens the page menu. One <strong>ROBOTS</strong> button opens Yarbo, Lymow, and Matter vacuums. <strong>HEAT</strong> lists heaters. <strong>ACCESS</strong> lists doors and windows. On a Yarbo screen, A/B still step Status, Health, and Plans. Home is still on A/B, not on the menu.</p>
                             <h3 class="settings-subtitle">Menu buttons</h3>
-                            <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. <strong>ROBOTS</strong> holds Yarbo, Lymow, and Matter vacuums — it stays off the menu when both robot modules are off and there are no vacuums. <strong>HEAT</strong> lists Home heaters: tap the name to Heat/Off, −/+ changes the set temperature. <strong>ACCESS</strong> lists lockable Access doors and open/close sensors that are on Home (not hidden); tap a lockable door to unlock. HEAT and ACCESS stay off the menu when Home is off or there are none. NOTE is the live Vestaboard plus the view buttons. The name on each button is also the title at the top of that page. Names wrap on the tablet and apply on the next poll — no reflash.</p>
+                            <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. <strong>ROBOTS</strong> holds Yarbo, Lymow, and Matter vacuums — it stays off the menu when both robot modules are off and there are no vacuums. <strong>HEAT</strong> lists Home heaters by room (or a custom name): tap the name to Heat/Off, −/+ changes the set temperature. <strong>ACCESS</strong> lists lockable Access doors and open/close sensors that are on Home (not hidden); tap a lockable door to unlock. HEAT and ACCESS stay off the menu when Home is off or there are none. NOTE is the live Vestaboard plus the view buttons. The name on each button is also the title at the top of that page. Names wrap on the tablet and apply on the next poll — no reflash.</p>
                             <div id="paper-menu-list" class="paper-menu-list">
                                 <div class="paper-menu-row" data-menu-id="robots">
                                     <span class="paper-menu-reorder">
@@ -1820,7 +1820,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="398" y="449" width="36" height="6" fill="#f4f1e8"/>
                                         <rect x="414" y="431" width="6" height="42" fill="#f4f1e8"/>
                                     </svg>
-                                    <figcaption>HEAT — tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.72.</figcaption>
+                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.72.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">

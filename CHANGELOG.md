@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.155] - 2026-10-21
+
+### Fixed
+- PaperMono **HEAT** rows use the Home **room** name when the heater is still called Heater (or a Mill stock product name). A custom Home name still wins. No firmware flash — next compact poll.
+
 ## [4.0.154] - 2026-10-21
 
 ### Added
