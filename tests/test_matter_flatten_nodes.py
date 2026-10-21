@@ -509,10 +509,15 @@ def main() -> int:
         },
     }
     pending_ids = {str(row.get("id") or "") for row in agent.flatten_nodes([pending_node])}
-    if "1:12" not in pending_ids:
-        raise SystemExit(f"named Hue Bridged Node without OnOff missing {pending_ids}")
+    if "1:12" in pending_ids:
+        raise SystemExit(f"named Hue Bridged Node without OnOff must not be a commandable light {pending_ids}")
     if "1:96" in pending_ids:
         raise SystemExit(f"leftover Hue without OnOff flattened {pending_ids}")
+    pending_eps = agent.incomplete_hue_child_endpoints([pending_node])
+    if (1, 12) not in pending_eps:
+        raise SystemExit(f"Porch should be queued for OnOff read {pending_eps}")
+    if (1, 96) in pending_eps:
+        raise SystemExit(f"leftover Hue queued for OnOff read {pending_eps}")
 
     mill = {
         "node_id": 26,
@@ -601,6 +606,59 @@ def main() -> int:
     missing = {"1:12", "1:13", "1:14", "1:15"} - grown_ids
     if missing:
         raise SystemExit(f"scan retry missed Apple Home Hue lights {missing} in {grown_ids}")
+
+    named_only = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            "0/40/1": "Signify Netherlands B.V.",
+            "0/40/3": "Hue Bridge",
+            "12/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "12/57/5": "Landing",
+        },
+    }
+    filled = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            **named_only["attributes"],
+            "12/6/0": True,
+            "12/8/0": 180,
+            "12/768/3": 200,
+            "12/768/4": 180,
+        },
+    }
+    hue_state = {"node": named_only}
+    read_calls: list[list[str]] = []
+
+    def fill_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True, **_kwargs):
+        if command == "get_nodes":
+            return {"ok": True, "result": [hue_state["node"]]}
+        if command == "interview_node":
+            return {"ok": True}
+        if command == "read_attribute":
+            paths = list((args or {}).get("attribute_path") or [])
+            read_calls.append(paths)
+            hue_state["node"] = filled
+            return {"ok": True, "result": {"12/6/0": True, "12/8/0": 180}}
+        return {"ok": False, "error": "no"}
+
+    agent.matter_rpc = fill_rpc  # type: ignore[method-assign]
+    agent._live_devices = []
+    filled_scan = agent.dispatch({"op": "scan"})
+    filled_by_id = {str(row.get("id") or ""): row for row in filled_scan.get("devices") or []}
+    if not read_calls:
+        raise SystemExit("scan did not read OnOff for a named Hue child")
+    landing = filled_by_id.get("1:12") or {}
+    if not landing.get("has_on_off") or not landing.get("on") or not landing.get("dimmable"):
+        raise SystemExit(f"Landing should have On/Off and brightness after scan {landing}")
+    stub = {"id": "1:12", "name": "Landing", "kind": "light", "on": False, "dimmable": False}
+    rich = {"id": "1:12", "name": "Landing", "kind": "light", "on": True, "dimmable": True, "has_on_off": True, "colorable": True}
+    kept = agent._prefer_richer_row(rich, stub)
+    if not kept.get("dimmable") or not kept.get("colorable"):
+        raise SystemExit(f"stub must not overwrite a complete Hue light {kept}")
 
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0

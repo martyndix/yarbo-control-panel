@@ -3249,6 +3249,7 @@ function homeSceneCanAdaptive(d) {
 
 function homeDeviceCanToggle(d) {
     if (!d) return false;
+    if (d.unready) return false;
     if (d.available === false) return false;
     if (homeIsUnifi(d)) {
         const kind = String(d.kind || '');
@@ -4286,6 +4287,9 @@ function homeDeviceActionsHtml(d, bright, color) {
     }
     if (d.available === false) {
         return `<div class="home-device-actions"><span class="home-device-meta">Unavailable</span></div>`;
+    }
+    if (d.unready) {
+        return `<div class="home-device-actions"><span class="home-device-meta">Reading…</span></div>`;
     }
     const on = Boolean(d.on);
     return `<div class="home-device-actions">
@@ -13088,7 +13092,7 @@ document.getElementById('home-scan')?.addEventListener('click', async () => {
         status.classList.remove('hidden');
     }
     try {
-        const data = await homeApi({ action: 'scan' }, 125000);
+        const data = await homeApi({ action: 'scan' }, 140000);
         if (!data.ok) throw new Error(data.error || 'Look for devices failed');
         const message = data.message || 'Looked for devices';
         if (status) status.textContent = message;

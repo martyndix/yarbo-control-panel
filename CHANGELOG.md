@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.140] - 2026-10-21
+
+### Fixed
+- Hue lights that **Look for devices** had listed as name-only rows now wait for On/Off, brightness, and colour. Those rows no longer show a dead On button or toast **This device does not support that control**. Tap **Look for devices** again (wait for it to finish) so the missing bulb and the Landing lights get their real controls. Do not pair the Hue Bridge again.
+
 ## [4.0.139] - 2026-10-21
 
 ### Fixed

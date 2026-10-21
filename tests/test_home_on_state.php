@@ -657,14 +657,35 @@ assert_true(str_contains($homePhp, '? 80.0 : 60.0'), 'heater Matter writes get a
 assert_true(str_contains($homePhp, "['op' => 'states'], 2.5, false)"), 'live mill list waits long enough for states');
 assert_true(str_contains($homePhp, 'unionDeviceLists'), 'pairing merges the new node into last_devices');
 assert_true(str_contains($homePhp, 'function scanDevices'), 'Look for devices re-interviews the Hue Bridge');
-assert_true(str_contains($homePhp, "['op' => 'scan'], 120.0"), 'Look for devices waits for Hue Bridge child lights');
+assert_true(str_contains($homePhp, "['op' => 'scan'], 130.0"), 'Look for devices waits for Hue Bridge child lights');
 assert_true(str_contains($homePhp, 'Check Hidden, then tap Look for devices again'), 'scan tells you to check Hidden and not re-pair');
+assert_true(str_contains($homePhp, 'function looksLikeUnreadyHueLight'), 'name-only Hue rows are marked unready');
+assert_true(YarboHome::looksLikeUnreadyHueLight([
+    'id' => '1:12',
+    'name' => 'Landing',
+    'kind' => 'light',
+    'bridge' => true,
+    'product' => 'Hue Bridge',
+    'on' => false,
+]), '4.0.139 name-only Landing is unready');
+assert_true(!YarboHome::looksLikeUnreadyHueLight([
+    'id' => '1:12',
+    'name' => 'Landing',
+    'kind' => 'light',
+    'bridge' => true,
+    'product' => 'Hue Bridge',
+    'on' => true,
+    'dimmable' => true,
+    'has_on_off' => true,
+    'brightness' => 70,
+]), 'interviewed Hue lights are ready');
 assert_true(str_contains($homePhp, 'looksLikeLeftoverHueEndpoint'), 'new Hue lights skip leftover Bridge endpoints');
 assert_true(str_contains($homePhp, 'function countsTowardRoomOn'), 'rooms ignore cameras when choosing green');
 assert_true(str_contains($homePhp, "if (self::countsTowardRoomOn(\$device) && !empty(\$device['on']))"), 'room on only from switchable devices');
 assert_true(str_contains($js, "btn.textContent = 'Adding…'"), 'Add device shows Adding while pairing');
 assert_true(str_contains($js, "action: 'scan'"), 'Look for devices calls scan');
-assert_true(str_contains($js, "homeApi({ action: 'scan' }, 125000)"), 'Look for devices waits for the Hue Bridge interview');
+assert_true(str_contains($js, "homeApi({ action: 'scan' }, 140000)"), 'Look for devices waits for the Hue Bridge interview');
+assert_true(str_contains($js, 'Reading…'), 'unready Hue lights say Reading instead of On');
 $index = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
 assert_true(str_contains($index, 'check Hidden, then Look for devices'), 'Home hint says to check Hidden for missing Hue lights');
 assert_true(str_contains($index, 'Do not pair the same Hue Bridge twice'), 'Home still warns not to pair the Hue Bridge again');

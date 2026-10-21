@@ -552,6 +552,8 @@ final class YarboHome
                 'color_temp_min' => isset($device['color_temp_min']) ? (int) $device['color_temp_min'] : null,
                 'color_temp_max' => isset($device['color_temp_max']) ? (int) $device['color_temp_max'] : null,
                 'available' => (bool) ($device['available'] ?? true),
+                'has_on_off' => array_key_exists('has_on_off', $device) ? (bool) $device['has_on_off'] : null,
+                'unready' => !$isUnifi && self::looksLikeUnreadyHueLight($device),
                 'room_id' => $roomName !== '' ? $roomId : '',
                 'room' => $roomName,
                 'group_id' => $this->deviceGroupId($store, $id, $roomId),
@@ -872,9 +874,9 @@ final class YarboHome
     public function scanDevices(): array
     {
         $agent = YarboMatterAgentClient::fromEnv();
-        $result = $agent->request(['op' => 'scan'], 120.0);
+        $result = $agent->request(['op' => 'scan'], 130.0);
         if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
-            $result = $agent->request(['op' => 'nodes', 'quick' => false], 120.0);
+            $result = $agent->request(['op' => 'nodes', 'quick' => false], 130.0);
         }
         if (!($result['ok'] ?? false)) {
             return [
@@ -885,7 +887,7 @@ final class YarboHome
 
         $incoming = [];
         foreach (is_array($result['devices'] ?? null) ? $result['devices'] : [] as $row) {
-            if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
+            if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row) || self::looksLikeUnreadyHueLight($row)) {
                 continue;
             }
             $incoming[] = $row;
@@ -952,6 +954,9 @@ final class YarboHome
             $cached = $this->cachedDeviceRow($id);
             if (is_array($cached) && self::looksLikeLeftoverHueEndpoint($cached)) {
                 return ['ok' => false, 'error' => 'That row is not a real light. Hide or Remove it.'];
+            }
+            if (is_array($cached) && self::looksLikeUnreadyHueLight($cached)) {
+                return ['ok' => false, 'error' => 'That light is still being read from the Hue Bridge. Tap Look for devices.'];
             }
         }
         if ($action === 'colour' || $action === 'set_color' || $action === 'set_colour') {
@@ -2560,6 +2565,42 @@ final class YarboHome
     }
 
     /**
+     * Hue Bridged Node that only has a name so far — no On/Off, brightness, or colour yet.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function looksLikeUnreadyHueLight(array $row): bool
+    {
+        if (YarboUnifi::isHomeId((string) ($row['id'] ?? ''))) {
+            return false;
+        }
+        $kind = strtolower(trim((string) ($row['kind'] ?? 'light')));
+        if ($kind !== '' && $kind !== 'light' && $kind !== 'switch') {
+            return false;
+        }
+        if (array_key_exists('has_on_off', $row)) {
+            return $row['has_on_off'] === false;
+        }
+        $blob = strtolower(trim(implode(' ', [
+            (string) ($row['product'] ?? ''),
+            (string) ($row['vendor'] ?? ''),
+            (string) ($row['source'] ?? ''),
+        ])));
+        $hueish = !empty($row['bridge'])
+            || str_contains($blob, 'hue')
+            || str_contains($blob, 'signify');
+        if (!$hueish) {
+            return false;
+        }
+        if (!empty($row['dimmable']) || !empty($row['colorable']) || !empty($row['color_hs'])
+            || !empty($row['color_xy']) || !empty($row['color_ct']) || ($row['brightness'] ?? null) !== null) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Dummy Hue Bridge endpoints named like "BSB003 96" (product + endpoint, no bulb label).
      *
      * @param array<string, mixed> $row
@@ -2688,7 +2729,7 @@ final class YarboHome
                 $device['color_hex'] = $hex;
             }
         }
-        foreach (['dimmable', 'colorable', 'color_hs', 'color_xy', 'color_ct'] as $flag) {
+        foreach (['dimmable', 'colorable', 'color_hs', 'color_xy', 'color_ct', 'has_on_off'] as $flag) {
             if (array_key_exists($flag, $live)) {
                 $device[$flag] = (bool) $live[$flag];
             }

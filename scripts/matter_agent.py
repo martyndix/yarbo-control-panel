@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 53
+AGENT_VERSION = 54
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1406,6 +1406,7 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
             item = dict(row)
             device_id = str(item.get("id") or "")
             prev = previous.get(device_id)
+            item = _prefer_richer_row(prev, item)
             patched_at = float((prev or {}).get("_patched_at") or 0)
             if prev is not None and patched_at > 0 and (now - patched_at) < STICKY_HOLD:
                 keys = prev.get("_sticky_keys") or STICKY_STATE_KEYS
@@ -1461,7 +1462,7 @@ def merge_live_devices(extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         did = str(row.get("id") or "")
         if did:
-            by_id[did] = dict(row)
+            by_id[did] = _prefer_richer_row(by_id.get(did), row)
     merged = list(by_id.values())
     if merged:
         remember_live_devices(merged)
@@ -1731,6 +1732,37 @@ def _scan_wait(seconds: float) -> None:
         time.sleep(seconds)
 
 
+def _row_control_score(row: dict[str, Any]) -> int:
+    score = 0
+    if row.get("has_on_off"):
+        score += 4
+    if row.get("dimmable"):
+        score += 2
+    if row.get("colorable") or row.get("color_hs") or row.get("color_xy"):
+        score += 2
+    if row.get("color_ct"):
+        score += 1
+    if row.get("brightness") is not None:
+        score += 1
+    return score
+
+
+def _prefer_richer_row(current: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+    item = dict(incoming)
+    if current is None:
+        return item
+    if _row_control_score(item) >= _row_control_score(current):
+        return item
+    kept = dict(current)
+    if item.get("has_on_off"):
+        kept["has_on_off"] = True
+        if "on" in item:
+            kept["on"] = item.get("on")
+        if item.get("brightness") is not None:
+            kept["brightness"] = item.get("brightness")
+    return kept
+
+
 def _merge_device_rows(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     for group in groups:
@@ -1739,25 +1771,105 @@ def _merge_device_rows(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 continue
             did = str(row.get("id") or "")
             if did:
-                by_id[did] = dict(row)
+                by_id[did] = _prefer_richer_row(by_id.get(did), row)
     return list(by_id.values())
 
 
+def incomplete_hue_child_endpoints(nodes: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """Named Hue Bridge children that interview has not filled On/Off for yet."""
+    out: list[tuple[int, int]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        try:
+            node_id = int(node.get("node_id") or node.get("nodeId") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+        if node_id <= 0:
+            continue
+        is_bridge = bool(node.get("is_bridge") or node.get("isBridge") or False)
+        attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
+        vendor = attr_str(attributes, 0, BASIC_INFO, ATTR_VENDOR_NAME)
+        product = attr_str(attributes, 0, BASIC_INFO, ATTR_PRODUCT_NAME)
+        node_name = attr_str(attributes, 0, BASIC_INFO, ATTR_NODE_LABEL)
+        source = node_name or product or vendor or f"Matter node {node_id}"
+        blob = f"{vendor} {product} {source}".lower()
+        if not (is_bridge or "hue" in blob or "signify" in blob):
+            continue
+        for endpoint in sorted(endpoint_ids(attributes)):
+            if endpoint == 0:
+                continue
+            on_val = attr_raw(attributes, endpoint, ON_OFF, ATTR_ON_OFF)
+            if on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF):
+                continue
+            types = attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES)
+            type_ids = device_type_ids(types)
+            if DEVTYPE_AGGREGATOR in type_ids:
+                continue
+            label = endpoint_name(attributes, endpoint, vendor, product)
+            if looks_like_leftover_hue_endpoint(label, product, source, endpoint):
+                continue
+            out.append((node_id, endpoint))
+    return out
+
+
+def read_hue_child_controls(node_id: int, endpoints: list[int]) -> None:
+    if node_id <= 0 or not endpoints:
+        return
+    paths: list[str] = []
+    for endpoint in endpoints:
+        paths.append(attr_key(endpoint, ON_OFF, ATTR_ON_OFF))
+        paths.append(attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL))
+        paths.append(attr_key(endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES))
+        paths.append(attr_key(endpoint, DESCRIPTOR, ATTR_SERVER_LIST))
+        paths.append(attr_key(endpoint, COLOR_CONTROL, ATTR_COLOR_CAPABILITIES))
+        paths.extend(attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS)
+    chunk = 24
+    for i in range(0, len(paths), chunk):
+        rpc = matter_rpc(
+            "read_attribute",
+            {"node_id": node_id, "attribute_path": paths[i : i + chunk]},
+            timeout=15.0,
+            channel=CMD_CHANNEL,
+        )
+        if rpc.get("ok"):
+            apply_read_attributes(node_id, rpc.get("result"))
+
+
+def _fill_incomplete_hue_controls(nodes: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    incomplete = incomplete_hue_child_endpoints(nodes)
+    by_node: dict[int, list[int]] = {}
+    for node_id, endpoint in incomplete:
+        bucket = by_node.setdefault(node_id, [])
+        if endpoint not in bucket:
+            bucket.append(endpoint)
+    for node_id, endpoints in by_node.items():
+        read_hue_child_controls(node_id, endpoints)
+    return incomplete
+
+
+def _nodes_from_live_rpc(timeout: float = 20.0) -> list[dict[str, Any]]:
+    rpc = matter_rpc("get_nodes", timeout=timeout, channel=CMD_CHANNEL)
+    return nodes_from_result(rpc.get("result")) if rpc.get("ok") else []
+
+
 def _scan_collect_devices(*, wait: bool) -> list[dict[str, Any]]:
-    rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
-    devices = flatten_nodes(nodes_from_result(rpc.get("result"))) if rpc.get("ok") else []
+    nodes = _nodes_from_live_rpc(15.0)
+    devices = flatten_nodes(nodes)
     if not wait:
         return devices
     first_count = len(devices)
+    _fill_incomplete_hue_controls(nodes)
     _scan_wait(SCAN_POST_INTERVIEW_S)
-    rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
-    retry = flatten_nodes(nodes_from_result(rpc.get("result"))) if rpc.get("ok") else []
-    devices = _merge_device_rows(devices, retry)
-    if len(devices) <= first_count:
+    nodes = _nodes_from_live_rpc(15.0)
+    devices = _merge_device_rows(devices, flatten_nodes(nodes))
+    still = incomplete_hue_child_endpoints(nodes)
+    if still or len(devices) <= first_count:
+        if still:
+            _fill_incomplete_hue_controls(nodes)
         _scan_wait(SCAN_RETRY_WAIT_S)
-        rpc = matter_rpc("get_nodes", timeout=20.0, channel=CMD_CHANNEL)
-        more = flatten_nodes(nodes_from_result(rpc.get("result"))) if rpc.get("ok") else []
-        devices = _merge_device_rows(devices, more)
+        nodes = _nodes_from_live_rpc(15.0)
+        devices = _merge_device_rows(devices, flatten_nodes(nodes))
     return devices
 
 
@@ -1778,7 +1890,12 @@ def scan_existing_nodes(*, force: bool = False) -> dict[str, Any]:
         for node_id in candidates:
             if command_in_flight() and not force:
                 break
-            matter_rpc("interview_node", {"node_id": node_id}, timeout=45.0, channel=CMD_CHANNEL)
+            matter_rpc(
+                "interview_node",
+                {"node_id": node_id},
+                timeout=60.0 if force else 45.0,
+                channel=CMD_CHANNEL,
+            )
             interviewed.append(node_id)
         devices = _scan_collect_devices(wait=force and bool(interviewed))
         if devices:
@@ -2355,6 +2472,7 @@ def apply_attribute_event(data: Any) -> None:
     fields: dict[str, Any] = {}
     if cluster == ON_OFF and attr == ATTR_ON_OFF:
         fields["on"] = attr_bool(value)
+        fields["has_on_off"] = True
     elif cluster == THERMOSTAT and attr == ATTR_LOCAL_TEMPERATURE:
         fields["local_temperature"] = matter_celsius(value)
     elif cluster == THERMOSTAT and attr == ATTR_OCCUPIED_HEATING_SETPOINT:
@@ -2372,8 +2490,28 @@ def apply_attribute_event(data: Any) -> None:
             return
         # Hue keeps CurrentLevel at the last brightness while Off. Never infer On from it.
         fields["brightness"] = max(0, min(100, int(round(level * 100 / 254)))) if level else 0
+        fields["dimmable"] = True
+        fields["has_on_off"] = True
     elif cluster == COLOR_CONTROL:
         fields = apply_color_attribute(device_id, attr, value)
+        if attr in (ATTR_CURRENT_HUE, ATTR_CURRENT_SATURATION, ATTR_ENHANCED_CURRENT_HUE):
+            fields["color_hs"] = True
+            fields["colorable"] = True
+        elif attr in (ATTR_CURRENT_X, ATTR_CURRENT_Y):
+            fields["color_xy"] = True
+            fields["colorable"] = True
+        elif attr == ATTR_COLOR_TEMP_MIREDS:
+            fields["color_ct"] = True
+        elif attr == ATTR_COLOR_CAPABILITIES:
+            cap_bits = int(event_number(value) or 0)
+            if cap_bits & (COLOR_CAP_HS | COLOR_CAP_EHUE):
+                fields["color_hs"] = True
+                fields["colorable"] = True
+            if cap_bits & COLOR_CAP_XY:
+                fields["color_xy"] = True
+                fields["colorable"] = True
+            if cap_bits & COLOR_CAP_CT:
+                fields["color_ct"] = True
     elif cluster == RVC_OPERATIONAL and attr == ATTR_OPERATIONAL_STATE:
         fields.update(vacuum_runtime_fields(device_id, {"vacuum_op": int(event_number(value) or 0)}))
     elif cluster == RVC_OPERATIONAL and attr == ATTR_OPERATIONAL_ERROR:
@@ -4905,18 +5043,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 continue
             has_on_off = on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF)
             if not has_on_off and kind not in ("heater", "vacuum"):
-                hue_child = (
-                    DEVTYPE_BRIDGED_NODE in type_ids
-                    and DEVTYPE_AGGREGATOR not in type_ids
-                    and (
-                        is_bridge
-                        or "hue" in f"{vendor} {product} {source}".lower()
-                        or "signify" in f"{vendor} {product} {source}".lower()
-                    )
-                )
-                if not hue_child:
-                    continue
-                kind = "light"
+                continue
             is_light = kind == "light"
             thermo = thermostat_payload(attributes, endpoint) if kind == "heater" else {
                 "has_thermostat": False,
@@ -4959,6 +5086,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "brightness": brightness,
                     "dimmable": is_light
                     and attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
+                    "has_on_off": bool(has_on_off),
                     "available": available,
                     **color,
                     **({k: v for k, v in thermo.items() if k != "thermostat_on"} if kind == "heater" else {}),
@@ -5048,9 +5176,9 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 device_id = str(row.get("id") or "")
                 if device_id in by_id and "on" in by_id[device_id]:
                     row["on"] = attr_bool(by_id[device_id].get("on"))
-                    live_row = by_id[device_id]
-                    if "brightness" in live_row:
-                        row["brightness"] = live_row.get("brightness")
+                    held = by_id[device_id]
+                    if "brightness" in held:
+                        row["brightness"] = held.get("brightness")
                     for key in (
                         "local_temperature",
                         "heating_setpoint",
@@ -5069,8 +5197,8 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                         "run_modes",
                         "clean_modes",
                     ):
-                        if key in live_row and live_row.get(key) not in (None, [], ""):
-                            row[key] = live_row.get(key)
+                        if key in held and held.get(key) not in (None, [], ""):
+                            row[key] = held.get(key)
         return {
             "ok": True,
             "devices": devices,
@@ -5194,6 +5322,12 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     device_id=device_id,
                 )
             else:
+                held = next(
+                    (row for row in current_live_devices() if str(row.get("id") or "") == device_id),
+                    {},
+                ) or {}
+                if not held.get("has_on_off") and not held.get("dimmable"):
+                    read_hue_child_controls(node_id, [endpoint])
 
                 def send_onoff(nid: int | None = None) -> dict[str, Any]:
                     use = node_id if nid is None else nid
@@ -5210,6 +5344,11 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     )
 
                 rpc = command_with_reconnect(node_id, send_onoff)
+                if not rpc.get("ok") and is_unsupported_cluster(rpc):
+                    return {
+                        "ok": False,
+                        "error": "That light is still being read from the Hue Bridge. Tap Look for devices.",
+                    }
             if not rpc.get("ok"):
                 return rpc
             if on is not None:
