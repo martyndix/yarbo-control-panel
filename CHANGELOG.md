@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.151] - 2026-10-21
+
+### Added
+- PaperMono **ACCESS** page lists lockable UniFi Access doors and open/close sensors on one screen. Controllable doors have a lock mark and a double border; tap unlocks. Sensors show a door or window glyph and are not tappable. Open fills the tile. Firmware **0.1.70**.
+- Each open/close sensor can be marked **Door** or **Window** on Home ⚙️. That chooses 🚪 or 🪟 on the Home page (room heading when open, and the device row) and on ACCESS. Names that include “window” start as Window until you change them. Lockable Access doors stay doors.
+
 ## [4.0.150] - 2026-10-21
 
 ### Added

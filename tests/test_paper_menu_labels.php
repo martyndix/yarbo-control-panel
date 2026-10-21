@@ -94,7 +94,7 @@ $ordered = $devices->savePrefs([
     'menu_order' => ['house', 'radio', 'status', 'house', 'unknown'],
 ]);
 $order = $ordered['prefs']['menu_order'] ?? [];
-$expect = ['house', 'radio', 'robots', 'note', 'powerwall', 'device'];
+$expect = ['house', 'radio', 'robots', 'note', 'powerwall', 'device', 'access'];
 if ($order !== $expect) {
     fwrite(STDERR, 'order ' . json_encode($order) . "\n");
     exit(1);
@@ -124,6 +124,10 @@ if (!str_contains($html, 'id="paper-menu-list"') || !str_contains($html, 'data-m
 }
 if (!str_contains($html, 'data-menu-id="robots"') || !str_contains($html, 'data-menu-label="robots"')) {
     fwrite(STDERR, "robots menu row missing\n");
+    exit(1);
+}
+if (!str_contains($html, 'data-menu-id="access"') || !str_contains($html, 'data-menu-label="access"')) {
+    fwrite(STDERR, "access menu row missing\n");
     exit(1);
 }
 if (str_contains($html, 'data-menu-id="yarbo"') || str_contains($html, 'data-menu-id="lymow"')) {

@@ -899,6 +899,8 @@ assert_true(str_contains($js, 'home-device--sensor'), 'sensor tiles are marked s
 assert_true(str_contains($js, 'function homeAlertIconsHtml'), 'room headings show motion and open-door icons');
 assert_true(str_contains($js, '👤'), 'motion on a collapsed room is a person');
 assert_true(str_contains($js, '🚪'), 'an open door on a collapsed room is a door');
+assert_true(str_contains($js, '🪟'), 'an open window on a collapsed room is a window');
+assert_true(str_contains($js, 'data-home-contact-assign'), 'Home ⚙️ can mark a sensor door or window');
 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(

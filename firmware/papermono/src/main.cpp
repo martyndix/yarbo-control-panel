@@ -94,7 +94,7 @@ String lockScreen = "both";
 String unlockPage = "home";
 String menuCustom[PAPERMONO_PAGE_COUNT];
 bool menuShow[PAPERMONO_PAGE_COUNT] = {
-    true, true, true, true, true, false, true, true, true, true, true, true
+    true, true, true, true, true, false, true, true, true, true, true, true, true
 };
 #define PAPERMONO_MENU_MAX 12
 int menuLaidPage[PAPERMONO_MENU_MAX];
@@ -103,14 +103,15 @@ int menuLaidY[PAPERMONO_MENU_MAX];
 int menuLaidN = 0;
 int menuLaidW = 208;
 int menuLaidH = 100;
-int menuOrderN = 6;
+int menuOrderN = 7;
 int menuOrderPage[PAPERMONO_MENU_MAX] = {
     PAPERMONO_PAGE_ROBOTS,
     PAPERMONO_PAGE_NOTE,
     PAPERMONO_PAGE_POWERWALL,
     PAPERMONO_PAGE_RADIO,
     PAPERMONO_PAGE_DEVICE,
-    PAPERMONO_PAGE_HOUSE
+    PAPERMONO_PAGE_HOUSE,
+    PAPERMONO_PAGE_ACCESS
 };
 int lastYarboPage = PAPERMONO_PAGE_STATUS;
 bool alertMessageOn = true;
@@ -211,6 +212,13 @@ String robotAreaNames[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 bool robotAreaOn[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 uint32_t robotVacHoldUntil = 0;
 uint32_t homeHoldUntil = 0;
+int accessCount = 0;
+bool accessHaveItems = false;
+String accessIds[PAPERMONO_ACCESS_MAX];
+String accessNames[PAPERMONO_ACCESS_MAX];
+String accessRoles[PAPERMONO_ACCESS_MAX];
+bool accessOnState[PAPERMONO_ACCESS_MAX];
+bool accessUnlock[PAPERMONO_ACCESS_MAX];
 
 void drawScreen(bool forceFull);
 void serviceTouchQueue();
@@ -715,6 +723,7 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
     if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
     if (page == PAPERMONO_PAGE_ROBOTS) return "ROBOTS";
+    if (page == PAPERMONO_PAGE_ACCESS) return "ACCESS";
     return "HOME";
 }
 
@@ -741,12 +750,17 @@ String screenKey()
         + "|" + String(menuOpen ? 1 : 0) + "|" + String(lastYarboPage)
         + "|" + String(tabletCharging ? 1 : 0)
         + "|" + String(usingRemote ? 1 : 0)
-        + "|" + String(robotsUi) + "|" + String(robotSel) + "|" + String(robotCount);
+        + "|" + String(robotsUi) + "|" + String(robotSel) + "|" + String(robotCount)
+        + "|" + String(accessCount) + "|" + String(accessHaveItems ? 1 : 0);
     for (int i = 0; i < robotCount; i++) {
         key += "|" + robotIds[i] + "|" + robotStatus[i] + "|" + robotClean[i] + "|" + robotRooms[i];
         for (int a = 0; a < robotAreaN[i]; a++) {
             key += robotAreaOn[i][a] ? "1" : "0";
         }
+    }
+    for (int i = 0; i < accessCount; i++) {
+        key += "|" + accessIds[i] + "|" + accessRoles[i] + "|" + String(accessOnState[i] ? 1 : 0)
+            + "|" + String(accessUnlock[i] ? 1 : 0);
     }
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         key += "|" + menuCustom[i] + "|" + String(menuShow[i] ? 1 : 0);
@@ -793,6 +807,9 @@ bool pageEnabled(int page)
     }
     if (page == PAPERMONO_PAGE_ROBOTS) {
         return menuShow[page] && (robotCount > 0 || robotsHaveItems);
+    }
+    if (page == PAPERMONO_PAGE_ACCESS) {
+        return menuShow[page] && homeOn && (accessCount > 0 || accessHaveItems);
     }
     return menuShow[page];
 }
@@ -854,6 +871,7 @@ int pageFromUnlockId(const String &id)
     if (id == "radio") return PAPERMONO_PAGE_RADIO;
     if (id == "device") return PAPERMONO_PAGE_DEVICE;
     if (id == "house") return PAPERMONO_PAGE_HOUSE;
+    if (id == "access") return PAPERMONO_PAGE_ACCESS;
     return PAPERMONO_PAGE_HOME;
 }
 
@@ -1023,6 +1041,35 @@ void drawDoorGlyph(int x, int y, int h, uint16_t fg)
     M5.Display.fillCircle(x + w - 3 - knob, y + h / 2, knob, fg);
 }
 
+void drawWindowGlyph(int x, int y, int h, uint16_t fg)
+{
+    int w = (h * 5) / 8;
+    if (w < 12) {
+        w = 12;
+    }
+    M5.Display.drawRect(x, y, w, h, fg);
+    M5.Display.drawRect(x + 1, y + 1, w - 2, h - 2, fg);
+    M5.Display.drawFastHLine(x, y + h / 2, w, fg);
+    M5.Display.drawFastVLine(x + w / 2, y, h, fg);
+}
+
+void drawLockMark(int x, int y, int h, uint16_t fg)
+{
+    int bodyW = (h * 5) / 8;
+    if (bodyW < 10) {
+        bodyW = 10;
+    }
+    int bodyH = (h * 5) / 8;
+    int hoop = bodyW / 2;
+    if (hoop < 4) {
+        hoop = 4;
+    }
+    int bodyY = y + h - bodyH;
+    int cx = x + bodyW / 2;
+    M5.Display.drawCircle(cx, bodyY, hoop, fg);
+    M5.Display.fillRect(x, bodyY, bodyW, bodyH, fg);
+}
+
 void drawButton(int x, int y, int w, int h, const String &label, bool invert)
 {
     uint16_t bg = invert ? TFT_BLACK : TFT_WHITE;
@@ -1157,6 +1204,7 @@ const char *pageKey(int page)
     if (page == PAPERMONO_PAGE_DEVICE) return "device";
     if (page == PAPERMONO_PAGE_HOUSE) return "house";
     if (page == PAPERMONO_PAGE_ROBOTS) return "robots";
+    if (page == PAPERMONO_PAGE_ACCESS) return "access";
     return "home";
 }
 
@@ -1172,6 +1220,7 @@ String menuLabelDefault(int page)
     if (page == PAPERMONO_PAGE_DEVICE) return "DEVICE";
     if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
     if (page == PAPERMONO_PAGE_ROBOTS) return "ROBOTS";
+    if (page == PAPERMONO_PAGE_ACCESS) return "ACCESS";
     return "HOME";
 }
 
@@ -1265,7 +1314,8 @@ void applyMenuOrder(JsonVariant order)
 {
     static const int kDefault[] = {
         PAPERMONO_PAGE_ROBOTS, PAPERMONO_PAGE_NOTE, PAPERMONO_PAGE_POWERWALL,
-        PAPERMONO_PAGE_RADIO, PAPERMONO_PAGE_DEVICE, PAPERMONO_PAGE_HOUSE
+        PAPERMONO_PAGE_RADIO, PAPERMONO_PAGE_DEVICE, PAPERMONO_PAGE_HOUSE,
+        PAPERMONO_PAGE_ACCESS
     };
     bool used[PAPERMONO_PAGE_COUNT] = {};
     int n = 0;
@@ -1285,7 +1335,7 @@ void applyMenuOrder(JsonVariant order)
             menuOrderPage[n++] = page;
         }
     }
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 7; i++) {
         int page = kDefault[i];
         if (used[page] || n >= PAPERMONO_MENU_MAX) {
             continue;
@@ -1293,13 +1343,14 @@ void applyMenuOrder(JsonVariant order)
         used[page] = true;
         menuOrderPage[n++] = page;
     }
-    menuOrderN = n > 0 ? n : 6;
+    menuOrderN = n > 0 ? n : 7;
 }
 
 String menuLayoutStamp()
 {
     String s = String((int) yarboOn) + String((int) powerwallOn) + String((int) lymowOn)
-        + String((int) homeOn) + String((int) robotsHaveItems) + "|" + String(menuOrderN);
+        + String((int) homeOn) + String((int) robotsHaveItems) + String((int) accessHaveItems)
+        + "|" + String(menuOrderN);
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         s += "|" + menuCustom[i] + (menuShow[i] ? "1" : "0");
     }
@@ -1337,6 +1388,7 @@ void saveMenuLayout()
     prefs.putBool("lon", lymowOn);
     prefs.putBool("hon", homeOn);
     prefs.putBool("rhv", robotsHaveItems);
+    prefs.putBool("ahv", accessHaveItems);
     prefs.end();
 }
 
@@ -1382,6 +1434,9 @@ void loadMenuLayout()
     }
     if (prefs.isKey("rhv")) {
         robotsHaveItems = prefs.getBool("rhv", robotsHaveItems);
+    }
+    if (prefs.isKey("ahv")) {
+        accessHaveItems = prefs.getBool("ahv", accessHaveItems);
     }
     prefs.end();
     lastMenuStamp = menuLayoutStamp();
@@ -1706,6 +1761,78 @@ void drawHousePage(bool forceFull)
                 glyphH = 16;
             }
             drawDoorGlyph(x + 10, y + (h - glyphH) / 2, glyphH, fg);
+        }
+        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+        M5.Display.setTextDatum(TL_DATUM);
+    }
+    drawPager();
+    finishEpdFrame();
+}
+
+int accessItemCount()
+{
+    int shown = accessCount < PAPERMONO_ACCESS_VISIBLE ? accessCount : PAPERMONO_ACCESS_VISIBLE;
+    return shown < 0 ? 0 : shown;
+}
+
+void accessButtonRect(int idx, int &x, int &y, int &w, int &h)
+{
+    int cols, rows, bw, bh, gap, x0, y0;
+    int n = accessItemCount();
+    if (n < 1) {
+        n = 1;
+    }
+    layoutTileGrid(n, cols, rows, bw, bh, gap, x0, y0);
+    int col = idx % cols;
+    int row = idx / cols;
+    x = x0 + col * (bw + gap);
+    y = y0 + row * (bh + gap);
+    w = bw;
+    h = bh;
+}
+
+void drawAccessPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    int shown = accessItemCount();
+    if (shown == 0) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("No doors or windows.", 16, 180);
+    }
+    for (int i = 0; i < shown; i++) {
+        int x, y, w, h;
+        accessButtonRect(i, x, y, w, h);
+        bool window = accessRoles[i] == "window";
+        bool unlock = accessUnlock[i];
+        uint16_t bg = accessOnState[i] ? TFT_BLACK : TFT_WHITE;
+        uint16_t fg = accessOnState[i] ? TFT_WHITE : TFT_BLACK;
+        M5.Display.fillRoundRect(x, y, w, h, 12, bg);
+        M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
+        if (unlock) {
+            M5.Display.drawRoundRect(x + 3, y + 3, w - 6, h - 6, 9, TFT_BLACK);
+            if (accessOnState[i]) {
+                M5.Display.drawRoundRect(x + 3, y + 3, w - 6, h - 6, 9, TFT_WHITE);
+            }
+        }
+        int padL = unlock ? 58 : 40;
+        drawFittedLabel(x + padL + (w - padL) / 2, y + h / 2, w - padL - 12, h - 16, accessNames[i], fg, bg);
+        int glyphH = h > 48 ? 26 : h - 22;
+        if (glyphH < 16) {
+            glyphH = 16;
+        }
+        int gy = y + (h - glyphH) / 2;
+        if (window) {
+            drawWindowGlyph(x + 10, gy, glyphH, fg);
+        } else {
+            drawDoorGlyph(x + 10, gy, glyphH, fg);
+        }
+        if (unlock) {
+            int lockH = glyphH > 20 ? 16 : 12;
+            drawLockMark(x + 34, y + (h - lockH) / 2, lockH, fg);
         }
         M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
         M5.Display.setTextDatum(TL_DATUM);
@@ -3237,6 +3364,8 @@ void drawScreen(bool forceFull)
                 drawDevicePage(forceFull);
             } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
                 drawHousePage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_ACCESS) {
+                drawAccessPage(forceFull);
             } else if (currentPage == PAPERMONO_PAGE_ROBOTS) {
                 drawRobotsPage(forceFull);
             } else {
@@ -4282,6 +4411,30 @@ bool httpGetStatus()
         }
         robotsHaveItems = robotCount > 0;
     }
+    if (doc["access_items"].is<JsonArray>()) {
+        accessCount = 0;
+        JsonArray items = doc["access_items"].as<JsonArray>();
+        if (!items.isNull()) {
+            for (JsonVariant item : items) {
+                if (accessCount >= PAPERMONO_ACCESS_MAX) {
+                    break;
+                }
+                JsonObject o = item.as<JsonObject>();
+                if (o.isNull()) {
+                    continue;
+                }
+                accessIds[accessCount] = String((const char *) (o["id"] | ""));
+                accessNames[accessCount] = String((const char *) (o["name"] | ""));
+                accessRoles[accessCount] = String((const char *) (o["role"] | "door"));
+                accessOnState[accessCount] = o["on"] | false;
+                accessUnlock[accessCount] = o["unlock"] | false;
+                if (accessIds[accessCount].length() && accessNames[accessCount].length()) {
+                    accessCount++;
+                }
+            }
+        }
+        accessHaveItems = accessCount > 0;
+    }
     if (keepRobot.length()) {
         int found = -1;
         for (int i = 0; i < robotCount; i++) {
@@ -4714,6 +4867,24 @@ void handleHouseTouch(int x, int y)
     }
 }
 
+void handleAccessTouch(int x, int y)
+{
+    int shown = accessItemCount();
+    for (int i = 0; i < shown; i++) {
+        int bx, by, bw, bh;
+        accessButtonRect(i, bx, by, bw, bh);
+        if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
+            if (!accessUnlock[i]) {
+                return;
+            }
+            lastDrawnKey = "";
+            drawScreen(false);
+            httpCommand("home_toggle", nullptr, nullptr, accessIds[i].c_str());
+            return;
+        }
+    }
+}
+
 void announceUsbReady()
 {
     Serial.println("PAPER_READY");
@@ -4804,6 +4975,8 @@ void serviceTouchQueue()
         handlePlansTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_HOUSE) {
         handleHouseTouch(tx, ty);
+    } else if (currentPage == PAPERMONO_PAGE_ACCESS) {
+        handleAccessTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_ROBOTS) {
         handleRobotsTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_NOTE) {

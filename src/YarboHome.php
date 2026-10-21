@@ -17,7 +17,10 @@ final class YarboHome
     public const KIND_HEATER = 'heater';
     public const KIND_VACUUM = 'vacuum';
     public const KIND_SCENE = 'scene';
+    public const CONTACT_DOOR = 'door';
+    public const CONTACT_WINDOW = 'window';
     public const PAPER_MAX = 12;
+    public const PAPER_ACCESS_MAX = 16;
     /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
     public const PAPER_NAME_MAX = 40;
     public const PAPER_ROBOT_AREA_MAX = 8;
@@ -88,6 +91,7 @@ final class YarboHome
             'active_scene_id' => '',
             'last_devices' => [],
             'last_trigger' => [],
+            'contact_kind' => [],
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
         ];
         if (!is_file($path)) {
@@ -223,6 +227,7 @@ final class YarboHome
                 is_array($decoded['last_devices'] ?? null) ? $decoded['last_devices'] : []
             ),
             'last_trigger' => $this->normalizeLastTrigger($decoded['last_trigger'] ?? null),
+            'contact_kind' => $this->normalizeContactKind($decoded['contact_kind'] ?? null),
             'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
         ];
         $recovered = $this->recoverUserMeta($store);
@@ -294,6 +299,18 @@ final class YarboHome
                 }
             }
         }
+        if (isset($input['contact_kind']) && is_array($input['contact_kind'])) {
+            if (!isset($store['contact_kind']) || !is_array($store['contact_kind'])) {
+                $store['contact_kind'] = [];
+            }
+            foreach ($input['contact_kind'] as $id => $role) {
+                $id = trim((string) $id);
+                if ($id === '') {
+                    continue;
+                }
+                $store['contact_kind'][$id] = self::normalizeContactRole($role);
+            }
+        }
 
         return $this->write($store);
     }
@@ -321,6 +338,7 @@ final class YarboHome
                 'hidden' => $store['hidden'],
                 'device_order' => $store['device_order'],
                 'last_devices' => $store['last_devices'],
+                'contact_kind' => $store['contact_kind'] ?? [],
             ],
             'automations' => (new YarboHomeAutomations($this->projectRoot))->exportStore(),
         ];
@@ -359,7 +377,7 @@ final class YarboHome
         $current = $this->load();
         if ($homeIn !== null) {
             $this->snapshotStore($current);
-            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order'] as $key) {
+            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind'] as $key) {
                 if (isset($homeIn[$key]) && is_array($homeIn[$key])) {
                     $current[$key] = $homeIn[$key];
                 }
@@ -614,6 +632,10 @@ final class YarboHome
                         $row[$key] = $device[$key];
                     }
                 }
+            }
+            if (self::isLockableDoor($row) || self::isOpenCloseSensor($row)) {
+                $row['contact_kind'] = $this->contactRoleFor($row, $store);
+                $row['can_assign_contact'] = self::isOpenCloseSensor($row);
             }
             $trig = $this->publicLastTrigger(
                 is_array($triggers[$id] ?? null) ? $triggers[$id] : null,
@@ -2022,6 +2044,26 @@ final class YarboHome
     }
 
     /**
+     * @return array<string, string>
+     */
+    private function normalizeContactKind(mixed $raw): array
+    {
+        $out = [];
+        if (!is_array($raw)) {
+            return $out;
+        }
+        foreach ($raw as $id => $role) {
+            $id = trim((string) $id);
+            if ($id === '') {
+                continue;
+            }
+            $out[$id] = self::normalizeContactRole($role);
+        }
+
+        return $out;
+    }
+
+    /**
      * @param mixed $raw
      * @return array<string, array{on: bool, at: int, via: string, name: string, text: string}>
      */
@@ -2667,6 +2709,8 @@ final class YarboHome
                     $row[$key] = $device[$key];
                 }
             }
+            $row['contact_kind'] = $this->contactRoleFor($row + $device, $store);
+            $row['can_assign_contact'] = self::isOpenCloseSensor($row + $device);
             $out[] = $row;
         }
 
@@ -3488,7 +3532,7 @@ final class YarboHome
                 continue;
             }
             $newId = $candidates[0];
-            foreach (['rooms', 'groups', 'names'] as $mapKey) {
+            foreach (['rooms', 'groups', 'names', 'contact_kind'] as $mapKey) {
                 $mapping = is_array($store[$mapKey] ?? null) ? $store[$mapKey] : [];
                 if (!isset($mapping[$newId]) && isset($mapping[$oldId])) {
                     $mapping[$newId] = $mapping[$oldId];
@@ -3853,7 +3897,7 @@ final class YarboHome
             }
             $newId = $ids[0];
             $prefix = $nid . ':';
-            foreach (['names', 'rooms', 'groups'] as $key) {
+            foreach (['names', 'rooms', 'groups', 'contact_kind'] as $key) {
                 $map = is_array($store[$key] ?? null) ? $store[$key] : [];
                 if (isset($map[$newId])) {
                     continue;
@@ -4106,6 +4150,195 @@ final class YarboHome
         }
 
         return $out;
+    }
+
+    /**
+     * Lockable Access doors plus open/close sensors for the PaperMono ACCESS page.
+     *
+     * @return list<array{id: string, name: string, kind: string, role: string, on: bool, unlock: bool}>
+     */
+    public function paperAccessItems(): array
+    {
+        $store = $this->load();
+        $hidden = array_fill_keys($store['hidden'], true);
+        $live = $this->devicesWithLiveState();
+        $live['devices'] = $this->mergeUnifiDevices($live['devices'], true);
+        $lockable = [];
+        $sensors = [];
+        $covered = [];
+        foreach ($live['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            if ($id === '' || isset($hidden[$id]) || !self::isLockableDoor($device)) {
+                continue;
+            }
+            $lockable[] = $device;
+            $native = trim((string) ($device['native_id'] ?? ''));
+            if ($native !== '') {
+                $covered[$native] = true;
+            }
+            $doorId = trim((string) ($device['door_id'] ?? ''));
+            if ($doorId !== '') {
+                $covered[$doorId] = true;
+            }
+        }
+        foreach ($live['devices'] as $device) {
+            if (!is_array($device) || !self::isOpenCloseSensor($device)) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            if ($id === '' || isset($hidden[$id])) {
+                continue;
+            }
+            $doorId = trim((string) ($device['door_id'] ?? ''));
+            if ($doorId !== '' && isset($covered[$doorId])) {
+                continue;
+            }
+            $sensors[] = $device;
+        }
+        $out = [];
+        foreach (array_merge($lockable, $sensors) as $device) {
+            $id = trim((string) ($device['id'] ?? ''));
+            $kind = strtolower(trim((string) ($device['kind'] ?? 'sensor')));
+            if ($kind === '') {
+                $kind = 'sensor';
+            }
+            $out[] = [
+                'id' => $id,
+                'name' => YarboHub::normalizeDisplayName(
+                    (string) ($store['names'][$id] ?? $device['name'] ?? $id),
+                    self::PAPER_NAME_MAX,
+                ) ?: $id,
+                'kind' => $kind,
+                'role' => $this->contactRoleFor($device, $store),
+                'on' => self::contactIsOpen($device),
+                'unlock' => self::isLockableDoor($device),
+            ];
+            if (count($out) >= self::PAPER_ACCESS_MAX) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    public static function isLockableDoor(array $row): bool
+    {
+        $kind = strtolower(trim((string) ($row['kind'] ?? '')));
+
+        return $kind === 'door' || $kind === 'hub';
+    }
+
+    /**
+     * Open/close contacts that are not lockable Access doors.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function isOpenCloseSensor(array $row): bool
+    {
+        if (self::isLockableDoor($row)) {
+            return false;
+        }
+        $kind = strtolower(trim((string) ($row['kind'] ?? '')));
+        $native = (string) ($row['native_id'] ?? $row['id'] ?? '');
+        $product = (string) ($row['product'] ?? '');
+        $name = (string) ($row['name'] ?? '');
+        if (str_starts_with($native, 'pir-') || str_contains($native, ':pir-')) {
+            return false;
+        }
+        if (str_starts_with($native, 'rin-') || str_contains($native, ':rin-')) {
+            return false;
+        }
+        if ($product === 'Door position sensor' || str_starts_with($native, 'dps-') || str_contains($native, ':dps-')) {
+            return true;
+        }
+        if (!empty($row['has_open']) || !empty($row['has_dps'])) {
+            return $kind === 'sensor' || $kind === '';
+        }
+        if ($kind !== 'sensor') {
+            return false;
+        }
+        $blob = $name . ' ' . $product;
+        if (preg_match('/motion|occupancy|presence|pir/i', $blob) === 1
+            && preg_match('/contact|door|window|magnet/i', $blob) !== 1) {
+            return false;
+        }
+
+        return preg_match('/contact|door|window|magnet/i', $blob) === 1;
+    }
+
+    public static function looksLikeWindowName(string $blob): bool
+    {
+        return preg_match('/window/i', $blob) === 1;
+    }
+
+    public static function normalizeContactRole(mixed $value): string
+    {
+        return strtolower(trim((string) $value)) === self::CONTACT_WINDOW
+            ? self::CONTACT_WINDOW
+            : self::CONTACT_DOOR;
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     * @param array<string, mixed>|null $store
+     */
+    public function contactRoleFor(array $device, ?array $store = null): string
+    {
+        if (self::isLockableDoor($device)) {
+            return self::CONTACT_DOOR;
+        }
+        $id = trim((string) ($device['id'] ?? ''));
+        $store ??= $this->load();
+        $map = is_array($store['contact_kind'] ?? null) ? $store['contact_kind'] : [];
+        $assigned = strtolower(trim((string) ($map[$id] ?? '')));
+        if ($assigned === self::CONTACT_WINDOW || $assigned === self::CONTACT_DOOR) {
+            return $assigned;
+        }
+        $blob = (string) ($store['names'][$id] ?? $device['name'] ?? '') . ' ' . (string) ($device['product'] ?? '');
+        if (self::looksLikeWindowName($blob)) {
+            return self::CONTACT_WINDOW;
+        }
+
+        return self::CONTACT_DOOR;
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     */
+    public static function contactIsOpen(array $device): bool
+    {
+        if (($device['open'] ?? null) === true) {
+            return true;
+        }
+        $dps = strtolower(trim((string) ($device['dps'] ?? '')));
+        if ($dps === 'open' || $dps === 'opened') {
+            return true;
+        }
+        $label = (string) ($device['dps_label'] ?? $device['status'] ?? '');
+
+        return preg_match('/^Open\b/i', $label) === 1;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function assignContactKind(string $deviceId, string $role): array
+    {
+        $deviceId = trim($deviceId);
+        if ($deviceId === '') {
+            return ['ok' => false, 'error' => 'Pick a device'];
+        }
+        $store = $this->load();
+        if (!isset($store['contact_kind']) || !is_array($store['contact_kind'])) {
+            $store['contact_kind'] = [];
+        }
+        $store['contact_kind'][$deviceId] = self::normalizeContactRole($role);
+        $this->write($store);
+
+        return ['ok' => true];
     }
 
     /**
@@ -5477,7 +5710,7 @@ final class YarboHome
         if (!$incomingEmpty || !$existingRich) {
             return $incoming;
         }
-        foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order'] as $key) {
+        foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind'] as $key) {
             if (($existing[$key] ?? []) !== []) {
                 $incoming[$key] = $existing[$key];
             }

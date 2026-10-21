@@ -48,6 +48,7 @@ try {
         'command' => $home->command($input),
         'rename' => $home->saveMeta(['names' => [$input['id'] ?? '' => $input['name'] ?? '']]),
         'room' => $home->assignDeviceRoom((string) ($input['id'] ?? ''), (string) ($input['room_id'] ?? $input['room'] ?? '')),
+        'contact_kind' => $home->assignContactKind((string) ($input['id'] ?? ''), (string) ($input['contact_kind'] ?? $input['kind'] ?? '')),
         'room_save' => $home->saveRoom($input),
         'room_delete' => $home->deleteRoom((string) ($input['id'] ?? '')),
         'room_command' => $home->commandRoom($input),

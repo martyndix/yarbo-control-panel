@@ -2930,10 +2930,12 @@ function homeDoorsTileCardHtml(d) {
            <button type="button" class="btn btn-secondary btn-compact" data-home-unifi-cmd="stop">Stop</button>`
         : '';
     const unlock = sensor ? '' : unifiDoorLockButtonHtml(d, { home: true });
+    const emoji = homeContactEmoji(d) || (sensor && homeContactRole(d) === 'window' ? '🪟' : '🚪');
+    const label = `${emoji} ${d.name || (sensor ? (homeContactRole(d) === 'window' ? 'Window' : 'Door sensor') : 'Door')}`;
     return `<article class="home-device home-device--door home-device--unifi${sensor ? ' home-device--sensor' : ''}" data-home-id="${escapeHtml(d.id)}">
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
-            <p class="home-device-name">${escapeHtml(d.name || (sensor ? 'Door sensor' : 'Door'))}</p>
+            <p class="home-device-name">${escapeHtml(label)}</p>
         </div>
         <div class="home-device-actions">
             ${unifiDpsMetaHtml(d, 'data-home-dps')}
@@ -2985,7 +2987,10 @@ function renderHomeDoorsTile(data) {
         const el = grid.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
         if (!el) return;
         const name = el.querySelector('.home-device-name');
-        if (name && d.name) name.textContent = d.name;
+        if (name && d.name) {
+            const emoji = homeContactEmoji(d) || (String(d.kind || '') === 'sensor' && homeContactRole(d) === 'window' ? '🪟' : '🚪');
+            name.textContent = `${emoji} ${d.name}`;
+        }
         const status = el.querySelector('[data-home-dps]');
         if (status) {
             const label = String(d.dps_label || '').trim()
@@ -3459,13 +3464,37 @@ function homeMemberHasMotion(d) {
     return false;
 }
 
+function homeContactRole(d) {
+    if (homeIsDoorKind(d)) return 'door';
+    const assigned = String(d?.contact_kind || '').toLowerCase();
+    if (assigned === 'window' || assigned === 'door') return assigned;
+    if (/window/i.test(`${d?.name || ''} ${d?.product || ''}`)) return 'window';
+    return 'door';
+}
+
+function homeCanAssignContact(d) {
+    if (!d || homeIsDoorKind(d)) return false;
+    if (d.can_assign_contact === true) return true;
+    return homeAutoCanOpen(d) && (homeIsSensorKind(d) || d.has_open || d.has_dps);
+}
+
+function homeContactEmoji(d) {
+    if (!d) return '';
+    if (homeIsDoorKind(d) || homeCanAssignContact(d) || d.has_open || d.has_dps) {
+        return homeContactRole(d) === 'window' ? '🪟' : '🚪';
+    }
+    return '';
+}
+
 function homeAlertIconsHtml(members) {
     const motion = (members || []).some((d) => homeMemberHasMotion(d));
-    const door = (members || []).some((d) => homeMemberIsOpen(d));
-    if (!motion && !door) return '';
+    const door = (members || []).some((d) => homeMemberIsOpen(d) && homeContactRole(d) !== 'window');
+    const windowOpen = (members || []).some((d) => homeMemberIsOpen(d) && homeContactRole(d) === 'window');
+    if (!motion && !door && !windowOpen) return '';
     return `<span class="home-room-alerts">${
         (motion ? '<span class="home-room-alert" title="Motion" aria-label="Motion">👤</span>' : '')
         + (door ? '<span class="home-room-alert" title="Door open" aria-label="Door open">🚪</span>' : '')
+        + (windowOpen ? '<span class="home-room-alert" title="Window open" aria-label="Window open">🪟</span>' : '')
     }</span>`;
 }
 
@@ -3586,12 +3615,13 @@ function homeKindLabel(d) {
             case 'camera':
                 return 'Camera';
             case 'door':
-                return 'Door';
+                return '🚪 Door';
             case 'hub':
-                return 'Controller';
+                return '🚪 Controller';
             case 'sensor':
-                if (d.product === 'Door position sensor' || String(d.native_id || '').startsWith('dps-')) {
-                    return 'Door sensor';
+                if (homeCanAssignContact(d) || d.has_open || d.has_dps
+                    || d.product === 'Door position sensor' || String(d.native_id || '').startsWith('dps-')) {
+                    return homeContactRole(d) === 'window' ? '🪟 Window' : '🚪 Door';
                 }
                 return 'Sensor';
             case 'relay':
@@ -3611,6 +3641,11 @@ function homeKindLabel(d) {
             return 'Plug';
         case 'switch':
             return 'Switch';
+        case 'sensor':
+            if (homeCanAssignContact(d) || d.has_open || d.has_dps) {
+                return homeContactRole(d) === 'window' ? '🪟 Window' : '🚪 Door';
+            }
+            return '';
         default:
             return '';
     }
@@ -4435,6 +4470,15 @@ function homeRoomSelectHtml(d, rooms) {
     return `<select class="home-device-room-select" data-home-room-assign="${escapeHtml(d.id)}" aria-label="Room">${opts.join('')}</select>`;
 }
 
+function homeContactSelectHtml(d) {
+    if (!homeManageOpen || !homeCanAssignContact(d)) return '';
+    const current = homeContactRole(d);
+    return `<select class="home-device-contact-select" data-home-contact-assign="${escapeHtml(d.id)}" aria-label="Door or window">
+        <option value="door"${current === 'door' ? ' selected' : ''}>🚪 Door</option>
+        <option value="window"${current === 'window' ? ' selected' : ''}>🪟 Window</option>
+    </select>`;
+}
+
 function homeGroupSelectHtml(d, rooms) {
     if (!homeManageOpen || !d.room_id) return '';
     const room = (rooms || []).find((r) => r.id === d.room_id);
@@ -4576,7 +4620,8 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const meta = homeDeviceHoverTitle(d);
     const defaultName = d.default_name || d.name || '';
     const kindName = homeKindLabel(d);
-    const kindChip = kindName ? `<span class="home-device-kind">${escapeHtml(kindName)}</span>` : '';
+    const contactSelect = hidden ? '' : homeContactSelectHtml(d);
+    const kindChip = kindName && !contactSelect ? `<span class="home-device-kind">${escapeHtml(kindName)}</span>` : '';
     const heater = String(d.kind || '') === 'heater';
     const vacuum = String(d.kind || '') === 'vacuum';
     const camera = String(d.kind || '') === 'camera';
@@ -4606,6 +4651,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
             ${label}
             ${kindChip}
+            ${contactSelect}
         </div>
         ${roomSelect}
         ${groupSelect}
@@ -5864,6 +5910,20 @@ function bindHomeDashboard() {
             applyHomeDeviceGroup(id, groupId);
             if (await saveHomeAssignment({ action: 'group', id, group_id: groupId }, id, prevRoom, prevGroup, 'Could not assign group')) {
                 renderHomeDashboard(homeDash, { replace: true });
+            }
+            return;
+        }
+        const contactAssign = event.target.closest('[data-home-contact-assign]');
+        if (contactAssign) {
+            const id = contactAssign.getAttribute('data-home-contact-assign') || '';
+            const role = contactAssign.value === 'window' ? 'window' : 'door';
+            patchHomeDashDevice(id, { contact_kind: role });
+            try {
+                const data = await homeApi({ action: 'contact_kind', id, contact_kind: role });
+                if (!data?.ok) throw new Error(data?.error || 'Could not save door or window');
+                renderHomeDashboard(homeDash, { replace: true });
+            } catch (err) {
+                showToast(err.message || 'Could not save door or window', 'error');
             }
             return;
         }

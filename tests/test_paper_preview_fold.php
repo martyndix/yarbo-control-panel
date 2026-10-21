@@ -14,7 +14,7 @@ $needles = [
     'HOUSE — same tile shape as the unlock menu; long names wrap',
     'MAIL — inbox with time stamps, read receipts, and WRITE',
     'Lock screen — envelope when mail is waiting, Unlock, and OFF',
-    'Unlock menu — one ROBOTS button for Yarbo, Lymow, and Matter vacuums. Reorder in Settings. MAIL blob if unread',
+    'Unlock menu — ROBOTS for robots, ACCESS for doors and windows. Reorder in Settings. MAIL blob if unread',
     'Opposite corners: tap 1, then 2',
 ];
 
