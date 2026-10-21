@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.138] - 2026-10-21
+
+### Fixed
+- Philips Hue lights that are already in Apple Home show on Home again. A fabric-id allowlist was hiding bulbs **Look for devices** had found, and sleepy Hue lamps with the same name as another lamp were dropped as leftovers. Dummy BSB003 endpoints and an old Matter node named like **Spot 5** are still hidden.
+
 ## [4.0.137] - 2026-10-21
 
 ### Fixed

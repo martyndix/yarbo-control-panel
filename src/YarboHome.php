@@ -919,11 +919,18 @@ final class YarboHome
         }
         $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
         if ($merged !== []) {
-            $this->writeDeviceCache(
-                $cachePath,
-                $merged,
-                YarboMatterFabric::storageMtime($this->projectRoot . '/data/matter-server')
-            );
+            $mtime = YarboMatterFabric::storageMtime($this->projectRoot . '/data/matter-server');
+            $known = $this->readDeviceCacheBundle($cachePath)['disk_ids'];
+            foreach ($incoming as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $id = trim((string) ($row['id'] ?? ''));
+                if ($id !== '') {
+                    $known[] = $id;
+                }
+            }
+            $this->writeDeviceCache($cachePath, $merged, $mtime, array_values(array_unique($known)));
             $this->rememberDevices($merged);
         }
         $message = $added === 0
@@ -2178,21 +2185,18 @@ final class YarboHome
         $remembered = $bundle['devices'] !== [] ? $bundle['devices'] : ($store['last_devices'] ?? []);
         $fromMeta = $this->devicesFromStoreHints($store);
         $fabricMtime = YarboMatterFabric::storageMtime($storageDir);
-        $diskIds = $bundle['disk_ids'];
         $cacheFresh = $remembered !== []
             && !self::looksLikeUninterviewedStub($remembered)
             && $bundle['fabric_mtime'] > 0
-            && $bundle['fabric_mtime'] >= $fabricMtime
-            && $diskIds !== [];
+            && $bundle['fabric_mtime'] >= $fabricMtime;
         if ($cacheFresh) {
             $devices = [];
-            $allow = array_fill_keys($diskIds, true);
             foreach ($remembered as $row) {
                 if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
                     continue;
                 }
                 $id = trim((string) ($row['id'] ?? ''));
-                if ($id === '' || !isset($allow[$id])) {
+                if ($id === '') {
                     continue;
                 }
                 $devices[] = YarboMatterFabric::reclassifyRow($row);
@@ -2432,18 +2436,6 @@ final class YarboHome
     }
 
     /**
-     * @param array<string, mixed> $row
-     */
-    /**
-     * Dummy Hue Bridge endpoints named like "BSB003 96" (product + endpoint, no bulb label).
-     *
-     * @param array<string, mixed> $row
-     */
-    /**
-     * @param list<array<string, mixed>> $devices
-     * @return list<array<string, mixed>>
-     */
-    /**
      * An old Matter node that is offline but still named "Spot 5" next to the live Hue Spot 5.
      *
      * @param list<array<string, mixed>> $devices
@@ -2451,7 +2443,7 @@ final class YarboHome
      */
     public static function dropUnavailableNameDuplicates(array $devices): array
     {
-        $liveNames = [];
+        $liveNodesByName = [];
         foreach ($devices as $row) {
             if (!is_array($row) || ($row['available'] ?? true) === false) {
                 continue;
@@ -2460,8 +2452,9 @@ final class YarboHome
                 continue;
             }
             $name = self::duplicateNameKey($row);
-            if ($name !== '') {
-                $liveNames[$name] = true;
+            $nid = self::rowNodeId($row);
+            if ($name !== '' && $nid > 0) {
+                $liveNodesByName[$name][$nid] = true;
             }
         }
         $out = [];
@@ -2470,10 +2463,20 @@ final class YarboHome
                 continue;
             }
             $id = (string) ($row['id'] ?? '');
-            if (($row['available'] ?? true) === false
-                && !YarboUnifi::isHomeId($id)
-                && isset($liveNames[self::duplicateNameKey($row)])) {
-                continue;
+            if (($row['available'] ?? true) === false && !YarboUnifi::isHomeId($id)) {
+                $name = self::duplicateNameKey($row);
+                $nid = self::rowNodeId($row);
+                $liveNodes = $liveNodesByName[$name] ?? [];
+                $otherNode = false;
+                foreach ($liveNodes as $liveNid => $_) {
+                    if ((int) $liveNid !== $nid) {
+                        $otherNode = true;
+                        break;
+                    }
+                }
+                if ($name !== '' && $otherNode) {
+                    continue;
+                }
             }
             $out[] = $row;
         }
@@ -2556,6 +2559,11 @@ final class YarboHome
         return null;
     }
 
+    /**
+     * Dummy Hue Bridge endpoints named like "BSB003 96" (product + endpoint, no bulb label).
+     *
+     * @param array<string, mixed> $row
+     */
     public static function looksLikeLeftoverHueEndpoint(array $row): bool
     {
         $name = trim((string) ($row['name'] ?? ''));

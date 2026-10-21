@@ -139,12 +139,13 @@ assert_true(YarboHome::dropLeftoverHueEndpoints([
     ['id' => '1:96', 'name' => 'BSB003 96', 'kind' => 'light'],
 ]) === [['id' => '1:2', 'name' => 'Hall', 'kind' => 'light']], 'drop leftover Hue from a saved list');
 $spotDup = YarboHome::dropUnavailableNameDuplicates([
-    ['id' => '1:12', 'name' => 'Spot 5', 'kind' => 'light', 'available' => true, 'on' => true],
-    ['id' => '7:1', 'name' => 'Spot 5', 'kind' => 'light', 'available' => false, 'on' => false],
-    ['id' => '1:4', 'name' => 'Lamp', 'kind' => 'light', 'available' => true],
+    ['id' => '1:12', 'name' => 'Spot 5', 'kind' => 'light', 'node_id' => 1, 'available' => true, 'on' => true],
+    ['id' => '7:1', 'name' => 'Spot 5', 'kind' => 'light', 'node_id' => 7, 'available' => false, 'on' => false],
+    ['id' => '1:4', 'name' => 'Lamp', 'kind' => 'light', 'node_id' => 1, 'available' => true],
+    ['id' => '1:8', 'name' => 'Lamp', 'kind' => 'light', 'node_id' => 1, 'available' => false],
 ]);
 $spotIds = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $spotDup);
-assert_true($spotIds === ['1:12', '1:4'], 'unavailable Spot 5 leftover must not sit next to the live Hue light');
+assert_true($spotIds === ['1:12', '1:4', '1:8'], 'old Matter Spot 5 is dropped; sleepy Hue Lamp on the Bridge stays');
 $offlineOnly = YarboHome::dropUnavailableNameDuplicates([
     ['id' => '3:1', 'name' => 'Cellar', 'kind' => 'light', 'available' => false],
 ]);
@@ -331,7 +332,7 @@ file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
     'devices' => [
         ['id' => '1:2', 'name' => 'Lamp', 'kind' => 'light', 'on' => false],
         ['id' => '1:96', 'name' => 'BSB003 96', 'kind' => 'light', 'on' => true],
-        ['id' => '1:9', 'name' => 'Ghost', 'kind' => 'light', 'on' => true],
+        ['id' => '1:12', 'name' => 'Hall', 'kind' => 'light', 'on' => false],
     ],
 ], JSON_UNESCAPED_SLASHES));
 $skipped = $home->localHomeDevices();
@@ -339,7 +340,7 @@ $skippedIds = array_column($skipped['devices'], 'id');
 assert_true($skipped['fabric']['source'] === 'cache', 'fresh cache should skip re-parsing Hue fabric');
 assert_true(!in_array('1:5', $skippedIds, true), 'stale fabric extra light must wait until the fabric file changes');
 assert_true(!in_array('1:96', $skippedIds, true), 'fresh cache must drop leftover Hue endpoints');
-assert_true(!in_array('1:9', $skippedIds, true), 'fresh cache must drop remembered ids that are not on the fabric');
+assert_true(in_array('1:12', $skippedIds, true), 'Hue lights found in Apple Home must stay even if they are not on the last fabric snapshot');
 
 touch($fabricPath, $fabricMtime + 5);
 $refreshed = $home->localHomeDevices();
