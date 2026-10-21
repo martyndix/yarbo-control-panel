@@ -130,8 +130,8 @@ $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_ROBOTS 11'), 'robots page id');
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.70"'), 'firmware 0.1.70');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.70';"), 'panel pin 0.1.70');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.71"'), 'firmware 0.1.71');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.71';"), 'panel pin 0.1.71');
 assert_true(str_contains($homePhp, 'function paperRobotVacuums'), 'paper vacuums helper');
 assert_true(str_contains($homePhp, 'function paperVacuumCommand'), 'paper vacuum command');
 assert_true(str_contains($api, "\$cmd === 'home_vacuum'"), 'device API home_vacuum');

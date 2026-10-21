@@ -232,6 +232,8 @@ void nextPage();
 void prevPage();
 void showPage(int page, bool loadPlansIfNeeded);
 void layoutTileGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0);
+void layoutAccessGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0);
+void drawThickRoundRect(int x, int y, int w, int h, int rad, int thickness, uint16_t color);
 String menuLabel(int page);
 void drawPadlockIcon(int x, int y, int size, bool locked);
 void drawWifiIcon(int cx, int cy, int size, bool connected);
@@ -1029,11 +1031,13 @@ void drawFittedLabel(int cx, int cy, int maxW, int maxH, const String &text, uin
 void drawDoorGlyph(int x, int y, int h, uint16_t fg)
 {
     int w = (h * 5) / 8;
-    if (w < 12) {
-        w = 12;
+    if (w < 8) {
+        w = 8;
     }
     M5.Display.drawRect(x, y, w, h, fg);
-    M5.Display.drawRect(x + 1, y + 1, w - 2, h - 2, fg);
+    if (w > 10 && h > 12) {
+        M5.Display.drawRect(x + 1, y + 1, w - 2, h - 2, fg);
+    }
     int knob = h / 10;
     if (knob < 2) {
         knob = 2;
@@ -1044,11 +1048,13 @@ void drawDoorGlyph(int x, int y, int h, uint16_t fg)
 void drawWindowGlyph(int x, int y, int h, uint16_t fg)
 {
     int w = (h * 5) / 8;
-    if (w < 12) {
-        w = 12;
+    if (w < 8) {
+        w = 8;
     }
     M5.Display.drawRect(x, y, w, h, fg);
-    M5.Display.drawRect(x + 1, y + 1, w - 2, h - 2, fg);
+    if (w > 10 && h > 12) {
+        M5.Display.drawRect(x + 1, y + 1, w - 2, h - 2, fg);
+    }
     M5.Display.drawFastHLine(x, y + h / 2, w, fg);
     M5.Display.drawFastVLine(x + w / 2, y, h, fg);
 }
@@ -1503,6 +1509,53 @@ void layoutTileGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int
     }
 }
 
+void layoutAccessGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0)
+{
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    if (n < 1) {
+        n = 1;
+    }
+    x0 = 12;
+    y0 = 104;
+    int y1 = H - 10;
+    int availH = y1 - y0;
+    int availW = W - x0 * 2;
+    cols = 2;
+    gap = n > 16 ? 4 : (n > 10 ? 6 : 8);
+    rows = (n + cols - 1) / cols;
+    bh = rows > 0 ? (availH - gap * (rows - 1)) / rows : availH;
+    if (bh < 56 && n > 10) {
+        cols = 3;
+        gap = n > 24 ? 4 : 5;
+        rows = (n + cols - 1) / cols;
+        bh = rows > 0 ? (availH - gap * (rows - 1)) / rows : availH;
+    }
+    if (bh > 100) {
+        bh = 100;
+    }
+    bw = cols > 1 ? (availW - gap * (cols - 1)) / cols : availW;
+}
+
+void drawThickRoundRect(int x, int y, int w, int h, int rad, int thickness, uint16_t color)
+{
+    if (thickness < 1) {
+        thickness = 1;
+    }
+    for (int i = 0; i < thickness; i++) {
+        int rr = rad - i;
+        if (rr < 1) {
+            rr = 1;
+        }
+        int rw = w - 2 * i;
+        int rh = h - 2 * i;
+        if (rw < 4 || rh < 4) {
+            break;
+        }
+        M5.Display.drawRoundRect(x + i, y + i, rw, rh, rr, color);
+    }
+}
+
 void drawNotifyBlob(int bx, int by, int bw, bool invert)
 {
     int r = 11;
@@ -1782,7 +1835,7 @@ void accessButtonRect(int idx, int &x, int &y, int &w, int &h)
     if (n < 1) {
         n = 1;
     }
-    layoutTileGrid(n, cols, rows, bw, bh, gap, x0, y0);
+    layoutAccessGrid(n, cols, rows, bw, bh, gap, x0, y0);
     int col = idx % cols;
     int row = idx / cols;
     x = x0 + col * (bw + gap);
@@ -1810,29 +1863,55 @@ void drawAccessPage(bool forceFull)
         bool unlock = accessUnlock[i];
         uint16_t bg = accessOnState[i] ? TFT_BLACK : TFT_WHITE;
         uint16_t fg = accessOnState[i] ? TFT_WHITE : TFT_BLACK;
-        M5.Display.fillRoundRect(x, y, w, h, 12, bg);
-        M5.Display.drawRoundRect(x, y, w, h, 12, TFT_BLACK);
+        int rad = h / 6;
+        if (rad > 12) {
+            rad = 12;
+        }
+        if (rad < 4) {
+            rad = 4;
+        }
+        M5.Display.fillRoundRect(x, y, w, h, rad, bg);
         if (unlock) {
-            M5.Display.drawRoundRect(x + 3, y + 3, w - 6, h - 6, 9, TFT_BLACK);
-            if (accessOnState[i]) {
-                M5.Display.drawRoundRect(x + 3, y + 3, w - 6, h - 6, 9, TFT_WHITE);
+            int thick = h < 40 ? 3 : 4;
+            drawThickRoundRect(x, y, w, h, rad, thick, fg);
+        } else {
+            M5.Display.drawRoundRect(x, y, w, h, rad, fg);
+        }
+        int glyphH = h - 12;
+        if (glyphH > 26) {
+            glyphH = 26;
+        }
+        if (glyphH < 10) {
+            glyphH = 10;
+        }
+        int glyphW = (glyphH * 5) / 8;
+        if (glyphW < 8) {
+            glyphW = 8;
+        }
+        int lockH = 0;
+        if (unlock) {
+            lockH = glyphH > 18 ? 14 : 10;
+            if (lockH > h - 10) {
+                lockH = h - 10;
+            }
+            if (lockH < 8) {
+                lockH = 0;
             }
         }
-        int padL = unlock ? 58 : 40;
-        drawFittedLabel(x + padL + (w - padL) / 2, y + h / 2, w - padL - 12, h - 16, accessNames[i], fg, bg);
-        int glyphH = h > 48 ? 26 : h - 22;
-        if (glyphH < 16) {
-            glyphH = 16;
+        int padL = 8 + glyphW + (lockH > 0 ? lockH + 6 : 4);
+        int labelH = h - 8;
+        if (labelH < 10) {
+            labelH = 10;
         }
+        drawFittedLabel(x + padL + (w - padL) / 2, y + h / 2, w - padL - 8, labelH, accessNames[i], fg, bg);
         int gy = y + (h - glyphH) / 2;
         if (window) {
-            drawWindowGlyph(x + 10, gy, glyphH, fg);
+            drawWindowGlyph(x + 8, gy, glyphH, fg);
         } else {
-            drawDoorGlyph(x + 10, gy, glyphH, fg);
+            drawDoorGlyph(x + 8, gy, glyphH, fg);
         }
-        if (unlock) {
-            int lockH = glyphH > 20 ? 16 : 12;
-            drawLockMark(x + 34, y + (h - lockH) / 2, lockH, fg);
+        if (lockH > 0) {
+            drawLockMark(x + 10 + glyphW, y + (h - lockH) / 2, lockH, fg);
         }
         M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
         M5.Display.setTextDatum(TL_DATUM);

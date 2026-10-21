@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.153] - 2026-10-21
+
+### Changed
+- PaperMono **ACCESS** shrinks the tile grid (and switches to three columns when needed) so every door and window stays on one screen, up to 36 items. Controllable doors use a solid thick border instead of a double line. Firmware **0.1.71**.
+
 ## [4.0.152] - 2026-10-21
 
 ### Fixed

@@ -1699,46 +1699,77 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <figcaption>HOUSE — same tile shape as the unlock menu; long names wrap</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
-                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono ACCESS page mock with lockable doors and window sensors">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono ACCESS page mock with a dense grid and thick lockable-door borders">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
                                         <text x="24" y="52" font-family="ui-sans-serif, system-ui, sans-serif" font-size="28" font-weight="700" fill="#111">ACCESS</text>
                                         <rect x="378" y="16" width="82" height="82" rx="14" fill="none" stroke="#111" stroke-width="3"/>
                                         <rect x="400" y="50" width="38" height="32" rx="5" fill="#111"/>
                                         <path d="M409 50 v-10 a10 10 0 0 1 20 0 v10" fill="none" stroke="#111" stroke-width="6"/>
-                                        <rect x="24" y="118" width="208" height="100" rx="14" fill="#111"/>
-                                        <rect x="27" y="121" width="202" height="94" rx="11" fill="none" stroke="#f4f1e8" stroke-width="2"/>
-                                        <rect x="36" y="140" width="22" height="56" fill="none" stroke="#f4f1e8" stroke-width="3"/>
-                                        <circle cx="52" cy="168" r="3" fill="#f4f1e8"/>
-                                        <rect x="64" y="158" width="14" height="16" rx="2" fill="#f4f1e8"/>
-                                        <text x="148" y="178" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#f4f1e8">Front</text>
-                                        <rect x="248" y="118" width="208" height="100" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
-                                        <rect x="251" y="121" width="202" height="94" rx="11" fill="none" stroke="#111" stroke-width="2"/>
-                                        <rect x="260" y="140" width="22" height="56" fill="none" stroke="#111" stroke-width="3"/>
-                                        <circle cx="276" cy="168" r="3" fill="#111"/>
-                                        <rect x="288" y="158" width="14" height="16" rx="2" fill="#111"/>
-                                        <text x="372" y="178" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Garage</text>
-                                        <rect x="24" y="230" width="208" height="100" rx="14" fill="#111"/>
-                                        <rect x="36" y="252" width="28" height="56" fill="none" stroke="#f4f1e8" stroke-width="3"/>
-                                        <line x1="36" y1="280" x2="64" y2="280" stroke="#f4f1e8" stroke-width="3"/>
-                                        <line x1="50" y1="252" x2="50" y2="308" stroke="#f4f1e8" stroke-width="3"/>
-                                        <text x="140" y="290" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#f4f1e8">Kitchen</text>
-                                        <rect x="248" y="230" width="208" height="100" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
-                                        <rect x="260" y="252" width="28" height="56" fill="none" stroke="#111" stroke-width="3"/>
-                                        <line x1="260" y1="280" x2="288" y2="280" stroke="#111" stroke-width="3"/>
-                                        <line x1="274" y1="252" x2="274" y2="308" stroke="#111" stroke-width="3"/>
-                                        <text x="372" y="290" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Study</text>
-                                        <rect x="24" y="342" width="208" height="100" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
-                                        <rect x="36" y="364" width="22" height="56" fill="none" stroke="#111" stroke-width="3"/>
-                                        <circle cx="52" cy="392" r="3" fill="#111"/>
-                                        <text x="140" y="402" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Side door</text>
-                                        <rect x="248" y="342" width="208" height="100" rx="14" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
-                                        <rect x="260" y="364" width="28" height="56" fill="none" stroke="#111" stroke-width="3"/>
-                                        <line x1="260" y1="392" x2="288" y2="392" stroke="#111" stroke-width="3"/>
-                                        <line x1="274" y1="364" x2="274" y2="420" stroke="#111" stroke-width="3"/>
-                                        <text x="372" y="402" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#111">Landing</text>
+                                        <rect x="12" y="108" width="222" height="78" rx="10" fill="#f4f1e8"/>
+                                        <rect x="16" y="112" width="214" height="70" rx="6" fill="#111"/>
+                                        <rect x="24" y="124" width="16" height="46" fill="none" stroke="#f4f1e8" stroke-width="2"/>
+                                        <circle cx="35" cy="147" r="2" fill="#f4f1e8"/>
+                                        <rect x="44" y="140" width="12" height="14" rx="2" fill="#f4f1e8"/>
+                                        <text x="140" y="154" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#f4f1e8">Front</text>
+                                        <rect x="246" y="108" width="222" height="78" rx="10" fill="#111"/>
+                                        <rect x="250" y="112" width="214" height="70" rx="6" fill="#f4f1e8"/>
+                                        <rect x="258" y="124" width="16" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <circle cx="269" cy="147" r="2" fill="#111"/>
+                                        <rect x="278" y="140" width="12" height="14" rx="2" fill="#111"/>
+                                        <text x="374" y="154" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Garage</text>
+                                        <rect x="12" y="192" width="222" height="78" rx="10" fill="#111"/>
+                                        <rect x="24" y="208" width="22" height="46" fill="none" stroke="#f4f1e8" stroke-width="2"/>
+                                        <line x1="24" y1="231" x2="46" y2="231" stroke="#f4f1e8" stroke-width="2"/>
+                                        <line x1="35" y1="208" x2="35" y2="254" stroke="#f4f1e8" stroke-width="2"/>
+                                        <text x="140" y="238" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#f4f1e8">Kitchen</text>
+                                        <rect x="246" y="192" width="222" height="78" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <rect x="258" y="208" width="22" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <line x1="258" y1="231" x2="280" y2="231" stroke="#111" stroke-width="2"/>
+                                        <line x1="269" y1="208" x2="269" y2="254" stroke="#111" stroke-width="2"/>
+                                        <text x="374" y="238" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Study</text>
+                                        <rect x="12" y="276" width="222" height="78" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <rect x="24" y="292" width="16" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <circle cx="35" cy="315" r="2" fill="#111"/>
+                                        <text x="140" y="322" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Side door</text>
+                                        <rect x="246" y="276" width="222" height="78" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <rect x="258" y="292" width="22" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <line x1="258" y1="315" x2="280" y2="315" stroke="#111" stroke-width="2"/>
+                                        <line x1="269" y1="292" x2="269" y2="338" stroke="#111" stroke-width="2"/>
+                                        <text x="374" y="322" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Landing</text>
+                                        <rect x="12" y="360" width="222" height="78" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <rect x="24" y="376" width="16" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <circle cx="35" cy="399" r="2" fill="#111"/>
+                                        <text x="140" y="406" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Hall</text>
+                                        <rect x="246" y="360" width="222" height="78" rx="10" fill="#111"/>
+                                        <rect x="250" y="364" width="214" height="70" rx="6" fill="#f4f1e8"/>
+                                        <rect x="258" y="376" width="16" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <circle cx="269" cy="399" r="2" fill="#111"/>
+                                        <rect x="278" y="392" width="12" height="14" rx="2" fill="#111"/>
+                                        <text x="374" y="406" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Back</text>
+                                        <rect x="12" y="444" width="222" height="78" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <rect x="24" y="460" width="22" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <line x1="24" y1="483" x2="46" y2="483" stroke="#111" stroke-width="2"/>
+                                        <line x1="35" y1="460" x2="35" y2="506" stroke="#111" stroke-width="2"/>
+                                        <text x="140" y="490" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Utility</text>
+                                        <rect x="246" y="444" width="222" height="78" rx="10" fill="#111"/>
+                                        <rect x="250" y="448" width="214" height="70" rx="6" fill="#f4f1e8"/>
+                                        <rect x="258" y="460" width="16" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <circle cx="269" cy="483" r="2" fill="#111"/>
+                                        <rect x="278" y="476" width="12" height="14" rx="2" fill="#111"/>
+                                        <text x="374" y="490" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Shed</text>
+                                        <rect x="12" y="528" width="222" height="78" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <rect x="24" y="544" width="22" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <line x1="24" y1="567" x2="46" y2="567" stroke="#111" stroke-width="2"/>
+                                        <line x1="35" y1="544" x2="35" y2="590" stroke="#111" stroke-width="2"/>
+                                        <text x="140" y="574" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Porch</text>
+                                        <rect x="246" y="528" width="222" height="78" rx="10" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
+                                        <rect x="258" y="544" width="22" height="46" fill="none" stroke="#111" stroke-width="2"/>
+                                        <line x1="258" y1="567" x2="280" y2="567" stroke="#111" stroke-width="2"/>
+                                        <line x1="269" y1="544" x2="269" y2="590" stroke="#111" stroke-width="2"/>
+                                        <text x="374" y="574" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#111">Loft</text>
                                     </svg>
-                                    <figcaption>ACCESS — lockable doors have a lock mark and double border; sensors use a door or window glyph. Open is filled. Tap a lockable door to unlock.</figcaption>
+                                    <figcaption>ACCESS — the grid shrinks so every door and window fits on one screen. Lockable doors have a lock mark and a thick border; sensors use a door or window glyph. Open is filled. Tap a lockable door to unlock.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">
@@ -1905,7 +1936,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.70 / 0.2.26-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.71 / 0.2.26-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

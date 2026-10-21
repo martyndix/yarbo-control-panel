@@ -224,6 +224,44 @@ $offOut = $compact->invoke($offPaper, null, false, null);
 assert_true(($offOut['access_items'] ?? ['x']) === [], 'no access_items when empty');
 assert_true(($offOut['menu_visible']['access'] ?? true) !== true, 'ACCESS hidden when empty');
 
+$manyRoot = sys_get_temp_dir() . '/yarbo-paper-access-many-' . bin2hex(random_bytes(3));
+mkdir($manyRoot . '/data', 0775, true);
+$manyIds = [];
+$manySensors = [];
+for ($i = 1; $i <= 24; $i++) {
+    $id = 'unifi:sensor:w' . $i;
+    $manyIds[] = $id;
+    $manySensors[] = [
+        'id' => $id,
+        'native_id' => 'w' . $i,
+        'name' => 'Window ' . $i,
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'product' => 'USP Sensor',
+        'has_open' => true,
+        'open' => $i % 5 === 0,
+    ];
+}
+file_put_contents($manyRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($manyRoot . '/data/unifi-config.json', json_encode([
+    'host' => '',
+    'show_on_home' => $manyIds,
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($manyRoot . '/data/unifi-inventory.json', json_encode([
+    'cameras' => [],
+    'lights' => [],
+    'relays' => [],
+    'doors' => [],
+    'hubs' => [],
+    'sensors' => $manySensors,
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($manyRoot . '/data/home.json', json_encode(['hidden' => [], 'last_devices' => []], JSON_UNESCAPED_SLASHES));
+$manyHome = new YarboHome($manyRoot);
+$manyItems = $manyHome->paperAccessItems();
+assert_true(count($manyItems) === 24, 'ACCESS payload keeps 24 sensors: ' . count($manyItems));
+
 $php = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
 $homePhp = (string) file_get_contents(__DIR__ . '/../src/YarboHome.php');
 $api = (string) file_get_contents(__DIR__ . '/../public/api/home.php');
@@ -235,12 +273,17 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_ACCESS 12'), 'access page id');
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_COUNT 13'), 'page count includes ACCESS');
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.70"'), 'firmware 0.1.70');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.70';"), 'panel pin 0.1.70');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.71"'), 'firmware 0.1.71');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.71';"), 'panel pin 0.1.71');
 assert_true(str_contains($homePhp, 'function paperAccessItems'), 'paper ACCESS helper');
 assert_true(str_contains($homePhp, 'function assignContactKind'), 'contact_kind save');
 assert_true(str_contains($api, "'contact_kind'"), 'home API contact_kind');
 assert_true(str_contains($fw, 'void drawAccessPage(bool forceFull)'), 'firmware ACCESS page');
+assert_true(str_contains($fw, 'void layoutAccessGrid'), 'ACCESS grid shrinks to fit one screen');
+assert_true(str_contains($fw, 'void drawThickRoundRect'), 'lockable doors use a thick border');
+assert_true(!str_contains($fw, 'drawRoundRect(x + 3, y + 3'), 'no double-line door border');
+assert_true(str_contains($ver, '#define PAPERMONO_ACCESS_MAX 36'), 'firmware holds 36 access tiles');
+assert_true(str_contains($homePhp, 'public const PAPER_ACCESS_MAX = 36;'), 'panel sends up to 36 ACCESS items');
 assert_true(str_contains($fw, 'void drawWindowGlyph'), 'window glyph');
 assert_true(str_contains($fw, 'void drawLockMark'), 'lockable doors have a lock mark');
 assert_true(str_contains($fw, 'void handleAccessTouch'), 'ACCESS tap handler');
@@ -249,7 +292,8 @@ assert_true(str_contains($fw, 'accessHaveItems'), 'menu can show ACCESS before c
 assert_true(str_contains($html, 'data-menu-id="access"'), 'settings ACCESS row');
 assert_true(str_contains($js, 'data-home-contact-assign'), 'Home ⚙️ Door/Window select');
 assert_true(str_contains($js, '🪟'), 'Home uses a window emoji');
-assert_true(str_contains($change, '## [4.0.152]'), 'changelog 4.0.152');
+assert_true(str_contains($change, '## [4.0.153]'), 'changelog 4.0.153');
+assert_true(str_contains($html, 'thick lockable-door borders'), 'settings preview uses a thick door border');
 assert_true(str_contains($homePhp, 'Home rows only: UniFi Hide unticks Show on Home'), 'ACCESS uses Home rows, not all UniFi devices');
 
 echo "ok: paper access\n";

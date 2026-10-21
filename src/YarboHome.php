@@ -20,7 +20,7 @@ final class YarboHome
     public const CONTACT_DOOR = 'door';
     public const CONTACT_WINDOW = 'window';
     public const PAPER_MAX = 12;
-    public const PAPER_ACCESS_MAX = 16;
+    public const PAPER_ACCESS_MAX = 36;
     /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
     public const PAPER_NAME_MAX = 40;
     public const PAPER_ROBOT_AREA_MAX = 8;
