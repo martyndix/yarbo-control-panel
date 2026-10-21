@@ -70,6 +70,7 @@ final class YarboMatterFabric
     private const COLOR_CAP_CT = 16;
     private const ATTR_DEVICE_TYPES = 0;
     private const ATTR_SERVER_LIST = 1;
+    private const ATTR_PARTS_LIST = 3;
     private const ATTR_VENDOR_NAME = 1;
     private const ATTR_PRODUCT_NAME = 3;
     private const ATTR_NODE_LABEL = 5;
@@ -84,6 +85,7 @@ final class YarboMatterFabric
     private const SYSTEM_MODE_OFF = 0;
     private const SYSTEM_MODE_FAN = 7;
     private const DEVTYPE_AGGREGATOR = 0x000E;
+    private const DEVTYPE_BRIDGED_NODE = 0x0013;
     private const DEVTYPE_ONOFF_LIGHT = 0x0100;
     private const DEVTYPE_DIMMABLE_LIGHT = 0x0101;
     private const DEVTYPE_COLOR_LIGHT = 0x0102;
@@ -273,6 +275,7 @@ final class YarboMatterFabric
                     break;
                 }
             }
+            $parentNames = self::bridgedParentNames($attributes, $vendor, $product, $source);
             foreach ($sorted as $endpoint) {
                 if ($endpoint === 0) {
                     continue;
@@ -281,7 +284,18 @@ final class YarboMatterFabric
                 $types = self::attrRaw($attributes, $endpoint, self::DESCRIPTOR, self::ATTR_DEVICE_TYPES);
                 $typeIds = self::deviceTypeIds($types);
                 $kind = self::deviceKind($types);
+                $parts = self::partsList($attributes, $endpoint);
+                if (self::isComposedParent($typeIds, $parts)) {
+                    continue;
+                }
                 $epName = self::endpointName($attributes, $endpoint, $vendor, $product);
+                $inherited = $parentNames[$endpoint] ?? '';
+                if ($inherited !== '' && ($epName === '' || self::looksLikeLeftoverHueName($epName, $product, $source, $endpoint))) {
+                    $epName = $inherited;
+                }
+                if (self::looksLikeLeftoverHueName($epName, $product, $source, $endpoint)) {
+                    continue;
+                }
                 $kind = self::classifyByName($kind, $epName, $vendor, $product, $source);
                 if (self::endpointLooksHeater($attributes, $endpoint)) {
                     $kind = 'heater';
@@ -331,6 +345,7 @@ final class YarboMatterFabric
                     'on' => $on,
                     'brightness' => $brightness,
                     'dimmable' => $isLight && self::attrRaw($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) !== null,
+                    'has_on_off' => $hasOnOff,
                     'available' => $available,
                 ] + ($isLight
                     ? self::colorPayload($attributes, $endpoint, $typeIds, $kind)
@@ -1476,6 +1491,90 @@ final class YarboMatterFabric
             }
 
             return false;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return list<int>
+     */
+    private static function partsList(array $attributes, int $endpoint): array
+    {
+        $out = [];
+        foreach (self::listInts(self::attrRaw($attributes, $endpoint, self::DESCRIPTOR, self::ATTR_PARTS_LIST)) as $ep) {
+            if ($ep > 0 && $ep !== $endpoint && !in_array($ep, $out, true)) {
+                $out[] = $ep;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<int> $typeIds
+     * @param list<int> $parts
+     */
+    private static function isComposedParent(array $typeIds, array $parts): bool
+    {
+        if ($parts === []) {
+            return false;
+        }
+
+        return in_array(self::DEVTYPE_BRIDGED_NODE, $typeIds, true)
+            || in_array(self::DEVTYPE_AGGREGATOR, $typeIds, true);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array<int, string>
+     */
+    private static function bridgedParentNames(array $attributes, string $vendor, string $product, string $source): array
+    {
+        $names = [];
+        foreach (self::endpointIds($attributes) as $endpoint) {
+            if ($endpoint === 0) {
+                continue;
+            }
+            $typeIds = self::deviceTypeIds(self::attrRaw($attributes, $endpoint, self::DESCRIPTOR, self::ATTR_DEVICE_TYPES));
+            $parts = self::partsList($attributes, $endpoint);
+            if (!in_array(self::DEVTYPE_BRIDGED_NODE, $typeIds, true) || $parts === []) {
+                continue;
+            }
+            $label = self::endpointName($attributes, $endpoint, $vendor, $product);
+            if ($label === '' || self::looksLikeLeftoverHueName($label, $product, $source, $endpoint)) {
+                continue;
+            }
+            foreach ($parts as $child) {
+                if (!isset($names[$child])) {
+                    $names[$child] = $label;
+                }
+            }
+        }
+
+        return $names;
+    }
+
+    private static function looksLikeLeftoverHueName(string $name, string $product, string $source, int $endpoint): bool
+    {
+        $name = trim($name);
+        if ($name === '' || $endpoint <= 0) {
+            return false;
+        }
+        if (preg_match('/^[A-Z]{2,}[A-Z0-9]*[0-9][A-Z0-9]*\s+' . preg_quote((string) $endpoint, '/') . '$/i', $name) === 1) {
+            return true;
+        }
+        $suffix = ' ' . $endpoint;
+        foreach ([$product, $source] as $base) {
+            $base = trim($base);
+            if ($base === '' || strcasecmp($name, $base . $suffix) !== 0) {
+                continue;
+            }
+            $low = strtolower($base);
+            if (str_contains($low, 'bridge') || preg_match('/^[a-z]{2,}[a-z0-9]*[0-9][a-z0-9]*$/', $low) === 1) {
+                return true;
+            }
         }
 
         return false;

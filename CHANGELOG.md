@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.143] - 2026-10-21
+
+### Fixed
+- Hue lights such as **Landing** that toasted **That light is still being read from the Hue Bridge** after Look for devices now use the lighting endpoint behind the Bridged Node name. Extra same-name rows from the parent endpoint are dropped, and rooms stay on the working id. Tap **Look for devices** once after the update (wait for it to finish). Do not pair the Hue Bridge again.
+
 ## [4.0.142] - 2026-10-21
 
 ### Fixed

@@ -79,6 +79,26 @@ def main() -> int:
     if agent.replacement_node_id(12, present=[1, 2], available=[1, 2]) is not None:
         raise SystemExit("two live nodes must not remap")
 
+    endpoint_store = {
+        "names": {"1:11": "Landing"},
+        "rooms": {"1:11": "r1"},
+        "groups": {"1:11": "g1"},
+        "hidden": [],
+        "device_order": ["1:11", "1:2"],
+        "paper": {"tab": ["1:11"]},
+        "scenes": [{"id": "s1", "actions": [{"id": "1:11", "on": True}]}],
+        "last_devices": [{"id": "1:11", "node_id": 1, "endpoint": 11, "name": "Landing"}],
+    }
+    n = agent.remap_home_endpoint_id(endpoint_store, "1:11", "1:12")
+    if n < 1:
+        raise SystemExit(f"endpoint remap changed {n}")
+    if endpoint_store["rooms"].get("1:12") != "r1" or "1:11" in endpoint_store["rooms"]:
+        raise SystemExit(f"endpoint rooms {endpoint_store['rooms']}")
+    if endpoint_store["last_devices"][0] != {"id": "1:12", "node_id": 1, "endpoint": 12, "name": "Landing"}:
+        raise SystemExit(f"last {endpoint_store['last_devices']}")
+    if endpoint_store["scenes"][0]["actions"][0]["id"] != "1:12":
+        raise SystemExit("scene endpoint")
+
     print("ok")
     return 0
 

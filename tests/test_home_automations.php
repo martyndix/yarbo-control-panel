@@ -1559,7 +1559,7 @@ assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');
 assert_true(str_contains($js, 'if (!heater) {'), 'heater On is not optimistic');
-assert_true(str_contains($matterPhp, 'MIN_VERSION = 55'), 'Matter agent min version 55');
+assert_true(str_contains($matterPhp, 'MIN_VERSION = 56'), 'Matter agent min version 56');
 assert_true(str_contains($js, "action: 'scan'"), 'Look for devices scans paired bridges');
 assert_true(str_contains($js, 'id="home-scene-filter"') || str_contains($js, "getElementById('home-scene-filter')"), 'scene editor search field');
 assert_true(str_contains($index, 'id="home-scan"'), 'Look for devices button');

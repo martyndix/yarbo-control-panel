@@ -679,6 +679,49 @@ assert_true(!YarboHome::looksLikeUnreadyHueLight([
     'has_on_off' => true,
     'brightness' => 70,
 ]), 'interviewed Hue lights are ready');
+assert_true(YarboHome::looksLikeUnreadyHueLight([
+    'id' => '1:11',
+    'name' => 'Landing',
+    'kind' => 'light',
+    'bridge' => true,
+    'product' => 'Hue Bridge',
+    'dimmable' => true,
+    'colorable' => true,
+]), 'cached Hue sliders without has_on_off stay unready');
+$replaced = YarboHome::replaceHueNodeDevices(
+    [
+        ['id' => '1:11', 'name' => 'Landing', 'node_id' => 1, 'kind' => 'light', 'bridge' => true],
+        ['id' => '1:12', 'name' => 'Landing Stairs', 'node_id' => 1, 'kind' => 'light', 'bridge' => true],
+        ['id' => '2:1', 'name' => 'Mill', 'node_id' => 2, 'kind' => 'heater'],
+    ],
+    [
+        ['id' => '1:12', 'name' => 'Landing', 'node_id' => 1, 'kind' => 'light', 'bridge' => true, 'has_on_off' => true],
+        ['id' => '1:13', 'name' => 'Landing Stairs', 'node_id' => 1, 'kind' => 'light', 'bridge' => true, 'has_on_off' => true],
+    ],
+    [1 => true]
+);
+$replacedIds = array_column($replaced, 'id');
+assert_true(!in_array('1:11', $replacedIds, true), 'scan drops the Hue Bridged Node parent id');
+assert_true(in_array('1:12', $replacedIds, true) && in_array('1:13', $replacedIds, true), 'scan keeps live Hue lighting endpoints');
+assert_true(in_array('2:1', $replacedIds, true), 'scan keeps devices on other nodes');
+$adopted = YarboHome::adoptHueEndpointAliases(
+    [
+        'names' => ['1:11' => 'Landing lamp'],
+        'rooms' => ['1:11' => 'r-landing'],
+        'groups' => ['1:11' => 'g-landing'],
+        'hidden' => [],
+        'device_order' => ['1:11'],
+        'paper' => [],
+        'scenes' => [['id' => 's1', 'actions' => [['id' => '1:11', 'on' => true]]]],
+    ],
+    [['id' => '1:11', 'name' => 'Landing', 'node_id' => 1]],
+    [['id' => '1:12', 'name' => 'Landing', 'node_id' => 1]]
+);
+assert_true(($adopted['rooms']['1:12'] ?? '') === 'r-landing', 'Landing room moves onto the lighting endpoint');
+assert_true(!isset($adopted['rooms']['1:11']), 'ghost Landing parent room is dropped');
+assert_true(($adopted['scenes'][0]['actions'][0]['id'] ?? '') === '1:12', 'scene action follows the lighting endpoint');
+assert_true(str_contains($homePhp, 'function replaceHueNodeDevices'), 'Look for devices replaces Hue node ids');
+assert_true(str_contains($homePhp, 'function adoptHueEndpointAliases'), 'Look for devices keeps rooms on the remapped Hue id');
 assert_true(str_contains($homePhp, 'looksLikeLeftoverHueEndpoint'), 'new Hue lights skip leftover Bridge endpoints');
 assert_true(str_contains($homePhp, 'function countsTowardRoomOn'), 'rooms ignore cameras when choosing green');
 assert_true(str_contains($homePhp, "if (self::countsTowardRoomOn(\$device) && !empty(\$device['on']))"), 'room on only from switchable devices');

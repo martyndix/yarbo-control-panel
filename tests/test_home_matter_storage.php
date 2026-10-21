@@ -48,6 +48,41 @@ foreach ($devices as $row) {
         fwrite(STDERR, 'Hue OnOff light must not show colour ' . json_encode($row) . "\n");
         exit(1);
     }
+    if (empty($row['has_on_off'])) {
+        fwrite(STDERR, 'Hue light must set has_on_off ' . json_encode($row) . "\n");
+        exit(1);
+    }
+}
+
+$composed = [
+    'node_id' => 1,
+    'available' => true,
+    'is_bridge' => true,
+    'attributes' => [
+        '0/40/1' => 'Signify Netherlands B.V.',
+        '0/40/3' => 'Hue Bridge',
+        '11/29/0' => [['deviceType' => 0x0013, 'revision' => 1]],
+        '11/29/3' => [12],
+        '11/57/5' => 'Landing',
+        '11/6/0' => true,
+        '11/8/0' => 40,
+        '12/29/0' => [['deviceType' => 0x010D, 'revision' => 1]],
+        '12/6/0' => true,
+        '12/8/0' => 180,
+        '12/57/5' => 'LCA005 12',
+    ],
+];
+$composedRows = [];
+foreach (YarboMatterFabric::flatten([$composed]) as $row) {
+    $composedRows[$row['id']] = $row;
+}
+if (isset($composedRows['1:11'])) {
+    fwrite(STDERR, 'Bridged Node parent with PartsList must not flatten ' . json_encode(array_keys($composedRows)) . "\n");
+    exit(1);
+}
+if (($composedRows['1:12']['name'] ?? '') !== 'Landing' || empty($composedRows['1:12']['has_on_off'])) {
+    fwrite(STDERR, 'lighting child should inherit Landing ' . json_encode($composedRows['1:12'] ?? null) . "\n");
+    exit(1);
 }
 
 $white = [

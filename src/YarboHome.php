@@ -893,8 +893,9 @@ final class YarboHome
             $incoming[] = $row;
         }
         $store = $this->load();
+        $previous = is_array($store['last_devices'] ?? null) ? $store['last_devices'] : [];
         $before = [];
-        foreach ($store['last_devices'] ?? [] as $row) {
+        foreach ($previous as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -903,9 +904,24 @@ final class YarboHome
                 $before[$id] = true;
             }
         }
+        $hueNodes = [];
+        foreach (is_array($result['interviewed'] ?? null) ? $result['interviewed'] : [] as $nid) {
+            $nid = (int) $nid;
+            if ($nid > 0) {
+                $hueNodes[$nid] = true;
+            }
+        }
+        foreach ($incoming as $row) {
+            if (self::rowLooksHueBridge($row)) {
+                $nid = self::rowNodeId($row);
+                if ($nid > 0) {
+                    $hueNodes[$nid] = true;
+                }
+            }
+        }
         $merged = $incoming === []
-            ? ($store['last_devices'] ?? [])
-            : self::unionDeviceLists($store['last_devices'] ?? [], $incoming);
+            ? $previous
+            : self::replaceHueNodeDevices($previous, $incoming, $hueNodes);
         if ($incoming !== []) {
             $merged = self::overlayDeviceStates($merged, $incoming);
         }
@@ -918,6 +934,10 @@ final class YarboHome
             if ($id !== '' && !isset($before[$id])) {
                 $added++;
             }
+        }
+        if ($incoming !== []) {
+            $store = self::adoptHueEndpointAliases($store, $previous, $merged);
+            $this->write($store);
         }
         $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
         if ($merged !== []) {
@@ -2597,10 +2617,6 @@ final class YarboHome
         if (!$hueish) {
             return false;
         }
-        if (!empty($row['dimmable']) || !empty($row['colorable']) || !empty($row['color_hs'])
-            || !empty($row['color_xy']) || !empty($row['color_ct']) || ($row['brightness'] ?? null) !== null) {
-            return false;
-        }
 
         return true;
     }
@@ -2967,6 +2983,172 @@ final class YarboHome
             'devices' => $devices,
             'fabric' => $fabric,
         ];
+    }
+
+    /**
+     * Add newly paired rows onto the remembered list without dropping existing devices.
+     *
+     * @param list<array<string, mixed>> $base
+     * @param list<array<string, mixed>> $incoming
+     * @return list<array<string, mixed>>
+     */
+    /**
+     * @param array<string, mixed> $row
+     */
+    public static function rowLooksHueBridge(array $row): bool
+    {
+        if (!empty($row['bridge'])) {
+            return true;
+        }
+        $blob = strtolower(trim(implode(' ', [
+            (string) ($row['product'] ?? ''),
+            (string) ($row['vendor'] ?? ''),
+            (string) ($row['source'] ?? ''),
+        ])));
+
+        return str_contains($blob, 'hue') || str_contains($blob, 'signify');
+    }
+
+    /**
+     * Drop remembered Hue ids on interviewed nodes that the live flatten no longer has.
+     *
+     * @param list<array<string, mixed>> $base
+     * @param list<array<string, mixed>> $incoming
+     * @param array<int, true> $hueNodeIds
+     * @return list<array<string, mixed>>
+     */
+    public static function replaceHueNodeDevices(array $base, array $incoming, array $hueNodeIds): array
+    {
+        if ($incoming === [] || $hueNodeIds === []) {
+            return self::unionDeviceLists($base, $incoming);
+        }
+        $byId = [];
+        foreach ($base as $row) {
+            if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $nid = self::rowNodeId($row, $id);
+            if ($nid > 0 && isset($hueNodeIds[$nid])) {
+                continue;
+            }
+            $byId[$id] = $row;
+        }
+        foreach ($incoming as $row) {
+            if (!is_array($row) || self::looksLikeLeftoverHueEndpoint($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            if (!isset($byId[$id])) {
+                $byId[$id] = $row;
+                continue;
+            }
+            $byId[$id] = self::copyLiveDeviceFields($byId[$id], $row);
+        }
+
+        return array_values($byId);
+    }
+
+    /**
+     * Copy room/group/name from a dropped Hue parent id onto the live child with the same name.
+     *
+     * @param array<string, mixed> $store
+     * @param list<array<string, mixed>> $previous
+     * @param list<array<string, mixed>> $live
+     * @return array<string, mixed>
+     */
+    public static function adoptHueEndpointAliases(array $store, array $previous, array $live): array
+    {
+        $liveIds = [];
+        $liveByNodeName = [];
+        foreach ($live as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $liveIds[$id] = true;
+            $nid = self::rowNodeId($row, $id);
+            $name = self::duplicateNameKey($row);
+            if ($name === '' && isset($store['names'][$id])) {
+                $name = strtolower(trim((string) $store['names'][$id]));
+            }
+            if ($nid > 0 && $name !== '') {
+                $liveByNodeName[$nid][$name][] = $id;
+            }
+        }
+        foreach ($previous as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $oldId = trim((string) ($row['id'] ?? ''));
+            if ($oldId === '' || isset($liveIds[$oldId])) {
+                continue;
+            }
+            $nid = self::rowNodeId($row, $oldId);
+            $name = self::duplicateNameKey($row);
+            if ($name === '' && isset($store['names'][$oldId])) {
+                $name = strtolower(trim((string) $store['names'][$oldId]));
+            }
+            $candidates = $liveByNodeName[$nid][$name] ?? [];
+            if ($nid <= 0 || $name === '' || count($candidates) !== 1) {
+                continue;
+            }
+            $newId = $candidates[0];
+            foreach (['rooms', 'groups', 'names'] as $mapKey) {
+                $mapping = is_array($store[$mapKey] ?? null) ? $store[$mapKey] : [];
+                if (!isset($mapping[$newId]) && isset($mapping[$oldId])) {
+                    $mapping[$newId] = $mapping[$oldId];
+                }
+                unset($mapping[$oldId]);
+                $store[$mapKey] = $mapping;
+            }
+            if (is_array($store['hidden'] ?? null)) {
+                $hidden = [];
+                foreach ($store['hidden'] as $item) {
+                    $hid = trim((string) $item);
+                    $hidden[] = $hid === $oldId ? $newId : $item;
+                }
+                $store['hidden'] = array_values(array_unique($hidden));
+            }
+            if (is_array($store['device_order'] ?? null)) {
+                $store['device_order'] = array_map(
+                    static fn ($item) => trim((string) $item) === $oldId ? $newId : $item,
+                    $store['device_order']
+                );
+            }
+            if (is_array($store['paper'] ?? null)) {
+                foreach ($store['paper'] as $tablet => $ids) {
+                    if (!is_array($ids)) {
+                        continue;
+                    }
+                    $store['paper'][$tablet] = array_map(
+                        static fn ($item) => trim((string) $item) === $oldId ? $newId : $item,
+                        $ids
+                    );
+                }
+            }
+            foreach ($store['scenes'] ?? [] as $i => $scene) {
+                if (!is_array($scene) || !is_array($scene['actions'] ?? null)) {
+                    continue;
+                }
+                foreach ($scene['actions'] as $j => $action) {
+                    if (is_array($action) && trim((string) ($action['id'] ?? '')) === $oldId) {
+                        $store['scenes'][$i]['actions'][$j]['id'] = $newId;
+                    }
+                }
+            }
+        }
+
+        return $store;
     }
 
     /**

@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 55
+AGENT_VERSION = 56
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -113,6 +113,7 @@ ATTR_CT_PHYSICAL_MIN = 0x400B
 ATTR_CT_PHYSICAL_MAX = 0x400C
 ATTR_DEVICE_TYPES = 0
 ATTR_SERVER_LIST = 1
+ATTR_PARTS_LIST = 3
 ATTR_VENDOR_NAME = 1
 ATTR_PRODUCT_NAME = 3
 ATTR_NODE_LABEL = 5
@@ -635,6 +636,160 @@ def persist_remapped_home(old_node: int, new_node: int) -> int:
                 pass
         path.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
     return changed
+
+
+def rewrite_exact_device_id(value: Any, old_id: str, new_id: str) -> Any:
+    if isinstance(value, str) and value == old_id:
+        return new_id
+    return value
+
+
+def remap_home_endpoint_id(store: dict[str, Any], old_id: str, new_id: str) -> int:
+    """Rewrite one Matter device id to another (same node, new endpoint)."""
+    if old_id == new_id or not looks_like_matter_id(old_id) or not looks_like_matter_id(new_id):
+        return 0
+    changed = 0
+
+    def one(value: Any) -> Any:
+        nonlocal changed
+        rewritten = rewrite_exact_device_id(value, old_id, new_id)
+        if rewritten != value:
+            changed += 1
+        return rewritten
+
+    for key in ("names", "rooms", "groups"):
+        mapping = store.get(key)
+        if not isinstance(mapping, dict):
+            continue
+        next_map: dict[str, Any] = {}
+        for map_key, map_val in mapping.items():
+            new_key = one(map_key)
+            if new_key in next_map and new_key != map_key:
+                continue
+            next_map[str(new_key)] = map_val
+        store[key] = next_map
+    hidden = store.get("hidden")
+    if isinstance(hidden, list):
+        store["hidden"] = [one(item) for item in hidden]
+    order = store.get("device_order")
+    if isinstance(order, list):
+        store["device_order"] = [one(item) for item in order]
+    paper = store.get("paper")
+    if isinstance(paper, dict):
+        store["paper"] = {
+            pk: [one(item) for item in lst] if isinstance(lst, list) else lst
+            for pk, lst in paper.items()
+        }
+    for scene in store.get("scenes") or []:
+        if not isinstance(scene, dict):
+            continue
+        actions = scene.get("actions")
+        if not isinstance(actions, list):
+            continue
+        for action in actions:
+            if isinstance(action, dict) and "id" in action:
+                action["id"] = one(action.get("id"))
+    devices = store.get("last_devices")
+    if isinstance(devices, list):
+        try:
+            new_ep = int(new_id.split(":", 1)[1])
+        except (IndexError, ValueError):
+            new_ep = 0
+        for row in devices:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("id") or "") == old_id:
+                row["id"] = new_id
+                if new_ep > 0:
+                    row["endpoint"] = new_ep
+                changed += 1
+    return changed
+
+
+def persist_remapped_endpoint(old_id: str, new_id: str) -> int:
+    path = ROOT / "data" / "home.json"
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return 0
+    if not isinstance(store, dict):
+        return 0
+    changed = remap_home_endpoint_id(store, old_id, new_id)
+    if changed:
+        path.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
+    autos_path = ROOT / "data" / "home-automations.json"
+    try:
+        autos = json.loads(autos_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        autos = None
+    if isinstance(autos, dict):
+        auto_changed = 0
+
+        def walk(value: Any) -> Any:
+            nonlocal auto_changed
+            if isinstance(value, str):
+                rewritten = rewrite_exact_device_id(value, old_id, new_id)
+                if rewritten != value:
+                    auto_changed += 1
+                return rewritten
+            if isinstance(value, list):
+                return [walk(item) for item in value]
+            if isinstance(value, dict):
+                return {k: walk(v) for k, v in value.items()}
+            return value
+
+        walked = walk(autos)
+        if auto_changed and isinstance(walked, dict):
+            autos_path.write_text(json.dumps(walked, indent=2) + "\n", encoding="utf-8")
+            changed += auto_changed
+    return changed
+
+
+def remap_live_device_id(old_id: str, new_id: str) -> None:
+    if old_id == new_id:
+        return
+    try:
+        node_id, new_ep = parse_id(new_id)
+    except ValueError:
+        return
+    with _live_lock:
+        old_row = None
+        new_row = None
+        for row in _live_devices:
+            did = str(row.get("id") or "")
+            if did == old_id:
+                old_row = row
+            elif did == new_id:
+                new_row = row
+        if old_row is None:
+            return
+        if new_row is not None and new_row is not old_row:
+            merged = _prefer_richer_row(new_row, old_row)
+            merged["id"] = new_id
+            merged["node_id"] = node_id
+            merged["endpoint"] = new_ep
+            new_row.clear()
+            new_row.update(merged)
+            _live_devices.remove(old_row)
+            return
+        old_row["id"] = new_id
+        old_row["node_id"] = node_id
+        old_row["endpoint"] = new_ep
+
+
+def remap_device_endpoint(old_id: str, new_endpoint: int) -> str:
+    try:
+        node_id, _ = parse_id(old_id)
+    except ValueError:
+        return old_id
+    if new_endpoint <= 0:
+        return old_id
+    new_id = f"{node_id}:{new_endpoint}"
+    if new_id == old_id:
+        return old_id
+    remap_live_device_id(old_id, new_id)
+    persist_remapped_endpoint(old_id, new_id)
+    return new_id
 
 
 def looks_like_matter_id(value: str) -> bool:
@@ -1830,6 +1985,7 @@ def incomplete_hue_child_endpoints(nodes: list[dict[str, Any]]) -> list[tuple[in
         blob = f"{vendor} {product} {source}".lower()
         if not (is_bridge or "hue" in blob or "signify" in blob):
             continue
+        parent_names = bridged_parent_names(attributes, vendor, product, source)
         for endpoint in sorted(endpoint_ids(attributes)):
             if endpoint == 0:
                 continue
@@ -1837,7 +1993,16 @@ def incomplete_hue_child_endpoints(nodes: list[dict[str, Any]]) -> list[tuple[in
             type_ids = device_type_ids(types)
             if DEVTYPE_AGGREGATOR in type_ids:
                 continue
+            parts = parts_list(attributes, endpoint)
+            if is_composed_parent(type_ids, parts):
+                continue
             label = endpoint_name(attributes, endpoint, vendor, product)
+            inherited = parent_names.get(endpoint) or ""
+            if inherited and (
+                not label
+                or looks_like_leftover_hue_endpoint(label, product, source, endpoint)
+            ):
+                label = inherited
             if looks_like_leftover_hue_endpoint(label, product, source, endpoint):
                 continue
             if name_looks_switch(" ".join((label, product, source, vendor))):
@@ -1868,6 +2033,7 @@ def read_hue_child_controls(node_id: int, endpoints: list[int]) -> None:
         paths.append(attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL))
         paths.append(attr_key(endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES))
         paths.append(attr_key(endpoint, DESCRIPTOR, ATTR_SERVER_LIST))
+        paths.append(attr_key(endpoint, DESCRIPTOR, ATTR_PARTS_LIST))
         paths.append(attr_key(endpoint, COLOR_CONTROL, ATTR_COLOR_CAPABILITIES))
         paths.extend(attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS)
     chunk = 24
@@ -2867,6 +3033,43 @@ def endpoint_has_cluster(attributes: dict[str, Any], endpoint: int, cluster: int
     return cluster in list_ints(attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_SERVER_LIST))
 
 
+def parts_list(attributes: dict[str, Any], endpoint: int) -> list[int]:
+    out: list[int] = []
+    for ep in list_ints(attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_PARTS_LIST)):
+        if ep > 0 and ep != endpoint and ep not in out:
+            out.append(ep)
+    return out
+
+
+def is_composed_parent(type_ids: list[int], parts: list[int]) -> bool:
+    if not parts:
+        return False
+    return DEVTYPE_BRIDGED_NODE in type_ids or DEVTYPE_AGGREGATOR in type_ids
+
+
+def bridged_parent_names(
+    attributes: dict[str, Any],
+    vendor: str,
+    product: str,
+    source: str,
+) -> dict[int, str]:
+    """Map lighting child endpoints to the Bridged Node name that owns them."""
+    names: dict[int, str] = {}
+    for endpoint in sorted(endpoint_ids(attributes)):
+        if endpoint == 0:
+            continue
+        type_ids = device_type_ids(attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES))
+        parts = parts_list(attributes, endpoint)
+        if DEVTYPE_BRIDGED_NODE not in type_ids or not parts:
+            continue
+        label = endpoint_name(attributes, endpoint, vendor, product)
+        if not label or looks_like_leftover_hue_endpoint(label, product, source, endpoint):
+            continue
+        for child in parts:
+            names.setdefault(child, label)
+    return names
+
+
 def attr_num(attributes: dict[str, Any], endpoint: int, cluster: int, attr: int) -> float | None:
     return event_number(attr_raw(attributes, endpoint, cluster, attr))
 
@@ -3092,6 +3295,110 @@ def device_command(node_id: int, endpoint: int, cluster: int, name: str, payload
         return rpc if not rpc.get("ok") else {"ok": True}
 
     return command_with_reconnect(node_id, send)
+
+
+def _endpoint_has_on_off(attributes: dict[str, Any], endpoint: int) -> bool:
+    return (
+        attr_raw(attributes, endpoint, ON_OFF, ATTR_ON_OFF) is not None
+        or endpoint_has_cluster(attributes, endpoint, ON_OFF)
+    )
+
+
+def lighting_alt_endpoint(node_id: int, endpoint: int, device_id: str) -> int | None:
+    """PartsList child or same-name sibling that actually implements On/Off."""
+    held = live_row(device_id) or {}
+    name = str(held.get("name") or "").strip().lower()
+    for row in current_live_devices():
+        if not isinstance(row, dict):
+            continue
+        try:
+            row_node = int(row.get("node_id") or 0)
+            row_ep = int(row.get("endpoint") or 0)
+        except (TypeError, ValueError):
+            continue
+        if row_node != node_id or row_ep in (0, endpoint):
+            continue
+        if name and str(row.get("name") or "").strip().lower() == name and row.get("has_on_off"):
+            return row_ep
+    attributes: dict[str, Any] = {}
+    for node in nodes_from_disk():
+        try:
+            nid = int(node.get("node_id") or node.get("nodeId") or 0)
+        except (TypeError, ValueError):
+            nid = 0
+        if nid != node_id:
+            continue
+        raw = node.get("attributes")
+        if isinstance(raw, dict):
+            attributes = raw
+            break
+    if attributes:
+        parts = parts_list(attributes, endpoint)
+        for child in parts:
+            if _endpoint_has_on_off(attributes, child) or endpoint_has_cluster(
+                attributes, child, LEVEL_CONTROL
+            ):
+                return child
+        my_name = (endpoint_name(attributes, endpoint, "", "") or name).strip().lower()
+        parent_names = bridged_parent_names(attributes, "", "", "")
+        if parent_names.get(endpoint):
+            my_name = str(parent_names.get(endpoint) or my_name).strip().lower()
+        for ep in sorted(endpoint_ids(attributes)):
+            if ep in (0, endpoint):
+                continue
+            child_name = endpoint_name(attributes, ep, "", "")
+            inherited = parent_names.get(ep) or ""
+            if inherited and (
+                not child_name
+                or looks_like_leftover_hue_endpoint(child_name, "", "", ep)
+            ):
+                child_name = inherited
+            if my_name and child_name.strip().lower() == my_name and _endpoint_has_on_off(
+                attributes, ep
+            ):
+                return ep
+    return None
+
+
+LEVEL_ONOFF_PAYLOAD = {
+    "transitionTime": 0,
+    "optionsMask": 0,
+    "optionsOverride": 0,
+}
+
+
+def retry_lighting_command(
+    node_id: int,
+    endpoint: int,
+    device_id: str,
+    cluster: int,
+    name: str,
+    payload: dict[str, Any],
+    *,
+    on: bool | None = None,
+) -> tuple[dict[str, Any], str]:
+    alt = lighting_alt_endpoint(node_id, endpoint, device_id)
+    if alt is not None:
+        rpc = device_command(node_id, alt, cluster, name, payload)
+        if rpc.get("ok"):
+            return rpc, remap_device_endpoint(device_id, alt)
+    if cluster == ON_OFF:
+        level = 254 if (on is True or name == "On") else 0
+        level_payload = {"level": level, **LEVEL_ONOFF_PAYLOAD}
+        rpc = device_command(node_id, endpoint, LEVEL_CONTROL, "MoveToLevelWithOnOff", level_payload)
+        if rpc.get("ok"):
+            return rpc, device_id
+        if alt is not None:
+            rpc = device_command(node_id, alt, LEVEL_CONTROL, "MoveToLevelWithOnOff", level_payload)
+            if rpc.get("ok"):
+                return rpc, remap_device_endpoint(device_id, alt)
+    return (
+        {
+            "ok": False,
+            "error": "Could not control that Hue light. Tap Look for devices so Home can use the working endpoint.",
+        },
+        device_id,
+    )
 
 
 def is_transport_error(result: dict[str, Any]) -> bool:
@@ -5092,6 +5399,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
         source = node_name or product or vendor or f"Matter node {node_id}"
         ep_ids = endpoint_ids(attributes)
         node_has_thermo = any(ep != 0 and endpoint_looks_heater(attributes, ep) for ep in ep_ids)
+        parent_names = bridged_parent_names(attributes, vendor, product, source)
         before = len(devices)
         for endpoint in sorted(ep_ids):
             if endpoint == 0:
@@ -5100,7 +5408,16 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             types = attr_raw(attributes, endpoint, DESCRIPTOR, ATTR_DEVICE_TYPES)
             type_ids = device_type_ids(types)
             kind = device_kind(types)
+            parts = parts_list(attributes, endpoint)
+            if is_composed_parent(type_ids, parts):
+                continue
             label = endpoint_name(attributes, endpoint, vendor, product)
+            inherited = parent_names.get(endpoint) or ""
+            if inherited and (
+                not label
+                or looks_like_leftover_hue_endpoint(label, product, source, endpoint)
+            ):
+                label = inherited
             if looks_like_leftover_hue_endpoint(label, product, source, endpoint):
                 continue
             kind = classify_by_name(kind, label, vendor, product, source)
@@ -5405,27 +5722,22 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 ) or {}
                 if not held.get("has_on_off") and not held.get("dimmable"):
                     read_hue_child_controls(node_id, [endpoint])
-
-                def send_onoff(nid: int | None = None) -> dict[str, Any]:
-                    use = node_id if nid is None else nid
-                    return matter_rpc(
-                        "device_command",
-                        {
-                            "node_id": use,
-                            "endpoint_id": endpoint,
-                            "cluster_id": ON_OFF,
-                            "command_name": name if action != "toggle" else ("On" if on else "Off"),
-                            "payload": {},
-                        },
-                        timeout=12.0,
-                    )
-
-                rpc = command_with_reconnect(node_id, send_onoff)
+                cmd_name = name if action != "toggle" else ("On" if on else "Off")
+                rpc = device_command(node_id, endpoint, ON_OFF, cmd_name, {})
                 if not rpc.get("ok") and is_unsupported_cluster(rpc):
-                    return {
-                        "ok": False,
-                        "error": "That light is still being read from the Hue Bridge. Tap Look for devices.",
-                    }
+                    rpc, device_id = retry_lighting_command(
+                        node_id,
+                        endpoint,
+                        device_id,
+                        ON_OFF,
+                        cmd_name,
+                        {},
+                        on=on,
+                    )
+                    try:
+                        _, endpoint = parse_id(device_id)
+                    except ValueError:
+                        pass
             if not rpc.get("ok"):
                 return rpc
             if on is not None:
@@ -5471,32 +5783,51 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     rpc = {**rpc, "id": device_id, "on": bool(rpc.get("on", on))}
                 return rpc
             level = int(round(pct * 254 / 100))
+            level_payload = {
+                "level": level,
+                "transitionTime": 0,
+                "optionsMask": 0,
+                "optionsOverride": 0,
+            }
             rpc = device_command(
                 node_id,
                 endpoint,
                 LEVEL_CONTROL,
                 "MoveToLevelWithOnOff",
-                {
-                    "level": level,
-                    "transitionTime": 0,
-                    "optionsMask": 0,
-                    "optionsOverride": 0,
-                },
+                level_payload,
             )
             if rpc.get("ok"):
                 patch_live_device(device_id, {"on": on, "brightness": pct}, sticky=True)
                 rpc = {**rpc, "id": device_id, "on": on, "brightness": pct}
                 return rpc
             if is_unsupported_cluster(rpc):
+                rpc, device_id = retry_lighting_command(
+                    node_id,
+                    endpoint,
+                    device_id,
+                    LEVEL_CONTROL,
+                    "MoveToLevelWithOnOff",
+                    level_payload,
+                    on=on,
+                )
+                if rpc.get("ok"):
+                    patch_live_device(device_id, {"on": on, "brightness": pct}, sticky=True)
+                    return {**rpc, "id": device_id, "on": on, "brightness": pct}
                 name = "On" if on else "Off"
                 onoff = device_command(node_id, endpoint, ON_OFF, name, {})
                 if onoff.get("ok"):
                     patch_live_device(device_id, {"on": on}, sticky=True)
                     return {"ok": True, "id": device_id, "on": on}
-                return onoff
+                return rpc
             return rpc
         if action in COLOR_ACTIONS:
             rpc = set_color(node_id, endpoint, body)
+            if not rpc.get("ok") and is_unsupported_cluster(rpc):
+                alt = lighting_alt_endpoint(node_id, endpoint, device_id)
+                if alt is not None:
+                    rpc = set_color(node_id, alt, body)
+                    if rpc.get("ok"):
+                        device_id = remap_device_endpoint(device_id, alt)
             if rpc.get("ok"):
                 fields: dict[str, Any] = {"on": True}
                 hex_s = rpc.get("color_hex") or body.get("hex") or body.get("color_hex")
@@ -5512,7 +5843,15 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 kelvin = 0
             if kelvin <= 0:
                 return {"ok": False, "error": "Colour temperature needs a kelvin value"}
-            return set_color_temp(node_id, endpoint, kelvin)
+            rpc = set_color_temp(node_id, endpoint, kelvin)
+            if not rpc.get("ok") and is_unsupported_cluster(rpc):
+                alt = lighting_alt_endpoint(node_id, endpoint, device_id)
+                if alt is not None:
+                    rpc = set_color_temp(node_id, alt, kelvin)
+                    if rpc.get("ok"):
+                        device_id = remap_device_endpoint(device_id, alt)
+                        rpc = {**rpc, "id": device_id}
+            return rpc
         shown = action or "(empty)"
         return {"ok": False, "error": f"Unknown Matter command ({shown})"}
     return {"ok": False, "error": f"Unknown op {op}"}

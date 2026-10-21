@@ -705,6 +705,60 @@ def main() -> int:
     if not kept.get("dimmable") or not kept.get("colorable"):
         raise SystemExit(f"stub must not overwrite a complete Hue light {kept}")
 
+    composed = {
+        "node_id": 1,
+        "available": True,
+        "is_bridge": True,
+        "attributes": {
+            "0/40/1": "Signify Netherlands B.V.",
+            "0/40/3": "Hue Bridge",
+            "11/29/0": [{"deviceType": DEVTYPE_BRIDGED, "revision": 1}],
+            "11/29/3": [12],
+            "11/57/5": "Landing",
+            "11/6/0": True,
+            "11/8/0": 40,
+            "12/29/0": [{"deviceType": 0x010D, "revision": 1}],
+            "12/6/0": True,
+            "12/8/0": 180,
+            "12/768/3": 200,
+            "12/57/5": "LCA005 12",
+        },
+    }
+    composed_rows = {str(d.get("id") or ""): d for d in agent.flatten_nodes([composed])}
+    if "1:11" in composed_rows:
+        raise SystemExit(f"Bridged Node parent with PartsList must not flatten {composed_rows.keys()}")
+    landing_child = composed_rows.get("1:12") or {}
+    if landing_child.get("name") != "Landing" or not landing_child.get("has_on_off"):
+        raise SystemExit(f"lighting child should inherit Landing {landing_child}")
+    if (1, 11) in agent.incomplete_hue_child_endpoints([composed]):
+        raise SystemExit("PartsList parent must not be queued for light reads")
+
+    cmd_calls: list[tuple] = []
+
+    def cmd_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True, **_kwargs):
+        cmd_calls.append((command, args or {}))
+        if command == "device_command":
+            ep = (args or {}).get("endpoint_id")
+            if ep == 11:
+                return {"ok": False, "error": "InteractionModelError: UnsupportedCluster (0xc3)"}
+            if ep == 12:
+                return {"ok": True}
+        return {"ok": False, "error": "no"}
+
+    agent.matter_rpc = cmd_rpc  # type: ignore[method-assign]
+    agent.persist_remapped_endpoint = lambda old, new: 1  # type: ignore[method-assign]
+    agent._live_devices = [
+        {"id": "1:11", "name": "Landing", "node_id": 1, "endpoint": 11, "kind": "light", "has_on_off": True},
+        {"id": "1:12", "name": "Landing", "node_id": 1, "endpoint": 12, "kind": "light", "has_on_off": True},
+    ]
+    remapped = agent.dispatch({"op": "command", "id": "1:11", "action": "on"})
+    if not remapped.get("ok"):
+        raise SystemExit(f"OnOff 0xc3 should remap to the lighting child {remapped}")
+    if remapped.get("id") != "1:12":
+        raise SystemExit(f"command id should become the child {remapped}")
+    if not any((args or {}).get("endpoint_id") == 12 for command, args in cmd_calls if command == "device_command"):
+        raise SystemExit(f"command did not retry the child endpoint {cmd_calls}")
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 
