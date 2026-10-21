@@ -105,7 +105,7 @@ $mono = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version
 
 assert_true(str_contains($ver, '0.2.26-colour'), 'firmware 0.2.26-colour');
 assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.26-colour';"), 'panel colour pin 0.2.26-colour');
-assert_true(str_contains($mono, '#define PAPERMONO_FW_VERSION "0.1.71"'), 'PaperMono firmware 0.1.71');
+assert_true(str_contains($mono, '#define PAPERMONO_FW_VERSION "0.1.72"'), 'PaperMono firmware 0.1.72');
 assert_true(str_contains($color, 'bool viewerOnly()'), 'viewer-only helper');
 assert_true(str_contains($color, 'void applyDisplayMode()'), 'landscape display mode');
 assert_true(str_contains($color, 'M5.Imu.getAccel'), 'IMU landscape left/right');

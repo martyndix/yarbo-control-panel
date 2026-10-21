@@ -396,6 +396,7 @@ final class YarboHub
         $map = [
             'powerwall' => self::MODULE_POWERWALL,
             'house' => self::MODULE_HOME,
+            'heat' => self::MODULE_HOME,
             'access' => self::MODULE_HOME,
         ];
         foreach ($map as $menuId => $moduleId) {

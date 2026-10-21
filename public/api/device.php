@@ -342,6 +342,22 @@ if ($action === 'command') {
         (new \Yarbo\YarboHome(dirname(__DIR__, 2)))->paperCommand($homeId);
         exit;
     }
+    if ($cmd === 'home_setpoint') {
+        $homeId = (string) ($input['home_id'] ?? $input['id'] ?? '');
+        $celsius = $input['celsius'] ?? $input['setpoint'] ?? $input['temperature'] ?? null;
+        if ($homeId === '' || $celsius === null || $celsius === '' || !is_numeric($celsius)) {
+            json_response(['ok' => false, 'error' => 'Heater setpoint required'], 400);
+        }
+        device_json_ack_continue(['ok' => true, 'command' => $cmd]);
+        (new \Yarbo\YarboHome(dirname(__DIR__, 2)))->command([
+            'id' => $homeId,
+            'command' => 'setpoint',
+            'celsius' => (float) $celsius,
+            'kind' => 'heater',
+            'mode' => 'heat',
+        ]);
+        exit;
+    }
     if ($cmd === 'home_vacuum') {
         $homeId = (string) ($input['home_id'] ?? $input['id'] ?? '');
         $vacCmd = strtolower(trim((string) ($input['vacuum_cmd'] ?? $input['home_action'] ?? '')));

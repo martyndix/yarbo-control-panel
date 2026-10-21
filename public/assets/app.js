@@ -8799,8 +8799,8 @@ function applyCompanionSettingsVisibility() {
         if (id === 'robots') {
             const hasVac = (homeDash.devices || []).some((d) => String(d.kind || '') === 'vacuum');
             show = yarboOn || lymowOn || hasVac;
-        } else if (id === 'powerwall') show = powerwallOn;
-        else if (id === 'house') show = homeOn;
+        }         else if (id === 'powerwall') show = powerwallOn;
+        else if (id === 'house' || id === 'heat' || id === 'access') show = homeOn;
         row.classList.toggle('hidden', !show);
     });
     const active = document.querySelector('.settings-section.is-active');

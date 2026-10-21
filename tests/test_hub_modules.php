@@ -146,12 +146,12 @@ if (($vacOnly['robots'] ?? false) !== true) {
     exit(1);
 }
 $homeOff = Yarbo\YarboHub::menuVisibleForModules(
-    ['access' => true, 'house' => true, 'note' => true],
+    ['access' => true, 'house' => true, 'heat' => true, 'note' => true],
     ['yarbo' => true, 'powerwall' => false, 'lymow' => false, 'home' => false],
     false,
 );
-if (($homeOff['access'] ?? true) !== false || ($homeOff['house'] ?? true) !== false) {
-    fwrite(STDERR, 'access/house should hide with Home off ' . json_encode($homeOff) . "\n");
+if (($homeOff['access'] ?? true) !== false || ($homeOff['house'] ?? true) !== false || ($homeOff['heat'] ?? true) !== false) {
+    fwrite(STDERR, 'access/house/heat should hide with Home off ' . json_encode($homeOff) . "\n");
     exit(1);
 }
 

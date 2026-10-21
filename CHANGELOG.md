@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.154] - 2026-10-21
+
+### Added
+- PaperMono **HEAT** page lists Home heaters on one screen. Each row shows now/set °C; tap the name for Heat/Off, −/+ steps the setpoint by 1°. Hidden when Home is off or there are no heaters. Firmware **0.1.72**.
+
 ## [4.0.153] - 2026-10-21
 
 ### Changed

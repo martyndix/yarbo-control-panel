@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.71';
+    public const FIRMWARE_VERSION = '0.1.72';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.26-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -1077,6 +1077,7 @@ final class YarboPaperDevice
         }
         $vacuums = $home->paperRobotVacuums();
         $accessItems = $homeEnabled ? $home->paperAccessItems() : [];
+        $heatItems = $homeEnabled ? $home->paperHeatItems() : [];
         $robotItems = [];
         if ($yarboEnabled) {
             $yarboName = trim((string) (is_array($parsed) ? ($parsed['robot_name'] ?? '') : ''));
@@ -1113,6 +1114,7 @@ final class YarboPaperDevice
             'home_items' => $homeItems,
             'robot_items' => $robotItems,
             'access_items' => $accessItems,
+            'heat_items' => $heatItems,
             'powerwall_pct' => isset($pw['battery_percent']) ? (int) round((float) $pw['battery_percent']) : -1,
             'powerwall_solar' => (string) ($pw['solar_label'] ?? '—'),
             'powerwall_load' => (string) ($pw['load_label'] ?? '—'),
@@ -1154,6 +1156,9 @@ final class YarboPaperDevice
         );
         if ($accessItems === []) {
             $out['menu_visible']['access'] = false;
+        }
+        if ($heatItems === []) {
+            $out['menu_visible']['heat'] = false;
         }
         $out['vestaboard_viewer'] = !empty($out['vestaboard_viewer']) && !empty($out['vestaboard_enabled']);
 
@@ -1671,7 +1676,7 @@ final class YarboPaperDevice
      */
     public static function defaultMenuKeys(): array
     {
-        return ['robots', 'note', 'powerwall', 'radio', 'device', 'house', 'access'];
+        return ['robots', 'note', 'powerwall', 'radio', 'device', 'house', 'heat', 'access'];
     }
 
     /**
@@ -1686,6 +1691,7 @@ final class YarboPaperDevice
             'radio' => 'MAIL',
             'device' => 'DEVICE',
             'house' => 'HOUSE',
+            'heat' => 'HEAT',
             'access' => 'ACCESS',
         ];
     }
@@ -1815,7 +1821,7 @@ final class YarboPaperDevice
         }
         if (!in_array($unlockPage, [
             'home', 'robots', 'note', 'board',
-            'powerwall', 'radio', 'device', 'house',
+            'powerwall', 'radio', 'device', 'house', 'heat', 'access',
         ], true)) {
             $unlockPage = 'home';
         }

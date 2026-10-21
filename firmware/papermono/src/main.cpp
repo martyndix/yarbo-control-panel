@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 #include <M5Unified.h>
 #include <cstring>
+#include <cmath>
 #include <time.h>
 #include "version.h"
 #include "paper_hw.h"
@@ -94,7 +95,7 @@ String lockScreen = "both";
 String unlockPage = "home";
 String menuCustom[PAPERMONO_PAGE_COUNT];
 bool menuShow[PAPERMONO_PAGE_COUNT] = {
-    true, true, true, true, true, false, true, true, true, true, true, true, true
+    true, true, true, true, true, false, true, true, true, true, true, true, true, true
 };
 #define PAPERMONO_MENU_MAX 12
 int menuLaidPage[PAPERMONO_MENU_MAX];
@@ -103,7 +104,7 @@ int menuLaidY[PAPERMONO_MENU_MAX];
 int menuLaidN = 0;
 int menuLaidW = 208;
 int menuLaidH = 100;
-int menuOrderN = 7;
+int menuOrderN = 8;
 int menuOrderPage[PAPERMONO_MENU_MAX] = {
     PAPERMONO_PAGE_ROBOTS,
     PAPERMONO_PAGE_NOTE,
@@ -111,6 +112,7 @@ int menuOrderPage[PAPERMONO_MENU_MAX] = {
     PAPERMONO_PAGE_RADIO,
     PAPERMONO_PAGE_DEVICE,
     PAPERMONO_PAGE_HOUSE,
+    PAPERMONO_PAGE_HEAT,
     PAPERMONO_PAGE_ACCESS
 };
 int lastYarboPage = PAPERMONO_PAGE_STATUS;
@@ -219,6 +221,16 @@ String accessNames[PAPERMONO_ACCESS_MAX];
 String accessRoles[PAPERMONO_ACCESS_MAX];
 bool accessOnState[PAPERMONO_ACCESS_MAX];
 bool accessUnlock[PAPERMONO_ACCESS_MAX];
+int heatCount = 0;
+bool heatHaveItems = false;
+String heatIds[PAPERMONO_HEAT_MAX];
+String heatNames[PAPERMONO_HEAT_MAX];
+bool heatOnState[PAPERMONO_HEAT_MAX];
+float heatTemp[PAPERMONO_HEAT_MAX];
+float heatSet[PAPERMONO_HEAT_MAX];
+float heatMin[PAPERMONO_HEAT_MAX];
+float heatMax[PAPERMONO_HEAT_MAX];
+uint32_t heatHoldUntil = 0;
 
 void drawScreen(bool forceFull);
 void serviceTouchQueue();
@@ -233,7 +245,9 @@ void prevPage();
 void showPage(int page, bool loadPlansIfNeeded);
 void layoutTileGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0);
 void layoutAccessGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0);
+void layoutHeatGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0);
 void drawThickRoundRect(int x, int y, int w, int h, int rad, int thickness, uint16_t color);
+bool httpHomeSetpoint(const char *homeId, float celsius);
 String menuLabel(int page);
 void drawPadlockIcon(int x, int y, int size, bool locked);
 void drawWifiIcon(int cx, int cy, int size, bool connected);
@@ -726,6 +740,7 @@ String pageName(int page)
     if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
     if (page == PAPERMONO_PAGE_ROBOTS) return "ROBOTS";
     if (page == PAPERMONO_PAGE_ACCESS) return "ACCESS";
+    if (page == PAPERMONO_PAGE_HEAT) return "HEAT";
     return "HOME";
 }
 
@@ -753,7 +768,8 @@ String screenKey()
         + "|" + String(tabletCharging ? 1 : 0)
         + "|" + String(usingRemote ? 1 : 0)
         + "|" + String(robotsUi) + "|" + String(robotSel) + "|" + String(robotCount)
-        + "|" + String(accessCount) + "|" + String(accessHaveItems ? 1 : 0);
+        + "|" + String(accessCount) + "|" + String(accessHaveItems ? 1 : 0)
+        + "|" + String(heatCount) + "|" + String(heatHaveItems ? 1 : 0);
     for (int i = 0; i < robotCount; i++) {
         key += "|" + robotIds[i] + "|" + robotStatus[i] + "|" + robotClean[i] + "|" + robotRooms[i];
         for (int a = 0; a < robotAreaN[i]; a++) {
@@ -763,6 +779,10 @@ String screenKey()
     for (int i = 0; i < accessCount; i++) {
         key += "|" + accessIds[i] + "|" + accessRoles[i] + "|" + String(accessOnState[i] ? 1 : 0)
             + "|" + String(accessUnlock[i] ? 1 : 0);
+    }
+    for (int i = 0; i < heatCount; i++) {
+        key += "|" + heatIds[i] + "|" + String(heatOnState[i] ? 1 : 0)
+            + "|" + String((int) roundf(heatTemp[i])) + "|" + String((int) roundf(heatSet[i]));
     }
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         key += "|" + menuCustom[i] + "|" + String(menuShow[i] ? 1 : 0);
@@ -798,7 +818,7 @@ bool pageEnabled(int page)
     if (page == PAPERMONO_PAGE_LYMOW && !lymowOn) {
         return false;
     }
-    if (page == PAPERMONO_PAGE_HOUSE && !homeOn) {
+    if ((page == PAPERMONO_PAGE_HOUSE || page == PAPERMONO_PAGE_HEAT) && !homeOn) {
         return false;
     }
     if (isYarboPage(page)) {
@@ -812,6 +832,9 @@ bool pageEnabled(int page)
     }
     if (page == PAPERMONO_PAGE_ACCESS) {
         return menuShow[page] && homeOn && (accessCount > 0 || accessHaveItems);
+    }
+    if (page == PAPERMONO_PAGE_HEAT) {
+        return menuShow[page] && homeOn && (heatCount > 0 || heatHaveItems);
     }
     return menuShow[page];
 }
@@ -873,6 +896,7 @@ int pageFromUnlockId(const String &id)
     if (id == "radio") return PAPERMONO_PAGE_RADIO;
     if (id == "device") return PAPERMONO_PAGE_DEVICE;
     if (id == "house") return PAPERMONO_PAGE_HOUSE;
+    if (id == "heat") return PAPERMONO_PAGE_HEAT;
     if (id == "access") return PAPERMONO_PAGE_ACCESS;
     return PAPERMONO_PAGE_HOME;
 }
@@ -1211,6 +1235,7 @@ const char *pageKey(int page)
     if (page == PAPERMONO_PAGE_HOUSE) return "house";
     if (page == PAPERMONO_PAGE_ROBOTS) return "robots";
     if (page == PAPERMONO_PAGE_ACCESS) return "access";
+    if (page == PAPERMONO_PAGE_HEAT) return "heat";
     return "home";
 }
 
@@ -1227,6 +1252,7 @@ String menuLabelDefault(int page)
     if (page == PAPERMONO_PAGE_HOUSE) return "HOUSE";
     if (page == PAPERMONO_PAGE_ROBOTS) return "ROBOTS";
     if (page == PAPERMONO_PAGE_ACCESS) return "ACCESS";
+    if (page == PAPERMONO_PAGE_HEAT) return "HEAT";
     return "HOME";
 }
 
@@ -1321,7 +1347,7 @@ void applyMenuOrder(JsonVariant order)
     static const int kDefault[] = {
         PAPERMONO_PAGE_ROBOTS, PAPERMONO_PAGE_NOTE, PAPERMONO_PAGE_POWERWALL,
         PAPERMONO_PAGE_RADIO, PAPERMONO_PAGE_DEVICE, PAPERMONO_PAGE_HOUSE,
-        PAPERMONO_PAGE_ACCESS
+        PAPERMONO_PAGE_HEAT, PAPERMONO_PAGE_ACCESS
     };
     bool used[PAPERMONO_PAGE_COUNT] = {};
     int n = 0;
@@ -1341,7 +1367,7 @@ void applyMenuOrder(JsonVariant order)
             menuOrderPage[n++] = page;
         }
     }
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 8; i++) {
         int page = kDefault[i];
         if (used[page] || n >= PAPERMONO_MENU_MAX) {
             continue;
@@ -1349,13 +1375,14 @@ void applyMenuOrder(JsonVariant order)
         used[page] = true;
         menuOrderPage[n++] = page;
     }
-    menuOrderN = n > 0 ? n : 7;
+    menuOrderN = n > 0 ? n : 8;
 }
 
 String menuLayoutStamp()
 {
     String s = String((int) yarboOn) + String((int) powerwallOn) + String((int) lymowOn)
         + String((int) homeOn) + String((int) robotsHaveItems) + String((int) accessHaveItems)
+        + String((int) heatHaveItems)
         + "|" + String(menuOrderN);
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
         s += "|" + menuCustom[i] + (menuShow[i] ? "1" : "0");
@@ -1395,6 +1422,7 @@ void saveMenuLayout()
     prefs.putBool("hon", homeOn);
     prefs.putBool("rhv", robotsHaveItems);
     prefs.putBool("ahv", accessHaveItems);
+    prefs.putBool("hhv", heatHaveItems);
     prefs.end();
 }
 
@@ -1443,6 +1471,9 @@ void loadMenuLayout()
     }
     if (prefs.isKey("ahv")) {
         accessHaveItems = prefs.getBool("ahv", accessHaveItems);
+    }
+    if (prefs.isKey("hhv")) {
+        heatHaveItems = prefs.getBool("hhv", heatHaveItems);
     }
     prefs.end();
     lastMenuStamp = menuLayoutStamp();
@@ -1535,6 +1566,38 @@ void layoutAccessGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, i
         bh = 100;
     }
     bw = cols > 1 ? (availW - gap * (cols - 1)) / cols : availW;
+}
+
+void layoutHeatGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, int &x0, int &y0)
+{
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    if (n < 1) {
+        n = 1;
+    }
+    cols = 1;
+    x0 = 12;
+    y0 = 104;
+    int y1 = H - 10;
+    int availH = y1 - y0;
+    gap = n > 8 ? 4 : 6;
+    rows = n;
+    bh = rows > 0 ? (availH - gap * (rows - 1)) / rows : availH;
+    if (bh > 100) {
+        bh = 100;
+    }
+    bw = W - x0 * 2;
+}
+
+void heatStepSize(int h, int &btn)
+{
+    btn = h - 12;
+    if (btn > 64) {
+        btn = 64;
+    }
+    if (btn < 36) {
+        btn = 36;
+    }
 }
 
 void drawThickRoundRect(int x, int y, int w, int h, int rad, int thickness, uint16_t color)
@@ -1913,6 +1976,115 @@ void drawAccessPage(bool forceFull)
         if (lockH > 0) {
             drawLockMark(x + 10 + glyphW, y + (h - lockH) / 2, lockH, fg);
         }
+        M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+        M5.Display.setTextDatum(TL_DATUM);
+    }
+    drawPager();
+    finishEpdFrame();
+}
+
+int heatItemCount()
+{
+    int shown = heatCount < PAPERMONO_HEAT_VISIBLE ? heatCount : PAPERMONO_HEAT_VISIBLE;
+    return shown < 0 ? 0 : shown;
+}
+
+void heatButtonRect(int idx, int &x, int &y, int &w, int &h)
+{
+    int cols, rows, bw, bh, gap, x0, y0;
+    int n = heatItemCount();
+    if (n < 1) {
+        n = 1;
+    }
+    layoutHeatGrid(n, cols, rows, bw, bh, gap, x0, y0);
+    x = x0;
+    y = y0 + idx * (bh + gap);
+    w = bw;
+    h = bh;
+}
+
+void heatPlusMinusRect(int idx, int which, int &x, int &y, int &w, int &h)
+{
+    int rx, ry, rw, rh;
+    heatButtonRect(idx, rx, ry, rw, rh);
+    int btn;
+    heatStepSize(rh, btn);
+    int gap = 8;
+    y = ry + (rh - btn) / 2;
+    h = btn;
+    w = btn;
+    if (which < 0) {
+        x = rx + rw - btn * 2 - gap - 8;
+    } else {
+        x = rx + rw - btn - 8;
+    }
+}
+
+String heatDegText(float t)
+{
+    if (t < -40) {
+        return "--";
+    }
+    return String((int) roundf(t));
+}
+
+void drawHeatStepButton(int x, int y, int w, int h, bool plus, uint16_t fg, uint16_t bg)
+{
+    int rad = h < 48 ? 8 : 10;
+    M5.Display.fillRoundRect(x, y, w, h, rad, bg);
+    M5.Display.drawRoundRect(x, y, w, h, rad, fg);
+    int cx = x + w / 2;
+    int cy = y + h / 2;
+    int arm = w / 5;
+    if (arm < 8) {
+        arm = 8;
+    }
+    M5.Display.fillRect(cx - arm, cy - 2, arm * 2, 5, fg);
+    if (plus) {
+        M5.Display.fillRect(cx - 2, cy - arm, 5, arm * 2, fg);
+    }
+}
+
+void drawHeatPage(bool forceFull)
+{
+    beginEpdFrame(forceFull);
+    M5.Display.fillScreen(TFT_WHITE);
+    drawHeader();
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(TL_DATUM);
+    int shown = heatItemCount();
+    if (shown == 0) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("No heaters.", 16, 180);
+    }
+    for (int i = 0; i < shown; i++) {
+        int x, y, w, h;
+        heatButtonRect(i, x, y, w, h);
+        bool on = heatOnState[i];
+        uint16_t bg = on ? TFT_BLACK : TFT_WHITE;
+        uint16_t fg = on ? TFT_WHITE : TFT_BLACK;
+        int rad = h < 56 ? 8 : 12;
+        M5.Display.fillRoundRect(x, y, w, h, rad, bg);
+        M5.Display.drawRoundRect(x, y, w, h, rad, fg);
+        int mx, my, mw, mh, px, py, pw, ph;
+        heatPlusMinusRect(i, -1, mx, my, mw, mh);
+        heatPlusMinusRect(i, 1, px, py, pw, ph);
+        int textW = mx - x - 12;
+        if (textW < 80) {
+            textW = 80;
+        }
+        int nameH = h > 60 ? 28 : 18;
+        int nameY = y + (h > 60 ? 22 : 16);
+        drawFittedLabel(x + 12 + textW / 2, nameY, textW, nameH, heatNames[i], fg, bg);
+        M5.Display.setTextDatum(TL_DATUM);
+        M5.Display.setTextColor(fg, bg);
+        M5.Display.setTextSize(h > 70 ? 2 : 1);
+        String line = "now " + heatDegText(heatTemp[i]) + "  set " + heatDegText(heatSet[i]);
+        M5.Display.drawString(line, x + 16, y + h - (h > 70 ? 28 : 16));
+        uint16_t btnBg = on ? TFT_BLACK : TFT_WHITE;
+        uint16_t btnFg = on ? TFT_WHITE : TFT_BLACK;
+        drawHeatStepButton(mx, my, mw, mh, false, btnFg, btnBg);
+        drawHeatStepButton(px, py, pw, ph, true, btnFg, btnBg);
         M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
         M5.Display.setTextDatum(TL_DATUM);
     }
@@ -3445,6 +3617,8 @@ void drawScreen(bool forceFull)
                 drawHousePage(forceFull);
             } else if (currentPage == PAPERMONO_PAGE_ACCESS) {
                 drawAccessPage(forceFull);
+            } else if (currentPage == PAPERMONO_PAGE_HEAT) {
+                drawHeatPage(forceFull);
             } else if (currentPage == PAPERMONO_PAGE_ROBOTS) {
                 drawRobotsPage(forceFull);
             } else {
@@ -4514,6 +4688,44 @@ bool httpGetStatus()
         }
         accessHaveItems = accessCount > 0;
     }
+    bool holdHeat = heatHoldUntil != 0 && (int32_t) (millis() - heatHoldUntil) < 0;
+    if (!holdHeat && doc["heat_items"].is<JsonArray>()) {
+        heatCount = 0;
+        JsonArray items = doc["heat_items"].as<JsonArray>();
+        if (!items.isNull()) {
+            for (JsonVariant item : items) {
+                if (heatCount >= PAPERMONO_HEAT_MAX) {
+                    break;
+                }
+                JsonObject o = item.as<JsonObject>();
+                if (o.isNull()) {
+                    continue;
+                }
+                heatIds[heatCount] = String((const char *) (o["id"] | ""));
+                heatNames[heatCount] = String((const char *) (o["name"] | ""));
+                heatOnState[heatCount] = o["on"] | false;
+                heatTemp[heatCount] = o["temp"] | -100.0f;
+                heatSet[heatCount] = o["set"] | 21.0f;
+                heatMin[heatCount] = o["min"] | 5.0f;
+                heatMax[heatCount] = o["max"] | 35.0f;
+                if (heatMin[heatCount] > heatMax[heatCount]) {
+                    float tmp = heatMin[heatCount];
+                    heatMin[heatCount] = heatMax[heatCount];
+                    heatMax[heatCount] = tmp;
+                }
+                if (heatSet[heatCount] < heatMin[heatCount]) {
+                    heatSet[heatCount] = heatMin[heatCount];
+                }
+                if (heatSet[heatCount] > heatMax[heatCount]) {
+                    heatSet[heatCount] = heatMax[heatCount];
+                }
+                if (heatIds[heatCount].length() && heatNames[heatCount].length()) {
+                    heatCount++;
+                }
+            }
+        }
+        heatHaveItems = heatCount > 0;
+    }
     if (keepRobot.length()) {
         int found = -1;
         for (int i = 0; i < robotCount; i++) {
@@ -4705,6 +4917,36 @@ bool httpHomeVacuum(const char *homeId, const char *vacCmd, const char *mode, bo
             areas.add(areaIds[i]);
         }
     }
+    String payload;
+    serializeJson(doc, payload);
+    HTTPClient http;
+    int code = paperNetPost(http, "/api/device.php", payload);
+    String body = http.getString();
+    http.end();
+    JsonDocument res;
+    deserializeJson(res, body);
+    bool ok = code == 200 && res["ok"];
+    if (ok) {
+        lastError = "";
+    } else if (res["error"].is<const char*>()) {
+        lastError = res["error"].as<const char*>();
+    } else {
+        lastError = "cmd HTTP " + String(code);
+    }
+    return ok;
+}
+
+bool httpHomeSetpoint(const char *homeId, float celsius)
+{
+    if (WiFi.status() != WL_CONNECTED || !homeId || !homeId[0]) {
+        return false;
+    }
+    JsonDocument doc;
+    doc["action"] = "command";
+    doc["command"] = "home_setpoint";
+    doc["token"] = token;
+    doc["home_id"] = homeId;
+    doc["celsius"] = celsius;
     String payload;
     serializeJson(doc, payload);
     HTTPClient http;
@@ -4964,6 +5206,46 @@ void handleAccessTouch(int x, int y)
     }
 }
 
+void handleHeatTouch(int x, int y)
+{
+    int shown = heatItemCount();
+    for (int i = 0; i < shown; i++) {
+        int bx, by, bw, bh;
+        heatButtonRect(i, bx, by, bw, bh);
+        if (x < bx || x > bx + bw || y < by || y > by + bh) {
+            continue;
+        }
+        int mx, my, mw, mh, px, py, pw, ph;
+        heatPlusMinusRect(i, -1, mx, my, mw, mh);
+        heatPlusMinusRect(i, 1, px, py, pw, ph);
+        int dir = 0;
+        if (x >= mx && x <= mx + mw && y >= my && y <= my + mh) {
+            dir = -1;
+        } else if (x >= px && x <= px + pw && y >= py && y <= py + ph) {
+            dir = 1;
+        }
+        heatHoldUntil = millis() + 18000UL;
+        lastDrawnKey = "";
+        if (dir != 0) {
+            float next = heatSet[i] + (float) dir;
+            if (next < heatMin[i]) {
+                next = heatMin[i];
+            }
+            if (next > heatMax[i]) {
+                next = heatMax[i];
+            }
+            heatSet[i] = next;
+            drawScreen(false);
+            httpHomeSetpoint(heatIds[i].c_str(), heatSet[i]);
+            return;
+        }
+        heatOnState[i] = !heatOnState[i];
+        drawScreen(false);
+        httpCommand("home_toggle", nullptr, nullptr, heatIds[i].c_str());
+        return;
+    }
+}
+
 void announceUsbReady()
 {
     Serial.println("PAPER_READY");
@@ -5056,6 +5338,8 @@ void serviceTouchQueue()
         handleHouseTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_ACCESS) {
         handleAccessTouch(tx, ty);
+    } else if (currentPage == PAPERMONO_PAGE_HEAT) {
+        handleHeatTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_ROBOTS) {
         handleRobotsTouch(tx, ty);
     } else if (currentPage == PAPERMONO_PAGE_NOTE) {

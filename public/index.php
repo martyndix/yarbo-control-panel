@@ -1386,9 +1386,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span>Vestaboard viewer only (Paper Colour)</span>
                             </label>
                             <p class="hint" id="papermono-vestaboard-viewer-hint">Paper Colour only. Requires Vestaboard Note. The tablet boots the live board in landscape and skips every other page. Turn the Note off and this stays saved but inactive.</p>
-                            <p class="hint">PaperMono Unlock always opens the page menu. One <strong>ROBOTS</strong> button opens Yarbo, Lymow, and Matter vacuums. <strong>ACCESS</strong> lists doors and windows. On a Yarbo screen, A/B still step Status, Health, and Plans. Home is still on A/B, not on the menu.</p>
+                            <p class="hint">PaperMono Unlock always opens the page menu. One <strong>ROBOTS</strong> button opens Yarbo, Lymow, and Matter vacuums. <strong>HEAT</strong> lists heaters. <strong>ACCESS</strong> lists doors and windows. On a Yarbo screen, A/B still step Status, Health, and Plans. Home is still on A/B, not on the menu.</p>
                             <h3 class="settings-subtitle">Menu buttons</h3>
-                            <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. <strong>ROBOTS</strong> holds Yarbo, Lymow, and Matter vacuums — it stays off the menu when both robot modules are off and there are no vacuums. <strong>ACCESS</strong> lists lockable Access doors and open/close sensors that are on Home (not hidden); tap a lockable door to unlock. It stays off the menu when Home is off or there are none. NOTE is the live Vestaboard plus the view buttons. The name on each button is also the title at the top of that page. Names wrap on the tablet and apply on the next poll — no reflash.</p>
+                            <p class="hint">Tick a page to show it on the unlock menu. Use ▲/▼ to change order. <strong>ROBOTS</strong> holds Yarbo, Lymow, and Matter vacuums — it stays off the menu when both robot modules are off and there are no vacuums. <strong>HEAT</strong> lists Home heaters: tap the name to Heat/Off, −/+ changes the set temperature. <strong>ACCESS</strong> lists lockable Access doors and open/close sensors that are on Home (not hidden); tap a lockable door to unlock. HEAT and ACCESS stay off the menu when Home is off or there are none. NOTE is the live Vestaboard plus the view buttons. The name on each button is also the title at the top of that page. Names wrap on the tablet and apply on the next poll — no reflash.</p>
                             <div id="paper-menu-list" class="paper-menu-list">
                                 <div class="paper-menu-row" data-menu-id="robots">
                                     <span class="paper-menu-reorder">
@@ -1437,6 +1437,14 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     </span>
                                     <input type="checkbox" data-menu-visible="house" checked aria-label="Show House">
                                     <label class="settings-field"><span class="label">House</span><input type="text" data-menu-label="house" maxlength="20" placeholder="HOUSE" autocomplete="off"></label>
+                                </div>
+                                <div class="paper-menu-row" data-menu-id="heat">
+                                    <span class="paper-menu-reorder">
+                                        <button type="button" class="home-move-btn" data-menu-move="-1" title="Move up" aria-label="Move Heat up">▲</button>
+                                        <button type="button" class="home-move-btn" data-menu-move="1" title="Move down" aria-label="Move Heat down">▼</button>
+                                    </span>
+                                    <input type="checkbox" data-menu-visible="heat" checked aria-label="Show Heat">
+                                    <label class="settings-field"><span class="label">Heat</span><input type="text" data-menu-label="heat" maxlength="20" placeholder="HEAT" autocomplete="off"></label>
                                 </div>
                                 <div class="paper-menu-row" data-menu-id="access">
                                     <span class="paper-menu-reorder">
@@ -1550,7 +1558,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="24" y="490" width="208" height="112" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="2"/>
                                         <text x="128" y="556" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" fill="#111">ACCESS</text>
                                     </svg>
-                                    <figcaption>Unlock menu — ROBOTS for robots, ACCESS for doors and windows. Reorder in Settings. MAIL blob if unread</figcaption>
+                                    <figcaption>Unlock menu — ROBOTS for robots, HEAT for heaters, ACCESS for doors and windows. Reorder in Settings. MAIL blob if unread</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="yarbo">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono home screen mock, portrait 480 by 800">
@@ -1772,6 +1780,49 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <figcaption>ACCESS — the grid shrinks so every door and window fits on one screen. Lockable doors have a lock mark and a thick border; sensors use a door or window glyph. Open is filled. Tap a lockable door to unlock.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
+                                    <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono HEAT page mock with current and set temperatures">
+                                        <rect width="480" height="800" fill="#f4f1e8"/>
+                                        <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+                                        <text x="24" y="52" font-family="ui-sans-serif, system-ui, sans-serif" font-size="28" font-weight="700" fill="#111">HEAT</text>
+                                        <rect x="378" y="16" width="82" height="82" rx="14" fill="none" stroke="#111" stroke-width="3"/>
+                                        <rect x="400" y="50" width="38" height="32" rx="5" fill="#111"/>
+                                        <path d="M409 50 v-10 a10 10 0 0 1 20 0 v10" fill="none" stroke="#111" stroke-width="6"/>
+                                        <rect x="12" y="108" width="456" height="88" rx="12" fill="#111"/>
+                                        <text x="28" y="144" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#f4f1e8">Kitchen</text>
+                                        <text x="28" y="176" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#f4f1e8">now 19  set 21</text>
+                                        <rect x="292" y="124" width="72" height="56" rx="10" fill="none" stroke="#f4f1e8" stroke-width="3"/>
+                                        <rect x="310" y="149" width="36" height="6" fill="#f4f1e8"/>
+                                        <rect x="380" y="124" width="72" height="56" rx="10" fill="none" stroke="#f4f1e8" stroke-width="3"/>
+                                        <rect x="398" y="149" width="36" height="6" fill="#f4f1e8"/>
+                                        <rect x="414" y="131" width="6" height="42" fill="#f4f1e8"/>
+                                        <rect x="12" y="208" width="456" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="28" y="244" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#111">Living room</text>
+                                        <text x="28" y="276" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#111">now 20  set 20</text>
+                                        <rect x="292" y="224" width="72" height="56" rx="10" fill="none" stroke="#111" stroke-width="3"/>
+                                        <rect x="310" y="249" width="36" height="6" fill="#111"/>
+                                        <rect x="380" y="224" width="72" height="56" rx="10" fill="none" stroke="#111" stroke-width="3"/>
+                                        <rect x="398" y="249" width="36" height="6" fill="#111"/>
+                                        <rect x="414" y="231" width="6" height="42" fill="#111"/>
+                                        <rect x="12" y="308" width="456" height="88" rx="12" fill="#f4f1e8" stroke="#111" stroke-width="3"/>
+                                        <text x="28" y="344" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#111">Study</text>
+                                        <text x="28" y="376" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#111">now 18  set 19</text>
+                                        <rect x="292" y="324" width="72" height="56" rx="10" fill="none" stroke="#111" stroke-width="3"/>
+                                        <rect x="310" y="349" width="36" height="6" fill="#111"/>
+                                        <rect x="380" y="324" width="72" height="56" rx="10" fill="none" stroke="#111" stroke-width="3"/>
+                                        <rect x="398" y="349" width="36" height="6" fill="#111"/>
+                                        <rect x="414" y="331" width="6" height="42" fill="#111"/>
+                                        <rect x="12" y="408" width="456" height="88" rx="12" fill="#111"/>
+                                        <text x="28" y="444" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#f4f1e8">Utility</text>
+                                        <text x="28" y="476" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#f4f1e8">now 16  set 18</text>
+                                        <rect x="292" y="424" width="72" height="56" rx="10" fill="none" stroke="#f4f1e8" stroke-width="3"/>
+                                        <rect x="310" y="449" width="36" height="6" fill="#f4f1e8"/>
+                                        <rect x="380" y="424" width="72" height="56" rx="10" fill="none" stroke="#f4f1e8" stroke-width="3"/>
+                                        <rect x="398" y="449" width="36" height="6" fill="#f4f1e8"/>
+                                        <rect x="414" y="431" width="6" height="42" fill="#f4f1e8"/>
+                                    </svg>
+                                    <figcaption>HEAT — tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.72.</figcaption>
+                                </figure>
+                                <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">
                                         <rect width="480" height="800" fill="#f4f1e8"/>
                                         <rect x="8" y="8" width="464" height="784" fill="none" stroke="#1a1a1a" stroke-width="2"/>
@@ -1936,7 +1987,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.71 / 0.2.26-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.72 / 0.2.26-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

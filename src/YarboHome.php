@@ -21,6 +21,7 @@ final class YarboHome
     public const CONTACT_WINDOW = 'window';
     public const PAPER_MAX = 12;
     public const PAPER_ACCESS_MAX = 36;
+    public const PAPER_HEAT_MAX = 12;
     /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
     public const PAPER_NAME_MAX = 40;
     public const PAPER_ROBOT_AREA_MAX = 8;
@@ -4150,6 +4151,71 @@ final class YarboHome
         }
 
         return $out;
+    }
+
+    /**
+     * Matter heaters for the PaperMono HEAT page. Not tablet HOUSE assignment.
+     *
+     * @return list<array{id: string, name: string, on: bool, set: float, min: float, max: float, temp?: float}>
+     */
+    public function paperHeatItems(): array
+    {
+        $store = $this->load();
+        $hidden = array_fill_keys($store['hidden'], true);
+        $live = $this->devicesWithLiveState();
+        $items = [];
+        foreach ($live['devices'] as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            if ($id === '' || isset($hidden[$id])) {
+                continue;
+            }
+            $kind = strtolower(trim((string) ($device['kind'] ?? '')));
+            if ($kind === self::KIND_VACUUM || $kind === self::KIND_SCENE) {
+                continue;
+            }
+            if ($kind !== self::KIND_HEATER
+                && !self::liveRowLooksHeater($device)
+                && !self::cachedRowLooksHeater($device)) {
+                continue;
+            }
+            $min = self::optionalCelsius($device['heating_min'] ?? 5) ?? 5.0;
+            $max = self::optionalCelsius($device['heating_max'] ?? 35) ?? 35.0;
+            if ($min > $max) {
+                $tmp = $min;
+                $min = $max;
+                $max = $tmp;
+            }
+            $set = self::optionalCelsius($device['heating_setpoint'] ?? null);
+            if ($set === null) {
+                $set = 21.0;
+            }
+            $set = max($min, min($max, $set));
+            $row = [
+                'id' => $id,
+                'name' => YarboHub::normalizeDisplayName(
+                    (string) ($store['names'][$id] ?? $device['name'] ?? $id),
+                    self::PAPER_NAME_MAX,
+                ) ?: $id,
+                'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
+                'set' => $set,
+                'min' => $min,
+                'max' => $max,
+            ];
+            $temp = self::optionalCelsius($device['local_temperature'] ?? null);
+            if ($temp !== null) {
+                $row['temp'] = $temp;
+            }
+            $items[] = $row;
+        }
+        $items = $this->applyIdOrder($items, $store['device_order'] ?? []);
+        if (count($items) > self::PAPER_HEAT_MAX) {
+            $items = array_slice($items, 0, self::PAPER_HEAT_MAX);
+        }
+
+        return $items;
     }
 
     /**
