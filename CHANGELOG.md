@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.152] - 2026-10-21
+
+### Fixed
+- PaperMono **ACCESS** no longer lists devices you hid on Home (UniFi Hide / Show on Home). Bound UA Hub tiles are skipped when that Access door is already on the page, same as the Doors tile.
+
 ## [4.0.151] - 2026-10-21
 
 ### Added

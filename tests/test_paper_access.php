@@ -23,7 +23,15 @@ file_put_contents($root . '/data/hub-config.json', json_encode([
 ], JSON_UNESCAPED_SLASHES));
 file_put_contents($root . '/data/unifi-config.json', json_encode([
     'host' => '',
-    'show_on_home' => ['unifi:sensor:kitchen-window', 'unifi:sensor:side-door', 'unifi:sensor:dps-garage'],
+    'show_on_home' => [
+        'unifi:door:garage',
+        'unifi:door:front',
+        'unifi:hub:mini',
+        'unifi:sensor:kitchen-window',
+        'unifi:sensor:side-door',
+        'unifi:sensor:dps-garage',
+        'unifi:sensor:spare-window',
+    ],
 ], JSON_UNESCAPED_SLASHES));
 file_put_contents($root . '/data/unifi-inventory.json', json_encode([
     'cameras' => [],
@@ -53,8 +61,39 @@ file_put_contents($root . '/data/unifi-inventory.json', json_encode([
         'dps' => 'close',
         'dps_label' => 'Closed',
         'open' => false,
+    ], [
+        'id' => 'unifi:door:spare',
+        'native_id' => 'spare',
+        'name' => 'Spare',
+        'kind' => 'door',
+        'source' => 'unifi',
+        'on' => false,
+        'locked' => true,
+        'has_dps' => false,
+        'open' => false,
     ]],
-    'hubs' => [],
+    'hubs' => [[
+        'id' => 'unifi:hub:mini',
+        'native_id' => 'mini',
+        'door_id' => 'garage',
+        'name' => 'UA Hub Door Mini 95aa',
+        'kind' => 'hub',
+        'source' => 'unifi',
+        'on' => false,
+        'locked' => true,
+        'has_dps' => true,
+        'open' => true,
+    ], [
+        'id' => 'unifi:hub:hidden',
+        'native_id' => 'hidden-hub',
+        'door_id' => 'front',
+        'name' => 'UA Hub Door Mini 952c',
+        'kind' => 'hub',
+        'source' => 'unifi',
+        'on' => false,
+        'locked' => true,
+        'open' => false,
+    ]],
     'sensors' => [[
         'id' => 'unifi:sensor:dps-garage',
         'native_id' => 'dps-garage',
@@ -92,6 +131,15 @@ file_put_contents($root . '/data/unifi-inventory.json', json_encode([
         'product' => 'AI 360',
         'has_motion' => true,
         'motion' => true,
+    ], [
+        'id' => 'unifi:sensor:spare-window',
+        'native_id' => 'usp-spare',
+        'name' => 'Spare window',
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'product' => 'USP Sensor',
+        'has_open' => true,
+        'open' => false,
     ]],
     'errors' => [],
 ], JSON_UNESCAPED_SLASHES));
@@ -101,7 +149,7 @@ file_put_contents($root . '/data/home.json', json_encode([
         'unifi:sensor:kitchen-window' => 'Kitchen window',
         'unifi:sensor:side-door' => 'Side door',
     ],
-    'hidden' => [],
+    'hidden' => ['unifi:sensor:spare-window'],
     'scenes' => [],
     'paper' => [],
     'last_devices' => [],
@@ -120,6 +168,10 @@ assert_true(isset($byId['unifi:sensor:kitchen-window']), 'window sensor on ACCES
 assert_true(isset($byId['unifi:sensor:side-door']), 'door sensor on ACCESS');
 assert_true(!isset($byId['unifi:sensor:dps-garage']), 'covered DPS is not duplicated: ' . json_encode($items));
 assert_true(!isset($byId['unifi:sensor:pir-drive']), 'PIR stays off ACCESS');
+assert_true(!isset($byId['unifi:hub:mini']), 'bound hub is not duplicated when the door is listed: ' . json_encode($items));
+assert_true(!isset($byId['unifi:hub:hidden']), 'hub hidden from Home (not Show on Home) stays off ACCESS');
+assert_true(!isset($byId['unifi:door:spare']), 'door hidden from Home stays off ACCESS');
+assert_true(!isset($byId['unifi:sensor:spare-window']), 'sensor on the Home hidden list stays off ACCESS');
 assert_true(($byId['unifi:door:garage']['unlock'] ?? false) === true, 'garage is unlockable');
 assert_true(($byId['unifi:door:garage']['on'] ?? false) === true, 'open garage inverts');
 assert_true(($byId['unifi:door:garage']['role'] ?? '') === 'door', 'lockable stays door');
@@ -197,6 +249,7 @@ assert_true(str_contains($fw, 'accessHaveItems'), 'menu can show ACCESS before c
 assert_true(str_contains($html, 'data-menu-id="access"'), 'settings ACCESS row');
 assert_true(str_contains($js, 'data-home-contact-assign'), 'Home ⚙️ Door/Window select');
 assert_true(str_contains($js, '🪟'), 'Home uses a window emoji');
-assert_true(str_contains($change, '## [4.0.151]'), 'changelog 4.0.151');
+assert_true(str_contains($change, '## [4.0.152]'), 'changelog 4.0.152');
+assert_true(str_contains($homePhp, 'Home rows only: UniFi Hide unticks Show on Home'), 'ACCESS uses Home rows, not all UniFi devices');
 
 echo "ok: paper access\n";

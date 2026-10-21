@@ -4162,34 +4162,44 @@ final class YarboHome
         $store = $this->load();
         $hidden = array_fill_keys($store['hidden'], true);
         $live = $this->devicesWithLiveState();
-        $live['devices'] = $this->mergeUnifiDevices($live['devices'], true);
-        $lockable = [];
-        $sensors = [];
-        $covered = [];
+        // Home rows only: UniFi Hide unticks Show on Home, which allRows() ignores.
+        $live['devices'] = $this->mergeUnifiDevices($live['devices']);
+        $visible = [];
         foreach ($live['devices'] as $device) {
             if (!is_array($device)) {
                 continue;
             }
             $id = trim((string) ($device['id'] ?? ''));
-            if ($id === '' || isset($hidden[$id]) || !self::isLockableDoor($device)) {
+            if ($id === '' || isset($hidden[$id])) {
+                continue;
+            }
+            $visible[] = $device;
+        }
+        $lockable = [];
+        $sensors = [];
+        $covered = [];
+        foreach ($visible as $device) {
+            $kind = strtolower(trim((string) ($device['kind'] ?? '')));
+            if ($kind !== 'door') {
                 continue;
             }
             $lockable[] = $device;
-            $native = trim((string) ($device['native_id'] ?? ''));
-            if ($native !== '') {
-                $covered[$native] = true;
-            }
-            $doorId = trim((string) ($device['door_id'] ?? ''));
-            if ($doorId !== '') {
-                $covered[$doorId] = true;
-            }
+            self::coverAccessDoor($device, $covered);
         }
-        foreach ($live['devices'] as $device) {
-            if (!is_array($device) || !self::isOpenCloseSensor($device)) {
+        foreach ($visible as $device) {
+            $kind = strtolower(trim((string) ($device['kind'] ?? '')));
+            if ($kind !== 'hub') {
                 continue;
             }
-            $id = trim((string) ($device['id'] ?? ''));
-            if ($id === '' || isset($hidden[$id])) {
+            $doorId = trim((string) ($device['door_id'] ?? ''));
+            if ($doorId === '' || isset($covered[$doorId])) {
+                continue;
+            }
+            $lockable[] = $device;
+            self::coverAccessDoor($device, $covered);
+        }
+        foreach ($visible as $device) {
+            if (!self::isOpenCloseSensor($device)) {
                 continue;
             }
             $doorId = trim((string) ($device['door_id'] ?? ''));
@@ -4222,6 +4232,22 @@ final class YarboHome
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $device
+     * @param array<string, true> $covered
+     */
+    private static function coverAccessDoor(array $device, array &$covered): void
+    {
+        $native = trim((string) ($device['native_id'] ?? ''));
+        if ($native !== '') {
+            $covered[$native] = true;
+        }
+        $doorId = trim((string) ($device['door_id'] ?? ''));
+        if ($doorId !== '') {
+            $covered[$doorId] = true;
+        }
     }
 
     public static function isLockableDoor(array $row): bool
