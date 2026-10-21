@@ -679,6 +679,29 @@ if (Yarbo\YarboUnifi::SNAPSHOT_CACHE_TTL !== 4) {
     fwrite(STDERR, 'snapshot ttl ' . Yarbo\YarboUnifi::SNAPSHOT_CACHE_TTL . "\n");
     exit(1);
 }
+file_put_contents($cache, 'STALEJPEG');
+touch($cache, time() - 30);
+$snapLock = fopen($cache . '.lock', 'c');
+if (!is_resource($snapLock) || !flock($snapLock, LOCK_EX)) {
+    fwrite(STDERR, "could not hold snapshot lock\n");
+    exit(1);
+}
+$callsBeforeBusy = count($calls);
+$busySnap = $unifi->snapshotJpeg('cam1');
+if ($busySnap !== 'STALEJPEG') {
+    flock($snapLock, LOCK_UN);
+    fclose($snapLock);
+    fwrite(STDERR, "busy snapshot should return stale $busySnap\n");
+    exit(1);
+}
+if (count($calls) !== $callsBeforeBusy) {
+    flock($snapLock, LOCK_UN);
+    fclose($snapLock);
+    fwrite(STDERR, "busy snapshot must not call Protect\n");
+    exit(1);
+}
+flock($snapLock, LOCK_UN);
+fclose($snapLock);
 if (Yarbo\YarboUnifi::firstRtspsUrl('{"high":"rtsps://h","medium":"rtsps://m"}') !== 'rtsps://m') {
     fwrite(STDERR, "firstRtspsUrl should prefer medium\n");
     exit(1);

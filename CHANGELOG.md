@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.142] - 2026-10-21
+
+### Fixed
+- Putting UniFi floodlights, relays, and cameras into Home groups (or rooms) no longer toasts **Home was busy**. Camera stills pause while ⚙️ is open so the save is not stuck behind Protect snapshots.
+
 ## [4.0.141] - 2026-10-21
 
 ### Fixed

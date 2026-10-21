@@ -2706,9 +2706,23 @@ async function unifiApi(body, timeoutMs = 20000) {
     }
 }
 
+function unifiExistingThumbSrc(d) {
+    const homeId = d?.id || '';
+    if (!homeId) return '';
+    try {
+        const img = document.querySelector(`[data-home-id="${CSS.escape(homeId)}"] img.unifi-thumb, [data-home-id="${CSS.escape(homeId)}"] img.unifi-camera-still`);
+        return img?.getAttribute('src') || '';
+    } catch {
+        return '';
+    }
+}
+
 function unifiSnapSrc(d, bust) {
     const id = d.native_id || d.id || '';
     const base = `/api/unifi.php?action=snapshot&id=${encodeURIComponent(id)}`;
+    const existing = unifiExistingThumbSrc(d);
+    if (existing) return existing;
+    if (homeManageOpen) return '';
     const token = bust ? (unifiSnapGen || Date.now()) : Date.now();
     return `${base}&r=${token}`;
 }
@@ -2717,8 +2731,9 @@ function unifiLiveOpenHtml(d, imgClass) {
     const id = d.id || d.native_id || '';
     const name = d.name || 'Camera';
     const src = unifiSnapSrc(d, true);
+    const srcAttr = src ? ` src="${escapeHtml(src)}"` : '';
     return `<button type="button" class="unifi-live-open" data-unifi-live="${escapeHtml(id)}" data-unifi-name="${escapeHtml(name)}">
-            <img class="${escapeHtml(imgClass)}" src="${escapeHtml(src)}" alt="${escapeHtml(name)}" loading="lazy" decoding="async">
+            <img class="${escapeHtml(imgClass)}"${srcAttr} alt="${escapeHtml(name)}" loading="lazy" decoding="async">
         </button>`;
 }
 
@@ -2733,6 +2748,7 @@ function unifiStillsVisible() {
 
 function refreshUnifiStills() {
     if (document.hidden || !unifiStillsVisible()) return;
+    if (homeManageOpen || homePollBlocked()) return;
     const imgs = document.querySelectorAll('.unifi-thumb, .unifi-camera-still');
     if (!imgs.length) return;
     unifiSnapGen = Date.now();
@@ -3317,6 +3333,7 @@ function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
 }
 
 const HOME_CONTROL_ACTIONS = new Set(['command', 'room_command', 'group_command', 'scene_run', 'scene_off']);
+const HOME_ASSIGN_ACTIONS = new Set(['room', 'group']);
 let homeAbort = null;
 let homeControlBusy = 0;
 const homeSticky = new Map();
@@ -3372,7 +3389,8 @@ function homeStickyOn(id) {
 
 async function homeApi(body, timeoutMs = 20000) {
     const isCommand = Boolean(body && HOME_CONTROL_ACTIONS.has(body.action));
-    if (isCommand) beginHomeControl();
+    const isAssign = Boolean(body && HOME_ASSIGN_ACTIONS.has(body.action));
+    if (isCommand || isAssign) beginHomeControl();
     try {
         const extra = {};
         if (!body) {
@@ -3391,7 +3409,7 @@ async function homeApi(body, timeoutMs = 20000) {
         }, timeoutMs);
         return parseJsonResponse(res);
     } finally {
-        if (isCommand) endHomeControl();
+        if (isCommand || isAssign) endHomeControl();
     }
 }
 
@@ -4764,13 +4782,14 @@ async function saveHomeAssignment(payload, id, prevRoom, prevGroup, fallback) {
     try {
         const data = await homeApi(payload);
         if (!data.ok) throw new Error(data.error || fallback);
+        return true;
     } catch (err) {
         let failed = err;
         if (isAbortError(err)) {
             try {
                 const data = await homeApi(payload);
                 if (!data.ok) throw new Error(data.error || fallback);
-                return;
+                return true;
             } catch (retryErr) {
                 failed = retryErr;
             }
@@ -4779,6 +4798,7 @@ async function saveHomeAssignment(payload, id, prevRoom, prevGroup, fallback) {
         applyHomeDeviceGroup(id, prevGroup);
         renderHomeDashboard(homeDash, { replace: true });
         showToast(homeMetaErrorMessage(failed, fallback), 'error');
+        return false;
     }
 }
 
@@ -5448,8 +5468,9 @@ function bindHomeDashboard() {
             const prevRoom = previous?.room_id || '';
             const prevGroup = previous?.group_id || '';
             applyHomeDeviceRoom(id, roomId);
-            renderHomeDashboard(homeDash, { replace: true });
-            await saveHomeAssignment({ action: 'room', id, room_id: roomId }, id, prevRoom, prevGroup, 'Could not assign room');
+            if (await saveHomeAssignment({ action: 'room', id, room_id: roomId }, id, prevRoom, prevGroup, 'Could not assign room')) {
+                renderHomeDashboard(homeDash, { replace: true });
+            }
             return;
         }
         const groupAssign = event.target.closest('[data-home-group-assign]');
@@ -5460,8 +5481,9 @@ function bindHomeDashboard() {
             const prevRoom = previous?.room_id || '';
             const prevGroup = previous?.group_id || '';
             applyHomeDeviceGroup(id, groupId);
-            renderHomeDashboard(homeDash, { replace: true });
-            await saveHomeAssignment({ action: 'group', id, group_id: groupId }, id, prevRoom, prevGroup, 'Could not assign group');
+            if (await saveHomeAssignment({ action: 'group', id, group_id: groupId }, id, prevRoom, prevGroup, 'Could not assign group')) {
+                renderHomeDashboard(homeDash, { replace: true });
+            }
             return;
         }
         const groupBright = event.target.closest('[data-home-group-bright]');

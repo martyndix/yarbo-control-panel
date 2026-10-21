@@ -905,30 +905,75 @@ final class YarboUnifi
         }
         $cacheDir = $this->projectRoot . '/data';
         $cache = $cacheDir . '/unifi-snap-' . preg_replace('/[^a-zA-Z0-9._-]+/', '_', $cameraId) . '.jpg';
-        $cached = '';
-        if (is_file($cache)) {
-            $raw = file_get_contents($cache);
-            if (is_string($raw) && $raw !== '') {
-                $cached = $raw;
-            }
-        }
-        if (!$fresh && $cached !== '' && (time() - (int) filemtime($cache)) < self::SNAPSHOT_CACHE_TTL) {
+        $cached = $this->readSnapshotCache($cache);
+        if (!$fresh && $cached !== '' && (time() - (int) @filemtime($cache)) < self::SNAPSHOT_CACHE_TTL) {
             return $cached;
-        }
-        $url = $this->protectUrl($config, '/cameras/' . rawurlencode($cameraId) . '/snapshot?highQuality=false');
-        $res = $this->request('GET', $url, $this->protectHeaders($config), null, 6.0, true);
-        if ($res['status'] < 200 || $res['status'] >= 300 || $res['body'] === '') {
-            if ($cached !== '') {
-                return $cached;
-            }
-            throw new \RuntimeException($res['error'] ?? ('Protect snapshot failed HTTP ' . $res['status']));
         }
         if (!is_dir($cacheDir)) {
             mkdir($cacheDir, 0755, true);
         }
-        file_put_contents($cache, $res['body']);
+        $lockPath = $cache . '.lock';
+        $lock = @fopen($lockPath, 'c');
+        $locked = is_resource($lock) && flock($lock, LOCK_EX | LOCK_NB);
+        if (!$locked) {
+            if (is_resource($lock)) {
+                fclose($lock);
+                $lock = null;
+            }
+            if (!$fresh && $cached !== '') {
+                return $cached;
+            }
+            $lock = @fopen($lockPath, 'c');
+            if (!is_resource($lock) || !flock($lock, LOCK_EX)) {
+                if (is_resource($lock)) {
+                    fclose($lock);
+                }
+                if ($cached !== '') {
+                    return $cached;
+                }
+                throw new \RuntimeException('Protect snapshot is busy');
+            }
+            $locked = true;
+            $cached = $this->readSnapshotCache($cache);
+            if (!$fresh && $cached !== '') {
+                flock($lock, LOCK_UN);
+                fclose($lock);
 
-        return $res['body'];
+                return $cached;
+            }
+        }
+        try {
+            $cached = $this->readSnapshotCache($cache);
+            if (!$fresh && $cached !== '' && (time() - (int) @filemtime($cache)) < self::SNAPSHOT_CACHE_TTL) {
+                return $cached;
+            }
+            $url = $this->protectUrl($config, '/cameras/' . rawurlencode($cameraId) . '/snapshot?highQuality=false');
+            $res = $this->request('GET', $url, $this->protectHeaders($config), null, 6.0, true);
+            if ($res['status'] < 200 || $res['status'] >= 300 || $res['body'] === '') {
+                if ($cached !== '') {
+                    return $cached;
+                }
+                throw new \RuntimeException($res['error'] ?? ('Protect snapshot failed HTTP ' . $res['status']));
+            }
+            file_put_contents($cache, $res['body']);
+
+            return $res['body'];
+        } finally {
+            if ($locked && is_resource($lock)) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+            }
+        }
+    }
+
+    private function readSnapshotCache(string $cache): string
+    {
+        if (!is_file($cache)) {
+            return '';
+        }
+        $raw = file_get_contents($cache);
+
+        return is_string($raw) && $raw !== '' ? $raw : '';
     }
 
     public function rtspsUrl(string $cameraId): string

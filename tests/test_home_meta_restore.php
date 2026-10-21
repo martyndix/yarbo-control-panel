@@ -163,6 +163,13 @@ assert_true(str_contains($js, 'homeManageOpen && !opts.force'), 'Home GET does n
 assert_true(str_contains($js, 'homePollBlocked() || homeManageOpen'), 'aborted Home GET does not retry while ⚙️ is open');
 assert_true(str_contains($js, 'function saveHomeAssignment'), 'room assign retries once if Home was busy');
 assert_true(str_contains($js, 'function applyHomeDeviceRoom'), 'room assign updates locally');
+assert_true(str_contains($js, "HOME_ASSIGN_ACTIONS = new Set(['room', 'group'])"), 'room/group assign pauses Home polls');
+assert_true(str_contains($js, 'isCommand || isAssign'), 'room/group POST aborts in-flight Home GETs');
+assert_true(str_contains($js, 'homeManageOpen || homePollBlocked()'), 'camera stills pause while ⚙️ is open');
+assert_true(str_contains($js, 'function unifiExistingThumbSrc'), 'manage re-render keeps camera stills instead of fetching Protect again');
+assert_true(str_contains($js, 'if (homeManageOpen) return \'\''), '⚙️ does not start new camera snapshots');
+assert_true(str_contains($js, 'if (await saveHomeAssignment({ action: \'group\''), 'group save runs before the grid rebuild');
+assert_true(str_contains($js, 'if (await saveHomeAssignment({ action: \'room\''), 'room save runs before the grid rebuild');
 assert_true(str_contains($change, '## [4.0.133]'), 'changelog 4.0.133');
 assert_true(str_contains($change, '## [4.0.135]'), 'changelog 4.0.135');
 assert_true(str_contains($change, '## [4.0.136]'), 'changelog 4.0.136');
@@ -171,5 +178,20 @@ assert_true(str_contains($change, '## [4.0.138]'), 'changelog 4.0.138');
 assert_true(str_contains($change, '## [4.0.139]'), 'changelog 4.0.139');
 assert_true(str_contains($change, '## [4.0.140]'), 'changelog 4.0.140');
 assert_true(str_contains($change, '## [4.0.141]'), 'changelog 4.0.141');
+assert_true(str_contains($change, '## [4.0.142]'), 'changelog 4.0.142');
+
+$rootUnifi = homeRoot();
+$storeUnifi = richStore();
+file_put_contents($rootUnifi . '/data/home.json', json_encode($storeUnifi, JSON_UNESCAPED_SLASHES));
+$homeUnifi = new YarboHome($rootUnifi);
+$flood = $homeUnifi->assignDeviceGroup('unifi:light:flood1', 'g1');
+assert_true(($flood['ok'] ?? false) === true, 'UniFi floodlight can join a group');
+$relay = $homeUnifi->assignDeviceGroup('unifi:relay:usl1:1', 'g1');
+assert_true(($relay['ok'] ?? false) === true, 'UniFi relay can join a group');
+$cam = $homeUnifi->assignDeviceGroup('unifi:camera:cam1', 'g1');
+assert_true(($cam['ok'] ?? false) === true, 'UniFi camera can join a group');
+$afterUnifi = $homeUnifi->load();
+assert_true(($afterUnifi['groups']['unifi:light:flood1'] ?? '') === 'g1', 'floodlight group is stored');
+assert_true(($afterUnifi['rooms']['unifi:camera:cam1'] ?? '') === 'r1', 'camera group also sets the room');
 
 echo "test_home_meta_restore.php ok\n";

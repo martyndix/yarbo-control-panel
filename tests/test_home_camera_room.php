@@ -57,4 +57,14 @@ if (!str_contains($change, '## [4.0.115]')) {
     exit(1);
 }
 
+if (!str_contains($js, 'function unifiExistingThumbSrc') || !str_contains($js, 'HOME_ASSIGN_ACTIONS')) {
+    fwrite(STDERR, "camera stills must not block UniFi group assign\n");
+    exit(1);
+}
+
+if (!str_contains($change, '## [4.0.142]')) {
+    fwrite(STDERR, "changelog 4.0.142\n");
+    exit(1);
+}
+
 echo "ok: home camera room\n";
