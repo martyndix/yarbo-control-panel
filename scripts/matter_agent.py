@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 56
+AGENT_VERSION = 57
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3437,6 +3437,15 @@ def try_color_commands(node_id: int, endpoint: int, attempts: list[tuple[str, di
     return last
 
 
+def color_command_should_turn_on(body: dict[str, Any]) -> bool:
+    """Time of day ticks must not force On — that wakes lights that were turned off."""
+    if body.get("adaptive") or body.get("adaptive_tick"):
+        return False
+    if "turn_on" in body:
+        return bool(body.get("turn_on"))
+    return True
+
+
 def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, Any]:
     hex_s = str(body.get("hex") or body.get("color_hex") or "").strip()
     hs = hex_to_hs(hex_s) if hex_s else None
@@ -3448,9 +3457,10 @@ def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, An
     if hs is None:
         return {"ok": False, "error": "Colour needs a hex value"}
     xy = hex_to_xy(hex_s) if hex_s else None
-    on_result = device_command(node_id, endpoint, ON_OFF, "On", {})
-    if is_transport_error(on_result):
-        return on_result
+    if color_command_should_turn_on(body):
+        on_result = device_command(node_id, endpoint, ON_OFF, "On", {})
+        if is_transport_error(on_result):
+            return on_result
     attempts: list[tuple[str, dict[str, Any]]] = []
     # Hue often applies XY more reliably than HS, and some stacks reject optionsMask.
     if xy is not None:
@@ -3476,9 +3486,13 @@ def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, An
     )
     if xy is not None:
         attempts.append(("MoveToColor", {"colorX": xy[0], "colorY": xy[1], **color_transition(True)}))
+    turn_on = color_command_should_turn_on(body)
     result = try_color_commands(node_id, endpoint, attempts)
     if result.get("ok"):
-        return {**result, "on": True, "color_hex": hex_s or None}
+        out = {**result, "color_hex": hex_s or None}
+        if turn_on:
+            out["on"] = True
+        return out
     if is_transport_error(result) or is_unsupported_cluster(result):
         return result
     fallback: list[tuple[str, dict[str, Any]]] = [
@@ -3491,14 +3505,19 @@ def set_color(node_id: int, endpoint: int, body: dict[str, Any]) -> dict[str, An
         fallback.append(("MoveToColor", {"colorX": xy[0], "colorY": xy[1], **color_transition(False)}))
     last = try_color_commands(node_id, endpoint, fallback)
     if last.get("ok"):
-        return {**last, "on": True, "color_hex": hex_s or None}
+        out = {**last, "color_hex": hex_s or None}
+        if turn_on:
+            out["on"] = True
+        return out
     return last
 
 
-def set_color_temp(node_id: int, endpoint: int, kelvin: int) -> dict[str, Any]:
-    on_result = device_command(node_id, endpoint, ON_OFF, "On", {})
-    if is_transport_error(on_result):
-        return on_result
+def set_color_temp(node_id: int, endpoint: int, kelvin: int, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    body = body or {}
+    if color_command_should_turn_on(body):
+        on_result = device_command(node_id, endpoint, ON_OFF, "On", {})
+        if is_transport_error(on_result):
+            return on_result
     payload_on = {
         "colorTemperatureMireds": kelvin_to_mireds(kelvin),
         **color_transition(True),
@@ -5829,11 +5848,14 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     if rpc.get("ok"):
                         device_id = remap_device_endpoint(device_id, alt)
             if rpc.get("ok"):
-                fields: dict[str, Any] = {"on": True}
+                fields: dict[str, Any] = {}
+                if color_command_should_turn_on(body):
+                    fields["on"] = True
                 hex_s = rpc.get("color_hex") or body.get("hex") or body.get("color_hex")
                 if hex_s:
                     fields["color_hex"] = hex_s
-                patch_live_device(device_id, fields, sticky=True)
+                if fields:
+                    patch_live_device(device_id, fields, sticky=True)
                 rpc = {**rpc, "id": device_id, **fields}
             return rpc
         if action in COLOR_TEMP_ACTIONS:
@@ -5843,14 +5865,20 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 kelvin = 0
             if kelvin <= 0:
                 return {"ok": False, "error": "Colour temperature needs a kelvin value"}
-            rpc = set_color_temp(node_id, endpoint, kelvin)
+            rpc = set_color_temp(node_id, endpoint, kelvin, body)
             if not rpc.get("ok") and is_unsupported_cluster(rpc):
                 alt = lighting_alt_endpoint(node_id, endpoint, device_id)
                 if alt is not None:
-                    rpc = set_color_temp(node_id, alt, kelvin)
+                    rpc = set_color_temp(node_id, alt, kelvin, body)
                     if rpc.get("ok"):
                         device_id = remap_device_endpoint(device_id, alt)
                         rpc = {**rpc, "id": device_id}
+            if rpc.get("ok") and color_command_should_turn_on(body):
+                patch_live_device(device_id, {"on": True, "color_temp": kelvin}, sticky=True)
+                rpc = {**rpc, "id": device_id, "on": True, "color_temp": kelvin}
+            elif rpc.get("ok"):
+                patch_live_device(device_id, {"color_temp": kelvin}, sticky=True)
+                rpc = {**rpc, "id": device_id, "color_temp": kelvin}
             return rpc
         shown = action or "(empty)"
         return {"ok": False, "error": f"Unknown Matter command ({shown})"}

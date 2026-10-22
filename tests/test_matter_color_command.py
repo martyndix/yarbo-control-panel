@@ -51,7 +51,38 @@ def main() -> int:
         {"op": "command", "id": "12:4", "action": "color_temp", "kelvin": 2700}
     )
     assert kelvin.get("ok") is True, kelvin
+    assert "On" in [call[3] for call in calls], calls
     assert "MoveToColorTemperature" in [call[3] for call in calls]
+
+    calls.clear()
+    adaptive = agent.dispatch(
+        {
+            "op": "command",
+            "id": "12:4",
+            "action": "color_temp",
+            "kelvin": 3000,
+            "adaptive": True,
+        }
+    )
+    assert adaptive.get("ok") is True, adaptive
+    names = [call[3] for call in calls]
+    assert "On" not in names, names
+    assert "MoveToColorTemperature" in names, names
+    assert adaptive.get("on") is not True, adaptive
+
+    calls.clear()
+    adaptive_rgb = agent.dispatch(
+        {
+            "op": "command",
+            "id": "12:4",
+            "action": "color",
+            "hex": "#ffd27a",
+            "adaptive": True,
+        }
+    )
+    assert adaptive_rgb.get("ok") is True, adaptive_rgb
+    rgb_names = [call[3] for call in calls]
+    assert "On" not in rgb_names, rgb_names
 
     unknown = agent.dispatch({"op": "command", "id": "12:4", "action": "sparkle"})
     assert unknown.get("ok") is False, unknown

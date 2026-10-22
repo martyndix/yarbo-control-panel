@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.156] - 2026-10-22
+
+### Fixed
+- **Time of day** no longer turns lights back on when it nudges colour temperature. Off lights keep the tick and stay off; they follow again when you turn them on. Needs Matter agent **57** (panel restarts it).
+
 ## [4.0.155] - 2026-10-21
 
 ### Fixed

@@ -1090,6 +1090,9 @@ final class YarboHome
         if (($action === 'color_temp' || $action === 'kelvin') && array_key_exists('kelvin', $input)) {
             $body['kelvin'] = max(1500, min(8000, (int) $input['kelvin']));
         }
+        if (!empty($input['adaptive'])) {
+            $body['adaptive'] = true;
+        }
         if (in_array($action, ['setpoint', 'temperature', 'heating_setpoint'], true)) {
             $celsius = $input['celsius'] ?? $input['setpoint'] ?? $input['temperature'] ?? null;
             if ($celsius === null || $celsius === '') {
@@ -1126,15 +1129,23 @@ final class YarboHome
             $result = $agent->request($body, 60.0);
         }
         $dropColor = [];
+        $adaptiveCmd = !empty($input['adaptive']) || !empty($body['adaptive']);
         if (in_array($action, ['color_temp', 'kelvin'], true) && !($result['ok'] ?? false)
             && YarboMatterFabric::isUnsupportedCluster((string) ($result['error'] ?? ''))) {
             $hex = self::kelvinToHex((int) ($body['kelvin'] ?? $this->adaptiveKelvinForDevice($id)));
             $action = 'color';
             $body = ['op' => 'command', 'id' => $id, 'action' => 'color', 'hex' => $hex];
+            if ($adaptiveCmd) {
+                $body['adaptive'] = true;
+            }
             $result = $agent->request($body, 60.0);
         }
         if (in_array($action, ['color', 'color_temp', 'kelvin'], true) && !($result['ok'] ?? false)
             && YarboMatterFabric::isUnsupportedCluster((string) ($result['error'] ?? ''))) {
+            // Time of day must not fall back to On — that turns off lights back on.
+            if ($adaptiveCmd) {
+                return ['ok' => false, 'error' => $this->friendlyMatterError((string) ($result['error'] ?? 'Command failed'))];
+            }
             $dropColor = $action === 'color'
                 ? ['colorable' => false, 'color_hs' => false, 'color_xy' => false]
                 : ['color_ct' => false];
@@ -3259,7 +3270,9 @@ final class YarboHome
             $patch['brightness'] = max(0, min(100, (int) $body['brightness']));
             $patch['on'] = $patch['brightness'] > 0;
         } elseif ($action === 'color' || $action === 'color_temp' || $action === 'kelvin') {
-            $patch['on'] = true;
+            if (empty($body['adaptive'])) {
+                $patch['on'] = true;
+            }
             if ($action === 'color') {
                 $hex = $this->normalizeHex((string) ($result['color_hex'] ?? $body['hex'] ?? ''));
                 if ($hex !== null) {
@@ -5451,7 +5464,13 @@ final class YarboHome
         $out = [];
         foreach ($ids as $id) {
             $row = $byId[$id] ?? [];
-            if ($row !== [] && array_key_exists('on', $row) && empty($row['on'])) {
+            // Prefer the live cache (updated by Apple Home / Hue / panel Off).
+            // Only nudge lights that are confirmed on — never wake an off lamp.
+            $on = $this->cachedDeviceOn($id);
+            if ($on === null && $row !== [] && array_key_exists('on', $row)) {
+                $on = YarboMatterFabric::attrBool($row['on']);
+            }
+            if ($on !== true) {
                 continue;
             }
             $kelvin = $this->adaptiveKelvinForDevice($id, $now);

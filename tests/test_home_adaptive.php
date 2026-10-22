@@ -101,6 +101,18 @@ $home->rememberAdaptiveApplied(['1:2' => (int) $updates[0]['kelvin']], $noon);
 $again = $home->adaptiveUpdates($noon);
 assert_true($again === [], 'same kelvin is not sent again');
 
+$offStore = json_decode((string) file_get_contents($root . '/data/home.json'), true);
+$offStore['last_devices'][0]['on'] = false;
+file_put_contents($root . '/data/home.json', json_encode($offStore, JSON_UNESCAPED_SLASHES));
+@unlink($root . '/data/home-nodes-cache.json');
+$home = new YarboHome($root);
+$home->addAdaptiveExtra('1:2');
+$home->rememberAdaptiveApplied(['1:2' => 2200], $noon - 120);
+assert_true($home->adaptiveUpdates($noon, true) === [], 'Time of day does not nudge a light that is off');
+$offStore['last_devices'][0]['on'] = true;
+file_put_contents($root . '/data/home.json', json_encode($offStore, JSON_UNESCAPED_SLASHES));
+$home = new YarboHome($root);
+
 $commands = [];
 $auto = new YarboHomeAutomations($root);
 $auto->setCommandHandler(static function (array $action) use (&$commands): array {
@@ -163,6 +175,8 @@ assert_true(str_contains($autoPhp, 'function applyAdaptiveLighting'), 'runner ke
 assert_true(str_contains($autoPhp, 'commandAdaptiveColor'), 'Time of day tick sends colour temp or RGB white, not On');
 assert_true(!str_contains($autoPhp, "\$hex = '';\n        \$kelvin = 0;"), 'Then Time of day must keep kelvin');
 assert_true(str_contains($homePhp, "'adaptive' => true"), 'Time of day commands must not pause themselves');
+assert_true(str_contains($homePhp, "\$body['adaptive'] = true"), 'Time of day forwards adaptive to the Matter agent');
+assert_true(str_contains($homePhp, 'Time of day must not fall back to On'), 'failed colour temp must not become On');
 assert_true(str_contains($homePhp, '!$caps[\'color_ct\'] && !$adaptive'), 'scene Time of day still sends kelvin');
 assert_true(str_contains($homePhp, 'function kelvinToHex'), 'colour lights get a white from kelvin');
 assert_true(str_contains($homePhp, 'function commandAdaptiveFollow'), 'light tiles can set Time of day');
@@ -250,5 +264,9 @@ assert_true($groupHome->adaptiveDeviceIds() === [], 'unticking the group clears 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(str_contains($css, '.home-bright-pct'), 'brightness percent has styles');
 assert_true(str_contains($change, '## [4.0.146]'), 'changelog 4.0.146');
+assert_true(str_contains($change, '## [4.0.156]'), 'changelog 4.0.156');
+$agentPy = (string) file_get_contents(dirname(__DIR__) . '/scripts/matter_agent.py');
+assert_true(str_contains($agentPy, 'def color_command_should_turn_on'), 'Matter skips On for Time of day');
+assert_true(str_contains($agentPy, 'AGENT_VERSION = 57'), 'Matter agent version 57');
 
 echo "ok\n";
