@@ -345,7 +345,17 @@ final class YarboLymow
                 YarboVestaboard::COLOR_RED,
             ), true);
         }
-        if ($returning || in_array($workStatus, [4, 10], true)) {
+        // On the pad wins over leftover DOCKING / is_recharging (mid-mow top-up).
+        if ($charging && !$full) {
+            return $this->vestaboardResult($board->brandedLayout(
+                'LYMOW',
+                'CHARGING',
+                $batteryLine,
+                'ON DOCK',
+                $batteryColor,
+            ), true);
+        }
+        if (($returning || in_array($workStatus, [4, 10], true)) && !$charging) {
             return $this->vestaboardResult($board->brandedLayout(
                 'LYMOW',
                 'DOCKING',
@@ -356,15 +366,6 @@ final class YarboLymow
         }
         if ($workStatus === 3) {
             return $this->vestaboardResult($board->brandedPaused('LYMOW', $batteryLine, $batteryColor), true);
-        }
-        if ($charging && !$full) {
-            return $this->vestaboardResult($board->brandedLayout(
-                'LYMOW',
-                'CHARGING',
-                $batteryLine,
-                'ON DOCK',
-                $batteryColor,
-            ), true);
         }
         if (in_array($workStatus, [2, 8, 9], true) && !$charging) {
             $line3 = $progress !== null ? $this->pair('WORK DONE', $progress . '%') : 'READY';

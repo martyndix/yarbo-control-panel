@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.157] - 2026-10-22
+
+### Fixed
+- Lymow Vestaboard Note shows **CHARGING** / **ON DOCK** when the mower is already on the pad (including a mid-mow top-up). Leftover docking status no longer keeps **DOCKING** / **HEADING HOME**.
+
 ## [4.0.156] - 2026-10-22
 
 ### Fixed

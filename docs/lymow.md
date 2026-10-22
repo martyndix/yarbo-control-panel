@@ -29,7 +29,7 @@ Sign-in may fill the IP from the cloud if it is still the default.
 
 Settings → Modules → **Vestaboard live module** → Lymow.
 
-The Note uses the same 3-line pattern as Yarbo: **LYMOW** plus the activity verb (**MOWING**, **CHARGING**, **IDLE**, **DOCKING**, **PAUSED**, …), **BATTERY** plus **%** or **FULL** (colour chip on the last column), and a context line (**WORK DONE n%** while mowing, **ON DOCK**, **CHARGED**, **READY**, **HEADING HOME**, **PLAN HOLD**).
+The Note uses the same 3-line pattern as Yarbo: **LYMOW** plus the activity verb (**MOWING**, **CHARGING**, **IDLE**, **DOCKING**, **PAUSED**, …), **BATTERY** plus **%** or **FULL** (colour chip on the last column), and a context line (**WORK DONE n%** while mowing, **ON DOCK**, **CHARGED**, **READY**, **HEADING HOME**, **PLAN HOLD**). Mid-mow top-ups show **CHARGING** / **ON DOCK** once the pad is charging — not **DOCKING** / **HEADING HOME**.
 
 The Lymow card has a **Progress** stat for the same percent. The MQTT listener writes each robot status message as it arrives (and asks for a status refresh about every 15 seconds) so the tile and Note are not a minute behind.
 
