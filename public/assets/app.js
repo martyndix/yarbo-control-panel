@@ -13627,12 +13627,8 @@ els.unifiRadioPlay?.addEventListener('click', async () => {
             if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
         }
         renderUnifiSpeakers(unifiDash || data, { replace: true });
-        if (data.warning) {
-            const soft = /volume was not applied/i.test(String(data.warning));
-            showToast(data.warning, soft ? 'success' : 'error');
-        } else {
-            showToast('Playing', 'success');
-        }
+        if (data.warning) showToast(data.warning, 'error');
+        else showToast('Playing', 'success');
     } catch (err) {
         if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = err.message || 'Play failed';
         showToast(err.message || 'Play failed', 'error');
