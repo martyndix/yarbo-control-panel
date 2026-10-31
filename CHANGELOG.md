@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.161] - 2026-10-31
+
+### Fixed
+- UniFi **Speakers** ticks no longer snap back on after a few seconds: hub status was re-entering the UniFi module and rebuilding the list as all-checked while Idle. Selection is kept in the UI (and remembered) across polls.
+
 ## [4.0.160] - 2026-10-31
 
 ### Fixed

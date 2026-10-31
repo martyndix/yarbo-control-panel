@@ -136,13 +136,35 @@ assert_true(str_contains($index, 'settings-unifi-speakers-enabled'), 'Settings S
 assert_true(str_contains($change, '## [4.0.158]'), 'changelog 4.0.158');
 assert_true(str_contains($change, '## [4.0.159]'), 'changelog 4.0.159');
 assert_true(str_contains($change, '## [4.0.160]'), 'changelog 4.0.160');
+assert_true(str_contains($change, '## [4.0.161]'), 'changelog 4.0.161');
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(str_contains($css, '.unifi-speakers'), 'Speakers panel CSS');
 assert_true(preg_match('/\.unifi-speakers\s*\{[^}]*color:\s*var\(--text\)/s', $css) === 1, 'Speakers uses theme text colour');
 assert_true(preg_match('/\.unifi-speakers\s*\{[^}]*background:\s*var\(--card\)/s', $css) === 1, 'Speakers uses theme card background');
 assert_true(str_contains($css, '.unifi-radio-speaker span'), 'speaker name colour forced');
+$js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
+assert_true(str_contains($js, 'prevModuleId !== \'unifi\''), 'UniFi poll not restarted every hub status');
+assert_true(str_contains($js, 'UNIFI_SPEAKER_PICK_KEY'), 'speaker ticks remembered');
+assert_true(str_contains($js, 'fromDom'), 'speaker ticks preserved across Speakers re-render');
 $api = (string) file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
 assert_true(str_contains($api, 'catch (Throwable'), 'unifi status catches fatals as JSON');
 assert_true(str_contains((string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php'), 'function_exists(\'mb_substr\')'), 'mb_substr guarded');
+assert_true(str_contains($php, 'active_targets'), 'status exposes active stream targets');
+
+// Idle status keeps last chosen targets (so the UI does not treat empty as “all on”).
+file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
+    'playing' => false,
+    'station_id' => 'classic-fm',
+    'station_name' => 'Classic FM',
+    'volume' => 40,
+    'streams' => [],
+    'targets' => ['cam1', 'cam2'],
+    'started_at' => null,
+    'error' => null,
+], JSON_UNESCAPED_SLASHES));
+$idle = $radio->status();
+assert_true(($idle['playing'] ?? true) === false, 'idle not playing');
+assert_true(($idle['targets'] ?? []) === ['cam1', 'cam2'], 'idle keeps saved targets');
+assert_true(($idle['active_targets'] ?? ['x']) === [], 'idle has no active streams');
 
 echo "test_unifi_radio.php ok\n";

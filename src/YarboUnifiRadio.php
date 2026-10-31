@@ -77,7 +77,7 @@ final class YarboUnifiRadio
     }
 
     /**
-     * @return array{playing: bool, station_id: ?string, station_name: ?string, targets: list<string>, volume: int, error: ?string, started_at: ?int}
+     * @return array{playing: bool, station_id: ?string, station_name: ?string, targets: list<string>, active_targets: list<string>, volume: int, error: ?string, started_at: ?int}
      */
     public function status(): array
     {
@@ -103,11 +103,29 @@ final class YarboUnifiRadio
             $this->writeState($state);
         }
 
+        $aliveIds = array_values(array_map(
+            static fn (array $r): string => (string) ($r['camera_id'] ?? ''),
+            $alive
+        ));
+        $savedTargets = [];
+        if (is_array($state['targets'] ?? null)) {
+            foreach ($state['targets'] as $id) {
+                $id = trim((string) $id);
+                if ($id !== '') {
+                    $savedTargets[] = $id;
+                }
+            }
+        }
+        // Keep last chosen speakers for the UI while Idle; only fall back to live
+        // streams when nothing was saved yet.
+        $targets = $savedTargets !== [] ? array_values(array_unique($savedTargets)) : $aliveIds;
+
         return [
             'playing' => !empty($state['playing']) && $alive !== [],
             'station_id' => isset($state['station_id']) ? (string) $state['station_id'] : null,
             'station_name' => isset($state['station_name']) ? (string) $state['station_name'] : null,
-            'targets' => array_values(array_map(static fn (array $r): string => (string) ($r['camera_id'] ?? ''), $alive)),
+            'targets' => $targets,
+            'active_targets' => $aliveIds,
             'volume' => max(0, min(100, (int) ($state['volume'] ?? 60))),
             'error' => isset($state['error']) && is_string($state['error']) && $state['error'] !== ''
                 ? $state['error']
@@ -203,7 +221,8 @@ final class YarboUnifiRadio
             'station_url' => $station['url'],
             'volume' => $volume,
             'streams' => $streams,
-            'targets' => array_column($streams, 'camera_id'),
+            // Remember the speakers the user ticked, even if some failed to start.
+            'targets' => $targets,
             'started_at' => $playing ? time() : null,
             'error' => $playing
                 ? ($errors !== [] ? implode('; ', $errors) : null)
@@ -255,7 +274,9 @@ final class YarboUnifiRadio
         $targets = $this->normalizeTargetIds($input['targets'] ?? $input['speakers'] ?? []);
         if ($targets === []) {
             $status = $this->status();
-            $targets = $status['targets'];
+            $targets = !empty($status['active_targets'])
+                ? $status['active_targets']
+                : ($status['targets'] ?? []);
         }
         $errors = [];
         foreach ($targets as $cameraId) {
@@ -266,6 +287,9 @@ final class YarboUnifiRadio
         }
         $state = $this->loadState();
         $state['volume'] = $volume;
+        if ($targets !== []) {
+            $state['targets'] = $targets;
+        }
         $this->writeState($state);
 
         return [

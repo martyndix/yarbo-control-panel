@@ -2515,6 +2515,7 @@ function setActiveModule(id, persist = true) {
     if (enabledIds && enabledIds.length && !enabledIds.includes(moduleId)) {
         moduleId = enabledIds[0];
     }
+    const prevModuleId = activeModuleId;
     activeModuleId = moduleId;
     if (persist) {
         try { localStorage.setItem(ACTIVE_MODULE_KEY, moduleId); } catch { /* ignore */ }
@@ -2530,14 +2531,20 @@ function setActiveModule(id, persist = true) {
     });
     applyDeviceNameSubtitle();
     if (moduleId === 'lymow') {
-        startLymowCamera();
-        startLymowCloudPoll();
+        if (prevModuleId !== 'lymow') {
+            startLymowCamera();
+            startLymowCloudPoll();
+        }
     } else {
         stopLymowCamera();
         stopLymowCloudPoll();
     }
     if (moduleId === 'unifi') {
-        startUnifiPoll();
+        // Hub status re-applies the module every few seconds — do not rebuild the UniFi
+        // dashboard (and Speakers ticks) on each poll when we are already here.
+        if (prevModuleId !== 'unifi' || !unifiPollTimer) {
+            startUnifiPoll();
+        }
     } else {
         stopUnifiPoll();
     }
@@ -3225,6 +3232,26 @@ function unifiSpeakersEnabled(data) {
     return true;
 }
 
+const UNIFI_SPEAKER_PICK_KEY = 'yarbo.unifi.speakerTargets';
+
+function readUnifiSpeakerPick() {
+    try {
+        const raw = localStorage.getItem(UNIFI_SPEAKER_PICK_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return null;
+        return parsed.map((id) => String(id)).filter(Boolean);
+    } catch {
+        return null;
+    }
+}
+
+function writeUnifiSpeakerPick(ids) {
+    try {
+        localStorage.setItem(UNIFI_SPEAKER_PICK_KEY, JSON.stringify([...new Set(ids.map(String).filter(Boolean))]));
+    } catch { /* ignore */ }
+}
+
 function renderUnifiSpeakers(data, { replace = false } = {}) {
     const wrap = els.unifiSpeakers;
     if (!wrap) return;
@@ -3251,12 +3278,30 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
         if (!speakers.length) {
             list.innerHTML = '<p class="hint">No speaker-capable Protect cameras yet (look for G3 Reader Pro / doorbells with a speaker).</p>';
         } else {
-            const selected = new Set(radio.targets || []);
+            // Prefer the ticks the user already set (DOM / localStorage) so status polls
+            // never re-check everything when radio.targets is empty while Idle.
+            const fromDom = [...list.querySelectorAll('input[data-unifi-speaker]:checked')]
+                .map((el) => el.value)
+                .filter(Boolean);
+            const fromStore = readUnifiSpeakerPick();
+            const fromRadio = Array.isArray(radio.targets) ? radio.targets.map(String).filter(Boolean) : [];
+            let selectedIds;
+            if (fromDom.length || list.querySelector('input[data-unifi-speaker]')) {
+                selectedIds = fromDom;
+            } else if (fromStore) {
+                selectedIds = fromStore;
+            } else if (fromRadio.length) {
+                selectedIds = fromRadio;
+            } else {
+                selectedIds = null; // first paint: tick all
+            }
+            const selected = selectedIds === null ? null : new Set(selectedIds);
             list.innerHTML = speakers.map((s) => {
                 const id = s.native_id || String(s.id || '').replace(/^unifi:camera:/, '');
-                const checked = selected.size ? selected.has(id) : true;
+                const checked = selected === null ? true : selected.has(id);
                 return `<label class="unifi-radio-speaker"><input type="checkbox" data-unifi-speaker value="${escapeHtml(id)}" ${checked ? 'checked' : ''}><span>${escapeHtml(s.name || id)}</span></label>`;
             }).join('');
+            writeUnifiSpeakerPick(unifiSelectedSpeakerIds());
         }
     }
 
@@ -13604,6 +13649,11 @@ els.unifiRadioStop?.addEventListener('click', async () => {
     }
 });
 document.getElementById('unifi-card')?.addEventListener('change', (event) => {
+    const speaker = event.target.closest('input[data-unifi-speaker]');
+    if (speaker) {
+        writeUnifiSpeakerPick(unifiSelectedSpeakerIds());
+        return;
+    }
     const input = event.target.closest('input[data-unifi-home]');
     if (!input) return;
     saveUnifiShowOnHome(input.getAttribute('data-unifi-home') || '', input.checked);
