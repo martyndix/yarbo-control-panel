@@ -4249,12 +4249,33 @@ body.home-is-reordering {
 .unifi-speakers {
     margin: 0.75rem 0 1.25rem;
     padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--border, #ccc) 80%, transparent);
+    border: 1px solid var(--border);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--card-bg, #fff) 92%, var(--accent, #2a7) 8%);
+    background: var(--card);
+    color: var(--text);
 }
 .unifi-speakers.hidden {
     display: none;
+}
+.unifi-speakers .settings-subtitle {
+    color: var(--text);
+    margin: 0 0 0.35rem;
+}
+.unifi-speakers .hint,
+.unifi-speakers .label,
+.unifi-speakers .settings-field .label,
+#unifi-radio-status {
+    color: var(--muted);
+}
+.unifi-speakers .settings-field {
+    color: var(--text);
+}
+.unifi-speakers select,
+.unifi-speakers input[type="range"] {
+    background: var(--bg);
+    color: var(--text);
+    border-color: var(--border);
+    accent-color: var(--accent);
 }
 .unifi-radio-speakers {
     display: grid;
@@ -4266,6 +4287,13 @@ body.home-is-reordering {
     align-items: center;
     gap: 0.5rem;
     font-size: 0.95rem;
+    color: var(--text);
+}
+.unifi-radio-speaker span {
+    color: var(--text);
+}
+.unifi-radio-speaker input {
+    accent-color: var(--accent);
 }
 .unifi-radio-volume-field input[type="range"] {
     width: 100%;

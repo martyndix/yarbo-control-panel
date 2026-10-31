@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.160] - 2026-10-31
+
+### Fixed
+- UniFi **Speakers** panel uses theme text/background colours so station labels and speaker names are readable in dark mode.
+
 ## [4.0.159] - 2026-10-31
 
 ### Fixed
