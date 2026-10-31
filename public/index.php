@@ -688,7 +688,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <p id="unifi-status" class="updated">UniFi: —</p>
             <div id="unifi-speakers" class="unifi-speakers hidden" aria-label="Speakers">
                 <h3 class="settings-subtitle">Speakers</h3>
-                <p class="hint">Play a radio stream to Protect cameras and readers that have a speaker (same talkback path as Home Assistant). Needs ffmpeg and UDP 7004 to each device. Turn Speakers off in Settings → UniFi if you do not want this.</p>
+                <p class="hint">Play a radio stream to Protect cameras and readers that have a speaker (same talkback path as Home Assistant). Needs ffmpeg and UDP 7004 to each device. Volume uses the local UniFi OS admin in Settings → UniFi. Turn Speakers off there if you do not want this.</p>
                 <label class="settings-field">
                     <span class="label">Station</span>
                     <select id="unifi-radio-station" aria-label="Radio station"></select>
@@ -1167,6 +1167,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span class="label">Protect local password (optional)</span>
                                 <input type="password" id="settings-unifi-protect-password" name="unifi_protect_password" autocomplete="new-password" placeholder="Leave blank to keep the saved password">
                             </label>
+                            <p class="hint">Local UniFi OS admin is also used for floodlight force-on when the API key alone is not enough, and for Speakers volume (the public Protect API cannot set camera speaker level).</p>
                             <label class="settings-field">
                                 <span class="label">Access API token</span>
                                 <input type="password" id="settings-unifi-access-token" name="unifi_access_token" autocomplete="new-password" placeholder="Leave blank to keep the saved token">
@@ -1191,7 +1192,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span>Also list door sensors on that tile (Access position sensors and Protect contacts)</span>
                             </label>
                             <h3 class="settings-subtitle">Speakers / radio</h3>
-                            <p class="hint">Optional. Streams UK national radio (and your own URLs) to Protect speakers such as a G3 Reader Pro via talkback — not AirPlay. Untick to hide Speakers on the UniFi page and stop playback (easy rollback without a panel downgrade). BBC HLS URLs can change; edit or restore defaults below.</p>
+                            <p class="hint">Optional. Streams UK national radio (and your own URLs) to Protect speakers such as a G3 Reader Pro via talkback — not AirPlay. Needs ffmpeg and UDP 7004 from this panel to each device. Volume needs the local UniFi OS admin above. Untick to hide Speakers and stop playback. BBC HLS URLs can change; edit or restore defaults below.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-unifi-speakers-enabled" name="unifi_speakers_enabled" checked>
                                 <span>Show Speakers / radio on the UniFi page</span>
