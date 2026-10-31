@@ -143,6 +143,20 @@ const els = {
     settingsUnifiDevices: document.getElementById('settings-unifi-devices'),
     settingsUnifiDoorsTile: document.getElementById('settings-unifi-doors-tile'),
     settingsUnifiDoorsTileSensors: document.getElementById('settings-unifi-doors-tile-sensors'),
+    settingsUnifiSpeakersEnabled: document.getElementById('settings-unifi-speakers-enabled'),
+    settingsUnifiStationsList: document.getElementById('settings-unifi-stations-list'),
+    settingsUnifiStationAdd: document.getElementById('settings-unifi-station-add'),
+    settingsUnifiStationsSave: document.getElementById('settings-unifi-stations-save'),
+    settingsUnifiStationsRestore: document.getElementById('settings-unifi-stations-restore'),
+    settingsUnifiStationsResult: document.getElementById('settings-unifi-stations-result'),
+    unifiSpeakers: document.getElementById('unifi-speakers'),
+    unifiRadioStation: document.getElementById('unifi-radio-station'),
+    unifiRadioSpeakers: document.getElementById('unifi-radio-speakers'),
+    unifiRadioVolume: document.getElementById('unifi-radio-volume'),
+    unifiRadioVolumeLabel: document.getElementById('unifi-radio-volume-label'),
+    unifiRadioPlay: document.getElementById('unifi-radio-play'),
+    unifiRadioStop: document.getElementById('unifi-radio-stop'),
+    unifiRadioStatus: document.getElementById('unifi-radio-status'),
     unifiLiveModal: document.getElementById('unifi-live-modal'),
     unifiLiveTitle: document.getElementById('unifi-live-title'),
     unifiLiveImg: document.getElementById('unifi-live-img'),
@@ -3195,8 +3209,100 @@ function renderUnifiDashboard(data, { replace = false } = {}) {
     patchUnifiWrap(document.getElementById('unifi-hubs'), data?.hubs || [], unifiDeviceCardHtml);
     patchUnifiWrap(document.getElementById('unifi-doors'), data?.doors || [], unifiDeviceCardHtml);
     patchUnifiWrap(document.getElementById('unifi-sensors'), data?.sensors || [], unifiDeviceCardHtml);
+    renderUnifiSpeakers(data, { replace });
     renderUnifiHomePicker(data, { replace });
     ensureUnifiStillRefresh();
+}
+
+function unifiSpeakersEnabled(data) {
+    const src = data?.config || data;
+    if (src && Object.prototype.hasOwnProperty.call(src, 'speakers_enabled')) {
+        return src.speakers_enabled !== false;
+    }
+    if (data && Object.prototype.hasOwnProperty.call(data, 'speakers_enabled')) {
+        return data.speakers_enabled !== false;
+    }
+    return true;
+}
+
+function renderUnifiSpeakers(data, { replace = false } = {}) {
+    const wrap = els.unifiSpeakers;
+    if (!wrap) return;
+    const enabled = unifiSpeakersEnabled(data);
+    wrap.classList.toggle('hidden', !enabled);
+    if (!enabled) return;
+
+    const stations = Array.isArray(data?.stations) ? data.stations : [];
+    const speakers = Array.isArray(data?.speakers) ? data.speakers : [];
+    const radio = data?.radio || {};
+    const stationSel = els.unifiRadioStation;
+    if (stationSel && (replace || !stationSel.options.length || stationSel.dataset.count !== String(stations.length))) {
+        const prev = stationSel.value || radio.station_id || '';
+        stationSel.innerHTML = stations.length
+            ? stations.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('')
+            : '<option value="">No stations — add some in Settings</option>';
+        stationSel.dataset.count = String(stations.length);
+        if (prev && [...stationSel.options].some((o) => o.value === prev)) stationSel.value = prev;
+        else if (radio.station_id) stationSel.value = radio.station_id;
+    }
+
+    const list = els.unifiRadioSpeakers;
+    if (list && (replace || !list.querySelector('[data-unifi-speaker]'))) {
+        if (!speakers.length) {
+            list.innerHTML = '<p class="hint">No speaker-capable Protect cameras yet (look for G3 Reader Pro / doorbells with a speaker).</p>';
+        } else {
+            const selected = new Set(radio.targets || []);
+            list.innerHTML = speakers.map((s) => {
+                const id = s.native_id || String(s.id || '').replace(/^unifi:camera:/, '');
+                const checked = selected.size ? selected.has(id) : true;
+                return `<label class="unifi-radio-speaker"><input type="checkbox" data-unifi-speaker value="${escapeHtml(id)}" ${checked ? 'checked' : ''}><span>${escapeHtml(s.name || id)}</span></label>`;
+            }).join('');
+        }
+    }
+
+    const vol = Number.isFinite(Number(radio.volume)) ? Number(radio.volume) : 60;
+    if (els.unifiRadioVolume && (replace || document.activeElement !== els.unifiRadioVolume)) {
+        els.unifiRadioVolume.value = String(vol);
+    }
+    if (els.unifiRadioVolumeLabel) els.unifiRadioVolumeLabel.textContent = `${vol}%`;
+
+    if (els.unifiRadioStatus) {
+        if (radio.playing) {
+            els.unifiRadioStatus.textContent = `Playing · ${radio.station_name || 'station'}${radio.error ? ' · ' + radio.error : ''}`;
+        } else if (radio.error) {
+            els.unifiRadioStatus.textContent = radio.error;
+        } else {
+            els.unifiRadioStatus.textContent = 'Idle';
+        }
+    }
+}
+
+function unifiSelectedSpeakerIds() {
+    return [...document.querySelectorAll('#unifi-radio-speakers input[data-unifi-speaker]:checked')]
+        .map((el) => el.value)
+        .filter(Boolean);
+}
+
+function renderUnifiStationsEditor(stations) {
+    const list = els.settingsUnifiStationsList;
+    if (!list) return;
+    const rows = Array.isArray(stations) && stations.length
+        ? stations
+        : [{ id: '', name: '', url: '' }];
+    list.innerHTML = rows.map((s, i) => `
+        <div class="unifi-station-row" data-station-row>
+            <input type="text" data-station-name placeholder="Name" value="${escapeHtml(s.name || '')}" aria-label="Station name ${i + 1}">
+            <input type="url" data-station-url placeholder="https://… stream URL" value="${escapeHtml(s.url || '')}" aria-label="Station URL ${i + 1}">
+            <button type="button" class="btn btn-secondary" data-station-remove aria-label="Remove station">✕</button>
+        </div>
+    `).join('');
+}
+
+function collectUnifiStationsFromEditor() {
+    return [...document.querySelectorAll('#settings-unifi-stations-list [data-station-row]')].map((row) => ({
+        name: row.querySelector('[data-station-name]')?.value.trim() || '',
+        url: row.querySelector('[data-station-url]')?.value.trim() || '',
+    })).filter((s) => s.name && s.url);
 }
 
 async function loadUnifiDashboard(opts = {}) {
@@ -10161,8 +10267,21 @@ async function loadSettings() {
         if (els.settingsUnifiDoorsTileSensors) {
             els.settingsUnifiDoorsTileSensors.checked = Boolean(data.unifi?.doors_tile_sensors);
         }
+        if (els.settingsUnifiSpeakersEnabled) {
+            els.settingsUnifiSpeakersEnabled.checked = data.unifi?.speakers_enabled !== false;
+        }
         if (Array.isArray(data.unifi?.devices) && data.unifi.devices.length) {
             renderUnifiHomePicker(data.unifi, { replace: !unifiPickerDirty });
+        }
+        if (Array.isArray(data.unifi?.stations) || data.unifi?.speakers_enabled !== false) {
+            // Stations load with UniFi status; fall back to a silent refresh if missing.
+            if (Array.isArray(data.unifi?.stations)) {
+                renderUnifiStationsEditor(data.unifi.stations);
+            } else {
+                unifiApi(null, 12000).then((u) => {
+                    if (Array.isArray(u?.stations)) renderUnifiStationsEditor(u.stations);
+                }).catch(() => {});
+            }
         }
         if (els.settingsVestaboardLive) {
             els.settingsVestaboardLive.value = data.hub?.vestaboard_live || 'yarbo';
@@ -11944,6 +12063,7 @@ async function saveSettings(event) {
             unifi_access_standalone: Boolean(els.settingsUnifiAccessStandalone?.checked),
             unifi_doors_tile: Boolean(els.settingsUnifiDoorsTile?.checked ?? true),
             unifi_doors_tile_sensors: Boolean(els.settingsUnifiDoorsTileSensors?.checked),
+            unifi_speakers_enabled: Boolean(els.settingsUnifiSpeakersEnabled?.checked ?? true),
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;
@@ -13347,6 +13467,140 @@ els.settingsUnifiTest?.addEventListener('click', async (e) => {
         showToast(message, 'error');
     } finally {
         button.disabled = false;
+    }
+});
+els.settingsUnifiSpeakersEnabled?.addEventListener('change', async () => {
+    const show = Boolean(els.settingsUnifiSpeakersEnabled.checked);
+    try {
+        const data = await unifiApi({ action: 'speakers_enabled', show }, 8000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not update Speakers');
+        if (unifiDash) {
+            unifiDash.speakers_enabled = show;
+            if (data.config) unifiDash.config = { ...(unifiDash.config || {}), ...data.config };
+            if (Array.isArray(data.stations)) unifiDash.stations = data.stations;
+            if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+            if (data.radio) unifiDash.radio = data.radio;
+        }
+        renderUnifiSpeakers(unifiDash || data, { replace: true });
+        showToast(show ? 'Speakers shown on UniFi' : 'Speakers hidden — playback stopped', 'success');
+    } catch (err) {
+        els.settingsUnifiSpeakersEnabled.checked = !show;
+        showToast(err.message || 'Could not update Speakers', 'error');
+    }
+});
+els.settingsUnifiStationAdd?.addEventListener('click', () => {
+    const list = els.settingsUnifiStationsList;
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'unifi-station-row';
+    row.dataset.stationRow = '';
+    row.innerHTML = `
+        <input type="text" data-station-name placeholder="Name" aria-label="Station name">
+        <input type="url" data-station-url placeholder="https://… stream URL" aria-label="Station URL">
+        <button type="button" class="btn btn-secondary" data-station-remove aria-label="Remove station">✕</button>
+    `;
+    list.appendChild(row);
+});
+els.settingsUnifiStationsList?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-station-remove]');
+    if (!btn) return;
+    btn.closest('[data-station-row]')?.remove();
+    if (!els.settingsUnifiStationsList.querySelector('[data-station-row]')) {
+        renderUnifiStationsEditor([]);
+    }
+});
+els.settingsUnifiStationsSave?.addEventListener('click', async () => {
+    const stations = collectUnifiStationsFromEditor();
+    const result = els.settingsUnifiStationsResult;
+    try {
+        const data = await unifiApi({ action: 'radio_stations', stations }, 10000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not save stations');
+        renderUnifiStationsEditor(data.stations || stations);
+        if (unifiDash) unifiDash.stations = data.stations || stations;
+        renderUnifiSpeakers(unifiDash || { stations: data.stations }, { replace: true });
+        if (result) {
+            result.textContent = 'Stations saved.';
+            result.className = 'settings-cloud-result success';
+        }
+        showToast('Stations saved', 'success');
+    } catch (err) {
+        if (result) {
+            result.textContent = err.message || 'Save failed';
+            result.className = 'settings-cloud-result error';
+        }
+        showToast(err.message || 'Could not save stations', 'error');
+    }
+});
+els.settingsUnifiStationsRestore?.addEventListener('click', async () => {
+    if (!window.confirm('Replace your station list with the built-in UK nationals?')) return;
+    try {
+        const data = await unifiApi({ action: 'radio_stations_restore' }, 10000);
+        if (!data?.ok) throw new Error(data?.error || 'Restore failed');
+        renderUnifiStationsEditor(data.stations || []);
+        if (unifiDash) unifiDash.stations = data.stations || [];
+        renderUnifiSpeakers(unifiDash || { stations: data.stations }, { replace: true });
+        showToast('UK defaults restored', 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not restore stations', 'error');
+    }
+});
+els.unifiRadioVolume?.addEventListener('input', () => {
+    if (els.unifiRadioVolumeLabel) els.unifiRadioVolumeLabel.textContent = `${els.unifiRadioVolume.value}%`;
+});
+els.unifiRadioVolume?.addEventListener('change', async () => {
+    const volume = Number(els.unifiRadioVolume.value);
+    const targets = unifiSelectedSpeakerIds();
+    try {
+        const data = await unifiApi({ action: 'radio_volume', volume, targets }, 10000);
+        if (!data?.ok && data?.error) throw new Error(data.error);
+        if (unifiDash && data.radio) unifiDash.radio = data.radio;
+    } catch (err) {
+        showToast(err.message || 'Could not set volume', 'error');
+    }
+});
+els.unifiRadioPlay?.addEventListener('click', async () => {
+    const station_id = els.unifiRadioStation?.value || '';
+    const targets = unifiSelectedSpeakerIds();
+    const volume = Number(els.unifiRadioVolume?.value || 60);
+    if (!station_id) {
+        showToast('Pick a station', 'error');
+        return;
+    }
+    if (!targets.length) {
+        showToast('Tick at least one speaker', 'error');
+        return;
+    }
+    els.unifiRadioPlay.disabled = true;
+    if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = 'Starting…';
+    try {
+        const data = await unifiApi({ action: 'radio_play', station_id, targets, volume }, 45000);
+        if (!data?.ok) throw new Error(data?.error || 'Play failed');
+        if (unifiDash) {
+            if (data.radio) unifiDash.radio = data.radio;
+            if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+        }
+        renderUnifiSpeakers(unifiDash || data, { replace: true });
+        if (data.warning) showToast(data.warning, 'error');
+        else showToast('Playing', 'success');
+    } catch (err) {
+        if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = err.message || 'Play failed';
+        showToast(err.message || 'Play failed', 'error');
+    } finally {
+        els.unifiRadioPlay.disabled = false;
+    }
+});
+els.unifiRadioStop?.addEventListener('click', async () => {
+    els.unifiRadioStop.disabled = true;
+    try {
+        const data = await unifiApi({ action: 'radio_stop' }, 10000);
+        if (!data?.ok) throw new Error(data?.error || 'Stop failed');
+        if (unifiDash && data.radio) unifiDash.radio = data.radio;
+        renderUnifiSpeakers(unifiDash || data, { replace: true });
+        showToast('Stopped', 'success');
+    } catch (err) {
+        showToast(err.message || 'Stop failed', 'error');
+    } finally {
+        els.unifiRadioStop.disabled = false;
     }
 });
 document.getElementById('unifi-card')?.addEventListener('change', (event) => {

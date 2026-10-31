@@ -14,15 +14,17 @@ Not affiliated with Ubiquiti.
 - Show **Open / Closed** on the door controller (and door) tile, next to Unlock/Lock, from the Access door-position sensor (`door_position_status`). Home refreshes that in the background so the chip and button can change without blocking light clicks. A separate door-position row is still listed if you want it on Home on its own.
 - Tick **Show on Home** per device so it behaves like another Home row (camera still, light/relay on/off, door/controller Unlock/Lock + position, sensor text). Ticks save as you click.
 - Optional **doors tile** under Vestaboard on the Home tab lists every Access door with Unlock/Lock and live Open/Closed, even if it is not ticked for the room grid. Untick it in Settings → UniFi or Home ⚙️. A second tick adds door sensors (Access position and Protect contacts) that have Open/Closed but no unlock.
+- Optional **Speakers / radio** on the UniFi page: choose a station (UK nationals are built in; add your own URLs in Settings), tick speaker-capable Protect cameras/readers (for example a **G3 Reader Pro**), set volume, Play/Stop. Audio uses Protect **talkback** (Home Assistant’s media_player path), not AirPlay. The Pi runs ffmpeg and must reach each device on **UDP 7004**. Untick **Show Speakers / radio** in Settings → UniFi to hide the block and stop playback.
 
 ## What it cannot do (this version)
 
 - Remote UniFi via `unifi.ui.com`.
 - A Vestaboard UniFi page.
 - PaperMono HOUSE buttons for UniFi devices.
-- Protect recordings, event history, two-way talk, or WebRTC.
+- Protect recordings, event history, live two-way mic talk, or WebRTC (radio talkback out only).
 - Access user / credential administration.
 - Access after **Identity Enterprise** (the OpenAPI is disabled there).
+- AirPlay / Chromecast into UniFi speakers.
 
 ## Settings
 
@@ -76,6 +78,10 @@ Turn **Home** on as well. UniFi rows use ids like `unifi:camera:…`. Hide or Re
 
 White-ambiance Matter bulbs show **brightness** (blue slider) and **colour temperature** (amber slider, warm to cool). Full-colour bulbs keep a colour picker.
 
+Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` returns a UDP/RTP URL; the panel streams the station through ffmpeg to that endpoint. Volume uses `PATCH /cameras/{id}` with speaker settings when the console accepts it.
+
 ## Rollback
 
-This is panel **4.0.25**. If it misbehaves, stay on **3.0.70** (or close the 4.0 pull request). UniFi settings live in `data/unifi-config.json`; deleting that file and unticking the module returns the panel to the previous module set.
+- **Speakers only:** Settings → UniFi → untick **Show Speakers / radio** (stops playback and hides the UI). Station list stays in `data/unifi-radio-stations.json`.
+- **Whole UniFi module:** untick UniFi under Settings → Modules. Credentials stay in `data/unifi-config.json`.
+- **Panel version:** install a previous panel build from Settings → Panel updates if you want to undo **4.0.158** entirely.

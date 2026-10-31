@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.158] - 2026-10-31
+
+### Added
+- UniFi **Speakers / radio** on the UniFi page: pick a station, tick Protect speakers (including G3 Reader Pro), set volume, Play/Stop. Uses Protect talkback (same idea as Home Assistant), not AirPlay. Ships with UK national presets (Classic FM, Capital, Heart, BBC HLS, talkSPORT, …); edit or restore defaults in Settings → UniFi. Untick **Show Speakers / radio** to hide it and stop playback without rolling back the panel. Needs ffmpeg and UDP **7004** to each device.
+
 ## [4.0.157] - 2026-10-22
 
 ### Fixed

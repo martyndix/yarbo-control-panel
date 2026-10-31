@@ -1,0 +1,17 @@
+[
+  {"id": "classic-fm", "name": "Classic FM", "url": "https://media-ice.musicradio.com/ClassicFMMP3", "format": "mp3"},
+  {"id": "capital-uk", "name": "Capital UK", "url": "https://media-ice.musicradio.com/CapitalUKMP3", "format": "mp3"},
+  {"id": "heart-uk", "name": "Heart UK", "url": "https://media-ice.musicradio.com/HeartUKMP3", "format": "mp3"},
+  {"id": "smooth-uk", "name": "Smooth UK", "url": "https://media-ice.musicradio.com/SmoothUKMP3", "format": "mp3"},
+  {"id": "radio-x-uk", "name": "Radio X UK", "url": "https://media-ice.musicradio.com/RadioXUKMP3", "format": "mp3"},
+  {"id": "gold", "name": "Gold", "url": "https://media-ice.musicradio.com/GoldMP3", "format": "mp3"},
+  {"id": "lbc", "name": "LBC", "url": "https://media-ice.musicradio.com/LBCUKMP3", "format": "mp3"},
+  {"id": "talksport", "name": "talkSPORT", "url": "https://radio.talksport.com/stream", "format": "aac"},
+  {"id": "talksport-2", "name": "talkSPORT 2", "url": "https://radio.talksport.com/stream2", "format": "aac"},
+  {"id": "virgin-uk", "name": "Virgin Radio UK", "url": "https://radio.virginradio.co.uk/stream", "format": "mp3"},
+  {"id": "bbc-ws", "name": "BBC World Service", "url": "https://stream.live.vc.bbcmedia.co.uk/bbc_world_service", "format": "mp3"},
+  {"id": "bbc-r1", "name": "BBC Radio 1", "url": "https://as-hls-ww-live.akamaized.net/pool_01505109/live/ww/bbc_radio_one/bbc_radio_one.isml/bbc_radio_one-audio%3d96000.norewind.m3u8", "format": "hls"},
+  {"id": "bbc-r2", "name": "BBC Radio 2", "url": "https://as-hls-ww-live.akamaized.net/pool_74208725/live/ww/bbc_radio_two/bbc_radio_two.isml/bbc_radio_two-audio%3d96000.norewind.m3u8", "format": "hls"},
+  {"id": "bbc-r4", "name": "BBC Radio 4", "url": "https://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio%3d96000.norewind.m3u8", "format": "hls"},
+  {"id": "bbc-r5", "name": "BBC Radio 5 Live", "url": "https://as-hls-ww-live.akamaized.net/pool_89021708/live/ww/bbc_radio_five_live/bbc_radio_five_live.isml/bbc_radio_five_live-audio%3d96000.norewind.m3u8", "format": "hls"}
+]

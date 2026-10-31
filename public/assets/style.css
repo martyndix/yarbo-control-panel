@@ -4246,6 +4246,53 @@ body.home-is-reordering {
     }
 }
 
+.unifi-speakers {
+    margin: 0.75rem 0 1.25rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid color-mix(in srgb, var(--border, #ccc) 80%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--card-bg, #fff) 92%, var(--accent, #2a7) 8%);
+}
+.unifi-speakers.hidden {
+    display: none;
+}
+.unifi-radio-speakers {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0.75rem;
+}
+.unifi-radio-speaker {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+}
+.unifi-radio-volume-field input[type="range"] {
+    width: 100%;
+    max-width: 20rem;
+}
+.unifi-radio-actions {
+    margin-top: 0.35rem;
+}
+.unifi-stations-list {
+    display: grid;
+    gap: 0.55rem;
+    margin: 0.5rem 0 0.75rem;
+}
+.unifi-station-row {
+    display: grid;
+    grid-template-columns: minmax(7rem, 10rem) 1fr auto;
+    gap: 0.4rem;
+    align-items: center;
+}
+.unifi-station-row input {
+    width: 100%;
+}
+@media (max-width: 640px) {
+    .unifi-station-row {
+        grid-template-columns: 1fr;
+    }
+}
 .unifi-camera-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));

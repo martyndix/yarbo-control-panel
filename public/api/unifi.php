@@ -6,10 +6,12 @@ require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboHub;
 use Yarbo\YarboUnifi;
+use Yarbo\YarboUnifiRadio;
 
 $projectRoot = dirname(__DIR__, 2);
 $hub = new YarboHub($projectRoot);
 $unifi = new YarboUnifi($projectRoot);
+$radio = new YarboUnifiRadio($projectRoot, $unifi);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = (string) ($_GET['action'] ?? '');
 set_time_limit(20);
@@ -99,6 +101,36 @@ if ($action === 'doors_tile_sensors') {
         json_response(['ok' => false, 'error' => 'Could not update door sensors on the tile'], 400);
     }
     json_response(['ok' => true, 'doors_tile_sensors' => $unifi->doorSensorsTileEnabled()]);
+}
+
+if ($action === 'speakers_enabled') {
+    $show = YarboHub::asBool($input['show'] ?? $input['on'] ?? $input['speakers_enabled'] ?? true);
+    if (!$unifi->setSpeakersEnabled($show)) {
+        json_response(['ok' => false, 'error' => 'Could not update Speakers setting'], 400);
+    }
+    json_response(['ok' => true, 'speakers_enabled' => $unifi->speakersEnabled()] + $radio->dashboardSlice());
+}
+
+if ($action === 'radio_stations') {
+    $stations = $radio->saveStations(is_array($input['stations'] ?? null) ? $input['stations'] : []);
+    json_response(['ok' => true, 'stations' => $stations]);
+}
+
+if ($action === 'radio_stations_restore') {
+    json_response(['ok' => true, 'stations' => $radio->restoreDefaultStations()]);
+}
+
+if ($action === 'radio_play') {
+    set_time_limit(60);
+    json_response($radio->play($input));
+}
+
+if ($action === 'radio_stop') {
+    json_response($radio->stop());
+}
+
+if ($action === 'radio_volume') {
+    json_response($radio->setVolume($input));
 }
 
 if ($action === 'command' || $action === 'unlock' || $action === 'light') {

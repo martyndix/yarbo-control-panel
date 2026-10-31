@@ -161,6 +161,7 @@ final class YarboUnifi
             'show_on_home' => [],
             'doors_tile' => true,
             'doors_tile_sensors' => false,
+            'speakers_enabled' => true,
             'last_ok' => false,
             'last_error' => '',
             'last_check' => null,
@@ -196,6 +197,9 @@ final class YarboUnifi
             'doors_tile_sensors' => array_key_exists('doors_tile_sensors', $decoded)
                 ? (bool) $decoded['doors_tile_sensors']
                 : false,
+            'speakers_enabled' => array_key_exists('speakers_enabled', $decoded)
+                ? (bool) $decoded['speakers_enabled']
+                : true,
             'last_ok' => (bool) ($decoded['last_ok'] ?? false),
             'last_error' => (string) ($decoded['last_error'] ?? ''),
             'last_check' => isset($decoded['last_check']) && is_string($decoded['last_check'])
@@ -285,6 +289,10 @@ final class YarboUnifi
             || array_key_exists('doors_tile_sensors', $input)
             ? YarboHub::asBool($input['unifi_doors_tile_sensors'] ?? $input['doors_tile_sensors'] ?? false)
             : $current['doors_tile_sensors'];
+        $speakersEnabled = array_key_exists('unifi_speakers_enabled', $input)
+            || array_key_exists('speakers_enabled', $input)
+            ? YarboHub::asBool($input['unifi_speakers_enabled'] ?? $input['speakers_enabled'] ?? true)
+            : ($current['speakers_enabled'] ?? true);
         $next = [
             'host' => $host,
             'verify_tls' => $verify,
@@ -299,6 +307,7 @@ final class YarboUnifi
             'show_on_home' => $show,
             'doors_tile' => $doorsTile,
             'doors_tile_sensors' => $doorsTileSensors,
+            'speakers_enabled' => $speakersEnabled,
             'last_ok' => array_key_exists('last_ok', $input) ? (bool) $input['last_ok'] : $current['last_ok'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
             'last_check' => $input['last_check'] ?? $current['last_check'],
@@ -510,12 +519,130 @@ final class YarboUnifi
             'show_on_home' => $config['show_on_home'],
             'doors_tile' => $config['doors_tile'] !== false,
             'doors_tile_sensors' => !empty($config['doors_tile_sensors']),
+            'speakers_enabled' => ($config['speakers_enabled'] ?? true) !== false,
             'last_ok' => $config['last_ok'],
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,
             'last_check' => $config['last_check'],
             'devices' => $this->catalogFromInventory($inventory, $config['show_on_home']),
             'connection_warning' => $this->connectionWarning(),
+            'stations' => ($config['speakers_enabled'] ?? true) !== false
+                ? (new YarboUnifiRadio($this->projectRoot, $this))->stations()
+                : [],
         ];
+    }
+
+    public function speakersEnabled(): bool
+    {
+        return ($this->load()['speakers_enabled'] ?? true) !== false;
+    }
+
+    public function setSpeakersEnabled(bool $on): bool
+    {
+        if (!$on) {
+            (new YarboUnifiRadio($this->projectRoot, $this))->stop();
+        }
+
+        return $this->save(['speakers_enabled' => $on]);
+    }
+
+    public function ffmpegPath(): string
+    {
+        return $this->ffmpegBinary();
+    }
+
+    /**
+     * Protect cameras/readers that can take talkback audio (HA media_player).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function speakerCameras(): array
+    {
+        $out = [];
+        $inventory = $this->readInventory();
+        $cameras = is_array($inventory['cameras'] ?? null) ? $inventory['cameras'] : [];
+        foreach ($cameras as $cam) {
+            if (!is_array($cam)) {
+                continue;
+            }
+            if (empty($cam['has_speaker'])) {
+                continue;
+            }
+            $out[] = $cam;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array{ok: bool, url?: string, codec?: string, sampling_rate?: int, bits_per_sample?: int, error?: string}
+     */
+    public function createTalkbackSession(string $cameraId): array
+    {
+        $cameraId = trim($cameraId);
+        if ($cameraId === '') {
+            return ['ok' => false, 'error' => 'Missing camera id'];
+        }
+        $config = $this->load();
+        if ($config['protect_api_key'] === '') {
+            return ['ok' => false, 'error' => 'Protect API key required for speakers'];
+        }
+        $url = $this->protectUrl($config, '/cameras/' . rawurlencode($cameraId) . '/talkback-session');
+        $res = $this->request('POST', $url, $this->protectHeaders($config), '{}', 8.0, false);
+        if ($res['status'] < 200 || $res['status'] >= 300) {
+            return ['ok' => false, 'error' => $res['error'] ?? ('Talkback HTTP ' . $res['status'])];
+        }
+        $decoded = $this->decodeJson($res['body']);
+        if (!is_array($decoded)) {
+            return ['ok' => false, 'error' => 'Talkback response was not JSON'];
+        }
+        $talkUrl = trim((string) ($decoded['url'] ?? ''));
+        if ($talkUrl === '') {
+            return ['ok' => false, 'error' => 'Talkback session had no stream URL'];
+        }
+        $codec = strtolower(trim((string) ($decoded['codec'] ?? $decoded['audioCodec'] ?? 'aac')));
+        $rate = (int) ($decoded['samplingRate'] ?? $decoded['sampling_rate'] ?? 22050);
+
+        return [
+            'ok' => true,
+            'url' => $talkUrl,
+            'codec' => $codec !== '' ? $codec : 'aac',
+            'sampling_rate' => $rate > 0 ? $rate : 22050,
+            'bits_per_sample' => (int) ($decoded['bitsPerSample'] ?? $decoded['bits_per_sample'] ?? 16),
+        ];
+    }
+
+    /**
+     * @return array{ok: bool, error?: string}
+     */
+    public function setCameraSpeakerVolume(string $cameraId, int $volume): array
+    {
+        $cameraId = trim($cameraId);
+        $volume = max(0, min(100, $volume));
+        if ($cameraId === '') {
+            return ['ok' => false, 'error' => 'Missing camera id'];
+        }
+        $config = $this->load();
+        if ($config['protect_api_key'] === '') {
+            return ['ok' => false, 'error' => 'Protect API key required'];
+        }
+        $url = $this->protectUrl($config, '/cameras/' . rawurlencode($cameraId));
+        $bodies = [
+            json_encode(['speakerSettings' => ['volume' => $volume]], JSON_UNESCAPED_SLASHES),
+            json_encode(['volume' => $volume], JSON_UNESCAPED_SLASHES),
+        ];
+        $last = ['ok' => false, 'error' => 'Volume update failed'];
+        foreach ($bodies as $body) {
+            if (!is_string($body)) {
+                continue;
+            }
+            $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, 6.0, false);
+            if ($res['status'] >= 200 && $res['status'] < 300) {
+                return ['ok' => true];
+            }
+            $last = ['ok' => false, 'error' => $res['error'] ?? ('Volume HTTP ' . $res['status'])];
+        }
+
+        return $last;
     }
 
     public function connectionWarning(): ?string
@@ -630,7 +757,7 @@ final class YarboUnifi
         }
         $show = $config['show_on_home'];
 
-        return [
+        $payload = [
             'ok' => $config['last_ok'] || $this->inventoryCount($inventory) > 0,
             'online' => $config['last_ok'],
             'error' => $config['last_error'] !== '' ? $config['last_error'] : null,
@@ -644,6 +771,25 @@ final class YarboUnifi
             'hubs' => $inventory['hubs'] ?? [],
             'devices' => $this->catalogFromInventory($inventory, $show),
         ];
+        if (($config['speakers_enabled'] ?? true) !== false) {
+            $radio = new YarboUnifiRadio($this->projectRoot, $this);
+            $payload += $radio->dashboardSlice();
+        } else {
+            $payload['speakers_enabled'] = false;
+            $payload['stations'] = [];
+            $payload['speakers'] = [];
+            $payload['radio'] = [
+                'playing' => false,
+                'station_id' => null,
+                'station_name' => null,
+                'targets' => [],
+                'volume' => 60,
+                'error' => null,
+                'started_at' => null,
+            ];
+        }
+
+        return $payload;
     }
 
     /**
@@ -2138,17 +2284,44 @@ final class YarboUnifi
         $connected = $this->truthy($row['isConnected'] ?? $row['is_connected'] ?? null)
             || strtoupper((string) ($row['state'] ?? '')) === 'CONNECTED';
 
+        $flags = is_array($row['featureFlags'] ?? null) ? $row['featureFlags'] : [];
+        $hasSpeaker = $this->truthy($flags['hasSpeaker'] ?? $flags['has_speaker'] ?? null)
+            || $this->truthy($row['hasSpeaker'] ?? $row['has_speaker'] ?? null)
+            || $this->truthy($row['speaker'] ?? null);
+        // G3 Reader Pro / doorbells often advertise as Access+Protect with a speaker.
+        $product = (string) ($row['type'] ?? $row['model'] ?? 'Protect camera');
+        if (!$hasSpeaker) {
+            $hint = strtolower($product . ' ' . (string) ($row['name'] ?? ''));
+            if (str_contains($hint, 'reader pro')
+                || str_contains($hint, 'doorbell')
+                || str_contains($hint, 'ua-g3')
+                || str_contains($hint, 'intercom')
+            ) {
+                $hasSpeaker = true;
+            }
+        }
+        $speakerVolume = null;
+        if (isset($row['speakerSettings']) && is_array($row['speakerSettings'])
+            && isset($row['speakerSettings']['volume']) && is_numeric($row['speakerSettings']['volume'])
+        ) {
+            $speakerVolume = max(0, min(100, (int) $row['speakerSettings']['volume']));
+        } elseif (isset($row['volume']) && is_numeric($row['volume'])) {
+            $speakerVolume = max(0, min(100, (int) $row['volume']));
+        }
+
         return [
             'id' => self::homeId(self::KIND_CAMERA, $id),
             'native_id' => $id,
             'name' => $this->displayName($row, 'Camera'),
             'kind' => self::KIND_CAMERA,
             'source' => self::SOURCE,
-            'product' => (string) ($row['type'] ?? $row['model'] ?? 'Protect camera'),
+            'product' => $product,
             'available' => $connected || $this->truthy($row['isAdopted'] ?? true),
             'on' => false,
             'dimmable' => false,
             'colorable' => false,
+            'has_speaker' => $hasSpeaker,
+            'speaker_volume' => $speakerVolume,
             'status' => $connected ? 'Online' : 'Offline',
             'snapshot' => '/api/unifi.php?action=snapshot&id=' . rawurlencode($id),
         ];

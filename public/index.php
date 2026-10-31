@@ -686,6 +686,24 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
             <p class="hint">Protect cameras, floodlights, relays, and sensors, plus Access doors and door controllers. Tick a device below to put it on the Home grid. Credentials stay in Settings → UniFi.</p>
             <p id="unifi-status" class="updated">UniFi: —</p>
+            <div id="unifi-speakers" class="unifi-speakers hidden" aria-label="Speakers">
+                <h3 class="settings-subtitle">Speakers</h3>
+                <p class="hint">Play a radio stream to Protect cameras and readers that have a speaker (same talkback path as Home Assistant). Needs ffmpeg and UDP 7004 to each device. Turn Speakers off in Settings → UniFi if you do not want this.</p>
+                <label class="settings-field">
+                    <span class="label">Station</span>
+                    <select id="unifi-radio-station" aria-label="Radio station"></select>
+                </label>
+                <div id="unifi-radio-speakers" class="unifi-radio-speakers" role="group" aria-label="Play on"></div>
+                <label class="settings-field unifi-radio-volume-field">
+                    <span class="label">Volume <span id="unifi-radio-volume-label">60%</span></span>
+                    <input type="range" id="unifi-radio-volume" min="0" max="100" value="60" aria-label="Speaker volume">
+                </label>
+                <div class="settings-update-actions unifi-radio-actions">
+                    <button type="button" class="btn" id="unifi-radio-play">Play</button>
+                    <button type="button" class="btn btn-secondary" id="unifi-radio-stop">Stop</button>
+                </div>
+                <p id="unifi-radio-status" class="hint" role="status">Idle</p>
+            </div>
             <div id="unifi-home-picker" class="unifi-pick" aria-label="Show on Home"></div>
             <div id="unifi-cameras" class="unifi-camera-grid"></div>
             <div id="unifi-lights" class="home-device-grid unifi-device-grid"></div>
@@ -1172,6 +1190,21 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <input type="checkbox" id="settings-unifi-doors-tile-sensors" name="unifi_doors_tile_sensors">
                                 <span>Also list door sensors on that tile (Access position sensors and Protect contacts)</span>
                             </label>
+                            <h3 class="settings-subtitle">Speakers / radio</h3>
+                            <p class="hint">Optional. Streams UK national radio (and your own URLs) to Protect speakers such as a G3 Reader Pro via talkback — not AirPlay. Untick to hide Speakers on the UniFi page and stop playback (easy rollback without a panel downgrade). BBC HLS URLs can change; edit or restore defaults below.</p>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-unifi-speakers-enabled" name="unifi_speakers_enabled" checked>
+                                <span>Show Speakers / radio on the UniFi page</span>
+                            </label>
+                            <div id="settings-unifi-stations" class="unifi-stations">
+                                <div id="settings-unifi-stations-list" class="unifi-stations-list"></div>
+                                <div class="settings-update-actions">
+                                    <button type="button" class="btn btn-secondary" id="settings-unifi-station-add">Add station</button>
+                                    <button type="button" class="btn btn-secondary" id="settings-unifi-stations-save">Save stations</button>
+                                    <button type="button" class="btn btn-secondary" id="settings-unifi-stations-restore">Restore UK defaults</button>
+                                </div>
+                                <p id="settings-unifi-stations-result" class="settings-cloud-result hidden" role="status"></p>
+                            </div>
                             <div id="settings-unifi-devices" class="unifi-pick"></div>
                         </section>
 
