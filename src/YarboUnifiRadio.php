@@ -180,18 +180,10 @@ final class YarboUnifiRadio
 
         $this->stop(false);
 
-        // Volume first (private Protect API). Failures must not block talkback or
-        // spam “Protect rejected” into the play result — Integration PATCH cannot set it.
-        $volumeFailed = 0;
-        $volumeHint = null;
+        // Best-effort Protect hardware volume (needs local UniFi OS admin). Playback
+        // loudness is always applied in ffmpeg so the slider works without that.
         foreach ($targets as $cameraId) {
-            $vol = $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
-            if (!($vol['ok'] ?? false)) {
-                $volumeFailed++;
-                if ($volumeHint === null) {
-                    $volumeHint = (string) ($vol['error'] ?? 'volume failed');
-                }
-            }
+            $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
         }
 
         $streams = [];
@@ -208,7 +200,8 @@ final class YarboUnifiRadio
                 (string) ($session['url'] ?? ''),
                 (string) ($session['codec'] ?? 'aac'),
                 (int) ($session['sampling_rate'] ?? 22050),
-                $cameraId
+                $cameraId,
+                $volume
             );
             if ($pid <= 0) {
                 $detail = $this->tailRadioLog($cameraId);
@@ -242,17 +235,10 @@ final class YarboUnifiRadio
         ];
         $this->writeState($state);
 
-        $warning = null;
-        if ($playing && $errors !== []) {
-            $warning = implode('; ', $errors);
-        } elseif ($playing && $volumeFailed > 0 && $volumeHint !== null) {
-            $warning = 'Playing, but volume was not applied (' . $volumeHint . ')';
-        }
-
         return [
             'ok' => $playing,
             'error' => $playing ? null : ($state['error'] ?? 'Play failed'),
-            'warning' => $warning,
+            'warning' => $playing && $errors !== [] ? implode('; ', $errors) : null,
             'radio' => $this->status(),
         ];
     }
@@ -297,23 +283,39 @@ final class YarboUnifiRadio
                 ? $status['active_targets']
                 : ($status['targets'] ?? []);
         }
-        $errors = [];
-        foreach ($targets as $cameraId) {
-            $res = $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
-            if (!($res['ok'] ?? false)) {
-                $errors[] = (string) ($res['error'] ?? 'failed') . ' (' . $cameraId . ')';
-            }
-        }
         $state = $this->loadState();
+        $wasPlaying = !empty($state['playing']) && is_array($state['streams']) && $state['streams'] !== [];
+        $stationId = isset($state['station_id']) ? (string) $state['station_id'] : '';
         $state['volume'] = $volume;
         if ($targets !== []) {
             $state['targets'] = $targets;
         }
         $this->writeState($state);
 
+        // Hardware volume is optional; stream volume is applied by restarting play.
+        foreach ($targets as $cameraId) {
+            $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
+        }
+
+        if ($wasPlaying && $stationId !== '' && $targets !== []) {
+            $replay = $this->play([
+                'station_id' => $stationId,
+                'targets' => $targets,
+                'volume' => $volume,
+            ]);
+
+            return [
+                'ok' => (bool) ($replay['ok'] ?? false),
+                'error' => $replay['error'] ?? null,
+                'warning' => $replay['warning'] ?? null,
+                'volume' => $volume,
+                'radio' => $replay['radio'] ?? $this->status(),
+            ];
+        }
+
         return [
-            'ok' => $errors === [],
-            'error' => $errors !== [] ? implode('; ', $errors) : null,
+            'ok' => true,
+            'error' => null,
             'volume' => $volume,
             'radio' => $this->status(),
         ];
@@ -430,6 +432,7 @@ final class YarboUnifiRadio
         string $codec,
         int $sampleRate,
         string $cameraId,
+        int $volume = 60,
     ): int {
         $talkbackUrl = trim($talkbackUrl);
         if ($talkbackUrl === '') {
@@ -437,6 +440,10 @@ final class YarboUnifiRadio
         }
         $sampleRate = $sampleRate > 0 ? $sampleRate : 22050;
         $codec = strtolower(trim($codec));
+        $volume = max(0, min(100, $volume));
+        // Linear gain in the stream so the UI slider works without Protect hardware volume.
+        $gain = number_format($volume / 100, 4, '.', '');
+        $volFilter = escapeshellarg('volume=' . $gain);
         $logDir = $this->projectRoot . '/data';
         if (!is_dir($logDir)) {
             @mkdir($logDir, 0755, true);
@@ -461,13 +468,13 @@ final class YarboUnifiRadio
         if ($codec === 'opus') {
             $out = escapeshellarg($talkbackUrl);
             $cmd = "{$ff} -nostdin -hide_banner -loglevel warning {$httpIn} -re -i {$input}"
-                . " -vn -ac 1 -ar {$sampleRate} -c:a libopus -application lowdelay -f rtp {$out}";
+                . " -vn -ac 1 -ar {$sampleRate} -af {$volFilter} -c:a libopus -application lowdelay -f rtp {$out}";
         } else {
             // AAC talkback: ADTS over UDP to the camera (same as Home Assistant / go2rtc).
             // Avoid MPEG-TS packet sizing on this ADTS path — it makes ffmpeg exit immediately.
             $udp = escapeshellarg('udp://' . $host . ':' . $port);
             $cmd = "{$ff} -nostdin -hide_banner -loglevel warning {$httpIn} -re -i {$input}"
-                . " -vn -ac 1 -ar {$sampleRate} -c:a aac -profile:a aac_low -b:a 32k -f adts {$udp}";
+                . " -vn -ac 1 -ar {$sampleRate} -af {$volFilter} -c:a aac -profile:a aac_low -b:a 32k -f adts {$udp}";
         }
 
         $full = 'nohup ' . $cmd . ' > ' . $logEsc . ' 2>&1 & echo $!';

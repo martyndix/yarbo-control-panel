@@ -89,7 +89,23 @@ assert_true(($speakers[0]['native_id'] ?? '') === 'cam1', 'reader pro listed');
 
 $calls = [];
 $unifi->setTransport(static function (string $method, string $url, array $headers, ?string $body, float $timeout, bool $binary) use (&$calls): array {
-    $calls[] = compact('method', 'url', 'body');
+    $calls[] = [
+        'method' => $method,
+        'url' => $url,
+        'body' => $body,
+        'headers' => $headers,
+    ];
+    if (str_contains($url, '/api/auth/login')) {
+        return [
+            'status' => 200,
+            'body' => '{}',
+            'content_type' => 'application/json',
+            'response_headers' => [
+                'set-cookie' => ['TOKEN=test-token; Path=/; HttpOnly'],
+                'x-csrf-token' => ['csrf-test'],
+            ],
+        ];
+    }
     if (str_contains($url, 'talkback-session')) {
         return [
             'status' => 200,
@@ -102,16 +118,12 @@ $unifi->setTransport(static function (string $method, string $url, array $header
             'content_type' => 'application/json',
         ];
     }
-    // Public Integration camera PATCH rejects speaker volume (AJV) — volume must use private API.
-    if (strtoupper($method) === 'PATCH' && str_contains($url, '/proxy/protect/integration/')) {
-        return [
-            'status' => 400,
-            'body' => json_encode(['name' => 'AJV_PARSE_ERROR', 'error' => 'additional properties']),
-            'content_type' => 'application/json',
-            'error' => 'Protect rejected that command',
-        ];
-    }
+    // API key on the private path must not be used for volume (real consoles 401).
     if (strtoupper($method) === 'PATCH' && str_contains($url, '/proxy/protect/api/cameras/')) {
+        $hasCookie = isset($headers['Cookie']) && str_contains((string) $headers['Cookie'], 'TOKEN=');
+        if (!$hasCookie) {
+            return ['status' => 401, 'body' => '', 'content_type' => '', 'error' => 'HTTP 401'];
+        }
         $decoded = is_string($body) ? json_decode($body, true) : null;
         $hasSpeakerVol = is_array($decoded)
             && isset($decoded['speakerSettings']['speakerVolume']);
@@ -121,6 +133,14 @@ $unifi->setTransport(static function (string $method, string $url, array $header
 
         return ['status' => 200, 'body' => '{}', 'content_type' => 'application/json'];
     }
+    if (strtoupper($method) === 'PATCH' && str_contains($url, '/proxy/protect/integration/')) {
+        return [
+            'status' => 400,
+            'body' => json_encode(['name' => 'AJV_PARSE_ERROR', 'error' => 'additional properties']),
+            'content_type' => 'application/json',
+            'error' => 'Protect rejected that command',
+        ];
+    }
 
     return ['status' => 404, 'body' => '', 'content_type' => '', 'error' => 'unexpected ' . $url];
 });
@@ -128,12 +148,30 @@ $unifi->setTransport(static function (string $method, string $url, array $header
 $session = $unifi->createTalkbackSession('cam1');
 assert_true(($session['ok'] ?? false) === true, 'talkback session ok: ' . json_encode($session));
 assert_true(($session['url'] ?? '') === 'rtp://192.168.1.50:7004', 'talkback url');
+
+$skipped = $unifi->setCameraSpeakerVolume('cam1', 55);
+assert_true(($skipped['ok'] ?? true) === false, 'volume without local admin fails');
+assert_true(!empty($skipped['skipped']), 'volume without local admin is skipped, not HTTP 401');
+assert_true(!str_contains(strtolower((string) ($skipped['error'] ?? '')), '401'), 'no raw 401 without local admin');
+
+$unifi->save([
+    'host' => '192.168.1.1',
+    'protect_api_key' => 'test-protect-key',
+    'protect_username' => 'admin',
+    'protect_password' => 'secret',
+]);
+$calls = [];
 $vol = $unifi->setCameraSpeakerVolume('cam1', 55);
-assert_true(($vol['ok'] ?? false) === true, 'volume ok via private API: ' . json_encode($vol));
+assert_true(($vol['ok'] ?? false) === true, 'volume ok via OS session: ' . json_encode($vol));
 $volUrls = array_values(array_filter($calls, static fn (array $c): bool => strtoupper((string) $c['method']) === 'PATCH'));
 assert_true($volUrls !== [], 'volume issued PATCH');
 assert_true(str_contains((string) $volUrls[0]['url'], '/proxy/protect/api/cameras/'), 'volume uses private Protect API');
+assert_true(str_contains((string) ($volUrls[0]['headers']['Cookie'] ?? ''), 'TOKEN='), 'volume uses session cookie, not API key alone');
 assert_true(!str_contains((string) ($volUrls[0]['url'] ?? ''), '/integration/'), 'volume does not use Integration camera PATCH');
+
+$radioPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php');
+assert_true(str_contains($radioPhp, '-af'), 'ffmpeg applies stream volume filter');
+assert_true(str_contains($radioPhp, 'volume='), 'ffmpeg volume gain from slider');
 
 $ref = new ReflectionClass(YarboUnifi::class);
 $method = $ref->getMethod('mapCamera');
@@ -158,6 +196,7 @@ assert_true(str_contains($change, '## [4.0.159]'), 'changelog 4.0.159');
 assert_true(str_contains($change, '## [4.0.160]'), 'changelog 4.0.160');
 assert_true(str_contains($change, '## [4.0.161]'), 'changelog 4.0.161');
 assert_true(str_contains($change, '## [4.0.162]'), 'changelog 4.0.162');
+assert_true(str_contains($change, '## [4.0.163]'), 'changelog 4.0.163');
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(str_contains($css, '.unifi-speakers'), 'Speakers panel CSS');
 assert_true(preg_match('/\.unifi-speakers\s*\{[^}]*color:\s*var\(--text\)/s', $css) === 1, 'Speakers uses theme text colour');

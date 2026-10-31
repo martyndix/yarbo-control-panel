@@ -13596,9 +13596,11 @@ els.unifiRadioVolume?.addEventListener('change', async () => {
     const volume = Number(els.unifiRadioVolume.value);
     const targets = unifiSelectedSpeakerIds();
     try {
-        const data = await unifiApi({ action: 'radio_volume', volume, targets }, 10000);
+        // May restart an active talkback stream so the new gain applies.
+        const data = await unifiApi({ action: 'radio_volume', volume, targets }, 45000);
         if (!data?.ok && data?.error) throw new Error(data.error);
         if (unifiDash && data.radio) unifiDash.radio = data.radio;
+        renderUnifiSpeakers(unifiDash || data, { replace: false });
     } catch (err) {
         showToast(err.message || 'Could not set volume', 'error');
     }

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.163] - 2026-10-31
+
+### Fixed
+- UniFi **Speakers** volume no longer returns **HTTP 401**: the API key cannot authenticate the private Protect volume API. Loudness is applied in the ffmpeg stream (slider works immediately); Protect hardware volume is attempted only with a local UniFi OS admin session.
+
 ## [4.0.162] - 2026-10-31
 
 ### Fixed
