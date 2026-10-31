@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.159] - 2026-10-31
+
+### Fixed
+- UniFi page no longer returns an empty **500** when Speakers/radio hits a PHP error (for example missing `mbstring`). Speakers failures stay isolated; the rest of UniFi still loads.
+
 ## [4.0.158] - 2026-10-31
 
 ### Added

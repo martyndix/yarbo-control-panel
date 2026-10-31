@@ -134,5 +134,9 @@ assert_true(str_contains($php, 'class YarboUnifiRadio'), 'radio class present');
 assert_true(str_contains($index, 'id="unifi-speakers"'), 'UniFi Speakers UI');
 assert_true(str_contains($index, 'settings-unifi-speakers-enabled'), 'Settings Speakers toggle');
 assert_true(str_contains($change, '## [4.0.158]'), 'changelog 4.0.158');
+assert_true(str_contains($change, '## [4.0.159]'), 'changelog 4.0.159');
+$api = (string) file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
+assert_true(str_contains($api, 'catch (Throwable'), 'unifi status catches fatals as JSON');
+assert_true(str_contains((string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php'), 'function_exists(\'mb_substr\')'), 'mb_substr guarded');
 
 echo "test_unifi_radio.php ok\n";

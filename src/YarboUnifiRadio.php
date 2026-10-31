@@ -331,7 +331,7 @@ final class YarboUnifiRadio
             }
             $out[] = [
                 'id' => $id,
-                'name' => mb_substr($name, 0, 64),
+                'name' => function_exists('mb_substr') ? mb_substr($name, 0, 64) : substr($name, 0, 64),
                 'url' => $url,
                 'format' => $format,
             ];

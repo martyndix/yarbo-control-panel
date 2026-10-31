@@ -525,10 +525,24 @@ final class YarboUnifi
             'last_check' => $config['last_check'],
             'devices' => $this->catalogFromInventory($inventory, $config['show_on_home']),
             'connection_warning' => $this->connectionWarning(),
-            'stations' => ($config['speakers_enabled'] ?? true) !== false
-                ? (new YarboUnifiRadio($this->projectRoot, $this))->stations()
-                : [],
+            'stations' => $this->radioStationsSafe($config),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return list<array{id: string, name: string, url: string, format: string}>
+     */
+    private function radioStationsSafe(array $config): array
+    {
+        if (($config['speakers_enabled'] ?? true) === false) {
+            return [];
+        }
+        try {
+            return (new YarboUnifiRadio($this->projectRoot, $this))->stations();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     public function speakersEnabled(): bool
@@ -539,7 +553,11 @@ final class YarboUnifi
     public function setSpeakersEnabled(bool $on): bool
     {
         if (!$on) {
-            (new YarboUnifiRadio($this->projectRoot, $this))->stop();
+            try {
+                (new YarboUnifiRadio($this->projectRoot, $this))->stop();
+            } catch (\Throwable) {
+                // Still allow turning the UI off.
+            }
         }
 
         return $this->save(['speakers_enabled' => $on]);
@@ -771,11 +789,25 @@ final class YarboUnifi
             'hubs' => $inventory['hubs'] ?? [],
             'devices' => $this->catalogFromInventory($inventory, $show),
         ];
-        if (($config['speakers_enabled'] ?? true) !== false) {
-            $radio = new YarboUnifiRadio($this->projectRoot, $this);
-            $payload += $radio->dashboardSlice();
-        } else {
-            $payload['speakers_enabled'] = false;
+        try {
+            if (($config['speakers_enabled'] ?? true) !== false) {
+                $payload += (new YarboUnifiRadio($this->projectRoot, $this))->dashboardSlice();
+            } else {
+                $payload['speakers_enabled'] = false;
+                $payload['stations'] = [];
+                $payload['speakers'] = [];
+                $payload['radio'] = [
+                    'playing' => false,
+                    'station_id' => null,
+                    'station_name' => null,
+                    'targets' => [],
+                    'volume' => 60,
+                    'error' => null,
+                    'started_at' => null,
+                ];
+            }
+        } catch (\Throwable $e) {
+            $payload['speakers_enabled'] = ($config['speakers_enabled'] ?? true) !== false;
             $payload['stations'] = [];
             $payload['speakers'] = [];
             $payload['radio'] = [
@@ -784,7 +816,7 @@ final class YarboUnifi
                 'station_name' => null,
                 'targets' => [],
                 'volume' => 60,
-                'error' => null,
+                'error' => $e->getMessage(),
                 'started_at' => null,
             ];
         }
