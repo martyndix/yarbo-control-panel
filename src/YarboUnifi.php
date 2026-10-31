@@ -630,6 +630,12 @@ final class YarboUnifi
     }
 
     /**
+     * Set talkback speaker level on a Protect camera.
+     *
+     * The public Integration camera PATCH schema rejects speaker volume (AJV
+     * “additional properties” → “Protect rejected that command”). HA / uiprotect
+     * use the private Protect API with speakerSettings.speakerVolume.
+     *
      * @return array{ok: bool, error?: string}
      */
     public function setCameraSpeakerVolume(string $cameraId, int $volume): array
@@ -640,24 +646,70 @@ final class YarboUnifi
             return ['ok' => false, 'error' => 'Missing camera id'];
         }
         $config = $this->load();
-        if ($config['protect_api_key'] === '') {
-            return ['ok' => false, 'error' => 'Protect API key required'];
+        if ($config['protect_api_key'] === '' && ($config['protect_username'] ?? '') === '') {
+            return ['ok' => false, 'error' => 'Protect API key or local UniFi OS admin required for volume'];
         }
-        $url = $this->protectUrl($config, '/cameras/' . rawurlencode($cameraId));
-        $bodies = [
-            json_encode(['speakerSettings' => ['volume' => $volume]], JSON_UNESCAPED_SLASHES),
-            json_encode(['volume' => $volume], JSON_UNESCAPED_SLASHES),
+        $private = $this->protectPrivateUrl($config, '/cameras/' . rawurlencode($cameraId));
+        $payloads = [
+            ['speakerSettings' => ['speakerVolume' => $volume, 'volume' => $volume]],
+            ['speakerSettings' => ['speakerVolume' => $volume]],
+            ['speakerSettings' => ['volume' => $volume]],
         ];
         $last = ['ok' => false, 'error' => 'Volume update failed'];
-        foreach ($bodies as $body) {
-            if (!is_string($body)) {
-                continue;
+        $hasCreds = ($config['protect_username'] ?? '') !== '' && ($config['protect_password'] ?? '') !== '';
+
+        if ($hasCreds) {
+            $session = $this->protectOsLogin($config);
+            if ($session['ok'] ?? false) {
+                $headers = $this->protectSessionHeaders($config, $session);
+                foreach ($payloads as $payload) {
+                    $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+                    if (!is_string($body)) {
+                        continue;
+                    }
+                    $res = $this->request('PATCH', $private, $headers, $body, 5.0, false);
+                    if ((int) ($res['status'] ?? 0) === 401) {
+                        $this->clearOsSession();
+                        $session = $this->protectOsLogin($config, true);
+                        if (!($session['ok'] ?? false)) {
+                            $last = ['ok' => false, 'error' => (string) ($session['error'] ?? 'UniFi OS login failed')];
+                            break;
+                        }
+                        $headers = $this->protectSessionHeaders($config, $session);
+                        $res = $this->request('PATCH', $private, $headers, $body, 5.0, false);
+                    }
+                    if ($res['status'] >= 200 && $res['status'] < 300) {
+                        return ['ok' => true];
+                    }
+                    $last = ['ok' => false, 'error' => $res['error'] ?? ('Volume HTTP ' . $res['status'])];
+                }
+            } else {
+                $last = ['ok' => false, 'error' => (string) ($session['error'] ?? 'UniFi OS login failed')];
             }
-            $res = $this->request('PATCH', $url, $this->protectHeaders($config), $body, 6.0, false);
-            if ($res['status'] >= 200 && $res['status'] < 300) {
-                return ['ok' => true];
+        }
+
+        // Some consoles accept the API key on the private path; never send speaker
+        // volume on the public Integration camera PATCH (always AJV-rejected).
+        if ($config['protect_api_key'] !== '') {
+            $headers = $this->protectHeaders($config);
+            foreach ($payloads as $payload) {
+                $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+                if (!is_string($body)) {
+                    continue;
+                }
+                $res = $this->request('PATCH', $private, $headers, $body, 4.0, false);
+                if ($res['status'] >= 200 && $res['status'] < 300) {
+                    return ['ok' => true];
+                }
+                $last = ['ok' => false, 'error' => $res['error'] ?? ('Volume HTTP ' . $res['status'])];
             }
-            $last = ['ok' => false, 'error' => $res['error'] ?? ('Volume HTTP ' . $res['status'])];
+        }
+
+        if (!$hasCreds) {
+            return [
+                'ok' => false,
+                'error' => 'Speaker volume needs a local UniFi OS admin under Settings → UniFi (API key cannot set it)',
+            ];
         }
 
         return $last;

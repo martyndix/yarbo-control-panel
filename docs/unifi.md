@@ -78,7 +78,7 @@ Turn **Home** on as well. UniFi rows use ids like `unifi:camera:…`. Hide or Re
 
 White-ambiance Matter bulbs show **brightness** (blue slider) and **colour temperature** (amber slider, warm to cool). Full-colour bulbs keep a colour picker.
 
-Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` returns a UDP/RTP URL; the panel streams the station through ffmpeg to that endpoint. Volume uses `PATCH /cameras/{id}` with speaker settings when the console accepts it.
+Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` (Integration API) returns a UDP/RTP URL; the panel streams the station through ffmpeg as AAC ADTS to that camera on UDP (usually port 7004). Speaker **volume** is not on the public camera PATCH schema — the panel uses the private Protect API `PATCH /proxy/protect/api/cameras/{id}` with `speakerSettings.speakerVolume` (cookie + CSRF from the optional local UniFi OS admin). Without that admin, play still works; volume may stay at the camera’s current level.
 
 ## Rollback
 

@@ -180,14 +180,23 @@ final class YarboUnifiRadio
 
         $this->stop(false);
 
-        $streams = [];
-        $errors = [];
+        // Volume first (private Protect API). Failures must not block talkback or
+        // spam “Protect rejected” into the play result — Integration PATCH cannot set it.
+        $volumeFailed = 0;
+        $volumeHint = null;
         foreach ($targets as $cameraId) {
             $vol = $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
             if (!($vol['ok'] ?? false)) {
-                // Volume is best-effort; still try talkback.
-                $errors[] = (string) ($vol['error'] ?? 'volume failed') . ' (' . $cameraId . ')';
+                $volumeFailed++;
+                if ($volumeHint === null) {
+                    $volumeHint = (string) ($vol['error'] ?? 'volume failed');
+                }
             }
+        }
+
+        $streams = [];
+        $errors = [];
+        foreach ($targets as $cameraId) {
             $session = $this->unifi->createTalkbackSession($cameraId);
             if (!($session['ok'] ?? false)) {
                 $errors[] = (string) ($session['error'] ?? 'talkback failed') . ' (' . $cameraId . ')';
@@ -202,7 +211,9 @@ final class YarboUnifiRadio
                 $cameraId
             );
             if ($pid <= 0) {
-                $errors[] = 'Could not start audio for ' . $cameraId;
+                $detail = $this->tailRadioLog($cameraId);
+                $errors[] = 'Could not start audio for ' . $cameraId
+                    . ($detail !== '' ? ' — ' . $detail : '');
                 continue;
             }
             $streams[] = [
@@ -214,6 +225,9 @@ final class YarboUnifiRadio
         }
 
         $playing = $streams !== [];
+        $playError = $playing
+            ? ($errors !== [] ? implode('; ', $errors) : null)
+            : ($errors !== [] ? implode('; ', $errors) : 'No speakers started');
         $state = [
             'playing' => $playing,
             'station_id' => $station['id'],
@@ -224,16 +238,21 @@ final class YarboUnifiRadio
             // Remember the speakers the user ticked, even if some failed to start.
             'targets' => $targets,
             'started_at' => $playing ? time() : null,
-            'error' => $playing
-                ? ($errors !== [] ? implode('; ', $errors) : null)
-                : ($errors !== [] ? implode('; ', $errors) : 'No speakers started'),
+            'error' => $playError,
         ];
         $this->writeState($state);
+
+        $warning = null;
+        if ($playing && $errors !== []) {
+            $warning = implode('; ', $errors);
+        } elseif ($playing && $volumeFailed > 0 && $volumeHint !== null) {
+            $warning = 'Playing, but volume was not applied (' . $volumeHint . ')';
+        }
 
         return [
             'ok' => $playing,
             'error' => $playing ? null : ($state['error'] ?? 'Play failed'),
-            'warning' => $playing && $errors !== [] ? implode('; ', $errors) : null,
+            'warning' => $warning,
             'radio' => $this->status(),
         ];
     }
@@ -422,33 +441,73 @@ final class YarboUnifiRadio
         if (!is_dir($logDir)) {
             @mkdir($logDir, 0755, true);
         }
-        $log = $logDir . '/unifi-radio-' . preg_replace('/[^a-zA-Z0-9_-]+/', '_', $cameraId) . '.log';
+        $log = $this->radioLogPath($cameraId);
+        @file_put_contents($log, '');
 
         $input = escapeshellarg($contentUrl);
         $ff = escapeshellarg($ffmpeg);
         $logEsc = escapeshellarg($log);
+        // Icecast/HLS drop briefly; reconnect so Play does not die after a few seconds.
+        $httpIn = '-reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1'
+            . ' -reconnect_delay_max 5 -rw_timeout 15000000';
+
+        $parsed = parse_url($talkbackUrl);
+        $host = (string) ($parsed['host'] ?? '');
+        $port = (int) ($parsed['port'] ?? 7004);
+        if ($host === '') {
+            return 0;
+        }
 
         if ($codec === 'opus') {
             $out = escapeshellarg($talkbackUrl);
-            $cmd = "{$ff} -nostdin -hide_banner -loglevel error -re -i {$input} -vn -ac 1 -ar {$sampleRate}"
-                . " -c:a libopus -application lowdelay -f rtp {$out}";
+            $cmd = "{$ff} -nostdin -hide_banner -loglevel warning {$httpIn} -re -i {$input}"
+                . " -vn -ac 1 -ar {$sampleRate} -c:a libopus -application lowdelay -f rtp {$out}";
         } else {
-            // AAC / default: ADTS over UDP (works for many Protect talkback endpoints).
-            $parsed = parse_url($talkbackUrl);
-            $host = (string) ($parsed['host'] ?? '');
-            $port = (int) ($parsed['port'] ?? 7004);
-            if ($host === '') {
-                return 0;
-            }
-            $udp = escapeshellarg('udp://' . $host . ':' . $port . '?pkt_size=188');
-            $cmd = "{$ff} -nostdin -hide_banner -loglevel error -re -i {$input} -vn -ac 1 -ar {$sampleRate}"
-                . " -c:a aac -b:a 64k -f adts {$udp}";
+            // AAC talkback: ADTS over UDP to the camera (same as Home Assistant / go2rtc).
+            // Avoid MPEG-TS packet sizing on this ADTS path — it makes ffmpeg exit immediately.
+            $udp = escapeshellarg('udp://' . $host . ':' . $port);
+            $cmd = "{$ff} -nostdin -hide_banner -loglevel warning {$httpIn} -re -i {$input}"
+                . " -vn -ac 1 -ar {$sampleRate} -c:a aac -profile:a aac_low -b:a 32k -f adts {$udp}";
         }
 
         $full = 'nohup ' . $cmd . ' > ' . $logEsc . ' 2>&1 & echo $!';
         $pid = (int) trim((string) shell_exec($full));
+        if ($pid <= 1) {
+            return 0;
+        }
+        // Talkback dies if the encoder never sends; catch immediate ffmpeg exits.
+        usleep(500000);
+        if (!$this->pidAlive($pid)) {
+            return 0;
+        }
 
-        return $pid > 1 ? $pid : 0;
+        return $pid;
+    }
+
+    private function radioLogPath(string $cameraId): string
+    {
+        return $this->projectRoot . '/data/unifi-radio-'
+            . preg_replace('/[^a-zA-Z0-9_-]+/', '_', $cameraId) . '.log';
+    }
+
+    private function tailRadioLog(string $cameraId): string
+    {
+        $path = $this->radioLogPath($cameraId);
+        if (!is_file($path)) {
+            return '';
+        }
+        $raw = trim((string) @file_get_contents($path));
+        if ($raw === '') {
+            return '';
+        }
+        $lines = preg_split('/\R/', $raw) ?: [];
+        $last = trim((string) end($lines));
+        $last = preg_replace('/\s+/', ' ', $last) ?? $last;
+        if ($last === '') {
+            return '';
+        }
+
+        return strlen($last) > 160 ? substr($last, 0, 157) . '…' : $last;
     }
 
     private function pidAlive(int $pid): bool

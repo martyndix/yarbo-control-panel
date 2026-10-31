@@ -102,7 +102,23 @@ $unifi->setTransport(static function (string $method, string $url, array $header
             'content_type' => 'application/json',
         ];
     }
-    if (strtoupper($method) === 'PATCH' && str_contains($url, '/cameras/')) {
+    // Public Integration camera PATCH rejects speaker volume (AJV) — volume must use private API.
+    if (strtoupper($method) === 'PATCH' && str_contains($url, '/proxy/protect/integration/')) {
+        return [
+            'status' => 400,
+            'body' => json_encode(['name' => 'AJV_PARSE_ERROR', 'error' => 'additional properties']),
+            'content_type' => 'application/json',
+            'error' => 'Protect rejected that command',
+        ];
+    }
+    if (strtoupper($method) === 'PATCH' && str_contains($url, '/proxy/protect/api/cameras/')) {
+        $decoded = is_string($body) ? json_decode($body, true) : null;
+        $hasSpeakerVol = is_array($decoded)
+            && isset($decoded['speakerSettings']['speakerVolume']);
+        if (!$hasSpeakerVol) {
+            return ['status' => 400, 'body' => '{"error":"missing speakerVolume"}', 'content_type' => 'application/json', 'error' => 'missing speakerVolume'];
+        }
+
         return ['status' => 200, 'body' => '{}', 'content_type' => 'application/json'];
     }
 
@@ -113,7 +129,11 @@ $session = $unifi->createTalkbackSession('cam1');
 assert_true(($session['ok'] ?? false) === true, 'talkback session ok: ' . json_encode($session));
 assert_true(($session['url'] ?? '') === 'rtp://192.168.1.50:7004', 'talkback url');
 $vol = $unifi->setCameraSpeakerVolume('cam1', 55);
-assert_true(($vol['ok'] ?? false) === true, 'volume ok');
+assert_true(($vol['ok'] ?? false) === true, 'volume ok via private API: ' . json_encode($vol));
+$volUrls = array_values(array_filter($calls, static fn (array $c): bool => strtoupper((string) $c['method']) === 'PATCH'));
+assert_true($volUrls !== [], 'volume issued PATCH');
+assert_true(str_contains((string) $volUrls[0]['url'], '/proxy/protect/api/cameras/'), 'volume uses private Protect API');
+assert_true(!str_contains((string) ($volUrls[0]['url'] ?? ''), '/integration/'), 'volume does not use Integration camera PATCH');
 
 $ref = new ReflectionClass(YarboUnifi::class);
 $method = $ref->getMethod('mapCamera');
@@ -137,6 +157,7 @@ assert_true(str_contains($change, '## [4.0.158]'), 'changelog 4.0.158');
 assert_true(str_contains($change, '## [4.0.159]'), 'changelog 4.0.159');
 assert_true(str_contains($change, '## [4.0.160]'), 'changelog 4.0.160');
 assert_true(str_contains($change, '## [4.0.161]'), 'changelog 4.0.161');
+assert_true(str_contains($change, '## [4.0.162]'), 'changelog 4.0.162');
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(str_contains($css, '.unifi-speakers'), 'Speakers panel CSS');
 assert_true(preg_match('/\.unifi-speakers\s*\{[^}]*color:\s*var\(--text\)/s', $css) === 1, 'Speakers uses theme text colour');
@@ -148,8 +169,15 @@ assert_true(str_contains($js, 'UNIFI_SPEAKER_PICK_KEY'), 'speaker ticks remember
 assert_true(str_contains($js, 'fromDom'), 'speaker ticks preserved across Speakers re-render');
 $api = (string) file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
 assert_true(str_contains($api, 'catch (Throwable'), 'unifi status catches fatals as JSON');
-assert_true(str_contains((string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php'), 'function_exists(\'mb_substr\')'), 'mb_substr guarded');
+$php = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php');
+$unifiPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifi.php');
+assert_true(str_contains($php, 'function_exists(\'mb_substr\')'), 'mb_substr guarded');
 assert_true(str_contains($php, 'active_targets'), 'status exposes active stream targets');
+assert_true(!preg_match('/udp:\/\/[^\'"]*pkt_size/', $php), 'ffmpeg ADTS UDP has no MPEG-TS pkt_size');
+assert_true(str_contains($php, 'reconnect_streamed'), 'ffmpeg reconnects Icecast/HLS');
+assert_true(str_contains($php, '-f adts'), 'ffmpeg outputs ADTS for AAC talkback');
+assert_true(str_contains($unifiPhp, 'speakerVolume'), 'volume uses speakerVolume on private API');
+assert_true(str_contains($unifiPhp, 'protectPrivateUrl'), 'volume helper can build private Protect URL');
 
 // Idle status keeps last chosen targets (so the UI does not treat empty as “all on”).
 file_put_contents($root . '/data/unifi-radio-state.json', json_encode([

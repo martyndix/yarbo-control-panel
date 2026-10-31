@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.162] - 2026-10-31
+
+### Fixed
+- UniFi **Speakers** play no longer floods **Protect rejected that command** (public Integration API cannot set speaker volume). Volume uses the private Protect API (`speakerSettings.speakerVolume`) with the local UniFi OS admin when available, and volume failures no longer block talkback.
+- Speakers ffmpeg talkback stays up more reliably: ADTS over plain UDP (dropped the bad MPEG-TS `pkt_size`), HTTP reconnect for Icecast/HLS, and a short post-start check so a dead encoder is reported instead of false **Playing**.
+
 ## [4.0.161] - 2026-10-31
 
 ### Fixed
