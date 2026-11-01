@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.177] - 2026-11-02
+
+### Fixed
+- Radio **🔊** / **📣** badge on *other* phones/tablets updates for every Play/Stop, not only the first. Status no longer keeps a stale local Idle over the live radio state, and the Radio watch keeps running while Idle so a Play from another device is noticed.
+
 ## [4.0.176] - 2026-11-02
 
 ### Fixed

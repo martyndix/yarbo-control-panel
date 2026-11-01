@@ -269,9 +269,13 @@ assert_true(str_contains($js, 'unifiRadioRecFile') || str_contains($js, 'unifi-r
 assert_true(str_contains($js, 'startRadioStatusPoll'), 'radio status poll while playing');
 assert_true(str_contains($js, 'applyRadioCommandResult'), 'play/stop invalidate stale radio polls');
 assert_true(str_contains($js, 'radioStatusPollGen'), 'radio poll generation guard');
+assert_true(str_contains($js, 'pickRadioState'), 'prefers fresh remote radio for other devices');
+assert_true(str_contains($js, 'radioLocalCommandUntil'), 'local Play/Stop grace before remote Idle');
+assert_true(str_contains($js, 'Stay subscribed while Idle') || str_contains($js, 'Keep watching while'), 'Idle watch for remote Play');
 assert_true(str_contains($js, "action: 'radio_status'"), 'polls radio_status');
 assert_true(str_contains($js, "'📣'") && str_contains($js, "'🔊'"), 'playing badge emojis');
 assert_true(str_contains($change, '## [4.0.176]'), 'changelog 4.0.176');
+assert_true(str_contains($change, '## [4.0.177]'), 'changelog 4.0.177');
 $api = (string) file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
 assert_true(str_contains($api, 'catch (Throwable'), 'unifi status catches fatals as JSON');
 assert_true(str_contains($api, "radio_announce"), 'API radio_announce action');
