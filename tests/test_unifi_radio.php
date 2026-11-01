@@ -209,6 +209,7 @@ assert_true(str_contains($change, '## [4.0.161]'), 'changelog 4.0.161');
 assert_true(str_contains($change, '## [4.0.162]'), 'changelog 4.0.162');
 assert_true(str_contains($change, '## [4.0.163]'), 'changelog 4.0.163');
 assert_true(str_contains($change, '## [4.0.164]'), 'changelog 4.0.164');
+assert_true(str_contains($change, '## [4.0.165]'), 'changelog 4.0.165');
 assert_true(str_contains($change, 'Radio Player'), 'changelog mentions Radio Player');
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(str_contains($css, '.unifi-speakers'), 'Speakers panel CSS');
@@ -216,6 +217,7 @@ assert_true(preg_match('/\.unifi-speakers\s*\{[^}]*color:\s*var\(--text\)/s', $c
 assert_true(str_contains($css, 'radio-player-panel'), 'Radio Player modal panel CSS');
 assert_true(str_contains($css, 'radio-playing-badge') || str_contains($css, '#radio-open.is-playing'), 'Radio playing chrome CSS');
 assert_true(str_contains($css, '.unifi-radio-speaker span'), 'speaker name colour forced');
+assert_true(preg_match('/#unifi-radio-status\s*\{[^}]*margin:\s*0\.55rem/s', $css) === 1, 'status cleared below Play/Stop');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(str_contains($js, 'prevModuleId !== \'unifi\''), 'UniFi poll not restarted every hub status');
 assert_true(str_contains($js, 'syncRadioPlayerChrome'), 'Radio header chrome sync');

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.165] - 2026-11-01
+
+### Fixed
+- Radio Player status line (**Idle** / playing text) no longer sits under the Play and Stop buttons.
+
 ## [4.0.164] - 2026-11-01
 
 ### Changed

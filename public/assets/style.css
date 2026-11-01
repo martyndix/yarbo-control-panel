@@ -4279,6 +4279,10 @@ body.home-is-reordering {
 #unifi-radio-status {
     color: var(--muted);
 }
+#unifi-radio-status {
+    /* .hint uses a negative top margin meant for copy under titles — keep status clear of Play/Stop */
+    margin: 0.55rem 0 0;
+}
 .unifi-speakers .settings-field {
     color: var(--text);
 }
