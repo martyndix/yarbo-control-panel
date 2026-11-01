@@ -87,6 +87,59 @@ final class YarboUpdate
     }
 
     /**
+     * Restart the systemd panel service (or signal panel.sh so systemd brings it back).
+     *
+     * @return array<string, mixed>
+     */
+    public function restartPanelAsync(): array
+    {
+        if ($this->isUpdateRunning()) {
+            return [
+                'ok' => false,
+                'error' => 'An update is already running — wait for it to finish',
+                'progress' => $this->readProgress(),
+            ];
+        }
+
+        if (!$this->ensureDataDir()) {
+            return ['ok' => false, 'error' => 'Could not create data directory'];
+        }
+
+        $logFile = $this->projectRoot . '/data/panel-restart.log';
+        $script = <<<'BASH'
+set -euo pipefail
+sleep 1
+if command -v systemctl >/dev/null 2>&1 && systemctl cat yarbo-panel.service >/dev/null 2>&1; then
+  if sudo -n systemctl restart yarbo-panel 2>/dev/null; then
+    echo "restarted via systemctl"
+    exit 0
+  fi
+  echo "systemctl restart failed (sudoers?); signalling panel.sh" >&2
+fi
+# Fallback without sudo: stop panel.sh so systemd Restart=on-failure brings it back.
+pkill -TERM -f '[s]cripts/panel.sh' 2>/dev/null || true
+pkill -TERM -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
+echo "signalled panel processes"
+BASH;
+
+        $cmd = sprintf(
+            'nohup bash -c %s >> %s 2>&1 &',
+            escapeshellarg($script),
+            escapeshellarg($logFile)
+        );
+
+        if (!$this->spawnBackgroundCommand($cmd)) {
+            return ['ok' => false, 'error' => 'Could not start panel restart'];
+        }
+
+        return [
+            'ok' => true,
+            'started' => true,
+            'message' => 'Panel restart started. The page will reload when it is back.',
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function runUpdateAsync(): array

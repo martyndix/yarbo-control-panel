@@ -73,6 +73,27 @@ if (!str_contains($html, 'copied aside and restored after the pull')) {
     exit(1);
 }
 
+if (!str_contains($html, 'id="settings-panel-restart"') || !str_contains($html, 'Restart panel')) {
+    fwrite(STDERR, "Settings must have Restart panel button\n");
+    exit(1);
+}
+
+$api = (string) file_get_contents($root . '/public/api/update.php');
+$php = (string) file_get_contents($root . '/src/YarboUpdate.php');
+$js = (string) file_get_contents($root . '/public/assets/app.js');
+if (!str_contains($api, "'restart'") || !str_contains($php, 'function restartPanelAsync')) {
+    fwrite(STDERR, "update API must support restart\n");
+    exit(1);
+}
+if (!str_contains($js, 'runPanelRestart') || !str_contains($js, "action: 'restart'")) {
+    fwrite(STDERR, "app.js must wire Restart panel\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.169]')) {
+    fwrite(STDERR, "changelog 4.0.169\n");
+    exit(1);
+}
+
 $tmpRoot = sys_get_temp_dir() . '/yarbo-upd-preserve-' . bin2hex(random_bytes(3));
 mkdir($tmpRoot . '/data', 0775, true);
 file_put_contents($tmpRoot . '/data/powerwall-config.json', json_encode([

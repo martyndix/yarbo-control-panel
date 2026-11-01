@@ -2076,7 +2076,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-update-check">Check for updates</button>
                                 <button type="button" class="btn btn-secondary" id="settings-update-view-notes">View release notes</button>
                                 <button type="button" class="btn" id="settings-update-run" disabled>Update to latest</button>
+                                <button type="button" class="btn btn-secondary" id="settings-panel-restart">Restart panel</button>
                             </div>
+                            <p class="hint">Restart panel reloads the Pi service (HTTPS :8443, MQTT agent, Matter). Use it after an update if something new did not come up. It does not reboot the whole Pi.</p>
                             <h3 class="settings-subtitle">E-paper firmware</h3>
                             <p class="hint">First flash is USB. After that, queue a Wi-Fi update for an online tablet. Build firmware on the E-paper page first — Update will not compile during the download. The tablet shows <strong>UPDATING</strong>, stays on Wi-Fi, then reboots. It only tries once per boot; reboot if it stays on the old version. PaperMono beeps and lights green. Update is disabled below 50% unless the tablet is charging.</p>
                             <div id="settings-paper-ota-list" class="papermono-device-list"></div>

@@ -218,6 +218,7 @@ const els = {
     settingsUpdateCheck: document.getElementById('settings-update-check'),
     settingsUpdateViewNotes: document.getElementById('settings-update-view-notes'),
     settingsUpdateRun: document.getElementById('settings-update-run'),
+    settingsPanelRestart: document.getElementById('settings-panel-restart'),
     settingsUpdateSection: document.getElementById('settings-update-section'),
     settingsUpdateCallout: document.getElementById('settings-update-callout'),
     settingsUpdateCalloutText: document.getElementById('settings-update-callout-text'),
@@ -12814,6 +12815,7 @@ async function runPanelUpdate(button) {
     if (button) button.disabled = true;
     if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = true;
     if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
+    if (els.settingsPanelRestart) els.settingsPanelRestart.disabled = true;
     setUpdateResult('Starting update…');
     try {
         const res = await fetch('/api/update.php', {
@@ -12863,6 +12865,51 @@ async function runPanelUpdate(button) {
     } finally {
         if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
         if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = false;
+        if (els.settingsPanelRestart) els.settingsPanelRestart.disabled = false;
+    }
+}
+
+async function runPanelRestart(button) {
+    const confirmed = window.confirm(
+        'Restart the panel service on this Pi?\n\n'
+        + 'The page will disconnect briefly, then reload. '
+        + 'This starts HTTPS :8443 and background agents again. '
+        + 'It does not reboot the whole Raspberry Pi.',
+    );
+    if (!confirmed) return;
+    if (button) button.disabled = true;
+    if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = true;
+    if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
+    setUpdateResult('Restarting panel…');
+    showToast('Restarting panel', 'success');
+    try {
+        const res = await fetch('/api/update.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'restart', confirm: true }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Restart failed');
+        setUpdateResult(data.message || 'Restart started. Waiting for the panel…', 'success');
+        await waitForPanelRestart(90000, null);
+    } catch (err) {
+        if (isUpdateNetworkError(err)) {
+            setUpdateResult('Panel is restarting… waiting for it to come back', 'success');
+            try {
+                await waitForPanelRestart(90000, null);
+                return;
+            } catch (waitErr) {
+                setUpdateResult(waitErr.message || 'Panel did not come back', 'error');
+                showToast(waitErr.message || 'Panel did not come back', 'error');
+                return;
+            }
+        }
+        setUpdateResult(err.message || 'Restart failed', 'error');
+        showToast(err.message || 'Restart failed', 'error');
+    } finally {
+        if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
+        if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = false;
+        if (els.settingsPanelRestart) els.settingsPanelRestart.disabled = false;
     }
 }
 
@@ -14292,6 +14339,7 @@ document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
 els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));
 els.settingsUpdateViewNotes?.addEventListener('click', (e) => viewReleaseNotes(e.currentTarget));
 els.settingsUpdateRun?.addEventListener('click', (e) => runPanelUpdate(e.currentTarget));
+els.settingsPanelRestart?.addEventListener('click', (e) => runPanelRestart(e.currentTarget));
 els.settingsPaperOtaAll?.addEventListener('click', (e) => queuePaperOta('*', e.currentTarget));
 document.querySelectorAll('[data-settings-close]').forEach((el) => {
     el.addEventListener('click', closeSettingsModal);

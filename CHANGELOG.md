@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.169] - 2026-11-01
+
+### Added
+- Settings → Panel updates → **Restart panel** restarts the Pi `yarbo-panel` service (HTTPS :8443, agents) without SSH. It does not reboot the whole Pi.
+
 ## [4.0.168] - 2026-11-01
 
 ### Fixed

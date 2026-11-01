@@ -54,4 +54,12 @@ if ($action === 'update') {
     json_response($update->runUpdateAsync());
 }
 
-json_response(['ok' => false, 'error' => 'Unknown action. Valid: check, update'], 400);
+if ($action === 'restart') {
+    if (!($input['confirm'] ?? false)) {
+        json_response(['ok' => false, 'error' => 'confirm=true is required'], 400);
+    }
+
+    json_response($update->restartPanelAsync());
+}
+
+json_response(['ok' => false, 'error' => 'Unknown action. Valid: check, update, restart'], 400);
