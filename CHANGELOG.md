@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.176] - 2026-11-02
+
+### Fixed
+- Radio header **🔊** / **📣** badge comes back on the next Play after Stop (or after an announcement ends). A late Idle `radio_status` poll no longer clears the new playing state.
+
 ## [4.0.175] - 2026-11-02
 
 ### Changed

@@ -3283,6 +3283,7 @@ function writeUnifiSpeakerPick(ids) {
 let radioPlayerOpen = false;
 let radioSpeakersEnabled = true;
 let radioStatusPollTimer = 0;
+let radioStatusPollGen = 0;
 
 function radioIsAnnouncement(radio = {}) {
     const id = String(radio?.station_id || '');
@@ -3310,22 +3311,38 @@ function setRadioPlayingBadge(playing, stationName = '', stationId = '') {
 }
 
 function stopRadioStatusPoll() {
+    // Bump generation so any in-flight radio_status response is ignored — otherwise a
+    // late Idle reply after Stop (or after an announcement ends) wipes the next Play badge.
+    radioStatusPollGen += 1;
     if (radioStatusPollTimer) {
         clearInterval(radioStatusPollTimer);
         radioStatusPollTimer = 0;
     }
 }
 
-function syncRadioStatusPoll(radio) {
+function syncRadioStatusPoll(radio, { restart = false } = {}) {
+    if (radio?.playing) {
+        if (restart) stopRadioStatusPoll();
+        startRadioStatusPoll();
+    } else {
+        stopRadioStatusPoll();
+    }
+}
+
+/** Call after Play / Stop / Announcement so stale polls cannot clobber the new state. */
+function applyRadioCommandResult(radio) {
+    stopRadioStatusPoll();
     if (radio?.playing) startRadioStatusPoll();
-    else stopRadioStatusPoll();
 }
 
 function startRadioStatusPoll() {
     if (radioStatusPollTimer) return;
+    const gen = radioStatusPollGen;
     radioStatusPollTimer = window.setInterval(async () => {
+        if (gen !== radioStatusPollGen) return;
         try {
             const data = await unifiApi({ action: 'radio_status' }, 8000);
+            if (gen !== radioStatusPollGen) return;
             if (!data || data.ok === false) return;
             if (unifiDash) {
                 if (data.radio) unifiDash.radio = data.radio;
@@ -3341,7 +3358,9 @@ function startRadioStatusPoll() {
                 speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
                 radio: (unifiDash || data)?.radio || null,
             });
-            if (!(data.radio?.playing)) stopRadioStatusPoll();
+            if (!(data.radio?.playing) && gen === radioStatusPollGen) {
+                stopRadioStatusPoll();
+            }
         } catch {
             /* keep polling while marked playing */
         }
@@ -13934,6 +13953,8 @@ els.unifiRadioPlay?.addEventListener('click', async () => {
     try {
         const data = await unifiApi({ action: 'radio_play', station_id, targets, volume }, 45000);
         if (!data?.ok) throw new Error(data?.error || 'Play failed');
+        // Drop in-flight Idle polls before painting the new playing state.
+        applyRadioCommandResult(data.radio || null);
         if (unifiDash) {
             if (data.radio) unifiDash.radio = data.radio;
             if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
@@ -13958,6 +13979,7 @@ els.unifiRadioStop?.addEventListener('click', async () => {
     try {
         const data = await unifiApi({ action: 'radio_stop' }, 10000);
         if (!data?.ok) throw new Error(data?.error || 'Stop failed');
+        applyRadioCommandResult(data.radio || { playing: false });
         if (unifiDash && data.radio) unifiDash.radio = data.radio;
         renderUnifiSpeakers(unifiDash || data, { replace: true });
         syncRadioPlayerChrome({
@@ -14403,6 +14425,7 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
         const res = await fetchWithTimeout('/api/unifi.php', { method: 'POST', body }, 45000);
         const data = await parseJsonResponse(res);
         if (!data?.ok) throw new Error(data?.error || 'Announcement failed');
+        applyRadioCommandResult(data.radio || null);
         if (unifiDash) {
             if (data.radio) unifiDash.radio = data.radio;
             if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
@@ -14416,7 +14439,6 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
         setRadioRecStatus('Sent');
         if (data.warning) showToast(data.warning, 'error');
         else showToast('Announcement sent', 'success');
-        syncRadioStatusPoll((unifiDash || data)?.radio || null);
     } catch (err) {
         setRadioRecStatus(err.message || 'Announcement failed');
         if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = err.message || 'Announcement failed';

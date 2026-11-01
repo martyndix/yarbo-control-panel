@@ -267,8 +267,11 @@ assert_true(str_contains($js, 'startRadioRecMeter'), 'Announcement level meter')
 assert_true(str_contains($js, "action', 'radio_announce'") || str_contains($js, 'radio_announce'), 'Announcement upload action');
 assert_true(str_contains($js, 'unifiRadioRecFile') || str_contains($js, 'unifi-radio-rec-file'), 'Choose file wired');
 assert_true(str_contains($js, 'startRadioStatusPoll'), 'radio status poll while playing');
+assert_true(str_contains($js, 'applyRadioCommandResult'), 'play/stop invalidate stale radio polls');
+assert_true(str_contains($js, 'radioStatusPollGen'), 'radio poll generation guard');
 assert_true(str_contains($js, "action: 'radio_status'"), 'polls radio_status');
 assert_true(str_contains($js, "'📣'") && str_contains($js, "'🔊'"), 'playing badge emojis');
+assert_true(str_contains($change, '## [4.0.176]'), 'changelog 4.0.176');
 $api = (string) file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
 assert_true(str_contains($api, 'catch (Throwable'), 'unifi status catches fatals as JSON');
 assert_true(str_contains($api, "radio_announce"), 'API radio_announce action');
