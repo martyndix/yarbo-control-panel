@@ -2520,10 +2520,22 @@ function applyHubFromStatus(data) {
     if (ids.includes('unifi') && activeModuleId === 'unifi' && !settingsModalOpen) {
         loadUnifiDashboard({ silent: true });
     }
+    // Prefer fresh status radio over a stale local Idle snapshot — other phones/tablets
+    // only learn about Play/Stop through this path once their local poll has gone Idle.
+    const remoteRadio = data?.unifi && Object.prototype.hasOwnProperty.call(data.unifi, 'radio')
+        ? data.unifi.radio
+        : null;
+    if (remoteRadio && Date.now() >= radioLocalCommandUntil) {
+        if (!unifiDash) unifiDash = {};
+        unifiDash.radio = remoteRadio;
+        if (Object.prototype.hasOwnProperty.call(data.unifi, 'speakers_enabled')) {
+            unifiDash.speakers_enabled = data.unifi.speakers_enabled;
+        }
+    }
     syncRadioPlayerChrome({
         unifiModuleOn: ids.includes('unifi'),
         speakersEnabled: unifiSpeakersEnabled(unifiDash || data?.unifi || {}),
-        radio: unifiDash?.radio || data?.unifi?.radio || null,
+        radio: pickRadioState(remoteRadio),
     });
     if (data.vestaboard) {
         applyVestaboardLiveSwitch(data);
@@ -3284,6 +3296,8 @@ let radioPlayerOpen = false;
 let radioSpeakersEnabled = true;
 let radioStatusPollTimer = 0;
 let radioStatusPollGen = 0;
+/** Ignore remote Idle/Playing for a moment after this tab's own Play/Stop/Announcement. */
+let radioLocalCommandUntil = 0;
 
 function radioIsAnnouncement(radio = {}) {
     const id = String(radio?.station_id || '');
@@ -3320,19 +3334,31 @@ function stopRadioStatusPoll() {
     }
 }
 
-function syncRadioStatusPoll(radio, { restart = false } = {}) {
-    if (radio?.playing) {
-        if (restart) stopRadioStatusPoll();
-        startRadioStatusPoll();
-    } else {
-        stopRadioStatusPoll();
+function pickRadioState(remoteRadio) {
+    const local = unifiDash?.radio || null;
+    if (Date.now() < radioLocalCommandUntil && local) {
+        return local;
     }
+    return remoteRadio ?? local ?? null;
+}
+
+function syncRadioStatusPoll(radio, { restart = false } = {}) {
+    // Keep watching while the Radio button is shown (even when Idle) so other devices
+    // see the next Play after this tab watched an announcement/station end.
+    if (restart) stopRadioStatusPoll();
+    if (radioSpeakersEnabled !== false) startRadioStatusPoll();
+    else stopRadioStatusPoll();
 }
 
 /** Call after Play / Stop / Announcement so stale polls cannot clobber the new state. */
 function applyRadioCommandResult(radio) {
+    radioLocalCommandUntil = Date.now() + 5000;
     stopRadioStatusPoll();
-    if (radio?.playing) startRadioStatusPoll();
+    if (radio && typeof radio === 'object') {
+        if (!unifiDash) unifiDash = {};
+        unifiDash.radio = radio;
+    }
+    startRadioStatusPoll();
 }
 
 function startRadioStatusPoll() {
@@ -3344,27 +3370,31 @@ function startRadioStatusPoll() {
             const data = await unifiApi({ action: 'radio_status' }, 8000);
             if (gen !== radioStatusPollGen) return;
             if (!data || data.ok === false) return;
-            if (unifiDash) {
-                if (data.radio) unifiDash.radio = data.radio;
+            const remote = data.radio || null;
+            if (remote && Date.now() >= radioLocalCommandUntil) {
+                if (!unifiDash) unifiDash = {};
+                unifiDash.radio = remote;
                 if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
                 if (Array.isArray(data.stations)) unifiDash.stations = data.stations;
                 if (Object.prototype.hasOwnProperty.call(data, 'speakers_enabled')) {
                     unifiDash.speakers_enabled = data.speakers_enabled;
                 }
             }
-            renderUnifiSpeakers(unifiDash || data, { replace: false });
+            const live = pickRadioState(remote);
+            renderUnifiSpeakers(
+                unifiDash ? { ...unifiDash, radio: live || unifiDash.radio } : data,
+                { replace: false },
+            );
             syncRadioPlayerChrome({
                 unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
                 speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
-                radio: (unifiDash || data)?.radio || null,
+                radio: live,
             });
-            if (!(data.radio?.playing) && gen === radioStatusPollGen) {
-                stopRadioStatusPoll();
-            }
+            // Stay subscribed while Idle so a Play from another phone still updates this tab.
         } catch {
-            /* keep polling while marked playing */
+            /* keep watching */
         }
-    }, 1500);
+    }, 2000);
 }
 
 function syncRadioPlayerChrome({ unifiModuleOn, speakersEnabled, radio } = {}) {
@@ -3384,8 +3414,11 @@ function syncRadioPlayerChrome({ unifiModuleOn, speakersEnabled, radio } = {}) {
     const live = radio || unifiDash?.radio || null;
     if (live) {
         setRadioPlayingBadge(Boolean(live.playing), live.station_name || '', live.station_id || '');
-        syncRadioStatusPoll(live);
+    } else {
+        setRadioPlayingBadge(false);
     }
+    // Always watch once the Radio control is visible (Idle or Playing).
+    startRadioStatusPoll();
 }
 
 async function ensureRadioPlayerData({ force = false } = {}) {
