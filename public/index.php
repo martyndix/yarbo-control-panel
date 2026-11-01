@@ -2103,7 +2103,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <button type="button" class="modal-backdrop" data-radio-player-close aria-label="Close Radio Player"></button>
             <div class="modal-panel card radio-player-panel">
                 <h2 id="radio-player-title">Radio Player</h2>
-                <p class="hint">Play a station to Protect cameras and readers with a speaker (talkback). Needs ffmpeg and UDP 7004 to each device.</p>
                 <div id="unifi-speakers" class="unifi-speakers" aria-label="Radio Player controls">
                     <div class="unifi-radio-announce" aria-label="Announce">
                         <h3 class="settings-subtitle">Announce</h3>

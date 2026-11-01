@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.173] - 2026-11-02
+
+### Changed
+- Radio Player modal no longer shows the “Play a station to Protect…” intro blurb.
+
 ## [4.0.172] - 2026-11-01
 
 ### Changed
