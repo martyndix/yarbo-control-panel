@@ -98,7 +98,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     >Radio</button>
                     <span
                         id="radio-playing-badge"
-                        class="settings-update-badge radio-playing-badge hidden"
+                        class="radio-playing-badge hidden"
                         aria-hidden="true"
                         title="Radio playing"
                     ></span>
@@ -2079,7 +2079,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-panel-restart">Restart panel</button>
                                 <button type="button" class="btn" id="settings-https-ensure">Start HTTPS</button>
                             </div>
-                            <p class="hint">Restart panel reloads the Pi service (MQTT agent, Matter). It does not reboot the whole Pi. <strong>Start HTTPS</strong> opens port <strong>8443</strong> for mic / Announce Record (self-signed — accept the Safari warning once). Paper tablets keep using HTTP :8080.</p>
+                            <p class="hint">Restart panel reloads the Pi service (MQTT agent, Matter). It does not reboot the whole Pi. <strong>Start HTTPS</strong> opens port <strong>8443</strong> for mic / Announcement Record (self-signed — accept the Safari warning once). Paper tablets keep using HTTP :8080.</p>
                             <p id="settings-https-status" class="hint" role="status">Checking HTTPS…</p>
                             <pre id="settings-https-log" class="settings-https-log hidden" aria-live="polite"></pre>
                             <h3 class="settings-subtitle">E-paper firmware</h3>
@@ -2104,8 +2104,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="modal-panel card radio-player-panel">
                 <h2 id="radio-player-title">Radio Player</h2>
                 <div id="unifi-speakers" class="unifi-speakers" aria-label="Radio Player controls">
-                    <div class="unifi-radio-announce" aria-label="Announce">
-                        <h3 class="settings-subtitle">Announce</h3>
+                    <div class="unifi-radio-announce" aria-label="Announcement">
+                        <h3 class="settings-subtitle">Announcement</h3>
                         <p class="hint">Hold Record to speak, check the level meter, listen back, then Send to the speakers ticked below. Or choose an audio file.</p>
                         <div class="unifi-radio-rec-meter" aria-hidden="true" title="Microphone level">
                             <div id="unifi-radio-rec-meter-fill" class="unifi-radio-rec-meter-fill"></div>

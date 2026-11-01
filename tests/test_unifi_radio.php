@@ -214,25 +214,29 @@ assert_true(str_contains($change, '## [4.0.166]'), 'changelog 4.0.166');
 assert_true(str_contains($change, '## [4.0.167]'), 'changelog 4.0.167');
 assert_true(str_contains($change, '## [4.0.168]'), 'changelog 4.0.168');
 assert_true(str_contains($change, '## [4.0.172]'), 'changelog 4.0.172');
-assert_true(str_contains($change, 'Announce'), 'changelog mentions Announce');
+assert_true(str_contains($change, 'Announcement'), 'changelog mentions Announcement');
 assert_true(str_contains($change, '8443') || str_contains($change, 'HTTPS'), 'changelog mentions HTTPS :8443');
 assert_true(str_contains($change, 'Radio Player'), 'changelog mentions Radio Player');
-assert_true(str_contains($index, 'id="unifi-radio-rec"'), 'Announce Record button');
-assert_true(str_contains($index, 'Hold to record'), 'Announce hold-to-record label');
-assert_true(!str_contains($index, 'id="unifi-radio-rec-stop"'), 'Announce Stop button removed');
-assert_true(str_contains($index, 'id="unifi-radio-rec-meter-fill"'), 'Announce level meter');
-assert_true(str_contains($index, 'id="unifi-radio-rec-listen"'), 'Announce Listen button');
-assert_true(str_contains($index, 'id="unifi-radio-rec-send"'), 'Announce Send button');
-assert_true(str_contains($index, 'id="unifi-radio-rec-file"'), 'Announce Choose file button');
+assert_true(str_contains($index, 'id="unifi-radio-rec"'), 'Announcement Record button');
+assert_true(str_contains($index, 'Hold to record'), 'Announcement hold-to-record label');
+assert_true(!str_contains($index, 'id="unifi-radio-rec-stop"'), 'Announcement Stop button removed');
+assert_true(str_contains($index, 'id="unifi-radio-rec-meter-fill"'), 'Announcement level meter');
+assert_true(str_contains($index, 'id="unifi-radio-rec-listen"'), 'Announcement Listen button');
+assert_true(str_contains($index, 'id="unifi-radio-rec-send"'), 'Announcement Send button');
+assert_true(str_contains($index, 'id="unifi-radio-rec-file"'), 'Announcement Choose file button');
 $listenPos = strpos($index, 'id="unifi-radio-rec-listen"');
 $filePos = strpos($index, 'id="unifi-radio-rec-file"');
 assert_true($listenPos !== false && $filePos !== false && $listenPos < $filePos, 'Listen before Choose file');
-assert_true(str_contains($index, 'unifi-radio-announce'), 'Announce section');
+assert_true(str_contains($index, 'unifi-radio-announce'), 'Announcement section');
+assert_true(str_contains($index, '>Announcement<'), 'Announcement heading label');
+assert_true(!preg_match('/settings-subtitle">Announce</', $index), 'old Announce heading gone');
 $announcePos = strpos($index, 'unifi-radio-announce');
 $radioStreamPos = strpos($index, 'unifi-radio-stream');
-assert_true($announcePos !== false && $radioStreamPos !== false && $announcePos < $radioStreamPos, 'Announce above Radio section');
+assert_true($announcePos !== false && $radioStreamPos !== false && $announcePos < $radioStreamPos, 'Announcement above Radio section');
 assert_true(str_contains($change, '## [4.0.174]'), 'changelog 4.0.174');
-assert_true(!str_contains($index, 'Live Record needs HTTPS'), 'HTTPS blurb removed from Announce hint');
+assert_true(str_contains($change, '## [4.0.175]'), 'changelog 4.0.175');
+assert_true(str_contains($change, '🔊') && str_contains($change, '📣'), 'changelog mentions radio badge emojis');
+assert_true(!str_contains($index, 'Live Record needs HTTPS'), 'HTTPS blurb removed from Announcement hint');
 $httpsProxy = (string) file_get_contents(dirname(__DIR__) . '/scripts/panel_https_proxy.py');
 $httpsLib = (string) file_get_contents(dirname(__DIR__) . '/scripts/lib/panel_https.sh');
 $panelSh = (string) file_get_contents(dirname(__DIR__) . '/scripts/panel.sh');
@@ -249,22 +253,26 @@ assert_true(str_contains($css, 'radio-player-panel'), 'Radio Player modal panel 
 assert_true(str_contains($css, 'radio-playing-badge') || str_contains($css, '#radio-open.is-playing'), 'Radio playing chrome CSS');
 assert_true(str_contains($css, '.unifi-radio-speaker span'), 'speaker name colour forced');
 assert_true(preg_match('/#unifi-radio-status\s*\{[^}]*margin:\s*0\.55rem/s', $css) === 1, 'status cleared below Play/Stop');
-assert_true(str_contains($css, 'unifi-radio-announce'), 'Announce CSS');
-assert_true(str_contains($css, 'unifi-radio-rec-meter'), 'Announce meter CSS');
+assert_true(str_contains($css, 'unifi-radio-announce'), 'Announcement CSS');
+assert_true(str_contains($css, 'unifi-radio-rec-meter'), 'Announcement meter CSS');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(str_contains($js, 'prevModuleId !== \'unifi\''), 'UniFi poll not restarted every hub status');
 assert_true(str_contains($js, 'syncRadioPlayerChrome'), 'Radio header chrome sync');
 assert_true(str_contains($js, 'openRadioPlayerModal'), 'Radio Player modal open');
 assert_true(str_contains($js, 'UNIFI_SPEAKER_PICK_KEY'), 'speaker ticks remembered');
 assert_true(str_contains($js, 'fromDom'), 'speaker ticks preserved across Speakers re-render');
-assert_true(str_contains($js, 'startRadioRecording'), 'Announce MediaRecorder start');
-assert_true(str_contains($js, 'beginRadioRecHold'), 'Announce hold-to-record');
-assert_true(str_contains($js, 'startRadioRecMeter'), 'Announce level meter');
-assert_true(str_contains($js, "action', 'radio_announce'") || str_contains($js, 'radio_announce'), 'Announce upload action');
+assert_true(str_contains($js, 'startRadioRecording'), 'Announcement MediaRecorder start');
+assert_true(str_contains($js, 'beginRadioRecHold'), 'Announcement hold-to-record');
+assert_true(str_contains($js, 'startRadioRecMeter'), 'Announcement level meter');
+assert_true(str_contains($js, "action', 'radio_announce'") || str_contains($js, 'radio_announce'), 'Announcement upload action');
 assert_true(str_contains($js, 'unifiRadioRecFile') || str_contains($js, 'unifi-radio-rec-file'), 'Choose file wired');
+assert_true(str_contains($js, 'startRadioStatusPoll'), 'radio status poll while playing');
+assert_true(str_contains($js, "action: 'radio_status'"), 'polls radio_status');
+assert_true(str_contains($js, "'📣'") && str_contains($js, "'🔊'"), 'playing badge emojis');
 $api = (string) file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
 assert_true(str_contains($api, 'catch (Throwable'), 'unifi status catches fatals as JSON');
 assert_true(str_contains($api, "radio_announce"), 'API radio_announce action');
+assert_true(str_contains($api, "radio_status"), 'API radio_status action');
 $php = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php');
 $unifiPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifi.php');
 assert_true(str_contains($php, 'function_exists(\'mb_substr\')'), 'mb_substr guarded');
@@ -275,6 +283,9 @@ assert_true(str_contains($php, '-f adts'), 'ffmpeg outputs ADTS for AAC talkback
 assert_true(str_contains($php, 'function playAnnounce'), 'playAnnounce method');
 assert_true(str_contains($php, 'storeAnnounceUpload'), 'announce upload helper');
 assert_true(str_contains($php, '$localFile'), 'ffmpeg local-file path for announce');
+assert_true(str_contains($php, 'ends_at'), 'announce ends_at for Idle');
+assert_true(str_contains($php, 'probeClipDurationSeconds'), 'ffprobe duration for announce');
+assert_true(str_contains($php, "'Announcement'"), 'station name Announcement');
 assert_true(str_contains($unifiPhp, 'speakerVolume'), 'volume uses speakerVolume on private API');
 assert_true(str_contains($unifiPhp, 'protectPrivateUrl'), 'volume helper can build private Protect URL');
 
@@ -291,11 +302,29 @@ file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
     'streams' => [],
     'targets' => ['cam1', 'cam2'],
     'started_at' => null,
+    'ends_at' => null,
     'error' => null,
 ], JSON_UNESCAPED_SLASHES));
 $idle = $radio->status();
 assert_true(($idle['playing'] ?? true) === false, 'idle not playing');
 assert_true(($idle['targets'] ?? []) === ['cam1', 'cam2'], 'idle keeps saved targets');
 assert_true(($idle['active_targets'] ?? ['x']) === [], 'idle has no active streams');
+
+// Finished announcement (dead pid / expired ends_at) must clear playing.
+file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
+    'playing' => true,
+    'station_id' => 'announce',
+    'station_name' => 'Announcement',
+    'volume' => 60,
+    'streams' => [['camera_id' => 'cam1', 'pid' => 999999991]],
+    'targets' => ['cam1'],
+    'started_at' => time() - 10,
+    'ends_at' => time() - 1,
+    'error' => null,
+], JSON_UNESCAPED_SLASHES));
+$done = $radio->status();
+assert_true(($done['playing'] ?? true) === false, 'announce ends_at clears playing');
+assert_true(empty($done['ends_at']), 'announce ends_at cleared');
+assert_true(($done['station_name'] ?? '') === 'Announcement', 'keeps Announcement name while Idle');
 
 echo "test_unifi_radio.php ok\n";

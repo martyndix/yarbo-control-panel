@@ -150,6 +150,10 @@ if ($action === 'radio_stop') {
     json_response($radio()->stop());
 }
 
+if ($action === 'radio_status') {
+    json_response(['ok' => true] + $radio()->dashboardSlice());
+}
+
 if ($action === 'radio_volume') {
     json_response($radio()->setVolume($input));
 }

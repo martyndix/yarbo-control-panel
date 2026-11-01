@@ -4269,10 +4269,35 @@ body.home-is-reordering {
     max-height: min(90vh, 40rem);
     overflow: auto;
 }
-.radio-playing-badge:not(.hidden) {
-    background: var(--accent);
+.radio-playing-badge {
+    position: absolute;
+    top: -0.45rem;
+    right: -0.35rem;
+    width: auto;
+    height: auto;
+    min-width: 1.15rem;
+    min-height: 1.15rem;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    font-size: 0.95rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    filter: drop-shadow(0 0 1px var(--bg)) drop-shadow(0 0 1px var(--bg));
+}
+.radio-playing-badge.hidden {
+    display: none;
 }
 #radio-open.is-playing {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+#radio-open.is-announcing {
     border-color: var(--accent);
     color: var(--accent);
 }

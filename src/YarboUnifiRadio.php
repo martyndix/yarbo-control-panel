@@ -77,7 +77,7 @@ final class YarboUnifiRadio
     }
 
     /**
-     * @return array{playing: bool, station_id: ?string, station_name: ?string, targets: list<string>, active_targets: list<string>, volume: int, error: ?string, started_at: ?int}
+     * @return array{playing: bool, station_id: ?string, station_name: ?string, targets: list<string>, active_targets: list<string>, volume: int, error: ?string, started_at: ?int, ends_at: ?int}
      */
     public function status(): array
     {
@@ -92,14 +92,31 @@ final class YarboUnifiRadio
                 $alive[] = $row;
             }
         }
-        if ($alive === [] && ($state['playing'] ?? false)) {
+
+        $endsAt = isset($state['ends_at']) ? (int) $state['ends_at'] : 0;
+        $timedOut = $endsAt > 0 && time() >= $endsAt;
+        // Finite clips (Announcement) must return to Idle when ffmpeg exits or ends_at passes.
+        if ($timedOut || ($alive === [] && ($state['playing'] ?? false))) {
+            if ($timedOut && $alive !== []) {
+                foreach ($alive as $row) {
+                    $pid = (int) ($row['pid'] ?? 0);
+                    if ($pid > 1) {
+                        $this->killPidTree($pid);
+                    }
+                }
+            }
             $state['playing'] = false;
             $state['streams'] = [];
+            $state['ends_at'] = null;
             $state['error'] = $state['error'] ?? null;
             $this->writeState($state);
+            $alive = [];
         } elseif (count($alive) !== count($state['streams'])) {
             $state['streams'] = $alive;
             $state['playing'] = $alive !== [];
+            if ($alive === []) {
+                $state['ends_at'] = null;
+            }
             $this->writeState($state);
         }
 
@@ -131,6 +148,9 @@ final class YarboUnifiRadio
                 ? $state['error']
                 : null,
             'started_at' => isset($state['started_at']) ? (int) $state['started_at'] : null,
+            'ends_at' => isset($state['ends_at']) && (int) $state['ends_at'] > 0
+                ? (int) $state['ends_at']
+                : null,
         ];
     }
 
@@ -168,7 +188,7 @@ final class YarboUnifiRadio
         if ($station === null && $stationId === 'announce') {
             $clip = trim((string) ($input['clip_path'] ?? $this->loadState()['station_url'] ?? ''));
             if ($clip !== '' && is_file($clip)) {
-                return $this->playLocalClip($clip, $input, 'Announce');
+                return $this->playLocalClip($clip, $input, 'Announcement');
             }
         }
         if ($station === null) {
@@ -238,7 +258,7 @@ final class YarboUnifiRadio
         return $this->playLocalClip($clipPath, [
             'targets' => $targets,
             'volume' => $volume,
-        ], 'Announce');
+        ], 'Announcement');
     }
 
     /**
@@ -342,6 +362,13 @@ final class YarboUnifiRadio
         $playError = $ok
             ? ($errors !== [] ? implode('; ', $errors) : null)
             : ($errors !== [] ? implode('; ', $errors) : 'No speakers started');
+        $endsAt = null;
+        if ($ok && $localFile && $playing) {
+            // Clip length + small grace so status() returns Idle after the announcement.
+            $seconds = $this->probeClipDurationSeconds($contentUrl);
+            $pad = 2;
+            $endsAt = time() + max(2, (int) ceil(($seconds ?? 30) + $pad));
+        }
         $state = [
             'playing' => $playing,
             'station_id' => $stationId,
@@ -353,6 +380,7 @@ final class YarboUnifiRadio
             // Remember the speakers the user ticked, even if some failed to start.
             'targets' => $targets,
             'started_at' => $ok ? time() : null,
+            'ends_at' => $endsAt,
             'error' => $playError,
         ];
         $this->writeState($state);
@@ -443,12 +471,45 @@ final class YarboUnifiRadio
         $state['playing'] = false;
         $state['streams'] = [];
         $state['started_at'] = null;
+        $state['ends_at'] = null;
         if ($clearError) {
             $state['error'] = null;
         }
         $this->writeState($state);
 
         return ['ok' => true, 'radio' => $this->status()];
+    }
+
+    /**
+     * Best-effort clip length for Announcement Idle timeout (seconds).
+     */
+    private function probeClipDurationSeconds(string $path): ?float
+    {
+        if ($path === '' || !is_file($path)) {
+            return null;
+        }
+        $ffmpeg = $this->unifi->ffmpegPath();
+        $ffprobe = 'ffprobe';
+        if ($ffmpeg !== '' && str_contains($ffmpeg, '/')) {
+            $candidate = dirname($ffmpeg) . '/ffprobe';
+            if (is_executable($candidate)) {
+                $ffprobe = $candidate;
+            }
+        }
+        $cmd = escapeshellarg($ffprobe)
+            . ' -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '
+            . escapeshellarg($path)
+            . ' 2>/dev/null';
+        $out = trim((string) shell_exec($cmd));
+        if ($out === '' || !is_numeric($out)) {
+            return null;
+        }
+        $seconds = (float) $out;
+        if ($seconds <= 0 || $seconds > 120) {
+            return null;
+        }
+
+        return $seconds;
     }
 
     /**
@@ -768,6 +829,7 @@ final class YarboUnifiRadio
             'streams' => [],
             'targets' => [],
             'started_at' => null,
+            'ends_at' => null,
             'error' => null,
         ];
         $decoded = $this->readJsonFile($this->statePath());

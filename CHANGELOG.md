@@ -6,10 +6,19 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.175] - 2026-11-02
+
+### Changed
+- Radio Player section renamed **Announce** → **Announcement**.
+- Header Radio badge uses **🔊** while a station is playing and **📣** during an announcement (replaces the green dot).
+
+### Fixed
+- After an **Announcement** finishes, status returns to **Idle** and the playing badge clears (server `ends_at` + light `radio_status` poll).
+
 ## [4.0.174] - 2026-11-02
 
 ### Changed
-- Radio Player **Announce** button order is now Hold to record → Listen → Choose file → Send.
+- Radio Player **Announcement** button order is now Hold to record → Listen → Choose file → Send.
 
 ## [4.0.173] - 2026-11-02
 

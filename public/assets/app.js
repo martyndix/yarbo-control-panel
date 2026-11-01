@@ -3282,18 +3282,70 @@ function writeUnifiSpeakerPick(ids) {
 
 let radioPlayerOpen = false;
 let radioSpeakersEnabled = true;
+let radioStatusPollTimer = 0;
 
-function setRadioPlayingBadge(playing, stationName = '') {
+function radioIsAnnouncement(radio = {}) {
+    const id = String(radio?.station_id || '');
+    const name = String(radio?.station_name || '');
+    return id === 'announce' || /announc/i.test(name);
+}
+
+function setRadioPlayingBadge(playing, stationName = '', stationId = '') {
     const on = Boolean(playing);
+    const announce = stationId === 'announce' || /announc/i.test(String(stationName || ''));
     els.radioOpen?.classList.toggle('is-playing', on);
+    els.radioOpen?.classList.toggle('is-announcing', on && announce);
     if (!els.radioPlayingBadge) return;
     els.radioPlayingBadge.classList.toggle('hidden', !on);
+    els.radioPlayingBadge.classList.toggle('is-announce', on && announce);
     els.radioPlayingBadge.setAttribute('aria-hidden', on ? 'false' : 'true');
-    const label = stationName ? `Playing ${stationName}` : 'Radio playing';
+    const label = stationName
+        ? `Playing ${stationName}`
+        : (announce ? 'Playing announcement' : 'Radio playing');
     els.radioPlayingBadge.title = label;
+    els.radioPlayingBadge.textContent = on ? (announce ? '📣' : '🔊') : '';
     if (els.radioOpen) {
         els.radioOpen.setAttribute('aria-label', on ? `Radio Player, ${label}` : 'Radio Player');
     }
+}
+
+function stopRadioStatusPoll() {
+    if (radioStatusPollTimer) {
+        clearInterval(radioStatusPollTimer);
+        radioStatusPollTimer = 0;
+    }
+}
+
+function syncRadioStatusPoll(radio) {
+    if (radio?.playing) startRadioStatusPoll();
+    else stopRadioStatusPoll();
+}
+
+function startRadioStatusPoll() {
+    if (radioStatusPollTimer) return;
+    radioStatusPollTimer = window.setInterval(async () => {
+        try {
+            const data = await unifiApi({ action: 'radio_status' }, 8000);
+            if (!data || data.ok === false) return;
+            if (unifiDash) {
+                if (data.radio) unifiDash.radio = data.radio;
+                if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+                if (Array.isArray(data.stations)) unifiDash.stations = data.stations;
+                if (Object.prototype.hasOwnProperty.call(data, 'speakers_enabled')) {
+                    unifiDash.speakers_enabled = data.speakers_enabled;
+                }
+            }
+            renderUnifiSpeakers(unifiDash || data, { replace: false });
+            syncRadioPlayerChrome({
+                unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+                speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
+                radio: (unifiDash || data)?.radio || null,
+            });
+            if (!(data.radio?.playing)) stopRadioStatusPoll();
+        } catch {
+            /* keep polling while marked playing */
+        }
+    }, 1500);
 }
 
 function syncRadioPlayerChrome({ unifiModuleOn, speakersEnabled, radio } = {}) {
@@ -3303,14 +3355,18 @@ function syncRadioPlayerChrome({ unifiModuleOn, speakersEnabled, radio } = {}) {
     if (!show) {
         if (radioPlayerOpen) closeRadioPlayerModal({ stopIfNeeded: false });
         setRadioPlayingBadge(false);
+        stopRadioStatusPoll();
         if (unifiModuleOn === false && (unifiDash?.radio?.playing || radio?.playing)) {
             unifiApi({ action: 'radio_stop' }, 8000).catch(() => {});
             if (unifiDash?.radio) unifiDash.radio.playing = false;
         }
         return;
     }
-    if (radio) setRadioPlayingBadge(Boolean(radio.playing), radio.station_name || '');
-    else if (unifiDash?.radio) setRadioPlayingBadge(Boolean(unifiDash.radio.playing), unifiDash.radio.station_name || '');
+    const live = radio || unifiDash?.radio || null;
+    if (live) {
+        setRadioPlayingBadge(Boolean(live.playing), live.station_name || '', live.station_id || '');
+        syncRadioStatusPoll(live);
+    }
 }
 
 async function ensureRadioPlayerData({ force = false } = {}) {
@@ -3422,14 +3478,17 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
 
     if (els.unifiRadioStatus) {
         if (radio.playing) {
-            els.unifiRadioStatus.textContent = `Playing · ${radio.station_name || 'station'}${radio.error ? ' · ' + radio.error : ''}`;
+            const name = radio.station_name
+                || (radioIsAnnouncement(radio) ? 'Announcement' : 'station');
+            els.unifiRadioStatus.textContent = `Playing · ${name}${radio.error ? ' · ' + radio.error : ''}`;
         } else if (radio.error) {
             els.unifiRadioStatus.textContent = radio.error;
         } else {
             els.unifiRadioStatus.textContent = 'Idle';
         }
     }
-    setRadioPlayingBadge(Boolean(radio.playing), radio.station_name || '');
+    setRadioPlayingBadge(Boolean(radio.playing), radio.station_name || '', radio.station_id || '');
+    syncRadioStatusPoll(radio);
 }
 
 function unifiSelectedSpeakerIds() {
@@ -14343,7 +14402,7 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
         body.append('audio', radioRecBlob, filename);
         const res = await fetchWithTimeout('/api/unifi.php', { method: 'POST', body }, 45000);
         const data = await parseJsonResponse(res);
-        if (!data?.ok) throw new Error(data?.error || 'Announce failed');
+        if (!data?.ok) throw new Error(data?.error || 'Announcement failed');
         if (unifiDash) {
             if (data.radio) unifiDash.radio = data.radio;
             if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
@@ -14356,11 +14415,12 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
         });
         setRadioRecStatus('Sent');
         if (data.warning) showToast(data.warning, 'error');
-        else showToast('Announce sent', 'success');
+        else showToast('Announcement sent', 'success');
+        syncRadioStatusPoll((unifiDash || data)?.radio || null);
     } catch (err) {
-        setRadioRecStatus(err.message || 'Announce failed');
-        if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = err.message || 'Announce failed';
-        showToast(err.message || 'Announce failed', 'error');
+        setRadioRecStatus(err.message || 'Announcement failed');
+        if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = err.message || 'Announcement failed';
+        showToast(err.message || 'Announcement failed', 'error');
     } finally {
         if (els.unifiRadioRecFile) els.unifiRadioRecFile.disabled = false;
         syncRadioAnnounceChrome();
