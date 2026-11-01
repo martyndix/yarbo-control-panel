@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.166] - 2026-11-01
+
+### Changed
+- Header **Radio** button shows **▶** while playing and **⏹** when stopped.
+
 ## [4.0.165] - 2026-11-01
 
 ### Fixed

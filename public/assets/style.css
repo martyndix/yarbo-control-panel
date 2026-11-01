@@ -4254,9 +4254,20 @@ body.home-is-reordering {
 .radio-playing-badge:not(.hidden) {
     background: var(--accent);
 }
+.radio-open-mark {
+    display: inline-block;
+    margin-left: 0.2rem;
+    font-size: 0.72em;
+    line-height: 1;
+    vertical-align: 0.05em;
+    opacity: 0.75;
+}
 #radio-open.is-playing {
     border-color: var(--accent);
     color: var(--accent);
+}
+#radio-open.is-playing .radio-open-mark {
+    opacity: 1;
 }
 .unifi-speakers {
     margin: 0.35rem 0 0.75rem;

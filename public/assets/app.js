@@ -76,6 +76,7 @@ const els = {
     mailOpenWrap: document.getElementById('mail-open-wrap'),
     mailUnreadBadge: document.getElementById('mail-unread-badge'),
     radioOpen: document.getElementById('radio-open'),
+    radioOpenMark: document.getElementById('radio-open-mark'),
     radioOpenWrap: document.getElementById('radio-open-wrap'),
     radioPlayingBadge: document.getElementById('radio-playing-badge'),
     radioPlayerModal: document.getElementById('radio-player-modal'),
@@ -3273,13 +3274,18 @@ let radioSpeakersEnabled = true;
 function setRadioPlayingBadge(playing, stationName = '') {
     const on = Boolean(playing);
     els.radioOpen?.classList.toggle('is-playing', on);
-    if (!els.radioPlayingBadge) return;
-    els.radioPlayingBadge.classList.toggle('hidden', !on);
-    els.radioPlayingBadge.setAttribute('aria-hidden', on ? 'false' : 'true');
-    const label = stationName ? `Playing ${stationName}` : 'Radio playing';
-    els.radioPlayingBadge.title = label;
+    const playLabel = stationName ? `Playing ${stationName}` : 'Playing';
+    if (els.radioOpenMark) {
+        els.radioOpenMark.textContent = on ? '▶' : '⏹';
+        els.radioOpenMark.title = on ? playLabel : 'Stopped';
+    }
+    if (els.radioPlayingBadge) {
+        els.radioPlayingBadge.classList.toggle('hidden', !on);
+        els.radioPlayingBadge.setAttribute('aria-hidden', on ? 'false' : 'true');
+        els.radioPlayingBadge.title = on ? playLabel : 'Radio playing';
+    }
     if (els.radioOpen) {
-        els.radioOpen.setAttribute('aria-label', on ? `Radio Player, ${label}` : 'Radio Player');
+        els.radioOpen.setAttribute('aria-label', on ? `Radio Player, ${playLabel}` : 'Radio Player, stopped');
     }
 }
 

@@ -94,8 +94,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         class="btn btn-secondary btn-settings"
                         aria-controls="radio-player-modal"
                         aria-expanded="false"
-                        aria-label="Radio Player"
-                    >Radio</button>
+                        aria-label="Radio Player, stopped"
+                    >Radio <span id="radio-open-mark" class="radio-open-mark" aria-hidden="true" title="Stopped">⏹</span></button>
                     <span
                         id="radio-playing-badge"
                         class="settings-update-badge radio-playing-badge hidden"
