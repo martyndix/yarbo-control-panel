@@ -2116,13 +2116,16 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <p id="unifi-radio-status" class="hint" role="status">Idle</p>
                     <div class="unifi-radio-announce" aria-label="Announce">
                         <h3 class="settings-subtitle">Announce</h3>
-                        <p class="hint">Record a short message on this device, listen back, then send it to the speakers ticked above (same volume). Needs microphone permission.</p>
+                        <p class="hint">Record a short message (or choose an audio file), listen back, then send it to the speakers ticked above. Live Record needs HTTPS — open the panel on port <strong>8443</strong> (self-signed; accept the warning once). Paper tablets keep using HTTP :8080.</p>
                         <div class="settings-update-actions unifi-radio-announce-actions">
                             <button type="button" class="btn" id="unifi-radio-rec">Record</button>
                             <button type="button" class="btn btn-secondary" id="unifi-radio-rec-stop" disabled>Stop</button>
+                            <button type="button" class="btn btn-secondary" id="unifi-radio-rec-file">Choose file</button>
                             <button type="button" class="btn btn-secondary" id="unifi-radio-rec-listen" disabled>Listen</button>
                             <button type="button" class="btn" id="unifi-radio-rec-send" disabled>Send</button>
                         </div>
+                        <input type="file" id="unifi-radio-rec-input" class="hidden" accept="audio/*,.webm,.ogg,.mp3,.m4a,.wav,.aac" aria-label="Choose audio file for announce">
+                        <input type="file" id="unifi-radio-rec-capture" class="hidden" accept="audio/*" capture aria-hidden="true" tabindex="-1">
                         <audio id="unifi-radio-rec-audio" class="unifi-radio-rec-audio hidden" controls preload="metadata"></audio>
                         <p id="unifi-radio-rec-status" class="hint" role="status"></p>
                     </div>

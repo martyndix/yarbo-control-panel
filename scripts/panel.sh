@@ -14,6 +14,8 @@ PHP_BIN="${YARBO_PHP_BIN:-$(command -v php)}"
 source "${ROOT}/scripts/lib/mqtt_agent.sh"
 # shellcheck source=scripts/lib/matter_agent.sh
 source "${ROOT}/scripts/lib/matter_agent.sh"
+# shellcheck source=scripts/lib/panel_https.sh
+source "${ROOT}/scripts/lib/panel_https.sh"
 
 if [[ -z "$PHP_BIN" ]]; then
   echo "ERROR: php not found on PATH" >&2
@@ -21,6 +23,9 @@ if [[ -z "$PHP_BIN" ]]; then
 fi
 
 cleanup() {
+  if [[ -n "${HTTPS_PROXY_PID:-}" ]]; then
+    kill "${HTTPS_PROXY_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${AGENT_PID:-}" ]]; then
     kill "${AGENT_PID}" 2>/dev/null || true
   fi
@@ -40,6 +45,7 @@ cleanup() {
     kill "${MATTER_PID}" 2>/dev/null || true
   fi
   pkill -f '[s]cripts/matter_agent.py' 2>/dev/null || true
+  pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
   yarbo_stop_matter_agent 2>/dev/null || true
   pkill -f '[p]aper_remote_router.php' 2>/dev/null || true
 }
@@ -144,7 +150,13 @@ if [[ -f "${ROOT}/scripts/paper_remote.sh" ]]; then
   fi
 fi
 
+HTTPS_PROXY_PID=""
+yarbo_panel_start_https_proxy "${ROOT}" "${PORT}" || true
+
 echo "==> Starting panel on http://${HOST}:${PORT}"
+if yarbo_panel_https_enabled; then
+  echo "    HTTPS UI: https://<panel-ip>:$(yarbo_panel_https_port) (self-signed — accept once for mic / Announce)"
+fi
 echo "    Keep this process running. Hard-refresh the browser after start."
 echo "    Close the official Yarbo app while testing controls/drive."
 "$PHP_BIN" -d max_execution_time=1200 -S "${HOST}:${PORT}" -t "${ROOT}/public"

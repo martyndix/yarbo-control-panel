@@ -163,6 +163,9 @@ const els = {
     unifiRadioStatus: document.getElementById('unifi-radio-status'),
     unifiRadioRec: document.getElementById('unifi-radio-rec'),
     unifiRadioRecStop: document.getElementById('unifi-radio-rec-stop'),
+    unifiRadioRecFile: document.getElementById('unifi-radio-rec-file'),
+    unifiRadioRecInput: document.getElementById('unifi-radio-rec-input'),
+    unifiRadioRecCapture: document.getElementById('unifi-radio-rec-capture'),
     unifiRadioRecListen: document.getElementById('unifi-radio-rec-listen'),
     unifiRadioRecSend: document.getElementById('unifi-radio-rec-send'),
     unifiRadioRecAudio: document.getElementById('unifi-radio-rec-audio'),
@@ -3340,6 +3343,7 @@ async function openRadioPlayerModal() {
     els.radioOpen?.classList.add('is-active');
     els.radioOpen?.setAttribute('aria-expanded', 'true');
     document.body.classList.add('modal-open');
+    syncRadioAnnounceChrome();
     await ensureRadioPlayerData({ force: !unifiDash?.stations?.length });
 }
 
@@ -13785,6 +13789,7 @@ els.unifiRadioStop?.addEventListener('click', async () => {
 });
 
 const RADIO_ANNOUNCE_MAX_MS = 30000;
+const RADIO_ANNOUNCE_MAX_BYTES = 3_000_000;
 let radioRecRecorder = null;
 let radioRecStream = null;
 let radioRecChunks = [];
@@ -13795,6 +13800,99 @@ let radioRecStartedAt = 0;
 
 function setRadioRecStatus(text) {
     if (els.unifiRadioRecStatus) els.unifiRadioRecStatus.textContent = text || '';
+}
+
+function radioAnnounceGetUserMedia() {
+    const md = navigator.mediaDevices;
+    if (md && typeof md.getUserMedia === 'function') {
+        return (constraints) => md.getUserMedia(constraints);
+    }
+    const legacy = navigator.getUserMedia
+        || navigator.webkitGetUserMedia
+        || navigator.mozGetUserMedia;
+    if (typeof legacy === 'function') {
+        return (constraints) => new Promise((resolve, reject) => {
+            legacy.call(navigator, constraints, resolve, reject);
+        });
+    }
+    return null;
+}
+
+function radioAnnounceCanRecord() {
+    try {
+        return typeof MediaRecorder !== 'undefined' && radioAnnounceGetUserMedia() !== null;
+    } catch {
+        return false;
+    }
+}
+
+function radioAnnounceHttpsUrl() {
+    try {
+        if (typeof window.isSecureContext === 'boolean' && window.isSecureContext) return '';
+        const host = location.hostname || '127.0.0.1';
+        const path = `${location.pathname || '/'}${location.search || ''}${location.hash || ''}`;
+        return `https://${host}:8443${path}`;
+    } catch {
+        return '';
+    }
+}
+
+function radioAnnounceRecordBlockReason() {
+    if (typeof window.isSecureContext === 'boolean' && !window.isSecureContext) {
+        const httpsUrl = radioAnnounceHttpsUrl();
+        return httpsUrl
+            ? `Live Record needs HTTPS. Open ${httpsUrl} (accept the certificate warning once), or use Choose file here.`
+            : 'Live Record needs HTTPS or localhost. Use Choose file, or open the panel on port 8443.';
+    }
+    if (typeof MediaRecorder === 'undefined') {
+        return 'This browser has no MediaRecorder. Use Choose file instead.';
+    }
+    if (!radioAnnounceGetUserMedia()) {
+        return 'Microphone API unavailable here. Use Choose file instead.';
+    }
+    return '';
+}
+
+function syncRadioAnnounceChrome() {
+    const block = radioAnnounceRecordBlockReason();
+    const can = !block && radioAnnounceCanRecord();
+    // On plain HTTP, Record still works as a “capture / file” fallback for phones.
+    if (els.unifiRadioRec) {
+        els.unifiRadioRec.disabled = Boolean(radioRecRecorder);
+        els.unifiRadioRec.title = can
+            ? 'Record from this device microphone'
+            : 'Open HTTPS :8443 for in-page mic, or tap to use the device recorder / file picker';
+    }
+    if (block && !radioRecBlob && !radioRecRecorder) {
+        setRadioRecStatus(block);
+    } else if (!block && !radioRecBlob && !radioRecRecorder
+        && /Choose file|HTTPS|8443|Microphone/.test(els.unifiRadioRecStatus?.textContent || '')) {
+        setRadioRecStatus('');
+    }
+}
+
+function setRadioRecPreview(blob, statusText) {
+    if (!(blob instanceof Blob) || blob.size <= 0) {
+        setRadioRecStatus('No audio in that file');
+        return;
+    }
+    if (blob.size > RADIO_ANNOUNCE_MAX_BYTES) {
+        setRadioRecStatus('Audio must be under 3 MB (keep it short)');
+        showToast('Audio must be under 3 MB', 'error');
+        return;
+    }
+    radioRecBlob = blob;
+    if (radioRecUrl) {
+        try { URL.revokeObjectURL(radioRecUrl); } catch { /* ignore */ }
+    }
+    radioRecUrl = URL.createObjectURL(blob);
+    if (els.unifiRadioRecAudio) {
+        els.unifiRadioRecAudio.src = radioRecUrl;
+        els.unifiRadioRecAudio.classList.remove('hidden');
+    }
+    if (els.unifiRadioRecListen) els.unifiRadioRecListen.disabled = false;
+    if (els.unifiRadioRecSend) els.unifiRadioRecSend.disabled = false;
+    setRadioRecStatus(statusText || 'Ready — Listen, then Send to the speakers above');
 }
 
 function clearRadioRecPreview() {
@@ -13812,6 +13910,8 @@ function clearRadioRecPreview() {
     }
     if (els.unifiRadioRecListen) els.unifiRadioRecListen.disabled = true;
     if (els.unifiRadioRecSend) els.unifiRadioRecSend.disabled = true;
+    if (els.unifiRadioRecInput) els.unifiRadioRecInput.value = '';
+    if (els.unifiRadioRecCapture) els.unifiRadioRecCapture.value = '';
 }
 
 function stopRadioMicTracks() {
@@ -13844,43 +13944,41 @@ function finishRadioRecording() {
         radioRecTimer = null;
     }
     els.unifiRadioRec?.classList.remove('is-recording');
-    if (els.unifiRadioRec) els.unifiRadioRec.disabled = false;
     if (els.unifiRadioRecStop) els.unifiRadioRecStop.disabled = true;
     stopRadioMicTracks();
     radioRecRecorder = null;
+    syncRadioAnnounceChrome();
     if (!radioRecChunks.length) {
         setRadioRecStatus('No audio captured');
         return;
     }
     const type = radioRecChunks[0]?.type || 'audio/webm';
-    radioRecBlob = new Blob(radioRecChunks, { type });
+    const blob = new Blob(radioRecChunks, { type });
     radioRecChunks = [];
-    if (radioRecUrl) {
-        try { URL.revokeObjectURL(radioRecUrl); } catch { /* ignore */ }
-    }
-    radioRecUrl = URL.createObjectURL(radioRecBlob);
-    if (els.unifiRadioRecAudio) {
-        els.unifiRadioRecAudio.src = radioRecUrl;
-        els.unifiRadioRecAudio.classList.remove('hidden');
-    }
-    if (els.unifiRadioRecListen) els.unifiRadioRecListen.disabled = false;
-    if (els.unifiRadioRecSend) els.unifiRadioRecSend.disabled = false;
     const secs = Math.max(1, Math.round((Date.now() - radioRecStartedAt) / 1000));
-    setRadioRecStatus(`Recorded ${secs}s — Listen, then Send to the speakers above`);
+    setRadioRecPreview(blob, `Recorded ${secs}s — Listen, then Send to the speakers above`);
 }
 
 async function startRadioRecording() {
-    if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-        throw new Error('This browser cannot record audio');
+    const block = radioAnnounceRecordBlockReason();
+    if (block) throw new Error(block);
+    const getUserMedia = radioAnnounceGetUserMedia();
+    if (typeof MediaRecorder === 'undefined' || !getUserMedia) {
+        throw new Error('Microphone API unavailable here. Use Choose file instead.');
     }
     clearRadioRecPreview();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const stream = await getUserMedia({ audio: true, video: false });
     radioRecStream = stream;
     const mime = pickRadioRecMime();
     radioRecChunks = [];
-    radioRecRecorder = mime
-        ? new MediaRecorder(stream, { mimeType: mime })
-        : new MediaRecorder(stream);
+    try {
+        radioRecRecorder = mime
+            ? new MediaRecorder(stream, { mimeType: mime })
+            : new MediaRecorder(stream);
+    } catch (err) {
+        stopRadioMicTracks();
+        throw new Error(err.message || 'Could not start MediaRecorder. Use Choose file instead.');
+    }
     radioRecRecorder.addEventListener('dataavailable', (event) => {
         if (event.data && event.data.size > 0) radioRecChunks.push(event.data);
     });
@@ -13908,22 +14006,47 @@ function stopRadioRecording() {
     } else {
         stopRadioMicTracks();
         els.unifiRadioRec?.classList.remove('is-recording');
-        if (els.unifiRadioRec) els.unifiRadioRec.disabled = false;
         if (els.unifiRadioRecStop) els.unifiRadioRecStop.disabled = true;
+        syncRadioAnnounceChrome();
     }
 }
 
+function announceFilenameForBlob(blob) {
+    const type = (blob?.type || '').toLowerCase();
+    if (type.includes('mp4') || type.includes('m4a')) return 'announce.m4a';
+    if (type.includes('ogg') || type.includes('opus')) return 'announce.ogg';
+    if (type.includes('wav')) return 'announce.wav';
+    if (type.includes('mpeg') || type.includes('mp3')) return 'announce.mp3';
+    if (type.includes('aac')) return 'announce.aac';
+    return 'announce.webm';
+}
+
+function loadRadioAnnounceFile(file, label) {
+    if (!file) return;
+    if (radioRecRecorder) stopRadioRecording();
+    clearRadioRecPreview();
+    setRadioRecPreview(file, label || `Loaded ${file.name} — Listen, then Send to the speakers above`);
+}
+
 els.unifiRadioRec?.addEventListener('click', async () => {
+    const block = radioAnnounceRecordBlockReason();
+    if (block) {
+        // HTTP / no mic API: open device voice-memo capture when possible, else file picker.
+        setRadioRecStatus(block);
+        if (els.unifiRadioRecCapture) els.unifiRadioRecCapture.click();
+        else els.unifiRadioRecInput?.click();
+        return;
+    }
     try {
         await startRadioRecording();
     } catch (err) {
         stopRadioMicTracks();
         els.unifiRadioRec?.classList.remove('is-recording');
-        if (els.unifiRadioRec) els.unifiRadioRec.disabled = false;
         if (els.unifiRadioRecStop) els.unifiRadioRecStop.disabled = true;
-        const msg = err?.name === 'NotAllowedError'
-            ? 'Microphone permission denied'
-            : (err.message || 'Could not start recording');
+        syncRadioAnnounceChrome();
+        let msg = err.message || 'Could not start recording';
+        if (err?.name === 'NotAllowedError') msg = 'Microphone permission denied. You can still use Choose file.';
+        else if (err?.name === 'NotFoundError') msg = 'No microphone found. Use Choose file instead.';
         setRadioRecStatus(msg);
         showToast(msg, 'error');
     }
@@ -13931,9 +14054,21 @@ els.unifiRadioRec?.addEventListener('click', async () => {
 els.unifiRadioRecStop?.addEventListener('click', () => {
     stopRadioRecording();
 });
+els.unifiRadioRecFile?.addEventListener('click', () => {
+    els.unifiRadioRecInput?.click();
+});
+els.unifiRadioRecInput?.addEventListener('change', () => {
+    loadRadioAnnounceFile(els.unifiRadioRecInput?.files?.[0]);
+});
+els.unifiRadioRecCapture?.addEventListener('change', () => {
+    loadRadioAnnounceFile(
+        els.unifiRadioRecCapture?.files?.[0],
+        'Captured recording — Listen, then Send to the speakers above',
+    );
+});
 els.unifiRadioRecListen?.addEventListener('click', async () => {
     if (!els.unifiRadioRecAudio?.src) {
-        showToast('Record a message first', 'error');
+        showToast('Record or choose a file first', 'error');
         return;
     }
     try {
@@ -13951,7 +14086,7 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
     const targets = unifiSelectedSpeakerIds();
     const volume = Number(els.unifiRadioVolume?.value || 60);
     if (!radioRecBlob) {
-        showToast('Record a message first', 'error');
+        showToast('Record or choose a file first', 'error');
         return;
     }
     if (!targets.length) {
@@ -13960,6 +14095,7 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
     }
     els.unifiRadioRecSend.disabled = true;
     if (els.unifiRadioRec) els.unifiRadioRec.disabled = true;
+    if (els.unifiRadioRecFile) els.unifiRadioRecFile.disabled = true;
     setRadioRecStatus('Sending…');
     if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = 'Announcing…';
     try {
@@ -13967,10 +14103,10 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
         body.append('action', 'radio_announce');
         body.append('volume', String(volume));
         body.append('targets', JSON.stringify(targets));
-        const ext = (radioRecBlob.type || '').includes('mp4') ? 'm4a'
-            : (radioRecBlob.type || '').includes('ogg') ? 'ogg'
-                : (radioRecBlob.type || '').includes('wav') ? 'wav' : 'webm';
-        body.append('audio', radioRecBlob, `announce.${ext}`);
+        const filename = (radioRecBlob instanceof File && radioRecBlob.name)
+            ? radioRecBlob.name
+            : announceFilenameForBlob(radioRecBlob);
+        body.append('audio', radioRecBlob, filename);
         const res = await fetchWithTimeout('/api/unifi.php', { method: 'POST', body }, 45000);
         const data = await parseJsonResponse(res);
         if (!data?.ok) throw new Error(data?.error || 'Announce failed');
@@ -13992,10 +14128,12 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
         if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = err.message || 'Announce failed';
         showToast(err.message || 'Announce failed', 'error');
     } finally {
-        if (els.unifiRadioRec) els.unifiRadioRec.disabled = false;
+        if (els.unifiRadioRecFile) els.unifiRadioRecFile.disabled = false;
+        syncRadioAnnounceChrome();
         if (els.unifiRadioRecSend) els.unifiRadioRecSend.disabled = !radioRecBlob;
     }
 });
+syncRadioAnnounceChrome();
 
 els.radioPlayerModal?.addEventListener('change', (event) => {
     const speaker = event.target.closest('input[data-unifi-speaker]');

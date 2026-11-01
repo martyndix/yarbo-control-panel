@@ -266,6 +266,16 @@ lan_url() {
   fi
 }
 
+lan_https_url() {
+  local ip https_port="${YARBO_PANEL_HTTPS_PORT:-8443}"
+  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  if [[ -n "$ip" ]]; then
+    echo "https://${ip}:${https_port}"
+  else
+    echo "https://localhost:${https_port}"
+  fi
+}
+
 echo "==> Yarbo Control Panel installer"
 echo "    Project: ${ROOT}"
 
@@ -285,6 +295,7 @@ echo "Install complete."
 echo ""
 if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled "${SERVICE_NAME}" >/dev/null 2>&1; then
   echo "Panel URL: $(lan_url)"
+  echo "HTTPS UI (mic / Announce): $(lan_https_url) — accept the self-signed warning once"
   echo "The panel starts automatically on boot (systemd: ${SERVICE_NAME})."
   echo ""
   echo "Next step: open the URL above, click Settings, and enter your Yarbo broker IP and serial."

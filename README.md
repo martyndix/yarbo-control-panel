@@ -179,7 +179,7 @@ cd yarbo-control-panel
 
 Hard-refresh the browser after start, and **close the official Yarbo app** while testing controls.
 
-Open **http://localhost:8080**, click **Settings**, and enter broker IP and serial. macOS has no systemd — keep the terminal open, or run on a Pi for always-on use.
+Open **http://localhost:8080**, click **Settings**, and enter broker IP and serial. For browser microphone features (Radio **Announce** Record), use **https://localhost:8443** (self-signed — accept once); Paper tablets keep using HTTP :8080. macOS has no systemd — keep the terminal open, or run on a Pi for always-on use.
 
 ### After install
 

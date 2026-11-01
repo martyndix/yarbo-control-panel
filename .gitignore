@@ -49,6 +49,8 @@
 /data/unifi-announce/
 /data/unifi-radio-*.log
 /data/unifi-radio-state.json
+/data/certs/
+/data/panel-https.log
 /data/home.json
 /data/home.json.bak
 /data/home.json.bak.*
@@ -77,3 +79,4 @@
 **/__pycache__/
 .DS_Store
 /debug/map-dumps/*.json
+/data/unifi-radio-stations.json

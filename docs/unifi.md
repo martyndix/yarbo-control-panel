@@ -80,7 +80,9 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` (Integration API) returns a UDP/RTP URL; the panel streams the station through ffmpeg as AAC ADTS to that camera on UDP (usually port 7004). The volume slider always scales the ffmpeg stream. Optional Protect hardware volume uses the private API `PATCH /proxy/protect/api/cameras/{id}` with `speakerSettings.speakerVolume` and a UniFi OS session (local admin) — an API key alone gets HTTP 401 on that path and is not used.
 
-**Announce** (Radio Player modal): the browser records a short clip (`MediaRecorder`, typically WebM/Opus), you can listen locally, then `POST /api/unifi.php` with `action=radio_announce` (multipart `audio` + `targets` + `volume`). The panel saves under `data/unifi-announce/` and ffmpeg sends the file over the same talkback path. Needs a microphone permission in the browser (HTTPS or a trusted local origin helps).
+**Announce** (Radio Player modal): the browser records a short clip (`MediaRecorder`, typically WebM/Opus), you can listen locally, then `POST /api/unifi.php` with `action=radio_announce` (multipart `audio` + `targets` + `volume`). The panel saves under `data/unifi-announce/` and ffmpeg sends the file over the same talkback path.
+
+Browsers only allow the microphone on a **secure context**. Use the panel HTTPS URL `https://<panel-ip>:8443` (self-signed — accept once). Paper tablets keep polling `http://<panel-ip>:8080`. On plain HTTP you can still **Choose file** (or Record falls back to the device recorder / file picker). Set `YARBO_PANEL_HTTPS=0` to turn the proxy off.
 
 ## Rollback
 

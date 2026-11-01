@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.167] - 2026-11-01
+
+### Added
+- Panel **HTTPS** on port **8443** (self-signed cert via `scripts/panel_https_proxy.py`). Open `https://<panel-ip>:8443` for a secure browser context (mic / Announce Record). Accept the certificate warning once. HTTP **:8080** stays for Paper tablets. Disable with `YARBO_PANEL_HTTPS=0`.
+- Announce **Choose file** (and Record fallback on plain HTTP) so you can still send a clip without live mic access.
+
 ## [4.0.166] - 2026-11-01
 
 ### Added
