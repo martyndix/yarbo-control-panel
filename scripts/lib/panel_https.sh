@@ -85,9 +85,13 @@ extendedKeyUsage = serverAuth
 EOF
   if ! openssl req -x509 -newkey rsa:2048 -sha256 -days 825 -nodes \
     -keyout "$key" -out "$crt" -config "$conf" >/dev/null 2>&1; then
-    rm -f "$conf"
-    echo "WARNING: could not create panel TLS certificate — HTTPS proxy disabled" >&2
-    return 1
+    # Older OpenSSL / busybox builds: fall back to a CN-only cert.
+    if ! openssl req -x509 -newkey rsa:2048 -sha256 -days 825 -nodes \
+      -keyout "$key" -out "$crt" -subj "/CN=yarbo-panel" >/dev/null 2>&1; then
+      rm -f "$conf"
+      echo "WARNING: could not create panel TLS certificate — HTTPS proxy disabled" >&2
+      return 1
+    fi
   fi
   rm -f "$conf"
   chmod 600 "$key" 2>/dev/null || true

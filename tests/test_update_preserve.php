@@ -97,6 +97,28 @@ if (!str_contains($change, '## [4.0.170]')) {
     fwrite(STDERR, "changelog 4.0.170\n");
     exit(1);
 }
+if (!str_contains($change, '## [4.0.171]')) {
+    fwrite(STDERR, "changelog 4.0.171\n");
+    exit(1);
+}
+if (!str_contains($html, 'id="settings-https-ensure"') || !str_contains($html, 'Start HTTPS')) {
+    fwrite(STDERR, "Settings must have Start HTTPS button\n");
+    exit(1);
+}
+$httpsPhp = (string) file_get_contents($root . '/src/YarboPanelHttps.php');
+$ensureSh = (string) file_get_contents($root . '/scripts/panel_https_ensure.sh');
+if (!str_contains($httpsPhp, 'class YarboPanelHttps') || !str_contains($ensureSh, 'panel_https_proxy.py')) {
+    fwrite(STDERR, "HTTPS ensure helpers missing\n");
+    exit(1);
+}
+if (!str_contains($api, 'https_ensure') || !str_contains($api, 'https-status')) {
+    fwrite(STDERR, "update API must support https ensure/status\n");
+    exit(1);
+}
+if (!str_contains($js, 'runHttpsEnsure')) {
+    fwrite(STDERR, "app.js must wire Start HTTPS\n");
+    exit(1);
+}
 if (!str_contains($php, 'clearOrphanedUpdateState')) {
     fwrite(STDERR, "restart must clear orphaned update state\n");
     exit(1);

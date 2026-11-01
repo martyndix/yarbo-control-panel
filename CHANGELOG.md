@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.171] - 2026-11-01
+
+### Added
+- Settings → Panel updates → **Start HTTPS** starts the :8443 TLS proxy from the UI (shows status + log). Use this when `https://<ip>:8443` will not connect after a restart. Also tries to open UFW for TCP 8443.
+
 ## [4.0.170] - 2026-11-01
 
 ### Fixed

@@ -219,6 +219,9 @@ const els = {
     settingsUpdateViewNotes: document.getElementById('settings-update-view-notes'),
     settingsUpdateRun: document.getElementById('settings-update-run'),
     settingsPanelRestart: document.getElementById('settings-panel-restart'),
+    settingsHttpsEnsure: document.getElementById('settings-https-ensure'),
+    settingsHttpsStatus: document.getElementById('settings-https-status'),
+    settingsHttpsLog: document.getElementById('settings-https-log'),
     settingsUpdateSection: document.getElementById('settings-update-section'),
     settingsUpdateCallout: document.getElementById('settings-update-callout'),
     settingsUpdateCalloutText: document.getElementById('settings-update-callout-text'),
@@ -10226,6 +10229,7 @@ function openSettingsModal(pane) {
             applyUpdateAvailability(lastUpdateStatus);
         }
         loadUpdateStatus();
+        loadHttpsStatus();
     }
     const hashPane = typeof pane === 'string' ? pane : settingsHashPane();
     const start = hashPane
@@ -12640,6 +12644,7 @@ async function loadUpdateStatus() {
         }
     } finally {
         if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
+        loadHttpsStatus();
     }
 }
 
@@ -12866,6 +12871,80 @@ async function runPanelUpdate(button) {
         if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
         if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = false;
         if (els.settingsPanelRestart) els.settingsPanelRestart.disabled = false;
+    }
+}
+
+function setHttpsStatusUi(data) {
+    const listening = Boolean(data?.listening);
+    const url = data?.https_url || `https://${location.hostname}:8443`;
+    if (els.settingsHttpsStatus) {
+        if (!data?.enabled) {
+            els.settingsHttpsStatus.textContent = 'HTTPS is disabled (YARBO_PANEL_HTTPS=0).';
+        } else if (listening) {
+            els.settingsHttpsStatus.innerHTML = `HTTPS is up — open <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a> (accept the certificate warning once).`;
+        } else {
+            els.settingsHttpsStatus.textContent = data?.error
+                || data?.message
+                || 'HTTPS is not listening on port 8443. Tap Start HTTPS.';
+        }
+    }
+    if (els.settingsHttpsLog) {
+        const tail = (data?.log_tail || '').trim();
+        if (tail) {
+            els.settingsHttpsLog.textContent = tail;
+            els.settingsHttpsLog.classList.remove('hidden');
+        } else {
+            els.settingsHttpsLog.textContent = '';
+            els.settingsHttpsLog.classList.add('hidden');
+        }
+    }
+    if (els.settingsHttpsEnsure) {
+        els.settingsHttpsEnsure.textContent = listening ? 'Refresh HTTPS' : 'Start HTTPS';
+    }
+}
+
+async function loadHttpsStatus() {
+    if (!els.settingsHttpsStatus) return null;
+    try {
+        const res = await fetch('/api/update.php?action=https-status', { cache: 'no-store' });
+        const data = await parseJsonResponse(res);
+        setHttpsStatusUi(data);
+        return data;
+    } catch (err) {
+        if (els.settingsHttpsStatus) {
+            els.settingsHttpsStatus.textContent = err.message || 'Could not check HTTPS';
+        }
+        return null;
+    }
+}
+
+async function runHttpsEnsure(button) {
+    if (button) button.disabled = true;
+    if (els.settingsHttpsStatus) els.settingsHttpsStatus.textContent = 'Starting HTTPS on port 8443…';
+    try {
+        const res = await fetch('/api/update.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'https_ensure' }),
+        });
+        const data = await parseJsonResponse(res);
+        setHttpsStatusUi(data);
+        if (data?.listening) {
+            showToast('HTTPS is up on port 8443', 'success');
+            const url = data.https_url || `https://${location.hostname}:8443`;
+            setUpdateResult(`HTTPS ready: ${url} — accept the certificate warning once`, 'success');
+        } else {
+            const err = data?.error || data?.message || 'HTTPS did not start';
+            showToast(err, 'error');
+            setUpdateResult(err, 'error');
+        }
+        return data;
+    } catch (err) {
+        showToast(err.message || 'HTTPS start failed', 'error');
+        setUpdateResult(err.message || 'HTTPS start failed', 'error');
+        return null;
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -14340,6 +14419,7 @@ els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.cu
 els.settingsUpdateViewNotes?.addEventListener('click', (e) => viewReleaseNotes(e.currentTarget));
 els.settingsUpdateRun?.addEventListener('click', (e) => runPanelUpdate(e.currentTarget));
 els.settingsPanelRestart?.addEventListener('click', (e) => runPanelRestart(e.currentTarget));
+els.settingsHttpsEnsure?.addEventListener('click', (e) => runHttpsEnsure(e.currentTarget));
 els.settingsPaperOtaAll?.addEventListener('click', (e) => queuePaperOta('*', e.currentTarget));
 document.querySelectorAll('[data-settings-close]').forEach((el) => {
     el.addEventListener('click', closeSettingsModal);

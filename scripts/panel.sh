@@ -176,9 +176,19 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
 done
 
 HTTPS_PROXY_PID=""
-yarbo_panel_start_https_proxy "${ROOT}" "${PORT}" || true
 if yarbo_panel_https_enabled; then
-  echo "    HTTPS UI: https://<panel-ip>:$(yarbo_panel_https_port) (self-signed — accept once for mic / Announce)"
+  echo "==> Ensuring HTTPS on port $(yarbo_panel_https_port)"
+  if [[ -x "${ROOT}/scripts/panel_https_ensure.sh" ]] || [[ -f "${ROOT}/scripts/panel_https_ensure.sh" ]]; then
+    ensure_json="$(bash "${ROOT}/scripts/panel_https_ensure.sh" 2>/dev/null || true)"
+    echo "    ${ensure_json}"
+    if [[ "${ensure_json}" == *'"listening":true'* ]] || [[ "${ensure_json}" == *'"listening": true'* ]]; then
+      echo "    HTTPS UI: https://<panel-ip>:$(yarbo_panel_https_port) (self-signed — accept once for mic / Announce)"
+    else
+      echo "    WARNING: HTTPS did not come up — open Settings → Panel updates → Start HTTPS, or see data/panel-https.log" >&2
+    fi
+  else
+    yarbo_panel_start_https_proxy "${ROOT}" "${PORT}" || true
+  fi
 fi
 
 wait "${PHP_PID}"

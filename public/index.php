@@ -2077,8 +2077,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-update-view-notes">View release notes</button>
                                 <button type="button" class="btn" id="settings-update-run" disabled>Update to latest</button>
                                 <button type="button" class="btn btn-secondary" id="settings-panel-restart">Restart panel</button>
+                                <button type="button" class="btn" id="settings-https-ensure">Start HTTPS</button>
                             </div>
-                            <p class="hint">Restart panel reloads the Pi service (HTTPS :8443, MQTT agent, Matter). Use it after an update if something new did not come up. It does not reboot the whole Pi.</p>
+                            <p class="hint">Restart panel reloads the Pi service (MQTT agent, Matter). It does not reboot the whole Pi. <strong>Start HTTPS</strong> opens port <strong>8443</strong> for mic / Announce Record (self-signed — accept the Safari warning once). Paper tablets keep using HTTP :8080.</p>
+                            <p id="settings-https-status" class="hint" role="status">Checking HTTPS…</p>
+                            <pre id="settings-https-log" class="settings-https-log hidden" aria-live="polite"></pre>
                             <h3 class="settings-subtitle">E-paper firmware</h3>
                             <p class="hint">First flash is USB. After that, queue a Wi-Fi update for an online tablet. Build firmware on the E-paper page first — Update will not compile during the download. The tablet shows <strong>UPDATING</strong>, stays on Wi-Fi, then reboots. It only tries once per boot; reboot if it stays on the old version. PaperMono beeps and lights green. Update is disabled below 50% unless the tablet is charging.</p>
                             <div id="settings-paper-ota-list" class="papermono-device-list"></div>
