@@ -2114,6 +2114,18 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <button type="button" class="btn btn-secondary" id="unifi-radio-stop">Stop</button>
                     </div>
                     <p id="unifi-radio-status" class="hint" role="status">Idle</p>
+                    <div class="unifi-radio-announce" aria-label="Announce">
+                        <h3 class="settings-subtitle">Announce</h3>
+                        <p class="hint">Record a short message on this device, listen back, then send it to the speakers ticked above (same volume). Needs microphone permission.</p>
+                        <div class="settings-update-actions unifi-radio-announce-actions">
+                            <button type="button" class="btn" id="unifi-radio-rec">Record</button>
+                            <button type="button" class="btn btn-secondary" id="unifi-radio-rec-stop" disabled>Stop</button>
+                            <button type="button" class="btn btn-secondary" id="unifi-radio-rec-listen" disabled>Listen</button>
+                            <button type="button" class="btn" id="unifi-radio-rec-send" disabled>Send</button>
+                        </div>
+                        <audio id="unifi-radio-rec-audio" class="unifi-radio-rec-audio hidden" controls preload="metadata"></audio>
+                        <p id="unifi-radio-rec-status" class="hint" role="status"></p>
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" data-radio-player-close>Close</button>

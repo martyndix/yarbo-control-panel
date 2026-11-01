@@ -59,10 +59,18 @@ if ($method !== 'POST') {
     json_response(['ok' => false, 'error' => 'Method not allowed'], 405);
 }
 
+$contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
 $raw = file_get_contents('php://input');
-$input = is_string($raw) && $raw !== '' ? json_decode($raw, true) : [];
-if (!is_array($input)) {
+if (str_contains($contentType, 'multipart/form-data') || ($_FILES !== [] && $_POST !== [])) {
     $input = $_POST;
+} else {
+    $input = is_string($raw) && $raw !== '' ? json_decode($raw, true) : [];
+    if (!is_array($input)) {
+        $input = $_POST;
+    }
+}
+if (!is_array($input)) {
+    $input = [];
 }
 $action = (string) ($input['action'] ?? $action);
 
@@ -127,6 +135,15 @@ if ($action === 'radio_stations_restore') {
 if ($action === 'radio_play') {
     set_time_limit(60);
     json_response($radio()->play($input));
+}
+
+if ($action === 'radio_announce') {
+    set_time_limit(60);
+    $upload = $_FILES['audio'] ?? $_FILES['clip'] ?? [];
+    if (!is_array($upload)) {
+        $upload = [];
+    }
+    json_response($radio()->playAnnounce($input, $upload));
 }
 
 if ($action === 'radio_stop') {

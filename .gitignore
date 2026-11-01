@@ -46,6 +46,9 @@
 /data/unifi-config.json
 /data/unifi-inventory.json
 /data/unifi-snap-*.jpg
+/data/unifi-announce/
+/data/unifi-radio-*.log
+/data/unifi-radio-state.json
 /data/home.json
 /data/home.json.bak
 /data/home.json.bak.*

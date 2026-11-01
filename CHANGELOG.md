@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.166] - 2026-11-01
+
+### Added
+- Radio Player **Announce**: record a short message in the browser, listen back, then **Send** it to the speakers ticked in the modal (same volume / talkback path as radio). Max about 30 seconds.
+
 ## [4.0.165] - 2026-11-01
 
 ### Fixed

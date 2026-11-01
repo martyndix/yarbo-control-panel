@@ -161,6 +161,12 @@ const els = {
     unifiRadioPlay: document.getElementById('unifi-radio-play'),
     unifiRadioStop: document.getElementById('unifi-radio-stop'),
     unifiRadioStatus: document.getElementById('unifi-radio-status'),
+    unifiRadioRec: document.getElementById('unifi-radio-rec'),
+    unifiRadioRecStop: document.getElementById('unifi-radio-rec-stop'),
+    unifiRadioRecListen: document.getElementById('unifi-radio-rec-listen'),
+    unifiRadioRecSend: document.getElementById('unifi-radio-rec-send'),
+    unifiRadioRecAudio: document.getElementById('unifi-radio-rec-audio'),
+    unifiRadioRecStatus: document.getElementById('unifi-radio-rec-status'),
     unifiLiveModal: document.getElementById('unifi-live-modal'),
     unifiLiveTitle: document.getElementById('unifi-live-title'),
     unifiLiveImg: document.getElementById('unifi-live-img'),
@@ -13777,6 +13783,220 @@ els.unifiRadioStop?.addEventListener('click', async () => {
         els.unifiRadioStop.disabled = false;
     }
 });
+
+const RADIO_ANNOUNCE_MAX_MS = 30000;
+let radioRecRecorder = null;
+let radioRecStream = null;
+let radioRecChunks = [];
+let radioRecBlob = null;
+let radioRecUrl = '';
+let radioRecTimer = null;
+let radioRecStartedAt = 0;
+
+function setRadioRecStatus(text) {
+    if (els.unifiRadioRecStatus) els.unifiRadioRecStatus.textContent = text || '';
+}
+
+function clearRadioRecPreview() {
+    if (radioRecUrl) {
+        try { URL.revokeObjectURL(radioRecUrl); } catch { /* ignore */ }
+    }
+    radioRecUrl = '';
+    radioRecBlob = null;
+    radioRecChunks = [];
+    if (els.unifiRadioRecAudio) {
+        els.unifiRadioRecAudio.pause();
+        els.unifiRadioRecAudio.removeAttribute('src');
+        els.unifiRadioRecAudio.load();
+        els.unifiRadioRecAudio.classList.add('hidden');
+    }
+    if (els.unifiRadioRecListen) els.unifiRadioRecListen.disabled = true;
+    if (els.unifiRadioRecSend) els.unifiRadioRecSend.disabled = true;
+}
+
+function stopRadioMicTracks() {
+    if (radioRecStream) {
+        radioRecStream.getTracks().forEach((t) => {
+            try { t.stop(); } catch { /* ignore */ }
+        });
+    }
+    radioRecStream = null;
+}
+
+function pickRadioRecMime() {
+    if (typeof MediaRecorder === 'undefined') return '';
+    const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+    ];
+    for (const type of candidates) {
+        if (MediaRecorder.isTypeSupported?.(type)) return type;
+    }
+    return '';
+}
+
+function finishRadioRecording() {
+    if (radioRecTimer) {
+        clearTimeout(radioRecTimer);
+        radioRecTimer = null;
+    }
+    els.unifiRadioRec?.classList.remove('is-recording');
+    if (els.unifiRadioRec) els.unifiRadioRec.disabled = false;
+    if (els.unifiRadioRecStop) els.unifiRadioRecStop.disabled = true;
+    stopRadioMicTracks();
+    radioRecRecorder = null;
+    if (!radioRecChunks.length) {
+        setRadioRecStatus('No audio captured');
+        return;
+    }
+    const type = radioRecChunks[0]?.type || 'audio/webm';
+    radioRecBlob = new Blob(radioRecChunks, { type });
+    radioRecChunks = [];
+    if (radioRecUrl) {
+        try { URL.revokeObjectURL(radioRecUrl); } catch { /* ignore */ }
+    }
+    radioRecUrl = URL.createObjectURL(radioRecBlob);
+    if (els.unifiRadioRecAudio) {
+        els.unifiRadioRecAudio.src = radioRecUrl;
+        els.unifiRadioRecAudio.classList.remove('hidden');
+    }
+    if (els.unifiRadioRecListen) els.unifiRadioRecListen.disabled = false;
+    if (els.unifiRadioRecSend) els.unifiRadioRecSend.disabled = false;
+    const secs = Math.max(1, Math.round((Date.now() - radioRecStartedAt) / 1000));
+    setRadioRecStatus(`Recorded ${secs}s — Listen, then Send to the speakers above`);
+}
+
+async function startRadioRecording() {
+    if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error('This browser cannot record audio');
+    }
+    clearRadioRecPreview();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    radioRecStream = stream;
+    const mime = pickRadioRecMime();
+    radioRecChunks = [];
+    radioRecRecorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
+    radioRecRecorder.addEventListener('dataavailable', (event) => {
+        if (event.data && event.data.size > 0) radioRecChunks.push(event.data);
+    });
+    radioRecRecorder.addEventListener('stop', () => finishRadioRecording());
+    radioRecStartedAt = Date.now();
+    radioRecRecorder.start(250);
+    els.unifiRadioRec?.classList.add('is-recording');
+    if (els.unifiRadioRec) els.unifiRadioRec.disabled = true;
+    if (els.unifiRadioRecStop) els.unifiRadioRecStop.disabled = false;
+    setRadioRecStatus('Recording… (max 30s)');
+    radioRecTimer = setTimeout(() => {
+        if (radioRecRecorder && radioRecRecorder.state !== 'inactive') {
+            try { radioRecRecorder.stop(); } catch { /* ignore */ }
+        }
+    }, RADIO_ANNOUNCE_MAX_MS);
+}
+
+function stopRadioRecording() {
+    if (radioRecTimer) {
+        clearTimeout(radioRecTimer);
+        radioRecTimer = null;
+    }
+    if (radioRecRecorder && radioRecRecorder.state !== 'inactive') {
+        try { radioRecRecorder.stop(); } catch { /* ignore */ }
+    } else {
+        stopRadioMicTracks();
+        els.unifiRadioRec?.classList.remove('is-recording');
+        if (els.unifiRadioRec) els.unifiRadioRec.disabled = false;
+        if (els.unifiRadioRecStop) els.unifiRadioRecStop.disabled = true;
+    }
+}
+
+els.unifiRadioRec?.addEventListener('click', async () => {
+    try {
+        await startRadioRecording();
+    } catch (err) {
+        stopRadioMicTracks();
+        els.unifiRadioRec?.classList.remove('is-recording');
+        if (els.unifiRadioRec) els.unifiRadioRec.disabled = false;
+        if (els.unifiRadioRecStop) els.unifiRadioRecStop.disabled = true;
+        const msg = err?.name === 'NotAllowedError'
+            ? 'Microphone permission denied'
+            : (err.message || 'Could not start recording');
+        setRadioRecStatus(msg);
+        showToast(msg, 'error');
+    }
+});
+els.unifiRadioRecStop?.addEventListener('click', () => {
+    stopRadioRecording();
+});
+els.unifiRadioRecListen?.addEventListener('click', async () => {
+    if (!els.unifiRadioRecAudio?.src) {
+        showToast('Record a message first', 'error');
+        return;
+    }
+    try {
+        els.unifiRadioRecAudio.currentTime = 0;
+        await els.unifiRadioRecAudio.play();
+        setRadioRecStatus('Playing recording…');
+    } catch (err) {
+        showToast(err.message || 'Could not play recording', 'error');
+    }
+});
+els.unifiRadioRecAudio?.addEventListener('ended', () => {
+    if (radioRecBlob) setRadioRecStatus('Ready to Send to the speakers above');
+});
+els.unifiRadioRecSend?.addEventListener('click', async () => {
+    const targets = unifiSelectedSpeakerIds();
+    const volume = Number(els.unifiRadioVolume?.value || 60);
+    if (!radioRecBlob) {
+        showToast('Record a message first', 'error');
+        return;
+    }
+    if (!targets.length) {
+        showToast('Tick at least one speaker', 'error');
+        return;
+    }
+    els.unifiRadioRecSend.disabled = true;
+    if (els.unifiRadioRec) els.unifiRadioRec.disabled = true;
+    setRadioRecStatus('Sending…');
+    if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = 'Announcing…';
+    try {
+        const body = new FormData();
+        body.append('action', 'radio_announce');
+        body.append('volume', String(volume));
+        body.append('targets', JSON.stringify(targets));
+        const ext = (radioRecBlob.type || '').includes('mp4') ? 'm4a'
+            : (radioRecBlob.type || '').includes('ogg') ? 'ogg'
+                : (radioRecBlob.type || '').includes('wav') ? 'wav' : 'webm';
+        body.append('audio', radioRecBlob, `announce.${ext}`);
+        const res = await fetchWithTimeout('/api/unifi.php', { method: 'POST', body }, 45000);
+        const data = await parseJsonResponse(res);
+        if (!data?.ok) throw new Error(data?.error || 'Announce failed');
+        if (unifiDash) {
+            if (data.radio) unifiDash.radio = data.radio;
+            if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+        }
+        renderUnifiSpeakers(unifiDash || data, { replace: true });
+        syncRadioPlayerChrome({
+            unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+            speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
+            radio: (unifiDash || data)?.radio || null,
+        });
+        setRadioRecStatus('Sent');
+        if (data.warning) showToast(data.warning, 'error');
+        else showToast('Announce sent', 'success');
+    } catch (err) {
+        setRadioRecStatus(err.message || 'Announce failed');
+        if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = err.message || 'Announce failed';
+        showToast(err.message || 'Announce failed', 'error');
+    } finally {
+        if (els.unifiRadioRec) els.unifiRadioRec.disabled = false;
+        if (els.unifiRadioRecSend) els.unifiRadioRecSend.disabled = !radioRecBlob;
+    }
+});
+
 els.radioPlayerModal?.addEventListener('change', (event) => {
     const speaker = event.target.closest('input[data-unifi-speaker]');
     if (!speaker) return;

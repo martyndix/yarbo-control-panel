@@ -165,6 +165,12 @@ final class YarboUnifiRadio
                 'format' => $this->guessFormat($customUrl),
             ];
         }
+        if ($station === null && $stationId === 'announce') {
+            $clip = trim((string) ($input['clip_path'] ?? $this->loadState()['station_url'] ?? ''));
+            if ($clip !== '' && is_file($clip)) {
+                return $this->playLocalClip($clip, $input, 'Announce');
+            }
+        }
         if ($station === null) {
             return ['ok' => false, 'error' => 'Pick a radio station'];
         }
@@ -178,7 +184,115 @@ final class YarboUnifiRadio
             ? max(0, min(100, (int) $input['volume']))
             : max(0, min(100, (int) ($this->loadState()['volume'] ?? 60)));
 
+        return $this->startStreams(
+            $ffmpeg,
+            (string) $station['url'],
+            false,
+            (string) $station['id'],
+            (string) $station['name'],
+            $targets,
+            $volume,
+            null,
+        );
+    }
+
+    /**
+     * Play a short browser-recorded clip to the ticked speakers (talkback).
+     *
+     * @param array<string, mixed> $input
+     * @param array<string, mixed> $upload from $_FILES['audio']
+     * @return array<string, mixed>
+     */
+    public function playAnnounce(array $input, array $upload): array
+    {
+        if (!$this->unifi->speakersEnabled()) {
+            return ['ok' => false, 'error' => 'Speakers are turned off in Settings → UniFi'];
+        }
+        $ffmpeg = $this->unifi->ffmpegPath();
+        if ($ffmpeg === '') {
+            return ['ok' => false, 'error' => 'ffmpeg is not installed on this panel'];
+        }
+
+        $targets = $this->normalizeTargetIds($input['targets'] ?? $input['speakers'] ?? []);
+        if ($targets === []) {
+            $rawTargets = $input['targets'] ?? null;
+            if (is_string($rawTargets) && $rawTargets !== '') {
+                $decoded = json_decode($rawTargets, true);
+                $targets = $this->normalizeTargetIds(is_array($decoded) ? $decoded : []);
+            }
+        }
+        if ($targets === []) {
+            return ['ok' => false, 'error' => 'Pick at least one speaker'];
+        }
+
+        $saved = $this->storeAnnounceUpload($upload);
+        if (!($saved['ok'] ?? false)) {
+            return ['ok' => false, 'error' => (string) ($saved['error'] ?? 'Could not save recording')];
+        }
+        $clipPath = (string) $saved['path'];
+
+        $volume = array_key_exists('volume', $input)
+            ? max(0, min(100, (int) $input['volume']))
+            : max(0, min(100, (int) ($this->loadState()['volume'] ?? 60)));
+
+        return $this->playLocalClip($clipPath, [
+            'targets' => $targets,
+            'volume' => $volume,
+        ], 'Announce');
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    private function playLocalClip(string $clipPath, array $input, string $name): array
+    {
+        $ffmpeg = $this->unifi->ffmpegPath();
+        if ($ffmpeg === '') {
+            return ['ok' => false, 'error' => 'ffmpeg is not installed on this panel'];
+        }
+        if (!is_file($clipPath)) {
+            return ['ok' => false, 'error' => 'Recording file missing'];
+        }
+        $targets = $this->normalizeTargetIds($input['targets'] ?? $input['speakers'] ?? []);
+        if ($targets === []) {
+            return ['ok' => false, 'error' => 'Pick at least one speaker'];
+        }
+        $volume = array_key_exists('volume', $input)
+            ? max(0, min(100, (int) $input['volume']))
+            : max(0, min(100, (int) ($this->loadState()['volume'] ?? 60)));
+
+        return $this->startStreams(
+            $ffmpeg,
+            $clipPath,
+            true,
+            'announce',
+            $name,
+            $targets,
+            $volume,
+            $clipPath,
+        );
+    }
+
+    /**
+     * @param list<string> $targets
+     * @return array<string, mixed>
+     */
+    private function startStreams(
+        string $ffmpeg,
+        string $contentUrl,
+        bool $localFile,
+        string $stationId,
+        string $stationName,
+        array $targets,
+        int $volume,
+        ?string $clipPath,
+    ): array {
+        $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
         $this->stop(false);
+        if ($prevClip !== '' && is_file($prevClip) && ($clipPath === null || $prevClip !== $clipPath)) {
+            @unlink($prevClip);
+        }
 
         // Best-effort Protect hardware volume (needs local UniFi OS admin). Playback
         // loudness is always applied in ffmpeg so the slider works without that.
@@ -188,6 +302,7 @@ final class YarboUnifiRadio
 
         $streams = [];
         $errors = [];
+        $started = 0;
         foreach ($targets as $cameraId) {
             $session = $this->unifi->createTalkbackSession($cameraId);
             if (!($session['ok'] ?? false)) {
@@ -196,12 +311,13 @@ final class YarboUnifiRadio
             }
             $pid = $this->spawnFfmpeg(
                 $ffmpeg,
-                (string) $station['url'],
+                $contentUrl,
                 (string) ($session['url'] ?? ''),
                 (string) ($session['codec'] ?? 'aac'),
                 (int) ($session['sampling_rate'] ?? 22050),
                 $cameraId,
-                $volume
+                $volume,
+                $localFile,
             );
             if ($pid <= 0) {
                 $detail = $this->tailRadioLog($cameraId);
@@ -209,38 +325,98 @@ final class YarboUnifiRadio
                     . ($detail !== '' ? ' — ' . $detail : '');
                 continue;
             }
-            $streams[] = [
-                'camera_id' => $cameraId,
-                'pid' => $pid,
-                'talkback_url' => (string) ($session['url'] ?? ''),
-                'codec' => (string) ($session['codec'] ?? ''),
-            ];
+            $started++;
+            if ($this->pidAlive($pid)) {
+                $streams[] = [
+                    'camera_id' => $cameraId,
+                    'pid' => $pid,
+                    'talkback_url' => (string) ($session['url'] ?? ''),
+                    'codec' => (string) ($session['codec'] ?? ''),
+                ];
+            }
         }
 
         $playing = $streams !== [];
-        $playError = $playing
+        // Short announce clips may finish before we return; still count as ok if ffmpeg started.
+        $ok = $localFile ? $started > 0 : $playing;
+        $playError = $ok
             ? ($errors !== [] ? implode('; ', $errors) : null)
             : ($errors !== [] ? implode('; ', $errors) : 'No speakers started');
         $state = [
             'playing' => $playing,
-            'station_id' => $station['id'],
-            'station_name' => $station['name'],
-            'station_url' => $station['url'],
+            'station_id' => $stationId,
+            'station_name' => $stationName,
+            'station_url' => $contentUrl,
+            'clip_path' => $localFile ? $clipPath : null,
             'volume' => $volume,
             'streams' => $streams,
             // Remember the speakers the user ticked, even if some failed to start.
             'targets' => $targets,
-            'started_at' => $playing ? time() : null,
+            'started_at' => $ok ? time() : null,
             'error' => $playError,
         ];
         $this->writeState($state);
 
         return [
-            'ok' => $playing,
-            'error' => $playing ? null : ($state['error'] ?? 'Play failed'),
-            'warning' => $playing && $errors !== [] ? implode('; ', $errors) : null,
+            'ok' => $ok,
+            'error' => $ok ? null : ($state['error'] ?? 'Play failed'),
+            'warning' => $ok && $errors !== [] ? implode('; ', $errors) : null,
             'radio' => $this->status(),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $upload
+     * @return array{ok: bool, path?: string, error?: string}
+     */
+    private function storeAnnounceUpload(array $upload): array
+    {
+        $error = (int) ($upload['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK) {
+            return ['ok' => false, 'error' => 'Recording upload failed'];
+        }
+        $tmp = (string) ($upload['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            return ['ok' => false, 'error' => 'Recording upload missing'];
+        }
+        $size = (int) ($upload['size'] ?? 0);
+        if ($size <= 0 || $size > 3_000_000) {
+            return ['ok' => false, 'error' => 'Recording must be under 3 MB (keep it under ~30 seconds)'];
+        }
+        $mime = strtolower(trim((string) ($upload['type'] ?? '')));
+        $name = strtolower((string) ($upload['name'] ?? ''));
+        $allowed = [
+            'audio/webm', 'video/webm', 'audio/ogg', 'application/ogg',
+            'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/wave',
+            'audio/x-m4a', 'audio/aac',
+        ];
+        $ext = 'webm';
+        if (str_contains($mime, 'ogg') || str_ends_with($name, '.ogg') || str_ends_with($name, '.opus')) {
+            $ext = 'ogg';
+        } elseif (str_contains($mime, 'mp4') || str_contains($mime, 'm4a') || str_ends_with($name, '.m4a') || str_ends_with($name, '.mp4')) {
+            $ext = 'm4a';
+        } elseif (str_contains($mime, 'mpeg') || str_contains($mime, 'mp3') || str_ends_with($name, '.mp3')) {
+            $ext = 'mp3';
+        } elseif (str_contains($mime, 'wav') || str_ends_with($name, '.wav')) {
+            $ext = 'wav';
+        } elseif (str_contains($mime, 'aac') || str_ends_with($name, '.aac')) {
+            $ext = 'aac';
+        }
+        if ($mime !== '' && !in_array($mime, $allowed, true)
+            && !str_starts_with($mime, 'audio/') && $mime !== 'video/webm' && $mime !== 'application/ogg') {
+            return ['ok' => false, 'error' => 'Unsupported recording format'];
+        }
+
+        $dir = $this->projectRoot . '/data/unifi-announce';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return ['ok' => false, 'error' => 'Could not create announce folder'];
+        }
+        $path = $dir . '/clip-' . bin2hex(random_bytes(8)) . '.' . $ext;
+        if (!@move_uploaded_file($tmp, $path)) {
+            return ['ok' => false, 'error' => 'Could not save recording'];
+        }
+
+        return ['ok' => true, 'path' => $path];
     }
 
     /**
@@ -257,6 +433,12 @@ final class YarboUnifiRadio
             if ($pid > 1) {
                 $this->killPidTree($pid);
             }
+        }
+        $clip = trim((string) ($state['clip_path'] ?? ''));
+        // Keep the last announce file while Idle so volume changes can replay it;
+        // only delete when clearing after a fresh stop request with clearError.
+        if ($clearError && $clip !== '' && is_file($clip)) {
+            // Leave file for a short window — cleaned on next play/announce.
         }
         $state['playing'] = false;
         $state['streams'] = [];
@@ -433,6 +615,7 @@ final class YarboUnifiRadio
         int $sampleRate,
         string $cameraId,
         int $volume = 60,
+        bool $localFile = false,
     ): int {
         $talkbackUrl = trim($talkbackUrl);
         if ($talkbackUrl === '') {
@@ -455,8 +638,11 @@ final class YarboUnifiRadio
         $ff = escapeshellarg($ffmpeg);
         $logEsc = escapeshellarg($log);
         // Icecast/HLS drop briefly; reconnect so Play does not die after a few seconds.
-        $httpIn = '-reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1'
-            . ' -reconnect_delay_max 5 -rw_timeout 15000000';
+        // Local announce clips skip reconnect flags (they confuse file inputs).
+        $httpIn = $localFile
+            ? ''
+            : '-reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1'
+                . ' -reconnect_delay_max 5 -rw_timeout 15000000';
 
         $parsed = parse_url($talkbackUrl);
         $host = (string) ($parsed['host'] ?? '');
@@ -465,15 +651,16 @@ final class YarboUnifiRadio
             return 0;
         }
 
+        $inFlags = trim($httpIn . ' -re');
         if ($codec === 'opus') {
             $out = escapeshellarg($talkbackUrl);
-            $cmd = "{$ff} -nostdin -hide_banner -loglevel warning {$httpIn} -re -i {$input}"
+            $cmd = "{$ff} -nostdin -hide_banner -loglevel warning {$inFlags} -i {$input}"
                 . " -vn -ac 1 -ar {$sampleRate} -af {$volFilter} -c:a libopus -application lowdelay -f rtp {$out}";
         } else {
             // AAC talkback: ADTS over UDP to the camera (same as Home Assistant / go2rtc).
             // Avoid MPEG-TS packet sizing on this ADTS path — it makes ffmpeg exit immediately.
             $udp = escapeshellarg('udp://' . $host . ':' . $port);
-            $cmd = "{$ff} -nostdin -hide_banner -loglevel warning {$httpIn} -re -i {$input}"
+            $cmd = "{$ff} -nostdin -hide_banner -loglevel warning {$inFlags} -i {$input}"
                 . " -vn -ac 1 -ar {$sampleRate} -af {$volFilter} -c:a aac -profile:a aac_low -b:a 32k -f adts {$udp}";
         }
 
@@ -483,12 +670,36 @@ final class YarboUnifiRadio
             return 0;
         }
         // Talkback dies if the encoder never sends; catch immediate ffmpeg exits.
-        usleep(500000);
+        // Short announce clips may finish within this window — treat clean exits as ok.
+        usleep($localFile ? 200000 : 500000);
         if (!$this->pidAlive($pid)) {
+            if ($localFile && !$this->radioLogLooksFailed($cameraId)) {
+                return $pid;
+            }
+
             return 0;
         }
 
         return $pid;
+    }
+
+    private function radioLogLooksFailed(string $cameraId): bool
+    {
+        $path = $this->radioLogPath($cameraId);
+        if (!is_file($path)) {
+            return false;
+        }
+        $raw = strtolower((string) @file_get_contents($path));
+        if ($raw === '') {
+            return false;
+        }
+        foreach (['error', 'invalid data', 'does not contain', 'conversion failed', 'no such file'] as $needle) {
+            if (str_contains($raw, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function radioLogPath(string $cameraId): string
@@ -552,6 +763,7 @@ final class YarboUnifiRadio
             'station_id' => null,
             'station_name' => null,
             'station_url' => null,
+            'clip_path' => null,
             'volume' => 60,
             'streams' => [],
             'targets' => [],

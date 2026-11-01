@@ -4318,6 +4318,36 @@ body.home-is-reordering {
 .unifi-radio-actions {
     margin-top: 0.35rem;
 }
+.unifi-radio-announce {
+    margin-top: 1.1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--border);
+}
+.unifi-radio-announce .settings-subtitle {
+    margin: 0 0 0.25rem;
+}
+.unifi-radio-announce > .hint {
+    margin: 0 0 0.65rem;
+}
+.unifi-radio-announce-actions {
+    margin-top: 0.15rem;
+}
+.unifi-radio-rec-audio {
+    display: block;
+    width: 100%;
+    max-width: 20rem;
+    margin: 0.65rem 0 0.25rem;
+}
+.unifi-radio-rec-audio.hidden {
+    display: none;
+}
+#unifi-radio-rec-status {
+    margin: 0.45rem 0 0;
+}
+#unifi-radio-rec.is-recording {
+    border-color: var(--danger, #b42318);
+    background: var(--danger, #b42318);
+}
 .unifi-stations-list {
     display: grid;
     gap: 0.55rem;

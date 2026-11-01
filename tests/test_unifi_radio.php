@@ -210,7 +210,13 @@ assert_true(str_contains($change, '## [4.0.162]'), 'changelog 4.0.162');
 assert_true(str_contains($change, '## [4.0.163]'), 'changelog 4.0.163');
 assert_true(str_contains($change, '## [4.0.164]'), 'changelog 4.0.164');
 assert_true(str_contains($change, '## [4.0.165]'), 'changelog 4.0.165');
+assert_true(str_contains($change, '## [4.0.166]'), 'changelog 4.0.166');
+assert_true(str_contains($change, 'Announce'), 'changelog mentions Announce');
 assert_true(str_contains($change, 'Radio Player'), 'changelog mentions Radio Player');
+assert_true(str_contains($index, 'id="unifi-radio-rec"'), 'Announce Record button');
+assert_true(str_contains($index, 'id="unifi-radio-rec-listen"'), 'Announce Listen button');
+assert_true(str_contains($index, 'id="unifi-radio-rec-send"'), 'Announce Send button');
+assert_true(str_contains($index, 'unifi-radio-announce'), 'Announce section');
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(str_contains($css, '.unifi-speakers'), 'Speakers panel CSS');
 assert_true(preg_match('/\.unifi-speakers\s*\{[^}]*color:\s*var\(--text\)/s', $css) === 1, 'Speakers uses theme text colour');
@@ -218,14 +224,18 @@ assert_true(str_contains($css, 'radio-player-panel'), 'Radio Player modal panel 
 assert_true(str_contains($css, 'radio-playing-badge') || str_contains($css, '#radio-open.is-playing'), 'Radio playing chrome CSS');
 assert_true(str_contains($css, '.unifi-radio-speaker span'), 'speaker name colour forced');
 assert_true(preg_match('/#unifi-radio-status\s*\{[^}]*margin:\s*0\.55rem/s', $css) === 1, 'status cleared below Play/Stop');
+assert_true(str_contains($css, 'unifi-radio-announce'), 'Announce CSS');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(str_contains($js, 'prevModuleId !== \'unifi\''), 'UniFi poll not restarted every hub status');
 assert_true(str_contains($js, 'syncRadioPlayerChrome'), 'Radio header chrome sync');
 assert_true(str_contains($js, 'openRadioPlayerModal'), 'Radio Player modal open');
 assert_true(str_contains($js, 'UNIFI_SPEAKER_PICK_KEY'), 'speaker ticks remembered');
 assert_true(str_contains($js, 'fromDom'), 'speaker ticks preserved across Speakers re-render');
+assert_true(str_contains($js, 'startRadioRecording'), 'Announce MediaRecorder start');
+assert_true(str_contains($js, "action', 'radio_announce'") || str_contains($js, 'radio_announce'), 'Announce upload action');
 $api = (string) file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
 assert_true(str_contains($api, 'catch (Throwable'), 'unifi status catches fatals as JSON');
+assert_true(str_contains($api, "radio_announce"), 'API radio_announce action');
 $php = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php');
 $unifiPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifi.php');
 assert_true(str_contains($php, 'function_exists(\'mb_substr\')'), 'mb_substr guarded');
@@ -233,8 +243,15 @@ assert_true(str_contains($php, 'active_targets'), 'status exposes active stream 
 assert_true(!preg_match('/udp:\/\/[^\'"]*pkt_size/', $php), 'ffmpeg ADTS UDP has no MPEG-TS pkt_size');
 assert_true(str_contains($php, 'reconnect_streamed'), 'ffmpeg reconnects Icecast/HLS');
 assert_true(str_contains($php, '-f adts'), 'ffmpeg outputs ADTS for AAC talkback');
+assert_true(str_contains($php, 'function playAnnounce'), 'playAnnounce method');
+assert_true(str_contains($php, 'storeAnnounceUpload'), 'announce upload helper');
+assert_true(str_contains($php, '$localFile'), 'ffmpeg local-file path for announce');
 assert_true(str_contains($unifiPhp, 'speakerVolume'), 'volume uses speakerVolume on private API');
 assert_true(str_contains($unifiPhp, 'protectPrivateUrl'), 'volume helper can build private Protect URL');
+
+$announceFail = $radio->playAnnounce(['targets' => ['cam1'], 'volume' => 50], []);
+assert_true(($announceFail['ok'] ?? true) === false, 'announce without upload fails');
+assert_true(str_contains((string) ($announceFail['error'] ?? ''), 'upload') || str_contains((string) ($announceFail['error'] ?? ''), 'Recording'), 'announce error mentions upload');
 
 // Idle status keeps last chosen targets (so the UI does not treat empty as “all on”).
 file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
