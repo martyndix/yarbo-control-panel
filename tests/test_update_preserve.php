@@ -93,6 +93,32 @@ if (!str_contains($change, '## [4.0.169]')) {
     fwrite(STDERR, "changelog 4.0.169\n");
     exit(1);
 }
+if (!str_contains($change, '## [4.0.170]')) {
+    fwrite(STDERR, "changelog 4.0.170\n");
+    exit(1);
+}
+if (!str_contains($php, 'clearOrphanedUpdateState')) {
+    fwrite(STDERR, "restart must clear orphaned update state\n");
+    exit(1);
+}
+
+// Stale "restarting" without a lock must not block Restart panel.
+require $root . '/vendor/autoload.php';
+use Yarbo\YarboUpdate;
+
+$staleRoot = sys_get_temp_dir() . '/yarbo-upd-stale-' . bin2hex(random_bytes(3));
+mkdir($staleRoot . '/data', 0775, true);
+file_put_contents($staleRoot . '/data/update-status.json', json_encode([
+    'state' => 'restarting',
+    'message' => 'Restarting panel service',
+    'updated_at' => gmdate('c'),
+], JSON_UNESCAPED_SLASHES));
+$upd = new YarboUpdate($staleRoot);
+$restart = $upd->restartPanelAsync();
+if (!($restart['ok'] ?? false)) {
+    fwrite(STDERR, 'stale restarting blocked restart: ' . ($restart['error'] ?? '') . "\n");
+    exit(1);
+}
 
 $tmpRoot = sys_get_temp_dir() . '/yarbo-upd-preserve-' . bin2hex(random_bytes(3));
 mkdir($tmpRoot . '/data', 0775, true);

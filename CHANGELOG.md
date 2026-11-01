@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.170] - 2026-11-01
+
+### Fixed
+- **Restart panel** no longer says an update is already running when a previous update left a stale “restarting” status (common after the service restarts mid-update).
+
 ## [4.0.169] - 2026-11-01
 
 ### Added
