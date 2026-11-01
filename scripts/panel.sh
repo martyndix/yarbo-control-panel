@@ -26,6 +26,9 @@ cleanup() {
   if [[ -n "${HTTPS_PROXY_PID:-}" ]]; then
     kill "${HTTPS_PROXY_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${PHP_PID:-}" ]]; then
+    kill "${PHP_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${AGENT_PID:-}" ]]; then
     kill "${AGENT_PID}" 2>/dev/null || true
   fi
@@ -150,13 +153,33 @@ if [[ -f "${ROOT}/scripts/paper_remote.sh" ]]; then
   fi
 fi
 
-HTTPS_PROXY_PID=""
-yarbo_panel_start_https_proxy "${ROOT}" "${PORT}" || true
+# Stop a leftover TLS proxy from a previous crashed run (same port).
+pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
 
 echo "==> Starting panel on http://${HOST}:${PORT}"
+echo "    Keep this process running. Hard-refresh the browser after start."
+echo "    Close the official Yarbo app while testing controls/drive."
+"$PHP_BIN" -d max_execution_time=1200 -S "${HOST}:${PORT}" -t "${ROOT}/public" &
+PHP_PID=$!
+
+# Wait until the HTTP listener accepts before binding HTTPS in front of it.
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  if ! kill -0 "${PHP_PID}" 2>/dev/null; then
+    echo "ERROR: PHP panel failed to start" >&2
+    wait "${PHP_PID}" || true
+    exit 1
+  fi
+  if "$PHP_BIN" -r 'exit(@fsockopen("127.0.0.1", (int)($argv[1]??8080), $e, $s, 0.2) ? 0 : 1);' "${PORT}" 2>/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+
+HTTPS_PROXY_PID=""
+yarbo_panel_start_https_proxy "${ROOT}" "${PORT}" || true
 if yarbo_panel_https_enabled; then
   echo "    HTTPS UI: https://<panel-ip>:$(yarbo_panel_https_port) (self-signed — accept once for mic / Announce)"
 fi
-echo "    Keep this process running. Hard-refresh the browser after start."
-echo "    Close the official Yarbo app while testing controls/drive."
-"$PHP_BIN" -d max_execution_time=1200 -S "${HOST}:${PORT}" -t "${ROOT}/public"
+
+wait "${PHP_PID}"
+exit $?

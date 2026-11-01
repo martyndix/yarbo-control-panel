@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.168] - 2026-11-01
+
+### Fixed
+- HTTPS **:8443** now starts only after HTTP **:8080** is up, and uses a real HTTP reverse proxy (not a raw TLS tunnel) so the panel page loads in the browser. Restart the panel service after updating.
+
 ## [4.0.167] - 2026-11-01
 
 ### Added

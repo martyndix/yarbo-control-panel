@@ -121,21 +121,44 @@ yarbo_panel_start_https_proxy() {
   local listen_host="${YARBO_PANEL_HTTPS_HOST:-0.0.0.0}"
   local upstream_host="${YARBO_PANEL_HTTPS_UPSTREAM:-127.0.0.1}"
   mkdir -p "${root}/data"
+  : >"${root}/data/panel-https.log"
   echo "==> Starting HTTPS proxy on https://0.0.0.0:${https_port} (self-signed)"
   echo "    Open https://<panel-ip>:${https_port} for mic / Announce Record (accept the certificate warning once)."
   echo "    Paper tablets keep using http://<panel-ip>:${upstream_port}"
+  # Upstream is already up (panel.sh starts PHP first).
   "$py" "${root}/scripts/panel_https_proxy.py" \
     --listen-host "$listen_host" \
     --listen-port "$https_port" \
     --upstream-host "$upstream_host" \
     --upstream-port "$upstream_port" \
     --cert "$crt" \
-    --key "$key" >>"${root}/data/panel-https.log" 2>&1 &
+    --key "$key" \
+    --no-wait-upstream >>"${root}/data/panel-https.log" 2>&1 &
   HTTPS_PROXY_PID=$!
-  sleep 0.3
+  sleep 0.5
   if ! kill -0 "${HTTPS_PROXY_PID}" 2>/dev/null; then
     echo "WARNING: HTTPS proxy failed to start — see data/panel-https.log" >&2
+    if [[ -f "${root}/data/panel-https.log" ]]; then
+      tail -n 20 "${root}/data/panel-https.log" >&2 || true
+    fi
     HTTPS_PROXY_PID=""
     return 0
+  fi
+  # Confirm the TLS port answers (curl if present, else python).
+  local ok=0
+  if command -v curl >/dev/null 2>&1; then
+    if curl -sk --max-time 3 -o /dev/null -w '' "https://127.0.0.1:${https_port}/"; then
+      ok=1
+    fi
+  elif command -v "$py" >/dev/null 2>&1; then
+    if "$py" -c "import socket,ssl,sys;c=ssl.create_default_context();c.check_hostname=False;c.verify_mode=ssl.CERT_NONE;s=c.wrap_socket(socket.create_connection(('127.0.0.1',${https_port}),timeout=2),server_hostname='localhost');s.sendall(b'HEAD / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');sys.exit(0 if s.recv(64).startswith(b'HTTP/') else 1)"; then
+      ok=1
+    fi
+  else
+    ok=1
+  fi
+  if [[ "$ok" -ne 1 ]]; then
+    echo "WARNING: HTTPS proxy is running but :${https_port} did not answer — see data/panel-https.log" >&2
+    tail -n 30 "${root}/data/panel-https.log" >&2 || true
   fi
 }
