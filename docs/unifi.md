@@ -82,7 +82,7 @@ Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` (Integration 
 
 **Announce** (Radio Player modal): the browser records a short clip (`MediaRecorder`, typically WebM/Opus), you can listen locally, then `POST /api/unifi.php` with `action=radio_announce` (multipart `audio` + `targets` + `volume`). The panel saves under `data/unifi-announce/` and ffmpeg sends the file over the same talkback path.
 
-Browsers only allow the microphone on a **secure context**. Use the panel HTTPS URL `https://<panel-ip>:8443` (self-signed — accept once). Paper tablets keep polling `http://<panel-ip>:8080`. On plain HTTP you can still **Choose file** (or Record falls back to the device recorder / file picker). Set `YARBO_PANEL_HTTPS=0` to turn the proxy off.
+Browsers only allow the microphone on a **secure context**. Use the panel HTTPS URL `https://<panel-ip>:8443` (self-signed — accept once). After a panel update, **restart** the service so `panel.sh` starts the TLS proxy (`sudo systemctl restart yarbo-panel`). Paper tablets keep polling `http://<panel-ip>:8080`. On plain HTTP you can still **Choose file**. Set `YARBO_PANEL_HTTPS=0` to turn the proxy off. If :8443 refuses connections, check `data/panel-https.log` and that the firewall allows TCP 8443.
 
 ## Rollback
 
