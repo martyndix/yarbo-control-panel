@@ -93,6 +93,10 @@ final class YarboUpdate
      */
     public function restartPanelAsync(): array
     {
+        // Updates often die mid-"restarting" when systemctl kills the service cgroup,
+        // leaving a stale progress/lock that blocked this button. Clear orphans first.
+        $this->clearOrphanedUpdateState();
+
         if ($this->isUpdateRunning()) {
             return [
                 'ok' => false,
@@ -105,13 +109,29 @@ final class YarboUpdate
             return ['ok' => false, 'error' => 'Could not create data directory'];
         }
 
+        $this->writeProgress([
+            'state' => 'restarting',
+            'message' => 'Panel restart requested from Settings',
+            'started_at' => gmdate('c'),
+            'updated_at' => gmdate('c'),
+        ]);
+
         $logFile = $this->projectRoot . '/data/panel-restart.log';
-        $script = <<<'BASH'
+        $statusFileArg = escapeshellarg($this->progressPath());
+        $script = <<<BASH
 set -euo pipefail
 sleep 1
+finish() {
+  php -r 'file_put_contents(\$argv[1], json_encode([
+    "state" => "done",
+    "message" => "Panel restart finished",
+    "updated_at" => gmdate("c"),
+  ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");' {$statusFileArg} || true
+}
 if command -v systemctl >/dev/null 2>&1 && systemctl cat yarbo-panel.service >/dev/null 2>&1; then
   if sudo -n systemctl restart yarbo-panel 2>/dev/null; then
     echo "restarted via systemctl"
+    finish
     exit 0
   fi
   echo "systemctl restart failed (sudoers?); signalling panel.sh" >&2
@@ -120,6 +140,7 @@ fi
 pkill -TERM -f '[s]cripts/panel.sh' 2>/dev/null || true
 pkill -TERM -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
 echo "signalled panel processes"
+finish
 BASH;
 
         $cmd = sprintf(
@@ -129,6 +150,13 @@ BASH;
         );
 
         if (!$this->spawnBackgroundCommand($cmd)) {
+            $this->writeProgress([
+                'state' => 'failed',
+                'message' => 'Could not start panel restart',
+                'error' => 'Could not start panel restart',
+                'updated_at' => gmdate('c'),
+            ]);
+
             return ['ok' => false, 'error' => 'Could not start panel restart'];
         }
 
@@ -137,6 +165,45 @@ BASH;
             'started' => true,
             'message' => 'Panel restart started. The page will reload when it is back.',
         ];
+    }
+
+    /**
+     * Drop leftover update lock/progress left when systemctl killed the updater mid-restart.
+     */
+    private function clearOrphanedUpdateState(): void
+    {
+        $lock = $this->lockPath();
+        $progress = $this->readProgress();
+        $state = (string) ($progress['state'] ?? '');
+        $hasLock = is_file($lock);
+        $age = 0;
+        $stamp = strtotime((string) ($progress['started_at'] ?? $progress['updated_at'] ?? ''));
+        if ($stamp > 0) {
+            $age = time() - $stamp;
+        }
+        if ($hasLock) {
+            $lockAge = time() - (int) filemtime($lock);
+            // Lock with no live updater after a short window is orphaned.
+            if ($lockAge > 45) {
+                @unlink($lock);
+                $hasLock = false;
+            }
+        }
+
+        if ($hasLock) {
+            return;
+        }
+
+        // No lock: active-looking progress is leftover from a killed update/restart.
+        if (in_array($state, self::ACTIVE_PROGRESS_STATES, true)) {
+            $this->writeProgress([
+                'state' => 'done',
+                'message' => 'Cleared stale update state',
+                'updated_at' => gmdate('c'),
+                'previous_state' => $state,
+                'stale_age_seconds' => $age,
+            ]);
+        }
     }
 
     /**
@@ -250,6 +317,18 @@ BASH;
         $progress = $this->readProgress();
         $state = (string) ($progress['state'] ?? '');
         if (!in_array($state, self::ACTIVE_PROGRESS_STATES, true)) {
+            return false;
+        }
+
+        // Without a lock file the updater is not alive — progress alone is stale
+        // (common after systemctl restart kills the update cgroup mid-"restarting").
+        if ($state === 'restarting') {
+            $this->writeProgress([
+                'state' => 'done',
+                'message' => 'Cleared stale restarting state',
+                'updated_at' => gmdate('c'),
+            ]);
+
             return false;
         }
 
