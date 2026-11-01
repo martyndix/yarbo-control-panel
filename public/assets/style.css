@@ -4337,18 +4337,43 @@ body.home-is-reordering {
     margin-top: 0.35rem;
 }
 .unifi-radio-announce {
-    margin-top: 1.1rem;
-    padding-top: 0.85rem;
-    border-top: 1px solid var(--border);
+    margin: 0 0 1rem;
+    padding: 0 0 0.95rem;
+    border-bottom: 1px solid var(--border);
 }
-.unifi-radio-announce .settings-subtitle {
+.unifi-radio-announce .settings-subtitle,
+.unifi-radio-stream .settings-subtitle {
     margin: 0 0 0.25rem;
 }
 .unifi-radio-announce > .hint {
+    margin: 0 0 0.55rem;
+}
+.unifi-radio-rec-meter {
+    height: 0.55rem;
+    width: 100%;
+    max-width: 20rem;
     margin: 0 0 0.65rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--border) 70%, var(--bg));
+    overflow: hidden;
+}
+.unifi-radio-rec-meter-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.05s linear;
+}
+.unifi-radio-rec-meter.is-hot .unifi-radio-rec-meter-fill {
+    background: var(--danger, #b42318);
 }
 .unifi-radio-announce-actions {
     margin-top: 0.15rem;
+}
+#unifi-radio-rec {
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
 }
 .unifi-radio-rec-audio {
     display: block;
@@ -4365,6 +4390,7 @@ body.home-is-reordering {
 #unifi-radio-rec.is-recording {
     border-color: var(--danger, #b42318);
     background: var(--danger, #b42318);
+    color: #fff;
 }
 .unifi-stations-list {
     display: grid;

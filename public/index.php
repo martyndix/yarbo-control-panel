@@ -2105,26 +2105,14 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2 id="radio-player-title">Radio Player</h2>
                 <p class="hint">Play a station to Protect cameras and readers with a speaker (talkback). Needs ffmpeg and UDP 7004 to each device.</p>
                 <div id="unifi-speakers" class="unifi-speakers" aria-label="Radio Player controls">
-                    <label class="settings-field">
-                        <span class="label">Station</span>
-                        <select id="unifi-radio-station" aria-label="Radio station"></select>
-                    </label>
-                    <div id="unifi-radio-speakers" class="unifi-radio-speakers" role="group" aria-label="Play on"></div>
-                    <label class="settings-field unifi-radio-volume-field">
-                        <span class="label">Volume <span id="unifi-radio-volume-label">60%</span></span>
-                        <input type="range" id="unifi-radio-volume" min="0" max="100" value="60" aria-label="Speaker volume">
-                    </label>
-                    <div class="settings-update-actions unifi-radio-actions">
-                        <button type="button" class="btn" id="unifi-radio-play">Play</button>
-                        <button type="button" class="btn btn-secondary" id="unifi-radio-stop">Stop</button>
-                    </div>
-                    <p id="unifi-radio-status" class="hint" role="status">Idle</p>
                     <div class="unifi-radio-announce" aria-label="Announce">
                         <h3 class="settings-subtitle">Announce</h3>
-                        <p class="hint">Record a short message (or choose an audio file), listen back, then send it to the speakers ticked above. Live Record needs HTTPS — open the panel on port <strong>8443</strong> (self-signed; accept the warning once). Paper tablets keep using HTTP :8080.</p>
+                        <p class="hint">Hold Record to speak, check the level meter, listen back, then Send to the speakers ticked below. Or choose an audio file.</p>
+                        <div class="unifi-radio-rec-meter" aria-hidden="true" title="Microphone level">
+                            <div id="unifi-radio-rec-meter-fill" class="unifi-radio-rec-meter-fill"></div>
+                        </div>
                         <div class="settings-update-actions unifi-radio-announce-actions">
-                            <button type="button" class="btn" id="unifi-radio-rec">Record</button>
-                            <button type="button" class="btn btn-secondary" id="unifi-radio-rec-stop" disabled>Stop</button>
+                            <button type="button" class="btn" id="unifi-radio-rec" aria-pressed="false">Hold to record</button>
                             <button type="button" class="btn btn-secondary" id="unifi-radio-rec-file">Choose file</button>
                             <button type="button" class="btn btn-secondary" id="unifi-radio-rec-listen" disabled>Listen</button>
                             <button type="button" class="btn" id="unifi-radio-rec-send" disabled>Send</button>
@@ -2133,6 +2121,23 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <input type="file" id="unifi-radio-rec-capture" class="hidden" accept="audio/*" capture aria-hidden="true" tabindex="-1">
                         <audio id="unifi-radio-rec-audio" class="unifi-radio-rec-audio hidden" controls preload="metadata"></audio>
                         <p id="unifi-radio-rec-status" class="hint" role="status"></p>
+                    </div>
+                    <div class="unifi-radio-stream">
+                        <h3 class="settings-subtitle">Radio</h3>
+                        <label class="settings-field">
+                            <span class="label">Station</span>
+                            <select id="unifi-radio-station" aria-label="Radio station"></select>
+                        </label>
+                        <div id="unifi-radio-speakers" class="unifi-radio-speakers" role="group" aria-label="Play on"></div>
+                        <label class="settings-field unifi-radio-volume-field">
+                            <span class="label">Volume <span id="unifi-radio-volume-label">60%</span></span>
+                            <input type="range" id="unifi-radio-volume" min="0" max="100" value="60" aria-label="Speaker volume">
+                        </label>
+                        <div class="settings-update-actions unifi-radio-actions">
+                            <button type="button" class="btn" id="unifi-radio-play">Play</button>
+                            <button type="button" class="btn btn-secondary" id="unifi-radio-stop">Stop</button>
+                        </div>
+                        <p id="unifi-radio-status" class="hint" role="status">Idle</p>
                     </div>
                 </div>
                 <div class="modal-actions">

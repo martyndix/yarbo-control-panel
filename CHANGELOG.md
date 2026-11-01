@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.172] - 2026-11-01
+
+### Changed
+- Radio Player **Announce** sits above Radio, uses **hold to record** (no Stop), and shows a live mic **level meter** while you speak.
+
 ## [4.0.171] - 2026-11-01
 
 ### Added

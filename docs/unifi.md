@@ -80,9 +80,9 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` (Integration API) returns a UDP/RTP URL; the panel streams the station through ffmpeg as AAC ADTS to that camera on UDP (usually port 7004). The volume slider always scales the ffmpeg stream. Optional Protect hardware volume uses the private API `PATCH /proxy/protect/api/cameras/{id}` with `speakerSettings.speakerVolume` and a UniFi OS session (local admin) — an API key alone gets HTTP 401 on that path and is not used.
 
-**Announce** (Radio Player modal): the browser records a short clip (`MediaRecorder`, typically WebM/Opus), you can listen locally, then `POST /api/unifi.php` with `action=radio_announce` (multipart `audio` + `targets` + `volume`). The panel saves under `data/unifi-announce/` and ffmpeg sends the file over the same talkback path.
+**Announce** (Radio Player modal, above Radio): hold **Hold to record** while speaking (live level meter), release to stop, listen, then Send to the ticked speakers. Or **Choose file**. Upload is `POST /api/unifi.php` with `action=radio_announce` (multipart `audio` + `targets` + `volume`) into `data/unifi-announce/`, then ffmpeg talkback.
 
-Browsers only allow the microphone on a **secure context**. Use the panel HTTPS URL `https://<panel-ip>:8443` (self-signed — accept once). After a panel update, **restart** the service so `panel.sh` starts the TLS proxy (`sudo systemctl restart yarbo-panel`). Paper tablets keep polling `http://<panel-ip>:8080`. On plain HTTP you can still **Choose file**. Set `YARBO_PANEL_HTTPS=0` to turn the proxy off. If :8443 refuses connections, check `data/panel-https.log` and that the firewall allows TCP 8443.
+Mic hold-to-record needs a **secure context** (`https://<panel-ip>:8443`, self-signed — accept once). Settings → Panel updates → **Start HTTPS** / **Restart panel** if :8443 is down. Paper tablets keep `http://<panel-ip>:8080`. Set `YARBO_PANEL_HTTPS=0` to disable the proxy.
 
 ## Rollback
 
