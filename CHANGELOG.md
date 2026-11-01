@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.174] - 2026-11-02
+
+### Changed
+- Radio Player **Announce** button order is now Hold to record → Listen → Choose file → Send.
+
 ## [4.0.173] - 2026-11-02
 
 ### Changed

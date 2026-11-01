@@ -224,10 +224,14 @@ assert_true(str_contains($index, 'id="unifi-radio-rec-meter-fill"'), 'Announce l
 assert_true(str_contains($index, 'id="unifi-radio-rec-listen"'), 'Announce Listen button');
 assert_true(str_contains($index, 'id="unifi-radio-rec-send"'), 'Announce Send button');
 assert_true(str_contains($index, 'id="unifi-radio-rec-file"'), 'Announce Choose file button');
+$listenPos = strpos($index, 'id="unifi-radio-rec-listen"');
+$filePos = strpos($index, 'id="unifi-radio-rec-file"');
+assert_true($listenPos !== false && $filePos !== false && $listenPos < $filePos, 'Listen before Choose file');
 assert_true(str_contains($index, 'unifi-radio-announce'), 'Announce section');
 $announcePos = strpos($index, 'unifi-radio-announce');
 $radioStreamPos = strpos($index, 'unifi-radio-stream');
 assert_true($announcePos !== false && $radioStreamPos !== false && $announcePos < $radioStreamPos, 'Announce above Radio section');
+assert_true(str_contains($change, '## [4.0.174]'), 'changelog 4.0.174');
 assert_true(!str_contains($index, 'Live Record needs HTTPS'), 'HTTPS blurb removed from Announce hint');
 $httpsProxy = (string) file_get_contents(dirname(__DIR__) . '/scripts/panel_https_proxy.py');
 $httpsLib = (string) file_get_contents(dirname(__DIR__) . '/scripts/lib/panel_https.sh');

@@ -2112,8 +2112,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         </div>
                         <div class="settings-update-actions unifi-radio-announce-actions">
                             <button type="button" class="btn" id="unifi-radio-rec" aria-pressed="false">Hold to record</button>
-                            <button type="button" class="btn btn-secondary" id="unifi-radio-rec-file">Choose file</button>
                             <button type="button" class="btn btn-secondary" id="unifi-radio-rec-listen" disabled>Listen</button>
+                            <button type="button" class="btn btn-secondary" id="unifi-radio-rec-file">Choose file</button>
                             <button type="button" class="btn" id="unifi-radio-rec-send" disabled>Send</button>
                         </div>
                         <input type="file" id="unifi-radio-rec-input" class="hidden" accept="audio/*,.webm,.ogg,.mp3,.m4a,.wav,.aac" aria-label="Choose audio file for announce">
