@@ -82,6 +82,6 @@ Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` (Integration 
 
 ## Rollback
 
-- **Speakers only:** Settings → UniFi → untick **Show Speakers / radio** (stops playback and hides the UI). Station list stays in `data/unifi-radio-stations.json`.
+- **Radio Player only:** Settings → UniFi → untick **Show Radio Player in the header** (stops playback and hides the button). Station list stays in `data/unifi-radio-stations.json`.
 - **Whole UniFi module:** untick UniFi under Settings → Modules. Credentials stay in `data/unifi-config.json`.
 - **Panel version:** install a previous panel build from Settings → Panel updates if you want to undo **4.0.158** entirely. **4.0.160** only fixes Speakers panel contrast (theme text/card colours).

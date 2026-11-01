@@ -4246,12 +4246,24 @@ body.home-is-reordering {
     }
 }
 
+.radio-player-panel {
+    width: min(28rem, 100%);
+    max-height: min(90vh, 40rem);
+    overflow: auto;
+}
+.radio-playing-badge:not(.hidden) {
+    background: var(--accent);
+}
+#radio-open.is-playing {
+    border-color: var(--accent);
+    color: var(--accent);
+}
 .unifi-speakers {
-    margin: 0.75rem 0 1.25rem;
-    padding: 0.85rem 1rem;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--card);
+    margin: 0.35rem 0 0.75rem;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
     color: var(--text);
 }
 .unifi-speakers.hidden {

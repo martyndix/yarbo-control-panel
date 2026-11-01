@@ -87,6 +87,22 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <nav class="module-switcher hidden" id="module-switcher" aria-label="Modules"></nav>
             </div>
             <div class="header-actions">
+                <div id="radio-open-wrap" class="header-action-wrap hidden">
+                    <button
+                        type="button"
+                        id="radio-open"
+                        class="btn btn-secondary btn-settings"
+                        aria-controls="radio-player-modal"
+                        aria-expanded="false"
+                        aria-label="Radio Player"
+                    >Radio</button>
+                    <span
+                        id="radio-playing-badge"
+                        class="settings-update-badge radio-playing-badge hidden"
+                        aria-hidden="true"
+                        title="Radio playing"
+                    ></span>
+                </div>
                 <div id="mail-open-wrap" class="header-action-wrap hidden">
                     <button
                         type="button"
@@ -684,26 +700,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-            <p class="hint">Protect cameras, floodlights, relays, and sensors, plus Access doors and door controllers. Tick a device below to put it on the Home grid. Credentials stay in Settings → UniFi.</p>
+            <p class="hint">Protect cameras, floodlights, relays, and sensors, plus Access doors and door controllers. Tick a device below to put it on the Home grid. Credentials stay in Settings → UniFi. Radio Player (when enabled) is the header <strong>Radio</strong> button.</p>
             <p id="unifi-status" class="updated">UniFi: —</p>
-            <div id="unifi-speakers" class="unifi-speakers hidden" aria-label="Speakers">
-                <h3 class="settings-subtitle">Speakers</h3>
-                <p class="hint">Play a radio stream to Protect cameras and readers that have a speaker (same talkback path as Home Assistant). Needs ffmpeg and UDP 7004 to each device. The volume slider scales the stream; optional Protect hardware volume needs the local UniFi OS admin in Settings → UniFi. Turn Speakers off there if you do not want this.</p>
-                <label class="settings-field">
-                    <span class="label">Station</span>
-                    <select id="unifi-radio-station" aria-label="Radio station"></select>
-                </label>
-                <div id="unifi-radio-speakers" class="unifi-radio-speakers" role="group" aria-label="Play on"></div>
-                <label class="settings-field unifi-radio-volume-field">
-                    <span class="label">Volume <span id="unifi-radio-volume-label">60%</span></span>
-                    <input type="range" id="unifi-radio-volume" min="0" max="100" value="60" aria-label="Speaker volume">
-                </label>
-                <div class="settings-update-actions unifi-radio-actions">
-                    <button type="button" class="btn" id="unifi-radio-play">Play</button>
-                    <button type="button" class="btn btn-secondary" id="unifi-radio-stop">Stop</button>
-                </div>
-                <p id="unifi-radio-status" class="hint" role="status">Idle</p>
-            </div>
             <div id="unifi-home-picker" class="unifi-pick" aria-label="Show on Home"></div>
             <div id="unifi-cameras" class="unifi-camera-grid"></div>
             <div id="unifi-lights" class="home-device-grid unifi-device-grid"></div>
@@ -1191,11 +1189,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <input type="checkbox" id="settings-unifi-doors-tile-sensors" name="unifi_doors_tile_sensors">
                                 <span>Also list door sensors on that tile (Access position sensors and Protect contacts)</span>
                             </label>
-                            <h3 class="settings-subtitle">Speakers / radio</h3>
-                            <p class="hint">Optional. Streams UK national radio (and your own URLs) to Protect speakers such as a G3 Reader Pro via talkback — not AirPlay. Needs ffmpeg and UDP 7004 from this panel to each device. The volume slider always works in the stream; Protect hardware volume only if the local UniFi OS admin above is set. Untick to hide Speakers and stop playback. BBC HLS URLs can change; edit or restore defaults below.</p>
+                            <h3 class="settings-subtitle">Radio Player</h3>
+                            <p class="hint">Optional. Puts a <strong>Radio</strong> button in the header on every screen (only while the UniFi module is on). Streams UK national radio (and your own URLs) to Protect speakers such as a G3 Reader Pro via talkback — not AirPlay. Needs ffmpeg and UDP 7004 from this panel to each device. Untick to hide the button and stop playback. BBC HLS URLs can change; edit or restore defaults below.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-unifi-speakers-enabled" name="unifi_speakers_enabled" checked>
-                                <span>Show Speakers / radio on the UniFi page</span>
+                                <span>Show Radio Player in the header</span>
                             </label>
                             <div id="settings-unifi-stations" class="unifi-stations">
                                 <div id="settings-unifi-stations-list" class="unifi-stations-list"></div>
@@ -2094,6 +2092,33 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </div>
                     </div>
                 </form>
+        </div>
+
+        <div id="radio-player-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="radio-player-title">
+            <button type="button" class="modal-backdrop" data-radio-player-close aria-label="Close Radio Player"></button>
+            <div class="modal-panel card radio-player-panel">
+                <h2 id="radio-player-title">Radio Player</h2>
+                <p class="hint">Play a station to Protect cameras and readers with a speaker (talkback). Needs ffmpeg and UDP 7004 to each device.</p>
+                <div id="unifi-speakers" class="unifi-speakers" aria-label="Radio Player controls">
+                    <label class="settings-field">
+                        <span class="label">Station</span>
+                        <select id="unifi-radio-station" aria-label="Radio station"></select>
+                    </label>
+                    <div id="unifi-radio-speakers" class="unifi-radio-speakers" role="group" aria-label="Play on"></div>
+                    <label class="settings-field unifi-radio-volume-field">
+                        <span class="label">Volume <span id="unifi-radio-volume-label">60%</span></span>
+                        <input type="range" id="unifi-radio-volume" min="0" max="100" value="60" aria-label="Speaker volume">
+                    </label>
+                    <div class="settings-update-actions unifi-radio-actions">
+                        <button type="button" class="btn" id="unifi-radio-play">Play</button>
+                        <button type="button" class="btn btn-secondary" id="unifi-radio-stop">Stop</button>
+                    </div>
+                    <p id="unifi-radio-status" class="hint" role="status">Idle</p>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" data-radio-player-close>Close</button>
+                </div>
+            </div>
         </div>
 
         <div id="vestaboard-rotate-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="vestaboard-rotate-title">

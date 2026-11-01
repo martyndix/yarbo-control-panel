@@ -75,6 +75,10 @@ const els = {
     mailOpen: document.getElementById('mail-open'),
     mailOpenWrap: document.getElementById('mail-open-wrap'),
     mailUnreadBadge: document.getElementById('mail-unread-badge'),
+    radioOpen: document.getElementById('radio-open'),
+    radioOpenWrap: document.getElementById('radio-open-wrap'),
+    radioPlayingBadge: document.getElementById('radio-playing-badge'),
+    radioPlayerModal: document.getElementById('radio-player-modal'),
     mailPage: document.getElementById('mail-page'),
     homeAutomationsPage: document.getElementById('home-automations-page'),
     homeAutomationsOpen: document.getElementById('home-automations-open'),
@@ -425,6 +429,7 @@ function syncBodyModalClass() {
         els.updateConfirmModal,
         els.vestaboardRotateModal,
         els.unifiLiveModal,
+        els.radioPlayerModal,
     ].some((modal) => modal && !modal.classList.contains('hidden'));
     document.body.classList.toggle('modal-open', open);
 }
@@ -2502,6 +2507,11 @@ function applyHubFromStatus(data) {
     if (ids.includes('unifi') && activeModuleId === 'unifi' && !settingsModalOpen) {
         loadUnifiDashboard({ silent: true });
     }
+    syncRadioPlayerChrome({
+        unifiModuleOn: ids.includes('unifi'),
+        speakersEnabled: unifiSpeakersEnabled(unifiDash || data?.unifi || {}),
+        radio: unifiDash?.radio || data?.unifi?.radio || null,
+    });
     if (data.vestaboard) {
         applyVestaboardLiveSwitch(data);
     }
@@ -3217,6 +3227,11 @@ function renderUnifiDashboard(data, { replace = false } = {}) {
     patchUnifiWrap(document.getElementById('unifi-doors'), data?.doors || [], unifiDeviceCardHtml);
     patchUnifiWrap(document.getElementById('unifi-sensors'), data?.sensors || [], unifiDeviceCardHtml);
     renderUnifiSpeakers(data, { replace });
+    syncRadioPlayerChrome({
+        unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+        speakersEnabled: unifiSpeakersEnabled(data),
+        radio: data?.radio || null,
+    });
     renderUnifiHomePicker(data, { replace });
     ensureUnifiStillRefresh();
 }
@@ -3252,12 +3267,92 @@ function writeUnifiSpeakerPick(ids) {
     } catch { /* ignore */ }
 }
 
+let radioPlayerOpen = false;
+let radioSpeakersEnabled = true;
+
+function setRadioPlayingBadge(playing, stationName = '') {
+    const on = Boolean(playing);
+    els.radioOpen?.classList.toggle('is-playing', on);
+    if (!els.radioPlayingBadge) return;
+    els.radioPlayingBadge.classList.toggle('hidden', !on);
+    els.radioPlayingBadge.setAttribute('aria-hidden', on ? 'false' : 'true');
+    const label = stationName ? `Playing ${stationName}` : 'Radio playing';
+    els.radioPlayingBadge.title = label;
+    if (els.radioOpen) {
+        els.radioOpen.setAttribute('aria-label', on ? `Radio Player, ${label}` : 'Radio Player');
+    }
+}
+
+function syncRadioPlayerChrome({ unifiModuleOn, speakersEnabled, radio } = {}) {
+    if (typeof speakersEnabled === 'boolean') radioSpeakersEnabled = speakersEnabled;
+    const show = Boolean(unifiModuleOn) && radioSpeakersEnabled !== false;
+    els.radioOpenWrap?.classList.toggle('hidden', !show);
+    if (!show) {
+        if (radioPlayerOpen) closeRadioPlayerModal({ stopIfNeeded: false });
+        setRadioPlayingBadge(false);
+        if (unifiModuleOn === false && (unifiDash?.radio?.playing || radio?.playing)) {
+            unifiApi({ action: 'radio_stop' }, 8000).catch(() => {});
+            if (unifiDash?.radio) unifiDash.radio.playing = false;
+        }
+        return;
+    }
+    if (radio) setRadioPlayingBadge(Boolean(radio.playing), radio.station_name || '');
+    else if (unifiDash?.radio) setRadioPlayingBadge(Boolean(unifiDash.radio.playing), unifiDash.radio.station_name || '');
+}
+
+async function ensureRadioPlayerData({ force = false } = {}) {
+    const need = force
+        || !unifiDash
+        || !Array.isArray(unifiDash.stations)
+        || !Array.isArray(unifiDash.speakers);
+    if (!need) {
+        renderUnifiSpeakers(unifiDash, { replace: false });
+        return unifiDash;
+    }
+    try {
+        const data = await unifiApi(null, 12000);
+        if (data && data.ok !== false) {
+            unifiDash = { ...unifiDash, ...data };
+            renderUnifiSpeakers(unifiDash, { replace: true });
+            syncRadioPlayerChrome({
+                unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+                speakersEnabled: unifiSpeakersEnabled(unifiDash),
+                radio: unifiDash.radio || null,
+            });
+        }
+        return data;
+    } catch {
+        return null;
+    }
+}
+
+async function openRadioPlayerModal() {
+    if (!els.radioPlayerModal || els.radioOpenWrap?.classList.contains('hidden')) return;
+    if (settingsModalOpen) closeSettingsModal();
+    radioPlayerOpen = true;
+    els.radioPlayerModal.classList.remove('hidden');
+    els.radioOpen?.classList.add('is-active');
+    els.radioOpen?.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('modal-open');
+    await ensureRadioPlayerData({ force: !unifiDash?.stations?.length });
+}
+
+function closeRadioPlayerModal({ stopIfNeeded = false } = {}) {
+    if (!els.radioPlayerModal) return;
+    radioPlayerOpen = false;
+    els.radioPlayerModal.classList.add('hidden');
+    els.radioOpen?.classList.remove('is-active');
+    els.radioOpen?.setAttribute('aria-expanded', 'false');
+    syncBodyModalClass();
+    if (stopIfNeeded) {
+        unifiApi({ action: 'radio_stop' }, 8000).catch(() => {});
+    }
+}
+
 function renderUnifiSpeakers(data, { replace = false } = {}) {
     const wrap = els.unifiSpeakers;
     if (!wrap) return;
-    const enabled = unifiSpeakersEnabled(data);
-    wrap.classList.toggle('hidden', !enabled);
-    if (!enabled) return;
+    // Header chrome owns show/hide; modal controls stay mounted.
 
     const stations = Array.isArray(data?.stations) ? data.stations : [];
     const speakers = Array.isArray(data?.speakers) ? data.speakers : [];
@@ -3320,6 +3415,7 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
             els.unifiRadioStatus.textContent = 'Idle';
         }
     }
+    setRadioPlayingBadge(Boolean(radio.playing), radio.station_name || '');
 }
 
 function unifiSelectedSpeakerIds() {
@@ -10315,6 +10411,15 @@ async function loadSettings() {
         if (els.settingsUnifiSpeakersEnabled) {
             els.settingsUnifiSpeakersEnabled.checked = data.unifi?.speakers_enabled !== false;
         }
+        if (data.unifi) {
+            unifiDash = { ...unifiDash, ...data.unifi };
+            syncRadioPlayerChrome({
+                unifiModuleOn: Array.isArray(data.hub?.enabled) && data.hub.enabled.some((m) => m.id === 'unifi')
+                    || (Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi')),
+                speakersEnabled: data.unifi.speakers_enabled !== false,
+                radio: data.unifi.radio || null,
+            });
+        }
         if (Array.isArray(data.unifi?.devices) && data.unifi.devices.length) {
             renderUnifiHomePicker(data.unifi, { replace: !unifiPickerDirty });
         }
@@ -13284,6 +13389,12 @@ els.settingsVestaboardSample?.addEventListener('change', () => loadVestaboardPre
 els.settingsVestaboardTest?.addEventListener('click', (e) => testVestaboardConnection(e.currentTarget));
 els.settingsVestaboardSend?.addEventListener('click', (e) => sendVestaboardNow(e.currentTarget));
 els.vestaboardResume?.addEventListener('click', (e) => resumeVestaboardStatus(e.currentTarget));
+els.radioOpen?.addEventListener('click', () => {
+    openRadioPlayerModal();
+});
+document.querySelectorAll('[data-radio-player-close]').forEach((btn) => {
+    btn.addEventListener('click', () => closeRadioPlayerModal());
+});
 els.vestaboardRotateOpen?.addEventListener('click', openVestaboardRotateModal);
 els.vestaboardRotateSave?.addEventListener('click', (e) => saveVestaboardRotate(e.currentTarget));
 els.vestaboardRotateEnabled?.addEventListener('change', updateVestaboardRotateHint);
@@ -13518,7 +13629,7 @@ els.settingsUnifiSpeakersEnabled?.addEventListener('change', async () => {
     const show = Boolean(els.settingsUnifiSpeakersEnabled.checked);
     try {
         const data = await unifiApi({ action: 'speakers_enabled', show }, 8000);
-        if (!data?.ok) throw new Error(data?.error || 'Could not update Speakers');
+        if (!data?.ok) throw new Error(data?.error || 'Could not update Radio Player');
         if (unifiDash) {
             unifiDash.speakers_enabled = show;
             if (data.config) unifiDash.config = { ...(unifiDash.config || {}), ...data.config };
@@ -13527,10 +13638,16 @@ els.settingsUnifiSpeakersEnabled?.addEventListener('change', async () => {
             if (data.radio) unifiDash.radio = data.radio;
         }
         renderUnifiSpeakers(unifiDash || data, { replace: true });
-        showToast(show ? 'Speakers shown on UniFi' : 'Speakers hidden — playback stopped', 'success');
+        syncRadioPlayerChrome({
+            unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+            speakersEnabled: show,
+            radio: (unifiDash || data)?.radio || null,
+        });
+        if (!show) closeRadioPlayerModal({ stopIfNeeded: false });
+        showToast(show ? 'Radio Player shown in header' : 'Radio Player hidden — playback stopped', 'success');
     } catch (err) {
         els.settingsUnifiSpeakersEnabled.checked = !show;
-        showToast(err.message || 'Could not update Speakers', 'error');
+        showToast(err.message || 'Could not update Radio Player', 'error');
     }
 });
 els.settingsUnifiStationAdd?.addEventListener('click', () => {
@@ -13627,6 +13744,11 @@ els.unifiRadioPlay?.addEventListener('click', async () => {
             if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
         }
         renderUnifiSpeakers(unifiDash || data, { replace: true });
+        syncRadioPlayerChrome({
+            unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+            speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
+            radio: (unifiDash || data)?.radio || null,
+        });
         if (data.warning) showToast(data.warning, 'error');
         else showToast('Playing', 'success');
     } catch (err) {
@@ -13643,6 +13765,11 @@ els.unifiRadioStop?.addEventListener('click', async () => {
         if (!data?.ok) throw new Error(data?.error || 'Stop failed');
         if (unifiDash && data.radio) unifiDash.radio = data.radio;
         renderUnifiSpeakers(unifiDash || data, { replace: true });
+        syncRadioPlayerChrome({
+            unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+            speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
+            radio: (unifiDash || data)?.radio || null,
+        });
         showToast('Stopped', 'success');
     } catch (err) {
         showToast(err.message || 'Stop failed', 'error');
@@ -13650,12 +13777,12 @@ els.unifiRadioStop?.addEventListener('click', async () => {
         els.unifiRadioStop.disabled = false;
     }
 });
-document.getElementById('unifi-card')?.addEventListener('change', (event) => {
+els.radioPlayerModal?.addEventListener('change', (event) => {
     const speaker = event.target.closest('input[data-unifi-speaker]');
-    if (speaker) {
-        writeUnifiSpeakerPick(unifiSelectedSpeakerIds());
-        return;
-    }
+    if (!speaker) return;
+    writeUnifiSpeakerPick(unifiSelectedSpeakerIds());
+});
+document.getElementById('unifi-card')?.addEventListener('change', (event) => {
     const input = event.target.closest('input[data-unifi-home]');
     if (!input) return;
     saveUnifiShowOnHome(input.getAttribute('data-unifi-home') || '', input.checked);

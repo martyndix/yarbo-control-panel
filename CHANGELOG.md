@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.164] - 2026-11-01
+
+### Changed
+- UniFi **Speakers** is now **Radio Player**: a header **Radio** button on every screen (when the UniFi module is on and Radio Player is enabled in Settings → UniFi) opens a modal for station, speakers, volume, Play/Stop. The inline Speakers block is removed from the UniFi page. Station editing stays in Settings.
+
+
 ## [4.0.163] - 2026-10-31
 
 ### Fixed
