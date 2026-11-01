@@ -13930,6 +13930,7 @@ els.unifiRadioVolume?.addEventListener('change', async () => {
         // May restart an active talkback stream so the new gain applies.
         const data = await unifiApi({ action: 'radio_volume', volume, targets }, 45000);
         if (!data?.ok && data?.error) throw new Error(data.error);
+        if (data.radio) applyRadioCommandResult(data.radio);
         if (unifiDash && data.radio) unifiDash.radio = data.radio;
         renderUnifiSpeakers(unifiDash || data, { replace: false });
     } catch (err) {
