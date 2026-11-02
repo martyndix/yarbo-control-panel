@@ -3557,16 +3557,13 @@ function renderUnifiAirplayStatus(airplay, radio = null) {
     const missing = ap.installed === false;
     const client = String(ap.client_name || '').trim();
     const airplayPlaying = Boolean(radio?.playing && radio?.station_id === 'airplay');
+    // Only trust radio.playing for AirPlay — never show Playing from session flags alone.
     if (airplayPlaying) {
         const who = client
             || (radio?.station_name && String(radio.station_name).toLowerCase() !== 'airplay'
                 ? String(radio.station_name)
                 : 'AirPlay device');
         els.unifiAirplayStatus.textContent = `Playing from ${who}`;
-    } else if (ap.session_active && (ap.armed || ap.running)) {
-        els.unifiAirplayStatus.textContent = client
-            ? `Connected · ${client}`
-            : 'Device connected — starting…';
     } else if (ap.armed || ap.running) {
         els.unifiAirplayStatus.textContent = `Available as ${name} — waiting for a device`;
     } else if (missing) {

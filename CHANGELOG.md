@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.183] - 2026-11-02
+
+### Fixed
+- AirPlay no longer stays on **Playing** with no device connected (classic fallback no longer starts talkback on Start; play-begins + TCP watcher gate the bridge; update clears a stuck Playing state).
+
 ## [4.0.182] - 2026-11-02
 
 ### Changed

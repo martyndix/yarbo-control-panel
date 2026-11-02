@@ -210,6 +210,55 @@ final class YarboPanelAirPlay
     }
 
     /**
+     * True when a play-begins / TCP-watch hook marked the session active, or a
+     * remote TCP peer is attached to shairport-sync (when ss/lsof can see it).
+     */
+    public function clientIsPresent(): bool
+    {
+        // Hook/watcher owns the flag until play_ends / client-gone. Do not expire
+        // it by age — unprivileged `ss -p` often hides PIDs on the Pi.
+        if (!empty($this->session()['active'])) {
+            return true;
+        }
+
+        return $this->hasNetworkClient();
+    }
+
+    public function hasNetworkClient(): bool
+    {
+        $pid = $this->receiverPid();
+        if ($pid <= 1) {
+            return false;
+        }
+        $ss = trim((string) shell_exec(
+            'ss -tnH state established -p 2>/dev/null | grep -F '
+            . escapeshellarg('pid=' . $pid) . ' | head -n1'
+        ));
+        if ($ss !== '') {
+            return true;
+        }
+        $lsof = trim((string) shell_exec(
+            'lsof -a -p ' . (int) $pid . ' -iTCP -sTCP:ESTABLISHED 2>/dev/null | awk \'NR>1{print; exit}\''
+        ));
+
+        return $lsof !== '';
+    }
+
+    private function receiverPid(): int
+    {
+        $pf = $this->projectRoot . '/data/airplay/shairport-sync.pid';
+        if (is_file($pf)) {
+            $pid = (int) trim((string) @file_get_contents($pf));
+            if ($pid > 1 && $this->pidAlive($pid)) {
+                return $pid;
+            }
+        }
+        $out = trim((string) shell_exec('pgrep -x shairport-sync 2>/dev/null | head -n1'));
+
+        return ($out !== '' && ctype_digit($out)) ? (int) $out : 0;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function status(): array
@@ -223,10 +272,11 @@ final class YarboPanelAirPlay
         $log = $this->logTail();
         $hooks = $this->sessionHooksAvailable();
 
+        $present = $running && $this->clientIsPresent();
         $message = 'AirPlay off';
         if (!$installed) {
             $message = 'shairport-sync is not installed on this panel';
-        } elseif ($running && $session['active']) {
+        } elseif ($present) {
             $who = $session['client_name'] ?: 'AirPlay device';
             $message = 'Playing from ' . $who;
         } elseif ($running && $bridge['armed']) {
@@ -243,8 +293,8 @@ final class YarboPanelAirPlay
             'nqptp' => $nqptp,
             'running' => $running,
             'armed' => $bridge['armed'] && $running,
-            'session_active' => $session['active'],
-            'client_name' => $session['client_name'],
+            'session_active' => $present,
+            'client_name' => $present ? $session['client_name'] : null,
             'hooks' => $hooks,
             'name' => $cfg['name'],
             'fifo' => $this->fifoPath(),

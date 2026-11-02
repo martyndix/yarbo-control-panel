@@ -126,9 +126,9 @@ general = {
 sessioncontrol = {
   allow_session_interruption = "yes";
   session_timeout = 120;
-  // Only bridge to Protect talkback while a client is actually playing.
-  run_this_before_entering_active_state = "${hook} active";
-  run_this_after_exiting_active_state = "${hook} inactive";
+  // play_begins/ends track real streams — active_state can fire without a client.
+  run_this_before_play_begins = "${hook} active";
+  run_this_after_play_ends = "${hook} inactive";
 };
 
 metadata = {
@@ -142,6 +142,76 @@ pipe = {
 };
 EOF
   echo "$conf"
+}
+
+yarbo_airplay_watch_pidfile() {
+  echo "$(yarbo_airplay_dir "$1")/watch.pid"
+}
+
+# True when shairport-sync has an established remote TCP peer (AirPlay/RTSP client).
+yarbo_airplay_has_network_client() {
+  local root="$1"
+  local pid
+  pid="$(yarbo_airplay_pid "$root")"
+  [[ -n "$pid" ]] || return 1
+  if command -v ss >/dev/null 2>&1; then
+    if ss -tnH state established -p 2>/dev/null | grep -F "pid=${pid}," >/dev/null 2>&1; then
+      return 0
+    fi
+    if ss -tnH state established -p 2>/dev/null | grep -E "pid=${pid}[^0-9]" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof -a -p "$pid" -iTCP -sTCP:ESTABLISHED 2>/dev/null | grep -qv '^COMMAND'; then
+      return 0
+    fi
+  fi
+  # /proc fallback: any ESTABLISHED socket inode owned by the process.
+  if [[ -d "/proc/${pid}/fd" ]]; then
+    local inodes="" inode
+    inodes="$(find "/proc/${pid}/fd" -lname 'socket:*' -printf '%l\n' 2>/dev/null | sed -n 's/.*\[\(.*\)\]/\1/p' | tr '\n' ' ')"
+    if [[ -n "$inodes" && -r /proc/net/tcp ]]; then
+      for inode in $inodes; do
+        if awk -v ino="$inode" 'NR>1 {
+          # local 00000000 = 0.0.0.0 listen; skip LISTEN (state 0A)
+          split($2, a, ":"); split($3, b, ":");
+          if ($10 == ino && $4 == "01" && b[1] != "00000000") { found=1; exit }
+        } END { exit found ? 0 : 1 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
+          return 0
+        fi
+      done
+    fi
+  fi
+  return 1
+}
+
+yarbo_airplay_stop_watch() {
+  local root="$1"
+  local pf pid
+  pf="$(yarbo_airplay_watch_pidfile "$root")"
+  if [[ -f "$pf" ]]; then
+    pid="$(tr -d ' \n' <"$pf" 2>/dev/null || true)"
+    if [[ -n "$pid" ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 0.1
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pf"
+  fi
+  pkill -f "panel_airplay_watch.sh" 2>/dev/null || true
+}
+
+yarbo_airplay_start_watch() {
+  local root="$1"
+  local log pf
+  yarbo_airplay_stop_watch "$root"
+  log="$(yarbo_airplay_log "$root")"
+  pf="$(yarbo_airplay_watch_pidfile "$root")"
+  mkdir -p "$(yarbo_airplay_dir "$root")"
+  chmod +x "${root}/scripts/panel_airplay_watch.sh" 2>/dev/null || true
+  nohup bash "${root}/scripts/panel_airplay_watch.sh" >>"$log" 2>&1 &
+  echo $! >"$pf"
 }
 
 yarbo_airplay_stop_metadata_reader() {
@@ -201,6 +271,7 @@ yarbo_airplay_pid() {
 yarbo_airplay_stop_receiver() {
   local root="$1"
   local pf pid
+  yarbo_airplay_stop_watch "$root"
   yarbo_airplay_stop_metadata_reader "$root"
   pf="$(yarbo_airplay_pidfile "$root")"
   if [[ -f "$pf" ]]; then
@@ -290,6 +361,10 @@ yarbo_airplay_start_receiver() {
   fi
   php -r 'file_put_contents($argv[1], json_encode(["hooks" => $argv[2] === "1", "updated_at" => time()], JSON_UNESCAPED_SLASHES) . "\n");' \
     "$(yarbo_airplay_hooks_flag "$root")" "$hooks"
+  # Always run the TCP watcher as a safety net (and the only signal when hooks=0).
+  if yarbo_airplay_running "$root"; then
+    yarbo_airplay_start_watch "$root"
+  fi
   yarbo_airplay_running "$root"
 }
 

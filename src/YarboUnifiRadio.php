@@ -96,6 +96,32 @@ final class YarboUnifiRadio
             }
         }
 
+        // AirPlay fan-out blocks on an empty FIFO forever — never treat it as Playing
+        // unless a real client session is active (play-begins hook / TCP watcher).
+        if (
+            trim((string) ($state['station_id'] ?? '')) === 'airplay'
+            && (!empty($state['playing']) || $alive !== [])
+        ) {
+            $airplay = new YarboPanelAirPlay($this->projectRoot);
+            if (!$airplay->clientIsPresent()) {
+                foreach ($alive as $row) {
+                    $pid = (int) ($row['pid'] ?? 0);
+                    if ($pid > 1) {
+                        $this->killPidTree($pid);
+                    }
+                }
+                $airplay->markSessionActive(false);
+                $state['playing'] = false;
+                $state['station_id'] = null;
+                $state['station_name'] = null;
+                $state['station_url'] = null;
+                $state['streams'] = [];
+                $state['ends_at'] = null;
+                $this->writeState($state);
+                $alive = [];
+            }
+        }
+
         $endsAt = isset($state['ends_at']) ? (int) $state['ends_at'] : 0;
         $timedOut = $endsAt > 0 && time() >= $endsAt;
         // Finite clips (Announcement) must return to Idle when ffmpeg exits or ends_at passes.
@@ -299,8 +325,8 @@ final class YarboUnifiRadio
      * @return array<string, mixed>
      */
     /**
-     * Advertise AirPlay on the LAN and remember speakers — do not mark Playing
-     * until a client connects (session hook) or classic fallback has no hooks.
+     * Advertise AirPlay on the LAN and remember speakers — never mark Playing here.
+     * Talkback starts only from play-begins / TCP-watch hooks when a device streams.
      *
      * @param array<string, mixed> $input
      * @return array<string, mixed>
@@ -351,16 +377,7 @@ final class YarboUnifiRadio
             ];
         }
 
-        // Classic CLI fallback has no session hooks — bridge immediately (legacy).
-        if (!$airplay->sessionHooksAvailable()) {
-            return $this->playAirplay([
-                'targets' => $targets,
-                'volume' => $volume,
-                'ensure_receiver' => false,
-            ]);
-        }
-
-        // Idle until a device connects and the active-state hook fires.
+        // Idle until a device connects (session play-begins hook and/or TCP watcher).
         $state = $this->loadState();
         $state['playing'] = false;
         $state['station_id'] = null;
@@ -519,7 +536,7 @@ final class YarboUnifiRadio
             'error' => $errors !== [] ? implode('; ', $errors) : null,
         ];
         $this->writeState($state);
-        $airplay->markSessionActive(true);
+        // Session active flag is owned by play-begins / TCP watcher — do not set it here.
 
         return [
             'ok' => true,
@@ -531,7 +548,7 @@ final class YarboUnifiRadio
     }
 
     /**
-     * shairport-sync entered active state — start talkback fan-out if armed.
+     * shairport-sync play begins / TCP client seen — start talkback fan-out if armed.
      *
      * @return array<string, mixed>
      */
@@ -675,7 +692,7 @@ final class YarboUnifiRadio
             $airplay->saveBridge($targets, $volume, true);
             // If the Apple device dropped during the announcement, stay Available
             // (waiting) instead of showing Playing with a silent FIFO reader.
-            if ($airplay->sessionHooksAvailable() && empty($airplay->session()['active'])) {
+            if (!$airplay->clientIsPresent()) {
                 return [
                     'ok' => true,
                     'skipped' => true,

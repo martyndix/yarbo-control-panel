@@ -358,11 +358,50 @@ fi
 
 step "Installing AirPlay packages (shairport-sync, avahi-daemon)"
 write_status "composer" "Installing AirPlay packages"
-chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" 2>/dev/null || true
+chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" "${ROOT}/scripts/panel_airplay_watch.sh" 2>/dev/null || true
 # shellcheck source=scripts/lib/panel_airplay.sh
 source "${ROOT}/scripts/lib/panel_airplay.sh"
 AIRPLAY_LOG="${ROOT}/data/panel-airplay.log"
 mkdir -p "${ROOT}/data"
+# Drop stale “Playing · AirPlay” from builds that started the talkback bridge on Start
+# without a client (ffmpeg blocks on the FIFO forever and looked permanently Playing).
+step "Clearing stale AirPlay playing state if needed"
+php -r '
+$root = $argv[1];
+$stateFile = $root . "/data/unifi-radio-state.json";
+$sessionFile = $root . "/data/airplay/session.json";
+$cleared = false;
+if (is_file($stateFile)) {
+  $state = json_decode((string) file_get_contents($stateFile), true);
+  if (is_array($state) && trim((string) ($state["station_id"] ?? "")) === "airplay") {
+    foreach ($state["streams"] ?? [] as $row) {
+      $pid = (int) ($row["pid"] ?? 0);
+      if ($pid > 1) {
+        posix_kill($pid, 15);
+        usleep(100000);
+        posix_kill($pid, 9);
+      }
+    }
+    $state["playing"] = false;
+    $state["station_id"] = null;
+    $state["station_name"] = null;
+    $state["station_url"] = null;
+    $state["streams"] = [];
+    $state["ends_at"] = null;
+    file_put_contents($stateFile, json_encode($state, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n");
+    $cleared = true;
+  }
+}
+if (is_file($sessionFile) || $cleared) {
+  @mkdir(dirname($sessionFile), 0755, true);
+  file_put_contents($sessionFile, json_encode([
+    "active" => false,
+    "client_name" => null,
+    "updated_at" => time(),
+  ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n");
+}
+echo $cleared ? "cleared\n" : "ok\n";
+' "${ROOT}" >/dev/null 2>&1 || true
 if yarbo_airplay_installed; then
   step "AirPlay packages already installed"
 else
