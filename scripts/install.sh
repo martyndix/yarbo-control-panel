@@ -93,7 +93,7 @@ install_project() {
 
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
   chmod +x scripts/update.sh 2>/dev/null || true
-  chmod +x scripts/dev.sh scripts/panel.sh scripts/panel_https_proxy.py scripts/panel_https_ensure.sh scripts/panel_airplay_ensure.sh scripts/panel_airplay_stop.sh scripts/panel_airplay_hook.sh scripts/panel_airplay_bridge.php scripts/panel_airplay_metadata.php scripts/panel_airplay_watch.sh scripts/home_automations.php scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/matter_check_node.py scripts/matter_fix_ipv6.sh scripts/matter_setup.sh scripts/lib/matter_server.sh scripts/lib/matter_agent.sh scripts/lib/panel_https.sh scripts/lib/panel_airplay.sh 2>/dev/null || true
+  chmod +x scripts/dev.sh scripts/panel.sh scripts/panel_https_proxy.py scripts/panel_https_ensure.sh scripts/panel_airplay_ensure.sh scripts/panel_airplay_stop.sh scripts/panel_airplay_hook.sh scripts/panel_airplay_bridge.php scripts/panel_airplay_metadata.php scripts/panel_airplay_watch.sh scripts/home_automations.php scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/homepod_agent.py scripts/matter_check_node.py scripts/matter_fix_ipv6.sh scripts/matter_setup.sh scripts/lib/matter_server.sh scripts/lib/matter_agent.sh scripts/lib/homepod_agent.sh scripts/lib/panel_https.sh scripts/lib/panel_airplay.sh 2>/dev/null || true
   # Browser mic / Announce needs LAN HTTPS :8443 reachable.
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi 'Status: active'; then
     ufw allow 8443/tcp comment 'Yarbo panel HTTPS' >/dev/null 2>&1 || true
@@ -127,6 +127,15 @@ install_project() {
       echo "    installed"
     else
       echo "    WARNING: pip install failed — Settings → Lymow → Sign in will retry"
+    fi
+    echo "==> HomePod / AirPlay sender (pyatv)"
+    if "$lymow_py" -c "import pyatv" >/dev/null 2>&1; then
+      echo "    already installed"
+    elif run_as_owner "'${lymow_py}' -m pip install --disable-pip-version-check --break-system-packages 'pyatv>=0.14'" \
+      || run_as_owner "'${lymow_py}' -m pip install --disable-pip-version-check --user --break-system-packages 'pyatv>=0.14'"; then
+      echo "    installed"
+    else
+      echo "    WARNING: pyatv pip install failed — HomePod speakers need it (Settings → UniFi)"
     fi
     echo "==> Yarbo cloud bridge (map/plan fallback reads)"
     if [[ "${EUID}" -eq 0 ]]; then

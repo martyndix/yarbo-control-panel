@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.185] - 2026-11-02
+
+### Added
+- **HomePod speakers** as Radio / Announcement / AirPlay-bridge outputs: Settings → UniFi scans and pairs HomePods (`pyatv` RAOP), then they appear in the Radio Player checklist beside Protect readers. Announce and stations stream to ticked HomePods; the AirPlay bridge fans panel audio to them as well. Pairing credentials stay in `data/homepod/`. Opt-in only (nothing streams until you pair and tick). Soft rollback: Remove in Settings, or `YARBO_HOMEPOD=0` + restart; full revert: install **4.0.184**.
+
 ## [4.0.184] - 2026-11-02
 
 ### Fixed

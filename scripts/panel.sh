@@ -14,6 +14,8 @@ PHP_BIN="${YARBO_PHP_BIN:-$(command -v php)}"
 source "${ROOT}/scripts/lib/mqtt_agent.sh"
 # shellcheck source=scripts/lib/matter_agent.sh
 source "${ROOT}/scripts/lib/matter_agent.sh"
+# shellcheck source=scripts/lib/homepod_agent.sh
+source "${ROOT}/scripts/lib/homepod_agent.sh"
 # shellcheck source=scripts/lib/panel_https.sh
 source "${ROOT}/scripts/lib/panel_https.sh"
 
@@ -50,9 +52,14 @@ cleanup() {
   if [[ -n "${MATTER_PID:-}" ]]; then
     kill "${MATTER_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${HOMEPOD_PID:-}" ]]; then
+    kill "${HOMEPOD_PID}" 2>/dev/null || true
+  fi
   pkill -f '[s]cripts/matter_agent.py' 2>/dev/null || true
+  pkill -f '[s]cripts/homepod_agent.py' 2>/dev/null || true
   pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
   yarbo_stop_matter_agent 2>/dev/null || true
+  yarbo_stop_homepod_agent 2>/dev/null || true
   pkill -f '[p]aper_remote_router.php' 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -138,6 +145,24 @@ if [[ -n "$MATTER_PY" && -f "${ROOT}/scripts/matter_agent.py" ]]; then
   yarbo_stop_matter_agent
   "$MATTER_PY" "${ROOT}/scripts/matter_agent.py" >> "${ROOT}/data/matter-agent.log" 2>&1 &
   MATTER_PID=$!
+fi
+
+HOMEPOD_PID=""
+HOMEPOD_PY="${ROOT}/.venv/bin/python"
+if [[ ! -x "$HOMEPOD_PY" ]]; then
+  HOMEPOD_PY="$(command -v python3 || true)"
+fi
+# Set YARBO_HOMEPOD=0 to skip the HomePod agent (rollback without uninstalling).
+if [[ "${YARBO_HOMEPOD:-1}" == "0" || "${YARBO_HOMEPOD:-1}" == "false" || "${YARBO_HOMEPOD:-1}" == "off" ]]; then
+  echo "==> HomePod agent skipped (YARBO_HOMEPOD=${YARBO_HOMEPOD})"
+  yarbo_stop_homepod_agent 2>/dev/null || true
+elif [[ -n "$HOMEPOD_PY" && -f "${ROOT}/scripts/homepod_agent.py" ]]; then
+  echo "==> Starting HomePod agent on 127.0.0.1:$(yarbo_homepod_agent_port)"
+  mkdir -p "${ROOT}/data/homepod"
+  yarbo_stop_homepod_agent
+  YARBO_HOMEPOD_AGENT_PORT="$(yarbo_homepod_agent_port)" \
+    "$HOMEPOD_PY" "${ROOT}/scripts/homepod_agent.py" >> "${ROOT}/data/homepod-agent.log" 2>&1 &
+  HOMEPOD_PID=$!
 fi
 
 echo "==> Starting anonymous usage ping"

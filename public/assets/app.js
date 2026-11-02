@@ -151,6 +151,13 @@ const els = {
     settingsUnifiAirplayName: document.getElementById('settings-unifi-airplay-name'),
     settingsUnifiAirplaySave: document.getElementById('settings-unifi-airplay-save'),
     settingsUnifiAirplayResult: document.getElementById('settings-unifi-airplay-result'),
+    settingsUnifiHomepodScan: document.getElementById('settings-unifi-homepod-scan'),
+    settingsUnifiHomepodList: document.getElementById('settings-unifi-homepod-list'),
+    settingsUnifiHomepodPair: document.getElementById('settings-unifi-homepod-pair'),
+    settingsUnifiHomepodPin: document.getElementById('settings-unifi-homepod-pin'),
+    settingsUnifiHomepodPairFinish: document.getElementById('settings-unifi-homepod-pair-finish'),
+    settingsUnifiHomepodPairCancel: document.getElementById('settings-unifi-homepod-pair-cancel'),
+    settingsUnifiHomepodResult: document.getElementById('settings-unifi-homepod-result'),
     settingsUnifiStationsList: document.getElementById('settings-unifi-stations-list'),
     settingsUnifiStationAdd: document.getElementById('settings-unifi-station-add'),
     settingsUnifiStationsSave: document.getElementById('settings-unifi-stations-save'),
@@ -3522,7 +3529,8 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
             list.innerHTML = speakers.map((s) => {
                 const id = s.native_id || String(s.id || '').replace(/^unifi:camera:/, '');
                 const checked = selected === null ? true : selected.has(id);
-                return `<label class="unifi-radio-speaker"><input type="checkbox" data-unifi-speaker value="${escapeHtml(id)}" ${checked ? 'checked' : ''}><span>${escapeHtml(s.name || id)}</span></label>`;
+                const kind = s.kind === 'homepod' ? ' · HomePod' : '';
+                return `<label class="unifi-radio-speaker"><input type="checkbox" data-unifi-speaker value="${escapeHtml(id)}" ${checked ? 'checked' : ''}><span>${escapeHtml(s.name || id)}${kind}</span></label>`;
             }).join('');
             writeUnifiSpeakerPick(unifiSelectedSpeakerIds());
         }
@@ -10581,6 +10589,13 @@ async function loadSettings() {
         if (els.settingsUnifiAirplayResult && data.unifi?.airplay?.message) {
             els.settingsUnifiAirplayResult.textContent = data.unifi.airplay.message;
         }
+        if (data.unifi?.homepod) {
+            if (unifiDash) unifiDash.homepod = data.unifi.homepod;
+            renderHomepodSettingsList(data.unifi.homepod);
+            if (els.settingsUnifiHomepodResult && data.unifi.homepod.message) {
+                setHomepodResult(data.unifi.homepod.message, true);
+            }
+        }
         if (data.unifi) {
             unifiDash = { ...unifiDash, ...data.unifi };
             syncRadioPlayerChrome({
@@ -14123,6 +14138,199 @@ els.settingsUnifiAirplaySave?.addEventListener('click', async () => {
         showToast(err.message || 'Could not save AirPlay name', 'error');
     }
 });
+
+let homepodScanDevices = [];
+let homepodPairingId = '';
+
+function setHomepodResult(message, ok = true) {
+    if (!els.settingsUnifiHomepodResult) return;
+    els.settingsUnifiHomepodResult.textContent = message || '';
+    els.settingsUnifiHomepodResult.className = 'settings-cloud-result hint'
+        + (message ? (ok ? ' success' : ' error') : '');
+}
+
+function renderHomepodSettingsList(homepod) {
+    const list = els.settingsUnifiHomepodList;
+    if (!list) return;
+    const paired = Array.isArray(homepod?.devices) ? homepod.devices : [];
+    const scanned = Array.isArray(homepodScanDevices) ? homepodScanDevices : [];
+    const byId = new Map();
+    for (const row of scanned) {
+        if (row?.id) byId.set(String(row.id), { ...row, source: 'scan' });
+    }
+    for (const row of paired) {
+        if (!row?.id) continue;
+        const id = String(row.id);
+        byId.set(id, { ...(byId.get(id) || {}), ...row, paired: true, source: 'paired' });
+    }
+    const rows = [...byId.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    if (!rows.length) {
+        list.innerHTML = '<p class="hint">No HomePods yet — tap Scan for HomePods.</p>';
+        return;
+    }
+    list.innerHTML = rows.map((row) => {
+        const id = escapeHtml(String(row.id || ''));
+        const name = escapeHtml(String(row.name || row.id || 'HomePod'));
+        const model = escapeHtml(String(row.model || row.kind || ''));
+        const pairedOn = Boolean(row.paired || row.credentials);
+        const enabled = row.enabled !== false;
+        const actions = pairedOn
+            ? `<label class="settings-checkbox"><input type="checkbox" data-homepod-enable value="${id}" ${enabled ? 'checked' : ''}><span>Show in Radio Player</span></label>
+               <button type="button" class="btn btn-secondary" data-homepod-remove value="${id}">Remove</button>`
+            : `<button type="button" class="btn" data-homepod-pair value="${id}">Pair</button>`;
+        return `<div class="unifi-homepod-row" role="listitem" data-homepod-id="${id}">
+            <div class="unifi-homepod-row-main"><strong>${name}</strong>${model ? ` <span class="hint">${model}</span>` : ''}
+            <span class="hint">${pairedOn ? 'Paired' : 'Found on LAN'}</span></div>
+            <div class="settings-update-actions">${actions}</div>
+        </div>`;
+    }).join('');
+}
+
+async function refreshHomepodSettings(homepod = null) {
+    if (!homepod) {
+        try {
+            const data = await unifiApi({ action: 'homepod_status' }, 8000);
+            homepod = data?.homepod || null;
+            if (unifiDash && data) {
+                if (data.homepod) unifiDash.homepod = data.homepod;
+                if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+            }
+        } catch {
+            homepod = unifiDash?.homepod || null;
+        }
+    }
+    renderHomepodSettingsList(homepod);
+    if (homepod?.message) setHomepodResult(homepod.message, Boolean(homepod.agent_running !== false));
+}
+
+els.settingsUnifiHomepodScan?.addEventListener('click', async () => {
+    const btn = els.settingsUnifiHomepodScan;
+    if (btn) btn.disabled = true;
+    setHomepodResult('Scanning the LAN for HomePods…');
+    try {
+        const data = await unifiApi({ action: 'homepod_scan' }, 45000);
+        if (!data?.ok) throw new Error(data?.error || 'Scan failed');
+        homepodScanDevices = Array.isArray(data.devices) ? data.devices : [];
+        if (unifiDash) {
+            if (data.homepod) unifiDash.homepod = data.homepod;
+            if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+        }
+        renderHomepodSettingsList(data.homepod || { devices: data.devices || [] });
+        setHomepodResult(
+            homepodScanDevices.length
+                ? `Found ${homepodScanDevices.length} AirPlay speaker(s). Pair a HomePod to use it.`
+                : 'No AirPlay speakers found. Check Wi‑Fi / “Anyone on the Same Network” in the Home app.',
+            true,
+        );
+    } catch (err) {
+        setHomepodResult(err.message || 'Scan failed', false);
+        showToast(err.message || 'HomePod scan failed', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+});
+
+els.settingsUnifiHomepodList?.addEventListener('click', async (ev) => {
+    const pairBtn = ev.target?.closest?.('[data-homepod-pair]');
+    const removeBtn = ev.target?.closest?.('[data-homepod-remove]');
+    if (pairBtn) {
+        const id = pairBtn.getAttribute('value') || '';
+        setHomepodResult('Starting pairing…');
+        try {
+            const data = await unifiApi({ action: 'homepod_pair_start', id }, 60000);
+            if (!data?.ok) throw new Error(data?.error || 'Pair start failed');
+            homepodPairingId = id;
+            els.settingsUnifiHomepodPair?.classList.remove('hidden');
+            if (els.settingsUnifiHomepodPin) {
+                els.settingsUnifiHomepodPin.value = '';
+                els.settingsUnifiHomepodPin.focus();
+            }
+            setHomepodResult(data.message || 'Enter the PIN shown on the HomePod / TV.');
+        } catch (err) {
+            setHomepodResult(err.message || 'Pair failed', false);
+            showToast(err.message || 'HomePod pair failed', 'error');
+        }
+        return;
+    }
+    if (removeBtn) {
+        const id = removeBtn.getAttribute('value') || '';
+        try {
+            const data = await unifiApi({ action: 'homepod_remove', id }, 15000);
+            if (!data?.ok) throw new Error(data?.error || 'Remove failed');
+            if (unifiDash) {
+                unifiDash.homepod = data.homepod || unifiDash.homepod;
+                if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+                renderUnifiSpeakers(unifiDash, { replace: true });
+            }
+            await refreshHomepodSettings(data.homepod || null);
+            showToast('HomePod removed', 'success');
+        } catch (err) {
+            setHomepodResult(err.message || 'Remove failed', false);
+        }
+    }
+});
+
+els.settingsUnifiHomepodList?.addEventListener('change', async (ev) => {
+    const box = ev.target?.closest?.('[data-homepod-enable]');
+    if (!box) return;
+    const id = box.getAttribute('value') || '';
+    try {
+        const data = await unifiApi({
+            action: 'homepod_enable',
+            id,
+            enabled: box.checked,
+        }, 10000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not update');
+        if (unifiDash) {
+            unifiDash.homepod = data.homepod || unifiDash.homepod;
+            if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+            renderUnifiSpeakers(unifiDash, { replace: true });
+        }
+        await refreshHomepodSettings(data.homepod || null);
+    } catch (err) {
+        box.checked = !box.checked;
+        setHomepodResult(err.message || 'Update failed', false);
+    }
+});
+
+els.settingsUnifiHomepodPairFinish?.addEventListener('click', async () => {
+    const pin = els.settingsUnifiHomepodPin?.value.trim() || '';
+    if (!homepodPairingId || !pin) {
+        setHomepodResult('Enter the PIN first', false);
+        return;
+    }
+    els.settingsUnifiHomepodPairFinish.disabled = true;
+    try {
+        const data = await unifiApi({
+            action: 'homepod_pair_finish',
+            id: homepodPairingId,
+            pin,
+        }, 60000);
+        if (!data?.ok) throw new Error(data?.error || 'Pairing failed');
+        homepodPairingId = '';
+        els.settingsUnifiHomepodPair?.classList.add('hidden');
+        if (unifiDash) {
+            unifiDash.homepod = data.homepod || unifiDash.homepod;
+            if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+            renderUnifiSpeakers(unifiDash, { replace: true });
+        }
+        await refreshHomepodSettings(data.homepod || null);
+        setHomepodResult(data.message || 'Paired.');
+        showToast('HomePod paired', 'success');
+    } catch (err) {
+        setHomepodResult(err.message || 'Pairing failed', false);
+        showToast(err.message || 'HomePod pairing failed', 'error');
+    } finally {
+        els.settingsUnifiHomepodPairFinish.disabled = false;
+    }
+});
+
+els.settingsUnifiHomepodPairCancel?.addEventListener('click', () => {
+    homepodPairingId = '';
+    els.settingsUnifiHomepodPair?.classList.add('hidden');
+    setHomepodResult('');
+});
+
 els.unifiAirplayStart?.addEventListener('click', async () => {
     const targets = unifiSelectedSpeakerIds();
     const volume = Number(els.unifiRadioVolume?.value || 60);
