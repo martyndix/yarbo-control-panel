@@ -119,6 +119,19 @@ if (!str_contains($js, 'runHttpsEnsure')) {
     fwrite(STDERR, "app.js must wire Start HTTPS\n");
     exit(1);
 }
+if (!str_contains($js, 'HTTPS was down — starting automatically')) {
+    fwrite(STDERR, "app.js must auto-start HTTPS when down\n");
+    exit(1);
+}
+$panelSh = (string) file_get_contents($root . '/scripts/panel.sh');
+if (!str_contains($panelSh, 'Watching HTTPS proxy') || !str_contains($panelSh, 'HTTPS_WATCH_PID')) {
+    fwrite(STDERR, "panel.sh must watch/restart HTTPS proxy\n");
+    exit(1);
+}
+if (!str_contains((string) file_get_contents($root . '/CHANGELOG.md'), '## [4.0.184]')) {
+    fwrite(STDERR, "changelog 4.0.184\n");
+    exit(1);
+}
 if (!str_contains($php, 'clearOrphanedUpdateState')) {
     fwrite(STDERR, "restart must clear orphaned update state\n");
     exit(1);

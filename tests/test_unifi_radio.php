@@ -245,6 +245,7 @@ assert_true(str_contains($httpsProxy, 'ThreadingHTTPServer') || str_contains($ht
 assert_true(str_contains($httpsLib, 'yarbo_panel_start_https_proxy'), 'HTTPS helper');
 assert_true(str_contains($panelSh, 'panel_https.sh'), 'panel.sh loads HTTPS helper');
 assert_true(str_contains($panelSh, 'PHP_PID'), 'panel.sh backgrounds PHP then starts HTTPS');
+assert_true(str_contains($panelSh, 'Watching HTTPS proxy') || str_contains($panelSh, 'HTTPS_WATCH_PID'), 'panel.sh watches HTTPS');
 assert_true(str_contains($httpsLib, '--no-wait-upstream'), 'HTTPS helper assumes upstream is up');
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(str_contains($css, '.unifi-speakers'), 'Speakers panel CSS');

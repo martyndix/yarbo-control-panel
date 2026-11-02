@@ -13059,12 +13059,30 @@ function setHttpsStatusUi(data) {
     }
 }
 
-async function loadHttpsStatus() {
+/** Avoid hammering ensure if :8443 stays down (firewall / openssl). */
+let httpsAutoEnsureTriedAt = 0;
+
+async function loadHttpsStatus(opts = {}) {
     if (!els.settingsHttpsStatus) return null;
+    const autoEnsure = opts.autoEnsure !== false;
     try {
         const res = await fetch('/api/update.php?action=https-status', { cache: 'no-store' });
         const data = await parseJsonResponse(res);
         setHttpsStatusUi(data);
+        // If the TLS proxy died while HTTP is still up, bring it back without a manual tap.
+        const now = Date.now();
+        if (
+            autoEnsure
+            && data?.enabled
+            && !data?.listening
+            && now - httpsAutoEnsureTriedAt > 60000
+        ) {
+            httpsAutoEnsureTriedAt = now;
+            if (els.settingsHttpsStatus) {
+                els.settingsHttpsStatus.textContent = 'HTTPS was down — starting automatically…';
+            }
+            return runHttpsEnsure(null, { quietFail: true, auto: true });
+        }
         return data;
     } catch (err) {
         if (els.settingsHttpsStatus) {
@@ -13074,7 +13092,7 @@ async function loadHttpsStatus() {
     }
 }
 
-async function runHttpsEnsure(button) {
+async function runHttpsEnsure(button, opts = {}) {
     if (button) button.disabled = true;
     if (els.settingsHttpsStatus) els.settingsHttpsStatus.textContent = 'Starting HTTPS on port 8443…';
     try {
@@ -13086,18 +13104,26 @@ async function runHttpsEnsure(button) {
         const data = await parseJsonResponse(res);
         setHttpsStatusUi(data);
         if (data?.listening) {
-            showToast('HTTPS is up on port 8443', 'success');
+            showToast(opts.auto ? 'HTTPS came back on port 8443' : 'HTTPS is up on port 8443', 'success');
             const url = data.https_url || `https://${location.hostname}:8443`;
             setUpdateResult(`HTTPS ready: ${url} — accept the certificate warning once`, 'success');
         } else {
             const err = data?.error || data?.message || 'HTTPS did not start';
-            showToast(err, 'error');
-            setUpdateResult(err, 'error');
+            if (!opts.quietFail) {
+                showToast(err, 'error');
+                setUpdateResult(err, 'error');
+            } else if (els.settingsHttpsStatus) {
+                els.settingsHttpsStatus.textContent = err;
+            }
         }
         return data;
     } catch (err) {
-        showToast(err.message || 'HTTPS start failed', 'error');
-        setUpdateResult(err.message || 'HTTPS start failed', 'error');
+        if (!opts.quietFail) {
+            showToast(err.message || 'HTTPS start failed', 'error');
+            setUpdateResult(err.message || 'HTTPS start failed', 'error');
+        } else if (els.settingsHttpsStatus) {
+            els.settingsHttpsStatus.textContent = err.message || 'HTTPS start failed';
+        }
         return null;
     } finally {
         if (button) button.disabled = false;

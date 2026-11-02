@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.184] - 2026-11-02
+
+### Fixed
+- HTTPS **:8443** is watched while the panel runs and restarts automatically if the TLS proxy dies (HTTP :8080 can stay up). Settings also auto-starts HTTPS when it finds the port down.
+
 ## [4.0.183] - 2026-11-02
 
 ### Fixed

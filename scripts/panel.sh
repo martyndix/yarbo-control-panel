@@ -23,6 +23,9 @@ if [[ -z "$PHP_BIN" ]]; then
 fi
 
 cleanup() {
+  if [[ -n "${HTTPS_WATCH_PID:-}" ]]; then
+    kill "${HTTPS_WATCH_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${HTTPS_PROXY_PID:-}" ]]; then
     kill "${HTTPS_PROXY_PID}" 2>/dev/null || true
   fi
@@ -176,6 +179,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
 done
 
 HTTPS_PROXY_PID=""
+HTTPS_WATCH_PID=""
 if yarbo_panel_https_enabled; then
   echo "==> Ensuring HTTPS on port $(yarbo_panel_https_port)"
   if [[ -x "${ROOT}/scripts/panel_https_ensure.sh" ]] || [[ -f "${ROOT}/scripts/panel_https_ensure.sh" ]]; then
@@ -184,11 +188,27 @@ if yarbo_panel_https_enabled; then
     if [[ "${ensure_json}" == *'"listening":true'* ]] || [[ "${ensure_json}" == *'"listening": true'* ]]; then
       echo "    HTTPS UI: https://<panel-ip>:$(yarbo_panel_https_port) (self-signed — accept once for mic / Announce)"
     else
-      echo "    WARNING: HTTPS did not come up — open Settings → Panel updates → Start HTTPS, or see data/panel-https.log" >&2
+      echo "    WARNING: HTTPS did not come up yet — watchdog will retry; see data/panel-https.log" >&2
     fi
   else
     yarbo_panel_start_https_proxy "${ROOT}" "${PORT}" || true
   fi
+
+  # Keep :8443 up while HTTP :8080 is running (proxy can exit without taking the panel down).
+  echo "==> Watching HTTPS proxy (auto-restart if :$(yarbo_panel_https_port) drops)"
+  (
+    while true; do
+      sleep "${YARBO_PANEL_HTTPS_WATCH_SECS:-20}"
+      if ! yarbo_panel_https_enabled; then
+        continue
+      fi
+      if ! kill -0 "${PHP_PID}" 2>/dev/null; then
+        break
+      fi
+      bash "${ROOT}/scripts/panel_https_ensure.sh" >/dev/null 2>&1 || true
+    done
+  ) &
+  HTTPS_WATCH_PID=$!
 fi
 
 wait "${PHP_PID}"

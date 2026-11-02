@@ -2089,7 +2089,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-panel-restart">Restart panel</button>
                                 <button type="button" class="btn" id="settings-https-ensure">Start HTTPS</button>
                             </div>
-                            <p class="hint">Restart panel reloads the Pi service (MQTT agent, Matter). It does not reboot the whole Pi. <strong>Start HTTPS</strong> opens port <strong>8443</strong> for mic / Announcement Record (self-signed — accept the Safari warning once). Paper tablets keep using HTTP :8080.</p>
+                            <p class="hint">Restart panel reloads the Pi service (MQTT agent, Matter). It does not reboot the whole Pi. HTTPS on port <strong>8443</strong> (mic / Announcement Record) starts with the panel and is watched so it comes back if the proxy dies — <strong>Start HTTPS</strong> forces a refresh. Self-signed: accept the Safari warning once. Paper tablets keep using HTTP :8080.</p>
                             <p id="settings-https-status" class="hint" role="status">Checking HTTPS…</p>
                             <pre id="settings-https-log" class="settings-https-log hidden" aria-live="polite"></pre>
                             <h3 class="settings-subtitle">E-paper firmware</h3>

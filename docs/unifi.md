@@ -90,7 +90,7 @@ Panel **Updates** (and a fresh `install.sh --deps`) install `shairport-sync` and
 
 Open UDP **319/320** (PTP) and allow mDNS if you use a firewall. The panel tries `ufw allow` when packages install / Start AirPlay runs. Sync across several Protect speakers is looser than HomePods.
 
-Mic hold-to-record needs a **secure context** (`https://<panel-ip>:8443`, self-signed — accept once). Settings → Panel updates → **Start HTTPS** / **Restart panel** if :8443 is down. Paper tablets keep `http://<panel-ip>:8080`. Set `YARBO_PANEL_HTTPS=0` to disable the proxy.
+Mic hold-to-record needs a **secure context** (`https://<panel-ip>:8443`, self-signed — accept once). The panel watches :8443 and restarts the TLS proxy if it dies while HTTP :8080 is still up; Settings → Panel updates → **Start HTTPS** forces a refresh. Paper tablets keep `http://<panel-ip>:8080`. Set `YARBO_PANEL_HTTPS=0` to disable the proxy.
 
 ## Rollback
 
