@@ -192,8 +192,15 @@ if ($action === 'homepod_status') {
     json_response(['ok' => true, 'homepod' => $homepod->status()] + $radio()->dashboardSlice());
 }
 
+if ($action === 'homepod_ensure') {
+    set_time_limit(180);
+    $homepod = YarboHomepod::fromEnv($projectRoot);
+    json_response($homepod->ensureDeps() + $radio()->dashboardSlice());
+}
+
 if ($action === 'homepod_scan') {
-    set_time_limit(45);
+    // May pip-install pyatv on first scan when Updates did not (no SSH).
+    set_time_limit(180);
     $homepod = YarboHomepod::fromEnv($projectRoot);
     json_response($homepod->scan(5.0) + $radio()->dashboardSlice());
 }

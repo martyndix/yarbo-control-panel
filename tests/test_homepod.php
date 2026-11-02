@@ -161,7 +161,18 @@ $docs = (string) file_get_contents($root . '/docs/unifi.md');
 
 assert_true(is_file($root . '/scripts/homepod_agent.py'), 'homepod agent script');
 assert_true(is_file($root . '/scripts/lib/homepod_agent.sh'), 'homepod agent helper');
+assert_true(is_file($root . '/scripts/lib/homepod_deps.sh'), 'homepod deps helper');
+assert_true(is_file($root . '/scripts/panel_homepod_ensure.sh'), 'homepod ensure script');
 assert_true(is_file($root . '/src/YarboHomepod.php'), 'YarboHomepod class');
+$deps = (string) file_get_contents($root . '/scripts/lib/homepod_deps.sh');
+$ensure = (string) file_get_contents($root . '/scripts/panel_homepod_ensure.sh');
+$update = (string) file_get_contents($root . '/scripts/update.sh');
+assert_true(str_contains($deps, 'yarbo_ensure_pyatv'), 'deps defines yarbo_ensure_pyatv');
+assert_true(str_contains($ensure, 'yarbo_ensure_pyatv'), 'ensure script installs pyatv');
+assert_true(str_contains($update, 'yarbo_ensure_pyatv'), 'update.sh installs pyatv via helper');
+assert_true(str_contains($api, 'homepod_ensure') || str_contains((string) file_get_contents($root . '/src/YarboHomepod.php'), 'ensureDeps'), 'ensure path available');
+assert_true(str_contains((string) file_get_contents($root . '/src/YarboHomepod.php'), 'needsPyatvInstall'), 'scan auto-installs pyatv');
+assert_true(str_contains($change, '## [4.0.186]'), 'changelog 4.0.186');
 assert_true(str_contains($index, 'settings-unifi-homepod-scan'), 'Settings HomePod scan');
 assert_true(str_contains($index, 'HomePod speakers'), 'Settings HomePod heading');
 assert_true(str_contains($js, 'homepod_scan'), 'JS scan action');

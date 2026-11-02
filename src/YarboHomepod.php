@@ -36,7 +36,9 @@ final class YarboHomepod
      */
     public static function isEnabled(): bool
     {
-        $raw = strtolower(trim((string) (getenv('YARBO_HOMEPOD') ?: '1')));
+        $env = getenv('YARBO_HOMEPOD');
+        // Do not use ?: here — PHP treats "0" as falsy and would flip the kill-switch off.
+        $raw = strtolower(trim((string) ($env === false ? '1' : $env)));
 
         return !in_array($raw, ['0', 'false', 'off', 'no'], true);
     }
@@ -173,10 +175,67 @@ final class YarboHomepod
             'playing' => $playing,
             'message' => !($agent['ok'] ?? false)
                 ? ((string) ($agent['error'] ?? 'HomePod agent is not running'))
-                : (empty($saved)
-                    ? 'No HomePods paired yet — scan and pair below'
-                    : (count($saved) . ' paired speaker(s)')),
+                : (!($agent['pyatv'] ?? false)
+                    ? 'pyatv missing — Update the panel, or tap Scan (installs automatically)'
+                    : (empty($saved)
+                        ? 'No HomePods paired yet — scan and pair below'
+                        : (count($saved) . ' paired speaker(s)'))),
         ];
+    }
+
+    /**
+     * Install pyatv into the project venv (no SSH) and restart the agent.
+     *
+     * @return array<string, mixed>
+     */
+    public function ensureDeps(): array
+    {
+        if (!self::isEnabled()) {
+            return ['ok' => false, 'error' => 'HomePod speakers disabled (YARBO_HOMEPOD=0)', 'pyatv' => false];
+        }
+        $script = $this->projectRoot . '/scripts/panel_homepod_ensure.sh';
+        if (!is_file($script)) {
+            return ['ok' => false, 'error' => 'panel_homepod_ensure.sh missing', 'pyatv' => false];
+        }
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $process = proc_open(
+            ['bash', $script],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot,
+            [
+                'HOME' => getenv('HOME') ?: $this->projectRoot,
+                'PATH' => getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+                'YARBO_HOMEPOD_AGENT_PORT' => (string) $this->port,
+            ]
+        );
+        if (!is_resource($process)) {
+            return ['ok' => false, 'error' => 'Could not start HomePod ensure script', 'pyatv' => false];
+        }
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]) ?: '';
+        stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($process);
+
+        $decoded = json_decode(trim($stdout), true);
+        if (!is_array($decoded)) {
+            return [
+                'ok' => false,
+                'error' => 'HomePod ensure returned invalid JSON — see data/homepod-agent.log',
+                'pyatv' => false,
+            ];
+        }
+        // Ensure script already restarted the agent; reset spawn cooldown.
+        self::$spawnAttempted = false;
+        self::$lastSpawnAt = 0.0;
+
+        return $decoded + ['homepod' => $this->status()];
     }
 
     /**
@@ -188,6 +247,18 @@ final class YarboHomepod
             return ['ok' => false, 'error' => 'HomePod speakers disabled (YARBO_HOMEPOD=0)', 'devices' => []];
         }
         $result = $this->request(['op' => 'scan', 'timeout' => $timeout], 35.0, true);
+        if ($this->needsPyatvInstall($result)) {
+            $ensured = $this->ensureDeps();
+            if (!($ensured['ok'] ?? false) || empty($ensured['pyatv'])) {
+                return [
+                    'ok' => false,
+                    'error' => (string) ($ensured['error'] ?? 'pyatv is not installed'),
+                    'devices' => [],
+                    'ensured' => $ensured,
+                ];
+            }
+            $result = $this->request(['op' => 'scan', 'timeout' => $timeout], 35.0, true);
+        }
         if (!($result['ok'] ?? false)) {
             return $result + ['devices' => []];
         }
@@ -205,6 +276,23 @@ final class YarboHomepod
     }
 
     /**
+     * @param array<string, mixed> $result
+     */
+    private function needsPyatvInstall(array $result): bool
+    {
+        if (($result['pyatv'] ?? null) === false) {
+            return true;
+        }
+        $error = strtolower((string) ($result['error'] ?? ''));
+        $import = strtolower((string) ($result['import_error'] ?? ''));
+
+        return str_contains($error, 'pyatv')
+            || str_contains($error, 'no module named')
+            || str_contains($import, 'pyatv')
+            || str_contains($import, 'no module named');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function pairStart(string $id): array
@@ -212,8 +300,19 @@ final class YarboHomepod
         if (!self::isEnabled()) {
             return ['ok' => false, 'error' => 'HomePod speakers disabled (YARBO_HOMEPOD=0)'];
         }
+        $result = $this->request(['op' => 'pair_start', 'id' => self::stripPrefix($id)], 50.0, true);
+        if ($this->needsPyatvInstall($result)) {
+            $ensured = $this->ensureDeps();
+            if (!($ensured['ok'] ?? false) || empty($ensured['pyatv'])) {
+                return [
+                    'ok' => false,
+                    'error' => (string) ($ensured['error'] ?? 'pyatv is not installed'),
+                ];
+            }
+            $result = $this->request(['op' => 'pair_start', 'id' => self::stripPrefix($id)], 50.0, true);
+        }
 
-        return $this->request(['op' => 'pair_start', 'id' => self::stripPrefix($id)], 50.0, true);
+        return $result;
     }
 
     /**
@@ -425,7 +524,10 @@ final class YarboHomepod
     {
         $error = strtolower((string) ($result['error'] ?? ''));
 
-        return $error !== '' && str_contains($error, 'homepod agent is not running');
+        return $error !== '' && (
+            str_contains($error, 'homepod agent is not running')
+            || str_contains($error, 'pyatv not installed')
+        );
     }
 
     private function ensureStarted(): void
@@ -477,6 +579,25 @@ final class YarboHomepod
         usleep(150000);
     }
 
+    private function resolvePython(): string
+    {
+        $root = $this->projectRoot;
+        foreach (['.venv/bin/python3', '.venv/bin/python'] as $rel) {
+            $candidate = $root . '/' . $rel;
+            if (is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+        $which = trim((string) shell_exec(
+            'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin command -v python3 2>/dev/null'
+        ));
+        if ($which !== '' && is_executable($which)) {
+            return $which;
+        }
+
+        return 'python3';
+    }
+
     private function spawnAgent(): void
     {
         $root = $this->projectRoot;
@@ -484,10 +605,7 @@ final class YarboHomepod
         if (!is_file($script)) {
             return;
         }
-        $python = $root . '/.venv/bin/python';
-        if (!is_executable($python)) {
-            $python = 'python3';
-        }
+        $python = $this->resolvePython();
         $log = escapeshellarg($root . '/data/homepod-agent.log');
         $port = (int) $this->port;
         @mkdir($root . '/data', 0755, true);
