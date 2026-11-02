@@ -80,3 +80,5 @@
 .DS_Store
 /debug/map-dumps/*.json
 /data/unifi-radio-stations.json
+/data/homepod/
+/data/homepod-agent.log

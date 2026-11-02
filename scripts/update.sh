@@ -326,6 +326,16 @@ if [[ -n "$PYTHON" ]]; then
   else
     step "Lymow MQTT pip install failed (Sign in / Test Lymow will retry)"
   fi
+  step "HomePod / AirPlay sender (pyatv)"
+  write_status "composer" "Installing pyatv for HomePod speakers"
+  if "$LYMOW_PY" -c "import pyatv" >/dev/null 2>&1; then
+    step "pyatv already installed"
+  elif "$LYMOW_PY" -m pip install --disable-pip-version-check --break-system-packages 'pyatv>=0.14' >/dev/null 2>&1 \
+    || "$LYMOW_PY" -m pip install --disable-pip-version-check --user --break-system-packages 'pyatv>=0.14' >/dev/null 2>&1; then
+    step "pyatv installed"
+  else
+    step "pyatv pip install failed (HomePod speakers need it)"
+  fi
   step "Checking yarbo-data-sdk"
   write_status "composer" "Checking yarbo-data-sdk"
   # shellcheck source=scripts/lib/python_sdk.sh
@@ -358,7 +368,7 @@ fi
 
 step "Installing AirPlay packages (shairport-sync, avahi-daemon)"
 write_status "composer" "Installing AirPlay packages"
-chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" "${ROOT}/scripts/panel_airplay_watch.sh" 2>/dev/null || true
+chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" "${ROOT}/scripts/panel_airplay_watch.sh" "${ROOT}/scripts/homepod_agent.py" "${ROOT}/scripts/lib/homepod_agent.sh" 2>/dev/null || true
 # shellcheck source=scripts/lib/panel_airplay.sh
 source "${ROOT}/scripts/lib/panel_airplay.sh"
 AIRPLAY_LOG="${ROOT}/data/panel-airplay.log"
@@ -433,11 +443,14 @@ RESTARTED=false
 source "${ROOT}/scripts/lib/mqtt_agent.sh"
 # shellcheck source=scripts/lib/matter_agent.sh
 source "${ROOT}/scripts/lib/matter_agent.sh"
-step "Stopping MQTT and Matter agents so the new code can load"
-write_status "restarting" "Restarting MQTT and Matter agents"
+# shellcheck source=scripts/lib/homepod_agent.sh
+source "${ROOT}/scripts/lib/homepod_agent.sh"
+step "Stopping MQTT, Matter, and HomePod agents so the new code can load"
+write_status "restarting" "Restarting MQTT, Matter, and HomePod agents"
 yarbo_stop_mqtt_agent
 yarbo_stop_matter_agent
-step "MQTT and Matter agents stopped"
+yarbo_stop_homepod_agent
+step "MQTT, Matter, and HomePod agents stopped"
 
 ensure_panel_sh_unit() {
   local unit_path="/etc/systemd/system/${SERVICE_NAME}.service"

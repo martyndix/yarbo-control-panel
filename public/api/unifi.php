@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+use Yarbo\YarboHomepod;
 use Yarbo\YarboHub;
 use Yarbo\YarboPanelAirPlay;
 use Yarbo\YarboUnifi;
@@ -184,6 +185,48 @@ if ($action === 'airplay_stop') {
     $stopReceiver = !array_key_exists('stop_receiver', $input)
         || YarboHub::asBool($input['stop_receiver'] ?? true);
     json_response($radio()->stopAirplay($stopReceiver));
+}
+
+if ($action === 'homepod_status') {
+    $homepod = YarboHomepod::fromEnv($projectRoot);
+    json_response(['ok' => true, 'homepod' => $homepod->status()] + $radio()->dashboardSlice());
+}
+
+if ($action === 'homepod_scan') {
+    set_time_limit(45);
+    $homepod = YarboHomepod::fromEnv($projectRoot);
+    json_response($homepod->scan(5.0) + $radio()->dashboardSlice());
+}
+
+if ($action === 'homepod_pair_start') {
+    set_time_limit(60);
+    $homepod = YarboHomepod::fromEnv($projectRoot);
+    $id = trim((string) ($input['id'] ?? ''));
+    json_response($homepod->pairStart($id) + ['homepod' => $homepod->status()]);
+}
+
+if ($action === 'homepod_pair_finish') {
+    set_time_limit(60);
+    $homepod = YarboHomepod::fromEnv($projectRoot);
+    $id = trim((string) ($input['id'] ?? ''));
+    $pin = trim((string) ($input['pin'] ?? $input['code'] ?? ''));
+    $result = $homepod->pairFinish($id, $pin);
+    json_response($result + $radio()->dashboardSlice());
+}
+
+if ($action === 'homepod_enable') {
+    $homepod = YarboHomepod::fromEnv($projectRoot);
+    $id = trim((string) ($input['id'] ?? ''));
+    $enabled = YarboHub::asBool($input['enabled'] ?? $input['on'] ?? true);
+    $result = $homepod->setEnabled($id, $enabled);
+    json_response($result + $radio()->dashboardSlice());
+}
+
+if ($action === 'homepod_remove') {
+    $homepod = YarboHomepod::fromEnv($projectRoot);
+    $id = trim((string) ($input['id'] ?? ''));
+    $result = $homepod->remove($id);
+    json_response($result + $radio()->dashboardSlice());
 }
 
 if ($action === 'command' || $action === 'unlock' || $action === 'light') {

@@ -4338,6 +4338,35 @@ body.home-is-reordering {
 .unifi-radio-airplay-actions {
     margin-top: 0.35rem;
 }
+.unifi-homepod-list {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0.65rem 0 0.35rem;
+}
+.unifi-homepod-row {
+    display: grid;
+    gap: 0.45rem;
+    padding: 0.65rem 0;
+    border-top: 1px solid var(--border);
+}
+.unifi-homepod-row:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+.unifi-homepod-row-main {
+    color: var(--text);
+}
+.unifi-homepod-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+.unifi-homepod-pair {
+    margin-top: 0.65rem;
+    display: grid;
+    gap: 0.5rem;
+}
 .unifi-speakers .settings-field {
     color: var(--text);
 }

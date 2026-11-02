@@ -96,11 +96,22 @@ final class YarboUnifiRadio
             }
         }
 
+        $homepodTargets = [];
+        if (is_array($state['homepod_targets'] ?? null)) {
+            foreach ($state['homepod_targets'] as $id) {
+                $id = trim((string) $id);
+                if ($id !== '') {
+                    $homepodTargets[] = $id;
+                }
+            }
+        }
+        $homepodAlive = $homepodTargets !== [];
+
         // AirPlay fan-out blocks on an empty FIFO forever — never treat it as Playing
         // unless a real client session is active (play-begins hook / TCP watcher).
         if (
             trim((string) ($state['station_id'] ?? '')) === 'airplay'
-            && (!empty($state['playing']) || $alive !== [])
+            && (!empty($state['playing']) || $alive !== [] || $homepodAlive)
         ) {
             $airplay = new YarboPanelAirPlay($this->projectRoot);
             if (!$airplay->clientIsPresent()) {
@@ -110,23 +121,30 @@ final class YarboUnifiRadio
                         $this->killPidTree($pid);
                     }
                 }
+                if ($homepodAlive) {
+                    YarboHomepod::fromEnv($this->projectRoot)->stop($homepodTargets);
+                    $this->stopHomepodBridgeHttp();
+                }
                 $airplay->markSessionActive(false);
                 $state['playing'] = false;
                 $state['station_id'] = null;
                 $state['station_name'] = null;
                 $state['station_url'] = null;
                 $state['streams'] = [];
+                $state['homepod_targets'] = [];
                 $state['ends_at'] = null;
                 $this->writeState($state);
                 $alive = [];
+                $homepodTargets = [];
+                $homepodAlive = false;
             }
         }
 
         $endsAt = isset($state['ends_at']) ? (int) $state['ends_at'] : 0;
         $timedOut = $endsAt > 0 && time() >= $endsAt;
         // Finite clips (Announcement) must return to Idle when ffmpeg exits or ends_at passes.
-        // If radio was playing before the announcement, resume that station.
-        if ($timedOut || ($alive === [] && ($state['playing'] ?? false))) {
+        // HomePod-only radio stays Playing while homepod_targets is set (no local ffmpeg pid).
+        if ($timedOut || ($alive === [] && !$homepodAlive && ($state['playing'] ?? false))) {
             if ($timedOut && $alive !== []) {
                 foreach ($alive as $row) {
                     $pid = (int) ($row['pid'] ?? 0);
@@ -135,15 +153,22 @@ final class YarboUnifiRadio
                     }
                 }
             }
+            if ($homepodAlive || $timedOut) {
+                YarboHomepod::fromEnv($this->projectRoot)->stop($homepodTargets !== [] ? $homepodTargets : null);
+                $this->stopHomepodBridgeHttp();
+            }
             $wasAnnounce = trim((string) ($state['station_id'] ?? '')) === 'announce';
             $resume = is_array($state['resume_after'] ?? null) ? $state['resume_after'] : null;
             $state['playing'] = false;
             $state['streams'] = [];
+            $state['homepod_targets'] = [];
             $state['ends_at'] = null;
             $state['resume_after'] = null;
             $state['error'] = $state['error'] ?? null;
             $this->writeState($state);
             $alive = [];
+            $homepodTargets = [];
+            $homepodAlive = false;
 
             if (
                 !$this->resumingRadio
@@ -163,12 +188,15 @@ final class YarboUnifiRadio
             }
         } elseif (count($alive) !== count($state['streams'])) {
             $state['streams'] = $alive;
-            $state['playing'] = $alive !== [];
-            if ($alive === []) {
+            $state['playing'] = $alive !== [] || $homepodAlive;
+            if ($alive === [] && !$homepodAlive) {
                 $state['ends_at'] = null;
             }
             $this->writeState($state);
         }
+
+        // Re-read after possible writes above.
+        $homepodAlive = is_array($state['homepod_targets'] ?? null) && $state['homepod_targets'] !== [];
 
         $aliveIds = array_values(array_map(
             static fn (array $r): string => (string) ($r['camera_id'] ?? ''),
@@ -187,12 +215,23 @@ final class YarboUnifiRadio
         // streams when nothing was saved yet.
         $targets = $savedTargets !== [] ? array_values(array_unique($savedTargets)) : $aliveIds;
 
+        $homepodActive = [];
+        if (is_array($state['homepod_targets'] ?? null)) {
+            foreach ($state['homepod_targets'] as $id) {
+                $id = trim((string) $id);
+                if ($id !== '') {
+                    $homepodActive[] = $id;
+                }
+            }
+        }
+
         return [
-            'playing' => !empty($state['playing']) && $alive !== [],
+            'playing' => (!empty($state['playing']) && $alive !== []) || $homepodActive !== [],
             'station_id' => isset($state['station_id']) ? (string) $state['station_id'] : null,
             'station_name' => isset($state['station_name']) ? (string) $state['station_name'] : null,
             'targets' => $targets,
-            'active_targets' => $aliveIds,
+            'active_targets' => array_values(array_unique(array_merge($aliveIds, $homepodActive))),
+            'homepod_targets' => $homepodActive,
             'volume' => max(0, min(100, (int) ($state['volume'] ?? 60))),
             'error' => isset($state['error']) && is_string($state['error']) && $state['error'] !== ''
                 ? $state['error']
@@ -473,13 +512,16 @@ final class YarboUnifiRadio
             @unlink($prevClip);
         }
 
-        foreach ($targets as $cameraId) {
+        $protectIds = YarboHomepod::filterProtectIds($targets);
+        $homepodIds = YarboHomepod::filterHomepodIds($targets);
+
+        foreach ($protectIds as $cameraId) {
             $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
         }
 
         $sessions = [];
         $errors = [];
-        foreach ($targets as $cameraId) {
+        foreach ($protectIds as $cameraId) {
             $session = $this->unifi->createTalkbackSession($cameraId);
             if (!($session['ok'] ?? false)) {
                 $errors[] = (string) ($session['error'] ?? 'talkback failed') . ' (' . $cameraId . ')';
@@ -492,7 +534,7 @@ final class YarboUnifiRadio
                 'sampling_rate' => (int) ($session['sampling_rate'] ?? 22050),
             ];
         }
-        if ($sessions === []) {
+        if ($sessions === [] && $homepodIds === []) {
             return [
                 'ok' => false,
                 'error' => $errors !== [] ? implode('; ', $errors) : 'No speakers started',
@@ -503,11 +545,12 @@ final class YarboUnifiRadio
         $sessionMeta = $airplay->session();
         $client = trim((string) ($sessionMeta['client_name'] ?? ''));
         $displayName = $client !== '' ? $client : 'AirPlay';
-        $pid = $this->spawnAirplayFanout($ffmpeg, $fifo, $sessions, $volume);
+        $homepodCount = count($homepodIds);
+        $pid = $this->spawnAirplayFanout($ffmpeg, $fifo, $sessions, $volume, $homepodCount);
         if ($pid <= 0) {
             return [
                 'ok' => false,
-                'error' => 'Could not start AirPlay → talkback bridge (see data/unifi-radio-airplay.log)',
+                'error' => 'Could not start AirPlay → speaker bridge (see data/unifi-radio-airplay.log)',
                 'airplay' => $airplay->status(),
             ];
         }
@@ -521,6 +564,33 @@ final class YarboUnifiRadio
                 'codec' => $row['codec'],
             ];
         }
+        // HomePod-only bridge still tracks the shared ffmpeg pid so Stop/status can reap it.
+        if ($sessions === [] && $homepodCount > 0) {
+            $streams[] = [
+                'camera_id' => 'homepod-bridge',
+                'pid' => $pid,
+                'talkback_url' => '',
+                'codec' => 'mp3',
+            ];
+        }
+
+        $homepodTargets = [];
+        if ($homepodCount > 0) {
+            // Give ffmpeg a moment to open each HTTP listener (one port per HomePod).
+            usleep(500000);
+            $hp = YarboHomepod::fromEnv($this->projectRoot);
+            foreach ($homepodIds as $i => $nativeId) {
+                $bridgeUrl = $this->homepodBridgeUrl((int) $i);
+                $hpResult = $hp->streamToMany([$nativeId], $bridgeUrl, $volume);
+                foreach ($hpResult['errors'] as $err) {
+                    $errors[] = $err;
+                }
+                foreach ($hpResult['started'] as $id) {
+                    $homepodTargets[] = $id;
+                }
+            }
+        }
+
         $state = [
             'playing' => true,
             'station_id' => 'airplay',
@@ -529,6 +599,7 @@ final class YarboUnifiRadio
             'clip_path' => null,
             'volume' => $volume,
             'streams' => $streams,
+            'homepod_targets' => $homepodTargets,
             'targets' => $targets,
             'started_at' => time(),
             'ends_at' => null,
@@ -802,20 +873,30 @@ final class YarboUnifiRadio
         string $fifo,
         array $sessions,
         int $volume,
+        int $homepodCount = 0,
     ): int {
-        if ($sessions === []) {
+        $homepodCount = max(0, $homepodCount);
+        if ($sessions === [] && $homepodCount < 1) {
             return 0;
         }
         $volume = max(0, min(100, $volume));
         $gain = number_format($volume / 100, 4, '.', '');
         $n = count($sessions);
+        $split = $n + $homepodCount;
+        if ($split < 1) {
+            return 0;
+        }
         $labels = [];
         for ($i = 0; $i < $n; $i++) {
             $labels[] = '[a' . $i . ']';
         }
-        // One FIFO reader → mono 22050 → asplit → AAC ADTS UDP per speaker.
+        for ($i = 0; $i < $homepodCount; $i++) {
+            $labels[] = '[hm' . $i . ']';
+        }
+        // One FIFO reader → mono → asplit → AAC ADTS UDP per Protect speaker
+        // (+ one MP3 HTTP listener per HomePod; ffmpeg -listen is single-client).
         $filter = '[0:a]volume=' . $gain
-            . ',pan=mono|c0=0.5*c0+0.5*c1,aresample=22050,asplit=' . $n
+            . ',pan=mono|c0=0.5*c0+0.5*c1,aresample=22050,asplit=' . $split
             . implode('', $labels);
         $log = $this->projectRoot . '/data/unifi-radio-airplay.log';
         @file_put_contents($log, '');
@@ -836,10 +917,21 @@ final class YarboUnifiRadio
             $udp = escapeshellarg('udp://' . $host . ':' . $port);
             $cmd .= ' -map "[a' . $i . ']" -c:a aac -profile:a aac_low -b:a 32k -f adts ' . $udp;
         }
+        if ($homepodCount > 0) {
+            @file_put_contents($this->homepodBridgePidPath(), '');
+            $basePort = $this->homepodBridgePort();
+            for ($i = 0; $i < $homepodCount; $i++) {
+                $http = escapeshellarg('http://127.0.0.1:' . ($basePort + $i) . '/live.mp3');
+                $cmd .= ' -map "[hm' . $i . ']" -c:a libmp3lame -b:a 128k -f mp3 -listen 1 ' . $http;
+            }
+        }
         $full = 'nohup ' . $cmd . ' > ' . $logEsc . ' 2>&1 & echo $!';
         $pid = (int) trim((string) shell_exec($full));
         if ($pid <= 1) {
             return 0;
+        }
+        if ($homepodCount > 0) {
+            @file_put_contents($this->homepodBridgePidPath(), (string) $pid);
         }
         // Bridge blocks on FIFO until an AirPlay client plays — process should stay alive.
         usleep(300000);
@@ -848,6 +940,30 @@ final class YarboUnifiRadio
         }
 
         return $pid;
+    }
+
+    private function homepodBridgePort(): int
+    {
+        $port = (int) (getenv('YARBO_HOMEPOD_BRIDGE_PORT') ?: 8768);
+
+        return $port > 0 ? $port : 8768;
+    }
+
+    private function homepodBridgeUrl(int $index = 0): string
+    {
+        return 'http://127.0.0.1:' . ($this->homepodBridgePort() + max(0, $index)) . '/live.mp3';
+    }
+
+    private function homepodBridgePidPath(): string
+    {
+        return $this->projectRoot . '/data/homepod/bridge-http.pid';
+    }
+
+    private function stopHomepodBridgeHttp(): void
+    {
+        $pf = $this->homepodBridgePidPath();
+        // Fanout pid is shared with talkback — do not kill it here; stop() already kills streams.
+        @unlink($pf);
     }
 
     /**
@@ -872,16 +988,19 @@ final class YarboUnifiRadio
             @unlink($prevClip);
         }
 
+        $protectIds = YarboHomepod::filterProtectIds($targets);
+        $homepodIds = YarboHomepod::filterHomepodIds($targets);
+
         // Best-effort Protect hardware volume (needs local UniFi OS admin). Playback
         // loudness is always applied in ffmpeg so the slider works without that.
-        foreach ($targets as $cameraId) {
+        foreach ($protectIds as $cameraId) {
             $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
         }
 
         $streams = [];
         $errors = [];
         $started = 0;
-        foreach ($targets as $cameraId) {
+        foreach ($protectIds as $cameraId) {
             $session = $this->unifi->createTalkbackSession($cameraId);
             if (!($session['ok'] ?? false)) {
                 $errors[] = (string) ($session['error'] ?? 'talkback failed') . ' (' . $cameraId . ')';
@@ -914,8 +1033,23 @@ final class YarboUnifiRadio
             }
         }
 
-        $playing = $streams !== [];
-        // Short announce clips may finish before we return; still count as ok if ffmpeg started.
+        $homepodTargets = [];
+        if ($homepodIds !== []) {
+            $hp = YarboHomepod::fromEnv($this->projectRoot);
+            $hpResult = $hp->streamToMany($homepodIds, $contentUrl, $volume);
+            foreach ($hpResult['errors'] as $err) {
+                $errors[] = $err;
+            }
+            foreach ($hpResult['started'] as $id) {
+                $homepodTargets[] = $id;
+                $started++;
+            }
+        }
+
+        $protectPlaying = $streams !== [];
+        $homepodPlaying = $homepodTargets !== [];
+        $playing = $protectPlaying || $homepodPlaying;
+        // Short announce clips may finish before we return; still count as ok if ffmpeg/HomePod started.
         $ok = $localFile ? $started > 0 : $playing;
         $playError = $ok
             ? ($errors !== [] ? implode('; ', $errors) : null)
@@ -935,6 +1069,7 @@ final class YarboUnifiRadio
             'clip_path' => $localFile ? $clipPath : null,
             'volume' => $volume,
             'streams' => $streams,
+            'homepod_targets' => $homepodTargets,
             // Remember the speakers the user ticked, even if some failed to start.
             'targets' => $targets,
             'started_at' => $ok ? time() : null,
@@ -1055,6 +1190,13 @@ final class YarboUnifiRadio
                 $this->killPidTree($pid);
             }
         }
+        $homepodIds = [];
+        if (is_array($state['homepod_targets'] ?? null)) {
+            $homepodIds = $state['homepod_targets'];
+        }
+        // Always stop HomePod streams tied to radio/announce/bridge.
+        YarboHomepod::fromEnv($this->projectRoot)->stop($homepodIds !== [] ? $homepodIds : null);
+        $this->stopHomepodBridgeHttp();
         $clip = trim((string) ($state['clip_path'] ?? ''));
         // Keep the last announce file while Idle so volume changes can replay it;
         // only delete when clearing after a fresh stop request with clearError.
@@ -1063,6 +1205,7 @@ final class YarboUnifiRadio
         }
         $state['playing'] = false;
         $state['streams'] = [];
+        $state['homepod_targets'] = [];
         $state['started_at'] = null;
         $state['ends_at'] = null;
         if ($clearError) {
@@ -1122,7 +1265,8 @@ final class YarboUnifiRadio
                 : ($status['targets'] ?? []);
         }
         $state = $this->loadState();
-        $wasPlaying = !empty($state['playing']) && is_array($state['streams']) && $state['streams'] !== [];
+        $wasPlaying = (!empty($state['playing']) && is_array($state['streams']) && $state['streams'] !== [])
+            || (is_array($state['homepod_targets'] ?? null) && $state['homepod_targets'] !== []);
         $stationId = isset($state['station_id']) ? (string) $state['station_id'] : '';
         $state['volume'] = $volume;
         if ($targets !== []) {
@@ -1131,31 +1275,43 @@ final class YarboUnifiRadio
         $this->writeState($state);
 
         // Hardware volume is optional; stream volume is applied by restarting play.
-        foreach ($targets as $cameraId) {
+        foreach (YarboHomepod::filterProtectIds($targets) as $cameraId) {
             $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
         }
 
-        if ($wasPlaying && $stationId !== '' && $targets !== []) {
-            $replay = $stationId === 'airplay'
-                ? $this->playAirplay([
-                    'targets' => $targets,
-                    'volume' => $volume,
-                    'ensure_receiver' => false,
-                ])
-                : $this->play([
-                    'station_id' => $stationId,
-                    'targets' => $targets,
-                    'volume' => $volume,
-                ]);
+        $homepodIds = YarboHomepod::filterHomepodIds(
+            $targets !== [] ? $targets : (is_array($state['homepod_targets'] ?? null) ? $state['homepod_targets'] : [])
+        );
+        if ($homepodIds !== []) {
+            YarboHomepod::fromEnv($this->projectRoot)->setVolume($homepodIds, $volume);
+        }
 
-            return [
-                'ok' => (bool) ($replay['ok'] ?? false),
-                'error' => $replay['error'] ?? null,
-                'warning' => $replay['warning'] ?? null,
-                'volume' => $volume,
-                'radio' => $replay['radio'] ?? $this->status(),
-                'airplay' => $replay['airplay'] ?? null,
-            ];
+        if ($wasPlaying && $stationId !== '' && $targets !== []) {
+            // Protect / AirPlay bridge loudness is baked into ffmpeg — restart to apply.
+            // HomePod-only radio can keep the RAOP session and only change volume above.
+            $protectIds = YarboHomepod::filterProtectIds($targets);
+            if ($stationId === 'airplay' || $protectIds !== []) {
+                $replay = $stationId === 'airplay'
+                    ? $this->playAirplay([
+                        'targets' => $targets,
+                        'volume' => $volume,
+                        'ensure_receiver' => false,
+                    ])
+                    : $this->play([
+                        'station_id' => $stationId,
+                        'targets' => $targets,
+                        'volume' => $volume,
+                    ]);
+
+                return [
+                    'ok' => (bool) ($replay['ok'] ?? false),
+                    'error' => $replay['error'] ?? null,
+                    'warning' => $replay['warning'] ?? null,
+                    'volume' => $volume,
+                    'radio' => $replay['radio'] ?? $this->status(),
+                    'airplay' => $replay['airplay'] ?? null,
+                ];
+            }
         }
 
         return [
@@ -1172,13 +1328,16 @@ final class YarboUnifiRadio
     public function dashboardSlice(): array
     {
         $airplay = new YarboPanelAirPlay($this->projectRoot);
+        $homepod = YarboHomepod::fromEnv($this->projectRoot);
+        $speakers = array_merge($this->unifi->speakerCameras(), $homepod->speakerRows());
 
         return [
             'stations' => $this->stations(),
-            'speakers' => $this->unifi->speakerCameras(),
+            'speakers' => $speakers,
             'radio' => $this->status(),
             'speakers_enabled' => $this->unifi->speakersEnabled(),
             'airplay' => $airplay->status(),
+            'homepod' => $homepod->status(),
         ];
     }
 
@@ -1261,9 +1420,13 @@ final class YarboUnifiRadio
             if ($id === '') {
                 continue;
             }
-            $parsed = YarboUnifi::parseHomeId($id);
-            if ($parsed !== null && $parsed['kind'] === YarboUnifi::KIND_CAMERA) {
-                $id = $parsed['native_id'];
+            if (YarboHomepod::isHomepodTargetId($id)) {
+                $id = YarboHomepod::withPrefix(YarboHomepod::stripPrefix($id));
+            } else {
+                $parsed = YarboUnifi::parseHomeId($id);
+                if ($parsed !== null && $parsed['kind'] === YarboUnifi::KIND_CAMERA) {
+                    $id = $parsed['native_id'];
+                }
             }
             if ($id !== '' && !in_array($id, $out, true)) {
                 $out[] = $id;
@@ -1432,6 +1595,7 @@ final class YarboUnifiRadio
             'clip_path' => null,
             'volume' => 60,
             'streams' => [],
+            'homepod_targets' => [],
             'targets' => [],
             'started_at' => null,
             'ends_at' => null,

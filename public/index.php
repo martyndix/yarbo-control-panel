@@ -1205,6 +1205,23 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-unifi-airplay-save">Save AirPlay name</button>
                             </div>
                             <p id="settings-unifi-airplay-result" class="settings-cloud-result hint" role="status"></p>
+                            <h3 class="settings-subtitle">HomePod speakers</h3>
+                            <p class="hint">Optional outputs for Radio, Announcement, and the AirPlay bridge. The panel sends audio to HomePods with <code>pyatv</code> (AirPlay/RAOP) — separate from the AirPlay bridge above. In the Home app, allow AirPlay from devices on the same network, then Scan and Pair (PIN). Paired speakers appear in the Radio Player checklist.</p>
+                            <div class="settings-update-actions">
+                                <button type="button" class="btn btn-secondary" id="settings-unifi-homepod-scan">Scan for HomePods</button>
+                            </div>
+                            <div id="settings-unifi-homepod-list" class="unifi-homepod-list" role="list"></div>
+                            <div id="settings-unifi-homepod-pair" class="unifi-homepod-pair hidden">
+                                <label class="settings-field">
+                                    <span class="label">Pairing PIN</span>
+                                    <input type="text" id="settings-unifi-homepod-pin" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="PIN from HomePod / TV">
+                                </label>
+                                <div class="settings-update-actions">
+                                    <button type="button" class="btn" id="settings-unifi-homepod-pair-finish">Submit PIN</button>
+                                    <button type="button" class="btn btn-secondary" id="settings-unifi-homepod-pair-cancel">Cancel</button>
+                                </div>
+                            </div>
+                            <p id="settings-unifi-homepod-result" class="settings-cloud-result hint" role="status"></p>
                             <div id="settings-unifi-stations" class="unifi-stations">
                                 <div id="settings-unifi-stations-list" class="unifi-stations-list"></div>
                                 <div class="settings-update-actions">
