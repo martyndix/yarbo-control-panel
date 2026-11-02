@@ -293,6 +293,10 @@ assert_true(str_contains($php, '$localFile'), 'ffmpeg local-file path for announ
 assert_true(str_contains($php, 'ends_at'), 'announce ends_at for Idle');
 assert_true(str_contains($php, 'probeClipDurationSeconds'), 'ffprobe duration for announce');
 assert_true(str_contains($php, "'Announcement'"), 'station name Announcement');
+assert_true(str_contains($php, 'resume_after'), 'resume radio after announcement');
+assert_true(str_contains($php, 'captureResumeAfter'), 'captures playing station before announce');
+assert_true(str_contains($change, '## [4.0.178]'), 'changelog 4.0.178');
+assert_true(str_contains($change, 'resumes') || str_contains($change, 'resume'), 'changelog mentions resume after announcement');
 assert_true(str_contains($unifiPhp, 'speakerVolume'), 'volume uses speakerVolume on private API');
 assert_true(str_contains($unifiPhp, 'protectPrivateUrl'), 'volume helper can build private Protect URL');
 
@@ -327,11 +331,84 @@ file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
     'targets' => ['cam1'],
     'started_at' => time() - 10,
     'ends_at' => time() - 1,
+    'resume_after' => null,
     'error' => null,
 ], JSON_UNESCAPED_SLASHES));
 $done = $radio->status();
 assert_true(($done['playing'] ?? true) === false, 'announce ends_at clears playing');
 assert_true(empty($done['ends_at']), 'announce ends_at cleared');
 assert_true(($done['station_name'] ?? '') === 'Announcement', 'keeps Announcement name while Idle');
+
+// Capture resume snapshot while a station is marked playing.
+file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
+    'playing' => true,
+    'station_id' => 'classic-fm',
+    'station_name' => 'Classic FM',
+    'station_url' => 'https://example.com/classic.mp3',
+    'volume' => 55,
+    'streams' => [['camera_id' => 'cam1', 'pid' => 999999992]],
+    'targets' => ['cam1'],
+    'started_at' => time() - 30,
+    'ends_at' => null,
+    'resume_after' => null,
+    'error' => null,
+], JSON_UNESCAPED_SLASHES));
+$capture = (new ReflectionClass(YarboUnifiRadio::class))->getMethod('captureResumeAfter');
+$capture->setAccessible(true);
+$snap = $capture->invoke($radio);
+assert_true(is_array($snap), 'captureResumeAfter returns snapshot');
+assert_true(($snap['station_id'] ?? '') === 'classic-fm', 'resume snapshot station');
+assert_true(($snap['targets'] ?? []) === ['cam1'], 'resume snapshot targets');
+assert_true((int) ($snap['volume'] ?? 0) === 55, 'resume snapshot volume');
+
+// Explicit Stop cancels a pending resume_after.
+file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
+    'playing' => true,
+    'station_id' => 'announce',
+    'station_name' => 'Announcement',
+    'volume' => 60,
+    'streams' => [],
+    'targets' => ['cam1'],
+    'started_at' => time(),
+    'ends_at' => time() + 10,
+    'resume_after' => [
+        'station_id' => 'classic-fm',
+        'url' => 'https://example.com/classic.mp3',
+        'targets' => ['cam1'],
+        'volume' => 55,
+    ],
+    'error' => null,
+], JSON_UNESCAPED_SLASHES));
+$radio->stop(true);
+$afterStop = json_decode((string) file_get_contents($root . '/data/unifi-radio-state.json'), true);
+assert_true(empty($afterStop['resume_after']), 'Stop clears resume_after');
+
+// When an announcement ends with resume_after, status tries to restart the station.
+$callsBeforeResume = count($calls);
+file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
+    'playing' => true,
+    'station_id' => 'announce',
+    'station_name' => 'Announcement',
+    'volume' => 60,
+    'streams' => [['camera_id' => 'cam1', 'pid' => 999999993]],
+    'targets' => ['cam1'],
+    'started_at' => time() - 10,
+    'ends_at' => time() - 1,
+    'resume_after' => [
+        'station_id' => 'classic-fm',
+        'url' => 'https://example.com/classic.mp3',
+        'targets' => ['cam1'],
+        'volume' => 55,
+    ],
+    'error' => null,
+], JSON_UNESCAPED_SLASHES));
+$radio->status();
+$afterResume = json_decode((string) file_get_contents($root . '/data/unifi-radio-state.json'), true);
+assert_true(empty($afterResume['resume_after']), 'resume_after cleared after announce end');
+$talkbacks = array_values(array_filter(
+    array_slice($calls, $callsBeforeResume),
+    static fn (array $c): bool => str_contains((string) ($c['url'] ?? ''), 'talkback-session')
+));
+assert_true($talkbacks !== [], 'resume after announce starts talkback');
 
 echo "test_unifi_radio.php ok\n";

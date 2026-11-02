@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.178] - 2026-11-02
+
+### Changed
+- If radio is playing when you send an **Announcement**, the station is paused for the clip and **automatically resumes** when the announcement ends. **Stop** during the announcement cancels that resume.
+
 ## [4.0.177] - 2026-11-02
 
 ### Fixed

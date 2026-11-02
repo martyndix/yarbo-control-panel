@@ -9,6 +9,9 @@ namespace Yarbo;
  */
 final class YarboUnifiRadio
 {
+    /** Prevent status() → play() → stop() → status() from re-entering resume. */
+    private bool $resumingRadio = false;
+
     public function __construct(
         private readonly string $projectRoot,
         private readonly YarboUnifi $unifi,
@@ -96,6 +99,7 @@ final class YarboUnifiRadio
         $endsAt = isset($state['ends_at']) ? (int) $state['ends_at'] : 0;
         $timedOut = $endsAt > 0 && time() >= $endsAt;
         // Finite clips (Announcement) must return to Idle when ffmpeg exits or ends_at passes.
+        // If radio was playing before the announcement, resume that station.
         if ($timedOut || ($alive === [] && ($state['playing'] ?? false))) {
             if ($timedOut && $alive !== []) {
                 foreach ($alive as $row) {
@@ -105,12 +109,37 @@ final class YarboUnifiRadio
                     }
                 }
             }
+            $wasAnnounce = trim((string) ($state['station_id'] ?? '')) === 'announce';
+            $resume = is_array($state['resume_after'] ?? null) ? $state['resume_after'] : null;
             $state['playing'] = false;
             $state['streams'] = [];
             $state['ends_at'] = null;
+            $state['resume_after'] = null;
             $state['error'] = $state['error'] ?? null;
             $this->writeState($state);
             $alive = [];
+
+            if (
+                !$this->resumingRadio
+                && $wasAnnounce
+                && $this->resumeAfterLooksValid($resume)
+            ) {
+                $this->resumingRadio = true;
+                try {
+                    $replay = $this->play([
+                        'station_id' => (string) $resume['station_id'],
+                        'url' => (string) ($resume['url'] ?? ''),
+                        'targets' => $resume['targets'],
+                        'volume' => $resume['volume'] ?? ($state['volume'] ?? 60),
+                    ]);
+                    if (($replay['ok'] ?? false) && is_array($replay['radio'] ?? null)) {
+                        return $replay['radio'];
+                    }
+                } finally {
+                    $this->resumingRadio = false;
+                }
+                $state = $this->loadState();
+            }
         } elseif (count($alive) !== count($state['streams'])) {
             $state['streams'] = $alive;
             $state['playing'] = $alive !== [];
@@ -282,6 +311,9 @@ final class YarboUnifiRadio
             ? max(0, min(100, (int) $input['volume']))
             : max(0, min(100, (int) ($this->loadState()['volume'] ?? 60)));
 
+        // Capture the live station before stop() so we can restart it when the clip ends.
+        $resumeAfter = $this->captureResumeAfter();
+
         return $this->startStreams(
             $ffmpeg,
             $clipPath,
@@ -291,11 +323,90 @@ final class YarboUnifiRadio
             $targets,
             $volume,
             $clipPath,
+            $resumeAfter,
         );
     }
 
     /**
+     * @return array{station_id: string, url: string, targets: list<string>, volume: int}|null
+     */
+    private function captureResumeAfter(): ?array
+    {
+        $state = $this->loadState();
+        $existing = is_array($state['resume_after'] ?? null) ? $state['resume_after'] : null;
+        $stationId = trim((string) ($state['station_id'] ?? ''));
+        if ($stationId === '' || $stationId === 'announce') {
+            // Stacked announcements keep the original station resume.
+            return $this->resumeAfterLooksValid($existing) ? $existing : null;
+        }
+
+        $alive = false;
+        foreach ($state['streams'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if ($this->pidAlive((int) ($row['pid'] ?? 0))) {
+                $alive = true;
+                break;
+            }
+        }
+        if (!$alive && empty($state['playing'])) {
+            return null;
+        }
+
+        $targets = [];
+        if (is_array($state['targets'] ?? null)) {
+            foreach ($state['targets'] as $id) {
+                $id = trim((string) $id);
+                if ($id !== '') {
+                    $targets[] = $id;
+                }
+            }
+        }
+        if ($targets === []) {
+            foreach ($state['streams'] ?? [] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $id = trim((string) ($row['camera_id'] ?? ''));
+                if ($id !== '') {
+                    $targets[] = $id;
+                }
+            }
+        }
+        $targets = array_values(array_unique($targets));
+        if ($targets === []) {
+            return null;
+        }
+
+        return [
+            'station_id' => $stationId,
+            'url' => trim((string) ($state['station_url'] ?? '')),
+            'targets' => $targets,
+            'volume' => max(0, min(100, (int) ($state['volume'] ?? 60))),
+        ];
+    }
+
+    /**
+     * @param mixed $resume
+     */
+    private function resumeAfterLooksValid(mixed $resume): bool
+    {
+        if (!is_array($resume)) {
+            return false;
+        }
+        $stationId = trim((string) ($resume['station_id'] ?? ''));
+        if ($stationId === '' || $stationId === 'announce') {
+            return false;
+        }
+        $targets = $this->normalizeTargetIds($resume['targets'] ?? []);
+
+        return $targets !== [];
+    }
+
+    /**
      * @param list<string> $targets
+     * @param array{station_id: string, url: string, targets: list<string>, volume: int}|null $resumeAfter
      * @return array<string, mixed>
      */
     private function startStreams(
@@ -307,6 +418,7 @@ final class YarboUnifiRadio
         array $targets,
         int $volume,
         ?string $clipPath,
+        ?array $resumeAfter = null,
     ): array {
         $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
         $this->stop(false);
@@ -381,9 +493,49 @@ final class YarboUnifiRadio
             'targets' => $targets,
             'started_at' => $ok ? time() : null,
             'ends_at' => $endsAt,
+            // Only announcements carry a station to restore; a normal Play clears it.
+            'resume_after' => ($ok && $localFile && $this->resumeAfterLooksValid($resumeAfter))
+                ? [
+                    'station_id' => (string) $resumeAfter['station_id'],
+                    'url' => (string) ($resumeAfter['url'] ?? ''),
+                    'targets' => $this->normalizeTargetIds($resumeAfter['targets'] ?? []),
+                    'volume' => max(0, min(100, (int) ($resumeAfter['volume'] ?? $volume))),
+                ]
+                : null,
             'error' => $playError,
         ];
         $this->writeState($state);
+
+        // Clip finished before we returned — resume the interrupted station immediately.
+        if (
+            $ok
+            && $localFile
+            && !$playing
+            && !$this->resumingRadio
+            && $this->resumeAfterLooksValid($state['resume_after'] ?? null)
+        ) {
+            $resume = $state['resume_after'];
+            $state['resume_after'] = null;
+            $this->writeState($state);
+            $this->resumingRadio = true;
+            try {
+                $replay = $this->play([
+                    'station_id' => (string) $resume['station_id'],
+                    'url' => (string) ($resume['url'] ?? ''),
+                    'targets' => $resume['targets'],
+                    'volume' => $resume['volume'] ?? $volume,
+                ]);
+
+                return [
+                    'ok' => true,
+                    'error' => null,
+                    'warning' => $ok && $errors !== [] ? implode('; ', $errors) : null,
+                    'radio' => is_array($replay['radio'] ?? null) ? $replay['radio'] : $this->status(),
+                ];
+            } finally {
+                $this->resumingRadio = false;
+            }
+        }
 
         return [
             'ok' => $ok,
@@ -474,6 +626,8 @@ final class YarboUnifiRadio
         $state['ends_at'] = null;
         if ($clearError) {
             $state['error'] = null;
+            // Explicit Stop cancels “resume radio after announcement”.
+            $state['resume_after'] = null;
         }
         $this->writeState($state);
 
@@ -830,6 +984,7 @@ final class YarboUnifiRadio
             'targets' => [],
             'started_at' => null,
             'ends_at' => null,
+            'resume_after' => null,
             'error' => null,
         ];
         $decoded = $this->readJsonFile($this->statePath());
