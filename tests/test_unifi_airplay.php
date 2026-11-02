@@ -100,11 +100,23 @@ assert_true(str_contains($index, 'id="settings-unifi-airplay-name"'), 'Settings 
 assert_true(str_contains($js, "action: 'airplay_start'"), 'JS airplay_start');
 assert_true(str_contains($js, 'renderUnifiAirplayStatus'), 'JS AirPlay status renderer');
 assert_true(str_contains($ensureSh, 'shairport-sync'), 'ensure script mentions shairport');
+assert_true(str_contains($ensureSh, 'yarbo_try_install_airplay_deps'), 'ensure tries auto apt install');
 assert_true(str_contains($libSh, 'audio.fifo'), 'helper creates FIFO');
+assert_true(str_contains($libSh, 'yarbo_install_airplay_deps'), 'apt install helper');
+assert_true(str_contains($libSh, 'shairport-sync avahi-daemon'), 'installs both packages');
+$updateSh = (string) file_get_contents(dirname(__DIR__) . '/scripts/update.sh');
+$matterSh = (string) file_get_contents(dirname(__DIR__) . '/scripts/lib/matter_server.sh');
+$installSh = (string) file_get_contents(dirname(__DIR__) . '/scripts/install.sh');
+assert_true(str_contains($updateSh, 'airplay-deps'), 'update.sh runs airplay-deps');
+assert_true(str_contains($matterSh, 'airplay-deps'), 'matter-setup handles airplay-deps');
+assert_true(str_contains($installSh, 'shairport-sync avahi-daemon'), 'install.sh --deps includes AirPlay packages');
+assert_true(str_contains($installSh, 'apt-get install -y shairport-sync avahi-daemon'), 'sudoers allows AirPlay apt');
 assert_true(str_contains($change, '## [4.0.179]'), 'changelog 4.0.179');
+assert_true(str_contains($change, '## [4.0.180]'), 'changelog 4.0.180');
 assert_true(str_contains($change, 'AirPlay'), 'changelog mentions AirPlay');
 assert_true(str_contains($docs, 'AirPlay bridge'), 'docs AirPlay bridge');
 assert_true(str_contains($docs, 'shairport-sync'), 'docs install hint');
+assert_true(str_contains($docs, 'no SSH'), 'docs say no SSH required for apt');
 
 // Announcement resume keeps airplay snapshot.
 file_put_contents($root . '/data/unifi-radio-state.json', json_encode([

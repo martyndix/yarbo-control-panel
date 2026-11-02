@@ -57,7 +57,12 @@ install_apt_deps() {
   echo "==> Installing system packages (apt)"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y php php-cli php-mbstring php-xml php-zlib php-zip composer unzip git python3 python3-pip docker.io
+  apt-get install -y php php-cli php-mbstring php-xml php-zlib php-zip composer unzip git python3 python3-pip docker.io \
+    shairport-sync avahi-daemon
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable avahi-daemon >/dev/null 2>&1 || true
+    systemctl start avahi-daemon >/dev/null 2>&1 || true
+  fi
 }
 
 install_project() {
@@ -251,6 +256,8 @@ install_update_sudoers() {
     if [[ -x /usr/bin/apt-get ]]; then
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get update -qq"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get install -y docker.io"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get install -y shairport-sync avahi-daemon"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get install -y avahi-daemon shairport-sync"
     fi
   } > "${sudoers_path}"
   chmod 440 "${sudoers_path}"

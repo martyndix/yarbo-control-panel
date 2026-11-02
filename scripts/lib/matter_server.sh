@@ -302,16 +302,33 @@ yarbo_matter_setup() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  cmd=""
   if [[ -n "${1:-}" && -d "${1}/scripts" ]]; then
     ROOT="$1"
+    cmd="${2:-}"
+  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" ]]; then
+    cmd="$1"
+    if [[ -n "${YARBO_ROOT:-}" && -d "${YARBO_ROOT}/scripts" ]]; then
+      ROOT="$YARBO_ROOT"
+    else
+      ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    fi
   elif [[ -n "${YARBO_ROOT:-}" && -d "${YARBO_ROOT}/scripts" ]]; then
     ROOT="$YARBO_ROOT"
   else
     ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   fi
-  if [[ "${1:-}" == "ipv6-route" ]]; then
+  if [[ "$cmd" == "ipv6-route" || "${1:-}" == "ipv6-route" ]]; then
     yarbo_matter_enable_ipv6
     exit 0
+  fi
+  if [[ "$cmd" == "airplay-deps" ]]; then
+    # Refresh this wrapper from the panel tree, then install AirPlay apt packages.
+    yarbo_matter_install_wrapper
+    # shellcheck source=scripts/lib/panel_airplay.sh
+    source "${ROOT}/scripts/lib/panel_airplay.sh"
+    yarbo_install_airplay_deps
+    exit $?
   fi
   cd "$ROOT"
   yarbo_matter_setup

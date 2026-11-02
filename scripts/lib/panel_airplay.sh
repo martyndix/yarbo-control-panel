@@ -217,3 +217,53 @@ yarbo_airplay_start_receiver() {
   fi
   yarbo_airplay_running "$root"
 }
+
+# Install AirPlay host packages (must run as root). Used by update.sh / matter-setup.
+yarbo_install_airplay_deps() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "apt-get not available — skip AirPlay packages" >&2
+    return 1
+  fi
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    echo "yarbo_install_airplay_deps must run as root" >&2
+    return 1
+  fi
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y shairport-sync avahi-daemon
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable avahi-daemon >/dev/null 2>&1 || true
+    systemctl start avahi-daemon >/dev/null 2>&1 || true
+  fi
+  # Best-effort PTP / mDNS firewall holes for AirPlay 2.
+  if command -v ufw >/dev/null 2>&1; then
+    if ufw status 2>/dev/null | grep -qi 'Status: active'; then
+      ufw allow 319,320/udp comment 'Yarbo AirPlay PTP' >/dev/null 2>&1 || true
+      ufw allow 5353/udp comment 'Yarbo mDNS' >/dev/null 2>&1 || true
+    fi
+  fi
+  return 0
+}
+
+# Try passwordless install via the panel's existing root helper (no SSH).
+yarbo_try_install_airplay_deps() {
+  local root="${1:-}"
+  if yarbo_airplay_installed; then
+    return 0
+  fi
+  if [[ -z "$root" ]]; then
+    return 1
+  fi
+  if [[ -x /usr/local/sbin/yarbo-matter-setup ]]; then
+    if sudo -n /usr/local/sbin/yarbo-matter-setup "$root" airplay-deps >/dev/null 2>&1; then
+      yarbo_airplay_installed && return 0
+    fi
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    if sudo -n apt-get update -qq >/dev/null 2>&1 \
+      && sudo -n apt-get install -y shairport-sync avahi-daemon >/dev/null 2>&1; then
+      yarbo_airplay_installed && return 0
+    fi
+  fi
+  return 1
+}

@@ -41,8 +41,16 @@ if yarbo_airplay_installed; then INSTALLED=1; fi
 if [[ -n "$(yarbo_airplay_nqptp_bin)" ]]; then NQPTP=1; fi
 
 if [[ "$INSTALLED" -ne 1 ]]; then
+  # Panel update / Start AirPlay: install via passwordless root helper when possible.
+  if yarbo_try_install_airplay_deps "$ROOT"; then
+    INSTALLED=1
+    if [[ -n "$(yarbo_airplay_nqptp_bin)" ]]; then NQPTP=1; fi
+  fi
+fi
+
+if [[ "$INSTALLED" -ne 1 ]]; then
   json_out 0 0 0 "$NQPTP" "$NAME" "$FIFO" "" "" \
-    "shairport-sync is not installed. On the Pi: sudo apt install -y shairport-sync avahi-daemon (AirPlay 2 also needs nqptp — see docs/unifi.md)." \
+    "shairport-sync is not installed. Run a panel update (it installs shairport-sync + avahi-daemon), or on the Pi: sudo apt install -y shairport-sync avahi-daemon (AirPlay 2 also needs nqptp — see docs/unifi.md)." \
     "$(log_tail)"
   exit 0
 fi

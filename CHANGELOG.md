@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.180] - 2026-11-02
+
+### Changed
+- Panel **Updates** (and Start AirPlay) install **shairport-sync** and **avahi-daemon** automatically on the Pi — no SSH `apt install` required.
+
 ## [4.0.179] - 2026-11-02
 
 ### Added

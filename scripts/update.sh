@@ -356,6 +356,25 @@ if [[ -f "${ROOT}/scripts/lib/matter_server.sh" ]]; then
   fi
 fi
 
+step "Installing AirPlay packages (shairport-sync, avahi-daemon)"
+write_status "composer" "Installing AirPlay packages"
+chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" 2>/dev/null || true
+# shellcheck source=scripts/lib/panel_airplay.sh
+source "${ROOT}/scripts/lib/panel_airplay.sh"
+if yarbo_airplay_installed; then
+  step "AirPlay packages already installed"
+elif sudo -n /usr/local/sbin/yarbo-matter-setup "${ROOT}" airplay-deps >/dev/null 2>&1; then
+  if yarbo_airplay_installed; then
+    step "AirPlay packages installed"
+  else
+    step "AirPlay package install finished but shairport-sync is still missing"
+  fi
+elif yarbo_try_install_airplay_deps "${ROOT}"; then
+  step "AirPlay packages installed"
+else
+  step "AirPlay packages skipped (Start AirPlay will retry; or: sudo apt install -y shairport-sync avahi-daemon)"
+fi
+
 RESTARTED=false
 # shellcheck source=scripts/lib/mqtt_agent.sh
 source "${ROOT}/scripts/lib/mqtt_agent.sh"

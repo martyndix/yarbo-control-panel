@@ -84,15 +84,11 @@ Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` (Integration 
 
 **Announcement** (Radio Player modal, above Radio): hold **Hold to record** while speaking (live level meter), release to stop, listen, then Send to the ticked speakers. Or **Choose file**. Upload is `POST /api/unifi.php` with `action=radio_announce` (multipart `audio` + `targets` + `volume`) into `data/unifi-announce/`, then ffmpeg talkback. When the clip ends the player returns to Idle (header badge clears). If a station or AirPlay bridge was playing, it is interrupted for the announcement and **resumes automatically** afterward (unless you press Stop).
 
-**AirPlay** (Radio Player modal): **Start AirPlay** runs `scripts/panel_airplay_ensure.sh` (starts `shairport-sync` → `data/airplay/audio.fifo`, and `nqptp` when installed), then bridges that FIFO to the ticked speakers. Set the advertised name in Settings → UniFi. **Stop AirPlay** tears down the bridge and the receiver. On the Pi install:
+**AirPlay** (Radio Player modal): **Start AirPlay** runs `scripts/panel_airplay_ensure.sh` (starts `shairport-sync` → `data/airplay/audio.fifo`, and `nqptp` when installed), then bridges that FIFO to the ticked speakers. Set the advertised name in Settings → UniFi. **Stop AirPlay** tears down the bridge and the receiver.
 
-```bash
-sudo apt install -y shairport-sync avahi-daemon
-# AirPlay 2 (Control Center multi-room style) also needs nqptp — build from
-# https://github.com/mikebrady/shairport-sync AIRPLAY2.md if your distro package is classic-only.
-```
+Panel **Updates** (and a fresh `install.sh --deps`) install `shairport-sync` and `avahi-daemon` automatically via the same passwordless root helper used for Matter — no SSH required. **Start AirPlay** also retries that install if the packages are still missing. AirPlay 2 (Control Center multi-room style) additionally needs `nqptp` — build from [shairport-sync AIRPLAY2.md](https://github.com/mikebrady/shairport-sync/blob/master/AIRPLAY2.md) if your distro package is classic-only.
 
-Open UDP **319/320** (PTP) and allow mDNS if you use a firewall. The panel tries `ufw allow` when Start AirPlay runs. Sync across several Protect speakers is looser than HomePods.
+Open UDP **319/320** (PTP) and allow mDNS if you use a firewall. The panel tries `ufw allow` when packages install / Start AirPlay runs. Sync across several Protect speakers is looser than HomePods.
 
 Mic hold-to-record needs a **secure context** (`https://<panel-ip>:8443`, self-signed — accept once). Settings → Panel updates → **Start HTTPS** / **Restart panel** if :8443 is down. Paper tablets keep `http://<panel-ip>:8080`. Set `YARBO_PANEL_HTTPS=0` to disable the proxy.
 
