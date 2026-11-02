@@ -328,13 +328,13 @@ if [[ -n "$PYTHON" ]]; then
   fi
   step "HomePod / AirPlay sender (pyatv)"
   write_status "composer" "Installing pyatv for HomePod speakers"
-  if "$LYMOW_PY" -c "import pyatv" >/dev/null 2>&1; then
-    step "pyatv already installed"
-  elif "$LYMOW_PY" -m pip install --disable-pip-version-check --break-system-packages 'pyatv>=0.14' >/dev/null 2>&1 \
-    || "$LYMOW_PY" -m pip install --disable-pip-version-check --user --break-system-packages 'pyatv>=0.14' >/dev/null 2>&1; then
-    step "pyatv installed"
+  # shellcheck source=scripts/lib/homepod_deps.sh
+  source "${ROOT}/scripts/lib/homepod_deps.sh"
+  chmod +x "${ROOT}/scripts/panel_homepod_ensure.sh" "${ROOT}/scripts/lib/homepod_deps.sh" 2>/dev/null || true
+  if yarbo_ensure_pyatv "${ROOT}"; then
+    step "pyatv installed ($(yarbo_homepod_python "${ROOT}"))"
   else
-    step "pyatv pip install failed (HomePod speakers need it)"
+    step "pyatv pip install failed — Scan for HomePods will retry (see data/homepod-agent.log)"
   fi
   step "Checking yarbo-data-sdk"
   write_status "composer" "Checking yarbo-data-sdk"
@@ -368,7 +368,7 @@ fi
 
 step "Installing AirPlay packages (shairport-sync, avahi-daemon)"
 write_status "composer" "Installing AirPlay packages"
-chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" "${ROOT}/scripts/panel_airplay_watch.sh" "${ROOT}/scripts/homepod_agent.py" "${ROOT}/scripts/lib/homepod_agent.sh" 2>/dev/null || true
+chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" "${ROOT}/scripts/panel_airplay_watch.sh" "${ROOT}/scripts/homepod_agent.py" "${ROOT}/scripts/lib/homepod_agent.sh" "${ROOT}/scripts/lib/homepod_deps.sh" "${ROOT}/scripts/panel_homepod_ensure.sh" 2>/dev/null || true
 # shellcheck source=scripts/lib/panel_airplay.sh
 source "${ROOT}/scripts/lib/panel_airplay.sh"
 AIRPLAY_LOG="${ROOT}/data/panel-airplay.log"

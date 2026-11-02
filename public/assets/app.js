@@ -14206,14 +14206,16 @@ async function refreshHomepodSettings(homepod = null) {
 els.settingsUnifiHomepodScan?.addEventListener('click', async () => {
     const btn = els.settingsUnifiHomepodScan;
     if (btn) btn.disabled = true;
-    setHomepodResult('Scanning the LAN for HomePods…');
+    setHomepodResult('Scanning the LAN for HomePods… (installs pyatv on first use if needed)');
     try {
-        const data = await unifiApi({ action: 'homepod_scan' }, 45000);
+        // First scan may pip-install pyatv into .venv (no SSH) — allow a few minutes.
+        const data = await unifiApi({ action: 'homepod_scan' }, 180000);
         if (!data?.ok) throw new Error(data?.error || 'Scan failed');
         homepodScanDevices = Array.isArray(data.devices) ? data.devices : [];
         if (unifiDash) {
             if (data.homepod) unifiDash.homepod = data.homepod;
             if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+            renderUnifiSpeakers(unifiDash, { replace: true });
         }
         renderHomepodSettingsList(data.homepod || { devices: data.devices || [] });
         setHomepodResult(

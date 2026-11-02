@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.186] - 2026-11-02
+
+### Fixed
+- HomePod **Scan** installs `pyatv` into the panel `.venv` automatically when it is missing (same as Updates) — no SSH. Updates use a shared ensure helper and restart the HomePod agent so a stale process does not keep “No module named pyatv”.
+
 ## [4.0.185] - 2026-11-02
 
 ### Added

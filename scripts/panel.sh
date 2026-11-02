@@ -148,16 +148,18 @@ if [[ -n "$MATTER_PY" && -f "${ROOT}/scripts/matter_agent.py" ]]; then
 fi
 
 HOMEPOD_PID=""
-HOMEPOD_PY="${ROOT}/.venv/bin/python"
-if [[ ! -x "$HOMEPOD_PY" ]]; then
-  HOMEPOD_PY="$(command -v python3 || true)"
-fi
+# shellcheck source=scripts/lib/homepod_deps.sh
+source "${ROOT}/scripts/lib/homepod_deps.sh"
+HOMEPOD_PY="$(yarbo_homepod_python "${ROOT}" || true)"
 # Set YARBO_HOMEPOD=0 to skip the HomePod agent (rollback without uninstalling).
 if [[ "${YARBO_HOMEPOD:-1}" == "0" || "${YARBO_HOMEPOD:-1}" == "false" || "${YARBO_HOMEPOD:-1}" == "off" ]]; then
   echo "==> HomePod agent skipped (YARBO_HOMEPOD=${YARBO_HOMEPOD})"
   yarbo_stop_homepod_agent 2>/dev/null || true
 elif [[ -n "$HOMEPOD_PY" && -f "${ROOT}/scripts/homepod_agent.py" ]]; then
-  echo "==> Starting HomePod agent on 127.0.0.1:$(yarbo_homepod_agent_port)"
+  # Best-effort pyatv install at start (also runs during Updates / Scan).
+  yarbo_ensure_pyatv "${ROOT}" >/dev/null 2>&1 || true
+  HOMEPOD_PY="$(yarbo_homepod_python "${ROOT}" || true)"
+  echo "==> Starting HomePod agent on 127.0.0.1:$(yarbo_homepod_agent_port) (${HOMEPOD_PY})"
   mkdir -p "${ROOT}/data/homepod"
   yarbo_stop_homepod_agent
   YARBO_HOMEPOD_AGENT_PORT="$(yarbo_homepod_agent_port)" \
