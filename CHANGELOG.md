@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.187] - 2026-11-02
+
+### Changed
+- HomePod pairing copy: HomePods **speak** the PIN (no screen); Settings placeholder and docs match that.
+
 ## [4.0.186] - 2026-11-02
 
 ### Fixed

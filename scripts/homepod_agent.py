@@ -224,7 +224,8 @@ class HomepodRuntime:
             "name": conf.name,
             "protocol": protocol.name,
             "device_provides_pin": bool(getattr(pairing, "device_provides_pin", True)),
-            "message": "Enter the PIN shown on the HomePod / TV, or check Home app AirPlay access",
+            # HomePods have no screen — they speak the PIN aloud.
+            "message": "Listen for the PIN spoken by the HomePod (TVs show it on screen). Or in the Home app set AirPlay to Anyone on the Same Network.",
         }
 
     async def pair_finish(self, identifier: str, pin: str) -> dict[str, Any]:
