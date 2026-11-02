@@ -176,8 +176,8 @@ if ($action === 'airplay_config') {
 }
 
 if ($action === 'airplay_start') {
-    set_time_limit(60);
-    json_response($radio()->playAirplay($input));
+    set_time_limit(180);
+    json_response($radio()->armAirplay($input));
 }
 
 if ($action === 'airplay_stop') {

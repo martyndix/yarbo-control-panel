@@ -4322,9 +4322,21 @@ body.home-is-reordering {
 #unifi-radio-status {
     color: var(--muted);
 }
-#unifi-radio-status {
-    /* .hint uses a negative top margin meant for copy under titles — keep status clear of Play/Stop */
+#unifi-radio-status,
+#unifi-airplay-status {
+    /* .hint uses a negative top margin meant for copy under titles — keep status clear of buttons */
     margin: 0.55rem 0 0;
+}
+.unifi-radio-airplay {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--border);
+}
+.unifi-radio-airplay > .hint {
+    margin: 0 0 0.55rem;
+}
+.unifi-radio-airplay-actions {
+    margin-top: 0.35rem;
 }
 .unifi-speakers .settings-field {
     color: var(--text);

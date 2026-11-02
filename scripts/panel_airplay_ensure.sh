@@ -63,10 +63,11 @@ if command -v ufw >/dev/null 2>&1; then
   fi
 fi
 
+# Always refresh conf (session hooks / name) and restart so Start AirPlay applies them.
 if yarbo_airplay_running "$ROOT"; then
-  json_out 1 1 1 "$NQPTP" "$NAME" "$FIFO" "$(yarbo_airplay_pid "$ROOT")" \
-    "AirPlay receiver is running as ${NAME}" "" "$(log_tail)"
-  exit 0
+  echo "==> panel_airplay_ensure restarting receiver to refresh conf $(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$LOG"
+  yarbo_airplay_stop_receiver "$ROOT"
+  sleep 0.3
 fi
 
 if ! yarbo_airplay_start_receiver "$ROOT"; then

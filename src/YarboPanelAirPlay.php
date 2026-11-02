@@ -23,6 +23,26 @@ final class YarboPanelAirPlay
         return $this->projectRoot . '/data/airplay/audio.fifo';
     }
 
+    public function metadataPipePath(): string
+    {
+        return $this->projectRoot . '/data/airplay/metadata.fifo';
+    }
+
+    public function bridgePath(): string
+    {
+        return $this->projectRoot . '/data/airplay/bridge.json';
+    }
+
+    public function sessionPath(): string
+    {
+        return $this->projectRoot . '/data/airplay/session.json';
+    }
+
+    public function hooksFlagPath(): string
+    {
+        return $this->projectRoot . '/data/airplay/hooks.json';
+    }
+
     /**
      * @return array{name: string}
      */
@@ -74,29 +94,162 @@ final class YarboPanelAirPlay
     }
 
     /**
+     * Speakers + volume remembered while the LAN receiver is advertised.
+     *
+     * @param list<string> $targets
+     * @return array{armed: bool, targets: list<string>, volume: int}
+     */
+    public function saveBridge(array $targets, int $volume, bool $armed = true): array
+    {
+        $clean = [];
+        foreach ($targets as $id) {
+            $id = trim((string) $id);
+            if ($id !== '') {
+                $clean[] = $id;
+            }
+        }
+        $clean = array_values(array_unique($clean));
+        $payload = [
+            'armed' => $armed,
+            'targets' => $clean,
+            'volume' => max(0, min(100, $volume)),
+            'updated_at' => time(),
+        ];
+        $this->writeJson($this->bridgePath(), $payload);
+
+        return [
+            'armed' => $armed,
+            'targets' => $clean,
+            'volume' => $payload['volume'],
+        ];
+    }
+
+    /**
+     * @return array{armed: bool, targets: list<string>, volume: int}
+     */
+    public function bridge(): array
+    {
+        $decoded = $this->readJson($this->bridgePath());
+        $targets = [];
+        if (is_array($decoded['targets'] ?? null)) {
+            foreach ($decoded['targets'] as $id) {
+                $id = trim((string) $id);
+                if ($id !== '') {
+                    $targets[] = $id;
+                }
+            }
+        }
+
+        return [
+            'armed' => !empty($decoded['armed']),
+            'targets' => array_values(array_unique($targets)),
+            'volume' => max(0, min(100, (int) ($decoded['volume'] ?? 60))),
+        ];
+    }
+
+    public function clearBridge(): void
+    {
+        $cur = $this->bridge();
+        $this->saveBridge($cur['targets'], $cur['volume'], false);
+    }
+
+    /**
+     * @return array{active: bool, client_name: ?string, updated_at: ?int}
+     */
+    public function session(): array
+    {
+        $decoded = $this->readJson($this->sessionPath());
+        $client = trim((string) ($decoded['client_name'] ?? ''));
+        if (function_exists('mb_substr')) {
+            $client = mb_substr($client, 0, 64);
+        } else {
+            $client = substr($client, 0, 64);
+        }
+
+        return [
+            'active' => !empty($decoded['active']),
+            'client_name' => $client !== '' ? $client : null,
+            'updated_at' => isset($decoded['updated_at']) ? (int) $decoded['updated_at'] : null,
+        ];
+    }
+
+    public function markSessionActive(bool $active): void
+    {
+        $cur = $this->session();
+        $this->writeJson($this->sessionPath(), [
+            'active' => $active,
+            'client_name' => $active ? $cur['client_name'] : null,
+            'updated_at' => time(),
+        ]);
+    }
+
+    public function setClientName(string $name): void
+    {
+        $name = trim(preg_replace('/\s+/', ' ', $name) ?? '');
+        if ($name === '') {
+            return;
+        }
+        if (function_exists('mb_substr')) {
+            $name = mb_substr($name, 0, 64);
+        } else {
+            $name = substr($name, 0, 64);
+        }
+        $cur = $this->session();
+        $this->writeJson($this->sessionPath(), [
+            'active' => $cur['active'],
+            'client_name' => $name,
+            'updated_at' => time(),
+        ]);
+    }
+
+    public function sessionHooksAvailable(): bool
+    {
+        $decoded = $this->readJson($this->hooksFlagPath());
+
+        return !empty($decoded['hooks']);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function status(): array
     {
         $cfg = $this->config();
+        $bridge = $this->bridge();
+        $session = $this->session();
         $installed = $this->binaryInstalled('shairport-sync');
         $nqptp = $this->binaryInstalled('nqptp');
         $running = $this->receiverRunning();
         $log = $this->logTail();
+        $hooks = $this->sessionHooksAvailable();
+
+        $message = 'AirPlay off';
+        if (!$installed) {
+            $message = 'shairport-sync is not installed on this panel';
+        } elseif ($running && $session['active']) {
+            $who = $session['client_name'] ?: 'AirPlay device';
+            $message = 'Playing from ' . $who;
+        } elseif ($running && $bridge['armed']) {
+            $message = 'Available as ' . $cfg['name'] . ' — waiting for a device';
+        } elseif ($running) {
+            $message = 'AirPlay receiver is running as ' . $cfg['name'];
+        } else {
+            $message = 'AirPlay receiver is off — tap Start AirPlay';
+        }
 
         return [
             'ok' => true,
             'installed' => $installed,
             'nqptp' => $nqptp,
             'running' => $running,
+            'armed' => $bridge['armed'] && $running,
+            'session_active' => $session['active'],
+            'client_name' => $session['client_name'],
+            'hooks' => $hooks,
             'name' => $cfg['name'],
             'fifo' => $this->fifoPath(),
             'fifo_ready' => file_exists($this->fifoPath()),
-            'message' => !$installed
-                ? 'shairport-sync is not installed on this panel'
-                : ($running
-                    ? ('AirPlay receiver is running as ' . $cfg['name'])
-                    : 'AirPlay receiver is off — tap Start AirPlay'),
+            'message' => $message,
             'log_tail' => $log,
         ];
     }
@@ -111,7 +264,7 @@ final class YarboPanelAirPlay
             return ['ok' => false, 'error' => 'panel_airplay_ensure.sh missing'] + $this->status();
         }
 
-        return $this->runScript($script) + ['config' => $this->config()];
+        return $this->runScript($script) + ['config' => $this->config()] + $this->status();
     }
 
     /**
@@ -123,8 +276,11 @@ final class YarboPanelAirPlay
         if (!is_file($script)) {
             return ['ok' => false, 'error' => 'panel_airplay_stop.sh missing'] + $this->status();
         }
+        $this->clearBridge();
+        $this->markSessionActive(false);
+        $out = $this->runScript($script);
 
-        return $this->runScript($script) + ['config' => $this->config()];
+        return $out + ['config' => $this->config()] + $this->status();
     }
 
     private function binaryInstalled(string $name): bool
@@ -229,6 +385,21 @@ final class YarboPanelAirPlay
         $lines = preg_split('/\R/', trim($raw)) ?: [];
 
         return implode("\n", array_slice($lines, -25));
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function writeJson(string $path, array $payload): void
+    {
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if ($json !== false) {
+            file_put_contents($path, $json . "\n", LOCK_EX);
+        }
     }
 
     /**

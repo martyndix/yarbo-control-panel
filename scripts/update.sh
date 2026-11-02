@@ -358,7 +358,7 @@ fi
 
 step "Installing AirPlay packages (shairport-sync, avahi-daemon)"
 write_status "composer" "Installing AirPlay packages"
-chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" 2>/dev/null || true
+chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" 2>/dev/null || true
 # shellcheck source=scripts/lib/panel_airplay.sh
 source "${ROOT}/scripts/lib/panel_airplay.sh"
 AIRPLAY_LOG="${ROOT}/data/panel-airplay.log"

@@ -6,6 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.182] - 2026-11-02
+
+### Changed
+- **Start AirPlay** only advertises the panel (Available / waiting). Play indicators and the 🔊 badge appear when a device is actually streaming; the status prefers the connected device name from AirPlay metadata.
+- AirPlay status text no longer overlaps the Start button.
+
+### Fixed
+- Playing was shown as soon as AirPlay was started, even with no client connected.
+
 ## [4.0.181] - 2026-11-02
 
 ### Fixed

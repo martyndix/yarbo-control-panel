@@ -252,7 +252,12 @@ assert_true(preg_match('/\.unifi-speakers\s*\{[^}]*color:\s*var\(--text\)/s', $c
 assert_true(str_contains($css, 'radio-player-panel'), 'Radio Player modal panel CSS');
 assert_true(str_contains($css, 'radio-playing-badge') || str_contains($css, '#radio-open.is-playing'), 'Radio playing chrome CSS');
 assert_true(str_contains($css, '.unifi-radio-speaker span'), 'speaker name colour forced');
-assert_true(preg_match('/#unifi-radio-status\s*\{[^}]*margin:\s*0\.55rem/s', $css) === 1, 'status cleared below Play/Stop');
+assert_true(
+    preg_match('/#unifi-radio-status[^{]*\{[^}]*margin:\s*0\.55rem/s', $css) === 1
+        || preg_match('/#unifi-radio-status,\s*#unifi-airplay-status\s*\{[^}]*margin:\s*0\.55rem/s', $css) === 1,
+    'status cleared below Play/Stop'
+);
+assert_true(str_contains($css, '#unifi-airplay-status'), 'AirPlay status has overlap-safe margin');
 assert_true(str_contains($css, 'unifi-radio-announce'), 'Announcement CSS');
 assert_true(str_contains($css, 'unifi-radio-rec-meter'), 'Announcement meter CSS');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');

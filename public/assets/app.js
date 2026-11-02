@@ -3555,10 +3555,20 @@ function renderUnifiAirplayStatus(airplay, radio = null) {
     const ap = airplay && typeof airplay === 'object' ? airplay : {};
     const name = ap.name || 'Yarbo Speakers';
     const missing = ap.installed === false;
-    if (radio?.playing && radio?.station_id === 'airplay') {
-        els.unifiAirplayStatus.textContent = `Playing from AirPlay · ${name}`;
-    } else if (ap.running) {
-        els.unifiAirplayStatus.textContent = `Waiting for iPhone · ${name}`;
+    const client = String(ap.client_name || '').trim();
+    const airplayPlaying = Boolean(radio?.playing && radio?.station_id === 'airplay');
+    if (airplayPlaying) {
+        const who = client
+            || (radio?.station_name && String(radio.station_name).toLowerCase() !== 'airplay'
+                ? String(radio.station_name)
+                : 'AirPlay device');
+        els.unifiAirplayStatus.textContent = `Playing from ${who}`;
+    } else if (ap.session_active && (ap.armed || ap.running)) {
+        els.unifiAirplayStatus.textContent = client
+            ? `Connected · ${client}`
+            : 'Device connected — starting…';
+    } else if (ap.armed || ap.running) {
+        els.unifiAirplayStatus.textContent = `Available as ${name} — waiting for a device`;
     } else if (missing) {
         els.unifiAirplayStatus.textContent = ap.error
             || 'shairport-sync not installed — tap Start AirPlay to install it';
@@ -14121,7 +14131,11 @@ els.unifiAirplayStart?.addEventListener('click', async () => {
             radio: (unifiDash || data)?.radio || null,
         });
         if (data.warning) showToast(data.warning, 'error');
-        else showToast('AirPlay ready — pick this panel in Control Center', 'success');
+        else if (data.radio?.playing && data.radio?.station_id === 'airplay') {
+            showToast('AirPlay bridging to speakers', 'success');
+        } else {
+            showToast('AirPlay available — pick this name in Control Center', 'success');
+        }
     } catch (err) {
         if (els.unifiAirplayStatus) els.unifiAirplayStatus.textContent = err.message || 'AirPlay start failed';
         showToast(err.message || 'AirPlay start failed', 'error');

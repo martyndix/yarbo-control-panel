@@ -126,19 +126,7 @@ final class YarboUnifiRadio
             ) {
                 $this->resumingRadio = true;
                 try {
-                    $resumeId = (string) $resume['station_id'];
-                    $replay = $resumeId === 'airplay'
-                        ? $this->playAirplay([
-                            'targets' => $resume['targets'],
-                            'volume' => $resume['volume'] ?? ($state['volume'] ?? 60),
-                            'ensure_receiver' => false,
-                        ])
-                        : $this->play([
-                            'station_id' => $resumeId,
-                            'url' => (string) ($resume['url'] ?? ''),
-                            'targets' => $resume['targets'],
-                            'volume' => $resume['volume'] ?? ($state['volume'] ?? 60),
-                        ]);
+                    $replay = $this->resumeAfterPlayback($resume);
                     if (($replay['ok'] ?? false) && is_array($replay['radio'] ?? null)) {
                         return $replay['radio'];
                     }
@@ -243,6 +231,10 @@ final class YarboUnifiRadio
             ? max(0, min(100, (int) $input['volume']))
             : max(0, min(100, (int) ($this->loadState()['volume'] ?? 60)));
 
+        // Radio station takes the speakers — stop advertising AirPlay so a late
+        // client connect cannot yank talkback away from the station.
+        (new YarboPanelAirPlay($this->projectRoot))->stopReceiver();
+
         return $this->startStreams(
             $ffmpeg,
             (string) $station['url'],
@@ -306,7 +298,14 @@ final class YarboUnifiRadio
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
-    public function playAirplay(array $input): array
+    /**
+     * Advertise AirPlay on the LAN and remember speakers — do not mark Playing
+     * until a client connects (session hook) or classic fallback has no hooks.
+     *
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function armAirplay(array $input): array
     {
         if (!$this->unifi->speakersEnabled()) {
             return ['ok' => false, 'error' => 'Speakers are turned off in Settings → UniFi'];
@@ -330,6 +329,96 @@ final class YarboUnifiRadio
             : max(0, min(100, (int) ($this->loadState()['volume'] ?? 60)));
 
         $airplay = new YarboPanelAirPlay($this->projectRoot);
+        $airplay->saveBridge($targets, $volume, true);
+        $airplay->markSessionActive(false);
+
+        // Stop any current station/fanout; receiver restart is handled by ensure().
+        $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
+        $this->stop(false);
+        if ($prevClip !== '' && is_file($prevClip)) {
+            @unlink($prevClip);
+        }
+
+        $ensured = $airplay->ensure();
+        if (!($ensured['ok'] ?? false) || empty($ensured['running'])) {
+            $airplay->clearBridge();
+
+            return [
+                'ok' => false,
+                'error' => (string) ($ensured['error'] ?? $ensured['message'] ?? 'AirPlay receiver did not start'),
+                'radio' => $this->status(),
+                'airplay' => $airplay->status(),
+            ];
+        }
+
+        // Classic CLI fallback has no session hooks — bridge immediately (legacy).
+        if (!$airplay->sessionHooksAvailable()) {
+            return $this->playAirplay([
+                'targets' => $targets,
+                'volume' => $volume,
+                'ensure_receiver' => false,
+            ]);
+        }
+
+        // Idle until a device connects and the active-state hook fires.
+        $state = $this->loadState();
+        $state['playing'] = false;
+        $state['station_id'] = null;
+        $state['station_name'] = null;
+        $state['station_url'] = null;
+        $state['streams'] = [];
+        $state['targets'] = $targets;
+        $state['volume'] = $volume;
+        $state['ends_at'] = null;
+        $state['resume_after'] = null;
+        $state['error'] = null;
+        $this->writeState($state);
+
+        return [
+            'ok' => true,
+            'error' => null,
+            'radio' => $this->status(),
+            'airplay' => $airplay->status(),
+        ];
+    }
+
+    /**
+     * Start FIFO → talkback fan-out (client active, announcement resume, or classic).
+     *
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function playAirplay(array $input): array
+    {
+        if (!$this->unifi->speakersEnabled()) {
+            return ['ok' => false, 'error' => 'Speakers are turned off in Settings → UniFi'];
+        }
+        $ffmpeg = $this->unifi->ffmpegPath();
+        if ($ffmpeg === '') {
+            return ['ok' => false, 'error' => 'ffmpeg is not installed on this panel'];
+        }
+
+        $airplay = new YarboPanelAirPlay($this->projectRoot);
+        $bridge = $airplay->bridge();
+
+        $targets = $this->normalizeTargetIds($input['targets'] ?? $input['speakers'] ?? []);
+        if ($targets === []) {
+            $targets = $this->normalizeTargetIds($bridge['targets']);
+        }
+        if ($targets === []) {
+            $status = $this->status();
+            $targets = $this->normalizeTargetIds($status['targets'] ?? []);
+        }
+        if ($targets === []) {
+            return ['ok' => false, 'error' => 'Pick at least one speaker', 'airplay' => $airplay->status()];
+        }
+
+        $volume = array_key_exists('volume', $input)
+            ? max(0, min(100, (int) $input['volume']))
+            : ($bridge['volume'] > 0 ? $bridge['volume'] : max(0, min(100, (int) ($this->loadState()['volume'] ?? 60))));
+
+        $airplay->saveBridge($targets, $volume, true);
+
         $ensureReceiver = !array_key_exists('ensure_receiver', $input)
             || YarboHub::asBool($input['ensure_receiver'] ?? true);
         if ($ensureReceiver) {
@@ -338,7 +427,7 @@ final class YarboUnifiRadio
                 return [
                     'ok' => false,
                     'error' => (string) ($ensured['error'] ?? $ensured['message'] ?? 'AirPlay receiver did not start'),
-                    'airplay' => $ensured,
+                    'airplay' => $airplay->status(),
                 ];
             }
         } elseif (!$airplay->status()['running']) {
@@ -354,15 +443,13 @@ final class YarboUnifiRadio
             @mkdir(dirname($fifo), 0755, true);
             @posix_mkfifo($fifo, 0666);
             if (!file_exists($fifo)) {
-                // Fallback when posix_mkfifo is missing.
                 @shell_exec('mkfifo -m 666 ' . escapeshellarg($fifo) . ' 2>/dev/null');
             }
         }
         if (!file_exists($fifo)) {
-            return ['ok' => false, 'error' => 'AirPlay audio FIFO missing'];
+            return ['ok' => false, 'error' => 'AirPlay audio FIFO missing', 'airplay' => $airplay->status()];
         }
 
-        // Do not auto-resume Icecast after AirPlay; Announcement may still resume AirPlay.
         $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
         $this->stop(false);
         if ($prevClip !== '' && is_file($prevClip)) {
@@ -396,7 +483,9 @@ final class YarboUnifiRadio
             ];
         }
 
-        $displayName = (string) ($airplay->config()['name'] ?? 'Yarbo Speakers');
+        $sessionMeta = $airplay->session();
+        $client = trim((string) ($sessionMeta['client_name'] ?? ''));
+        $displayName = $client !== '' ? $client : 'AirPlay';
         $pid = $this->spawnAirplayFanout($ffmpeg, $fifo, $sessions, $volume);
         if ($pid <= 0) {
             return [
@@ -430,11 +519,83 @@ final class YarboUnifiRadio
             'error' => $errors !== [] ? implode('; ', $errors) : null,
         ];
         $this->writeState($state);
+        $airplay->markSessionActive(true);
 
         return [
             'ok' => true,
             'error' => null,
             'warning' => $errors !== [] ? implode('; ', $errors) : null,
+            'radio' => $this->status(),
+            'airplay' => $airplay->status(),
+        ];
+    }
+
+    /**
+     * shairport-sync entered active state — start talkback fan-out if armed.
+     *
+     * @return array<string, mixed>
+     */
+    public function onAirplayClientActive(): array
+    {
+        $airplay = new YarboPanelAirPlay($this->projectRoot);
+        $bridge = $airplay->bridge();
+        if (!$bridge['armed']) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'not armed', 'airplay' => $airplay->status()];
+        }
+        $state = $this->loadState();
+        // Don't interrupt an announcement; resume_after already points at AirPlay.
+        if (trim((string) ($state['station_id'] ?? '')) === 'announce' && !empty($state['playing'])) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'announce playing', 'airplay' => $airplay->status()];
+        }
+        if (
+            !empty($state['playing'])
+            && trim((string) ($state['station_id'] ?? '')) === 'airplay'
+            && is_array($state['streams'] ?? null)
+            && $state['streams'] !== []
+        ) {
+            // Already bridging — refresh client name in status if known.
+            $client = trim((string) ($airplay->session()['client_name'] ?? ''));
+            if ($client !== '') {
+                $state['station_name'] = $client;
+                $this->writeState($state);
+            }
+
+            return ['ok' => true, 'skipped' => true, 'reason' => 'already playing', 'radio' => $this->status(), 'airplay' => $airplay->status()];
+        }
+
+        return $this->playAirplay([
+            'targets' => $bridge['targets'],
+            'volume' => $bridge['volume'],
+            'ensure_receiver' => false,
+        ]);
+    }
+
+    /**
+     * shairport-sync left active state — stop fan-out but keep the receiver advertised.
+     *
+     * @return array<string, mixed>
+     */
+    public function onAirplayClientInactive(): array
+    {
+        $airplay = new YarboPanelAirPlay($this->projectRoot);
+        $state = $this->loadState();
+        $stationId = trim((string) ($state['station_id'] ?? ''));
+        // Announcement owns the speakers; leave resume_after alone.
+        if ($stationId === 'announce') {
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'reason' => 'announce',
+                'radio' => $this->status(),
+                'airplay' => $airplay->status(),
+            ];
+        }
+        if ($stationId === 'airplay') {
+            $this->stop(false);
+        }
+
+        return [
+            'ok' => true,
             'radio' => $this->status(),
             'airplay' => $airplay->status(),
         ];
@@ -450,6 +611,9 @@ final class YarboUnifiRadio
         $stop = $this->stop(true);
         $airplay = new YarboPanelAirPlay($this->projectRoot);
         $recv = $stopReceiver ? $airplay->stopReceiver() : $airplay->status();
+        if (!$stopReceiver) {
+            $airplay->markSessionActive(false);
+        }
 
         return [
             'ok' => (bool) ($stop['ok'] ?? false),
@@ -493,6 +657,46 @@ final class YarboUnifiRadio
             $clipPath,
             $resumeAfter,
         );
+    }
+
+    /**
+     * Restart the station / AirPlay bridge captured before an announcement.
+     *
+     * @param array{station_id: string, url: string, targets: list<string>, volume: int} $resume
+     * @return array<string, mixed>
+     */
+    private function resumeAfterPlayback(array $resume): array
+    {
+        $resumeId = (string) ($resume['station_id'] ?? '');
+        if ($resumeId === 'airplay') {
+            $airplay = new YarboPanelAirPlay($this->projectRoot);
+            $targets = $this->normalizeTargetIds($resume['targets'] ?? []);
+            $volume = max(0, min(100, (int) ($resume['volume'] ?? 60)));
+            $airplay->saveBridge($targets, $volume, true);
+            // If the Apple device dropped during the announcement, stay Available
+            // (waiting) instead of showing Playing with a silent FIFO reader.
+            if ($airplay->sessionHooksAvailable() && empty($airplay->session()['active'])) {
+                return [
+                    'ok' => true,
+                    'skipped' => true,
+                    'radio' => $this->status(),
+                    'airplay' => $airplay->status(),
+                ];
+            }
+
+            return $this->playAirplay([
+                'targets' => $targets,
+                'volume' => $volume,
+                'ensure_receiver' => false,
+            ]);
+        }
+
+        return $this->play([
+            'station_id' => $resumeId,
+            'url' => (string) ($resume['url'] ?? ''),
+            'targets' => $resume['targets'] ?? [],
+            'volume' => $resume['volume'] ?? 60,
+        ]);
     }
 
     /**
@@ -744,12 +948,7 @@ final class YarboUnifiRadio
             $this->writeState($state);
             $this->resumingRadio = true;
             try {
-                $replay = $this->play([
-                    'station_id' => (string) $resume['station_id'],
-                    'url' => (string) ($resume['url'] ?? ''),
-                    'targets' => $resume['targets'],
-                    'volume' => $resume['volume'] ?? $volume,
-                ]);
+                $replay = $this->resumeAfterPlayback($resume);
 
                 return [
                     'ok' => true,

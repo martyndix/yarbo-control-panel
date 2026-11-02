@@ -114,13 +114,46 @@ assert_true(str_contains($installSh, 'apt-get install -y shairport-sync avahi-da
 assert_true(str_contains($change, '## [4.0.179]'), 'changelog 4.0.179');
 assert_true(str_contains($change, '## [4.0.180]'), 'changelog 4.0.180');
 assert_true(str_contains($change, '## [4.0.181]'), 'changelog 4.0.181');
+assert_true(str_contains($change, '## [4.0.182]'), 'changelog 4.0.182');
 assert_true(str_contains($js, 'Install & start AirPlay'), 'JS keeps Start enabled for install retry');
+assert_true(str_contains($js, 'Available as'), 'JS waiting status when armed');
+assert_true(str_contains($js, 'Playing from'), 'JS playing-from client status');
 assert_true(str_contains($updateSh, '/usr/bin/apt-get install -y shairport-sync avahi-daemon'), 'update.sh sudoers apt fallback');
 assert_true(str_contains($libSh, '/usr/bin/apt-get install -y shairport-sync avahi-daemon'), 'panel_airplay sudoers apt fallback');
+assert_true(str_contains($libSh, 'run_this_before_entering_active_state'), 'shairport session active hook');
+assert_true(str_contains($libSh, 'run_this_after_exiting_active_state'), 'shairport session inactive hook');
+assert_true(str_contains($php, 'function armAirplay'), 'armAirplay method');
+assert_true(str_contains($php, 'function onAirplayClientActive'), 'client active handler');
+assert_true(str_contains($php, 'function onAirplayClientInactive'), 'client inactive handler');
+assert_true(str_contains($api, 'armAirplay'), 'API airplay_start arms receiver');
+$css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
+assert_true(str_contains($css, '#unifi-airplay-status'), 'CSS clears AirPlay status overlap');
+assert_true(is_file(dirname(__DIR__) . '/scripts/panel_airplay_hook.sh'), 'session hook script');
+assert_true(is_file(dirname(__DIR__) . '/scripts/panel_airplay_bridge.php'), 'bridge CLI script');
+assert_true(is_file(dirname(__DIR__) . '/scripts/panel_airplay_metadata.php'), 'metadata reader script');
 assert_true(str_contains($change, 'AirPlay'), 'changelog mentions AirPlay');
 assert_true(str_contains($docs, 'AirPlay bridge'), 'docs AirPlay bridge');
 assert_true(str_contains($docs, 'shairport-sync'), 'docs install hint');
 assert_true(str_contains($docs, 'no SSH'), 'docs say no SSH required for apt');
+assert_true(str_contains($docs, 'Announcement'), 'docs mention announcement interrupt/resume');
+
+// armAirplay without shairport stays soft-fail; with mocked bridge prefs.
+$airplay->saveBridge(['cam1'], 55, true);
+$bridge = $airplay->bridge();
+assert_true($bridge['armed'] === true, 'bridge armed');
+assert_true($bridge['targets'] === ['cam1'], 'bridge targets');
+assert_true((int) $bridge['volume'] === 55, 'bridge volume');
+$airplay->setClientName("Martyn's iPhone");
+$airplay->markSessionActive(true);
+$session = $airplay->session();
+assert_true($session['active'] === true, 'session active');
+assert_true(($session['client_name'] ?? '') === "Martyn's iPhone", 'client name stored');
+$statusArmed = $airplay->status();
+assert_true(($statusArmed['client_name'] ?? '') === "Martyn's iPhone", 'status exposes client_name');
+assert_true(($statusArmed['session_active'] ?? false) === true, 'status exposes session_active');
+$airplay->markSessionActive(false);
+$airplay->clearBridge();
+assert_true($airplay->bridge()['armed'] === false, 'bridge cleared');
 
 // Announcement resume keeps airplay snapshot.
 file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
