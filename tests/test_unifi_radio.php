@@ -296,7 +296,10 @@ assert_true(str_contains($php, "'Announcement'"), 'station name Announcement');
 assert_true(str_contains($php, 'resume_after'), 'resume radio after announcement');
 assert_true(str_contains($php, 'captureResumeAfter'), 'captures playing station before announce');
 assert_true(str_contains($change, '## [4.0.178]'), 'changelog 4.0.178');
+assert_true(str_contains($change, '## [4.0.179]'), 'changelog 4.0.179');
 assert_true(str_contains($change, 'resumes') || str_contains($change, 'resume'), 'changelog mentions resume after announcement');
+assert_true(str_contains($change, 'AirPlay'), 'changelog mentions AirPlay bridge');
+assert_true(str_contains($php, 'playAirplay'), 'radio class has playAirplay');
 assert_true(str_contains($unifiPhp, 'speakerVolume'), 'volume uses speakerVolume on private API');
 assert_true(str_contains($unifiPhp, 'protectPrivateUrl'), 'volume helper can build private Protect URL');
 

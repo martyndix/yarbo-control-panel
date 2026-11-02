@@ -148,6 +148,9 @@ const els = {
     settingsUnifiDoorsTile: document.getElementById('settings-unifi-doors-tile'),
     settingsUnifiDoorsTileSensors: document.getElementById('settings-unifi-doors-tile-sensors'),
     settingsUnifiSpeakersEnabled: document.getElementById('settings-unifi-speakers-enabled'),
+    settingsUnifiAirplayName: document.getElementById('settings-unifi-airplay-name'),
+    settingsUnifiAirplaySave: document.getElementById('settings-unifi-airplay-save'),
+    settingsUnifiAirplayResult: document.getElementById('settings-unifi-airplay-result'),
     settingsUnifiStationsList: document.getElementById('settings-unifi-stations-list'),
     settingsUnifiStationAdd: document.getElementById('settings-unifi-station-add'),
     settingsUnifiStationsSave: document.getElementById('settings-unifi-stations-save'),
@@ -161,6 +164,9 @@ const els = {
     unifiRadioPlay: document.getElementById('unifi-radio-play'),
     unifiRadioStop: document.getElementById('unifi-radio-stop'),
     unifiRadioStatus: document.getElementById('unifi-radio-status'),
+    unifiAirplayStart: document.getElementById('unifi-airplay-start'),
+    unifiAirplayStop: document.getElementById('unifi-airplay-stop'),
+    unifiAirplayStatus: document.getElementById('unifi-airplay-status'),
     unifiRadioRec: document.getElementById('unifi-radio-rec'),
     unifiRadioRecMeterFill: document.getElementById('unifi-radio-rec-meter-fill'),
     unifiRadioRecFile: document.getElementById('unifi-radio-rec-file'),
@@ -3541,6 +3547,27 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
     }
     setRadioPlayingBadge(Boolean(radio.playing), radio.station_name || '', radio.station_id || '');
     syncRadioStatusPoll(radio);
+    renderUnifiAirplayStatus(data?.airplay || unifiDash?.airplay || null, radio);
+}
+
+function renderUnifiAirplayStatus(airplay, radio = null) {
+    if (!els.unifiAirplayStatus) return;
+    const ap = airplay && typeof airplay === 'object' ? airplay : {};
+    const name = ap.name || 'Yarbo Speakers';
+    if (radio?.playing && radio?.station_id === 'airplay') {
+        els.unifiAirplayStatus.textContent = `Playing from AirPlay · ${name}`;
+    } else if (ap.running) {
+        els.unifiAirplayStatus.textContent = ap.installed === false
+            ? (ap.error || 'shairport-sync not installed')
+            : `Waiting for iPhone · ${name}`;
+    } else if (ap.installed === false) {
+        els.unifiAirplayStatus.textContent = ap.error || 'shairport-sync not installed — see Settings → UniFi';
+    } else {
+        els.unifiAirplayStatus.textContent = 'AirPlay off';
+    }
+    if (els.unifiAirplayStart) {
+        els.unifiAirplayStart.disabled = ap.installed === false;
+    }
 }
 
 function unifiSelectedSpeakerIds() {
@@ -10537,6 +10564,14 @@ async function loadSettings() {
         if (els.settingsUnifiSpeakersEnabled) {
             els.settingsUnifiSpeakersEnabled.checked = data.unifi?.speakers_enabled !== false;
         }
+        if (els.settingsUnifiAirplayName) {
+            els.settingsUnifiAirplayName.value = data.unifi?.airplay?.name
+                || data.unifi?.airplay?.config?.name
+                || 'Yarbo Speakers';
+        }
+        if (els.settingsUnifiAirplayResult && data.unifi?.airplay?.message) {
+            els.settingsUnifiAirplayResult.textContent = data.unifi.airplay.message;
+        }
         if (data.unifi) {
             unifiDash = { ...unifiDash, ...data.unifi };
             syncRadioPlayerChrome({
@@ -10545,6 +10580,7 @@ async function loadSettings() {
                 speakersEnabled: data.unifi.speakers_enabled !== false,
                 radio: data.unifi.radio || null,
             });
+            renderUnifiAirplayStatus(data.unifi.airplay || null, data.unifi.radio || null);
         }
         if (Array.isArray(data.unifi?.devices) && data.unifi.devices.length) {
             renderUnifiHomePicker(data.unifi, { replace: !unifiPickerDirty });
@@ -14026,6 +14062,86 @@ els.unifiRadioStop?.addEventListener('click', async () => {
         showToast(err.message || 'Stop failed', 'error');
     } finally {
         els.unifiRadioStop.disabled = false;
+    }
+});
+els.settingsUnifiAirplaySave?.addEventListener('click', async () => {
+    const name = els.settingsUnifiAirplayName?.value.trim() || 'Yarbo Speakers';
+    const result = els.settingsUnifiAirplayResult;
+    try {
+        const data = await unifiApi({ action: 'airplay_config', name }, 10000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not save AirPlay name');
+        if (unifiDash) unifiDash.airplay = data.airplay || unifiDash.airplay;
+        if (els.settingsUnifiAirplayName && data.airplay?.name) {
+            els.settingsUnifiAirplayName.value = data.airplay.name;
+        }
+        renderUnifiAirplayStatus(data.airplay || null, unifiDash?.radio || null);
+        if (result) {
+            result.textContent = 'AirPlay name saved.';
+            result.className = 'settings-cloud-result success';
+        }
+        showToast('AirPlay name saved', 'success');
+    } catch (err) {
+        if (result) {
+            result.textContent = err.message || 'Save failed';
+            result.className = 'settings-cloud-result error';
+        }
+        showToast(err.message || 'Could not save AirPlay name', 'error');
+    }
+});
+els.unifiAirplayStart?.addEventListener('click', async () => {
+    const targets = unifiSelectedSpeakerIds();
+    const volume = Number(els.unifiRadioVolume?.value || 60);
+    if (!targets.length) {
+        showToast('Tick at least one speaker', 'error');
+        return;
+    }
+    els.unifiAirplayStart.disabled = true;
+    if (els.unifiAirplayStatus) els.unifiAirplayStatus.textContent = 'Starting AirPlay…';
+    try {
+        const data = await unifiApi({ action: 'airplay_start', targets, volume }, 60000);
+        if (!data?.ok) throw new Error(data?.error || 'AirPlay start failed');
+        applyRadioCommandResult(data.radio || null);
+        if (unifiDash) {
+            if (data.radio) unifiDash.radio = data.radio;
+            if (data.airplay) unifiDash.airplay = data.airplay;
+            if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+        }
+        renderUnifiSpeakers(unifiDash || data, { replace: true });
+        syncRadioPlayerChrome({
+            unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+            speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
+            radio: (unifiDash || data)?.radio || null,
+        });
+        if (data.warning) showToast(data.warning, 'error');
+        else showToast('AirPlay ready — pick this panel in Control Center', 'success');
+    } catch (err) {
+        if (els.unifiAirplayStatus) els.unifiAirplayStatus.textContent = err.message || 'AirPlay start failed';
+        showToast(err.message || 'AirPlay start failed', 'error');
+    } finally {
+        els.unifiAirplayStart.disabled = false;
+    }
+});
+els.unifiAirplayStop?.addEventListener('click', async () => {
+    els.unifiAirplayStop.disabled = true;
+    try {
+        const data = await unifiApi({ action: 'airplay_stop', stop_receiver: true }, 15000);
+        if (!data?.ok) throw new Error(data?.error || 'AirPlay stop failed');
+        applyRadioCommandResult(data.radio || { playing: false });
+        if (unifiDash) {
+            if (data.radio) unifiDash.radio = data.radio;
+            if (data.airplay) unifiDash.airplay = data.airplay;
+        }
+        renderUnifiSpeakers(unifiDash || data, { replace: true });
+        syncRadioPlayerChrome({
+            unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+            speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
+            radio: (unifiDash || data)?.radio || null,
+        });
+        showToast('AirPlay stopped', 'success');
+    } catch (err) {
+        showToast(err.message || 'AirPlay stop failed', 'error');
+    } finally {
+        els.unifiAirplayStop.disabled = false;
     }
 });
 

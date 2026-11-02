@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboHub;
+use Yarbo\YarboPanelAirPlay;
 use Yarbo\YarboUnifi;
 use Yarbo\YarboUnifiRadio;
 
@@ -120,6 +121,9 @@ if ($action === 'speakers_enabled') {
     if (!$unifi->setSpeakersEnabled($show)) {
         json_response(['ok' => false, 'error' => 'Could not update Speakers setting'], 400);
     }
+    if (!$show) {
+        $radio()->stopAirplay(true);
+    }
     json_response(['ok' => true, 'speakers_enabled' => $unifi->speakersEnabled()] + $radio()->dashboardSlice());
 }
 
@@ -156,6 +160,30 @@ if ($action === 'radio_status') {
 
 if ($action === 'radio_volume') {
     json_response($radio()->setVolume($input));
+}
+
+if ($action === 'airplay_status') {
+    $airplay = new YarboPanelAirPlay($projectRoot);
+    json_response(['ok' => true, 'airplay' => $airplay->status()] + $radio()->dashboardSlice());
+}
+
+if ($action === 'airplay_config') {
+    $airplay = new YarboPanelAirPlay($projectRoot);
+    $cfg = $airplay->saveConfig($input);
+    $status = $airplay->status();
+    $status['config'] = $cfg;
+    json_response(['ok' => true, 'airplay' => $status]);
+}
+
+if ($action === 'airplay_start') {
+    set_time_limit(60);
+    json_response($radio()->playAirplay($input));
+}
+
+if ($action === 'airplay_stop') {
+    $stopReceiver = !array_key_exists('stop_receiver', $input)
+        || YarboHub::asBool($input['stop_receiver'] ?? true);
+    json_response($radio()->stopAirplay($stopReceiver));
 }
 
 if ($action === 'command' || $action === 'unlock' || $action === 'light') {

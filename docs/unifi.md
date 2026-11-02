@@ -14,7 +14,8 @@ Not affiliated with Ubiquiti.
 - Show **Open / Closed** on the door controller (and door) tile, next to Unlock/Lock, from the Access door-position sensor (`door_position_status`). Home refreshes that in the background so the chip and button can change without blocking light clicks. A separate door-position row is still listed if you want it on Home on its own.
 - Tick **Show on Home** per device so it behaves like another Home row (camera still, light/relay on/off, door/controller Unlock/Lock + position, sensor text). Ticks save as you click.
 - Optional **doors tile** under Vestaboard on the Home tab lists every Access door with Unlock/Lock and live Open/Closed, even if it is not ticked for the room grid. Untick it in Settings → UniFi or Home ⚙️. A second tick adds door sensors (Access position and Protect contacts) that have Open/Closed but no unlock.
-- Optional **Speakers / radio** on the UniFi page: choose a station (UK nationals are built in; add your own URLs in Settings), tick speaker-capable Protect cameras/readers (for example a **G3 Reader Pro**), set volume, Play/Stop. Audio uses Protect **talkback** (Home Assistant’s media_player path), not AirPlay. The Pi runs ffmpeg and must reach each device on **UDP 7004**. Untick **Show Speakers / radio** in Settings → UniFi to hide the block and stop playback.
+- Optional **Speakers / radio** (header **Radio** button): choose a station (UK nationals are built in; add your own URLs in Settings), tick speaker-capable Protect cameras/readers (for example a **G3 Reader Pro**), set volume, Play/Stop. Audio uses Protect **talkback** (Home Assistant’s media_player path). The Pi runs ffmpeg and must reach each device on **UDP 7004**. Untick **Show Radio Player in the header** in Settings → UniFi to hide the button and stop playback.
+- Optional **AirPlay bridge**: the panel Pi advertises itself on the LAN (`shairport-sync`). Audio is piped to a FIFO and ffmpeg fans it out to the same Protect talkback speakers. Protect readers cannot receive AirPlay natively.
 
 ## What it cannot do (this version)
 
@@ -24,7 +25,8 @@ Not affiliated with Ubiquiti.
 - Protect recordings, event history, live two-way mic talk, or WebRTC (radio talkback out only).
 - Access user / credential administration.
 - Access after **Identity Enterprise** (the OpenAPI is disabled there).
-- AirPlay / Chromecast into UniFi speakers.
+- Native AirPlay / Chromecast **on** UniFi Protect hardware (use the panel AirPlay bridge instead).
+- Bit-perfect HomePod-style sync across multiple Protect speakers (separate talkback sockets).
 
 ## Settings
 
@@ -80,7 +82,17 @@ White-ambiance Matter bulbs show **brightness** (blue slider) and **colour tempe
 
 Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` (Integration API) returns a UDP/RTP URL; the panel streams the station through ffmpeg as AAC ADTS to that camera on UDP (usually port 7004). The volume slider always scales the ffmpeg stream. Optional Protect hardware volume uses the private API `PATCH /proxy/protect/api/cameras/{id}` with `speakerSettings.speakerVolume` and a UniFi OS session (local admin) — an API key alone gets HTTP 401 on that path and is not used.
 
-**Announcement** (Radio Player modal, above Radio): hold **Hold to record** while speaking (live level meter), release to stop, listen, then Send to the ticked speakers. Or **Choose file**. Upload is `POST /api/unifi.php` with `action=radio_announce` (multipart `audio` + `targets` + `volume`) into `data/unifi-announce/`, then ffmpeg talkback. When the clip ends the player returns to Idle (header badge clears). If a station was playing, it is interrupted for the announcement and **resumes automatically** afterward (unless you press Stop).
+**Announcement** (Radio Player modal, above Radio): hold **Hold to record** while speaking (live level meter), release to stop, listen, then Send to the ticked speakers. Or **Choose file**. Upload is `POST /api/unifi.php` with `action=radio_announce` (multipart `audio` + `targets` + `volume`) into `data/unifi-announce/`, then ffmpeg talkback. When the clip ends the player returns to Idle (header badge clears). If a station or AirPlay bridge was playing, it is interrupted for the announcement and **resumes automatically** afterward (unless you press Stop).
+
+**AirPlay** (Radio Player modal): **Start AirPlay** runs `scripts/panel_airplay_ensure.sh` (starts `shairport-sync` → `data/airplay/audio.fifo`, and `nqptp` when installed), then bridges that FIFO to the ticked speakers. Set the advertised name in Settings → UniFi. **Stop AirPlay** tears down the bridge and the receiver. On the Pi install:
+
+```bash
+sudo apt install -y shairport-sync avahi-daemon
+# AirPlay 2 (Control Center multi-room style) also needs nqptp — build from
+# https://github.com/mikebrady/shairport-sync AIRPLAY2.md if your distro package is classic-only.
+```
+
+Open UDP **319/320** (PTP) and allow mDNS if you use a firewall. The panel tries `ufw allow` when Start AirPlay runs. Sync across several Protect speakers is looser than HomePods.
 
 Mic hold-to-record needs a **secure context** (`https://<panel-ip>:8443`, self-signed — accept once). Settings → Panel updates → **Start HTTPS** / **Restart panel** if :8443 is down. Paper tablets keep `http://<panel-ip>:8080`. Set `YARBO_PANEL_HTTPS=0` to disable the proxy.
 

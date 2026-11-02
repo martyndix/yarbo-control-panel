@@ -1190,11 +1190,21 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span>Also list door sensors on that tile (Access position sensors and Protect contacts)</span>
                             </label>
                             <h3 class="settings-subtitle">Radio Player</h3>
-                            <p class="hint">Optional. Puts a <strong>Radio</strong> button in the header on every screen (only while the UniFi module is on). Streams UK national radio (and your own URLs) to Protect speakers such as a G3 Reader Pro via talkback — not AirPlay. Needs ffmpeg and UDP 7004 from this panel to each device. Untick to hide the button and stop playback. BBC HLS URLs can change; edit or restore defaults below.</p>
+                            <p class="hint">Optional. Puts a <strong>Radio</strong> button in the header on every screen (only while the UniFi module is on). Streams UK national radio (and your own URLs) to Protect speakers such as a G3 Reader Pro via talkback. Needs ffmpeg and UDP 7004 from this panel to each device. Untick to hide the button and stop playback. BBC HLS URLs can change; edit or restore defaults below.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-unifi-speakers-enabled" name="unifi_speakers_enabled" checked>
                                 <span>Show Radio Player in the header</span>
                             </label>
+                            <h3 class="settings-subtitle">AirPlay bridge</h3>
+                            <p class="hint">Opt-in: the panel Pi appears as an AirPlay speaker on the LAN (shairport-sync), then ffmpeg forwards audio to the same Protect talkback speakers. Protect devices cannot receive AirPlay themselves. Needs <code>shairport-sync</code> and <code>avahi-daemon</code> on the Pi; AirPlay 2 also needs <code>nqptp</code>. See <code>docs/unifi.md</code>.</p>
+                            <label class="settings-field">
+                                <span class="label">AirPlay name</span>
+                                <input type="text" id="settings-unifi-airplay-name" maxlength="48" placeholder="Yarbo Speakers" autocomplete="off">
+                            </label>
+                            <div class="settings-update-actions">
+                                <button type="button" class="btn btn-secondary" id="settings-unifi-airplay-save">Save AirPlay name</button>
+                            </div>
+                            <p id="settings-unifi-airplay-result" class="settings-cloud-result hint" role="status"></p>
                             <div id="settings-unifi-stations" class="unifi-stations">
                                 <div id="settings-unifi-stations-list" class="unifi-stations-list"></div>
                                 <div class="settings-update-actions">
@@ -2137,6 +2147,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <button type="button" class="btn btn-secondary" id="unifi-radio-stop">Stop</button>
                         </div>
                         <p id="unifi-radio-status" class="hint" role="status">Idle</p>
+                    </div>
+                    <div class="unifi-radio-airplay" aria-label="AirPlay">
+                        <h3 class="settings-subtitle">AirPlay</h3>
+                        <p class="hint">Start to advertise this panel on the LAN. Pick speakers above, then choose this name in Control Center on your iPhone or Mac. Audio is bridged through Protect talkback (not native AirPlay on the readers).</p>
+                        <div class="settings-update-actions unifi-radio-airplay-actions">
+                            <button type="button" class="btn" id="unifi-airplay-start">Start AirPlay</button>
+                            <button type="button" class="btn btn-secondary" id="unifi-airplay-stop">Stop AirPlay</button>
+                        </div>
+                        <p id="unifi-airplay-status" class="hint" role="status">AirPlay off</p>
                     </div>
                 </div>
                 <div class="modal-actions">

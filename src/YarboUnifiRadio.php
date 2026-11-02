@@ -126,12 +126,19 @@ final class YarboUnifiRadio
             ) {
                 $this->resumingRadio = true;
                 try {
-                    $replay = $this->play([
-                        'station_id' => (string) $resume['station_id'],
-                        'url' => (string) ($resume['url'] ?? ''),
-                        'targets' => $resume['targets'],
-                        'volume' => $resume['volume'] ?? ($state['volume'] ?? 60),
-                    ]);
+                    $resumeId = (string) $resume['station_id'];
+                    $replay = $resumeId === 'airplay'
+                        ? $this->playAirplay([
+                            'targets' => $resume['targets'],
+                            'volume' => $resume['volume'] ?? ($state['volume'] ?? 60),
+                            'ensure_receiver' => false,
+                        ])
+                        : $this->play([
+                            'station_id' => $resumeId,
+                            'url' => (string) ($resume['url'] ?? ''),
+                            'targets' => $resume['targets'],
+                            'volume' => $resume['volume'] ?? ($state['volume'] ?? 60),
+                        ]);
                     if (($replay['ok'] ?? false) && is_array($replay['radio'] ?? null)) {
                         return $replay['radio'];
                     }
@@ -198,6 +205,9 @@ final class YarboUnifiRadio
         }
 
         $stationId = trim((string) ($input['station_id'] ?? $input['station'] ?? ''));
+        if ($stationId === 'airplay') {
+            return $this->playAirplay($input);
+        }
         $customUrl = trim((string) ($input['url'] ?? ''));
         $station = null;
         foreach ($this->stations() as $row) {
@@ -291,6 +301,164 @@ final class YarboUnifiRadio
     }
 
     /**
+     * Bridge AirPlay FIFO PCM → Protect talkback (one ffmpeg, multi UDP).
+     *
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function playAirplay(array $input): array
+    {
+        if (!$this->unifi->speakersEnabled()) {
+            return ['ok' => false, 'error' => 'Speakers are turned off in Settings → UniFi'];
+        }
+        $ffmpeg = $this->unifi->ffmpegPath();
+        if ($ffmpeg === '') {
+            return ['ok' => false, 'error' => 'ffmpeg is not installed on this panel'];
+        }
+
+        $targets = $this->normalizeTargetIds($input['targets'] ?? $input['speakers'] ?? []);
+        if ($targets === []) {
+            $status = $this->status();
+            $targets = $this->normalizeTargetIds($status['targets'] ?? []);
+        }
+        if ($targets === []) {
+            return ['ok' => false, 'error' => 'Pick at least one speaker'];
+        }
+
+        $volume = array_key_exists('volume', $input)
+            ? max(0, min(100, (int) $input['volume']))
+            : max(0, min(100, (int) ($this->loadState()['volume'] ?? 60)));
+
+        $airplay = new YarboPanelAirPlay($this->projectRoot);
+        $ensureReceiver = !array_key_exists('ensure_receiver', $input)
+            || YarboHub::asBool($input['ensure_receiver'] ?? true);
+        if ($ensureReceiver) {
+            $ensured = $airplay->ensure();
+            if (!($ensured['ok'] ?? false) || empty($ensured['running'])) {
+                return [
+                    'ok' => false,
+                    'error' => (string) ($ensured['error'] ?? $ensured['message'] ?? 'AirPlay receiver did not start'),
+                    'airplay' => $ensured,
+                ];
+            }
+        } elseif (!$airplay->status()['running']) {
+            return [
+                'ok' => false,
+                'error' => 'AirPlay receiver is not running',
+                'airplay' => $airplay->status(),
+            ];
+        }
+
+        $fifo = $airplay->fifoPath();
+        if (!file_exists($fifo)) {
+            @mkdir(dirname($fifo), 0755, true);
+            @posix_mkfifo($fifo, 0666);
+            if (!file_exists($fifo)) {
+                // Fallback when posix_mkfifo is missing.
+                @shell_exec('mkfifo -m 666 ' . escapeshellarg($fifo) . ' 2>/dev/null');
+            }
+        }
+        if (!file_exists($fifo)) {
+            return ['ok' => false, 'error' => 'AirPlay audio FIFO missing'];
+        }
+
+        // Do not auto-resume Icecast after AirPlay; Announcement may still resume AirPlay.
+        $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
+        $this->stop(false);
+        if ($prevClip !== '' && is_file($prevClip)) {
+            @unlink($prevClip);
+        }
+
+        foreach ($targets as $cameraId) {
+            $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
+        }
+
+        $sessions = [];
+        $errors = [];
+        foreach ($targets as $cameraId) {
+            $session = $this->unifi->createTalkbackSession($cameraId);
+            if (!($session['ok'] ?? false)) {
+                $errors[] = (string) ($session['error'] ?? 'talkback failed') . ' (' . $cameraId . ')';
+                continue;
+            }
+            $sessions[] = [
+                'camera_id' => $cameraId,
+                'talkback_url' => (string) ($session['url'] ?? ''),
+                'codec' => (string) ($session['codec'] ?? 'aac'),
+                'sampling_rate' => (int) ($session['sampling_rate'] ?? 22050),
+            ];
+        }
+        if ($sessions === []) {
+            return [
+                'ok' => false,
+                'error' => $errors !== [] ? implode('; ', $errors) : 'No speakers started',
+                'airplay' => $airplay->status(),
+            ];
+        }
+
+        $displayName = (string) ($airplay->config()['name'] ?? 'Yarbo Speakers');
+        $pid = $this->spawnAirplayFanout($ffmpeg, $fifo, $sessions, $volume);
+        if ($pid <= 0) {
+            return [
+                'ok' => false,
+                'error' => 'Could not start AirPlay → talkback bridge (see data/unifi-radio-airplay.log)',
+                'airplay' => $airplay->status(),
+            ];
+        }
+
+        $streams = [];
+        foreach ($sessions as $row) {
+            $streams[] = [
+                'camera_id' => $row['camera_id'],
+                'pid' => $pid,
+                'talkback_url' => $row['talkback_url'],
+                'codec' => $row['codec'],
+            ];
+        }
+        $state = [
+            'playing' => true,
+            'station_id' => 'airplay',
+            'station_name' => $displayName,
+            'station_url' => $fifo,
+            'clip_path' => null,
+            'volume' => $volume,
+            'streams' => $streams,
+            'targets' => $targets,
+            'started_at' => time(),
+            'ends_at' => null,
+            'resume_after' => null,
+            'error' => $errors !== [] ? implode('; ', $errors) : null,
+        ];
+        $this->writeState($state);
+
+        return [
+            'ok' => true,
+            'error' => null,
+            'warning' => $errors !== [] ? implode('; ', $errors) : null,
+            'radio' => $this->status(),
+            'airplay' => $airplay->status(),
+        ];
+    }
+
+    /**
+     * Stop talkback bridge and optionally the AirPlay LAN receiver.
+     *
+     * @return array<string, mixed>
+     */
+    public function stopAirplay(bool $stopReceiver = true): array
+    {
+        $stop = $this->stop(true);
+        $airplay = new YarboPanelAirPlay($this->projectRoot);
+        $recv = $stopReceiver ? $airplay->stopReceiver() : $airplay->status();
+
+        return [
+            'ok' => (bool) ($stop['ok'] ?? false),
+            'radio' => $stop['radio'] ?? $this->status(),
+            'airplay' => $recv,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
@@ -336,9 +504,10 @@ final class YarboUnifiRadio
         $existing = is_array($state['resume_after'] ?? null) ? $state['resume_after'] : null;
         $stationId = trim((string) ($state['station_id'] ?? ''));
         if ($stationId === '' || $stationId === 'announce') {
-            // Stacked announcements keep the original station resume.
+            // Stacked announcements keep the original station / AirPlay resume.
             return $this->resumeAfterLooksValid($existing) ? $existing : null;
         }
+        // AirPlay bridge is resumable after Announcement (receiver stays up).
 
         $alive = false;
         foreach ($state['streams'] ?? [] as $row) {
@@ -402,6 +571,62 @@ final class YarboUnifiRadio
         $targets = $this->normalizeTargetIds($resume['targets'] ?? []);
 
         return $targets !== [];
+    }
+
+    /**
+     * @param list<array{camera_id: string, talkback_url: string, codec: string, sampling_rate: int}> $sessions
+     */
+    private function spawnAirplayFanout(
+        string $ffmpeg,
+        string $fifo,
+        array $sessions,
+        int $volume,
+    ): int {
+        if ($sessions === []) {
+            return 0;
+        }
+        $volume = max(0, min(100, $volume));
+        $gain = number_format($volume / 100, 4, '.', '');
+        $n = count($sessions);
+        $labels = [];
+        for ($i = 0; $i < $n; $i++) {
+            $labels[] = '[a' . $i . ']';
+        }
+        // One FIFO reader → mono 22050 → asplit → AAC ADTS UDP per speaker.
+        $filter = '[0:a]volume=' . $gain
+            . ',pan=mono|c0=0.5*c0+0.5*c1,aresample=22050,asplit=' . $n
+            . implode('', $labels);
+        $log = $this->projectRoot . '/data/unifi-radio-airplay.log';
+        @file_put_contents($log, '');
+        $ff = escapeshellarg($ffmpeg);
+        $fifoEsc = escapeshellarg($fifo);
+        $logEsc = escapeshellarg($log);
+        $filterEsc = escapeshellarg($filter);
+        $cmd = "{$ff} -nostdin -hide_banner -loglevel warning"
+            . " -f s16le -ar 44100 -ac 2 -i {$fifoEsc}"
+            . " -filter_complex {$filterEsc}";
+        foreach ($sessions as $i => $row) {
+            $parsed = parse_url((string) ($row['talkback_url'] ?? ''));
+            $host = (string) ($parsed['host'] ?? '');
+            $port = (int) ($parsed['port'] ?? 7004);
+            if ($host === '') {
+                return 0;
+            }
+            $udp = escapeshellarg('udp://' . $host . ':' . $port);
+            $cmd .= ' -map "[a' . $i . ']" -c:a aac -profile:a aac_low -b:a 32k -f adts ' . $udp;
+        }
+        $full = 'nohup ' . $cmd . ' > ' . $logEsc . ' 2>&1 & echo $!';
+        $pid = (int) trim((string) shell_exec($full));
+        if ($pid <= 1) {
+            return 0;
+        }
+        // Bridge blocks on FIFO until an AirPlay client plays — process should stay alive.
+        usleep(300000);
+        if (!$this->pidAlive($pid)) {
+            return 0;
+        }
+
+        return $pid;
     }
 
     /**
@@ -695,11 +920,17 @@ final class YarboUnifiRadio
         }
 
         if ($wasPlaying && $stationId !== '' && $targets !== []) {
-            $replay = $this->play([
-                'station_id' => $stationId,
-                'targets' => $targets,
-                'volume' => $volume,
-            ]);
+            $replay = $stationId === 'airplay'
+                ? $this->playAirplay([
+                    'targets' => $targets,
+                    'volume' => $volume,
+                    'ensure_receiver' => false,
+                ])
+                : $this->play([
+                    'station_id' => $stationId,
+                    'targets' => $targets,
+                    'volume' => $volume,
+                ]);
 
             return [
                 'ok' => (bool) ($replay['ok'] ?? false),
@@ -707,6 +938,7 @@ final class YarboUnifiRadio
                 'warning' => $replay['warning'] ?? null,
                 'volume' => $volume,
                 'radio' => $replay['radio'] ?? $this->status(),
+                'airplay' => $replay['airplay'] ?? null,
             ];
         }
 
@@ -723,11 +955,14 @@ final class YarboUnifiRadio
      */
     public function dashboardSlice(): array
     {
+        $airplay = new YarboPanelAirPlay($this->projectRoot);
+
         return [
             'stations' => $this->stations(),
             'speakers' => $this->unifi->speakerCameras(),
             'radio' => $this->status(),
             'speakers_enabled' => $this->unifi->speakersEnabled(),
+            'airplay' => $airplay->status(),
         ];
     }
 

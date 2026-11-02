@@ -526,7 +526,26 @@ final class YarboUnifi
             'devices' => $this->catalogFromInventory($inventory, $config['show_on_home']),
             'connection_warning' => $this->connectionWarning(),
             'stations' => $this->radioStationsSafe($config),
+            'airplay' => $this->airplayStatusSafe(),
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function airplayStatusSafe(): array
+    {
+        try {
+            return (new YarboPanelAirPlay($this->projectRoot))->status();
+        } catch (\Throwable $e) {
+            return [
+                'ok' => false,
+                'installed' => false,
+                'running' => false,
+                'name' => 'Yarbo Speakers',
+                'error' => $e->getMessage(),
+            ];
+        }
     }
 
     /**
@@ -845,6 +864,7 @@ final class YarboUnifi
                     'error' => null,
                     'started_at' => null,
                 ];
+                $payload['airplay'] = $this->airplayStatusSafe();
             }
         } catch (\Throwable $e) {
             $payload['speakers_enabled'] = ($config['speakers_enabled'] ?? true) !== false;
@@ -858,6 +878,13 @@ final class YarboUnifi
                 'volume' => 60,
                 'error' => $e->getMessage(),
                 'started_at' => null,
+            ];
+            $payload['airplay'] = [
+                'ok' => false,
+                'installed' => false,
+                'running' => false,
+                'name' => 'Yarbo Speakers',
+                'error' => $e->getMessage(),
             ];
         }
 

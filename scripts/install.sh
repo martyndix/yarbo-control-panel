@@ -88,7 +88,7 @@ install_project() {
 
   chmod +x scripts/cloud_bridge.py 2>/dev/null || true
   chmod +x scripts/update.sh 2>/dev/null || true
-  chmod +x scripts/dev.sh scripts/panel.sh scripts/panel_https_proxy.py scripts/panel_https_ensure.sh scripts/home_automations.php scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/matter_check_node.py scripts/matter_fix_ipv6.sh scripts/matter_setup.sh scripts/lib/matter_server.sh scripts/lib/matter_agent.sh scripts/lib/panel_https.sh 2>/dev/null || true
+  chmod +x scripts/dev.sh scripts/panel.sh scripts/panel_https_proxy.py scripts/panel_https_ensure.sh scripts/panel_airplay_ensure.sh scripts/panel_airplay_stop.sh scripts/home_automations.php scripts/vestaboard_watch.php scripts/metrics_ping.php scripts/matter_agent.py scripts/matter_check_node.py scripts/matter_fix_ipv6.sh scripts/matter_setup.sh scripts/lib/matter_server.sh scripts/lib/matter_agent.sh scripts/lib/panel_https.sh scripts/lib/panel_airplay.sh 2>/dev/null || true
   # Browser mic / Announce needs LAN HTTPS :8443 reachable.
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi 'Status: active'; then
     ufw allow 8443/tcp comment 'Yarbo panel HTTPS' >/dev/null 2>&1 || true

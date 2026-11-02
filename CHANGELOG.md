@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.179] - 2026-11-02
+
+### Added
+- **AirPlay bridge** for Protect speakers: Start AirPlay in the Radio Player advertises the Pi on the LAN (`shairport-sync` → FIFO) and ffmpeg fans audio out to the ticked talkback speakers. Configure the name in Settings → UniFi. Needs `shairport-sync` / `avahi-daemon` on the Pi (`nqptp` for AirPlay 2). Announcement can interrupt AirPlay and resume it afterward.
+
 ## [4.0.178] - 2026-11-02
 
 ### Changed
