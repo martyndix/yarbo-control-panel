@@ -14247,7 +14247,7 @@ els.settingsUnifiHomepodList?.addEventListener('click', async (ev) => {
                 els.settingsUnifiHomepodPin.value = '';
                 els.settingsUnifiHomepodPin.focus();
             }
-            setHomepodResult(data.message || 'Enter the PIN shown on the HomePod / TV.');
+            setHomepodResult(data.message || 'Listen for the PIN spoken by the HomePod, then enter it here.');
         } catch (err) {
             setHomepodResult(err.message || 'Pair failed', false);
             showToast(err.message || 'HomePod pair failed', 'error');
