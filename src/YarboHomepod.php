@@ -30,6 +30,17 @@ final class YarboHomepod
         return new self($projectRoot, '127.0.0.1', $port > 0 ? $port : self::AGENT_PORT_DEFAULT);
     }
 
+    /**
+     * Kill-switch: set YARBO_HOMEPOD=0 (or false/off/no) to disable HomePod outputs
+     * without uninstalling the panel. Pairing files in data/homepod/ are kept.
+     */
+    public static function isEnabled(): bool
+    {
+        $raw = strtolower(trim((string) (getenv('YARBO_HOMEPOD') ?: '1')));
+
+        return !in_array($raw, ['0', 'false', 'off', 'no'], true);
+    }
+
     public static function isHomepodTargetId(string $id): bool
     {
         return str_starts_with($id, self::KIND_PREFIX);
@@ -100,6 +111,9 @@ final class YarboHomepod
      */
     public function speakerRows(): array
     {
+        if (!self::isEnabled()) {
+            return [];
+        }
         $devices = $this->savedDevices();
         $out = [];
         foreach ($devices as $row) {
@@ -128,12 +142,25 @@ final class YarboHomepod
      */
     public function status(): array
     {
+        if (!self::isEnabled()) {
+            return [
+                'ok' => true,
+                'enabled' => false,
+                'agent_running' => false,
+                'pyatv' => false,
+                'import_error' => null,
+                'devices' => [],
+                'playing' => [],
+                'message' => 'HomePod speakers disabled (YARBO_HOMEPOD=0)',
+            ];
+        }
         $agent = $this->request(['op' => 'status'], 2.0, false);
         $saved = $this->savedDevices();
         $playing = is_array($agent['playing'] ?? null) ? $agent['playing'] : [];
 
         return [
             'ok' => true,
+            'enabled' => true,
             'agent_running' => (bool) ($agent['ok'] ?? false),
             'pyatv' => (bool) ($agent['pyatv'] ?? false),
             'import_error' => $agent['import_error'] ?? null,
@@ -157,6 +184,9 @@ final class YarboHomepod
      */
     public function scan(float $timeout = 5.0): array
     {
+        if (!self::isEnabled()) {
+            return ['ok' => false, 'error' => 'HomePod speakers disabled (YARBO_HOMEPOD=0)', 'devices' => []];
+        }
         $result = $this->request(['op' => 'scan', 'timeout' => $timeout], 35.0, true);
         if (!($result['ok'] ?? false)) {
             return $result + ['devices' => []];
@@ -179,6 +209,10 @@ final class YarboHomepod
      */
     public function pairStart(string $id): array
     {
+        if (!self::isEnabled()) {
+            return ['ok' => false, 'error' => 'HomePod speakers disabled (YARBO_HOMEPOD=0)'];
+        }
+
         return $this->request(['op' => 'pair_start', 'id' => self::stripPrefix($id)], 50.0, true);
     }
 
@@ -187,6 +221,10 @@ final class YarboHomepod
      */
     public function pairFinish(string $id, string $pin): array
     {
+        if (!self::isEnabled()) {
+            return ['ok' => false, 'error' => 'HomePod speakers disabled (YARBO_HOMEPOD=0)'];
+        }
+
         return $this->request([
             'op' => 'pair_finish',
             'id' => self::stripPrefix($id),
@@ -220,6 +258,13 @@ final class YarboHomepod
      */
     public function streamToMany(array $ids, string $source, ?int $volume = null): array
     {
+        if (!self::isEnabled()) {
+            return [
+                'ok' => false,
+                'started' => [],
+                'errors' => ['HomePod speakers disabled (YARBO_HOMEPOD=0)'],
+            ];
+        }
         $started = [];
         $errors = [];
         foreach ($ids as $id) {
@@ -385,6 +430,9 @@ final class YarboHomepod
 
     private function ensureStarted(): void
     {
+        if (!self::isEnabled()) {
+            return;
+        }
         if ($this->portOpen()) {
             return;
         }

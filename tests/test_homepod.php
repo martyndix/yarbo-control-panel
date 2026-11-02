@@ -69,6 +69,22 @@ assert_true(count($status['devices'] ?? []) === 2, 'status lists saved devices')
 assert_true(($status['devices'][0]['credentials'] ?? true) === true, 'credentials redacted to bool');
 assert_true(($status['devices'][0]['target_id'] ?? '') === 'homepod:aa:bb:cc:dd', 'status target_id');
 
+$prevHomepodEnv = getenv('YARBO_HOMEPOD');
+putenv('YARBO_HOMEPOD=0');
+assert_true(YarboHomepod::isEnabled() === false, 'YARBO_HOMEPOD=0 disables');
+assert_true((new YarboHomepod($tmp))->speakerRows() === [], 'kill-switch hides speakers');
+$disabledStatus = (new YarboHomepod($tmp))->status();
+assert_true(($disabledStatus['enabled'] ?? true) === false, 'status reports disabled');
+assert_true(str_contains((string) ($disabledStatus['message'] ?? ''), 'YARBO_HOMEPOD=0'), 'status mentions kill-switch');
+$disabledScan = (new YarboHomepod($tmp))->scan();
+assert_true(($disabledScan['ok'] ?? true) === false, 'scan blocked when disabled');
+if ($prevHomepodEnv === false) {
+    putenv('YARBO_HOMEPOD');
+} else {
+    putenv('YARBO_HOMEPOD=' . $prevHomepodEnv);
+}
+assert_true(YarboHomepod::isEnabled() === true, 'HomePods re-enabled after env restore');
+
 $unifi = new YarboUnifi($tmp);
 $radio = new YarboUnifiRadio($tmp, $unifi);
 $unifi->setSpeakersEnabled(true);
@@ -156,6 +172,9 @@ assert_true(str_contains($api, 'use YarboHomepod') || str_contains($api, 'YarboH
 assert_true(str_contains($css, 'unifi-homepod-list'), 'HomePod settings CSS');
 assert_true(str_contains($panel, 'homepod_agent.py'), 'panel.sh starts HomePod agent');
 assert_true(str_contains($panel, 'homepod_agent.sh'), 'panel.sh sources helper');
+assert_true(str_contains($panel, 'YARBO_HOMEPOD'), 'panel.sh respects HomePod kill-switch');
+assert_true(str_contains($docs, 'YARBO_HOMEPOD=0'), 'docs document HomePod soft rollback');
+assert_true(str_contains($docs, '4.0.184') || str_contains($change, '4.0.184'), 'docs/changelog mention full revert target');
 assert_true(str_contains($agent, 'pyatv'), 'agent uses pyatv');
 assert_true(str_contains($agent, 'stream_file'), 'agent streams files');
 assert_true(str_contains($change, '## [4.0.185]'), 'changelog 4.0.185');

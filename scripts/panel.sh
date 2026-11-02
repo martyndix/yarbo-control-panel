@@ -152,7 +152,11 @@ HOMEPOD_PY="${ROOT}/.venv/bin/python"
 if [[ ! -x "$HOMEPOD_PY" ]]; then
   HOMEPOD_PY="$(command -v python3 || true)"
 fi
-if [[ -n "$HOMEPOD_PY" && -f "${ROOT}/scripts/homepod_agent.py" ]]; then
+# Set YARBO_HOMEPOD=0 to skip the HomePod agent (rollback without uninstalling).
+if [[ "${YARBO_HOMEPOD:-1}" == "0" || "${YARBO_HOMEPOD:-1}" == "false" || "${YARBO_HOMEPOD:-1}" == "off" ]]; then
+  echo "==> HomePod agent skipped (YARBO_HOMEPOD=${YARBO_HOMEPOD})"
+  yarbo_stop_homepod_agent 2>/dev/null || true
+elif [[ -n "$HOMEPOD_PY" && -f "${ROOT}/scripts/homepod_agent.py" ]]; then
   echo "==> Starting HomePod agent on 127.0.0.1:$(yarbo_homepod_agent_port)"
   mkdir -p "${ROOT}/data/homepod"
   yarbo_stop_homepod_agent

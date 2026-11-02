@@ -98,5 +98,7 @@ Mic hold-to-record needs a **secure context** (`https://<panel-ip>:8443`, self-s
 ## Rollback
 
 - **Radio Player only:** Settings → UniFi → untick **Show Radio Player in the header** (stops playback and hides the button). Station list stays in `data/unifi-radio-stations.json`.
+- **HomePod speakers only (soft):** In Settings → UniFi, untick **Show in Radio Player** or **Remove** each paired HomePod. Unticked pods stay paired but leave the Radio checklist. Or set `YARBO_HOMEPOD=0` in the panel service environment and restart — the agent does not start, HomePods disappear from the checklist, and Protect/AirPlay-receive keep working. Pairing files stay in `data/homepod/` until you delete that folder.
+- **HomePod speakers (full panel revert):** install panel **4.0.184** (or earlier) from Settings → Panel updates to drop the HomePod sender code entirely. Safe parent commit before this feature: `1602a48` on `main`.
 - **Whole UniFi module:** untick UniFi under Settings → Modules. Credentials stay in `data/unifi-config.json`.
 - **Panel version:** install a previous panel build from Settings → Panel updates if you want to undo **4.0.158** entirely. **4.0.160** only fixes Speakers panel contrast (theme text/card colours).
