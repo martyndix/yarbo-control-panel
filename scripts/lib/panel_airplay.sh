@@ -49,10 +49,14 @@ yarbo_airplay_read_name() {
 }
 
 yarbo_airplay_bin() {
+  if [[ -x /usr/bin/shairport-sync ]]; then echo /usr/bin/shairport-sync; return 0; fi
+  if [[ -x /usr/local/bin/shairport-sync ]]; then echo /usr/local/bin/shairport-sync; return 0; fi
   command -v shairport-sync 2>/dev/null || true
 }
 
 yarbo_airplay_nqptp_bin() {
+  if [[ -x /usr/bin/nqptp ]]; then echo /usr/bin/nqptp; return 0; fi
+  if [[ -x /usr/local/bin/nqptp ]]; then echo /usr/local/bin/nqptp; return 0; fi
   command -v nqptp 2>/dev/null || true
 }
 
@@ -248,22 +252,38 @@ yarbo_install_airplay_deps() {
 # Try passwordless install via the panel's existing root helper (no SSH).
 yarbo_try_install_airplay_deps() {
   local root="${1:-}"
+  local log
   if yarbo_airplay_installed; then
     return 0
   fi
   if [[ -z "$root" ]]; then
     return 1
   fi
-  if [[ -x /usr/local/sbin/yarbo-matter-setup ]]; then
-    if sudo -n /usr/local/sbin/yarbo-matter-setup "$root" airplay-deps >/dev/null 2>&1; then
-      yarbo_airplay_installed && return 0
+  log="$(yarbo_airplay_log "$root")"
+  mkdir -p "$(dirname "$log")"
+  {
+    echo "==> yarbo_try_install_airplay_deps $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    # airplay-deps refreshes the wrapper then apt-installs (do NOT call matter-setup
+    # without a subcommand — that starts the full Matter Docker stack).
+    if [[ -x /usr/local/sbin/yarbo-matter-setup ]]; then
+      if sudo -n /usr/local/sbin/yarbo-matter-setup "$root" airplay-deps; then
+        echo "matter-setup airplay-deps ok"
+      else
+        echo "matter-setup airplay-deps failed (exit $?)"
+      fi
+    else
+      echo "yarbo-matter-setup missing — cannot apt without SSH once"
     fi
-  fi
-  if command -v sudo >/dev/null 2>&1; then
-    if sudo -n apt-get update -qq >/dev/null 2>&1 \
-      && sudo -n apt-get install -y shairport-sync avahi-daemon >/dev/null 2>&1; then
-      yarbo_airplay_installed && return 0
+    if ! yarbo_airplay_installed && command -v sudo >/dev/null 2>&1; then
+      # Exact argv must match scripts/install.sh sudoers (NOPASSWD apt-get lines).
+      echo "trying sudoers apt-get install…"
+      sudo -n /usr/bin/apt-get update -qq || true
+      sudo -n /usr/bin/apt-get install -y shairport-sync avahi-daemon || true
+      # Also try reversed package order (second sudoers line from install.sh).
+      if ! yarbo_airplay_installed; then
+        sudo -n /usr/bin/apt-get install -y avahi-daemon shairport-sync || true
+      fi
     fi
-  fi
-  return 1
+  } >>"$log" 2>&1 || true
+  yarbo_airplay_installed
 }

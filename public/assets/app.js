@@ -3554,19 +3554,21 @@ function renderUnifiAirplayStatus(airplay, radio = null) {
     if (!els.unifiAirplayStatus) return;
     const ap = airplay && typeof airplay === 'object' ? airplay : {};
     const name = ap.name || 'Yarbo Speakers';
+    const missing = ap.installed === false;
     if (radio?.playing && radio?.station_id === 'airplay') {
         els.unifiAirplayStatus.textContent = `Playing from AirPlay · ${name}`;
     } else if (ap.running) {
-        els.unifiAirplayStatus.textContent = ap.installed === false
-            ? (ap.error || 'shairport-sync not installed')
-            : `Waiting for iPhone · ${name}`;
-    } else if (ap.installed === false) {
-        els.unifiAirplayStatus.textContent = ap.error || 'shairport-sync not installed — see Settings → UniFi';
+        els.unifiAirplayStatus.textContent = `Waiting for iPhone · ${name}`;
+    } else if (missing) {
+        els.unifiAirplayStatus.textContent = ap.error
+            || 'shairport-sync not installed — tap Start AirPlay to install it';
     } else {
         els.unifiAirplayStatus.textContent = 'AirPlay off';
     }
     if (els.unifiAirplayStart) {
-        els.unifiAirplayStart.disabled = ap.installed === false;
+        // Keep enabled so a tap can retry apt install via the ensure script.
+        els.unifiAirplayStart.disabled = false;
+        els.unifiAirplayStart.textContent = missing ? 'Install & start AirPlay' : 'Start AirPlay';
     }
 }
 
@@ -14096,9 +14098,15 @@ els.unifiAirplayStart?.addEventListener('click', async () => {
         return;
     }
     els.unifiAirplayStart.disabled = true;
-    if (els.unifiAirplayStatus) els.unifiAirplayStatus.textContent = 'Starting AirPlay…';
+    const installing = /install/i.test(els.unifiAirplayStart.textContent || '');
+    if (els.unifiAirplayStatus) {
+        els.unifiAirplayStatus.textContent = installing
+            ? 'Installing shairport-sync…'
+            : 'Starting AirPlay…';
+    }
     try {
-        const data = await unifiApi({ action: 'airplay_start', targets, volume }, 60000);
+        // Longer timeout: first tap may apt-get install packages on the Pi.
+        const data = await unifiApi({ action: 'airplay_start', targets, volume }, 180000);
         if (!data?.ok) throw new Error(data?.error || 'AirPlay start failed');
         applyRadioCommandResult(data.radio || null);
         if (unifiDash) {
@@ -14117,6 +14125,14 @@ els.unifiAirplayStart?.addEventListener('click', async () => {
     } catch (err) {
         if (els.unifiAirplayStatus) els.unifiAirplayStatus.textContent = err.message || 'AirPlay start failed';
         showToast(err.message || 'AirPlay start failed', 'error');
+        // Refresh installed flag / button label after a failed install attempt.
+        try {
+            const st = await unifiApi({ action: 'airplay_status' }, 8000);
+            if (st?.airplay) {
+                if (unifiDash) unifiDash.airplay = st.airplay;
+                renderUnifiAirplayStatus(st.airplay, unifiDash?.radio || st.radio || null);
+            }
+        } catch { /* ignore */ }
     } finally {
         els.unifiAirplayStart.disabled = false;
     }

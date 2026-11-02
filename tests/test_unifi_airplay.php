@@ -113,6 +113,10 @@ assert_true(str_contains($installSh, 'shairport-sync avahi-daemon'), 'install.sh
 assert_true(str_contains($installSh, 'apt-get install -y shairport-sync avahi-daemon'), 'sudoers allows AirPlay apt');
 assert_true(str_contains($change, '## [4.0.179]'), 'changelog 4.0.179');
 assert_true(str_contains($change, '## [4.0.180]'), 'changelog 4.0.180');
+assert_true(str_contains($change, '## [4.0.181]'), 'changelog 4.0.181');
+assert_true(str_contains($js, 'Install & start AirPlay'), 'JS keeps Start enabled for install retry');
+assert_true(str_contains($updateSh, '/usr/bin/apt-get install -y shairport-sync avahi-daemon'), 'update.sh sudoers apt fallback');
+assert_true(str_contains($libSh, '/usr/bin/apt-get install -y shairport-sync avahi-daemon'), 'panel_airplay sudoers apt fallback');
 assert_true(str_contains($change, 'AirPlay'), 'changelog mentions AirPlay');
 assert_true(str_contains($docs, 'AirPlay bridge'), 'docs AirPlay bridge');
 assert_true(str_contains($docs, 'shairport-sync'), 'docs install hint');

@@ -86,7 +86,7 @@ Protect talkback (Speakers): `POST /cameras/{id}/talkback-session` (Integration 
 
 **AirPlay** (Radio Player modal): **Start AirPlay** runs `scripts/panel_airplay_ensure.sh` (starts `shairport-sync` → `data/airplay/audio.fifo`, and `nqptp` when installed), then bridges that FIFO to the ticked speakers. Set the advertised name in Settings → UniFi. **Stop AirPlay** tears down the bridge and the receiver.
 
-Panel **Updates** (and a fresh `install.sh --deps`) install `shairport-sync` and `avahi-daemon` automatically via the same passwordless root helper used for Matter — no SSH required. **Start AirPlay** also retries that install if the packages are still missing. AirPlay 2 (Control Center multi-room style) additionally needs `nqptp` — build from [shairport-sync AIRPLAY2.md](https://github.com/mikebrady/shairport-sync/blob/master/AIRPLAY2.md) if your distro package is classic-only.
+Panel **Updates** (and a fresh `install.sh --deps`) install `shairport-sync` and `avahi-daemon` automatically via the Matter root helper and the panel’s passwordless `apt-get` sudoers rules — no SSH required. If packages are still missing, Radio Player shows **Install & start AirPlay**; tapping it retries the install (see `data/panel-airplay.log`). AirPlay 2 (Control Center multi-room style) additionally needs `nqptp` — build from [shairport-sync AIRPLAY2.md](https://github.com/mikebrady/shairport-sync/blob/master/AIRPLAY2.md) if your distro package is classic-only.
 
 Open UDP **319/320** (PTP) and allow mDNS if you use a firewall. The panel tries `ufw allow` when packages install / Start AirPlay runs. Sync across several Protect speakers is looser than HomePods.
 

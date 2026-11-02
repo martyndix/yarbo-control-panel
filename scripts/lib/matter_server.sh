@@ -330,6 +330,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     yarbo_install_airplay_deps
     exit $?
   fi
+  # Always refresh the root helper even when Matter is already up, so new
+  # subcommands (airplay-deps) land before the next update step uses them.
   cd "$ROOT"
+  yarbo_matter_install_wrapper
   yarbo_matter_setup
 fi

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.181] - 2026-11-02
+
+### Fixed
+- **Install & start AirPlay** stays clickable when packages are missing (was disabled, so install could not retry). Update/Start now fall back to the panel’s passwordless `apt-get` rules when an older `yarbo-matter-setup` ignores `airplay-deps`.
+
 ## [4.0.180] - 2026-11-02
 
 ### Changed

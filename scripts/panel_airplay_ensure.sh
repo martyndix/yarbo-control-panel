@@ -50,7 +50,7 @@ fi
 
 if [[ "$INSTALLED" -ne 1 ]]; then
   json_out 0 0 0 "$NQPTP" "$NAME" "$FIFO" "" "" \
-    "shairport-sync is not installed. Run a panel update (it installs shairport-sync + avahi-daemon), or on the Pi: sudo apt install -y shairport-sync avahi-daemon (AirPlay 2 also needs nqptp — see docs/unifi.md)." \
+    "Could not install shairport-sync. Update the panel again, or on the Pi run: sudo apt install -y shairport-sync avahi-daemon. Check data/panel-airplay.log for apt output." \
     "$(log_tail)"
   exit 0
 fi

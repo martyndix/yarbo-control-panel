@@ -129,7 +129,16 @@ final class YarboPanelAirPlay
 
     private function binaryInstalled(string $name): bool
     {
-        $out = trim((string) shell_exec('command -v ' . escapeshellarg($name) . ' 2>/dev/null'));
+        foreach (['/usr/bin/', '/usr/local/bin/', '/bin/'] as $dir) {
+            $path = $dir . $name;
+            if (is_executable($path)) {
+                return true;
+            }
+        }
+        $out = trim((string) shell_exec(
+            'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin command -v '
+            . escapeshellarg($name) . ' 2>/dev/null'
+        ));
 
         return $out !== '' && is_executable($out);
     }

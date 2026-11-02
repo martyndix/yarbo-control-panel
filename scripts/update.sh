@@ -361,18 +361,32 @@ write_status "composer" "Installing AirPlay packages"
 chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" 2>/dev/null || true
 # shellcheck source=scripts/lib/panel_airplay.sh
 source "${ROOT}/scripts/lib/panel_airplay.sh"
+AIRPLAY_LOG="${ROOT}/data/panel-airplay.log"
+mkdir -p "${ROOT}/data"
 if yarbo_airplay_installed; then
   step "AirPlay packages already installed"
-elif sudo -n /usr/local/sbin/yarbo-matter-setup "${ROOT}" airplay-deps >/dev/null 2>&1; then
+else
+  # Old yarbo-matter-setup binaries ignore the airplay-deps subcommand and still exit 0
+  # (they re-enter Matter setup, which succeeds when Matter is already up) — so never
+  # trust exit status alone; always verify the binary, then fall back to sudoers apt.
+  {
+    echo "==> update.sh airplay-deps $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    sudo -n /usr/local/sbin/yarbo-matter-setup "${ROOT}" airplay-deps || echo "matter-setup airplay-deps exit $?"
+    if ! yarbo_airplay_installed; then
+      yarbo_try_install_airplay_deps "${ROOT}" || true
+    fi
+    if ! yarbo_airplay_installed && [[ -x /usr/bin/apt-get ]]; then
+      echo "direct sudoers apt-get fallback"
+      # Exact argv must match install.sh sudoers rules.
+      sudo -n /usr/bin/apt-get update -qq || true
+      sudo -n /usr/bin/apt-get install -y shairport-sync avahi-daemon || true
+    fi
+  } >>"$AIRPLAY_LOG" 2>&1 || true
   if yarbo_airplay_installed; then
     step "AirPlay packages installed"
   else
-    step "AirPlay package install finished but shairport-sync is still missing"
+    step "AirPlay packages not installed yet — tap Install & start AirPlay in Radio Player (see data/panel-airplay.log)"
   fi
-elif yarbo_try_install_airplay_deps "${ROOT}"; then
-  step "AirPlay packages installed"
-else
-  step "AirPlay packages skipped (Start AirPlay will retry; or: sudo apt install -y shairport-sync avahi-daemon)"
 fi
 
 RESTARTED=false
