@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.206] - 2026-11-03
+
+### Added
+- **Automations Only if — no motion for X:** device conditions can require **no motion** **now** or **for** N minutes/hours (true when the sensor is clear and last `motion_at` is at least that old).
+
 ## [4.0.205] - 2026-11-03
 
 ### Fixed

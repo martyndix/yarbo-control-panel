@@ -1109,6 +1109,91 @@ $auto->delete('a-motion-within');
 $commands = [];
 @unlink($auto->statePath());
 
+$forSave = $auto->save([
+    'id' => 'a-no-motion-for',
+    'enabled' => true,
+    'name' => 'Hall quiet for',
+    'trigger' => ['type' => 'time', 'at' => '12:00'],
+    'conditions' => [[
+        'type' => 'device',
+        'id' => 'unifi:sensor:s1',
+        'state' => 'no_motion',
+        'for_sec' => 7200,
+    ]],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($forSave['ok']), 'save no motion for: ' . json_encode($forSave));
+assert_true(
+    (int) (($forSave['automation']['conditions'][0]['for_sec'] ?? 0)) === 7200,
+    'for_sec persisted: ' . json_encode($forSave['automation']['conditions'][0] ?? null)
+);
+$forLive = $auto->save([
+    'id' => 'a-no-motion-live',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '12:00'],
+    'conditions' => [[
+        'type' => 'device',
+        'id' => 'unifi:sensor:s1',
+        'state' => 'no_motion',
+        'for_sec' => 0,
+    ]],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'off']],
+    'cooldown_sec' => 0,
+]);
+assert_true(
+    !isset($forLive['automation']['conditions'][0]['for_sec']),
+    'for_sec 0 is omitted: ' . json_encode($forLive['automation']['conditions'][0] ?? null)
+);
+$auto->delete('a-no-motion-live');
+$auto->delete('a-no-motion-for');
+
+$forRule = $auto->save([
+    'id' => 'a-no-motion-for',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:light:porch', 'event' => 'turns_on'],
+    'conditions' => [[
+        'type' => 'device',
+        'id' => 'unifi:sensor:s1',
+        'state' => 'no_motion',
+        'for_sec' => 3600,
+    ]],
+    'actions' => [['kind' => 'scene', 'id' => 'sc-outdoor', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($forRule['ok']), 'save no-motion-for rule for tick');
+$tFor = 1_830_100_000;
+$devicesFor = static function (bool $lightOn, bool $motion, int $motionAt): array {
+    return [
+        [
+            'id' => 'unifi:sensor:s1',
+            'kind' => 'sensor',
+            'open' => false,
+            'on' => false,
+            'motion' => $motion,
+            'motion_at' => $motionAt,
+        ],
+        [
+            'id' => 'unifi:light:porch',
+            'kind' => 'light',
+            'on' => $lightOn,
+        ],
+    ];
+};
+$r = $auto->tick($devicesFor(false, false, $tFor - 7200), $tFor);
+assert_true($r['fired'] === [], 'for: idle');
+$r = $auto->tick($devicesFor(true, false, $tFor - 600), $tFor + 1);
+assert_true($r['fired'] === [], 'for: light on but motion too recent: ' . json_encode($r));
+$r = $auto->tick($devicesFor(true, true, $tFor - 7200), $tFor + 2);
+assert_true($r['fired'] === [], 'for: detecting motion fails even if stamp is old: ' . json_encode($r));
+$r = $auto->tick($devicesFor(false, false, $tFor - 7200), $tFor + 3);
+assert_true($r['fired'] === [], 'for: quiet long enough but When not edged');
+$r = $auto->tick($devicesFor(true, false, $tFor - 7200), $tFor + 4);
+assert_true($r['fired'] === ['a-no-motion-for'], 'for: quiet long enough passes Only if: ' . json_encode($r));
+$auto->delete('a-no-motion-for');
+$commands = [];
+@unlink($auto->statePath());
+
 assert_true(YarboHomeAutomations::hmInWindow('21:00', '20:00', '22:00'), 'window inside');
 assert_true(!YarboHomeAutomations::hmInWindow('19:00', '20:00', '22:00'), 'window before');
 assert_true(YarboHomeAutomations::hmInWindow('23:00', '22:00', '06:00'), 'overnight window');
@@ -1560,9 +1645,14 @@ assert_true(str_contains($js, 'homeAutoIfStateOptions'), 'only-if states');
 assert_true(str_contains($js, 'data-auto-if-within-mode'), 'Only if motion within mode');
 assert_true(str_contains($js, 'data-auto-if-within'), 'Only if motion within amount');
 assert_true(str_contains($js, 'function homeAutoReadIfWithin'), 'within reader');
+assert_true(str_contains($js, 'data-auto-if-for-mode'), 'Only if no-motion for mode');
+assert_true(str_contains($js, 'data-auto-if-for'), 'Only if no-motion for amount');
+assert_true(str_contains($js, 'function homeAutoReadIfFor'), 'for reader');
 $autoPhp = (string) file_get_contents(__DIR__ . '/../src/YarboHomeAutomations.php');
 assert_true(str_contains($autoPhp, 'deviceMotionWithin'), 'within evaluator');
 assert_true(str_contains($autoPhp, "'within_sec'"), 'within_sec normalize');
+assert_true(str_contains($autoPhp, 'deviceNoMotionFor'), 'no-motion-for evaluator');
+assert_true(str_contains($autoPhp, "'for_sec'"), 'for_sec normalize');
 assert_true(str_contains($js, 'homeAutoThenParamsHtml'), 'Then look controls helper');
 assert_true(str_contains($js, 'data-auto-hex'), 'Then colour picker');
 assert_true(str_contains($js, 'data-auto-celsius'), 'Then heater setpoint');
@@ -1621,6 +1711,7 @@ assert_true(str_contains($index, 'data-panel-version'), 'panel version on the pa
 $matterPhp = (string) file_get_contents(__DIR__ . '/../src/YarboMatterAgentClient.php');
 assert_true(str_contains($matterPhp, 'function portOpen'), 'Matter client checks the listening port');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.206]'), 'changelog 4.0.206');
 assert_true(str_contains($change, '## [4.0.204]'), 'changelog 4.0.204');
 assert_true(str_contains($change, '## [4.0.37]'), 'changelog 4.0.37');
 assert_true(str_contains($change, '## [4.0.39]'), 'changelog 4.0.39');
