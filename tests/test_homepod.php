@@ -132,6 +132,23 @@ $done = $radio->status();
 assert_true(($done['playing'] ?? true) === false, 'homepod announce ends_at clears playing');
 assert_true(($done['homepod_targets'] ?? ['x']) === [], 'homepod targets cleared after announce');
 
+// Missing ends_at must not leave a HomePod announcement Playing forever.
+file_put_contents($tmp . '/data/unifi-radio-state.json', json_encode([
+    'playing' => true,
+    'station_id' => 'announce',
+    'station_name' => 'Announcement',
+    'volume' => 60,
+    'streams' => [],
+    'homepod_targets' => ['homepod:aa:bb:cc:dd'],
+    'targets' => ['homepod:aa:bb:cc:dd'],
+    'started_at' => time() - 120,
+    'ends_at' => null,
+    'resume_after' => null,
+    'error' => null,
+], JSON_UNESCAPED_SLASHES));
+$stuck = $radio->status();
+assert_true(($stuck['playing'] ?? true) === false, 'homepod announce without ends_at clears after started_at bound');
+
 // HomePod-only radio stays Playing without a local ffmpeg pid.
 file_put_contents($tmp . '/data/unifi-radio-state.json', json_encode([
     'playing' => true,
@@ -188,7 +205,6 @@ assert_true(str_contains($agent, '_ffmpeg_pipe') || str_contains($agent, 'pipe:1
 assert_true(str_contains($agent, 'user_agent') || str_contains($agent, 'User-Agent'), 'agent sets ffmpeg User-Agent for ice streams');
 assert_true(str_contains($change, '401') || str_contains($change, 'Classic FM'), 'changelog mentions ice 401 fix');
 assert_true(str_contains($change, 'pipe') || str_contains($change, 'stdout'), 'changelog mentions ffmpeg pipe');
-$js = (string) file_get_contents($root . '/public/assets/app.js');
 assert_true(str_contains($js, 'nqptp'), 'UI mentions nqptp when missing');
 assert_true(str_contains($agent, 'MrpTunnel') || str_contains($agent, 'mrp_tunnel'), 'agent disables AirPlay MRP tunnel');
 assert_true(str_contains($agent, 'remote control') || str_contains($agent, '_disable_non_stream'), 'agent skips remote-control protocols');

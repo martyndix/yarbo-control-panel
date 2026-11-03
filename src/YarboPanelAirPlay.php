@@ -466,13 +466,36 @@ final class YarboPanelAirPlay
         if (!is_file($path)) {
             return null;
         }
+        // Avoid loading multi‑MB logs into PHP on every status poll (was stalling the Pi).
+        $size = @filesize($path);
+        if (is_int($size) && $size > 512 * 1024) {
+            $this->trimAirplayLog($path);
+        }
         $raw = (string) @file_get_contents($path);
         if ($raw === '') {
             return null;
         }
+        if (strlen($raw) > 64 * 1024) {
+            $raw = substr($raw, -64 * 1024);
+        }
         $lines = preg_split('/\R/', trim($raw)) ?: [];
+        $tail = implode("\n", array_slice($lines, -15));
 
-        return implode("\n", array_slice($lines, -25));
+        return strlen($tail) > 1500 ? substr($tail, -1500) : $tail;
+    }
+
+    private function trimAirplayLog(string $path): void
+    {
+        $raw = (string) @file_get_contents($path);
+        if ($raw === '' || strlen($raw) <= 128 * 1024) {
+            return;
+        }
+        $kept = substr($raw, -128 * 1024);
+        @file_put_contents(
+            $path,
+            "==> panel_airplay trimmed oversized log " . gmdate('Y-m-d\TH:i:s\Z') . "\n" . $kept,
+            LOCK_EX
+        );
     }
 
     /**

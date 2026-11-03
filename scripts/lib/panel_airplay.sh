@@ -18,6 +18,24 @@ yarbo_airplay_log() {
   echo "${1%/}/data/panel-airplay.log"
 }
 
+# Cap panel-airplay.log so ensure/status never hit ARG_MAX or stall the Pi on huge I/O.
+yarbo_airplay_trim_log() {
+  local root="${1:-}"
+  local log max keep
+  [[ -n "$root" ]] || return 0
+  log="$(yarbo_airplay_log "$root")"
+  [[ -f "$log" ]] || return 0
+  max=$((512 * 1024))
+  keep=$((128 * 1024))
+  # Portable size check (busybox / GNU).
+  local sz
+  sz="$(wc -c <"$log" 2>/dev/null | tr -d ' ' || echo 0)"
+  if [[ "${sz:-0}" -gt "$max" ]]; then
+    tail -c "$keep" "$log" >"${log}.trim" 2>/dev/null && mv -f "${log}.trim" "$log" || true
+    echo "==> panel_airplay trimmed log to last ${keep} bytes $(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$log"
+  fi
+}
+
 yarbo_airplay_pidfile() {
   echo "$(yarbo_airplay_dir "$1")/shairport-sync.pid"
 }

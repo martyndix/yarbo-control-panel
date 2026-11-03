@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.195] - 2026-11-03
+
+### Fixed
+- AirPlay ensure **`/usr/bin/php: Argument list too long`**: stop stuffing `panel-airplay.log` into `php -r` argv; pass the log path and trim oversized logs (this was also stalling the Pi). HomePod-only **Announcement** no longer stays Playing forever when `ends_at` was missing.
+
 ## [4.0.194] - 2026-11-03
 
 ### Fixed
