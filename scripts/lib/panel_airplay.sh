@@ -96,6 +96,70 @@ yarbo_airplay_escape_conf_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+# Start avahi so shairport-sync can advertise on the LAN (iPhone AirPlay list).
+yarbo_airplay_ensure_avahi() {
+  local root="${1:-}"
+  local log=""
+  if [[ -n "$root" ]]; then
+    log="$(yarbo_airplay_log "$root")"
+  fi
+  if pgrep -x avahi-daemon >/dev/null 2>&1; then
+    return 0
+  fi
+  {
+    echo "==> panel_airplay ensuring avahi-daemon $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if command -v systemctl >/dev/null 2>&1; then
+      if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        sudo -n systemctl enable avahi-daemon >/dev/null 2>&1 || true
+        sudo -n systemctl start avahi-daemon >/dev/null 2>&1 || true
+      fi
+      systemctl --user start avahi-daemon >/dev/null 2>&1 || true
+      # Root helper (update / first install) can start it without password.
+      if [[ -n "$root" && -x /usr/local/sbin/yarbo-matter-setup ]]; then
+        sudo -n /usr/local/sbin/yarbo-matter-setup "$root" airplay-quiesce >/dev/null 2>&1 || true
+      fi
+    fi
+    if command -v service >/dev/null 2>&1; then
+      if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        sudo -n service avahi-daemon start >/dev/null 2>&1 || true
+      fi
+    fi
+  } >>"${log:-/dev/null}" 2>&1 || true
+  pgrep -x avahi-daemon >/dev/null 2>&1
+}
+
+# Debian's shairport-sync.service often auto-starts with ALSA and steals the
+# AirPlay name / ports. Stop+disable it so the panel's pipe receiver owns mDNS.
+yarbo_airplay_quiesce_packaged_service() {
+  local root="${1:-}"
+  local log=""
+  if [[ -n "$root" ]]; then
+    log="$(yarbo_airplay_log "$root")"
+  fi
+  {
+    echo "==> panel_airplay quiesce packaged shairport-sync $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if command -v systemctl >/dev/null 2>&1; then
+      if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        sudo -n systemctl stop shairport-sync >/dev/null 2>&1 || true
+        sudo -n systemctl disable shairport-sync >/dev/null 2>&1 || true
+        # Mask stops apt/systemd from bringing the ALSA unit back on boot.
+        sudo -n systemctl mask shairport-sync >/dev/null 2>&1 || true
+      elif [[ -n "$root" && -x /usr/local/sbin/yarbo-matter-setup ]]; then
+        sudo -n /usr/local/sbin/yarbo-matter-setup "$root" airplay-quiesce >/dev/null 2>&1 || true
+      fi
+    fi
+    # Always clear stray binaries so our next start owns the name.
+    pkill -x shairport-sync 2>/dev/null || true
+    sleep 0.2
+    pkill -KILL -x shairport-sync 2>/dev/null || true
+  } >>"${log:-/dev/null}" 2>&1 || true
+  return 0
+}
+
+yarbo_airplay_avahi_running() {
+  pgrep -x avahi-daemon >/dev/null 2>&1
+}
+
 yarbo_airplay_write_conf() {
   local root="$1"
   local name fifo conf hook meta
@@ -119,6 +183,8 @@ general = {
   name = "${name}";
   interpolation = "basic";
   output_backend = "pipe";
+  // Publish via Avahi so iPhones on the same LAN see this name in AirPlay.
+  mdns_backend = "avahi";
   // Ignore volume from the Apple device; Protect volume is the panel slider.
   ignore_volume_control = "yes";
 };
@@ -318,6 +384,18 @@ yarbo_airplay_start_nqptp() {
   sleep 0.3
 }
 
+yarbo_airplay_our_receiver_running() {
+  # True only when the pidfile we wrote is still alive (not a packaged ALSA unit).
+  local root="$1"
+  local pf pid
+  pf="$(yarbo_airplay_pidfile "$root")"
+  if [[ ! -f "$pf" ]]; then
+    return 1
+  fi
+  pid="$(tr -d ' \n' <"$pf" 2>/dev/null || true)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
 yarbo_airplay_start_receiver() {
   local root="$1"
   local bin conf log pf
@@ -326,17 +404,24 @@ yarbo_airplay_start_receiver() {
     echo "shairport-sync not installed" >&2
     return 1
   fi
+  yarbo_airplay_ensure_avahi "$root" || true
+  yarbo_airplay_quiesce_packaged_service "$root"
   yarbo_airplay_ensure_fifo "$root"
   conf="$(yarbo_airplay_write_conf "$root")"
   log="$(yarbo_airplay_log "$root")"
   pf="$(yarbo_airplay_pidfile "$root")"
   mkdir -p "$(yarbo_airplay_dir "$root")"
   : >>"$log"
-  if yarbo_airplay_running "$root"; then
+  # Only skip restart when *our* pipe receiver is already up with this conf.
+  if yarbo_airplay_our_receiver_running "$root"; then
+    # Still refresh conf on disk; caller (ensure) typically stopped us first.
     return 0
   fi
+  # Clear any non-panel shairport that appeared after quiesce (systemd race).
+  pkill -x shairport-sync 2>/dev/null || true
+  sleep 0.15
   yarbo_airplay_start_nqptp "$root"
-  echo "==> panel_airplay $(date -u +%Y-%m-%dT%H:%M:%SZ) starting shairport-sync" >>"$log"
+  echo "==> panel_airplay $(date -u +%Y-%m-%dT%H:%M:%SZ) starting shairport-sync name=$(yarbo_airplay_read_name "$root") avahi=$(yarbo_airplay_avahi_running && echo 1 || echo 0)" >>"$log"
   # Prefer config file; fall back to classic CLI pipe if the build rejects the conf.
   if nohup "$bin" -c "$conf" >>"$log" 2>&1 & then
     echo $! >"$pf"
@@ -345,7 +430,7 @@ yarbo_airplay_start_receiver() {
   fi
   sleep 0.6
   local hooks=0
-  if yarbo_airplay_running "$root"; then
+  if yarbo_airplay_our_receiver_running "$root"; then
     hooks=1
     yarbo_airplay_start_metadata_reader "$root"
   else
@@ -354,6 +439,8 @@ yarbo_airplay_start_receiver() {
     fifo="$(yarbo_airplay_fifo "$root")"
     name="$(yarbo_airplay_read_name "$root")"
     echo "==> panel_airplay falling back to classic CLI pipe" >>"$log"
+    pkill -x shairport-sync 2>/dev/null || true
+    sleep 0.1
     nohup "$bin" -a "$name" -o pipe -- "$fifo" >>"$log" 2>&1 &
     echo $! >"$pf"
     sleep 0.5
@@ -362,10 +449,27 @@ yarbo_airplay_start_receiver() {
   php -r 'file_put_contents($argv[1], json_encode(["hooks" => $argv[2] === "1", "updated_at" => time()], JSON_UNESCAPED_SLASHES) . "\n");' \
     "$(yarbo_airplay_hooks_flag "$root")" "$hooks"
   # Always run the TCP watcher as a safety net (and the only signal when hooks=0).
-  if yarbo_airplay_running "$root"; then
+  if yarbo_airplay_our_receiver_running "$root"; then
     yarbo_airplay_start_watch "$root"
+    if ! yarbo_airplay_avahi_running; then
+      echo "==> panel_airplay WARNING: avahi-daemon is not running — iPhones will not see AirPlay" >>"$log"
+    fi
+    return 0
   fi
-  yarbo_airplay_running "$root"
+  return 1
+}
+
+# Stop packaged shairport + start Avahi. Safe to call as root from matter-setup.
+yarbo_airplay_quiesce_as_root() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable avahi-daemon >/dev/null 2>&1 || true
+    systemctl start avahi-daemon >/dev/null 2>&1 || true
+    systemctl stop shairport-sync >/dev/null 2>&1 || true
+    systemctl disable shairport-sync >/dev/null 2>&1 || true
+    systemctl mask shairport-sync >/dev/null 2>&1 || true
+  fi
+  pkill -x shairport-sync 2>/dev/null || true
+  return 0
 }
 
 # Install AirPlay host packages (must run as root). Used by update.sh / matter-setup.
@@ -381,10 +485,7 @@ yarbo_install_airplay_deps() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y shairport-sync avahi-daemon
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl enable avahi-daemon >/dev/null 2>&1 || true
-    systemctl start avahi-daemon >/dev/null 2>&1 || true
-  fi
+  yarbo_airplay_quiesce_as_root
   # Best-effort PTP / mDNS firewall holes for AirPlay 2.
   if command -v ufw >/dev/null 2>&1; then
     if ufw status 2>/dev/null | grep -qi 'Status: active'; then

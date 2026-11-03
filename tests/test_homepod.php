@@ -175,6 +175,10 @@ assert_true(str_contains((string) file_get_contents($root . '/src/YarboHomepod.p
 assert_true(str_contains($change, '## [4.0.186]'), 'changelog 4.0.186');
 assert_true(str_contains($change, '## [4.0.188]'), 'changelog 4.0.188');
 assert_true(str_contains($change, '## [4.0.189]'), 'changelog 4.0.189');
+assert_true(str_contains($change, '## [4.0.190]'), 'changelog 4.0.190');
+assert_true(str_contains($deps, 'pyatv>=0.15.1') || str_contains($deps, '0.15.1'), 'deps pin pyatv >= 0.15.1');
+assert_true(str_contains($agent, '_prepare_source') || str_contains($agent, 'transcode'), 'agent prepares announce audio');
+assert_true(str_contains($agent, 'remux') || str_contains($agent, 'm3u8'), 'agent remuxes HLS for HomePods');
 assert_true(str_contains($index, 'settings-unifi-homepod-scan'), 'Settings HomePod scan');
 assert_true(str_contains($index, 'HomePod speakers'), 'Settings HomePod heading');
 assert_true(str_contains($index, 'settings-unifi-homepod-pair-skip'), 'No PIN add button');

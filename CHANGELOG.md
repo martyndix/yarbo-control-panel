@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.190] - 2026-11-03
+
+### Fixed
+- **AirPlay not appearing on iPhones:** Start AirPlay now starts **avahi-daemon**, masks the packaged `shairport-sync` ALSA service (it was stealing the LAN name), and publishes with `mdns_backend = "avahi"`. Status warns if Avahi is still off.
+- **HomePods paired but silent:** require `pyatv` ≥ 0.15.1; convert announcement WebM/Ogg to WAV before RAOP; remux HLS/AAC radio to a local MP3 for HomePods; surface real stream errors instead of a fake Playing state; set volume before and after play starts.
+
 ## [4.0.189] - 2026-11-03
 
 ### Fixed
