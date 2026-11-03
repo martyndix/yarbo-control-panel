@@ -62,6 +62,10 @@ install_apt_deps() {
   if command -v systemctl >/dev/null 2>&1; then
     systemctl enable avahi-daemon >/dev/null 2>&1 || true
     systemctl start avahi-daemon >/dev/null 2>&1 || true
+    # Packaged unit uses ALSA and steals the AirPlay name from the panel pipe receiver.
+    systemctl stop shairport-sync >/dev/null 2>&1 || true
+    systemctl disable shairport-sync >/dev/null 2>&1 || true
+    systemctl mask shairport-sync >/dev/null 2>&1 || true
   fi
 }
 
@@ -268,6 +272,14 @@ install_update_sudoers() {
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get install -y avahi-daemon shairport-sync"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get install -y python3-pip python3-venv"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/bin/apt-get install -y python3-venv python3-pip"
+    fi
+    # AirPlay advertise: Avahi must run; packaged shairport ALSA unit must not steal mDNS.
+    if [[ -n "$systemctl_bin" ]]; then
+      echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} start avahi-daemon"
+      echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} enable avahi-daemon"
+      echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} stop shairport-sync"
+      echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} disable shairport-sync"
+      echo "${owner} ALL=(ALL) NOPASSWD: ${systemctl_bin} mask shairport-sync"
     fi
   } > "${sudoers_path}"
   chmod 440 "${sudoers_path}"

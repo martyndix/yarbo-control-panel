@@ -49,7 +49,19 @@ yarbo_homepod_python() {
 
 yarbo_pyatv_installed() {
   local python="${1:?}"
-  "$python" -c "import pyatv" >/dev/null 2>&1
+  # 0.15.0 could light the HomePod with no audio; require 0.15.1+.
+  "$python" -c "
+import pyatv, sys
+parts = []
+for p in str(getattr(pyatv, '__version__', '0')).split('.'):
+    try:
+        parts.append(int(''.join(ch for ch in p if ch.isdigit()) or '0'))
+    except Exception:
+        parts.append(0)
+while len(parts) < 3:
+    parts.append(0)
+sys.exit(0 if tuple(parts[:3]) >= (0, 15, 1) else 1)
+" >/dev/null 2>&1
 }
 
 yarbo_try_apt_python_venv() {
@@ -102,7 +114,7 @@ yarbo_pip_install_pyatv() {
   local err_file
   err_file="$(mktemp)"
 
-  if "$py" -m pip install --disable-pip-version-check --upgrade 'pyatv>=0.14' >>"$log" 2>"$err_file"; then
+  if "$py" -m pip install --disable-pip-version-check --upgrade 'pyatv>=0.15.1' >>"$log" 2>"$err_file"; then
     cat "$err_file" >>"$log" 2>/dev/null || true
     rm -f "$err_file"
     yarbo_pyatv_installed "$py" && return 0
@@ -110,8 +122,8 @@ yarbo_pip_install_pyatv() {
     cat "$err_file" >>"$log" 2>/dev/null || true
   fi
 
-  if "$py" -m pip install --disable-pip-version-check --break-system-packages 'pyatv>=0.14' >>"$log" 2>"$err_file" \
-    || "$py" -m pip install --disable-pip-version-check --user --break-system-packages 'pyatv>=0.14' >>"$log" 2>"$err_file"; then
+  if "$py" -m pip install --disable-pip-version-check --break-system-packages 'pyatv>=0.15.1' >>"$log" 2>"$err_file" \
+    || "$py" -m pip install --disable-pip-version-check --user --break-system-packages 'pyatv>=0.15.1' >>"$log" 2>"$err_file"; then
     cat "$err_file" >>"$log" 2>/dev/null || true
     rm -f "$err_file"
     yarbo_pyatv_installed "$py" && return 0
@@ -157,9 +169,10 @@ yarbo_ensure_pyatv() {
   echo "python=${py}" >>"$log"
 
   if yarbo_pyatv_installed "$py"; then
-    echo "pyatv already importable" >>"$log"
+    echo "pyatv >= 0.15.1 already importable" >>"$log"
     return 0
   fi
+  echo "pyatv missing or older than 0.15.1 — upgrading" >>"$log"
 
   if ! "$py" -m pip --version >/dev/null 2>&1; then
     echo "pip missing — trying ensurepip / apt" >>"$log"

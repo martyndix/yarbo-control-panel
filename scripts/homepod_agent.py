@@ -12,6 +12,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
+import socket
+import subprocess
 import sys
 import threading
 import time
@@ -26,7 +29,10 @@ AGENT_PORT = int(os.environ.get("YARBO_HOMEPOD_AGENT_PORT", "8767"))
 DATA_DIR = ROOT / "data" / "homepod"
 DEVICES_PATH = DATA_DIR / "devices.json"
 LOG_PATH = ROOT / "data" / "homepod-agent.log"
-AGENT_VERSION = 1
+CACHE_DIR = DATA_DIR / "cache"
+AGENT_VERSION = 2
+# Formats pyatv stream_file handles reliably on HomePods.
+_DIRECT_SUFFIXES = {".wav", ".mp3", ".aac", ".m4a", ".flac", ".aiff", ".aif", ".caf"}
 
 try:
     import pyatv
@@ -142,6 +148,8 @@ class HomepodRuntime:
         self._thread.start()
         self._pairings: dict[str, Any] = {}
         self._streams: dict[str, dict[str, Any]] = {}
+        self._remux: dict[str, subprocess.Popen[Any]] = {}
+        self._temps: dict[str, list[Path]] = {}
         self._lock = threading.Lock()
 
     def _run_loop(self) -> None:
@@ -151,6 +159,145 @@ class HomepodRuntime:
     def call(self, coro: Any, timeout: float = 60.0) -> Any:
         fut = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return fut.result(timeout=timeout)
+
+    def _ffmpeg_bin(self) -> str:
+        return shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+
+    def _free_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
+
+    def _cleanup_helpers(self, ident: str) -> None:
+        proc = self._remux.pop(ident, None)
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        for path in self._temps.pop(ident, []) or []:
+            try:
+                if path.is_file():
+                    path.unlink()
+            except OSError:
+                pass
+
+    def _needs_file_transcode(self, path: Path) -> bool:
+        suffix = path.suffix.lower()
+        if suffix in _DIRECT_SUFFIXES:
+            return False
+        # Browser announce clips are usually webm/ogg/opus — HomePods reject those.
+        return True
+
+    def _looks_like_hls(self, source: str) -> bool:
+        lower = source.lower()
+        return ".m3u8" in lower or "hls" in lower or ".isml" in lower or "norewind" in lower
+
+    async def _prepare_source(self, ident: str, source: str) -> str:
+        """Return a path/URL pyatv stream_file can play; start remux helpers if needed."""
+        self._cleanup_helpers(ident)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+        if source.startswith(("http://", "https://")):
+            if self._looks_like_hls(source) or source.lower().endswith(".aac"):
+                return await self._remux_http_to_mp3(ident, source)
+            # Direct MP3/AAC ice streams usually work as-is.
+            return source
+
+        path = Path(source)
+        if not path.is_file():
+            raise RuntimeError(f"Audio source not found: {source}")
+        if not self._needs_file_transcode(path):
+            return str(path.resolve())
+
+        ffmpeg = self._ffmpeg_bin()
+        if not os.path.isfile(ffmpeg) and shutil.which("ffmpeg") is None:
+            raise RuntimeError("ffmpeg is required to convert announcement audio for HomePods")
+        out = CACHE_DIR / f"announce-{ident.replace(':', '')}-{int(time.time())}.wav"
+        cmd = [
+            ffmpeg,
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(path),
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-f",
+            "wav",
+            str(out),
+        ]
+        log(f"transcode announce id={ident} src={path.name} -> {out.name}")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await proc.communicate()
+        if proc.returncode != 0 or not out.is_file() or out.stat().st_size < 64:
+            detail = (stderr or b"").decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                "Could not convert announcement for HomePod"
+                + (f": {detail}" if detail else "")
+            )
+        self._temps.setdefault(ident, []).append(out)
+        return str(out)
+
+    async def _remux_http_to_mp3(self, ident: str, source: str) -> str:
+        ffmpeg = self._ffmpeg_bin()
+        if not os.path.isfile(ffmpeg) and shutil.which("ffmpeg") is None:
+            raise RuntimeError("ffmpeg is required to remux radio streams for HomePods")
+        port = self._free_port()
+        url = f"http://127.0.0.1:{port}/live.mp3"
+        cmd = [
+            ffmpeg,
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-re",
+            "-i",
+            source,
+            "-vn",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            "-f",
+            "mp3",
+            "-listen",
+            "1",
+            url,
+        ]
+        log(f"remux HLS/AAC id={ident} -> {url}")
+        # Use a real Popen so we can keep the listener alive across the stream.
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self._remux[ident] = proc
+        # Wait briefly for the listen socket; pyatv connects as the client.
+        await asyncio.sleep(0.8)
+        if proc.poll() is not None:
+            self._remux.pop(ident, None)
+            raise RuntimeError("Could not remux radio stream for HomePod (ffmpeg exited)")
+        return url
 
     async def scan(self, timeout: float = 5.0) -> list[dict[str, Any]]:
         if pyatv is None:
@@ -441,37 +588,97 @@ class HomepodRuntime:
         conf = next((d for d in devices if str(d.identifier) == ident), None)
         if conf is None:
             raise RuntimeError(f"{saved.get('name') or ident} not found on the LAN")
+        # Prefer RAOP — that is what stream_file needs.
+        try:
+            protocol = self._pick_protocol(conf)
+        except Exception:
+            protocol = Protocol.RAOP if Protocol is not None else None
         creds = saved.get("credentials")
         if creds:
-            for protocol in (Protocol.RAOP, Protocol.AirPlay):
+            for proto in (Protocol.RAOP, Protocol.AirPlay):
                 try:
-                    conf.set_credentials(protocol, creds)
+                    conf.set_credentials(proto, creds)
                 except Exception:
                     pass
-        return await pyatv.connect(conf, self.loop)
+        atv = await pyatv.connect(conf, self.loop)
+        # Persist credentials discovered after an open-LAN connect so later
+        # streams keep working if HomeKit tightens access.
+        try:
+            if protocol is not None:
+                service = conf.get_service(protocol)
+                new_creds = getattr(service, "credentials", None) if service else None
+                if new_creds and new_creds != creds:
+                    saved_row = dict(saved)
+                    saved_row["credentials"] = new_creds
+                    upsert_device(saved_row)
+        except Exception as exc:
+            log(f"credential refresh skipped for {ident}: {exc}")
+        return atv
 
     async def stream(self, ident: str, source: str, volume: int | None = None) -> dict[str, Any]:
         await self.stop(ident)
-        atv = await self._connect(ident)
-        if volume is not None and hasattr(atv, "audio") and atv.audio is not None:
+        source = str(source or "").strip()
+        if not source:
+            raise RuntimeError("No audio source for HomePod stream")
+        if not source.startswith(("http://", "https://", "-")) and not Path(source).is_file():
+            raise RuntimeError(f"Audio source not found: {source}")
+
+        try:
+            playable = await self._prepare_source(ident, source)
+        except Exception as exc:
+            self._cleanup_helpers(ident)
+            raise RuntimeError(str(exc)) from exc
+
+        try:
+            atv = await self._connect(ident)
+        except Exception as exc:
+            self._cleanup_helpers(ident)
+            raise RuntimeError(f"Could not connect to HomePod: {exc}") from exc
+
+        if not hasattr(atv, "stream") or atv.stream is None:
             try:
-                # pyatv volume is often 0.0–100.0
-                await atv.audio.set_volume(float(max(0, min(100, volume))))
-            except Exception as exc:
-                log(f"volume set failed for {ident}: {exc}")
+                atv.close()
+            except Exception:
+                pass
+            self._cleanup_helpers(ident)
+            raise RuntimeError("HomePod connection has no audio stream interface (RAOP)")
+
+        error_box: dict[str, Any] = {"error": None}
 
         async def _play() -> None:
             try:
-                await atv.stream.stream_file(source)
+                # Set volume once connected, then again shortly after play starts —
+                # some firmwares ignore the first set or start muted.
+                if volume is not None and hasattr(atv, "audio") and atv.audio is not None:
+                    try:
+                        await atv.audio.set_volume(float(max(0, min(100, volume))))
+                    except Exception as exc:
+                        log(f"volume set (pre) failed for {ident}: {exc}")
+
+                async def _bump_volume() -> None:
+                    if volume is None or not hasattr(atv, "audio") or atv.audio is None:
+                        return
+                    try:
+                        await asyncio.sleep(0.4)
+                        await atv.audio.set_volume(float(max(0, min(100, volume))))
+                    except Exception as exc:
+                        log(f"volume set (post) failed for {ident}: {exc}")
+
+                asyncio.create_task(_bump_volume())
+                log(f"stream_file start id={ident} source={playable} (from {source})")
+                await atv.stream.stream_file(playable)
+                log(f"stream_file finished id={ident}")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                log(f"stream ended with error for {ident}: {exc}")
+                error_box["error"] = str(exc)
+                log(f"stream ended with error for {ident}: {exc}\n{traceback.format_exc()}")
             finally:
                 try:
                     atv.close()
                 except Exception:
                     pass
+                self._cleanup_helpers(ident)
                 with self._lock:
                     cur = self._streams.get(ident)
                     if cur and cur.get("task") is asyncio.current_task():
@@ -482,11 +689,29 @@ class HomepodRuntime:
             self._streams[ident] = {
                 "task": task,
                 "atv": atv,
-                "source": source,
+                "source": playable,
+                "orig_source": source,
                 "started_at": time.time(),
                 "volume": volume,
             }
-        return {"ok": True, "id": ident, "playing": True, "source": source}
+        # Catch immediate *failures* (bad format, auth) — not successful short clips.
+        await asyncio.sleep(1.0)
+        if task.done():
+            with self._lock:
+                self._streams.pop(ident, None)
+            err = error_box.get("error")
+            if err:
+                self._cleanup_helpers(ident)
+                raise RuntimeError(err)
+            # Clip finished cleanly inside the grace window (short announcement).
+            return {
+                "ok": True,
+                "id": ident,
+                "playing": False,
+                "finished": True,
+                "source": playable,
+            }
+        return {"ok": True, "id": ident, "playing": True, "source": playable}
 
     async def stop(self, ident: str | None = None) -> dict[str, Any]:
         with self._lock:
@@ -497,6 +722,7 @@ class HomepodRuntime:
         stopped: list[str] = []
         for key, state in items:
             if not state:
+                self._cleanup_helpers(key)
                 continue
             task = state.get("task")
             atv = state.get("atv")
@@ -511,9 +737,14 @@ class HomepodRuntime:
                     atv.close()
                 except Exception:
                     pass
+            self._cleanup_helpers(key)
             with self._lock:
                 self._streams.pop(key, None)
             stopped.append(key)
+        if ident is None:
+            # Belt-and-braces: clear any orphan remux processes.
+            for key in list(self._remux.keys()):
+                self._cleanup_helpers(key)
         return {"ok": True, "stopped": stopped}
 
     async def set_volume(self, ident: str | None, volume: int) -> dict[str, Any]:

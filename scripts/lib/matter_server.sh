@@ -306,7 +306,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   if [[ -n "${1:-}" && -d "${1}/scripts" ]]; then
     ROOT="$1"
     cmd="${2:-}"
-  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" ]]; then
+  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" ]]; then
     cmd="$1"
     if [[ -n "${YARBO_ROOT:-}" && -d "${YARBO_ROOT}/scripts" ]]; then
       ROOT="$YARBO_ROOT"
@@ -330,8 +330,16 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     yarbo_install_airplay_deps
     exit $?
   fi
+  if [[ "$cmd" == "airplay-quiesce" ]]; then
+    # Start Avahi + stop/mask packaged shairport-sync (no apt). Used by Start AirPlay.
+    yarbo_matter_install_wrapper
+    # shellcheck source=scripts/lib/panel_airplay.sh
+    source "${ROOT}/scripts/lib/panel_airplay.sh"
+    yarbo_airplay_quiesce_as_root
+    exit $?
+  fi
   # Always refresh the root helper even when Matter is already up, so new
-  # subcommands (airplay-deps) land before the next update step uses them.
+  # subcommands (airplay-deps / airplay-quiesce) land before the next update step uses them.
   cd "$ROOT"
   yarbo_matter_install_wrapper
   yarbo_matter_setup

@@ -295,6 +295,7 @@ final class YarboPanelAirPlay
         $installed = $this->binaryInstalled('shairport-sync');
         $nqptp = $this->binaryInstalled('nqptp');
         $running = $this->receiverRunning();
+        $avahi = $this->avahiRunning();
         $log = $this->logTail();
         $hooks = $this->sessionHooksAvailable();
 
@@ -302,6 +303,9 @@ final class YarboPanelAirPlay
         $message = 'AirPlay off';
         if (!$installed) {
             $message = 'shairport-sync is not installed on this panel';
+        } elseif ($running && !$avahi) {
+            $message = 'AirPlay is running as ' . $cfg['name']
+                . ' but avahi-daemon is off — iPhones will not see it. Update the panel or start Avahi.';
         } elseif ($present) {
             $who = $session['client_name'] ?: 'AirPlay device';
             $message = 'Playing from ' . $who;
@@ -317,6 +321,7 @@ final class YarboPanelAirPlay
             'ok' => true,
             'installed' => $installed,
             'nqptp' => $nqptp,
+            'avahi' => $avahi,
             'running' => $running,
             'armed' => $bridge['armed'] && $running,
             'session_active' => $present,
@@ -328,6 +333,13 @@ final class YarboPanelAirPlay
             'message' => $message,
             'log_tail' => $log,
         ];
+    }
+
+    private function avahiRunning(): bool
+    {
+        $out = trim((string) shell_exec('pgrep -x avahi-daemon 2>/dev/null | head -n1'));
+
+        return $out !== '' && ctype_digit($out);
     }
 
     /**
