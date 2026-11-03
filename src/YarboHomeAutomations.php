@@ -1899,6 +1899,14 @@ final class YarboHomeAutomations
                 $out['within_sec'] = max(1, min(604800, $within));
             }
         }
+        // Optional quiet window for no_motion: true when not detecting and last
+        // motion_at is at least for_sec ago. 0 / omitted = live state only.
+        if ($state === 'no_motion' && isset($cond['for_sec'])) {
+            $for = (int) $cond['for_sec'];
+            if ($for > 0) {
+                $out['for_sec'] = max(1, min(604800, $for));
+            }
+        }
 
         return $out;
     }
@@ -2482,13 +2490,14 @@ final class YarboHomeAutomations
                 }
                 $want = (string) ($cond['state'] ?? '');
                 $within = (int) ($cond['within_sec'] ?? 0);
+                $for = (int) ($cond['for_sec'] ?? 0);
                 $ok = match ($want) {
                     'on' => $row['on'] === true,
                     'off' => $row['on'] === false,
                     'open' => $row['open'] === true,
                     'closed' => $row['open'] === false,
                     'motion' => $this->deviceMotionWithin($row, $within, $now),
-                    'no_motion' => $row['motion'] === false,
+                    'no_motion' => $this->deviceNoMotionFor($row, $for, $now),
                     default => false,
                 };
                 if (!$ok) {
@@ -2519,6 +2528,27 @@ final class YarboHomeAutomations
         }
 
         return ($now - $at) <= $withinSec;
+    }
+
+    /**
+     * Live no-motion, or last motion_at at least for_sec ago (and not detecting now).
+     *
+     * @param array<string, mixed> $row
+     */
+    private function deviceNoMotionFor(array $row, int $forSec, int $now): bool
+    {
+        if ($row['motion'] !== false) {
+            return false;
+        }
+        if ($forSec <= 0) {
+            return true;
+        }
+        $at = (int) ($row['motion_at'] ?? 0);
+        if ($at <= 0) {
+            return false;
+        }
+
+        return ($now - $at) >= $forSec;
     }
 
     /**

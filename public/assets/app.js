@@ -7518,6 +7518,9 @@ function homeAutoClampDraft() {
         if (cond.state !== 'motion') {
             delete cond.within_sec;
         }
+        if (cond.state !== 'no_motion') {
+            delete cond.for_sec;
+        }
     });
 }
 
@@ -7804,6 +7807,24 @@ function homeAutoIfChipHtml(cond, index) {
             </select>
         </span>`
         : '';
+    const forSec = Number(cond.for_sec || 0);
+    const useFor = state === 'no_motion' && forSec > 0;
+    const forMode = state === 'no_motion'
+        ? `<select data-auto-if-for-mode aria-label="No motion when">
+            <option value="now" ${!useFor ? 'selected' : ''}>now</option>
+            <option value="for" ${useFor ? 'selected' : ''}>for</option>
+        </select>`
+        : '';
+    const forParts = homeAutoDurationParts(useFor ? forSec : 3600);
+    const forDur = state === 'no_motion'
+        ? `<span class="auto-if-for" ${useFor ? '' : 'hidden'}>
+            <input type="number" min="1" data-auto-if-for value="${forParts.value}" aria-label="No motion for amount">
+            <select data-auto-if-for-unit aria-label="No motion for unit">
+                <option value="60" ${forParts.unit === 60 ? 'selected' : ''}>min</option>
+                <option value="3600" ${forParts.unit === 3600 || forParts.unit === 1 ? 'selected' : ''}>hr</option>
+            </select>
+        </span>`
+        : '';
     return `<div class="auto-chip auto-chip--if-device" data-auto-if-i="${index}">
         <input type="search" class="auto-if-device-filter" data-auto-if-filter="${index}" placeholder="Search devices" value="${escapeHtml(query)}" autocomplete="off" aria-label="Search devices">
         <select data-auto-if-id>${opts}</select>
@@ -7815,6 +7836,8 @@ function homeAutoIfChipHtml(cond, index) {
         </select>
         ${withinMode}
         ${withinDur}
+        ${forMode}
+        ${forDur}
         <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
     </div>`;
 }
@@ -7836,6 +7859,25 @@ function homeAutoApplyIfWithin(cond, chip) {
     const within = homeAutoReadIfWithin(chip);
     if (within > 0) cond.within_sec = within;
     else delete cond.within_sec;
+}
+
+function homeAutoReadIfFor(chip) {
+    const mode = chip?.querySelector('[data-auto-if-for-mode]')?.value || 'now';
+    if (mode !== 'for') return 0;
+    const value = Number(chip?.querySelector('[data-auto-if-for]')?.value || 1);
+    const unit = Number(chip?.querySelector('[data-auto-if-for-unit]')?.value || 3600);
+    return Math.max(1, Math.min(604800, Math.round(value * unit)));
+}
+
+function homeAutoApplyIfFor(cond, chip) {
+    if (!cond || cond.type !== 'device') return;
+    if (cond.state !== 'no_motion') {
+        delete cond.for_sec;
+        return;
+    }
+    const forSec = homeAutoReadIfFor(chip);
+    if (forSec > 0) cond.for_sec = forSec;
+    else delete cond.for_sec;
 }
 
 function homeAutoIfDeviceSelectGroupsFiltered(devices, selectedId, query) {
@@ -8597,6 +8639,7 @@ async function homeAutoSave() {
     (autoDraft.conditions || []).forEach((cond, i) => {
         const chip = document.querySelector(`#home-automations-editor [data-auto-if-i="${i}"]`);
         homeAutoApplyIfWithin(cond, chip);
+        homeAutoApplyIfFor(cond, chip);
     });
     autoDraft.hold_sec = Math.max(0, Number(document.getElementById('auto-hold-sec')?.value || autoDraft.hold_sec || 0));
     if (homeAutoUsesSun() && homeAutoSunNeedsCoords()) {
@@ -9006,6 +9049,9 @@ function bindHomeAutomations() {
                 if (autoDraft.conditions[i].state !== 'motion') {
                     delete autoDraft.conditions[i].within_sec;
                 }
+                if (autoDraft.conditions[i].state !== 'no_motion') {
+                    delete autoDraft.conditions[i].for_sec;
+                }
             }
         }
         if (event.target.matches('[data-auto-if-state]')) {
@@ -9014,6 +9060,9 @@ function bindHomeAutomations() {
                 autoDraft.conditions[i].state = event.target.value;
                 if (event.target.value !== 'motion') {
                     delete autoDraft.conditions[i].within_sec;
+                }
+                if (event.target.value !== 'no_motion') {
+                    delete autoDraft.conditions[i].for_sec;
                 }
             }
         }
@@ -9034,12 +9083,29 @@ function bindHomeAutomations() {
             const i = Number(chip?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) homeAutoApplyIfWithin(autoDraft.conditions[i], chip);
         }
-        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive], [data-auto-if-within-mode], [data-auto-if-within], [data-auto-if-within-unit]')) {
+        if (event.target.matches('[data-auto-if-for-mode]')) {
+            const chip = event.target.closest('[data-auto-if-i]');
+            const i = Number(chip?.getAttribute('data-auto-if-i') || 0);
+            const cond = autoDraft.conditions[i];
+            if (cond) {
+                if (event.target.value === 'for') {
+                    cond.for_sec = homeAutoReadIfFor(chip) || 3600;
+                } else {
+                    delete cond.for_sec;
+                }
+            }
+        }
+        if (event.target.matches('[data-auto-if-for], [data-auto-if-for-unit]')) {
+            const chip = event.target.closest('[data-auto-if-i]');
+            const i = Number(chip?.getAttribute('data-auto-if-i') || 0);
+            if (autoDraft.conditions[i]) homeAutoApplyIfFor(autoDraft.conditions[i], chip);
+        }
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive], [data-auto-if-within-mode], [data-auto-if-within], [data-auto-if-within-unit], [data-auto-if-for-mode], [data-auto-if-for], [data-auto-if-for-unit]')) {
             homeAutoFollowName();
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-state], [data-auto-if-within-mode], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-state], [data-auto-if-within-mode], [data-auto-if-for-mode], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');

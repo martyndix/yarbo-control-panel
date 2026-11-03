@@ -770,7 +770,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </section>
                     <details class="auto-if auto-drop" id="auto-if" data-auto-zone="if">
                         <summary>Only if…</summary>
-                        <p class="hint">Optional. All of these must be true when the When fires. Motion can be <strong>now</strong> or <strong>within last</strong> N minutes/hours.</p>
+                        <p class="hint">Optional. All of these must be true when the When fires. Motion can be <strong>now</strong> or <strong>within last</strong> N minutes/hours. No motion can be <strong>now</strong> or <strong>for</strong> N minutes/hours (quiet since last motion).</p>
                         <div id="auto-if-chips" class="auto-drop-chips"></div>
                         <div class="auto-if-add">
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="window">Time window</button>
