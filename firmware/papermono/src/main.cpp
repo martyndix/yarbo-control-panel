@@ -1807,7 +1807,8 @@ void drawHealthPage(bool forceFull)
 
 int plansRowY0()
 {
-    return 150;
+    // Leave room under the header for BACK + plan activity.
+    return 160;
 }
 
 int plansRowH()
@@ -2452,13 +2453,21 @@ void drawPlansPage(bool forceFull)
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
+    drawButton(16, 108, 120, 42, "BACK", false);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.setTextDatum(ML_DATUM);
     M5.Display.setTextSize(2);
-    M5.Display.drawString(planActivity.length() ? planActivity : "idle", 16, 108);
+    String activity = planActivity.length() ? planActivity : String("idle");
+    if (activity.length() > 18) {
+        activity = activity.substring(0, 18);
+    }
+    M5.Display.drawString(activity, 150, 128);
+    M5.Display.setTextDatum(TL_DATUM);
     if (plansNote.length() && planCount == 0) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString(plansNote.substring(0, 22), 16, 180);
+        M5.Display.drawString(plansNote.substring(0, 22), 16, 190);
         if (plansNote.length() > 22) {
-            M5.Display.drawString(plansNote.substring(22, 44), 16, 214);
+            M5.Display.drawString(plansNote.substring(22, 44), 16, 224);
         }
     }
 
@@ -2493,6 +2502,8 @@ void drawPlansPage(bool forceFull)
     drawButton(16, startY, bw, 72, "START", canStart);
     if (planCount > PAPERMONO_PLAN_VISIBLE) {
         drawButton(16 + bw + gap, startY, bw, 72, "MORE", false);
+    } else {
+        drawButton(16 + bw + gap, startY, bw, 72, "BACK", false);
     }
     drawPager();
     finishEpdFrame();
@@ -5136,6 +5147,10 @@ void handleNoteTouch(int x, int y)
 
 void handlePlansTouch(int x, int y)
 {
+    if (x >= 16 && x <= 136 && y >= 108 && y <= 150) {
+        showPage(PAPERMONO_PAGE_HOME, false);
+        return;
+    }
     int y0 = plansRowY0();
     int rh = plansRowH();
     int startY = plansStartY();
@@ -5157,7 +5172,9 @@ void handlePlansTouch(int x, int y)
                 planOffset = 0;
             }
             drawScreen(false);
+            return;
         }
+        showPage(PAPERMONO_PAGE_HOME, false);
         return;
     }
     if (y >= y0 && y < startY) {
