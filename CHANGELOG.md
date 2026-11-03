@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.202] - 2026-11-03
+
+### Fixed
+- **Replacement Yarbo / MQTT not connected:** the MQTT agent only read Broker IP and serial at process start, so after you entered a new robot’s details, Controller On still talked to the old broker. Settings Save now restarts the agent when IP or serial change, and Controller / Dock / lights retry once with a reconnect if MQTT is down.
+
 ## [4.0.201] - 2026-11-03
 
 ### Fixed

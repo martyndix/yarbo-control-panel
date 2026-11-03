@@ -644,7 +644,13 @@ async def handle_request(
         }
 
     if not getattr(client, "is_connected", False):
-        return {"ok": False, "error": "MQTT not connected"}
+        return {
+            "ok": False,
+            "error": (
+                "MQTT not connected. Check Broker IP and serial in Settings → Yarbo, "
+                "then Save (that restarts the MQTT agent for a new robot)."
+            ),
+        }
 
     try:
         if op == "telemetry":

@@ -73,17 +73,47 @@ if (!isset($ACTIONS[$action])) {
 
 $def = $ACTIONS[$action];
 
-try {
+/**
+ * After a robot swap, the agent may still be bound to the old IP/serial until
+ * Settings Save restarts it. One reconnect retry covers that case.
+ *
+ * @param callable(YarboMqttAgentClient): array<string, mixed> $fn
+ * @return array{0: YarboMqttAgentClient, 1: array<string, mixed>}
+ */
+$runWithMqttRetry = static function (callable $fn): array {
     $agent = YarboMqttAgentClient::requireRunning();
+    $result = $fn($agent);
+    if (($result['ok'] ?? false)) {
+        return [$agent, $result];
+    }
+    $error = strtolower((string) ($result['error'] ?? ''));
+    if (!str_contains($error, 'mqtt not connected') && !str_contains($error, 'mqtt connect failed')) {
+        return [$agent, $result];
+    }
+    // Re-read config.php (new broker/serial) and try once more.
+    if (!$agent->restart(true)) {
+        return [$agent, $result];
+    }
+    $agent = YarboMqttAgentClient::requireRunning();
+    $retry = $fn($agent);
+    if (!($retry['ok'] ?? false) && ($retry['error'] ?? '') === '') {
+        $retry['error'] = (string) ($result['error'] ?? 'MQTT not connected');
+    }
+    $retry['mqtt_agent_restarted'] = true;
 
+    return [$agent, $retry];
+};
+
+try {
     if (($def['kind'] ?? '') === 'controller') {
         $on = (bool) ($def['controller'] ?? false);
-        $result = $agent->controller($on);
+        [, $result] = $runWithMqttRetry(static fn (YarboMqttAgentClient $agent): array => $agent->controller($on));
         if (!($result['ok'] ?? false)) {
             json_response([
                 'ok' => false,
                 'error' => (string) ($result['error'] ?? 'Controller command failed'),
                 'via' => 'agent',
+                'mqtt_agent_restarted' => (bool) ($result['mqtt_agent_restarted'] ?? false),
             ], 500);
         }
 
@@ -99,11 +129,12 @@ try {
             'working_state' => $result['working_state'] ?? null,
             'ack_msg' => $result['ack_msg'] ?? null,
             'warning' => $result['warning'] ?? null,
+            'mqtt_agent_restarted' => (bool) ($result['mqtt_agent_restarted'] ?? false),
         ]);
     }
 
     if (($def['kind'] ?? '') === 'buzzer') {
-        $result = $agent->buzzer();
+        [, $result] = $runWithMqttRetry(static fn (YarboMqttAgentClient $agent): array => $agent->buzzer());
         if (!($result['ok'] ?? false)) {
             json_response([
                 'ok' => false,
@@ -124,7 +155,7 @@ try {
 
     if (($def['kind'] ?? '') === 'lights') {
         $on = (bool) ($def['lights'] ?? false);
-        $result = $agent->lights($on);
+        [, $result] = $runWithMqttRetry(static fn (YarboMqttAgentClient $agent): array => $agent->lights($on));
         if (!($result['ok'] ?? false)) {
             json_response([
                 'ok' => false,
@@ -146,7 +177,7 @@ try {
     }
 
     if (($def['kind'] ?? '') === 'stop') {
-        $result = $agent->stop();
+        [, $result] = $runWithMqttRetry(static fn (YarboMqttAgentClient $agent): array => $agent->stop());
         if (!($result['ok'] ?? false)) {
             json_response([
                 'ok' => false,
@@ -167,7 +198,7 @@ try {
     }
 
     if (($def['kind'] ?? '') === 'return_to_dock') {
-        $result = $agent->returnToDock();
+        [, $result] = $runWithMqttRetry(static fn (YarboMqttAgentClient $agent): array => $agent->returnToDock());
         if (!($result['ok'] ?? false)) {
             json_response([
                 'ok' => false,
@@ -188,7 +219,9 @@ try {
     }
 
     $variants = ($def['variants'] ?? static fn (): array => [])();
-    $result = $agent->publishVariants($variants, 'work');
+    [, $result] = $runWithMqttRetry(
+        static fn (YarboMqttAgentClient $agent): array => $agent->publishVariants($variants, 'work')
+    );
     if (!($result['ok'] ?? false)) {
         json_response([
             'ok' => false,

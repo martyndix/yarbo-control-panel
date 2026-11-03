@@ -937,6 +937,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     spellcheck="false"
                                 >
                             </label>
+                            <p class="hint">After you change the IP or serial (for example a replacement robot), Save restarts the MQTT agent so Controller On talks to the new Yarbo.</p>
                             <label class="settings-field">
                                 <span class="label">Yarbo name</span>
                                 <input

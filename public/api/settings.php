@@ -9,6 +9,7 @@ use Yarbo\YarboCloudSettings;
 use Yarbo\YarboConfig;
 use Yarbo\YarboHub;
 use Yarbo\YarboLymow;
+use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboPowerwall;
 use Yarbo\YarboRainSettings;
 use Yarbo\YarboUnifi;
@@ -74,6 +75,9 @@ $input['modules'] = $modules;
 
 $host = trim((string) ($input['broker_host'] ?? $input['host'] ?? ''));
 $serial = trim((string) ($input['serial'] ?? ''));
+$prevHost = trim((string) ($config['broker_host'] ?? ''));
+$prevSerial = trim((string) ($config['serial'] ?? ''));
+$brokerChanged = false;
 
 if ($yarboOn) {
     if ($host === '') {
@@ -86,6 +90,7 @@ if ($yarboOn) {
         json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address'], 400);
     }
 
+    $brokerChanged = ($host !== $prevHost || $serial !== $prevSerial);
     if (!YarboConfig::applySettings($configPath, [
         'broker_host' => $host,
         'serial' => $serial,
@@ -99,14 +104,17 @@ if ($yarboOn) {
     if ($host !== '' && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
         json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address'], 400);
     }
-    if ($host !== '' && $serial !== '' && !YarboConfig::applySettings($configPath, [
-        'broker_host' => $host,
-        'serial' => $serial,
-    ])) {
-        json_response([
-            'ok' => false,
-            'error' => 'Could not write config.php. Check file permissions on the server.',
-        ], 500);
+    if ($host !== '' && $serial !== '') {
+        $brokerChanged = ($host !== $prevHost || $serial !== $prevSerial);
+        if (!YarboConfig::applySettings($configPath, [
+            'broker_host' => $host,
+            'serial' => $serial,
+        ])) {
+            json_response([
+                'ok' => false,
+                'error' => 'Could not write config.php. Check file permissions on the server.',
+            ], 500);
+        }
     }
 }
 
@@ -166,6 +174,18 @@ if ($serial !== '' && !$robotName->saveFromInput($input, $serial)) {
     ], 500);
 }
 
+// Agent loads broker IP / serial only at process start. Restart it when those change
+// so a replacement Yarbo (new IP/SN) is used immediately — otherwise Controller On
+// keeps talking to the old robot and returns "MQTT not connected".
+$mqttAgentRestarted = false;
+if ($brokerChanged) {
+    try {
+        $mqttAgentRestarted = YarboMqttAgentClient::fromEnv()->restart();
+    } catch (Throwable) {
+        $mqttAgentRestarted = false;
+    }
+}
+
 // Skip cloud->status() on save — that spawns Python and can block the single-threaded
 // php -S server. The client already has status from load; Test cloud connection refreshes it.
 json_response([
@@ -173,6 +193,7 @@ json_response([
     'broker_host' => $host,
     'serial' => $serial,
     'robot_name' => $robotName->settingsName($serial),
+    'mqtt_agent_restarted' => $mqttAgentRestarted,
     'cloud' => $cloudSettings->publicView(),
     'vestaboard' => $vestaboard->publicView(),
     'hub' => $hub->publicView(),

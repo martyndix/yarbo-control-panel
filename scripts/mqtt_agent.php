@@ -475,6 +475,7 @@ function handle_request(
     }
 
     $connected = ensure_connected($mqtt, $loopStartedAt, $host, $port, $serial, $lastRaw, $state);
+    // Note: host/serial are fixed at process start — Settings Save restarts this agent.
     if (!($connected['ok'] ?? false)) {
         return $connected;
     }
