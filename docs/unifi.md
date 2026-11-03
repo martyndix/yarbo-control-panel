@@ -95,6 +95,26 @@ Open UDP **319/320** (PTP) and allow mDNS (UDP **5353**) if you use a firewall. 
 
 Mic hold-to-record needs a **secure context** (`https://<panel-ip>:8443`, self-signed — accept once). The panel watches :8443 and restarts the TLS proxy if it dies while HTTP :8080 is still up; Settings → Panel updates → **Start HTTPS** forces a refresh. Paper tablets keep `http://<panel-ip>:8080`. Set `YARBO_PANEL_HTTPS=0` to disable the proxy.
 
+## Pi too slow / cannot update
+
+Huge `data/panel-airplay.log` / `data/homepod-agent.log` can stall the Pi (I/O + `Argument list too long`). Reboot for a short window, then free disk I/O **without** wiping lights or settings:
+
+```bash
+cd /home/admin/yarbo   # your panel path
+# Immediate (works on older builds — does not delete home.json / UniFi / Matter):
+pkill -x shairport-sync 2>/dev/null || true
+pkill -x nqptp 2>/dev/null || true
+pkill -f '[p]anel_airplay_' 2>/dev/null || true
+pkill -f '[f]fmpeg.*(airplay|live\.mp3|unifi-radio|homepod)' 2>/dev/null || true
+: > data/panel-airplay.log
+: > data/homepod-agent.log
+find data -type f -name '*.log' -size +64k -exec truncate -s 0 {} \;
+./scripts/update.sh
+sudo systemctl restart yarbo-panel
+```
+
+From **4.0.196**, the same path is `bash scripts/panel_recover_speed.sh` (or `--update` to pull + restart). It runs automatically on panel start and at the beginning of Updates. It only trims `*.log`, stops AirPlay/ffmpeg helpers, and clears stuck Playing — `data/home.json`, Matter, UniFi, HomePod pairing, scenes, and automations stay on disk.
+
 ## Rollback
 
 - **Radio Player only:** Settings → UniFi → untick **Show Radio Player in the header** (stops playback and hides the button). Station list stays in `data/unifi-radio-stations.json`.

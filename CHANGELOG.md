@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.196] - 2026-11-03
+
+### Fixed
+- **Pi too slow to update:** `scripts/panel_recover_speed.sh` trims fat AirPlay/HomePod logs, stops stale AirPlay/ffmpeg helpers, and clears stuck Playing — without touching lights, Home devices, or settings. Runs automatically on panel start and at the beginning of Updates. If the UI cannot update, SSH: `cd /home/admin/yarbo && bash scripts/panel_recover_speed.sh --update`.
+
 ## [4.0.195] - 2026-11-03
 
 ### Fixed

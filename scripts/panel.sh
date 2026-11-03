@@ -24,6 +24,13 @@ if [[ -z "$PHP_BIN" ]]; then
   exit 1
 fi
 
+# Free a Pi that stalled on huge AirPlay/HomePod logs before anything else starts.
+# Safe for settings (home.json, Matter, UniFi, etc. are not touched).
+if [[ -f "${ROOT}/scripts/panel_recover_speed.sh" ]]; then
+  echo "==> Speed recovery (trim logs / stop stale AirPlay helpers)"
+  bash "${ROOT}/scripts/panel_recover_speed.sh" >/dev/null 2>&1 || true
+fi
+
 cleanup() {
   if [[ -n "${HTTPS_WATCH_PID:-}" ]]; then
     kill "${HTTPS_WATCH_PID}" 2>/dev/null || true

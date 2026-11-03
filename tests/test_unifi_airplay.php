@@ -111,6 +111,8 @@ assert_true(str_contains($change, '## [4.0.192]'), 'changelog 4.0.192');
 assert_true(str_contains($change, '## [4.0.193]'), 'changelog 4.0.193');
 assert_true(str_contains($change, '## [4.0.194]'), 'changelog 4.0.194');
 assert_true(str_contains($change, '## [4.0.195]'), 'changelog 4.0.195');
+assert_true(str_contains($change, '## [4.0.196]'), 'changelog 4.0.196');
+assert_true(is_file(dirname(__DIR__) . '/scripts/panel_recover_speed.sh'), 'recover speed script');
 assert_true(str_contains($js, 'nqptp'), 'JS surfaces missing nqptp hint');
 assert_true(str_contains($ensureSh, 'shairport-sync'), 'ensure script mentions shairport');
 assert_true(str_contains($ensureSh, 'yarbo_try_install_airplay_deps'), 'ensure tries auto apt install');

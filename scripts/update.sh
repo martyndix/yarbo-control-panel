@@ -34,6 +34,11 @@ for arg in "$@"; do
   esac
 done
 
+# Trim fat AirPlay logs / stuck player state before git work so a stalled Pi can update.
+if [[ -f "${ROOT}/scripts/panel_recover_speed.sh" ]]; then
+  bash "${ROOT}/scripts/panel_recover_speed.sh" >/dev/null 2>&1 || true
+fi
+
 write_status() {
   local state="$1"
   local message="${2:-}"

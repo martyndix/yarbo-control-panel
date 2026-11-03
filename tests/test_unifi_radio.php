@@ -314,6 +314,7 @@ assert_true(str_contains($change, '## [4.0.192]'), 'changelog 4.0.192');
 assert_true(str_contains($change, '## [4.0.193]'), 'changelog 4.0.193');
 assert_true(str_contains($change, '## [4.0.194]'), 'changelog 4.0.194');
 assert_true(str_contains($change, '## [4.0.195]'), 'changelog 4.0.195');
+assert_true(str_contains($change, '## [4.0.196]'), 'changelog 4.0.196');
 assert_true(str_contains($php, "stationIdNow === 'announce'") || str_contains($php, "=== 'announce' && \$homepodAlive"), 'announce missing ends_at bounded');
 assert_true(str_contains($change, 'HomePod'), 'changelog mentions HomePod');
 assert_true(str_contains($change, 'pyatv'), 'changelog mentions pyatv install');
