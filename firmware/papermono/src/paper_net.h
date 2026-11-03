@@ -106,7 +106,9 @@ inline bool paperNetBeginBase(HTTPClient &http, const String &base, const String
 inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs = 8000)
 {
     usingRemote = false;
-    int lanMs = remoteUrl.length() ? 2000 : remoteMs;
+    // On home Wi-Fi (paperNetLanReachable) use the full budget. A 2s LAN cut-off
+    // made compact fail over to Funnel mid-request and show HTTP 502 on Vestaboard.
+    int lanMs = remoteMs;
     if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
         http.addHeader("X-PaperMono-Token", token);
         int code = http.GET();
@@ -132,7 +134,7 @@ inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs =
 inline int paperNetPost(HTTPClient &http, const String &pathQuery, const String &payload, int remoteMs = 8000)
 {
     usingRemote = false;
-    int lanMs = remoteUrl.length() ? 2000 : remoteMs;
+    int lanMs = remoteMs;
     if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
         http.addHeader("Content-Type", "application/json");
         http.addHeader("X-PaperMono-Token", token);

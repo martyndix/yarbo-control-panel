@@ -48,6 +48,14 @@ final class YarboHome
     /** @var array{via: string, name: string}|null */
     private ?array $commandTrigger = null;
 
+    /**
+     * One Matter states() snapshot per YarboHome instance so PaperMono compact
+     * (HOUSE + vacuums + ACCESS + HEAT) does not wait 2.5s four times.
+     *
+     * @var array{ok: bool, error: string, devices: list<array<string, mixed>>, fabric: array<string, mixed>}|null
+     */
+    private ?array $devicesLiveCache = null;
+
     public function __construct(private readonly string $projectRoot)
     {
     }
@@ -2784,17 +2792,20 @@ final class YarboHome
      */
     private function devicesWithLiveState(): array
     {
+        if ($this->devicesLiveCache !== null) {
+            return $this->devicesLiveCache;
+        }
         $local = $this->localHomeDevices();
         $states = $this->agentDeviceStates();
         // Empty live state must not overwrite the On/Off cache (stale agent / listen still starting).
         if ($states === []) {
-            return $local;
+            return $this->devicesLiveCache = $local;
         }
         $devices = self::overlayDeviceStates($local['devices'], $states);
         $this->writeDeviceCache($this->projectRoot . '/data/home-nodes-cache.json', $devices);
         $local['devices'] = $devices;
 
-        return $local;
+        return $this->devicesLiveCache = $local;
     }
 
     /**

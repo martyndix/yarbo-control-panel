@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.72';
+    public const FIRMWARE_VERSION = '0.1.73';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.26-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -974,7 +974,8 @@ final class YarboPaperDevice
             ];
         }
         $agent = YarboMqttAgentClient::fromEnv();
-        $result = $agent->telemetry(4.0, false);
+        // Prefer cached last_raw so companion + Vestaboard fit the tablet HTTP budget.
+        $result = $agent->telemetry(2.0, false, true);
         $raw = $result['raw'] ?? null;
         if (!($result['ok'] ?? false) || !is_array($raw) || $raw === []) {
             $mqttError = trim((string) ($result['error'] ?? 'MQTT not connected'));
@@ -1061,7 +1062,8 @@ final class YarboPaperDevice
     private function companionCompact(?array $parsed = null, bool $online = false, ?array $forDevice = null): array
     {
         $hub = new YarboHub($this->projectRoot);
-        $pw = (new YarboPowerwall($this->projectRoot))->dashboardPayload();
+        // Cache only — never refresh Powerwall on the PaperMono hot path.
+        $pw = (new YarboPowerwall($this->projectRoot))->dashboardPayload(false);
         $ly = (new YarboLymow($this->projectRoot))->dashboardPayload();
         $vbObj = new YarboVestaboard($this->projectRoot);
         $vb = $vbObj->load();
@@ -1071,10 +1073,11 @@ final class YarboPaperDevice
         $homeEnabled = $hub->enabled(YarboHub::MODULE_HOME);
         $home = new YarboHome($this->projectRoot);
         $homeItems = [];
+        $tabletId = is_array($forDevice) ? (string) ($forDevice['id'] ?? '') : '';
         if ($homeEnabled) {
-            $tabletId = is_array($forDevice) ? (string) ($forDevice['id'] ?? '') : '';
             $homeItems = $home->paperItems($tabletId);
         }
+        // paperRobotVacuums / access / heat reuse one devicesWithLiveState() cache on $home.
         $vacuums = $home->paperRobotVacuums();
         $accessItems = $homeEnabled ? $home->paperAccessItems() : [];
         $heatItems = $homeEnabled ? $home->paperHeatItems() : [];

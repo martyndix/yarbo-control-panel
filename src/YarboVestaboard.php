@@ -1039,15 +1039,17 @@ final class YarboVestaboard
         if ($paused) {
             return $this->packPaused($batteryLine, $batteryColor);
         }
-        if ($charging && $chargingLabel !== 'Full') {
-            return $this->pack('CHARGING', $batteryLine, 'ON DOCK', $batteryColor);
-        }
-        if ($planRunning && $chargingLabel === 'No') {
+        // Work plan (incl. heading to the start point) before pad/charge so a
+        // leftover charging_status cannot paint IDLE/CHARGING over MOWING.
+        if ($planRunning) {
             $verb = $this->workingVerb($headName);
             $accent = $verb === 'MOWING' ? self::COLOR_GREEN : 0;
             $line3 = $this->planCompleteLine($parsed) ?? $this->headLine($headName);
 
             return $this->pack($verb, $batteryLine, $line3, $batteryColor, $accent);
+        }
+        if ($charging && $chargingLabel !== 'Full') {
+            return $this->pack('CHARGING', $batteryLine, 'ON DOCK', $batteryColor);
         }
         if ($chargingLabel === 'Full') {
             return $this->pack('IDLE', $this->batteryLine($parsed), 'CHARGED', $batteryColor);

@@ -84,7 +84,10 @@ final class YarboTelemetry
             ? 100
             : $batteryInt;
         $planningPaused = self::isPausedFlag($stateMsg['planning_paused'] ?? 0);
-        $planRunning = self::isActiveJobFlag($stateMsg['on_going_planning'] ?? 0);
+        // Transit to the work area uses on_going_to_start_point; treat it as the job
+        // too so PaperMono / Vestaboard do not sit on Idle while the robot is heading out.
+        $planRunning = self::isActiveJobFlag($stateMsg['on_going_planning'] ?? 0)
+            || self::isActiveJobFlag($stateMsg['on_going_to_start_point'] ?? 0);
         $stillManeuvering = ((int) ($workingState ?? 0) === 1)
             || ($motionMotor !== null && abs((float) $motionMotor) > 0);
         $sittingHighSoc = $batteryInt !== null && $batteryInt >= 95
@@ -543,6 +546,8 @@ final class YarboTelemetry
 
     /**
      * working_state 1 is app-awake (lights, leftover after cancel), not mowing.
+     * A running / departing work plan wins over a leftover charging_status so the
+     * tablet does not say Idle while the robot is still cutting.
      * Sit Full on the pad as idle unless rain is detected.
      */
     private static function displayState(
@@ -558,10 +563,10 @@ final class YarboTelemetry
         }
 
         $offPad = $chargingLabel === 'No';
-        if ($returning && $offPad) {
+        if ($planRunning && !$paused) {
             return 'active';
         }
-        if ($planRunning && !$paused && $offPad) {
+        if ($returning && $offPad) {
             return 'active';
         }
         if ($workingState === 1 && $offPad && !$paused) {
