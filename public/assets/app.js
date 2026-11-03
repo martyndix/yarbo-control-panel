@@ -3574,7 +3574,16 @@ function renderUnifiAirplayStatus(airplay, radio = null) {
                 : 'AirPlay device');
         els.unifiAirplayStatus.textContent = `Playing from ${who}`;
     } else if (ap.armed || ap.running) {
-        els.unifiAirplayStatus.textContent = `Available as ${name} — waiting for a device`;
+        let msg = `Available as ${name} — waiting for a device`;
+        // Control Center / multi-room needs AirPlay 2 (nqptp). Classic AirPlay
+        // still works from the Music app without it.
+        if (ap.nqptp === false) {
+            msg += ' · Control Center needs nqptp (AirPlay 2) — try Music → AirPlay, or install nqptp on the Pi';
+        }
+        if (ap.avahi === false) {
+            msg += ' · avahi-daemon is off (iPhones will not see this name)';
+        }
+        els.unifiAirplayStatus.textContent = msg;
     } else if (missing) {
         els.unifiAirplayStatus.textContent = ap.error
             || 'shairport-sync not installed — tap Start AirPlay to install it';

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.194] - 2026-11-03
+
+### Fixed
+- HomePod **radio and AirPlay bridge** audio: feed stations / bridge MP3 through an ffmpeg **stdout pipe** into pyatv `stream_file` (same path announcements already used successfully). HTTP `-listen` URLs stayed silent. AirPlay status now notes when **nqptp** is missing (Control Center needs AirPlay 2; Music app AirPlay still works).
+
 ## [4.0.193] - 2026-11-03
 
 ### Fixed

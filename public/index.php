@@ -2168,7 +2168,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </div>
                     <div class="unifi-radio-airplay" aria-label="AirPlay">
                         <h3 class="settings-subtitle">AirPlay</h3>
-                        <p class="hint">Start to advertise this panel on the LAN. Pick speakers above, then choose this name in Control Center on your iPhone or Mac. Audio is bridged through Protect talkback (not native AirPlay on the readers).</p>
+                        <p class="hint">Start to advertise this panel on the LAN. Pick speakers above (Protect readers and/or HomePods), then choose this name. <strong>Music app → AirPlay</strong> works with classic shairport-sync. <strong>Control Center</strong> needs AirPlay 2 (<code>nqptp</code> on the Pi). Audio is bridged through Protect talkback and/or HomePod RAOP — not native AirPlay on the readers.</p>
                         <div class="settings-update-actions unifi-radio-airplay-actions">
                             <button type="button" class="btn" id="unifi-airplay-start">Start AirPlay</button>
                             <button type="button" class="btn btn-secondary" id="unifi-airplay-stop">Stop AirPlay</button>
