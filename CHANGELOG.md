@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.205] - 2026-11-03
+
+### Fixed
+- **PaperMono Plans has no way back:** the work-plans page now has **BACK** (top, and bottom-right when MORE is not shown) to return to Yarbo Home status. Firmware **0.1.74**.
+
 ## [4.0.204] - 2026-11-03
 
 ### Added
