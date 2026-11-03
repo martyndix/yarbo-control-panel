@@ -1025,6 +1025,90 @@ $auto->delete('a-motion-at');
 $commands = [];
 @unlink($auto->statePath());
 
+$withinSave = $auto->save([
+    'id' => 'a-motion-within',
+    'enabled' => true,
+    'name' => 'Hall motion within',
+    'trigger' => ['type' => 'time', 'at' => '12:00'],
+    'conditions' => [[
+        'type' => 'device',
+        'id' => 'unifi:sensor:s1',
+        'state' => 'motion',
+        'within_sec' => 7200,
+    ]],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($withinSave['ok']), 'save motion within: ' . json_encode($withinSave));
+assert_true(
+    (int) (($withinSave['automation']['conditions'][0]['within_sec'] ?? 0)) === 7200,
+    'within_sec persisted: ' . json_encode($withinSave['automation']['conditions'][0] ?? null)
+);
+$liveOnly = $auto->save([
+    'id' => 'a-motion-live',
+    'enabled' => true,
+    'trigger' => ['type' => 'time', 'at' => '12:00'],
+    'conditions' => [[
+        'type' => 'device',
+        'id' => 'unifi:sensor:s1',
+        'state' => 'motion',
+        'within_sec' => 0,
+    ]],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(
+    !isset($liveOnly['automation']['conditions'][0]['within_sec']),
+    'within_sec 0 is omitted: ' . json_encode($liveOnly['automation']['conditions'][0] ?? null)
+);
+$auto->delete('a-motion-live');
+
+// Force When true via time trigger at noon local — use device When instead for clearer ticks.
+$auto->delete('a-motion-within');
+$withinRule = $auto->save([
+    'id' => 'a-motion-within',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:light:porch', 'event' => 'turns_on'],
+    'conditions' => [[
+        'type' => 'device',
+        'id' => 'unifi:sensor:s1',
+        'state' => 'motion',
+        'within_sec' => 3600,
+    ]],
+    'actions' => [['kind' => 'scene', 'id' => 'sc-outdoor', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($withinRule['ok']), 'save within rule for tick');
+$tWithin = 1_830_000_000;
+$devicesWithin = static function (bool $lightOn, bool $motion, int $motionAt): array {
+    return [
+        [
+            'id' => 'unifi:sensor:s1',
+            'kind' => 'sensor',
+            'open' => false,
+            'on' => false,
+            'motion' => $motion,
+            'motion_at' => $motionAt,
+        ],
+        [
+            'id' => 'unifi:light:porch',
+            'kind' => 'light',
+            'on' => $lightOn,
+        ],
+    ];
+};
+$r = $auto->tick($devicesWithin(false, false, $tWithin - 7200), $tWithin);
+assert_true($r['fired'] === [], 'within: idle');
+$r = $auto->tick($devicesWithin(true, false, $tWithin - 7200), $tWithin + 1);
+assert_true($r['fired'] === [], 'within: light on but motion too old: ' . json_encode($r));
+$r = $auto->tick($devicesWithin(false, false, $tWithin - 600), $tWithin + 2);
+assert_true($r['fired'] === [], 'within: recent motion but When not edged');
+$r = $auto->tick($devicesWithin(true, false, $tWithin - 600), $tWithin + 3);
+assert_true($r['fired'] === ['a-motion-within'], 'within: recent motion_at passes Only if: ' . json_encode($r));
+$auto->delete('a-motion-within');
+$commands = [];
+@unlink($auto->statePath());
+
 assert_true(YarboHomeAutomations::hmInWindow('21:00', '20:00', '22:00'), 'window inside');
 assert_true(!YarboHomeAutomations::hmInWindow('19:00', '20:00', '22:00'), 'window before');
 assert_true(YarboHomeAutomations::hmInWindow('23:00', '22:00', '06:00'), 'overnight window');
@@ -1473,6 +1557,12 @@ assert_true(str_contains($js, "['pulse', 'Pulse']"), 'Pulse command');
 assert_true(str_contains($js, 'data-auto-pulse-count'), 'pulse count picker');
 assert_true(str_contains($index, 'Pulse flashes a colour'), 'Then pulse hint');
 assert_true(str_contains($js, 'homeAutoIfStateOptions'), 'only-if states');
+assert_true(str_contains($js, 'data-auto-if-within-mode'), 'Only if motion within mode');
+assert_true(str_contains($js, 'data-auto-if-within'), 'Only if motion within amount');
+assert_true(str_contains($js, 'function homeAutoReadIfWithin'), 'within reader');
+$autoPhp = (string) file_get_contents(__DIR__ . '/../src/YarboHomeAutomations.php');
+assert_true(str_contains($autoPhp, 'deviceMotionWithin'), 'within evaluator');
+assert_true(str_contains($autoPhp, "'within_sec'"), 'within_sec normalize');
 assert_true(str_contains($js, 'homeAutoThenParamsHtml'), 'Then look controls helper');
 assert_true(str_contains($js, 'data-auto-hex'), 'Then colour picker');
 assert_true(str_contains($js, 'data-auto-celsius'), 'Then heater setpoint');
@@ -1531,6 +1621,7 @@ assert_true(str_contains($index, 'data-panel-version'), 'panel version on the pa
 $matterPhp = (string) file_get_contents(__DIR__ . '/../src/YarboMatterAgentClient.php');
 assert_true(str_contains($matterPhp, 'function portOpen'), 'Matter client checks the listening port');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.204]'), 'changelog 4.0.204');
 assert_true(str_contains($change, '## [4.0.37]'), 'changelog 4.0.37');
 assert_true(str_contains($change, '## [4.0.39]'), 'changelog 4.0.39');
 assert_true(str_contains($change, '## [4.0.40]'), 'changelog 4.0.40');
