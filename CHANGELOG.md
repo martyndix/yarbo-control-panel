@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.200] - 2026-11-03
+
+### Fixed
+- **Unticking a speaker paused the others:** live `radio_targets` compared prefixed `homepod:…` ids with bare MAC ids, so every toggle looked like stop-all/start-all. Keepers now stay up; only the speakers you turn off (or on) change. Protect add/remove is surgical too.
+
 ## [4.0.199] - 2026-11-03
 
 ### Fixed

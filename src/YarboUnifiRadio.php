@@ -1443,7 +1443,59 @@ final class YarboUnifiRadio
             ];
         }
 
-        if ($stationId === 'airplay') {
+        if ($stationId === 'airplay' && $airplay->clientIsPresent()) {
+            $prefixHp = static function (array $ids): array {
+                $out = [];
+                foreach ($ids as $id) {
+                    $id = trim((string) $id);
+                    if ($id === '') {
+                        continue;
+                    }
+                    $out[] = YarboHomepod::withPrefix(YarboHomepod::stripPrefix($id));
+                }
+
+                return array_values(array_unique($out));
+            };
+            $oldHp = [];
+            if (is_array($state['homepod_targets'] ?? null)) {
+                $oldHp = $prefixHp($state['homepod_targets']);
+            }
+            $oldPr = [];
+            foreach ($state['streams'] ?? [] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $id = trim((string) ($row['camera_id'] ?? ''));
+                if ($id !== '' && $id !== 'homepod-bridge') {
+                    $oldPr[] = $id;
+                }
+            }
+            $oldPr = array_values(array_unique($oldPr));
+            $newPr = YarboHomepod::filterProtectIds($targets);
+            $newHp = $prefixHp(YarboHomepod::filterHomepodIds($targets));
+            $onlyRemoveHp = array_values(array_diff($oldHp, $newHp));
+            $onlyAddHp = array_values(array_diff($newHp, $oldHp));
+            sort($oldPr);
+            $newPrSorted = $newPr;
+            sort($newPrSorted);
+            // Removing HomePods: stop those RAOP streams only — fanout UDP can keep
+            // sending unused ports. Adding HomePods or changing Protect needs a rebuild.
+            if ($oldPr === $newPrSorted && $onlyAddHp === [] && $onlyRemoveHp !== []) {
+                YarboHomepod::fromEnv($this->projectRoot)->stop($onlyRemoveHp);
+                $kept = array_values(array_intersect($oldHp, $newHp));
+                $state = $this->loadState();
+                $state['targets'] = $targets;
+                $state['homepod_targets'] = $kept;
+                $state['volume'] = $volume;
+                $this->writeState($state);
+
+                return [
+                    'ok' => true,
+                    'error' => null,
+                    'radio' => $this->status(),
+                    'airplay' => $airplay->status(),
+                ];
+            }
             $replay = $this->playAirplay([
                 'targets' => $targets,
                 'volume' => $volume,
@@ -1459,14 +1511,24 @@ final class YarboUnifiRadio
             ];
         }
 
+        // State stores HomePods as homepod:MAC; filterHomepodIds returns bare MAC.
+        // Normalize both sides or every toggle looks like stop-all + start-all and
+        // briefly kills speakers that should keep playing.
+        $prefixHomepod = static function (array $ids): array {
+            $out = [];
+            foreach ($ids as $id) {
+                $id = trim((string) $id);
+                if ($id === '') {
+                    continue;
+                }
+                $out[] = YarboHomepod::withPrefix(YarboHomepod::stripPrefix($id));
+            }
+
+            return array_values(array_unique($out));
+        };
         $oldHomepod = [];
         if (is_array($state['homepod_targets'] ?? null)) {
-            foreach ($state['homepod_targets'] as $id) {
-                $id = trim((string) $id);
-                if ($id !== '') {
-                    $oldHomepod[] = $id;
-                }
-            }
+            $oldHomepod = $prefixHomepod($state['homepod_targets']);
         }
         $oldProtect = [];
         foreach ($state['streams'] ?? [] as $row) {
@@ -1480,61 +1542,115 @@ final class YarboUnifiRadio
         }
         $oldProtect = array_values(array_unique($oldProtect));
         $newProtect = YarboHomepod::filterProtectIds($targets);
-        $newHomepod = YarboHomepod::filterHomepodIds($targets);
-        sort($oldProtect);
-        sort($newProtect);
+        $newHomepod = $prefixHomepod(YarboHomepod::filterHomepodIds($targets));
 
-        // HomePod-only radio: add/remove RAOP streams without tearing down the others.
+        $contentUrl = trim((string) ($state['station_url'] ?? ''));
+        $ffmpeg = $this->unifi->ffmpegPath();
+        $hp = YarboHomepod::fromEnv($this->projectRoot);
+
+        // Prefer surgical add/remove so keepers never restart.
         if (
             $stationId !== ''
             && $stationId !== 'announce'
-            && $oldProtect === []
-            && $newProtect === []
+            && $contentUrl !== ''
+            && $ffmpeg !== ''
         ) {
-            $contentUrl = trim((string) ($state['station_url'] ?? ''));
-            if ($contentUrl === '') {
-                return $this->play([
-                    'station_id' => $stationId,
-                    'targets' => $targets,
-                    'volume' => $volume,
-                ]);
-            }
-            $hp = YarboHomepod::fromEnv($this->projectRoot);
-            $toStop = array_values(array_diff($oldHomepod, $newHomepod));
-            $toStart = array_values(array_diff($newHomepod, $oldHomepod));
+            $toStopHp = array_values(array_diff($oldHomepod, $newHomepod));
+            $toStartHp = array_values(array_diff($newHomepod, $oldHomepod));
+            $toStopPr = array_values(array_diff($oldProtect, $newProtect));
+            $toStartPr = array_values(array_diff($newProtect, $oldProtect));
             $errors = [];
-            if ($toStop !== []) {
-                $hp->stop($toStop);
+
+            // Remove first so we free talkback / RAOP before adding.
+            if ($toStopHp !== []) {
+                $hp->stop($toStopHp);
             }
-            $started = array_values(array_intersect($oldHomepod, $newHomepod));
-            if ($toStart !== []) {
-                $hpResult = $hp->streamToMany($toStart, $contentUrl, $volume);
+            $streams = [];
+            foreach ($state['streams'] ?? [] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $cam = trim((string) ($row['camera_id'] ?? ''));
+                $pid = (int) ($row['pid'] ?? 0);
+                if ($cam !== '' && in_array($cam, $toStopPr, true)) {
+                    if ($pid > 1) {
+                        $this->killPidTree($pid);
+                    }
+                    continue;
+                }
+                if ($cam !== '' && $cam !== 'homepod-bridge') {
+                    $streams[] = $row;
+                }
+            }
+
+            foreach ($toStartPr as $cameraId) {
+                $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
+                $session = $this->unifi->createTalkbackSession($cameraId);
+                if (!($session['ok'] ?? false)) {
+                    $errors[] = (string) ($session['error'] ?? 'talkback failed') . ' (' . $cameraId . ')';
+                    continue;
+                }
+                $pid = $this->spawnFfmpeg(
+                    $ffmpeg,
+                    $contentUrl,
+                    (string) ($session['url'] ?? ''),
+                    (string) ($session['codec'] ?? 'aac'),
+                    (int) ($session['sampling_rate'] ?? 22050),
+                    $cameraId,
+                    $volume,
+                    false,
+                );
+                if ($pid <= 0) {
+                    $detail = $this->tailRadioLog($cameraId);
+                    $errors[] = 'Could not start audio for ' . $cameraId
+                        . ($detail !== '' ? ' — ' . $detail : '');
+                    continue;
+                }
+                if ($this->pidAlive($pid)) {
+                    $streams[] = [
+                        'camera_id' => $cameraId,
+                        'pid' => $pid,
+                        'talkback_url' => (string) ($session['url'] ?? ''),
+                        'codec' => (string) ($session['codec'] ?? ''),
+                    ];
+                }
+            }
+
+            $startedHp = array_values(array_intersect($oldHomepod, $newHomepod));
+            if ($toStartHp !== []) {
+                $hpResult = $hp->streamToMany($toStartHp, $contentUrl, $volume);
                 foreach ($hpResult['errors'] as $err) {
                     $errors[] = $err;
                 }
                 foreach ($hpResult['started'] as $id) {
-                    $started[] = $id;
+                    $startedHp[] = YarboHomepod::withPrefix(YarboHomepod::stripPrefix((string) $id));
                 }
             }
-            $started = array_values(array_unique($started));
+            $startedHp = array_values(array_unique($startedHp));
+
             $state = $this->loadState();
             $state['targets'] = $targets;
             $state['volume'] = $volume;
-            $state['homepod_targets'] = $started;
-            $state['playing'] = $started !== [];
+            $state['streams'] = $streams;
+            $state['homepod_targets'] = $startedHp;
+            $state['playing'] = $streams !== [] || $startedHp !== [];
             $state['error'] = $errors !== [] ? implode('; ', $errors) : null;
             $this->writeState($state);
 
             return [
-                'ok' => $started !== [] || $errors === [],
-                'error' => $started === [] && $errors !== [] ? implode('; ', $errors) : null,
-                'warning' => $started !== [] && $errors !== [] ? implode('; ', $errors) : null,
+                'ok' => ($streams !== [] || $startedHp !== []) || $errors === [],
+                'error' => ($streams === [] && $startedHp === [] && $errors !== [])
+                    ? implode('; ', $errors)
+                    : null,
+                'warning' => (($streams !== [] || $startedHp !== []) && $errors !== [])
+                    ? implode('; ', $errors)
+                    : null,
                 'radio' => $this->status(),
                 'airplay' => $airplay->status(),
             ];
         }
 
-        // Protect talkback (or announce) — restart so sessions match the new ticks.
+        // Announce (or missing URL) — restart so sessions match the new ticks.
         if ($stationId === 'announce') {
             $clip = trim((string) ($state['clip_path'] ?? $state['station_url'] ?? ''));
             if ($clip !== '' && is_file($clip)) {
