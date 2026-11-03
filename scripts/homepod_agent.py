@@ -13,7 +13,6 @@ import asyncio
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import threading
@@ -30,10 +29,10 @@ DATA_DIR = ROOT / "data" / "homepod"
 DEVICES_PATH = DATA_DIR / "devices.json"
 LOG_PATH = ROOT / "data" / "homepod-agent.log"
 CACHE_DIR = DATA_DIR / "cache"
-AGENT_VERSION = 4
-# Formats pyatv stream_file handles reliably on HomePods (local files only).
+AGENT_VERSION = 5
+# Formats pyatv stream_file handles reliably as local files (announcements).
 _DIRECT_SUFFIXES = {".wav", ".mp3", ".aac", ".m4a", ".flac", ".aiff", ".aif", ".caf"}
-# Icecast / CDN streams often 401 when the HomePod fetches them itself.
+# Icecast / CDN streams often 401 without a browser-like UA.
 _FFMPEG_UA = "Mozilla/5.0 (compatible; YarboHomepod/1.0)"
 
 try:
@@ -154,7 +153,8 @@ class HomepodRuntime:
         self._thread.start()
         self._pairings: dict[str, Any] = {}
         self._streams: dict[str, dict[str, Any]] = {}
-        self._remux: dict[str, subprocess.Popen[Any]] = {}
+        # ffmpeg helpers: asyncio.subprocess.Process or subprocess.Popen
+        self._remux: dict[str, Any] = {}
         self._temps: dict[str, list[Path]] = {}
         self._lock = threading.Lock()
 
@@ -169,25 +169,23 @@ class HomepodRuntime:
     def _ffmpeg_bin(self) -> str:
         return shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
 
-    def _free_port(self) -> int:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("127.0.0.1", 0))
-            return int(sock.getsockname()[1])
-
     def _cleanup_helpers(self, ident: str) -> None:
         proc = self._remux.pop(ident, None)
         if proc is not None:
             try:
-                proc.terminate()
-            except Exception:
-                pass
-            try:
-                proc.wait(timeout=2)
+                if getattr(proc, "returncode", None) is None:
+                    proc.kill()
             except Exception:
                 try:
-                    proc.kill()
+                    proc.terminate()
                 except Exception:
                     pass
+            # Best-effort reap without blocking the event loop hard.
+            try:
+                if isinstance(proc, subprocess.Popen):
+                    proc.wait(timeout=1)
+            except Exception:
+                pass
         for path in self._temps.pop(ident, []) or []:
             try:
                 if path.is_file():
@@ -202,28 +200,24 @@ class HomepodRuntime:
         # Browser announce clips are usually webm/ogg/opus — HomePods reject those.
         return True
 
-    def _looks_like_hls(self, source: str) -> bool:
-        lower = source.lower()
-        return ".m3u8" in lower or "hls" in lower or ".isml" in lower or "norewind" in lower
-
     def _is_local_http(self, source: str) -> bool:
-        """True for our own AirPlay/radio remux listeners (already playable)."""
+        """True for panel AirPlay-bridge MP3 listeners on loopback."""
         lower = source.lower()
         return lower.startswith("http://127.0.0.1:") or lower.startswith("http://localhost:")
 
-    async def _prepare_source(self, ident: str, source: str) -> str:
-        """Return a path/URL pyatv stream_file can play; start remux helpers if needed."""
+    async def _prepare_playable(self, ident: str, source: str) -> Any:
+        """Return a local file path or an asyncio StreamReader for stream_file.
+
+        Announcements stay as WAV files (that path already works). Radio and the
+        AirPlay bridge are HTTP — pyatv's InternetSource often fails on ice/CDN
+        and on ffmpeg -listen URLs, so we always decode via ffmpeg → stdout pipe
+        and hand the StreamReader to RAOP.
+        """
         self._cleanup_helpers(ident)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
         if source.startswith(("http://", "https://")):
-            # Local bridge URLs are already MP3 from the panel — do not remux again.
-            if self._is_local_http(source):
-                return source
-            # Always remux remote radio through ffmpeg. Icecast/CDN hosts (Classic FM,
-            # etc.) often return 401 when the HomePod or pyatv fetches them directly;
-            # ffmpeg with a normal User-Agent works, same as Protect talkback.
-            return await self._remux_http_to_mp3(ident, source)
+            return await self._ffmpeg_pipe(ident, source)
 
         path = Path(source)
         if not path.is_file():
@@ -268,23 +262,31 @@ class HomepodRuntime:
         self._temps.setdefault(ident, []).append(out)
         return str(out)
 
-    async def _remux_http_to_mp3(self, ident: str, source: str) -> str:
+    async def _ffmpeg_pipe(self, ident: str, source: str) -> asyncio.StreamReader:
+        """Decode any HTTP/file-like source to MP3 on stdout for stream_file."""
         ffmpeg = self._ffmpeg_bin()
         if not os.path.isfile(ffmpeg) and shutil.which("ffmpeg") is None:
-            raise RuntimeError("ffmpeg is required to remux radio streams for HomePods")
-        port = self._free_port()
-        url = f"http://127.0.0.1:{port}/live.mp3"
-        # Live ice/HLS: no -re (that paces file reads). Browser UA avoids CDN 401s.
-        cmd = [
+            raise RuntimeError("ffmpeg is required to stream radio/AirPlay to HomePods")
+
+        cmd: list[str] = [
             ffmpeg,
             "-nostdin",
             "-hide_banner",
             "-loglevel",
             "warning",
-            "-user_agent",
-            _FFMPEG_UA,
-            "-headers",
-            "Icy-MetaData: 1\r\n",
+        ]
+        # Remote ice/CDN need a UA; loopback AirPlay-bridge MP3 does not.
+        if source.startswith(("http://", "https://")) and not self._is_local_http(source):
+            cmd += [
+                "-user_agent",
+                _FFMPEG_UA,
+                "-headers",
+                "Icy-MetaData: 1\r\n",
+            ]
+        # Live inputs: give ffmpeg a few seconds to open slow listeners / ice.
+        if self._is_local_http(source):
+            cmd += ["-rw_timeout", "15000000"]  # 15s in microseconds
+        cmd += [
             "-i",
             source,
             "-vn",
@@ -298,41 +300,33 @@ class HomepodRuntime:
             "128k",
             "-f",
             "mp3",
-            "-listen",
-            "1",
-            url,
+            "pipe:1",
         ]
-        log(f"remux radio id={ident} src={source} -> {url}")
-        err_log = CACHE_DIR / f"remux-{ident.replace(':', '')}.log"
-        err_fh = err_log.open("w", encoding="utf-8")
-        # Use a real Popen so we can keep the listener alive across the stream.
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=err_fh,
+        log(f"ffmpeg pipe id={ident} src={source}")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        try:
-            err_fh.close()
-        except Exception:
-            pass
         self._remux[ident] = proc
-        self._temps.setdefault(ident, []).append(err_log)
-        # Wait briefly for the listen socket; pyatv connects as the client.
-        await asyncio.sleep(1.0)
-        if proc.poll() is not None:
-            self._remux.pop(ident, None)
-            detail = ""
+        if proc.stdout is None:
+            self._cleanup_helpers(ident)
+            raise RuntimeError("ffmpeg produced no stdout pipe")
+
+        # Confirm the process is alive and producing data before RAOP attaches.
+        # Drain a tiny probe via wait — if ffmpeg dies immediately, surface stderr.
+        await asyncio.sleep(0.35)
+        if proc.returncode is not None:
+            err = b""
             try:
-                detail = err_log.read_text(encoding="utf-8", errors="replace").strip()
-            except OSError:
+                err = await asyncio.wait_for(proc.stderr.read(), timeout=0.5) if proc.stderr else b""
+            except Exception:
                 pass
-            if detail:
-                detail = detail.splitlines()[-1][:240]
-            raise RuntimeError(
-                "Could not remux radio stream for HomePod"
-                + (f": {detail}" if detail else " (ffmpeg exited)")
-            )
-        return url
+            self._remux.pop(ident, None)
+            detail = err.decode("utf-8", errors="replace").strip().splitlines()
+            tail = detail[-1] if detail else "ffmpeg exited"
+            raise RuntimeError(f"Could not start audio pipe for HomePod: {tail[:240]}")
+        return proc.stdout
 
     async def scan(self, timeout: float = 5.0) -> list[dict[str, Any]]:
         if pyatv is None:
@@ -718,16 +712,11 @@ class HomepodRuntime:
         if not source.startswith(("http://", "https://", "-")) and not Path(source).is_file():
             raise RuntimeError(f"Audio source not found: {source}")
 
-        try:
-            playable = await self._prepare_source(ident, source)
-        except Exception as exc:
-            self._cleanup_helpers(ident)
-            raise RuntimeError(str(exc)) from exc
-
+        # Connect first, then open ffmpeg pipes — otherwise stdout fills while
+        # scan/connect runs and the decoder stalls.
         try:
             atv = await self._connect(ident)
         except Exception as exc:
-            self._cleanup_helpers(ident)
             raise RuntimeError(f"Could not connect to HomePod: {exc}") from exc
 
         if not hasattr(atv, "stream") or atv.stream is None:
@@ -735,15 +724,13 @@ class HomepodRuntime:
                 atv.close()
             except Exception:
                 pass
-            self._cleanup_helpers(ident)
             raise RuntimeError("HomePod connection has no audio stream interface (RAOP)")
 
         error_box: dict[str, Any] = {"error": None}
+        playable_box: dict[str, Any] = {"playable": None}
 
         async def _play() -> None:
             try:
-                # Set volume once connected, then again shortly after play starts —
-                # some firmwares ignore the first set or start muted.
                 if volume is not None and hasattr(atv, "audio") and atv.audio is not None:
                     try:
                         await atv.audio.set_volume(float(max(0, min(100, volume))))
@@ -760,7 +747,10 @@ class HomepodRuntime:
                         log(f"volume set (post) failed for {ident}: {exc}")
 
                 asyncio.create_task(_bump_volume())
-                log(f"stream_file start id={ident} source={playable} (from {source})")
+                playable = await self._prepare_playable(ident, source)
+                playable_box["playable"] = playable
+                label = playable if isinstance(playable, str) else f"pipe:{source}"
+                log(f"stream_file start id={ident} source={label}")
                 await atv.stream.stream_file(playable)
                 log(f"stream_file finished id={ident}")
             except asyncio.CancelledError:
@@ -784,13 +774,13 @@ class HomepodRuntime:
             self._streams[ident] = {
                 "task": task,
                 "atv": atv,
-                "source": playable,
+                "source": source,
                 "orig_source": source,
                 "started_at": time.time(),
                 "volume": volume,
             }
-        # Catch immediate *failures* (bad format, auth) — not successful short clips.
-        await asyncio.sleep(1.0)
+        # Catch immediate *failures* (bad format, auth, pipe) — not short clips.
+        await asyncio.sleep(1.6)
         if task.done():
             with self._lock:
                 self._streams.pop(ident, None)
@@ -798,15 +788,14 @@ class HomepodRuntime:
             if err:
                 self._cleanup_helpers(ident)
                 raise RuntimeError(err)
-            # Clip finished cleanly inside the grace window (short announcement).
             return {
                 "ok": True,
                 "id": ident,
                 "playing": False,
                 "finished": True,
-                "source": playable,
+                "source": source,
             }
-        return {"ok": True, "id": ident, "playing": True, "source": playable}
+        return {"ok": True, "id": ident, "playing": True, "source": source}
 
     async def stop(self, ident: str | None = None) -> dict[str, Any]:
         with self._lock:
