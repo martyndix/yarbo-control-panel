@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.189] - 2026-11-03
+
+### Fixed
+- Saving the AirPlay bridge name restarts `shairport-sync` when it is already running so iPhones show the new label (e.g. **28LPC**) instead of a stale name.
+
 ## [4.0.188] - 2026-11-03
 
 ### Fixed

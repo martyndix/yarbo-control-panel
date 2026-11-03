@@ -174,6 +174,7 @@ assert_true(str_contains($api, 'homepod_ensure') || str_contains((string) file_g
 assert_true(str_contains((string) file_get_contents($root . '/src/YarboHomepod.php'), 'needsPyatvInstall'), 'scan auto-installs pyatv');
 assert_true(str_contains($change, '## [4.0.186]'), 'changelog 4.0.186');
 assert_true(str_contains($change, '## [4.0.188]'), 'changelog 4.0.188');
+assert_true(str_contains($change, '## [4.0.189]'), 'changelog 4.0.189');
 assert_true(str_contains($index, 'settings-unifi-homepod-scan'), 'Settings HomePod scan');
 assert_true(str_contains($index, 'HomePod speakers'), 'Settings HomePod heading');
 assert_true(str_contains($index, 'settings-unifi-homepod-pair-skip'), 'No PIN add button');
