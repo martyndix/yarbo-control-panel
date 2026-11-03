@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.197] - 2026-11-03
+
+### Fixed
+- AirPlay → HomePod **Connection refused** / silent bridge: fanout no longer uses ffmpeg HTTP `-listen` (it never bound while blocked on the audio FIFO). It now sends loopback **MPEG-TS/AAC over UDP**, holds the AirPlay FIFO open so ffmpeg can start, and the HomePod agent reads that UDP stream into RAOP.
+
 ## [4.0.196] - 2026-11-03
 
 ### Fixed
