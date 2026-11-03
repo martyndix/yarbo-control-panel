@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.193] - 2026-11-03
+
+### Fixed
+- HomePod radio **401 UNAUTHORIZED** on ice streams (e.g. Classic FM): remux every remote station through local ffmpeg (browser User-Agent) to a loopback MP3 before RAOP, instead of letting the HomePod fetch the CDN URL itself.
+
 ## [4.0.192] - 2026-11-03
 
 ### Fixed

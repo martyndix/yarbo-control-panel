@@ -311,6 +311,7 @@ assert_true(str_contains($change, '## [4.0.189]'), 'changelog 4.0.189');
 assert_true(str_contains($change, '## [4.0.190]'), 'changelog 4.0.190');
 assert_true(str_contains($change, '## [4.0.191]'), 'changelog 4.0.191');
 assert_true(str_contains($change, '## [4.0.192]'), 'changelog 4.0.192');
+assert_true(str_contains($change, '## [4.0.193]'), 'changelog 4.0.193');
 assert_true(str_contains($change, 'HomePod'), 'changelog mentions HomePod');
 assert_true(str_contains($change, 'pyatv'), 'changelog mentions pyatv install');
 assert_true(str_contains($change, 'resumes') || str_contains($change, 'resume'), 'changelog mentions resume after announcement');
