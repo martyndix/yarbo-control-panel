@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.198] - 2026-11-03
+
+### Fixed
+- AirPlay → HomePod **garbled audio** and **only one speaker**: MP3-over-FIFO (and earlier HTTP/UDP remux) either fractured frames or blocked the whole fanout when a HomePod reader was missing. Fanout now keeps **stereo 44100 PCM** for HomePods (Protect still gets mono 22050), sends each pod **PCM over loopback UDP** (no FIFO backpressure), and the agent encodes clean MP3 into RAOP.
+
 ## [4.0.197] - 2026-11-03
 
 ### Fixed

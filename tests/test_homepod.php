@@ -200,6 +200,7 @@ assert_true(str_contains($change, '## [4.0.194]'), 'changelog 4.0.194');
 assert_true(str_contains($change, '## [4.0.195]'), 'changelog 4.0.195');
 assert_true(str_contains($change, '## [4.0.196]'), 'changelog 4.0.196');
 assert_true(str_contains($change, '## [4.0.197]'), 'changelog 4.0.197');
+assert_true(str_contains($change, '## [4.0.198]'), 'changelog 4.0.198');
 assert_true(str_contains($deps, 'pyatv>=0.15.1') || str_contains($deps, '0.15.1'), 'deps pin pyatv >= 0.15.1');
 assert_true(str_contains($deps, 'srptools') && str_contains($deps, '<2'), 'deps pin srptools < 2');
 assert_true(str_contains($deps, 'yarbo_srptools_ok'), 'deps checks srptools compatibility');
@@ -240,11 +241,16 @@ assert_true(str_contains($docs, 'does not speak') || str_contains($docs, 'No PIN
 $radioPhp = (string) file_get_contents($root . '/src/YarboUnifiRadio.php');
 assert_true(str_contains($radioPhp, 'filterHomepodIds'), 'radio splits HomePod targets');
 assert_true(str_contains($radioPhp, 'homepodBridgeUrl'), 'AirPlay bridge HomePod URL helper');
-assert_true(str_contains($radioPhp, 'udp://127.0.0.1:'), 'AirPlay bridge uses loopback UDP for HomePods');
-assert_true(str_contains($radioPhp, 'mpegts'), 'AirPlay bridge encodes MPEG-TS for HomePods');
+assert_true(str_contains($radioPhp, 'pcm:s16le:44100:2:'), 'AirPlay bridge uses stereo PCM descriptor');
+assert_true(str_contains($radioPhp, 'homepodBridgeUdp') || str_contains($radioPhp, 'udp://127.0.0.1:'), 'AirPlay bridge PCM over loopback UDP');
+assert_true(str_contains($radioPhp, 'pcm_s16le'), 'fanout writes raw PCM for HomePods');
+assert_true(str_contains($radioPhp, 'hp_src') || str_contains($radioPhp, '[hp_src]'), 'HomePod path split before Protect downmix');
 assert_true(str_contains($radioPhp, 'exec 3<>'), 'AirPlay fanout holds FIFO open RDWR');
 assert_true(!str_contains($radioPhp, '-listen 1'), 'AirPlay bridge no longer uses ffmpeg HTTP -listen');
-assert_true(str_contains($agent, '_is_local_loopback') || str_contains($agent, 'udp://'), 'agent accepts loopback UDP bridge');
+assert_true(str_contains($agent, '_parse_pcm_source') || str_contains($agent, 'pcm:'), 'agent parses PCM UDP bridge');
+assert_true(str_contains($agent, 'stream_many'), 'agent starts multi HomePod streams concurrently');
+assert_true(str_contains((string) file_get_contents($root . '/src/YarboHomepod.php'), 'streamManyItems'), 'PHP streamManyItems helper');
 assert_true(str_contains($radioPhp, 'streamToMany'), 'radio streams to HomePods');
+assert_true(str_contains($radioPhp, 'streamManyItems'), 'AirPlay starts HomePods via streamManyItems');
 
 echo "test_homepod.php ok\n";

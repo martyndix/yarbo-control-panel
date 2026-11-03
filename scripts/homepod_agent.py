@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import shutil
+import stat as stat_mod
 import subprocess
 import sys
 import threading
@@ -29,7 +30,7 @@ DATA_DIR = ROOT / "data" / "homepod"
 DEVICES_PATH = DATA_DIR / "devices.json"
 LOG_PATH = ROOT / "data" / "homepod-agent.log"
 CACHE_DIR = DATA_DIR / "cache"
-AGENT_VERSION = 5
+AGENT_VERSION = 6
 # Formats pyatv stream_file handles reliably as local files (announcements).
 _DIRECT_SUFFIXES = {".wav", ".mp3", ".aac", ".m4a", ".flac", ".aiff", ".aif", ".caf"}
 # Icecast / CDN streams often 401 without a browser-like UA.
@@ -209,8 +210,10 @@ class HomepodRuntime:
         return True
 
     def _is_local_loopback(self, source: str) -> bool:
-        """True for panel AirPlay-bridge streams on loopback (UDP MPEG-TS or HTTP)."""
+        """True for panel AirPlay-bridge streams on loopback (PCM UDP / FIFO / HTTP)."""
         lower = source.lower()
+        if lower.startswith("pcm:") or lower.endswith(".fifo") or lower.endswith(".mp3.fifo"):
+            return True
         return (
             lower.startswith("http://127.0.0.1:")
             or lower.startswith("http://localhost:")
@@ -218,18 +221,43 @@ class HomepodRuntime:
             or lower.startswith("udp://localhost:")
         )
 
+    def _is_fifo_path(self, source: str) -> bool:
+        path = Path(source)
+        try:
+            if path.exists() and stat_mod.S_ISFIFO(path.stat().st_mode):
+                return True
+        except OSError:
+            pass
+        lower = source.lower()
+        return lower.endswith(".mp3.fifo") or lower.endswith(".fifo")
+
+    def _parse_pcm_source(self, source: str) -> tuple[str, str, str, str] | None:
+        """Parse pcm:FORMAT:RATE:CHANNELS:URL → (fmt, rate, channels, url)."""
+        if not source.lower().startswith("pcm:"):
+            return None
+        parts = source.split(":", 4)
+        # pcm / s16le / 44100 / 2 / udp://127.0.0.1:8768?pkt_size=1400
+        if len(parts) < 5:
+            return None
+        _prefix, fmt, rate, channels, url = parts[0], parts[1], parts[2], parts[3], parts[4]
+        if not url or not rate.isdigit() or not channels.isdigit():
+            return None
+        return fmt, rate, channels, url
+
     async def _prepare_playable(self, ident: str, source: str) -> Any:
         """Return a local file path or an asyncio StreamReader for stream_file.
 
         Announcements stay as WAV files (that path already works). Radio (HTTP)
-        and the AirPlay bridge (loopback UDP MPEG-TS) are decoded via ffmpeg →
-        stdout pipe into pyatv stream_file — InternetSource and HTTP -listen
-        were unreliable on HomePods.
+        and the AirPlay bridge (PCM over loopback UDP) are decoded via ffmpeg →
+        stdout MP3 pipe into pyatv stream_file.
         """
         self._cleanup_helpers(ident)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-        if source.startswith(("http://", "https://", "udp://")):
+        if (
+            source.startswith(("http://", "https://", "udp://", "pcm:"))
+            or self._is_fifo_path(source)
+        ):
             return await self._ffmpeg_pipe(ident, source)
 
         path = Path(source)
@@ -276,7 +304,7 @@ class HomepodRuntime:
         return str(out)
 
     async def _ffmpeg_pipe(self, ident: str, source: str) -> asyncio.StreamReader:
-        """Decode any HTTP/file-like source to MP3 on stdout for stream_file."""
+        """Decode any HTTP/file/FIFO source to MP3 on stdout for stream_file."""
         ffmpeg = self._ffmpeg_bin()
         if not os.path.isfile(ffmpeg) and shutil.which("ffmpeg") is None:
             raise RuntimeError("ffmpeg is required to stream radio/AirPlay to HomePods")
@@ -289,7 +317,9 @@ class HomepodRuntime:
             "warning",
         ]
         local = self._is_local_loopback(source)
-        # Remote ice/CDN need a UA; loopback AirPlay-bridge UDP/HTTP does not.
+        fifo = self._is_fifo_path(source)
+        pcm = self._parse_pcm_source(source)
+        # Remote ice/CDN need a UA; local AirPlay bridge does not.
         if source.startswith(("http://", "https://")) and not local:
             cmd += [
                 "-user_agent",
@@ -297,31 +327,80 @@ class HomepodRuntime:
                 "-headers",
                 "Icy-MetaData: 1\r\n",
             ]
-        input_url = source
-        if local and source.lower().startswith("udp://"):
-            # Wait for first AirPlay packets (microseconds) instead of failing open.
-            if "timeout=" not in source.lower():
-                sep = "&" if "?" in source else "?"
-                input_url = f"{source}{sep}timeout=15000000"
-        elif local:
-            cmd += ["-rw_timeout", "15000000"]
-        cmd += [
-            "-i",
-            input_url,
-            "-vn",
-            "-ac",
-            "2",
-            "-ar",
-            "44100",
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "128k",
-            "-f",
-            "mp3",
-            "pipe:1",
-        ]
-        log(f"ffmpeg pipe id={ident} src={source}")
+        if pcm is not None:
+            fmt, rate, channels, url = pcm
+            # Stereo PCM from AirPlay fanout — encode fresh MP3 for RAOP.
+            # UDP has no FIFO backpressure, so multi-HomePod does not stall.
+            if url.lower().startswith("udp://") and "timeout=" not in url.lower():
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}timeout=30000000"
+            cmd += [
+                "-f",
+                fmt,
+                "-ar",
+                rate,
+                "-ac",
+                channels,
+                "-i",
+                url,
+                "-vn",
+                "-ac",
+                "2",
+                "-ar",
+                "44100",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "160k",
+                "-f",
+                "mp3",
+                "pipe:1",
+            ]
+        elif fifo:
+            # Legacy MP3 FIFO: re-encode (copy mode was garbled across frame splits).
+            cmd += [
+                "-f",
+                "mp3",
+                "-i",
+                source,
+                "-vn",
+                "-ac",
+                "2",
+                "-ar",
+                "44100",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "160k",
+                "-f",
+                "mp3",
+                "pipe:1",
+            ]
+        else:
+            input_url = source
+            if local and source.lower().startswith("udp://"):
+                if "timeout=" not in source.lower():
+                    sep = "&" if "?" in source else "?"
+                    input_url = f"{source}{sep}timeout=30000000"
+            elif local:
+                cmd += ["-rw_timeout", "30000000"]
+            cmd += [
+                "-i",
+                input_url,
+                "-vn",
+                "-ac",
+                "2",
+                "-ar",
+                "44100",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "128k",
+                "-f",
+                "mp3",
+                "pipe:1",
+            ]
+        log(f"ffmpeg pipe id={ident} src={source} fifo={fifo} pcm={pcm is not None}")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -332,18 +411,20 @@ class HomepodRuntime:
             self._cleanup_helpers(ident)
             raise RuntimeError("ffmpeg produced no stdout pipe")
 
-        # Confirm the process is alive before RAOP attaches. Local UDP may sit
-        # waiting for the first AirPlay packet — that is OK while pid is live.
-        await asyncio.sleep(0.6 if local else 0.35)
+        # Local FIFO/UDP may sit waiting for the first AirPlay packet — OK while live.
+        await asyncio.sleep(1.0 if (local or fifo) else 0.35)
         if proc.returncode is not None:
             err = b""
             try:
-                err = await asyncio.wait_for(proc.stderr.read(), timeout=0.5) if proc.stderr else b""
+                err = await asyncio.wait_for(proc.stderr.read(), timeout=0.8) if proc.stderr else b""
             except Exception:
                 pass
             self._remux.pop(ident, None)
-            detail = err.decode("utf-8", errors="replace").strip().splitlines()
-            tail = detail[-1] if detail else "ffmpeg exited"
+            detail = err.decode("utf-8", errors="replace").strip()
+            lines = [ln for ln in detail.splitlines() if ln.strip()]
+            tail = lines[-1] if lines else "ffmpeg exited"
+            if detail and len(detail) < 220:
+                tail = detail.replace("\n", " | ")
             raise RuntimeError(f"Could not start audio pipe for HomePod: {tail[:240]}")
         return proc.stdout
 
@@ -728,7 +809,11 @@ class HomepodRuntime:
         source = str(source or "").strip()
         if not source:
             raise RuntimeError("No audio source for HomePod stream")
-        if not source.startswith(("http://", "https://", "udp://", "-")) and not Path(source).is_file():
+        if (
+            not source.startswith(("http://", "https://", "udp://", "pcm:", "-"))
+            and not Path(source).exists()
+            and not self._is_fifo_path(source)
+        ):
             raise RuntimeError(f"Audio source not found: {source}")
 
         # Connect first, then open ffmpeg pipes — otherwise stdout fills while
@@ -799,7 +884,10 @@ class HomepodRuntime:
                 "volume": volume,
             }
         # Catch immediate *failures* (bad format, auth, pipe) — not short clips.
-        await asyncio.sleep(1.6)
+        # Local PCM/UDP bridges stay alive waiting for AirPlay packets — shorter wait
+        # so multi-HomePod starts can run concurrently without stalling the panel.
+        settle = 0.75 if (source.startswith("pcm:") or self._is_local_loopback(source)) else 1.6
+        await asyncio.sleep(settle)
         if task.done():
             with self._lock:
                 self._streams.pop(ident, None)
@@ -815,6 +903,37 @@ class HomepodRuntime:
                 "source": source,
             }
         return {"ok": True, "id": ident, "playing": True, "source": source}
+
+    async def stream_many(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        """Start several HomePod streams concurrently (radio multi / AirPlay bridge)."""
+
+        async def _one(item: dict[str, Any]) -> dict[str, Any]:
+            ident = str(item.get("id") or "").strip()
+            source = str(item.get("source") or "").strip()
+            volume = item.get("volume")
+            vol = int(volume) if volume is not None and str(volume).strip() != "" else None
+            if not ident or not source:
+                return {"ok": False, "id": ident, "error": "id and source required"}
+            try:
+                result = await self.stream(ident, source, vol)
+                result.setdefault("id", ident)
+                return result
+            except Exception as exc:
+                return {"ok": False, "id": ident, "error": str(exc)}
+
+        rows = await asyncio.gather(*[_one(item) for item in items if isinstance(item, dict)])
+        started = [str(r.get("id")) for r in rows if r.get("ok") and r.get("id")]
+        errors = [
+            f"{r.get('error') or 'stream failed'} ({r.get('id')})"
+            for r in rows
+            if not r.get("ok")
+        ]
+        return {
+            "ok": started != [] or errors == [],
+            "started": started,
+            "errors": errors,
+            "results": list(rows),
+        }
 
     async def stop(self, ident: str | None = None) -> dict[str, Any]:
         with self._lock:
@@ -999,6 +1118,14 @@ class Handler(BaseHTTPRequestHandler):
                 volume = body.get("volume")
                 vol = int(volume) if volume is not None and str(volume).strip() != "" else None
                 result = RUNTIME.call(RUNTIME.stream(ident, source, vol), timeout=30.0)
+                self._write(result)
+                return
+            if op == "stream_many":
+                items = body.get("items")
+                if not isinstance(items, list) or items == []:
+                    self._write({"ok": False, "error": "items required"}, 400)
+                    return
+                result = RUNTIME.call(RUNTIME.stream_many(items), timeout=45.0)
                 self._write(result)
                 return
             if op == "stop":
