@@ -196,6 +196,10 @@ if (!str_contains((string) file_get_contents($root . '/CHANGELOG.md'), '## [4.0.
     fwrite(STDERR, "changelog 4.0.200\n");
     exit(1);
 }
+if (!str_contains((string) file_get_contents($root . '/CHANGELOG.md'), '## [4.0.201]')) {
+    fwrite(STDERR, "changelog 4.0.201\n");
+    exit(1);
+}
 $updateSh = (string) file_get_contents($root . '/scripts/update.sh');
 if (!str_contains($updateSh, 'panel_recover_speed.sh')) {
     fwrite(STDERR, "update.sh must run panel_recover_speed before git\n");

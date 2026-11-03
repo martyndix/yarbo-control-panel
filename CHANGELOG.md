@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.201] - 2026-11-03
+
+### Fixed
+- **AirPlay briefly plays then turns off:** a long-lived FIFO reader stays open with the receiver so `play_ends` / fan-out restarts cannot SIGPIPE `shairport-sync`. Client-inactive no longer stops the bridge immediately — `status()` waits 15s of real client-gone, and the TCP watcher debounces three polls before inactive.
+
 ## [4.0.200] - 2026-11-03
 
 ### Fixed
