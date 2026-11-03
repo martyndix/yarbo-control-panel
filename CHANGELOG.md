@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.192] - 2026-11-03
+
+### Fixed
+- HomePod **`SRPClientSession.__init__() takes 2 positional arguments but 3 were given`**: pin `srptools` to 1.x (`<2`). `srptools` 2.0 made the private key keyword-only and breaks pyatv HAP auth; Updates / Scan re-pin it automatically.
+
 ## [4.0.191] - 2026-11-03
 
 ### Fixed

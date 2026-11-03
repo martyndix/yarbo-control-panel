@@ -107,6 +107,7 @@ assert_true(str_contains($airplayPhp, '$this->ensure()'), 'saveConfig restarts v
 assert_true(str_contains($change, '## [4.0.189]'), 'changelog 4.0.189');
 assert_true(str_contains($change, '## [4.0.190]'), 'changelog 4.0.190');
 assert_true(str_contains($change, '## [4.0.191]'), 'changelog 4.0.191');
+assert_true(str_contains($change, '## [4.0.192]'), 'changelog 4.0.192');
 assert_true(str_contains($ensureSh, 'shairport-sync'), 'ensure script mentions shairport');
 assert_true(str_contains($ensureSh, 'yarbo_try_install_airplay_deps'), 'ensure tries auto apt install');
 assert_true(str_contains($ensureSh, 'yarbo_airplay_ensure_avahi') || str_contains($libSh, 'yarbo_airplay_ensure_avahi'), 'ensure starts avahi');

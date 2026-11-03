@@ -47,13 +47,19 @@ yarbo_homepod_python() {
   return 1
 }
 
-yarbo_pyatv_installed() {
+yarbo_pyatv_version_ok() {
   local python="${1:?}"
   # 0.15.0 could light the HomePod with no audio; require 0.15.1+.
   "$python" -c "
 import pyatv, sys
 parts = []
-for p in str(getattr(pyatv, '__version__', '0')).split('.'):
+ver = None
+try:
+    from importlib.metadata import version as _v
+    ver = _v('pyatv')
+except Exception:
+    ver = getattr(pyatv, '__version__', '0')
+for p in str(ver or '0').split('.'):
     try:
         parts.append(int(''.join(ch for ch in p if ch.isdigit()) or '0'))
     except Exception:
@@ -62,6 +68,34 @@ while len(parts) < 3:
     parts.append(0)
 sys.exit(0 if tuple(parts[:3]) >= (0, 15, 1) else 1)
 " >/dev/null 2>&1
+}
+
+yarbo_srptools_ok() {
+  local python="${1:?}"
+  # srptools 2.0 made SRPClientSession(..., private) keyword-only; pyatv still
+  # passes it positionally → "takes 2 positional arguments but 3 were given".
+  "$python" -c "
+import sys
+try:
+    from importlib.metadata import version as _v
+    ver = _v('srptools')
+except Exception:
+    ver = '0'
+parts = []
+for p in str(ver).split('.'):
+    try:
+        parts.append(int(''.join(ch for ch in p if ch.isdigit()) or '0'))
+    except Exception:
+        parts.append(0)
+while len(parts) < 2:
+    parts.append(0)
+sys.exit(0 if tuple(parts[:2]) < (2, 0) else 1)
+" >/dev/null 2>&1
+}
+
+yarbo_pyatv_installed() {
+  local python="${1:?}"
+  yarbo_pyatv_version_ok "$python" && yarbo_srptools_ok "$python"
 }
 
 yarbo_try_apt_python_venv() {
@@ -112,9 +146,11 @@ yarbo_pip_install_pyatv() {
   local py="${1:?}"
   local log="${2:?}"
   local err_file
+  # Keep srptools on 1.x — 2.0 breaks pyatv HAP/SRP pairing and HomePod connect.
+  local pkgs=('pyatv>=0.15.1' 'srptools>=0.2.0,<2')
   err_file="$(mktemp)"
 
-  if "$py" -m pip install --disable-pip-version-check --upgrade 'pyatv>=0.15.1' >>"$log" 2>"$err_file"; then
+  if "$py" -m pip install --disable-pip-version-check --upgrade "${pkgs[@]}" >>"$log" 2>"$err_file"; then
     cat "$err_file" >>"$log" 2>/dev/null || true
     rm -f "$err_file"
     yarbo_pyatv_installed "$py" && return 0
@@ -122,8 +158,8 @@ yarbo_pip_install_pyatv() {
     cat "$err_file" >>"$log" 2>/dev/null || true
   fi
 
-  if "$py" -m pip install --disable-pip-version-check --break-system-packages 'pyatv>=0.15.1' >>"$log" 2>"$err_file" \
-    || "$py" -m pip install --disable-pip-version-check --user --break-system-packages 'pyatv>=0.15.1' >>"$log" 2>"$err_file"; then
+  if "$py" -m pip install --disable-pip-version-check --break-system-packages "${pkgs[@]}" >>"$log" 2>"$err_file" \
+    || "$py" -m pip install --disable-pip-version-check --user --break-system-packages "${pkgs[@]}" >>"$log" 2>"$err_file"; then
     cat "$err_file" >>"$log" 2>/dev/null || true
     rm -f "$err_file"
     yarbo_pyatv_installed "$py" && return 0
@@ -169,10 +205,14 @@ yarbo_ensure_pyatv() {
   echo "python=${py}" >>"$log"
 
   if yarbo_pyatv_installed "$py"; then
-    echo "pyatv >= 0.15.1 already importable" >>"$log"
+    echo "pyatv >= 0.15.1 and srptools < 2 already ok" >>"$log"
     return 0
   fi
-  echo "pyatv missing or older than 0.15.1 — upgrading" >>"$log"
+  if yarbo_pyatv_version_ok "$py" && ! yarbo_srptools_ok "$py"; then
+    echo "srptools 2.x incompatible with pyatv — pinning srptools<2" >>"$log"
+  else
+    echo "pyatv missing/old or srptools incompatible — upgrading" >>"$log"
+  fi
 
   if ! "$py" -m pip --version >/dev/null 2>&1; then
     echo "pip missing — trying ensurepip / apt" >>"$log"
