@@ -82,3 +82,5 @@
 /data/unifi-radio-stations.json
 /data/homepod/
 /data/homepod-agent.log
+/data/airplay/
+/data/panel-airplay.log
