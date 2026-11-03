@@ -1890,8 +1890,17 @@ final class YarboHomeAutomations
         if ($id === '' || !in_array($state, ['on', 'off', 'open', 'closed', 'motion', 'no_motion'], true)) {
             return null;
         }
+        $out = ['type' => 'device', 'id' => $id, 'state' => $state];
+        // Optional look-back for motion: true if currently detecting or last
+        // motion_at was within within_sec. 0 / omitted = live state only.
+        if ($state === 'motion' && isset($cond['within_sec'])) {
+            $within = (int) $cond['within_sec'];
+            if ($within > 0) {
+                $out['within_sec'] = max(1, min(604800, $within));
+            }
+        }
 
-        return ['type' => 'device', 'id' => $id, 'state' => $state];
+        return $out;
     }
 
     /**
@@ -2472,12 +2481,13 @@ final class YarboHomeAutomations
                     return false;
                 }
                 $want = (string) ($cond['state'] ?? '');
+                $within = (int) ($cond['within_sec'] ?? 0);
                 $ok = match ($want) {
                     'on' => $row['on'] === true,
                     'off' => $row['on'] === false,
                     'open' => $row['open'] === true,
                     'closed' => $row['open'] === false,
-                    'motion' => $row['motion'] === true,
+                    'motion' => $this->deviceMotionWithin($row, $within, $now),
                     'no_motion' => $row['motion'] === false,
                     default => false,
                 };
@@ -2488,6 +2498,27 @@ final class YarboHomeAutomations
         }
 
         return true;
+    }
+
+    /**
+     * Live motion, or last motion_at still inside the look-back window.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function deviceMotionWithin(array $row, int $withinSec, int $now): bool
+    {
+        if ($row['motion'] === true) {
+            return true;
+        }
+        if ($withinSec <= 0) {
+            return false;
+        }
+        $at = (int) ($row['motion_at'] ?? 0);
+        if ($at <= 0) {
+            return false;
+        }
+
+        return ($now - $at) <= $withinSec;
     }
 
     /**

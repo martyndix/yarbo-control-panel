@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.204] - 2026-11-03
+
+### Added
+- **Automations Only if — motion within last X:** device conditions can require motion **now** or **within last** N minutes/hours (uses the sensor’s last `motion_at`, so a brief PIR flash still counts).
+
 ## [4.0.203] - 2026-11-03
 
 ### Fixed

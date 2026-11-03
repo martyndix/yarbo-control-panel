@@ -7515,6 +7515,9 @@ function homeAutoClampDraft() {
         if (states.length && !states.some(([v]) => v === cond.state)) {
             cond.state = states[0][0];
         }
+        if (cond.state !== 'motion') {
+            delete cond.within_sec;
+        }
     });
 }
 
@@ -7783,6 +7786,24 @@ function homeAutoIfChipHtml(cond, index) {
     const selected = homeAutoDeviceById(cond.id) || devices[0];
     const states = homeAutoIfStateOptions(selected);
     const state = states.some(([v]) => v === cond.state) ? cond.state : (states[0] ? states[0][0] : 'on');
+    const withinSec = Number(cond.within_sec || 0);
+    const useWithin = state === 'motion' && withinSec > 0;
+    const withinMode = state === 'motion'
+        ? `<select data-auto-if-within-mode aria-label="Motion when">
+            <option value="now" ${!useWithin ? 'selected' : ''}>now</option>
+            <option value="within" ${useWithin ? 'selected' : ''}>within last</option>
+        </select>`
+        : '';
+    const withinParts = homeAutoDurationParts(useWithin ? withinSec : 3600);
+    const withinDur = state === 'motion'
+        ? `<span class="auto-if-within" ${useWithin ? '' : 'hidden'}>
+            <input type="number" min="1" data-auto-if-within value="${withinParts.value}" aria-label="Within amount">
+            <select data-auto-if-within-unit aria-label="Within unit">
+                <option value="60" ${withinParts.unit === 60 ? 'selected' : ''}>min</option>
+                <option value="3600" ${withinParts.unit === 3600 || withinParts.unit === 1 ? 'selected' : ''}>hr</option>
+            </select>
+        </span>`
+        : '';
     return `<div class="auto-chip auto-chip--if-device" data-auto-if-i="${index}">
         <input type="search" class="auto-if-device-filter" data-auto-if-filter="${index}" placeholder="Search devices" value="${escapeHtml(query)}" autocomplete="off" aria-label="Search devices">
         <select data-auto-if-id>${opts}</select>
@@ -7792,8 +7813,29 @@ function homeAutoIfChipHtml(cond, index) {
                 `<option value="${v}" ${v === state ? 'selected' : ''}>${escapeHtml(label)}</option>`
             ).join('')}
         </select>
+        ${withinMode}
+        ${withinDur}
         <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
     </div>`;
+}
+
+function homeAutoReadIfWithin(chip) {
+    const mode = chip?.querySelector('[data-auto-if-within-mode]')?.value || 'now';
+    if (mode !== 'within') return 0;
+    const value = Number(chip?.querySelector('[data-auto-if-within]')?.value || 1);
+    const unit = Number(chip?.querySelector('[data-auto-if-within-unit]')?.value || 3600);
+    return Math.max(1, Math.min(604800, Math.round(value * unit)));
+}
+
+function homeAutoApplyIfWithin(cond, chip) {
+    if (!cond || cond.type !== 'device') return;
+    if (cond.state !== 'motion') {
+        delete cond.within_sec;
+        return;
+    }
+    const within = homeAutoReadIfWithin(chip);
+    if (within > 0) cond.within_sec = within;
+    else delete cond.within_sec;
 }
 
 function homeAutoIfDeviceSelectGroupsFiltered(devices, selectedId, query) {
@@ -8552,6 +8594,10 @@ async function homeAutoSave() {
         autoDraft.off_after_sec = autoDraft.off_when_false ? 0 : homeAutoReadOffAfter();
         homeAutoApplyOffAfterToActions(autoDraft.off_after_sec);
     }
+    (autoDraft.conditions || []).forEach((cond, i) => {
+        const chip = document.querySelector(`#home-automations-editor [data-auto-if-i="${i}"]`);
+        homeAutoApplyIfWithin(cond, chip);
+    });
     autoDraft.hold_sec = Math.max(0, Number(document.getElementById('auto-hold-sec')?.value || autoDraft.hold_sec || 0));
     if (homeAutoUsesSun() && homeAutoSunNeedsCoords()) {
         const lat = Number(document.getElementById('auto-lat')?.value);
@@ -8957,18 +9003,43 @@ function bindHomeAutomations() {
                 if (!states.some(([v]) => v === autoDraft.conditions[i].state)) {
                     autoDraft.conditions[i].state = states[0] ? states[0][0] : 'on';
                 }
+                if (autoDraft.conditions[i].state !== 'motion') {
+                    delete autoDraft.conditions[i].within_sec;
+                }
             }
         }
         if (event.target.matches('[data-auto-if-state]')) {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
-            if (autoDraft.conditions[i]) autoDraft.conditions[i].state = event.target.value;
+            if (autoDraft.conditions[i]) {
+                autoDraft.conditions[i].state = event.target.value;
+                if (event.target.value !== 'motion') {
+                    delete autoDraft.conditions[i].within_sec;
+                }
+            }
         }
-        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) {
+        if (event.target.matches('[data-auto-if-within-mode]')) {
+            const chip = event.target.closest('[data-auto-if-i]');
+            const i = Number(chip?.getAttribute('data-auto-if-i') || 0);
+            const cond = autoDraft.conditions[i];
+            if (cond) {
+                if (event.target.value === 'within') {
+                    cond.within_sec = homeAutoReadIfWithin(chip) || 3600;
+                } else {
+                    delete cond.within_sec;
+                }
+            }
+        }
+        if (event.target.matches('[data-auto-if-within], [data-auto-if-within-unit]')) {
+            const chip = event.target.closest('[data-auto-if-i]');
+            const i = Number(chip?.getAttribute('data-auto-if-i') || 0);
+            if (autoDraft.conditions[i]) homeAutoApplyIfWithin(autoDraft.conditions[i], chip);
+        }
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive], [data-auto-if-within-mode], [data-auto-if-within], [data-auto-if-within-unit]')) {
             homeAutoFollowName();
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-state], [data-auto-if-within-mode], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');
