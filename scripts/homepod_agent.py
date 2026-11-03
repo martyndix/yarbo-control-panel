@@ -59,6 +59,14 @@ def log(msg: str) -> None:
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         ROOT.joinpath("data").mkdir(parents=True, exist_ok=True)
+        # Cap the agent log — unbounded growth stalled the Pi and blew shell ARG_MAX
+        # when related scripts embedded log tails in php -r argv.
+        if LOG_PATH.is_file() and LOG_PATH.stat().st_size > 512 * 1024:
+            try:
+                raw = LOG_PATH.read_bytes()
+                LOG_PATH.write_bytes(raw[-128 * 1024 :])
+            except OSError:
+                pass
         with LOG_PATH.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except OSError:

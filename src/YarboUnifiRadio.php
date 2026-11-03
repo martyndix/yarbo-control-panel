@@ -141,6 +141,15 @@ final class YarboUnifiRadio
         }
 
         $endsAt = isset($state['ends_at']) ? (int) $state['ends_at'] : 0;
+        $stationIdNow = trim((string) ($state['station_id'] ?? ''));
+        // HomePod-only announcements with a missing ends_at used to stay Playing forever
+        // (no local ffmpeg pid to reap). Bound them from started_at.
+        if ($stationIdNow === 'announce' && $homepodAlive && $endsAt <= 0) {
+            $startedAt = (int) ($state['started_at'] ?? 0);
+            $endsAt = $startedAt > 0 ? $startedAt + 45 : time();
+            $state['ends_at'] = $endsAt;
+            $this->writeState($state);
+        }
         $timedOut = $endsAt > 0 && time() >= $endsAt;
         // Finite clips (Announcement) must return to Idle when ffmpeg exits or ends_at passes.
         // HomePod-only radio stays Playing while homepod_targets is set (no local ffmpeg pid).
@@ -1055,11 +1064,16 @@ final class YarboUnifiRadio
             ? ($errors !== [] ? implode('; ', $errors) : null)
             : ($errors !== [] ? implode('; ', $errors) : 'No speakers started');
         $endsAt = null;
-        if ($ok && $localFile && $playing) {
-            // Clip length + small grace so status() returns Idle after the announcement.
+        if ($ok && $localFile) {
+            // Always set ends_at for announcements — HomePod-only clips have no ffmpeg
+            // pid, so without this the UI can stay on Playing forever.
             $seconds = $this->probeClipDurationSeconds($contentUrl);
             $pad = 2;
             $endsAt = time() + max(2, (int) ceil(($seconds ?? 30) + $pad));
+            if (!$playing) {
+                // Already finished on every target before we returned.
+                $endsAt = time();
+            }
         }
         $state = [
             'playing' => $playing,
