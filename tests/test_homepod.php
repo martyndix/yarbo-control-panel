@@ -201,6 +201,7 @@ assert_true(str_contains($change, '## [4.0.195]'), 'changelog 4.0.195');
 assert_true(str_contains($change, '## [4.0.196]'), 'changelog 4.0.196');
 assert_true(str_contains($change, '## [4.0.197]'), 'changelog 4.0.197');
 assert_true(str_contains($change, '## [4.0.198]'), 'changelog 4.0.198');
+assert_true(str_contains($change, '## [4.0.199]'), 'changelog 4.0.199');
 assert_true(str_contains($deps, 'pyatv>=0.15.1') || str_contains($deps, '0.15.1'), 'deps pin pyatv >= 0.15.1');
 assert_true(str_contains($deps, 'srptools') && str_contains($deps, '<2'), 'deps pin srptools < 2');
 assert_true(str_contains($deps, 'yarbo_srptools_ok'), 'deps checks srptools compatibility');

@@ -3393,10 +3393,13 @@ function startRadioStatusPoll() {
                 if (Object.prototype.hasOwnProperty.call(data, 'speakers_enabled')) {
                     unifiDash.speakers_enabled = data.speakers_enabled;
                 }
+                if (data.airplay) unifiDash.airplay = data.airplay;
             }
             const live = pickRadioState(remote);
             renderUnifiSpeakers(
-                unifiDash ? { ...unifiDash, radio: live || unifiDash.radio } : data,
+                unifiDash
+                    ? { ...unifiDash, radio: live || unifiDash.radio, airplay: data.airplay || unifiDash.airplay }
+                    : data,
                 { replace: false },
             );
             syncRadioPlayerChrome({
@@ -3505,19 +3508,21 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
     }
 
     const list = els.unifiRadioSpeakers;
+    const fromRadio = Array.isArray(radio.targets) ? radio.targets.map(String).filter(Boolean) : [];
+    const acceptRemote = Date.now() >= radioLocalCommandUntil;
     if (list && (replace || !list.querySelector('[data-unifi-speaker]'))) {
         if (!speakers.length) {
             list.innerHTML = '<p class="hint">No speaker-capable Protect cameras yet (look for G3 Reader Pro / doorbells with a speaker).</p>';
         } else {
-            // Prefer the ticks the user already set (DOM / localStorage) so status polls
-            // never re-check everything when radio.targets is empty while Idle.
+            // Prefer server targets (shared across browsers), then DOM / localStorage.
             const fromDom = [...list.querySelectorAll('input[data-unifi-speaker]:checked')]
                 .map((el) => el.value)
                 .filter(Boolean);
             const fromStore = readUnifiSpeakerPick();
-            const fromRadio = Array.isArray(radio.targets) ? radio.targets.map(String).filter(Boolean) : [];
             let selectedIds;
-            if (fromDom.length || list.querySelector('input[data-unifi-speaker]')) {
+            if (acceptRemote && fromRadio.length) {
+                selectedIds = fromRadio;
+            } else if (fromDom.length || list.querySelector('input[data-unifi-speaker]')) {
                 selectedIds = fromDom;
             } else if (fromStore) {
                 selectedIds = fromStore;
@@ -3535,13 +3540,28 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
             }).join('');
             writeUnifiSpeakerPick(unifiSelectedSpeakerIds());
         }
+    } else if (list && acceptRemote && fromRadio.length) {
+        // Keep open tabs in sync without rebuilding the whole list.
+        syncSpeakerChecksFromIds(fromRadio);
+    }
+
+    if (
+        stationSel
+        && acceptRemote
+        && radio.station_id
+        && radio.station_id !== 'announce'
+        && radio.station_id !== 'airplay'
+        && document.activeElement !== stationSel
+        && [...stationSel.options].some((o) => o.value === radio.station_id)
+    ) {
+        stationSel.value = radio.station_id;
     }
 
     const vol = Number.isFinite(Number(radio.volume)) ? Number(radio.volume) : 60;
     if (els.unifiRadioVolume && (replace || document.activeElement !== els.unifiRadioVolume)) {
-        els.unifiRadioVolume.value = String(vol);
+        if (acceptRemote || replace) els.unifiRadioVolume.value = String(vol);
     }
-    if (els.unifiRadioVolumeLabel) els.unifiRadioVolumeLabel.textContent = `${vol}%`;
+    if (els.unifiRadioVolumeLabel) els.unifiRadioVolumeLabel.textContent = `${els.unifiRadioVolume?.value || vol}%`;
 
     if (els.unifiRadioStatus) {
         if (radio.playing) {
@@ -3557,6 +3577,19 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
     setRadioPlayingBadge(Boolean(radio.playing), radio.station_name || '', radio.station_id || '');
     syncRadioStatusPoll(radio);
     renderUnifiAirplayStatus(data?.airplay || unifiDash?.airplay || null, radio);
+}
+
+function syncSpeakerChecksFromIds(ids) {
+    const set = new Set((ids || []).map(String).filter(Boolean));
+    let changed = false;
+    document.querySelectorAll('#unifi-radio-speakers input[data-unifi-speaker]').forEach((el) => {
+        const next = set.has(el.value);
+        if (el.checked !== next) {
+            el.checked = next;
+            changed = true;
+        }
+    });
+    if (changed || set.size) writeUnifiSpeakerPick([...set]);
 }
 
 function renderUnifiAirplayStatus(airplay, radio = null) {
@@ -14925,10 +14958,31 @@ els.unifiRadioRecSend?.addEventListener('click', async () => {
 });
 syncRadioAnnounceChrome();
 
-els.radioPlayerModal?.addEventListener('change', (event) => {
+els.radioPlayerModal?.addEventListener('change', async (event) => {
     const speaker = event.target.closest('input[data-unifi-speaker]');
     if (!speaker) return;
-    writeUnifiSpeakerPick(unifiSelectedSpeakerIds());
+    const targets = unifiSelectedSpeakerIds();
+    writeUnifiSpeakerPick(targets);
+    // Apply live while Playing / AirPlay, and always persist so other browsers sync.
+    radioLocalCommandUntil = Date.now() + 2500;
+    try {
+        const data = await unifiApi({ action: 'radio_targets', targets }, 45000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not update speakers');
+        applyRadioCommandResult(data.radio || null);
+        if (unifiDash) {
+            if (data.radio) unifiDash.radio = data.radio;
+            if (data.airplay) unifiDash.airplay = data.airplay;
+        }
+        renderUnifiSpeakers(unifiDash || data, { replace: false });
+        syncRadioPlayerChrome({
+            unifiModuleOn: Array.isArray(lastHub?.enabled) && lastHub.enabled.some((m) => m.id === 'unifi'),
+            speakersEnabled: unifiSpeakersEnabled(unifiDash || data),
+            radio: (unifiDash || data)?.radio || null,
+        });
+        if (data.warning) showToast(data.warning, 'error');
+    } catch (err) {
+        showToast(err.message || 'Could not update speakers', 'error');
+    }
 });
 document.getElementById('unifi-card')?.addEventListener('change', (event) => {
     const input = event.target.closest('input[data-unifi-home]');

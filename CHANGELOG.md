@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.199] - 2026-11-03
+
+### Fixed
+- **Toggle speakers while Playing:** ticking/unticking speakers in Radio Player applies live (`radio_targets`) — HomePod-only radio adds/removes streams without a full Stop/Play; Protect/AirPlay rebuilds the bridge. Picks are saved so other open browsers stay in sync.
+- **Radio Player multi-browser sync:** status polls push station, volume, speaker ticks, Playing/Idle, and AirPlay status to every open tab (not only the one that pressed Play).
+- **AirPlay dropouts:** brief `play_ends` / flaky client detection no longer tears the bridge down for 8 seconds, so gaps between tracks do not kill HomePod/Protect output.
+
 ## [4.0.198] - 2026-11-03
 
 ### Fixed
