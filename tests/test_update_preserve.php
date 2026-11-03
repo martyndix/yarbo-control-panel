@@ -176,7 +176,19 @@ if (!str_contains((string) file_get_contents($root . '/CHANGELOG.md'), '## [4.0.
     fwrite(STDERR, "changelog 4.0.195\n");
     exit(1);
 }
+if (!str_contains((string) file_get_contents($root . '/CHANGELOG.md'), '## [4.0.196]')) {
+    fwrite(STDERR, "changelog 4.0.196\n");
+    exit(1);
+}
 $updateSh = (string) file_get_contents($root . '/scripts/update.sh');
+if (!str_contains($updateSh, 'panel_recover_speed.sh')) {
+    fwrite(STDERR, "update.sh must run panel_recover_speed before git\n");
+    exit(1);
+}
+if (!is_file($root . '/scripts/panel_recover_speed.sh')) {
+    fwrite(STDERR, "panel_recover_speed.sh missing\n");
+    exit(1);
+}
 if (!str_contains($updateSh, 'yarbo_ensure_pyatv')) {
     fwrite(STDERR, "update.sh must install pyatv via yarbo_ensure_pyatv\n");
     exit(1);
