@@ -1543,9 +1543,6 @@ final class YarboUnifiRadio
         $oldProtect = array_values(array_unique($oldProtect));
         $newProtect = YarboHomepod::filterProtectIds($targets);
         $newHomepod = $prefixHomepod(YarboHomepod::filterHomepodIds($targets));
-        sort($oldProtect);
-        $sortedNewProtect = $newProtect;
-        sort($sortedNewProtect);
 
         $contentUrl = trim((string) ($state['station_url'] ?? ''));
         $ffmpeg = $this->unifi->ffmpegPath();
