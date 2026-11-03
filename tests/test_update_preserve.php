@@ -144,6 +144,10 @@ if (!str_contains((string) file_get_contents($root . '/CHANGELOG.md'), '## [4.0.
     fwrite(STDERR, "changelog 4.0.187\n");
     exit(1);
 }
+if (!str_contains((string) file_get_contents($root . '/CHANGELOG.md'), '## [4.0.188]')) {
+    fwrite(STDERR, "changelog 4.0.188\n");
+    exit(1);
+}
 $updateSh = (string) file_get_contents($root . '/scripts/update.sh');
 if (!str_contains($updateSh, 'yarbo_ensure_pyatv')) {
     fwrite(STDERR, "update.sh must install pyatv via yarbo_ensure_pyatv\n");

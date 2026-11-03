@@ -209,7 +209,8 @@ if ($action === 'homepod_pair_start') {
     set_time_limit(60);
     $homepod = YarboHomepod::fromEnv($projectRoot);
     $id = trim((string) ($input['id'] ?? ''));
-    json_response($homepod->pairStart($id) + ['homepod' => $homepod->status()]);
+    // May complete immediately (no PIN) when AirPlay access is open — include speakers.
+    json_response($homepod->pairStart($id) + $radio()->dashboardSlice());
 }
 
 if ($action === 'homepod_pair_finish') {
@@ -218,6 +219,14 @@ if ($action === 'homepod_pair_finish') {
     $id = trim((string) ($input['id'] ?? ''));
     $pin = trim((string) ($input['pin'] ?? $input['code'] ?? ''));
     $result = $homepod->pairFinish($id, $pin);
+    json_response($result + $radio()->dashboardSlice());
+}
+
+if ($action === 'homepod_add' || $action === 'homepod_pair_skip') {
+    set_time_limit(60);
+    $homepod = YarboHomepod::fromEnv($projectRoot);
+    $id = trim((string) ($input['id'] ?? ''));
+    $result = $homepod->addWithoutPin($id);
     json_response($result + $radio()->dashboardSlice());
 }
 

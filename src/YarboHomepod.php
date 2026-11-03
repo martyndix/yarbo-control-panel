@@ -332,6 +332,23 @@ final class YarboHomepod
     }
 
     /**
+     * Add a HomePod without a PIN (open LAN AirPlay access — device stays silent).
+     *
+     * @return array<string, mixed>
+     */
+    public function addWithoutPin(string $id): array
+    {
+        if (!self::isEnabled()) {
+            return ['ok' => false, 'error' => 'HomePod speakers disabled (YARBO_HOMEPOD=0)'];
+        }
+
+        return $this->request([
+            'op' => 'add_without_pin',
+            'id' => self::stripPrefix($id),
+        ], 50.0, true);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function setEnabled(string $id, bool $enabled): array

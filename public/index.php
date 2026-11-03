@@ -1206,7 +1206,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             <p id="settings-unifi-airplay-result" class="settings-cloud-result hint" role="status"></p>
                             <h3 class="settings-subtitle">HomePod speakers</h3>
-                            <p class="hint">Optional outputs for Radio, Announcement, and the AirPlay bridge. The panel sends audio to HomePods with <code>pyatv</code> (AirPlay/RAOP) — separate from the AirPlay bridge above. Panel Updates install <code>pyatv</code> into the project venv (no SSH); Scan will install it too if it is still missing. In the Home app, allow AirPlay from devices on the same network, then Scan and Pair — a HomePod <strong>speaks</strong> the PIN (no screen). Paired speakers appear in the Radio Player checklist.</p>
+                            <p class="hint">Optional outputs for Radio, Announcement, and the AirPlay bridge. The panel sends audio to HomePods with <code>pyatv</code> (AirPlay/RAOP) — separate from the AirPlay bridge above. Panel Updates install <code>pyatv</code> into the project venv (no SSH). In the Home app set Speakers &amp; TVs → <strong>Anyone on the Same Network</strong> (no password). Then Scan and Pair — with that access a HomePod often stays silent (no PIN); Pair adds it automatically. Only tighter access makes it speak a code.</p>
                             <div class="settings-update-actions">
                                 <button type="button" class="btn btn-secondary" id="settings-unifi-homepod-scan">Scan for HomePods</button>
                             </div>
@@ -1214,10 +1214,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <div id="settings-unifi-homepod-pair" class="unifi-homepod-pair hidden">
                                 <label class="settings-field">
                                     <span class="label">Pairing PIN</span>
-                                    <input type="text" id="settings-unifi-homepod-pin" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Code the HomePod speaks">
+                                    <input type="text" id="settings-unifi-homepod-pin" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Code the HomePod speaks (if any)">
                                 </label>
                                 <div class="settings-update-actions">
                                     <button type="button" class="btn" id="settings-unifi-homepod-pair-finish">Submit PIN</button>
+                                    <button type="button" class="btn btn-secondary" id="settings-unifi-homepod-pair-skip">No PIN — add anyway</button>
                                     <button type="button" class="btn btn-secondary" id="settings-unifi-homepod-pair-cancel">Cancel</button>
                                 </div>
                             </div>

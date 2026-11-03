@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.188] - 2026-11-03
+
+### Fixed
+- HomePod Pair with **Anyone on the Same Network**: no spoken PIN is normal — Pair adds the speaker without a code. Settings also offers **No PIN — add anyway** when a PIN form appears but the pod stays silent.
+
 ## [4.0.187] - 2026-11-02
 
 ### Changed
