@@ -320,6 +320,7 @@ assert_true(str_contains($change, '## [4.0.198]'), 'changelog 4.0.198');
 assert_true(str_contains($change, '## [4.0.199]'), 'changelog 4.0.199');
 assert_true(str_contains($change, '## [4.0.200]'), 'changelog 4.0.200');
 assert_true(str_contains($change, '## [4.0.201]'), 'changelog 4.0.201');
+assert_true(str_contains($change, '## [4.0.202]'), 'changelog 4.0.202');
 assert_true(str_contains($php, 'function setTargets'), 'setTargets for live speaker toggles');
 assert_true(str_contains($php, 'prefixHomepod') || str_contains($php, 'withPrefix(YarboHomepod::stripPrefix'), 'setTargets normalizes HomePod ids before diff');
 assert_true(str_contains($api, 'radio_targets'), 'API radio_targets');

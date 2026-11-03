@@ -163,6 +163,38 @@ final class YarboMqttAgentClient
     }
 
     /**
+     * Kill and respawn the MQTT agent so it re-reads config.php (broker IP / serial).
+     * Needed after swapping robots — the agent only loads host/SN at process start.
+     *
+     * @param bool $waitForBroker when true, wait until ping reports MQTT connected
+     */
+    public function restart(bool $waitForBroker = false): bool
+    {
+        self::$spawnAttempted = false;
+        self::$pythonReplaceAttempted = false;
+        $this->stopAgentProcesses();
+        usleep(350000);
+        $this->ensureStarted();
+
+        $deadline = microtime(true) + ($waitForBroker ? 12.0 : 6.0);
+        while (microtime(true) < $deadline) {
+            $ping = $this->ping(1.0);
+            if (!($ping['ok'] ?? false)) {
+                usleep(250000);
+                continue;
+            }
+            if (!$waitForBroker || !empty($ping['connected'])) {
+                return true;
+            }
+            usleep(250000);
+        }
+
+        $ping = $this->ping(1.0);
+
+        return ($ping['ok'] ?? false) && (!$waitForBroker || !empty($ping['connected']));
+    }
+
+    /**
      * @return list<string>|null already escapeshellarg()'d binary + args
      */
     private function pythonAgentArgv(string $root): ?array

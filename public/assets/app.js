@@ -12508,7 +12508,11 @@ async function saveSettings(event) {
             els.settingsPowerwallEmail.value = data.powerwall.gateway_email;
         }
         if (els.settingsPowerwallPassword) els.settingsPowerwallPassword.value = '';
-        showToast('Settings saved', 'success');
+        if (data.mqtt_agent_restarted) {
+            showToast('Settings saved — MQTT agent restarted for the new broker/serial', 'success');
+        } else {
+            showToast('Settings saved', 'success');
+        }
         // Stay on Settings so Build firmware and other actions still work.
         fetchStatus().catch(() => {});
     } catch (err) {
