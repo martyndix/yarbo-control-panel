@@ -30,7 +30,7 @@ DATA_DIR = ROOT / "data" / "homepod"
 DEVICES_PATH = DATA_DIR / "devices.json"
 LOG_PATH = ROOT / "data" / "homepod-agent.log"
 CACHE_DIR = DATA_DIR / "cache"
-AGENT_VERSION = 2
+AGENT_VERSION = 3
 # Formats pyatv stream_file handles reliably on HomePods.
 _DIRECT_SUFFIXES = {".wav", ".mp3", ".aac", ".m4a", ".flac", ".aiff", ".aif", ".caf"}
 
@@ -38,12 +38,16 @@ try:
     import pyatv
     from pyatv import exceptions as pyatv_exc
     from pyatv.const import DeviceModel, PairingRequirement, Protocol
+    from pyatv.settings import MrpTunnel
+    from pyatv.storage.memory_storage import MemoryStorage
 except Exception as exc:  # pragma: no cover - import probed at runtime
     pyatv = None  # type: ignore
     pyatv_exc = None  # type: ignore
     Protocol = None  # type: ignore
     DeviceModel = None  # type: ignore
     PairingRequirement = None  # type: ignore
+    MrpTunnel = None  # type: ignore
+    MemoryStorage = None  # type: ignore
     _IMPORT_ERROR = str(exc)
 else:
     _IMPORT_ERROR = ""
@@ -571,6 +575,28 @@ class HomepodRuntime:
             ),
         }
 
+    def _disable_non_stream_protocols(self, conf: Any) -> None:
+        """Drop Companion/MRP/DMAP so connect does not need remote-control pairing.
+
+        HomePods often advertise those services; setting them up fails with
+        "Failed to set up remote control channel" even when RAOP streaming works.
+        """
+        if Protocol is None:
+            return
+        for proto in (
+            getattr(Protocol, "Companion", None),
+            getattr(Protocol, "MRP", None),
+            getattr(Protocol, "DMAP", None),
+        ):
+            if proto is None:
+                continue
+            service = conf.get_service(proto)
+            if service is not None:
+                try:
+                    service.enabled = False
+                except Exception:
+                    pass
+
     async def _connect(self, ident: str) -> Any:
         if pyatv is None:
             raise RuntimeError(f"pyatv not installed: {_IMPORT_ERROR}")
@@ -584,8 +610,16 @@ class HomepodRuntime:
         )
         if not saved:
             raise RuntimeError("Device is not paired — pair it in Settings → UniFi")
-        devices = await pyatv.scan(self.loop, timeout=6.0)
+        # Scan for RAOP/AirPlay only — avoids pulling in Companion noise.
+        scan_protocol = None
+        if Protocol is not None:
+            scan_protocol = {Protocol.RAOP, Protocol.AirPlay}
+        devices = await pyatv.scan(self.loop, timeout=6.0, protocol=scan_protocol)
         conf = next((d for d in devices if str(d.identifier) == ident), None)
+        if conf is None:
+            # Fallback: full scan in case identifier lives on another service.
+            devices = await pyatv.scan(self.loop, timeout=6.0)
+            conf = next((d for d in devices if str(d.identifier) == ident), None)
         if conf is None:
             raise RuntimeError(f"{saved.get('name') or ident} not found on the LAN")
         # Prefer RAOP — that is what stream_file needs.
@@ -600,7 +634,37 @@ class HomepodRuntime:
                     conf.set_credentials(proto, creds)
                 except Exception:
                     pass
-        atv = await pyatv.connect(conf, self.loop)
+
+        self._disable_non_stream_protocols(conf)
+
+        # Disable AirPlay→MRP remote-control tunnel (common HomePod connect failure).
+        storage = None
+        if MemoryStorage is not None and MrpTunnel is not None:
+            storage = MemoryStorage()
+            settings = await storage.get_settings(conf)
+            settings.protocols.airplay.mrp_tunnel = MrpTunnel.Disable
+
+        try:
+            atv = await pyatv.connect(conf, self.loop, storage=storage)
+        except Exception as first_exc:
+            # Last resort: disable AirPlay service entirely if RAOP is present.
+            msg = str(first_exc)
+            airplay_svc = conf.get_service(Protocol.AirPlay) if Protocol else None
+            raop_svc = conf.get_service(Protocol.RAOP) if Protocol else None
+            if (
+                airplay_svc is not None
+                and raop_svc is not None
+                and "remote control" in msg.lower()
+            ):
+                log(f"retry connect RAOP-only after: {first_exc}")
+                try:
+                    airplay_svc.enabled = False
+                except Exception:
+                    pass
+                atv = await pyatv.connect(conf, self.loop, storage=storage)
+            else:
+                raise
+
         # Persist credentials discovered after an open-LAN connect so later
         # streams keep working if HomeKit tightens access.
         try:

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.191] - 2026-11-03
+
+### Fixed
+- HomePod connect no longer fails with **Failed to set up remote control channel**: the agent disables Companion/MRP and the AirPlay MRP tunnel, and falls back to RAOP-only when needed (streaming does not use remote control).
+
 ## [4.0.190] - 2026-11-03
 
 ### Fixed
