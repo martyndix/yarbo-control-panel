@@ -173,12 +173,17 @@ assert_true(str_contains($update, 'yarbo_ensure_pyatv'), 'update.sh installs pya
 assert_true(str_contains($api, 'homepod_ensure') || str_contains((string) file_get_contents($root . '/src/YarboHomepod.php'), 'ensureDeps'), 'ensure path available');
 assert_true(str_contains((string) file_get_contents($root . '/src/YarboHomepod.php'), 'needsPyatvInstall'), 'scan auto-installs pyatv');
 assert_true(str_contains($change, '## [4.0.186]'), 'changelog 4.0.186');
+assert_true(str_contains($change, '## [4.0.188]'), 'changelog 4.0.188');
 assert_true(str_contains($index, 'settings-unifi-homepod-scan'), 'Settings HomePod scan');
 assert_true(str_contains($index, 'HomePod speakers'), 'Settings HomePod heading');
+assert_true(str_contains($index, 'settings-unifi-homepod-pair-skip'), 'No PIN add button');
+assert_true(str_contains($index, 'Anyone on the Same Network'), 'Settings hint open AirPlay access');
 assert_true(str_contains($js, 'homepod_scan'), 'JS scan action');
 assert_true(str_contains($js, 'homepod_pair_finish'), 'JS pair finish');
+assert_true(str_contains($js, 'homepod_add') || str_contains($js, 'pin_required'), 'JS handles no-PIN pair');
 assert_true(str_contains($js, '· HomePod'), 'checklist HomePod label');
 assert_true(str_contains($api, 'homepod_scan'), 'API homepod_scan');
+assert_true(str_contains($api, 'homepod_add') || str_contains($api, 'addWithoutPin'), 'API add without PIN');
 assert_true(str_contains($api, 'use YarboHomepod') || str_contains($api, 'YarboHomepod::'), 'API uses YarboHomepod');
 assert_true(str_contains($css, 'unifi-homepod-list'), 'HomePod settings CSS');
 assert_true(str_contains($panel, 'homepod_agent.py'), 'panel.sh starts HomePod agent');
@@ -188,10 +193,12 @@ assert_true(str_contains($docs, 'YARBO_HOMEPOD=0'), 'docs document HomePod soft 
 assert_true(str_contains($docs, '4.0.184') || str_contains($change, '4.0.184'), 'docs/changelog mention full revert target');
 assert_true(str_contains($agent, 'pyatv'), 'agent uses pyatv');
 assert_true(str_contains($agent, 'stream_file'), 'agent streams files');
+assert_true(str_contains($agent, 'add_without_pin') || str_contains($agent, 'NotNeeded'), 'agent skips PIN when NotNeeded');
 assert_true(str_contains($change, '## [4.0.185]'), 'changelog 4.0.185');
 assert_true(str_contains($change, 'HomePod'), 'changelog mentions HomePod');
 assert_true(str_contains($docs, 'HomePod'), 'docs mention HomePod');
 assert_true(str_contains($docs, 'pyatv'), 'docs mention pyatv');
+assert_true(str_contains($docs, 'does not speak') || str_contains($docs, 'No PIN'), 'docs explain silent pairing');
 
 $radioPhp = (string) file_get_contents($root . '/src/YarboUnifiRadio.php');
 assert_true(str_contains($radioPhp, 'filterHomepodIds'), 'radio splits HomePod targets');

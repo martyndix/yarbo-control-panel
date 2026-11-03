@@ -156,6 +156,7 @@ const els = {
     settingsUnifiHomepodPair: document.getElementById('settings-unifi-homepod-pair'),
     settingsUnifiHomepodPin: document.getElementById('settings-unifi-homepod-pin'),
     settingsUnifiHomepodPairFinish: document.getElementById('settings-unifi-homepod-pair-finish'),
+    settingsUnifiHomepodPairSkip: document.getElementById('settings-unifi-homepod-pair-skip'),
     settingsUnifiHomepodPairCancel: document.getElementById('settings-unifi-homepod-pair-cancel'),
     settingsUnifiHomepodResult: document.getElementById('settings-unifi-homepod-result'),
     settingsUnifiStationsList: document.getElementById('settings-unifi-stations-list'),
@@ -14241,13 +14242,27 @@ els.settingsUnifiHomepodList?.addEventListener('click', async (ev) => {
         try {
             const data = await unifiApi({ action: 'homepod_pair_start', id }, 60000);
             if (!data?.ok) throw new Error(data?.error || 'Pair start failed');
+            // Open LAN access: no PIN spoken — already saved.
+            if (data.pin_required === false || data.paired === true) {
+                homepodPairingId = '';
+                els.settingsUnifiHomepodPair?.classList.add('hidden');
+                if (unifiDash) {
+                    unifiDash.homepod = data.homepod || unifiDash.homepod;
+                    if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+                    renderUnifiSpeakers(unifiDash, { replace: true });
+                }
+                await refreshHomepodSettings(data.homepod || null);
+                setHomepodResult(data.message || 'HomePod added (no PIN needed).');
+                showToast('HomePod added', 'success');
+                return;
+            }
             homepodPairingId = id;
             els.settingsUnifiHomepodPair?.classList.remove('hidden');
             if (els.settingsUnifiHomepodPin) {
                 els.settingsUnifiHomepodPin.value = '';
                 els.settingsUnifiHomepodPin.focus();
             }
-            setHomepodResult(data.message || 'Listen for the PIN spoken by the HomePod, then enter it here.');
+            setHomepodResult(data.message || 'If the HomePod speaks a code, enter it — otherwise tap No PIN — add anyway.');
         } catch (err) {
             setHomepodResult(err.message || 'Pair failed', false);
             showToast(err.message || 'HomePod pair failed', 'error');
@@ -14324,6 +14339,34 @@ els.settingsUnifiHomepodPairFinish?.addEventListener('click', async () => {
         showToast(err.message || 'HomePod pairing failed', 'error');
     } finally {
         els.settingsUnifiHomepodPairFinish.disabled = false;
+    }
+});
+
+els.settingsUnifiHomepodPairSkip?.addEventListener('click', async () => {
+    if (!homepodPairingId) {
+        setHomepodResult('Tap Pair on a HomePod first', false);
+        return;
+    }
+    const id = homepodPairingId;
+    els.settingsUnifiHomepodPairSkip.disabled = true;
+    try {
+        const data = await unifiApi({ action: 'homepod_add', id }, 60000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not add HomePod');
+        homepodPairingId = '';
+        els.settingsUnifiHomepodPair?.classList.add('hidden');
+        if (unifiDash) {
+            unifiDash.homepod = data.homepod || unifiDash.homepod;
+            if (Array.isArray(data.speakers)) unifiDash.speakers = data.speakers;
+            renderUnifiSpeakers(unifiDash, { replace: true });
+        }
+        await refreshHomepodSettings(data.homepod || null);
+        setHomepodResult(data.message || 'HomePod added without a PIN.');
+        showToast('HomePod added', 'success');
+    } catch (err) {
+        setHomepodResult(err.message || 'Add failed', false);
+        showToast(err.message || 'Could not add HomePod', 'error');
+    } finally {
+        els.settingsUnifiHomepodPairSkip.disabled = false;
     }
 });
 
