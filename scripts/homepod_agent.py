@@ -30,9 +30,11 @@ DATA_DIR = ROOT / "data" / "homepod"
 DEVICES_PATH = DATA_DIR / "devices.json"
 LOG_PATH = ROOT / "data" / "homepod-agent.log"
 CACHE_DIR = DATA_DIR / "cache"
-AGENT_VERSION = 3
-# Formats pyatv stream_file handles reliably on HomePods.
+AGENT_VERSION = 4
+# Formats pyatv stream_file handles reliably on HomePods (local files only).
 _DIRECT_SUFFIXES = {".wav", ".mp3", ".aac", ".m4a", ".flac", ".aiff", ".aif", ".caf"}
+# Icecast / CDN streams often 401 when the HomePod fetches them itself.
+_FFMPEG_UA = "Mozilla/5.0 (compatible; YarboHomepod/1.0)"
 
 try:
     import pyatv
@@ -204,16 +206,24 @@ class HomepodRuntime:
         lower = source.lower()
         return ".m3u8" in lower or "hls" in lower or ".isml" in lower or "norewind" in lower
 
+    def _is_local_http(self, source: str) -> bool:
+        """True for our own AirPlay/radio remux listeners (already playable)."""
+        lower = source.lower()
+        return lower.startswith("http://127.0.0.1:") or lower.startswith("http://localhost:")
+
     async def _prepare_source(self, ident: str, source: str) -> str:
         """Return a path/URL pyatv stream_file can play; start remux helpers if needed."""
         self._cleanup_helpers(ident)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
         if source.startswith(("http://", "https://")):
-            if self._looks_like_hls(source) or source.lower().endswith(".aac"):
-                return await self._remux_http_to_mp3(ident, source)
-            # Direct MP3/AAC ice streams usually work as-is.
-            return source
+            # Local bridge URLs are already MP3 from the panel — do not remux again.
+            if self._is_local_http(source):
+                return source
+            # Always remux remote radio through ffmpeg. Icecast/CDN hosts (Classic FM,
+            # etc.) often return 401 when the HomePod or pyatv fetches them directly;
+            # ffmpeg with a normal User-Agent works, same as Protect talkback.
+            return await self._remux_http_to_mp3(ident, source)
 
         path = Path(source)
         if not path.is_file():
@@ -264,13 +274,17 @@ class HomepodRuntime:
             raise RuntimeError("ffmpeg is required to remux radio streams for HomePods")
         port = self._free_port()
         url = f"http://127.0.0.1:{port}/live.mp3"
+        # Live ice/HLS: no -re (that paces file reads). Browser UA avoids CDN 401s.
         cmd = [
             ffmpeg,
             "-nostdin",
             "-hide_banner",
             "-loglevel",
             "warning",
-            "-re",
+            "-user_agent",
+            _FFMPEG_UA,
+            "-headers",
+            "Icy-MetaData: 1\r\n",
             "-i",
             source,
             "-vn",
@@ -288,19 +302,36 @@ class HomepodRuntime:
             "1",
             url,
         ]
-        log(f"remux HLS/AAC id={ident} -> {url}")
+        log(f"remux radio id={ident} src={source} -> {url}")
+        err_log = CACHE_DIR / f"remux-{ident.replace(':', '')}.log"
+        err_fh = err_log.open("w", encoding="utf-8")
         # Use a real Popen so we can keep the listener alive across the stream.
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=err_fh,
         )
+        try:
+            err_fh.close()
+        except Exception:
+            pass
         self._remux[ident] = proc
+        self._temps.setdefault(ident, []).append(err_log)
         # Wait briefly for the listen socket; pyatv connects as the client.
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(1.0)
         if proc.poll() is not None:
             self._remux.pop(ident, None)
-            raise RuntimeError("Could not remux radio stream for HomePod (ffmpeg exited)")
+            detail = ""
+            try:
+                detail = err_log.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                pass
+            if detail:
+                detail = detail.splitlines()[-1][:240]
+            raise RuntimeError(
+                "Could not remux radio stream for HomePod"
+                + (f": {detail}" if detail else " (ffmpeg exited)")
+            )
         return url
 
     async def scan(self, timeout: float = 5.0) -> list[dict[str, Any]]:
