@@ -1196,7 +1196,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span>Show Radio Player in the header</span>
                             </label>
                             <h3 class="settings-subtitle">AirPlay bridge</h3>
-                            <p class="hint">Opt-in: the panel Pi appears as an AirPlay speaker on the LAN (shairport-sync), then ffmpeg forwards audio to the same Protect talkback speakers. Protect devices cannot receive AirPlay themselves. Needs <code>shairport-sync</code> and <code>avahi-daemon</code> on the Pi; AirPlay 2 also needs <code>nqptp</code>. See <code>docs/unifi.md</code>.</p>
+                            <p class="hint">Opt-in: the panel Pi appears as an AirPlay speaker on the LAN (shairport-sync), then ffmpeg forwards audio to the same Protect talkback speakers. Protect devices cannot receive AirPlay themselves. Saving the name restarts AirPlay when it is already started so iPhones pick up the new label. Other entries in the AirPlay list (for example a Homebridge box) are separate devices. Needs <code>shairport-sync</code> and <code>avahi-daemon</code> on the Pi; AirPlay 2 also needs <code>nqptp</code>. See <code>docs/unifi.md</code>.</p>
                             <label class="settings-field">
                                 <span class="label">AirPlay name</span>
                                 <input type="text" id="settings-unifi-airplay-name" maxlength="48" placeholder="Yarbo Speakers" autocomplete="off">

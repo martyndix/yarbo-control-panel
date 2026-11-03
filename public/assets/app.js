@@ -14118,16 +14118,25 @@ els.unifiRadioStop?.addEventListener('click', async () => {
 els.settingsUnifiAirplaySave?.addEventListener('click', async () => {
     const name = els.settingsUnifiAirplayName?.value.trim() || 'Yarbo Speakers';
     const result = els.settingsUnifiAirplayResult;
+    if (result) {
+        result.textContent = 'Saving AirPlay name…';
+        result.className = 'settings-cloud-result hint';
+    }
     try {
-        const data = await unifiApi({ action: 'airplay_config', name }, 10000);
+        // May restart shairport-sync so iPhones pick up the new mDNS name.
+        const data = await unifiApi({ action: 'airplay_config', name, apply: true }, 120000);
         if (!data?.ok) throw new Error(data?.error || 'Could not save AirPlay name');
         if (unifiDash) unifiDash.airplay = data.airplay || unifiDash.airplay;
         if (els.settingsUnifiAirplayName && data.airplay?.name) {
             els.settingsUnifiAirplayName.value = data.airplay.name;
         }
         renderUnifiAirplayStatus(data.airplay || null, unifiDash?.radio || null);
+        const msg = data.airplay?.message
+            || (data.airplay?.applied
+                ? `AirPlay name is now “${data.airplay.name || name}” on the LAN`
+                : `Name saved as “${data.airplay?.name || name}”. Start AirPlay to advertise it.`);
         if (result) {
-            result.textContent = 'AirPlay name saved.';
+            result.textContent = msg;
             result.className = 'settings-cloud-result success';
         }
         showToast('AirPlay name saved', 'success');

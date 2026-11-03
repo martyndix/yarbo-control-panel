@@ -67,8 +67,11 @@ final class YarboPanelAirPlay
     }
 
     /**
+     * Save the advertised AirPlay name. If the receiver is running, rewrite
+     * shairport-sync.conf and restart so iPhones see the new name immediately.
+     *
      * @param array<string, mixed> $input
-     * @return array{name: string}
+     * @return array<string, mixed>
      */
     public function saveConfig(array $input): array
     {
@@ -90,7 +93,30 @@ final class YarboPanelAirPlay
             file_put_contents($this->configPath(), $json . "\n", LOCK_EX);
         }
 
-        return $this->config();
+        $cfg = $this->config();
+        $wasRunning = $this->receiverRunning();
+        // shairport-sync only reads general.name at start — restart so iPhones see 28LPC etc.
+        $apply = !array_key_exists('apply', $input) || YarboHub::asBool($input['apply'] ?? true);
+        if ($apply && $wasRunning) {
+            $ensured = $this->ensure();
+            return [
+                'name' => $cfg['name'],
+                'applied' => (bool) ($ensured['ok'] ?? false),
+                'running' => (bool) ($ensured['running'] ?? false),
+                'message' => ($ensured['ok'] ?? false)
+                    ? ('AirPlay name is now “' . $cfg['name'] . '” on the LAN')
+                    : (string) ($ensured['error'] ?? $ensured['message'] ?? 'Name saved; could not restart receiver'),
+                'error' => ($ensured['ok'] ?? false) ? null : ($ensured['error'] ?? null),
+            ] + $ensured;
+        }
+
+        return $cfg + [
+            'applied' => false,
+            'running' => $wasRunning,
+            'message' => $wasRunning
+                ? null
+                : ('Name saved as “' . $cfg['name'] . '”. Start AirPlay in the Radio Player to advertise it.'),
+        ];
     }
 
     /**

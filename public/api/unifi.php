@@ -169,11 +169,26 @@ if ($action === 'airplay_status') {
 }
 
 if ($action === 'airplay_config') {
+    set_time_limit(120);
     $airplay = new YarboPanelAirPlay($projectRoot);
     $cfg = $airplay->saveConfig($input);
     $status = $airplay->status();
-    $status['config'] = $cfg;
-    json_response(['ok' => true, 'airplay' => $status]);
+    // saveConfig may have restarted the receiver to apply the new mDNS name.
+    $status['config'] = [
+        'name' => (string) ($cfg['name'] ?? $airplay->config()['name']),
+    ];
+    $status['name'] = (string) ($cfg['name'] ?? $status['name'] ?? '');
+    if (!empty($cfg['message'])) {
+        $status['message'] = (string) $cfg['message'];
+    }
+    if (array_key_exists('applied', $cfg)) {
+        $status['applied'] = (bool) $cfg['applied'];
+    }
+    json_response([
+        'ok' => empty($cfg['error']),
+        'error' => $cfg['error'] ?? null,
+        'airplay' => $status,
+    ] + $radio()->dashboardSlice());
 }
 
 if ($action === 'airplay_start') {

@@ -97,8 +97,14 @@ assert_true(str_contains($api, 'stopAirplay(true)'), 'speakers off stops AirPlay
 assert_true(str_contains($index, 'id="unifi-airplay-start"'), 'AirPlay Start button');
 assert_true(str_contains($index, 'id="unifi-airplay-stop"'), 'AirPlay Stop button');
 assert_true(str_contains($index, 'id="settings-unifi-airplay-name"'), 'Settings AirPlay name');
+assert_true(str_contains($index, 'restarts AirPlay') || str_contains($index, 'Homebridge'), 'Settings hint: rename restarts / other devices');
 assert_true(str_contains($js, "action: 'airplay_start'"), 'JS airplay_start');
 assert_true(str_contains($js, 'renderUnifiAirplayStatus'), 'JS AirPlay status renderer');
+assert_true(str_contains($js, 'apply: true') || str_contains($js, "apply: true"), 'JS save applies name to running receiver');
+$airplayPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboPanelAirPlay.php');
+assert_true(str_contains($airplayPhp, 'receiverRunning()'), 'saveConfig can detect running receiver');
+assert_true(str_contains($airplayPhp, '$this->ensure()'), 'saveConfig restarts via ensure');
+assert_true(str_contains($change, '## [4.0.189]'), 'changelog 4.0.189');
 assert_true(str_contains($ensureSh, 'shairport-sync'), 'ensure script mentions shairport');
 assert_true(str_contains($ensureSh, 'yarbo_try_install_airplay_deps'), 'ensure tries auto apt install');
 assert_true(str_contains($libSh, 'audio.fifo'), 'helper creates FIFO');
