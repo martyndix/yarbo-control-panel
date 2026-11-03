@@ -115,6 +115,7 @@ assert_true(str_contains($change, '## [4.0.196]'), 'changelog 4.0.196');
 assert_true(str_contains($change, '## [4.0.197]'), 'changelog 4.0.197');
 assert_true(str_contains($change, '## [4.0.198]'), 'changelog 4.0.198');
 assert_true(str_contains($change, '## [4.0.199]'), 'changelog 4.0.199');
+assert_true(str_contains($change, '## [4.0.200]'), 'changelog 4.0.200');
 assert_true(str_contains($php, 'pcm:s16le:44100:2:'), 'HomePod bridge stereo PCM');
 assert_true(str_contains($php, 'pcm_s16le'), 'HomePod bridge raw PCM codec');
 assert_true(str_contains($php, 'exec 3<>'), 'FIFO RDWR holder in fanout');
