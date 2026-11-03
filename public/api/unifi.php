@@ -163,6 +163,11 @@ if ($action === 'radio_volume') {
     json_response($radio()->setVolume($input));
 }
 
+if ($action === 'radio_targets') {
+    set_time_limit(60);
+    json_response($radio()->setTargets($input));
+}
+
 if ($action === 'airplay_status') {
     $airplay = new YarboPanelAirPlay($projectRoot);
     json_response(['ok' => true, 'airplay' => $airplay->status()] + $radio()->dashboardSlice());
