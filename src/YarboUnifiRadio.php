@@ -109,7 +109,8 @@ final class YarboUnifiRadio
 
         // AirPlay fan-out blocks on an empty FIFO forever — never treat it as Playing
         // unless a real client session is active (play-begins hook / TCP watcher).
-        // Grace: play_ends / flaky ss can flicker for a few seconds between tracks.
+        // Grace: play_ends / flaky ss can flicker for several seconds between tracks
+        // and during the initial handshake — do not tear the bridge down yet.
         if (
             trim((string) ($state['station_id'] ?? '')) === 'airplay'
             && (!empty($state['playing']) || $alive !== [] || $homepodAlive)
@@ -118,7 +119,7 @@ final class YarboUnifiRadio
             if (!$airplay->clientIsPresent()) {
                 $sess = $airplay->session();
                 $goneFor = time() - (int) ($sess['updated_at'] ?? 0);
-                if ($goneFor < 0 || $goneFor >= 8) {
+                if ($goneFor < 0 || $goneFor >= 15) {
                     foreach ($alive as $row) {
                         $pid = (int) ($row['pid'] ?? 0);
                         if ($pid > 1) {
@@ -678,7 +679,12 @@ final class YarboUnifiRadio
     }
 
     /**
-     * shairport-sync left active state — stop fan-out but keep the receiver advertised.
+     * shairport-sync left active state — defer fan-out teardown.
+     *
+     * Brief play_ends / TCP flicker during handshake used to call stop() here,
+     * which killed the FIFO reader and SIGPIPE'd shairport (AirPlay off after a
+     * blip of sound). Session is already marked inactive by the bridge CLI;
+     * status() tears the bridge down only after the client-gone grace window.
      *
      * @return array<string, mixed>
      */
@@ -697,12 +703,10 @@ final class YarboUnifiRadio
                 'airplay' => $airplay->status(),
             ];
         }
-        if ($stationId === 'airplay') {
-            $this->stop(false);
-        }
 
         return [
             'ok' => true,
+            'deferred' => $stationId === 'airplay',
             'radio' => $this->status(),
             'airplay' => $airplay->status(),
         ];

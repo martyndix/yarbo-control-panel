@@ -46,6 +46,7 @@ pkill -x nqptp 2>/dev/null || true
 pkill -f '[p]anel_airplay_watch.sh' 2>/dev/null || true
 pkill -f '[p]anel_airplay_metadata.php' 2>/dev/null || true
 pkill -f '[p]anel_airplay_bridge.php' 2>/dev/null || true
+pkill -f 'yarbo-airplay-fifo-holder' 2>/dev/null || true
 # Fan-out / remux ffmpeg left from radio or AirPlay bridge.
 pkill -f '[f]fmpeg.*(airplay|live\.mp3|unifi-radio|homepod)' 2>/dev/null || true
 # Do NOT kill the Homepod agent itself here if the panel is up — panel.sh owns it.

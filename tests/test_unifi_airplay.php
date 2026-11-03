@@ -116,10 +116,19 @@ assert_true(str_contains($change, '## [4.0.197]'), 'changelog 4.0.197');
 assert_true(str_contains($change, '## [4.0.198]'), 'changelog 4.0.198');
 assert_true(str_contains($change, '## [4.0.199]'), 'changelog 4.0.199');
 assert_true(str_contains($change, '## [4.0.200]'), 'changelog 4.0.200');
+assert_true(str_contains($change, '## [4.0.201]'), 'changelog 4.0.201');
 assert_true(str_contains($php, 'pcm:s16le:44100:2:'), 'HomePod bridge stereo PCM');
 assert_true(str_contains($php, 'pcm_s16le'), 'HomePod bridge raw PCM codec');
 assert_true(str_contains($php, 'exec 3<>'), 'FIFO RDWR holder in fanout');
+assert_true(str_contains($libSh, 'yarbo_airplay_start_fifo_holder'), 'long-lived FIFO holder helper');
+assert_true(str_contains($libSh, 'yarbo-airplay-fifo-holder'), 'FIFO holder process marker');
+assert_true(str_contains($php, "'deferred'") || str_contains($php, '"deferred"'), 'inactive defers fan-out stop');
+assert_true(!preg_match('/function onAirplayClientInactive\(\)[^{]*\{[^}]*\$this->stop\(false\)/s', $php), 'inactive must not stop() immediately');
+assert_true(str_contains($php, '>= 15') || str_contains($php, '$goneFor >= 15'), 'client-gone grace is 15s');
+$watchSh = (string) file_get_contents(dirname(__DIR__) . '/scripts/panel_airplay_watch.sh');
+assert_true(str_contains($watchSh, 'gone_streak') || str_contains($watchSh, 'GONE_NEED'), 'watch debounces client-gone');
 assert_true(str_contains($change, 'garbled') || str_contains($change, 'stereo 44100'), 'changelog notes garble fix');
+assert_true(str_contains($change, 'SIGPIPE') || str_contains($change, 'briefly plays'), 'changelog 4.0.201 stay-on');
 assert_true(is_file(dirname(__DIR__) . '/scripts/panel_recover_speed.sh'), 'recover speed script');
 assert_true(str_contains($js, 'nqptp'), 'JS surfaces missing nqptp hint');
 assert_true(str_contains($ensureSh, 'shairport-sync'), 'ensure script mentions shairport');
@@ -216,5 +225,36 @@ $snap = $capture->invoke($radio);
 assert_true(is_array($snap), 'captureResumeAfter for airplay');
 assert_true(($snap['station_id'] ?? '') === 'airplay', 'resume snapshot is airplay');
 assert_true((int) ($snap['volume'] ?? 0) === 42, 'resume snapshot volume');
+
+// Inactive must defer stop — keep Playing during the client-gone grace window.
+// Use a live pid so status() does not reap "dead ffmpeg" and clear playing early.
+$holderPid = (int) trim((string) shell_exec('sleep 60 >/dev/null 2>&1 & echo $!'));
+assert_true($holderPid > 1 && function_exists('posix_kill') && @posix_kill($holderPid, 0), 'spawned live stream pid for grace test');
+file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
+    'playing' => true,
+    'station_id' => 'airplay',
+    'station_name' => 'Patio Readers',
+    'station_url' => $root . '/data/airplay/audio.fifo',
+    'volume' => 42,
+    'streams' => [['camera_id' => 'cam1', 'pid' => $holderPid]],
+    'targets' => ['cam1'],
+    'started_at' => time() - 5,
+    'ends_at' => null,
+    'resume_after' => null,
+    'error' => null,
+], JSON_UNESCAPED_SLASHES));
+$airplay->saveBridge(['cam1'], 42, true);
+$airplay->markSessionActive(false); // as bridge.php does before onAirplayClientInactive
+$inactive = $radio->onAirplayClientInactive();
+assert_true(($inactive['ok'] ?? false) === true, 'inactive ok');
+assert_true(!empty($inactive['deferred']), 'inactive deferred while airplay station');
+$stateAfter = json_decode((string) file_get_contents($root . '/data/unifi-radio-state.json'), true);
+assert_true(($stateAfter['station_id'] ?? '') === 'airplay', 'inactive keeps airplay station during grace');
+assert_true(!empty($stateAfter['playing']), 'inactive keeps playing during grace');
+assert_true(is_array($stateAfter['streams'] ?? null) && $stateAfter['streams'] !== [], 'inactive keeps streams during grace');
+assert_true((int) ($stateAfter['streams'][0]['pid'] ?? 0) === $holderPid, 'inactive keeps live fan-out pid');
+assert_true(@posix_kill($holderPid, 0), 'fan-out pid still alive after deferred inactive');
+@posix_kill($holderPid, 9);
+@shell_exec('kill -9 ' . $holderPid . ' 2>/dev/null');
 
 echo "test_unifi_airplay.php ok\n";

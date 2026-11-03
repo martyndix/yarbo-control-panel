@@ -232,6 +232,44 @@ yarbo_airplay_watch_pidfile() {
   echo "$(yarbo_airplay_dir "$1")/watch.pid"
 }
 
+yarbo_airplay_holder_pidfile() {
+  echo "$(yarbo_airplay_dir "$1")/fifo-holder.pid"
+}
+
+# Keep a long-lived RDWR open on the audio FIFO so shairport-sync never sees
+# zero readers when ffmpeg fan-out restarts (or briefly dies). Without this,
+# play_ends → stop fanout closes the only reader and shairport gets SIGPIPE —
+# AirPlay turns off after a brief blip of sound.
+yarbo_airplay_stop_fifo_holder() {
+  local root="$1"
+  local pf pid
+  pf="$(yarbo_airplay_holder_pidfile "$root")"
+  if [[ -f "$pf" ]]; then
+    pid="$(tr -d ' \n' <"$pf" 2>/dev/null || true)"
+    if [[ -n "$pid" ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 0.1
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pf"
+  fi
+  pkill -f "yarbo-airplay-fifo-holder" 2>/dev/null || true
+}
+
+yarbo_airplay_start_fifo_holder() {
+  local root="$1"
+  local fifo log pf
+  yarbo_airplay_ensure_fifo "$root"
+  yarbo_airplay_stop_fifo_holder "$root"
+  fifo="$(yarbo_airplay_fifo "$root")"
+  log="$(yarbo_airplay_log "$root")"
+  pf="$(yarbo_airplay_holder_pidfile "$root")"
+  mkdir -p "$(yarbo_airplay_dir "$root")"
+  # $0 marker so stop/recover can pkill without matching unrelated bash.
+  nohup bash -c 'exec 3<>"$1"; while true; do sleep 3600; done' yarbo-airplay-fifo-holder "$fifo" >>"$log" 2>&1 &
+  echo $! >"$pf"
+}
+
 # True when shairport-sync has an established remote TCP peer (AirPlay/RTSP client).
 yarbo_airplay_has_network_client() {
   local root="$1"
@@ -357,6 +395,7 @@ yarbo_airplay_stop_receiver() {
   local pf pid
   yarbo_airplay_stop_watch "$root"
   yarbo_airplay_stop_metadata_reader "$root"
+  # Stop shairport before the FIFO holder so the writer exits cleanly (no SIGPIPE).
   pf="$(yarbo_airplay_pidfile "$root")"
   if [[ -f "$pf" ]]; then
     pid="$(tr -d ' \n' <"$pf" 2>/dev/null || true)"
@@ -368,6 +407,7 @@ yarbo_airplay_stop_receiver() {
     rm -f "$pf"
   fi
   pkill -x shairport-sync 2>/dev/null || true
+  yarbo_airplay_stop_fifo_holder "$root"
   pf="$(yarbo_airplay_nqptp_pidfile "$root")"
   if [[ -f "$pf" ]]; then
     pid="$(tr -d ' \n' <"$pf" 2>/dev/null || true)"
@@ -433,11 +473,15 @@ yarbo_airplay_start_receiver() {
   # Only skip restart when *our* pipe receiver is already up with this conf.
   if yarbo_airplay_our_receiver_running "$root"; then
     # Still refresh conf on disk; caller (ensure) typically stopped us first.
+    # Keep the FIFO holder alive across no-op ensure calls.
+    yarbo_airplay_start_fifo_holder "$root"
     return 0
   fi
   # Clear any non-panel shairport that appeared after quiesce (systemd race).
   pkill -x shairport-sync 2>/dev/null || true
   sleep 0.15
+  # Reader before writer: shairport opens the pipe for write.
+  yarbo_airplay_start_fifo_holder "$root"
   yarbo_airplay_start_nqptp "$root"
   echo "==> panel_airplay $(date -u +%Y-%m-%dT%H:%M:%SZ) starting shairport-sync name=$(yarbo_airplay_read_name "$root") avahi=$(yarbo_airplay_avahi_running && echo 1 || echo 0)" >>"$log"
   # Prefer config file; fall back to classic CLI pipe if the build rejects the conf.
