@@ -115,7 +115,7 @@ int menuOrderPage[PAPERMONO_MENU_MAX] = {
     PAPERMONO_PAGE_HEAT,
     PAPERMONO_PAGE_ACCESS
 };
-int lastYarboPage = PAPERMONO_PAGE_STATUS;
+int lastYarboPage = PAPERMONO_PAGE_HOME;
 bool alertMessageOn = true;
 bool alertYarboOn = true;
 bool alertLymowOn = true;
@@ -795,16 +795,14 @@ String screenKey()
 
 bool isYarboPage(int page)
 {
-    return page == PAPERMONO_PAGE_STATUS || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS;
+    return page == PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_STATUS
+        || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS;
 }
 
 bool pageEnabled(int page)
 {
     if (page == PAPERMONO_PAGE_BOARD) {
         return false;
-    }
-    if (page == PAPERMONO_PAGE_HOME) {
-        return true;
     }
     if (page < 0 || page >= PAPERMONO_PAGE_COUNT) {
         return false;
@@ -841,26 +839,29 @@ bool pageEnabled(int page)
 
 int firstYarboPage()
 {
+    // HOME has DOCK / STOP / plans entry; STATUS is read-only telemetry.
+    if (pageEnabled(PAPERMONO_PAGE_HOME)) return PAPERMONO_PAGE_HOME;
     if (pageEnabled(PAPERMONO_PAGE_STATUS)) return PAPERMONO_PAGE_STATUS;
     if (pageEnabled(PAPERMONO_PAGE_HEALTH)) return PAPERMONO_PAGE_HEALTH;
     if (pageEnabled(PAPERMONO_PAGE_PLANS)) return PAPERMONO_PAGE_PLANS;
-    return PAPERMONO_PAGE_STATUS;
+    return PAPERMONO_PAGE_HOME;
 }
 
 int stepYarboPage(int from, int dir)
 {
     static const int kYarbo[] = {
-        PAPERMONO_PAGE_STATUS, PAPERMONO_PAGE_HEALTH, PAPERMONO_PAGE_PLANS
+        PAPERMONO_PAGE_HOME, PAPERMONO_PAGE_STATUS, PAPERMONO_PAGE_HEALTH, PAPERMONO_PAGE_PLANS
     };
+    const int nPages = 4;
     int idx = 0;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < nPages; i++) {
         if (kYarbo[i] == from) {
             idx = i;
             break;
         }
     }
-    for (int n = 0; n < 3; n++) {
-        idx = (idx + dir + 3) % 3;
+    for (int n = 0; n < nPages; n++) {
+        idx = (idx + dir + nPages) % nPages;
         if (pageEnabled(kYarbo[idx])) {
             return kYarbo[idx];
         }
@@ -918,7 +919,7 @@ int stepEnabledPage(int from, int dir)
     int p = from;
     for (int i = 0; i < count; i++) {
         p = (p + dir + count) % count;
-        if (p == PAPERMONO_PAGE_HEALTH || p == PAPERMONO_PAGE_PLANS
+        if (p == PAPERMONO_PAGE_HOME || p == PAPERMONO_PAGE_HEALTH || p == PAPERMONO_PAGE_PLANS
             || p == PAPERMONO_PAGE_STATUS || p == PAPERMONO_PAGE_LYMOW) {
             continue;
         }
@@ -1306,9 +1307,10 @@ void applyMenuVisible(JsonVariant vis)
         robotsOnMenu = rv.is<bool>() ? rv.as<bool>() : ((int) rv) != 0;
     }
     for (int i = 0; i < PAPERMONO_PAGE_COUNT; i++) {
-        if (i == PAPERMONO_PAGE_HOME || i == PAPERMONO_PAGE_BOARD) {
+        if (i == PAPERMONO_PAGE_BOARD) {
             continue;
         }
+        // HOME is a Yarbo control page (DOCK / PLANS), not a menu tile.
         if (isYarboPage(i) || i == PAPERMONO_PAGE_LYMOW || i == PAPERMONO_PAGE_ROBOTS) {
             continue;
         }
@@ -1357,7 +1359,8 @@ void applyMenuOrder(JsonVariant order)
             int page = pageFromUnlockId(id);
             if (page == PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_BOARD
                 || page == PAPERMONO_PAGE_HEALTH || page == PAPERMONO_PAGE_PLANS
-                || page == PAPERMONO_PAGE_STATUS || page == PAPERMONO_PAGE_LYMOW) {
+                || page == PAPERMONO_PAGE_STATUS || page == PAPERMONO_PAGE_LYMOW
+                || isYarboPage(page)) {
                 continue;
             }
             if (used[page] || n >= PAPERMONO_MENU_MAX) {
@@ -1750,7 +1753,7 @@ void drawHome(bool forceFull)
     drawButton(16, y0, bw, bh, "STOP", true);
     drawButton(16 + bw + gap, y0, bw, bh, "DOCK", false);
     drawButton(16, y0 + bh + gap, bw, bh, state == "active" ? "PAUSE" : "RESUME", false);
-    drawButton(16 + bw + gap, y0 + bh + gap, bw, bh, lightsOn ? "LIGHTS OFF" : "LIGHTS", false);
+    drawButton(16 + bw + gap, y0 + bh + gap, bw, bh, "PLANS", false);
     drawPager();
     finishEpdFrame();
 }
@@ -4552,7 +4555,9 @@ bool httpGetStatus()
     }
     HTTPClient http;
     String url = panelApiPath("compact");
-    int code = paperNetGet(http, url);
+    // Compact builds HOUSE/ACCESS/HEAT + Vestaboard; allow more than the default 8s
+    // so a slow Matter/UniFi slice does not surface as HTTP 502 on the board.
+    int code = paperNetGet(http, url, 20000);
     String body = http.getString();
     http.end();
     if (code != 200) {
@@ -5003,7 +5008,8 @@ void showPage(int page, bool loadPlansIfNeeded)
         wifiUi = PAPERMONO_WIFI_IDLE;
     }
     noteActivity();
-    if (currentPage == PAPERMONO_PAGE_PLANS && loadPlansIfNeeded && !plansLoaded) {
+    if ((currentPage == PAPERMONO_PAGE_PLANS || currentPage == PAPERMONO_PAGE_HOME)
+        && loadPlansIfNeeded && !plansLoaded) {
         httpGetPlans(false);
     }
     drawScreen(false);
@@ -5048,7 +5054,8 @@ bool applyPendingPages()
         lastYarboPage = currentPage;
     }
     offConfirm = false;
-    if (currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {
+    if ((currentPage == PAPERMONO_PAGE_PLANS || currentPage == PAPERMONO_PAGE_HOME)
+        && !plansLoaded) {
         httpGetPlans(false);
     }
     return true;
@@ -5329,8 +5336,7 @@ void serviceTouchQueue()
         } else if (which == 3) {
             runCommand(state == "active" ? "pause" : "resume");
         } else if (which == 4) {
-            lightsOn = !lightsOn;
-            runCommand(lightsOn ? "lights_on" : "lights_off");
+            showPage(PAPERMONO_PAGE_PLANS, true);
         }
     } else if (currentPage == PAPERMONO_PAGE_PLANS) {
         handlePlansTouch(tx, ty);

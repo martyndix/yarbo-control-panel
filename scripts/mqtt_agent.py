@@ -656,6 +656,7 @@ async def handle_request(
         if op == "telemetry":
             timeout = float(req.get("timeout") or 4.0)
             want_wifi = bool(req.get("wifi", True))
+            prefer_cache = bool(req.get("prefer_cache", False))
             # Quiet window after lights / work start — do not poke the robot.
             quiet_until = float(state.get("quiet_until") or 0)
             if time.time() < quiet_until:
@@ -673,6 +674,19 @@ async def handle_request(
                     "ok": False,
                     "error": "telemetry quiet after command",
                     "transient": True,
+                    **state_flags(state, client),
+                }
+            # PaperMono compact polls every ~15s; serve last_raw immediately so the
+            # tablet's 8s HTTP budget is not burned waiting on get_status.
+            if prefer_cache and isinstance(state.get("last_raw"), dict):
+                await maybe_request_plan_feedback(client, state)
+                return {
+                    "ok": True,
+                    "op": "telemetry",
+                    "raw": attach_plan_feedback(state["last_raw"], state),
+                    "wifi": state.get("last_wifi"),
+                    "battery_cells": state.get("last_battery_cells"),
+                    "cached": True,
                     **state_flags(state, client),
                 }
 

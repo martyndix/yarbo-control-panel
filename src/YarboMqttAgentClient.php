@@ -308,13 +308,22 @@ final class YarboMqttAgentClient
      *
      * @return array<string, mixed>
      */
-    public function telemetry(float $timeoutSeconds = 4.0, bool $wifi = true): array
+    public function telemetry(float $timeoutSeconds = 4.0, bool $wifi = true, bool $preferCache = false): array
     {
-        return $this->request([
+        $payload = [
             'op' => 'telemetry',
             'timeout' => $timeoutSeconds,
             'wifi' => $wifi,
-        ], max(12.0, $timeoutSeconds + 6.0));
+        ];
+        if ($preferCache) {
+            $payload['prefer_cache'] = true;
+        }
+        // Cached PaperMono polls should not wait out a full get_status window.
+        $socketWait = $preferCache
+            ? max(3.0, $timeoutSeconds + 1.0)
+            : max(12.0, $timeoutSeconds + 6.0);
+
+        return $this->request($payload, $socketWait);
     }
 
     /**

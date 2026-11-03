@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.203] - 2026-11-03
+
+### Fixed
+- **PaperMono Vestaboard HTTP 502 / empty board:** compact status no longer waits on a fresh MQTT `get_status` or a Powerwall refresh, and Matter live state is fetched once per request (HOUSE + vacuums + ACCESS + HEAT). On home Wi-Fi the tablet uses the full HTTP budget instead of failing over to Funnel after 2s mid-request. Firmware **0.1.73**.
+- **Yarbo Idle while mowing:** `on_going_to_start_point` counts as a running plan, and a leftover `charging_status` no longer forces Idle / CHARGING over an active job (Vestaboard shows MOWING again).
+- **Yarbo missing Dock / start plans:** tapping Yarbo opens **HOME** (Stop / Dock / Pause / **PLANS**) instead of read-only Status. **PLANS** opens the work-plan list with **START**. A/B cycles Home → Status → Health → Plans.
+
 ## [4.0.202] - 2026-11-03
 
 ### Fixed
