@@ -585,19 +585,23 @@ final class YarboUnifiRadio
 
         $homepodTargets = [];
         if ($homepodCount > 0) {
-            // Fanout sends MPEG-TS/AAC on loopback UDP (no HTTP -listen race).
-            // Brief pause so the FIFO holder + ffmpeg process are up before RAOP.
-            usleep(400000);
+            // Each HomePod gets its own loopback PCM UDP port; start them together.
+            usleep(300000);
             $hp = YarboHomepod::fromEnv($this->projectRoot);
+            $items = [];
             foreach ($homepodIds as $i => $nativeId) {
-                $bridgeUrl = $this->homepodBridgeUrl((int) $i);
-                $hpResult = $hp->streamToMany([$nativeId], $bridgeUrl, $volume);
-                foreach ($hpResult['errors'] as $err) {
-                    $errors[] = $err;
-                }
-                foreach ($hpResult['started'] as $id) {
-                    $homepodTargets[] = $id;
-                }
+                $items[] = [
+                    'id' => $nativeId,
+                    'source' => $this->homepodBridgeUrl((int) $i),
+                    'volume' => $volume,
+                ];
+            }
+            $hpResult = $hp->streamManyItems($items);
+            foreach ($hpResult['errors'] as $err) {
+                $errors[] = $err;
+            }
+            foreach ($hpResult['started'] as $id) {
+                $homepodTargets[] = $id;
             }
         }
 
@@ -892,23 +896,52 @@ final class YarboUnifiRadio
         $volume = max(0, min(100, $volume));
         $gain = number_format($volume / 100, 4, '.', '');
         $n = count($sessions);
-        $split = $n + $homepodCount;
-        if ($split < 1) {
+        if ($n + $homepodCount < 1) {
             return 0;
         }
-        $labels = [];
-        for ($i = 0; $i < $n; $i++) {
-            $labels[] = '[a' . $i . ']';
+
+        // Protect needs mono@22050 AAC; HomePods need clean stereo@44100 PCM.
+        // Split before the Protect downmix so HomePod audio is not garbled, and
+        // use UDP (not FIFOs) so a missing/slow HomePod cannot backpressure the
+        // whole fanout and stall every other speaker.
+        $filterParts = ['[0:a]volume=' . $gain . '[vol]'];
+        if ($n > 0 && $homepodCount > 0) {
+            $filterParts[] = '[vol]asplit=2[pr_src][hp_src]';
+            $prLabels = [];
+            for ($i = 0; $i < $n; $i++) {
+                $prLabels[] = '[a' . $i . ']';
+            }
+            $filterParts[] = '[pr_src]pan=mono|c0=0.5*c0+0.5*c1,aresample=22050,asplit='
+                . $n . implode('', $prLabels);
+            $hpLabels = [];
+            for ($i = 0; $i < $homepodCount; $i++) {
+                $hpLabels[] = '[hm' . $i . ']';
+            }
+            if ($homepodCount === 1) {
+                $filterParts[] = '[hp_src]anull[hm0]';
+            } else {
+                $filterParts[] = '[hp_src]asplit=' . $homepodCount . implode('', $hpLabels);
+            }
+        } elseif ($n > 0) {
+            $prLabels = [];
+            for ($i = 0; $i < $n; $i++) {
+                $prLabels[] = '[a' . $i . ']';
+            }
+            $filterParts[] = '[vol]pan=mono|c0=0.5*c0+0.5*c1,aresample=22050,asplit='
+                . $n . implode('', $prLabels);
+        } else {
+            $hpLabels = [];
+            for ($i = 0; $i < $homepodCount; $i++) {
+                $hpLabels[] = '[hm' . $i . ']';
+            }
+            if ($homepodCount === 1) {
+                $filterParts[] = '[vol]anull[hm0]';
+            } else {
+                $filterParts[] = '[vol]asplit=' . $homepodCount . implode('', $hpLabels);
+            }
         }
-        for ($i = 0; $i < $homepodCount; $i++) {
-            $labels[] = '[hm' . $i . ']';
-        }
-        // One FIFO reader → mono → asplit → AAC ADTS UDP per Protect speaker
-        // (+ MPEG-TS/AAC UDP per HomePod). HTTP -listen was racy: ffmpeg blocked on
-        // FIFO open before binding, so the HomePod agent got Connection refused.
-        $filter = '[0:a]volume=' . $gain
-            . ',pan=mono|c0=0.5*c0+0.5*c1,aresample=22050,asplit=' . $split
-            . implode('', $labels);
+        $filter = implode(';', $filterParts);
+
         $log = $this->projectRoot . '/data/unifi-radio-airplay.log';
         @file_put_contents($log, '');
         $ff = escapeshellarg($ffmpeg);
@@ -930,15 +963,14 @@ final class YarboUnifiRadio
         }
         if ($homepodCount > 0) {
             @file_put_contents($this->homepodBridgePidPath(), '');
-            $basePort = $this->homepodBridgePort();
             for ($i = 0; $i < $homepodCount; $i++) {
-                $udpHp = escapeshellarg($this->homepodBridgeUrl((int) $i));
-                $cmd .= ' -map "[hm' . $i . ']" -c:a aac -b:a 128k -f mpegts ' . $udpHp;
+                // Raw stereo PCM — agent encodes MP3 for RAOP. UDP = no FIFO stall.
+                $udpHp = escapeshellarg($this->homepodBridgeUdp((int) $i));
+                $cmd .= ' -map "[hm' . $i . ']" -c:a pcm_s16le -f s16le ' . $udpHp;
             }
         }
-        // Hold the FIFO open RDWR so ffmpeg can open the input (and start UDP
-        // outputs) even before shairport writes — otherwise open(O_RDONLY) blocks
-        // forever and HomePod bridge never comes up.
+        // Hold the AirPlay FIFO open RDWR so ffmpeg can open the input even before
+        // shairport writes — otherwise open(O_RDONLY) blocks forever.
         $inner = 'exec 3<>' . $fifoEsc . '; exec ' . $cmd;
         $full = 'nohup bash -c ' . escapeshellarg($inner) . ' > ' . $logEsc . ' 2>&1 & echo $!';
         $pid = (int) trim((string) shell_exec($full));
@@ -963,11 +995,15 @@ final class YarboUnifiRadio
         return $port > 0 ? $port : 8768;
     }
 
+    private function homepodBridgeUdp(int $index = 0): string
+    {
+        return 'udp://127.0.0.1:' . ($this->homepodBridgePort() + max(0, $index)) . '?pkt_size=1400';
+    }
+
     private function homepodBridgeUrl(int $index = 0): string
     {
-        // Loopback MPEG-TS — agent ffmpeg reads this and pipes MP3 into RAOP.
-        // UDP avoids the old HTTP -listen Connection refused race on FIFO open.
-        return 'udp://127.0.0.1:' . ($this->homepodBridgePort() + max(0, $index));
+        // Agent understands pcm:… and opens the UDP as s16le 44100 stereo.
+        return 'pcm:s16le:44100:2:' . $this->homepodBridgeUdp($index);
     }
 
     private function homepodBridgePidPath(): string

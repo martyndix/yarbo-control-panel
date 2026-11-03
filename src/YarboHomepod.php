@@ -374,6 +374,30 @@ final class YarboHomepod
      */
     public function streamToMany(array $ids, string $source, ?int $volume = null): array
     {
+        $items = [];
+        foreach ($ids as $id) {
+            $native = self::stripPrefix(trim((string) $id));
+            if ($native === '') {
+                continue;
+            }
+            $row = ['id' => $native, 'source' => $source];
+            if ($volume !== null) {
+                $row['volume'] = max(0, min(100, $volume));
+            }
+            $items[] = $row;
+        }
+
+        return $this->streamManyItems($items);
+    }
+
+    /**
+     * Start several HomePod streams (optionally different sources) concurrently.
+     *
+     * @param list<array{id: string, source: string, volume?: int}> $items
+     * @return array{ok: bool, started: list<string>, errors: list<string>}
+     */
+    public function streamManyItems(array $items): array
+    {
         if (!self::isEnabled()) {
             return [
                 'ok' => false,
@@ -381,27 +405,68 @@ final class YarboHomepod
                 'errors' => ['HomePod speakers disabled (YARBO_HOMEPOD=0)'],
             ];
         }
-        $started = [];
-        $errors = [];
-        foreach ($ids as $id) {
-            $native = self::stripPrefix(trim((string) $id));
-            if ($native === '') {
+        $normalized = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
                 continue;
             }
+            $native = self::stripPrefix(trim((string) ($item['id'] ?? '')));
+            $source = trim((string) ($item['source'] ?? ''));
+            if ($native === '' || $source === '') {
+                continue;
+            }
+            $row = ['id' => $native, 'source' => $source];
+            if (array_key_exists('volume', $item)) {
+                $row['volume'] = max(0, min(100, (int) $item['volume']));
+            }
+            $normalized[] = $row;
+        }
+        if ($normalized === []) {
+            return ['ok' => true, 'started' => [], 'errors' => []];
+        }
+        if (count($normalized) === 1) {
+            $one = $normalized[0];
             $body = [
                 'op' => 'stream',
-                'id' => $native,
-                'source' => $source,
+                'id' => $one['id'],
+                'source' => $one['source'],
             ];
-            if ($volume !== null) {
-                $body['volume'] = max(0, min(100, $volume));
+            if (array_key_exists('volume', $one)) {
+                $body['volume'] = $one['volume'];
             }
             $result = $this->request($body, 35.0, true);
             if ($result['ok'] ?? false) {
-                $started[] = self::withPrefix($native);
-            } else {
-                $errors[] = (string) ($result['error'] ?? 'stream failed') . ' (' . $native . ')';
+                return [
+                    'ok' => true,
+                    'started' => [self::withPrefix($one['id'])],
+                    'errors' => [],
+                ];
             }
+
+            return [
+                'ok' => false,
+                'started' => [],
+                'errors' => [(string) ($result['error'] ?? 'stream failed') . ' (' . $one['id'] . ')'],
+            ];
+        }
+
+        $result = $this->request(['op' => 'stream_many', 'items' => $normalized], 45.0, true);
+        $started = [];
+        foreach ($result['started'] ?? [] as $id) {
+            $id = trim((string) $id);
+            if ($id !== '') {
+                $started[] = self::withPrefix($id);
+            }
+        }
+        $errors = [];
+        foreach ($result['errors'] ?? [] as $err) {
+            $err = trim((string) $err);
+            if ($err !== '') {
+                $errors[] = $err;
+            }
+        }
+        if (!($result['ok'] ?? false) && $started === [] && $errors === []) {
+            $errors[] = (string) ($result['error'] ?? 'stream_many failed');
         }
 
         return [
