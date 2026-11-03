@@ -199,6 +199,7 @@ assert_true(str_contains($change, '## [4.0.193]'), 'changelog 4.0.193');
 assert_true(str_contains($change, '## [4.0.194]'), 'changelog 4.0.194');
 assert_true(str_contains($change, '## [4.0.195]'), 'changelog 4.0.195');
 assert_true(str_contains($change, '## [4.0.196]'), 'changelog 4.0.196');
+assert_true(str_contains($change, '## [4.0.197]'), 'changelog 4.0.197');
 assert_true(str_contains($deps, 'pyatv>=0.15.1') || str_contains($deps, '0.15.1'), 'deps pin pyatv >= 0.15.1');
 assert_true(str_contains($deps, 'srptools') && str_contains($deps, '<2'), 'deps pin srptools < 2');
 assert_true(str_contains($deps, 'yarbo_srptools_ok'), 'deps checks srptools compatibility');
@@ -238,7 +239,12 @@ assert_true(str_contains($docs, 'does not speak') || str_contains($docs, 'No PIN
 
 $radioPhp = (string) file_get_contents($root . '/src/YarboUnifiRadio.php');
 assert_true(str_contains($radioPhp, 'filterHomepodIds'), 'radio splits HomePod targets');
-assert_true(str_contains($radioPhp, 'homepodBridgeUrl'), 'AirPlay bridge HomePod HTTP');
+assert_true(str_contains($radioPhp, 'homepodBridgeUrl'), 'AirPlay bridge HomePod URL helper');
+assert_true(str_contains($radioPhp, 'udp://127.0.0.1:'), 'AirPlay bridge uses loopback UDP for HomePods');
+assert_true(str_contains($radioPhp, 'mpegts'), 'AirPlay bridge encodes MPEG-TS for HomePods');
+assert_true(str_contains($radioPhp, 'exec 3<>'), 'AirPlay fanout holds FIFO open RDWR');
+assert_true(!str_contains($radioPhp, '-listen 1'), 'AirPlay bridge no longer uses ffmpeg HTTP -listen');
+assert_true(str_contains($agent, '_is_local_loopback') || str_contains($agent, 'udp://'), 'agent accepts loopback UDP bridge');
 assert_true(str_contains($radioPhp, 'streamToMany'), 'radio streams to HomePods');
 
 echo "test_homepod.php ok\n";

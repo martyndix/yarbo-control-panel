@@ -585,8 +585,9 @@ final class YarboUnifiRadio
 
         $homepodTargets = [];
         if ($homepodCount > 0) {
-            // Give ffmpeg a moment to open each HTTP listener (one port per HomePod).
-            usleep(500000);
+            // Fanout sends MPEG-TS/AAC on loopback UDP (no HTTP -listen race).
+            // Brief pause so the FIFO holder + ffmpeg process are up before RAOP.
+            usleep(400000);
             $hp = YarboHomepod::fromEnv($this->projectRoot);
             foreach ($homepodIds as $i => $nativeId) {
                 $bridgeUrl = $this->homepodBridgeUrl((int) $i);
@@ -903,7 +904,8 @@ final class YarboUnifiRadio
             $labels[] = '[hm' . $i . ']';
         }
         // One FIFO reader → mono → asplit → AAC ADTS UDP per Protect speaker
-        // (+ one MP3 HTTP listener per HomePod; ffmpeg -listen is single-client).
+        // (+ MPEG-TS/AAC UDP per HomePod). HTTP -listen was racy: ffmpeg blocked on
+        // FIFO open before binding, so the HomePod agent got Connection refused.
         $filter = '[0:a]volume=' . $gain
             . ',pan=mono|c0=0.5*c0+0.5*c1,aresample=22050,asplit=' . $split
             . implode('', $labels);
@@ -930,11 +932,15 @@ final class YarboUnifiRadio
             @file_put_contents($this->homepodBridgePidPath(), '');
             $basePort = $this->homepodBridgePort();
             for ($i = 0; $i < $homepodCount; $i++) {
-                $http = escapeshellarg('http://127.0.0.1:' . ($basePort + $i) . '/live.mp3');
-                $cmd .= ' -map "[hm' . $i . ']" -c:a libmp3lame -b:a 128k -f mp3 -listen 1 ' . $http;
+                $udpHp = escapeshellarg($this->homepodBridgeUrl((int) $i));
+                $cmd .= ' -map "[hm' . $i . ']" -c:a aac -b:a 128k -f mpegts ' . $udpHp;
             }
         }
-        $full = 'nohup ' . $cmd . ' > ' . $logEsc . ' 2>&1 & echo $!';
+        // Hold the FIFO open RDWR so ffmpeg can open the input (and start UDP
+        // outputs) even before shairport writes — otherwise open(O_RDONLY) blocks
+        // forever and HomePod bridge never comes up.
+        $inner = 'exec 3<>' . $fifoEsc . '; exec ' . $cmd;
+        $full = 'nohup bash -c ' . escapeshellarg($inner) . ' > ' . $logEsc . ' 2>&1 & echo $!';
         $pid = (int) trim((string) shell_exec($full));
         if ($pid <= 1) {
             return 0;
@@ -942,8 +948,7 @@ final class YarboUnifiRadio
         if ($homepodCount > 0) {
             @file_put_contents($this->homepodBridgePidPath(), (string) $pid);
         }
-        // Bridge blocks on FIFO until an AirPlay client plays — process should stay alive.
-        usleep(300000);
+        usleep(400000);
         if (!$this->pidAlive($pid)) {
             return 0;
         }
@@ -960,7 +965,9 @@ final class YarboUnifiRadio
 
     private function homepodBridgeUrl(int $index = 0): string
     {
-        return 'http://127.0.0.1:' . ($this->homepodBridgePort() + max(0, $index)) . '/live.mp3';
+        // Loopback MPEG-TS — agent ffmpeg reads this and pipes MP3 into RAOP.
+        // UDP avoids the old HTTP -listen Connection refused race on FIFO open.
+        return 'udp://127.0.0.1:' . ($this->homepodBridgePort() + max(0, $index));
     }
 
     private function homepodBridgePidPath(): string

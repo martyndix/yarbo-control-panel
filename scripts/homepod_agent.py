@@ -208,23 +208,28 @@ class HomepodRuntime:
         # Browser announce clips are usually webm/ogg/opus — HomePods reject those.
         return True
 
-    def _is_local_http(self, source: str) -> bool:
-        """True for panel AirPlay-bridge MP3 listeners on loopback."""
+    def _is_local_loopback(self, source: str) -> bool:
+        """True for panel AirPlay-bridge streams on loopback (UDP MPEG-TS or HTTP)."""
         lower = source.lower()
-        return lower.startswith("http://127.0.0.1:") or lower.startswith("http://localhost:")
+        return (
+            lower.startswith("http://127.0.0.1:")
+            or lower.startswith("http://localhost:")
+            or lower.startswith("udp://127.0.0.1:")
+            or lower.startswith("udp://localhost:")
+        )
 
     async def _prepare_playable(self, ident: str, source: str) -> Any:
         """Return a local file path or an asyncio StreamReader for stream_file.
 
-        Announcements stay as WAV files (that path already works). Radio and the
-        AirPlay bridge are HTTP — pyatv's InternetSource often fails on ice/CDN
-        and on ffmpeg -listen URLs, so we always decode via ffmpeg → stdout pipe
-        and hand the StreamReader to RAOP.
+        Announcements stay as WAV files (that path already works). Radio (HTTP)
+        and the AirPlay bridge (loopback UDP MPEG-TS) are decoded via ffmpeg →
+        stdout pipe into pyatv stream_file — InternetSource and HTTP -listen
+        were unreliable on HomePods.
         """
         self._cleanup_helpers(ident)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-        if source.startswith(("http://", "https://")):
+        if source.startswith(("http://", "https://", "udp://")):
             return await self._ffmpeg_pipe(ident, source)
 
         path = Path(source)
@@ -283,20 +288,26 @@ class HomepodRuntime:
             "-loglevel",
             "warning",
         ]
-        # Remote ice/CDN need a UA; loopback AirPlay-bridge MP3 does not.
-        if source.startswith(("http://", "https://")) and not self._is_local_http(source):
+        local = self._is_local_loopback(source)
+        # Remote ice/CDN need a UA; loopback AirPlay-bridge UDP/HTTP does not.
+        if source.startswith(("http://", "https://")) and not local:
             cmd += [
                 "-user_agent",
                 _FFMPEG_UA,
                 "-headers",
                 "Icy-MetaData: 1\r\n",
             ]
-        # Live inputs: give ffmpeg a few seconds to open slow listeners / ice.
-        if self._is_local_http(source):
-            cmd += ["-rw_timeout", "15000000"]  # 15s in microseconds
+        input_url = source
+        if local and source.lower().startswith("udp://"):
+            # Wait for first AirPlay packets (microseconds) instead of failing open.
+            if "timeout=" not in source.lower():
+                sep = "&" if "?" in source else "?"
+                input_url = f"{source}{sep}timeout=15000000"
+        elif local:
+            cmd += ["-rw_timeout", "15000000"]
         cmd += [
             "-i",
-            source,
+            input_url,
             "-vn",
             "-ac",
             "2",
@@ -321,9 +332,9 @@ class HomepodRuntime:
             self._cleanup_helpers(ident)
             raise RuntimeError("ffmpeg produced no stdout pipe")
 
-        # Confirm the process is alive and producing data before RAOP attaches.
-        # Drain a tiny probe via wait — if ffmpeg dies immediately, surface stderr.
-        await asyncio.sleep(0.35)
+        # Confirm the process is alive before RAOP attaches. Local UDP may sit
+        # waiting for the first AirPlay packet — that is OK while pid is live.
+        await asyncio.sleep(0.6 if local else 0.35)
         if proc.returncode is not None:
             err = b""
             try:
@@ -717,7 +728,7 @@ class HomepodRuntime:
         source = str(source or "").strip()
         if not source:
             raise RuntimeError("No audio source for HomePod stream")
-        if not source.startswith(("http://", "https://", "-")) and not Path(source).is_file():
+        if not source.startswith(("http://", "https://", "udp://", "-")) and not Path(source).is_file():
             raise RuntimeError(f"Audio source not found: {source}")
 
         # Connect first, then open ffmpeg pipes — otherwise stdout fills while
