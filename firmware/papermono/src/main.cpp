@@ -181,6 +181,7 @@ volatile int touchQY = 0;
 volatile uint8_t touchQ = 0;
 bool inDraw = false;
 bool redrawQueued = false;
+bool epdFrameOpen = false;
 
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
@@ -235,6 +236,7 @@ uint32_t heatHoldUntil = 0;
 void drawScreen(bool forceFull);
 void serviceTouchQueue();
 void waitEpdReady();
+void waitEpdReadyOrTimeout(uint32_t maxMs);
 bool applyPendingPages();
 void drawVestaboardGrid(int x, int y, int cell, int gap);
 void enterLock();
@@ -698,6 +700,16 @@ void waitEpdReady()
     }
 }
 
+/* Timed stand-in for the unbounded Display wait helper — that call can hang forever. */
+void waitEpdReadyOrTimeout(uint32_t maxMs)
+{
+    uint32_t t0 = millis();
+    while (M5.Display.displayBusy() && (millis() - t0) < maxMs) {
+        pollSerialConfig();
+        delay(5);
+    }
+}
+
 void beginEpdFrame(bool forceQuality)
 {
     uint32_t t0 = millis();
@@ -705,14 +717,26 @@ void beginEpdFrame(bool forceQuality)
         pollSerialConfig();
         delay(5);
     }
+    /* Still busy: refuse a second refresh. Overlapping waveforms mottle the
+     * panel and can leave the FT6336G touch dead until power cycle. */
+    if (M5.Display.displayBusy()) {
+        epdFrameOpen = false;
+        redrawQueued = true;
+        return;
+    }
     bool full = forceQuality || partialRefreshCount >= 6;
     M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fastest);
     partialRefreshCount = full ? 0 : (partialRefreshCount + 1);
+    epdFrameOpen = true;
     M5.Display.startWrite();
 }
 
 void finishEpdFrame()
 {
+    if (!epdFrameOpen) {
+        return;
+    }
+    epdFrameOpen = false;
     M5.Display.endWrite();
     M5.Display.display();
     /* displayBusy() can stay false after display(). Starting another refresh
@@ -2678,7 +2702,7 @@ void powerOffTablet()
 {
     rgbOff();
     applyFrontlight(false, true);
-    M5.Display.waitDisplay();
+    waitEpdReadyOrTimeout(4000);
     M5.Display.setEpdMode(epd_mode_t::epd_quality);
     M5.Display.startWrite();
     M5.Display.fillScreen(TFT_WHITE);
@@ -2695,7 +2719,7 @@ void powerOffTablet()
     M5.Display.drawString("TAP RED BUTTON TO BEGIN", W / 2, H - 72);
     M5.Display.endWrite();
     M5.Display.display();
-    M5.Display.waitDisplay();
+    waitEpdReadyOrTimeout(6000);
     delay(400);
     M5.Power.powerOff();
 }
@@ -2722,7 +2746,11 @@ void updateRadioDraft()
     const int y = PAPERMONO_DRAFT_Y;
     const int w = M5.Display.width() - 32;
     const int h = PAPERMONO_DRAFT_H;
-    M5.Display.waitDisplay();
+    waitEpdReadyOrTimeout(4000);
+    if (M5.Display.displayBusy()) {
+        redrawQueued = true;
+        return;
+    }
     if (partialRefreshCount >= 6) {
         drawScreen(false);
         return;
@@ -2761,7 +2789,11 @@ void refreshLocalClock()
     if (now < 1700000000) {
         return;
     }
-    if (lastPanelClockMs && millis() - lastPanelClockMs < 120000UL) {
+    /* Prefer panel clock for ~2 minutes after a poll — but on the lock screen
+     * (or when a poll is overdue) keep ticking from NTP so a hung HTTP cannot
+     * freeze the painted time. */
+    bool pollOverdue = lastPoll != 0 && (millis() - lastPoll) > (PAPERMONO_POLL_MS * 2);
+    if (!screenLocked && !pollOverdue && lastPanelClockMs && millis() - lastPanelClockMs < 120000UL) {
         return;
     }
     struct tm t;
@@ -3590,6 +3622,12 @@ void drawScreen(bool forceFull)
     inDraw = true;
     redrawQueued = false;
     waitEpdReady();
+    /* Fail closed: never start a second refresh while BUSY (dead touch). */
+    if (M5.Display.displayBusy()) {
+        redrawQueued = true;
+        inDraw = false;
+        return;
+    }
     if (screenLocked) {
         String key = screenKey();
         if (forceFull || key != lastDrawnKey) {
@@ -4568,7 +4606,9 @@ bool httpGetStatus()
     String url = panelApiPath("compact");
     // Compact builds HOUSE/ACCESS/HEAT + Vestaboard; allow more than the default 8s
     // so a slow Matter/UniFi slice does not surface as HTTP 502 on the board.
-    int code = paperNetGet(http, url, 20000);
+    // On the lock screen use a short budget so Unlock / clock stay alive.
+    int budgetMs = screenLocked ? PAPERMONO_LOCK_HTTP_MS : 20000;
+    int code = paperNetGet(http, url, budgetMs);
     String body = http.getString();
     http.end();
     if (code != 200) {
@@ -4764,7 +4804,9 @@ bool httpGetStatus()
     lymowBattery = doc["lymow_battery"] | lymowBattery;
     lymowState = doc["lymow_state"] | lymowState;
     lymowCharging = doc["lymow_charging"] | lymowCharging;
-    if (!doc["ota_pending"] && !doc["logo_hash"].isNull()) {
+    /* Logo download can take tens of seconds — never do it on the lock screen
+     * (Unlock must stay live) or while the panel is still refreshing. */
+    if (!screenLocked && !doc["ota_pending"] && !doc["logo_hash"].isNull()) {
         String logoNext = String((const char *) (doc["logo_hash"] | ""));
         if (logoNext.length()) {
             if (!M5.Display.displayBusy()) {
@@ -4812,7 +4854,8 @@ bool httpGetStatus()
     lastError = "";
     bool otaPending = doc["ota_pending"] | false;
     String latest = doc["firmware_latest"] | "";
-    if (otaPending && latest.length() && latest != PAPERMONO_FW_VERSION && !otaTriedThisBoot) {
+    /* Defer OTA while locked — a 5-minute update leaves Unlock dead. */
+    if (!screenLocked && otaPending && latest.length() && latest != PAPERMONO_FW_VERSION && !otaTriedThisBoot) {
         otaTriedThisBoot = true;
         runOtaUpdate();
     }
@@ -5416,6 +5459,18 @@ void loop()
     serviceTouchQueue();
 
     now = millis();
+    /* BUSY that never clears → soft reboot (better than a brick until power). */
+    static uint32_t epdBusySince = 0;
+    if (M5.Display.displayBusy()) {
+        if (epdBusySince == 0) {
+            epdBusySince = now;
+        } else if (now - epdBusySince > PAPERMONO_EPD_STUCK_MS) {
+            ESP.restart();
+        }
+    } else {
+        epdBusySince = 0;
+    }
+
     if (!otaBusy && !screenLocked && wifiUi == PAPERMONO_WIFI_IDLE && WiFi.status() == WL_CONNECTED
         && now - lastActivity > (uint32_t) lockAfterS * 1000) {
         enterLock();
@@ -5441,10 +5496,11 @@ void loop()
         return;
     }
 
-    if (now - lastPoll > PAPERMONO_POLL_MS && !M5.Display.displayBusy()) {
+    uint32_t pollEvery = screenLocked ? PAPERMONO_LOCK_POLL_MS : (uint32_t) PAPERMONO_POLL_MS;
+    if (now - lastPoll > pollEvery && !M5.Display.displayBusy()) {
         lastPoll = now;
         httpGetStatus();
-        if (currentPage == PAPERMONO_PAGE_PLANS) {
+        if (!screenLocked && currentPage == PAPERMONO_PAGE_PLANS) {
             httpGetPlans(false);
         }
         drawScreen(false);
