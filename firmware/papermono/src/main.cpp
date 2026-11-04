@@ -4854,8 +4854,9 @@ bool httpGetStatus()
     lastError = "";
     bool otaPending = doc["ota_pending"] | false;
     String latest = doc["firmware_latest"] | "";
-    /* Defer OTA while locked — a 5-minute update leaves Unlock dead. */
-    if (!screenLocked && otaPending && latest.length() && latest != PAPERMONO_FW_VERSION && !otaTriedThisBoot) {
+    /* OTA must run even on the lock screen — deferring left tablets stuck on
+     * the old build while compact stayed stripped to ota_pending only. */
+    if (otaPending && latest.length() && latest != PAPERMONO_FW_VERSION && !otaTriedThisBoot) {
         otaTriedThisBoot = true;
         runOtaUpdate();
     }

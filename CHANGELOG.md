@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.208] - 2026-11-04
+
+### Fixed
+- **PaperMono stuck on Updating… / blank HOUSE and Vestaboard:** Wi-Fi update runs even on the lock screen (0.1.75 deferred it and left compact stripped to `ota_pending`). Paired devices get a **Cancel** button to clear a stuck queue so status returns on the next poll. Firmware **0.1.76**.
+
 ## [4.0.207] - 2026-11-04
 
 ### Fixed

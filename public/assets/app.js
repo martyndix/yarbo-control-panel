@@ -11304,7 +11304,8 @@ function paperPresenceHtml(device) {
 function paperOtaUpdateButton(device) {
     const id = escapeHtml(device.id || '');
     if (device.ota_pending) {
-        return `<button type="button" class="btn btn-compact" disabled title="Keep the tablet on Wi-Fi. It only tries once per boot — reboot it if this sits here.">Updating…</button>`;
+        return `<button type="button" class="btn btn-compact" disabled title="Keep the tablet on Wi-Fi. It only tries once per boot — reboot it if this sits here.">Updating…</button>`
+            + `<button type="button" class="btn btn-secondary btn-compact" data-papermono-ota-cancel="${id}" title="Stop waiting and restore HOUSE / Vestaboard on the next poll">Cancel</button>`;
     }
     const latest = String(device.firmware_latest || '');
     const reported = String(device.fw_reported || '');
@@ -11329,6 +11330,9 @@ function bindPaperOtaButtons(root) {
     if (!root) return;
     root.querySelectorAll('[data-papermono-ota]').forEach((button) => {
         button.addEventListener('click', () => queuePaperOta(button.dataset.papermonoOta, button));
+    });
+    root.querySelectorAll('[data-papermono-ota-cancel]').forEach((button) => {
+        button.addEventListener('click', () => cancelPaperOta(button.dataset.papermonoOtaCancel, button));
     });
 }
 
@@ -11383,7 +11387,7 @@ function renderPaperMonoDevices(devices) {
         const fw = device.fw_reported ? ` · fw ${escapeHtml(String(device.fw_reported))}` : '';
         const otaWait = device.ota_pending && device.fw_reported && device.firmware_latest
             && String(device.fw_reported) !== String(device.firmware_latest)
-            ? `<p class="hint">Waiting for ${escapeHtml(String(device.name || 'the tablet'))} to install ${escapeHtml(String(device.firmware_latest))}. If it keeps polling on ${escapeHtml(String(device.fw_reported))}, reboot it once — that build only tries an update once per boot.</p>`
+            ? `<p class="hint">Waiting for ${escapeHtml(String(device.name || 'the tablet'))} to install ${escapeHtml(String(device.firmware_latest))}. If it keeps polling on ${escapeHtml(String(device.fw_reported))}, reboot once and try again — or tap <strong>Cancel</strong> to restore HOUSE / Vestaboard (that build only tries an update once per boot).</p>`
             : '';
         const revokeLabel = device.name || device.kind_label || 'companion';
         const id = escapeHtml(device.id);
@@ -11434,6 +11438,28 @@ function renderPaperMonoDevices(devices) {
     bindPaperOtaButtons(els.papermonoDevices);
     refreshPaperLockPreview();
     renderPaperOtaPanel(devices);
+}
+
+async function cancelPaperOta(id, button) {
+    if (!id) return;
+    if (!window.confirm('Cancel this update? The tablet keeps its current firmware. HOUSE and Vestaboard come back on the next poll.')) {
+        return;
+    }
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'ota_cancel', id }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not cancel the update');
+        showToast(data.message || 'Update cancelled', 'success');
+        loadPaperMonoDashboard();
+    } catch (err) {
+        showToast(err.message || 'Could not cancel the update', 'error');
+        if (button) button.disabled = false;
+    }
 }
 
 async function queuePaperOta(id, button) {

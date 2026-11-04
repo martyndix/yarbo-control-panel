@@ -65,8 +65,8 @@ $agent = (string) file_get_contents(dirname(__DIR__) . '/scripts/mqtt_agent.py')
 $mqtt = (string) file_get_contents(dirname(__DIR__) . '/src/YarboMqttAgentClient.php');
 $home = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.75"'), 'firmware 0.1.75');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.75';"), 'panel pin 0.1.75');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.76"'), 'firmware 0.1.76');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.76';"), 'panel pin 0.1.76');
 assert_true(str_contains($fw, 'PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_STATUS'), 'HOME is a Yarbo page');
 assert_true(str_contains($fw, 'if (pageEnabled(PAPERMONO_PAGE_HOME)) return PAPERMONO_PAGE_HOME;'), 'Yarbo opens HOME with DOCK');
 assert_true(str_contains($fw, 'drawButton(16 + bw + gap, y0 + bh + gap, bw, bh, "PLANS", false);'), 'HOME shows PLANS');

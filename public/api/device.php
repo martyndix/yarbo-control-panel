@@ -226,6 +226,11 @@ if ($action === 'ota') {
     json_response($devices->requestOta($id));
 }
 
+if ($action === 'ota_cancel') {
+    $id = trim((string) ($input['id'] ?? ''));
+    json_response($devices->cancelOta($id));
+}
+
 if ($action === 'prefs') {
     json_response($devices->savePrefs($input));
 }

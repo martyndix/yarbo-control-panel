@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.75';
+    public const FIRMWARE_VERSION = '0.1.76';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.26-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -499,6 +499,46 @@ final class YarboPaperDevice
                 'ok' => true,
                 'device' => $this->publicDevice($device),
                 'message' => 'Update queued for ' . $label . '. It starts on the next poll (beep and green LED on PaperMono).',
+            ];
+        }
+        unset($device);
+
+        return ['ok' => false, 'error' => 'Device not found'];
+    }
+
+    /**
+     * Clear a stuck Updating… queue so compact status (HOUSE / Vestaboard) returns.
+     *
+     * @return array<string, mixed>
+     */
+    public function cancelOta(string $id): array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return ['ok' => false, 'error' => 'Device not found'];
+        }
+        $store = $this->load();
+        foreach ($store['devices'] as &$device) {
+            if (!is_array($device) || (string) ($device['id'] ?? '') !== $id) {
+                continue;
+            }
+            $label = (string) ($device['name'] ?? $this->kindLabel($this->deviceKind($device)));
+            if (empty($device['ota_pending'])) {
+                return [
+                    'ok' => true,
+                    'device' => $this->publicDevice($device),
+                    'message' => $label . ' is not waiting for an update.',
+                ];
+            }
+            $device['ota_pending'] = false;
+            $device['ota_requested_at'] = null;
+            $device['ota_served_at'] = null;
+            $this->save($store);
+
+            return [
+                'ok' => true,
+                'device' => $this->publicDevice($device),
+                'message' => 'Cancelled update for ' . $label . '. HOUSE and Vestaboard return on the next poll. Queue Update again after a reboot if you still need ' . $this->firmwareVersionForKind($this->deviceKind($device)) . '.',
             ];
         }
         unset($device);
