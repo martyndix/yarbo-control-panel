@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.209] - 2026-11-04
+
+### Added
+- **Vestaboard follows the mower:** while Yarbo or Lymow is mowing (or in error), the Note switches to that robot — All and Rotate yield. Both mowing swaps every 5 minutes; an error sticks until cleared, then the swap resumes. Idle default is **Powerwall** (when that module is on). **Rotate** stops after 24 hours and returns to Powerwall.
+
 ## [4.0.208] - 2026-11-04
 
 ### Fixed

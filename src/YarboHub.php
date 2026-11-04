@@ -58,15 +58,19 @@ final class YarboHub
                 self::MODULE_UNIFI => false,
             ],
             'active_module' => self::MODULE_YARBO,
-            'vestaboard_live' => self::MODULE_YARBO,
+            'vestaboard_live' => self::MODULE_POWERWALL,
             'house_name' => '',
         ];
         if (!is_file($this->configPath())) {
+            $defaults['vestaboard_live'] = self::firstEnabledVestaboardLive($defaults['modules']);
+
             return $defaults;
         }
         $raw = file_get_contents($this->configPath());
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
         if (!is_array($decoded)) {
+            $defaults['vestaboard_live'] = self::firstEnabledVestaboardLive($defaults['modules']);
+
             return $defaults;
         }
         $modules = $defaults['modules'];
@@ -81,7 +85,8 @@ final class YarboHub
             $modules[self::MODULE_YARBO] = true;
         }
         $active = $this->normalizeModule((string) ($decoded['active_module'] ?? ''), $modules);
-        $live = $this->normalizeVestaboardLive((string) ($decoded['vestaboard_live'] ?? self::MODULE_YARBO), $modules);
+        $liveDefault = self::firstEnabledVestaboardLive($modules);
+        $live = $this->normalizeVestaboardLive((string) ($decoded['vestaboard_live'] ?? $liveDefault), $modules);
         $house = self::normalizeDisplayName((string) ($decoded['house_name'] ?? ''));
 
         return [
@@ -493,7 +498,8 @@ final class YarboHub
      */
     public static function firstEnabledVestaboardLive(array $modules): string
     {
-        foreach ([self::MODULE_YARBO, self::MODULE_POWERWALL, self::MODULE_LYMOW] as $id) {
+        // Idle default prefers Powerwall when that module is on.
+        foreach ([self::MODULE_POWERWALL, self::MODULE_YARBO, self::MODULE_LYMOW] as $id) {
             if (!empty($modules[$id])) {
                 return $id;
             }
