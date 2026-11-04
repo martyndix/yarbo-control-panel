@@ -33,6 +33,10 @@ final class YarboVestaboard
     public const ROTATE_DEFAULT_MINUTES = 5;
     public const ROTATE_MIN_MINUTES = 1;
     public const ROTATE_MAX_MINUTES = 60;
+    /** Dual-mowing / dual-error dwell before swapping live focus. */
+    public const ACTIVITY_SWAP_SECONDS = 300;
+    /** Rotate sessions auto-stop after this and return to Powerwall. */
+    public const ROTATE_MAX_SECONDS = 86400;
 
     private const HEAD_SHORT = [
         'None' => '',
@@ -126,6 +130,10 @@ final class YarboVestaboard
             'rotate_views' => [YarboHub::MODULE_YARBO],
             'rotate_minutes' => self::ROTATE_DEFAULT_MINUTES,
             'rotate_at' => null,
+            'rotate_started_at' => null,
+            'live_resume' => null,
+            'activity_focus' => null,
+            'activity_swap_at' => null,
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -176,6 +184,16 @@ final class YarboVestaboard
             'rotate_minutes' => $this->normalizeRotateMinutes($decoded['rotate_minutes'] ?? self::ROTATE_DEFAULT_MINUTES),
             'rotate_at' => isset($decoded['rotate_at']) && is_string($decoded['rotate_at']) && $decoded['rotate_at'] !== ''
                 ? $decoded['rotate_at']
+                : null,
+            'rotate_started_at' => isset($decoded['rotate_started_at']) && is_string($decoded['rotate_started_at'])
+                && $decoded['rotate_started_at'] !== ''
+                ? $decoded['rotate_started_at']
+                : null,
+            'live_resume' => $this->normalizeLiveResume($decoded['live_resume'] ?? null),
+            'activity_focus' => $this->normalizeActivityFocus($decoded['activity_focus'] ?? null),
+            'activity_swap_at' => isset($decoded['activity_swap_at']) && is_string($decoded['activity_swap_at'])
+                && $decoded['activity_swap_at'] !== ''
+                ? $decoded['activity_swap_at']
                 : null,
         ];
     }
@@ -289,6 +307,22 @@ final class YarboVestaboard
             'rotate_at' => array_key_exists('rotate_at', $input)
                 ? (is_string($input['rotate_at']) && $input['rotate_at'] !== '' ? $input['rotate_at'] : null)
                 : ($current['rotate_at'] ?? null),
+            'rotate_started_at' => array_key_exists('rotate_started_at', $input)
+                ? (is_string($input['rotate_started_at']) && $input['rotate_started_at'] !== ''
+                    ? $input['rotate_started_at']
+                    : null)
+                : ($current['rotate_started_at'] ?? null),
+            'live_resume' => array_key_exists('live_resume', $input)
+                ? $this->normalizeLiveResume($input['live_resume'])
+                : $this->normalizeLiveResume($current['live_resume'] ?? null),
+            'activity_focus' => array_key_exists('activity_focus', $input)
+                ? $this->normalizeActivityFocus($input['activity_focus'])
+                : $this->normalizeActivityFocus($current['activity_focus'] ?? null),
+            'activity_swap_at' => array_key_exists('activity_swap_at', $input)
+                ? (is_string($input['activity_swap_at']) && $input['activity_swap_at'] !== ''
+                    ? $input['activity_swap_at']
+                    : null)
+                : ($current['activity_swap_at'] ?? null),
         ];
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
@@ -493,7 +527,11 @@ final class YarboVestaboard
         }
 
         $this->refreshCompanionModules();
-        $rotated = $this->maybeAdvanceRotation();
+        $activity = $this->applyActivityLivePolicy();
+        $rotated = false;
+        if (!($activity['active'] ?? false)) {
+            $rotated = $this->maybeAdvanceRotation();
+        }
         $layout = $this->layoutForLiveModule();
         if (!($layout['ok'] ?? false)) {
             $this->save(['last_error' => (string) ($layout['error'] ?? 'Could not compose layout')]);
@@ -520,7 +558,7 @@ final class YarboVestaboard
             ];
         }
 
-        $result = $this->sendLayout($layout, $forceResume || $rotated);
+        $result = $this->sendLayout($layout, $forceResume || $rotated || !empty($activity['changed']));
         if ($forceResume && !empty($result['ok'])) {
             $this->save(['quiet_active' => false]);
         }
@@ -576,7 +614,13 @@ final class YarboVestaboard
         if (!$hub->save(['vestaboard_live' => $id])) {
             return ['ok' => false, 'error' => 'Could not save the Vestaboard live view.'];
         }
-        $this->save(['rotate_at' => gmdate('c')]);
+        // Manual pick becomes the resume target after a mowing/error override.
+        $this->save([
+            'rotate_at' => gmdate('c'),
+            'live_resume' => null,
+            'activity_focus' => null,
+            'activity_swap_at' => null,
+        ]);
         $saved = [
             'ok' => true,
             'vestaboard_live' => $hub->vestaboardLive(),
@@ -602,11 +646,18 @@ final class YarboVestaboard
         if (count($available) < 2) {
             $enabled = false;
         }
+        $prev = $this->load();
+        $started = $enabled
+            ? (empty($prev['rotate_enabled']) || empty($prev['rotate_started_at'])
+                ? gmdate('c')
+                : (string) $prev['rotate_started_at'])
+            : null;
         if (!$this->save([
             'rotate_enabled' => $enabled,
             'rotate_views' => $views,
             'rotate_minutes' => $minutes,
             'rotate_at' => gmdate('c'),
+            'rotate_started_at' => $started,
         ])) {
             return ['ok' => false, 'error' => 'Could not save rotation settings.'];
         }
@@ -724,6 +775,16 @@ final class YarboVestaboard
         if (empty($config['rotate_enabled'])) {
             return false;
         }
+        $sessionStart = isset($config['rotate_started_at']) && is_string($config['rotate_started_at'])
+            ? strtotime($config['rotate_started_at'])
+            : false;
+        if ($sessionStart === false) {
+            $this->save(['rotate_started_at' => gmdate('c')]);
+            $sessionStart = time();
+        }
+        if ((time() - $sessionStart) >= self::ROTATE_MAX_SECONDS) {
+            return $this->stopRotateToDefault();
+        }
         $views = $this->availableRotateViews($this->normalizeRotateViews($config['rotate_views'] ?? []));
         if (count($views) < 2) {
             return false;
@@ -751,6 +812,270 @@ final class YarboVestaboard
         }
 
         return $hub->save(['vestaboard_live' => $next]);
+    }
+
+    /**
+     * End Rotate and return the idle default (Powerwall when enabled).
+     */
+    private function stopRotateToDefault(): bool
+    {
+        $hub = new YarboHub($this->projectRoot);
+        $default = YarboHub::firstEnabledVestaboardLive($hub->load()['modules']);
+        $this->save([
+            'rotate_enabled' => false,
+            'rotate_started_at' => null,
+            'rotate_at' => gmdate('c'),
+            'live_resume' => null,
+            'activity_focus' => null,
+            'activity_swap_at' => null,
+        ]);
+
+        return $hub->save(['vestaboard_live' => $default]);
+    }
+
+    /**
+     * While Yarbo/Lymow are mowing or in error, force that live page (All/Rotate yield).
+     * Both mowing → swap every 5 minutes; an error sticks until cleared.
+     *
+     * @param array{mowing?: bool, error?: bool}|null $yarboOverride
+     * @param array{mowing?: bool, error?: bool}|null $lymowOverride
+     * @return array{active: bool, changed: bool}
+     */
+    public function applyActivityLivePolicy(?array $yarboOverride = null, ?array $lymowOverride = null): array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        $modules = $hub->load()['modules'];
+        $yarboOn = !empty($modules[YarboHub::MODULE_YARBO]);
+        $lymowOn = !empty($modules[YarboHub::MODULE_LYMOW]);
+        if ($yarboOverride !== null) {
+            $yarbo = $yarboOverride;
+        } elseif ($yarboOn) {
+            $yarbo = $this->yarboActivitySnapshot();
+        } else {
+            $yarbo = ['mowing' => false, 'error' => false];
+        }
+        if ($lymowOverride !== null) {
+            $lymow = $lymowOverride;
+        } elseif ($lymowOn) {
+            $lymow = $this->lymowActivitySnapshot();
+        } else {
+            $lymow = ['mowing' => false, 'error' => false];
+        }
+        $yarbo = [
+            'mowing' => $yarboOn && !empty($yarbo['mowing']),
+            'error' => $yarboOn && !empty($yarbo['error']),
+        ];
+        $lymow = [
+            'mowing' => $lymowOn && !empty($lymow['mowing']),
+            'error' => $lymowOn && !empty($lymow['error']),
+        ];
+        $yActive = !empty($yarbo['mowing']) || !empty($yarbo['error']);
+        $lActive = !empty($lymow['mowing']) || !empty($lymow['error']);
+        $config = $this->load();
+        $current = $hub->vestaboardLive();
+
+        if (!$yActive && !$lActive) {
+            if (($config['live_resume'] ?? null) === null && ($config['activity_focus'] ?? null) === null) {
+                return ['active' => false, 'changed' => false];
+            }
+
+            return ['active' => false, 'changed' => $this->restoreLiveAfterActivity($hub, $config, $current)];
+        }
+
+        $target = $this->resolveActivityFocus($yarbo, $lymow, $config);
+        if ($target === null) {
+            return ['active' => false, 'changed' => false];
+        }
+
+        $resume = $this->normalizeLiveResume($config['live_resume'] ?? null);
+        if ($resume === null) {
+            // Remember All / current page so we can restore when the job ends.
+            // Rotate stays enabled; dwell resumes after the override.
+            $resume = $current === YarboHub::LIVE_BATTERIES || $current === YarboHub::MODULE_POWERWALL
+                || $current === YarboHub::MODULE_YARBO || $current === YarboHub::MODULE_LYMOW
+                ? $current
+                : YarboHub::firstEnabledVestaboardLive($modules);
+        }
+
+        $changed = false;
+        $save = [
+            'live_resume' => $resume,
+            'activity_focus' => $target,
+        ];
+        if (($config['activity_focus'] ?? null) !== $target || ($config['activity_swap_at'] ?? null) === null) {
+            $save['activity_swap_at'] = gmdate('c');
+        }
+        if ($current !== $target) {
+            $changed = $hub->save(['vestaboard_live' => $target]);
+        }
+        $this->save($save);
+
+        return ['active' => true, 'changed' => $changed || $current !== $target];
+    }
+
+    /**
+     * @param array{mowing: bool, error: bool} $yarbo
+     * @param array{mowing: bool, error: bool} $lymow
+     * @param array<string, mixed> $config
+     */
+    private function resolveActivityFocus(array $yarbo, array $lymow, array $config): ?string
+    {
+        $yErr = !empty($yarbo['error']);
+        $lErr = !empty($lymow['error']);
+        $yMow = !empty($yarbo['mowing']);
+        $lMow = !empty($lymow['mowing']);
+
+        if ($yErr && !$lErr) {
+            return YarboHub::MODULE_YARBO;
+        }
+        if ($lErr && !$yErr) {
+            return YarboHub::MODULE_LYMOW;
+        }
+        if ($yErr && $lErr) {
+            return $this->swapActivityFocus(
+                YarboHub::MODULE_YARBO,
+                YarboHub::MODULE_LYMOW,
+                $config
+            );
+        }
+        if ($yMow && !$lMow) {
+            return YarboHub::MODULE_YARBO;
+        }
+        if ($lMow && !$yMow) {
+            return YarboHub::MODULE_LYMOW;
+        }
+        if ($yMow && $lMow) {
+            return $this->swapActivityFocus(
+                YarboHub::MODULE_YARBO,
+                YarboHub::MODULE_LYMOW,
+                $config
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function swapActivityFocus(string $a, string $b, array $config): string
+    {
+        $focus = $this->normalizeActivityFocus($config['activity_focus'] ?? null);
+        if ($focus !== $a && $focus !== $b) {
+            return $a;
+        }
+        $swapAt = isset($config['activity_swap_at']) && is_string($config['activity_swap_at'])
+            ? strtotime($config['activity_swap_at'])
+            : false;
+        if ($swapAt === false || (time() - $swapAt) < self::ACTIVITY_SWAP_SECONDS) {
+            return $focus ?? $a;
+        }
+
+        return $focus === $a ? $b : $a;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function restoreLiveAfterActivity(YarboHub $hub, array $config, string $current): bool
+    {
+        $resume = $this->normalizeLiveResume($config['live_resume'] ?? null);
+        $this->save([
+            'live_resume' => null,
+            'activity_focus' => null,
+            'activity_swap_at' => null,
+            'rotate_at' => gmdate('c'),
+        ]);
+        if ($resume === null) {
+            return false;
+        }
+        if (!empty($config['rotate_enabled'])) {
+            // Rotate stays on — put them back on a rotate view if needed.
+            $views = $this->availableRotateViews($this->normalizeRotateViews($config['rotate_views'] ?? []));
+            if ($views !== [] && !in_array($current, $views, true)) {
+                return $hub->save(['vestaboard_live' => $views[0]]);
+            }
+
+            return false;
+        }
+        if ($resume === $current) {
+            return false;
+        }
+
+        return $hub->save(['vestaboard_live' => $resume]);
+    }
+
+    /**
+     * @return array{mowing: bool, error: bool}
+     */
+    private function yarboActivitySnapshot(): array
+    {
+        try {
+            $agent = YarboMqttAgentClient::fromEnv();
+            $result = $agent->telemetry(2.0, false, true);
+        } catch (\Throwable) {
+            return ['mowing' => false, 'error' => false];
+        }
+        $raw = $result['raw'] ?? null;
+        if (!($result['ok'] ?? false) || !is_array($raw) || $raw === []) {
+            return ['mowing' => false, 'error' => false];
+        }
+        $cells = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
+        $parsed = YarboTelemetry::parseForPanel($raw, $cells, $this->projectRoot);
+        $error = (int) ($parsed['error_code'] ?? 0) !== 0;
+        $paused = (bool) ($parsed['planning_paused'] ?? false);
+        $mowing = !$error && !$paused && (bool) ($parsed['plan_running'] ?? false);
+
+        return ['mowing' => $mowing, 'error' => $error];
+    }
+
+    /**
+     * @return array{mowing: bool, error: bool}
+     */
+    private function lymowActivitySnapshot(): array
+    {
+        $data = (new YarboLymow($this->projectRoot))->dashboardPayload();
+        $error = YarboLymow::hasError($data);
+        $work = isset($data['work_status']) && is_numeric($data['work_status'])
+            ? (int) $data['work_status']
+            : null;
+        $mowing = !$error && in_array($work, [2, 8, 9], true);
+
+        return ['mowing' => $mowing, 'error' => $error];
+    }
+
+    private function normalizeLiveResume(mixed $raw): ?string
+    {
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $id = strtolower(trim($raw));
+        if ($id === 'all') {
+            $id = YarboHub::LIVE_BATTERIES;
+        }
+        if (in_array($id, [
+            YarboHub::MODULE_YARBO,
+            YarboHub::MODULE_POWERWALL,
+            YarboHub::MODULE_LYMOW,
+            YarboHub::LIVE_BATTERIES,
+        ], true)) {
+            return $id;
+        }
+
+        return null;
+    }
+
+    private function normalizeActivityFocus(mixed $raw): ?string
+    {
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $id = strtolower(trim($raw));
+        if ($id === YarboHub::MODULE_YARBO || $id === YarboHub::MODULE_LYMOW) {
+            return $id;
+        }
+
+        return null;
     }
 
     /**

@@ -2187,7 +2187,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <button type="button" class="modal-backdrop" data-vestaboard-rotate-close aria-label="Close rotate settings"></button>
             <div class="modal-panel card vestaboard-rotate-panel">
                 <h2 id="vestaboard-rotate-title">Rotate views</h2>
-                <p class="hint">Cycle the Note through the ticked views. Needs two or more.</p>
+                <p class="hint">Cycle the Note through the ticked views (needs two or more). Pauses while Yarbo or Lymow is mowing or in error, and stops after 24 hours (back to Powerwall).</p>
                 <label class="vestaboard-rotate-option">
                     <input type="checkbox" id="vestaboard-rotate-enabled">
                     <span>Rotate views</span>
