@@ -17,8 +17,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.74"'), 'firmware 0.1.74');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.74';"), 'panel firmware pin 0.1.74');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.75"'), 'firmware 0.1.75');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.75';"), 'panel firmware pin 0.1.75');
 assert_true(str_contains($fw, 'void waitEpdReady()'), 'wait for e-paper BUSY');
 assert_true(str_contains($fw, 'void serviceTouchQueue()'), 'touch handled as a queue');
 if (!preg_match('/void waitEpdReady\(\)\n\{\n(?:.*\n)*?\}\n\n/', $fw, $wait)) {
@@ -29,11 +29,19 @@ assert_true(str_contains($wait[0], 'applyPendingPages()'), 'A/B still taken duri
 assert_true(!str_contains($wait[0], 'serviceTouchQueue'), 'HOUSE HTTP must not run during BUSY');
 assert_true(str_contains($wait[0], 'millis() - t0) < 4000'), 'BUSY wait must time out so Unlock is not stuck');
 assert_true(str_contains($fw, 'while (!M5.Display.displayBusy() && (millis() - t0) < 200)'), 'finishEpdFrame waits for BUSY to assert');
+assert_true(str_contains($fw, 'void waitEpdReadyOrTimeout(uint32_t maxMs)'), 'timed wait replaces unbounded waitDisplay');
+assert_true(!str_contains($fw, 'M5.Display.waitDisplay()'), 'no unbounded waitDisplay');
+assert_true(str_contains($fw, 'PAPERMONO_LOCK_POLL_MS'), 'lock screen slower poll');
+assert_true(str_contains($fw, 'PAPERMONO_LOCK_HTTP_MS'), 'lock screen short HTTP budget');
+assert_true(str_contains($fw, 'PAPERMONO_EPD_STUCK_MS'), 'stuck BUSY soft-reboot');
+assert_true(str_contains($fw, 'ESP.restart()'), 'soft-reboot when e-paper stuck');
+assert_true(str_contains($fw, 'epdFrameOpen'), 'refuse finish without an open frame');
 $drawStart = strpos($fw, "void drawScreen(bool forceFull)\n{");
 $setupStart = strpos($fw, "void drawSetup()\n{");
 assert_true($drawStart !== false && $setupStart !== false && $setupStart > $drawStart, 'drawScreen before drawSetup');
 $draw = substr($fw, $drawStart, $setupStart - $drawStart);
 assert_true(!str_contains($draw, 'serviceTouchQueue'), 'drawScreen must not handle taps (HTTP overlap / mottle)');
+assert_true(str_contains($draw, 'Fail closed'), 'drawScreen skips refresh while BUSY');
 assert_true(str_contains($fw, 'drawScreen(false);'), 'navigation uses fast e-paper update');
 assert_true(str_contains($fw, "wifiStartHome();\n        drawScreen(true);"), 'boot paints with a full refresh');
 if (!preg_match('/void showPage\(int page, bool loadPlansIfNeeded\)\n\{[\s\S]*?\n\}\n\nvoid nextPage/', $fw, $show)) {
@@ -43,6 +51,8 @@ if (!preg_match('/void showPage\(int page, bool loadPlansIfNeeded\)\n\{[\s\S]*?\
 assert_true(str_contains($show[0], 'drawScreen(false)'), 'showPage uses fast update');
 assert_true(!str_contains($show[0], 'drawScreen(true)'), 'showPage must not force a full refresh');
 assert_true(str_contains($docs, 'A/B is taken while the panel is still refreshing'), 'docs mention A/B during refresh');
+assert_true(str_contains($docs, '0.1.75'), 'docs mention lock-screen freeze fix');
+assert_true(str_contains($change, '## [4.0.207]'), 'changelog 4.0.207');
 assert_true(str_contains($change, '## [4.0.63]'), 'changelog 4.0.63');
 
 echo "test_paper_epd_nav.php ok\n";

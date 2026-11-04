@@ -273,8 +273,8 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_ACCESS 12'), 'access page id');
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_COUNT 14'), 'page count includes HEAT');
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.74"'), 'firmware 0.1.74');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.74';"), 'panel pin 0.1.74');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.75"'), 'firmware 0.1.75');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.75';"), 'panel pin 0.1.75');
 assert_true(str_contains($homePhp, 'function paperAccessItems'), 'paper ACCESS helper');
 assert_true(str_contains($homePhp, 'function assignContactKind'), 'contact_kind save');
 assert_true(str_contains($api, "'contact_kind'"), 'home API contact_kind');

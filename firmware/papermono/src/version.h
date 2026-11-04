@@ -1,9 +1,15 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.1.74"
+#define PAPERMONO_FW_VERSION "0.1.75"
 /* Status poll. Do not go much faster: SSD1677 must not stream partial refreshes. */
 #define PAPERMONO_LOGO_PX 160
 #define PAPERMONO_POLL_MS 15000
+/* Lock screen can wait longer between polls — Unlock must stay responsive. */
+#define PAPERMONO_LOCK_POLL_MS 60000UL
+/* Compact while locked uses a short budget so a slow Pi cannot brick touch. */
+#define PAPERMONO_LOCK_HTTP_MS 8000
+/* If e-paper BUSY never clears, soft-reboot instead of a dead tablet. */
+#define PAPERMONO_EPD_STUCK_MS 45000UL
 #define PAPERMONO_PAGE_HOME 0
 #define PAPERMONO_PAGE_STATUS 1
 #define PAPERMONO_PAGE_HEALTH 2

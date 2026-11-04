@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.207] - 2026-11-04
+
+### Fixed
+- **PaperMono lock screen freezes (clock stuck, Unlock dead):** never start a second e-paper refresh while BUSY (overlapping waveforms killed touch until power cycle); replace unbounded `waitDisplay()`; while locked poll less often with a short HTTP budget, skip logo/OTA downloads, and keep the clock on NTP; soft-reboot if BUSY sticks for 45s. Firmware **0.1.75**.
+
 ## [4.0.206] - 2026-11-03
 
 ### Added
