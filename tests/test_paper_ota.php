@@ -102,11 +102,45 @@ if (!empty($stale['ota_pending'])) {
     exit(1);
 }
 
+$store = json_decode((string) file_get_contents($root . '/data/papermono-devices.json'), true);
+$store['devices'][0]['ota_pending'] = true;
+$store['devices'][0]['ota_requested_at'] = gmdate('c');
+$store['devices'][0]['fw_reported'] = '0.1.56';
+file_put_contents($root . '/data/papermono-devices.json', json_encode($store, JSON_UNESCAPED_SLASHES));
+$cancelled = $devices->cancelOta('tab1');
+if (!($cancelled['ok'] ?? false)) {
+    fwrite(STDERR, 'cancel OTA failed ' . json_encode($cancelled) . "\n");
+    exit(1);
+}
+$afterCancel = null;
+foreach ($devices->publicTablets() as $row) {
+    if ($row['id'] === 'tab1') {
+        $afterCancel = $row;
+    }
+}
+if (!empty($afterCancel['ota_pending'])) {
+    fwrite(STDERR, 'cancel must clear pending ' . json_encode($afterCancel) . "\n");
+    exit(1);
+}
+
 $api = file_get_contents(__DIR__ . '/../public/api/device.php');
 $js = file_get_contents(__DIR__ . '/../public/assets/app.js');
 $change = file_get_contents(__DIR__ . '/../CHANGELOG.md');
-if ($api === false || $js === false || $change === false) {
+$fw = file_get_contents(__DIR__ . '/../firmware/papermono/src/main.cpp');
+if ($api === false || $js === false || $change === false || $fw === false) {
     fwrite(STDERR, "missing sources\n");
+    exit(1);
+}
+if (!str_contains($api, "action === 'ota_cancel'") || !str_contains($js, 'data-papermono-ota-cancel') || !str_contains($js, 'cancelPaperOta')) {
+    fwrite(STDERR, "Cancel update control missing\n");
+    exit(1);
+}
+if (!str_contains($fw, 'OTA must run even on the lock screen') || str_contains($fw, 'Defer OTA while locked')) {
+    fwrite(STDERR, "firmware must not defer OTA on the lock screen\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.208]')) {
+    fwrite(STDERR, "changelog 4.0.208 missing\n");
     exit(1);
 }
 if (!preg_match("/action === 'firmware'(.*)if \\(\\\$method !== 'POST'\\)/s", $api, $chunk)) {
