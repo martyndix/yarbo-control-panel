@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.211] - 2026-11-04
+
+### Fixed
+- **Settings checkboxes:** Enable / Smart Display (and other `settings-field` checkboxes) sit on one row with the label instead of stacking the control above the text.
+
 ## [4.0.210] - 2026-11-04
 
 ### Added

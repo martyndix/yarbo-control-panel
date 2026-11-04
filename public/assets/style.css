@@ -2027,10 +2027,29 @@ body.map-is-fullscreen {
     margin: 0 0 0.75rem;
 }
 
-.settings-checkbox {
+.settings-checkbox,
+.settings-field.settings-checkbox {
+    display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
+    width: fit-content;
+    max-width: 100%;
+}
+
+.settings-field.settings-checkbox input[type="checkbox"],
+.settings-checkbox input[type="checkbox"] {
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    appearance: auto;
+    -webkit-appearance: checkbox;
 }
 
 .settings-checkbox.is-disabled {
