@@ -118,13 +118,50 @@ assert_true($hub->vestaboardLive() === 'powerwall', 'rotate expiry lands on Powe
 $cfg = $vb->load();
 assert_true(empty($cfg['rotate_enabled']), 'rotate disabled after 24h');
 
+$hub->save(['vestaboard_live' => 'powerwall']);
+$vb->save(['smart_display' => false, 'live_resume' => null, 'activity_focus' => null]);
+$r = $vb->applyActivityLivePolicy(
+    ['mowing' => true, 'error' => false],
+    ['mowing' => true, 'error' => false]
+);
+assert_true(empty($r['active']) && empty($r['changed']), 'smart display off ignores mowing');
+assert_true($hub->vestaboardLive() === 'powerwall', 'smart off keeps Powerwall');
+
+$vb->save(['smart_display' => true]);
+$hub->save([
+    'modules' => [
+        'yarbo' => false,
+        'powerwall' => true,
+        'lymow' => true,
+        'home' => false,
+        'unifi' => false,
+    ],
+    'vestaboard_live' => 'powerwall',
+]);
+$r = $vb->applyActivityLivePolicy(
+    ['mowing' => true, 'error' => false],
+    ['mowing' => true, 'error' => false]
+);
+assert_true(!empty($r['active']), 'lymow-only module still follows Lymow');
+assert_true($hub->vestaboardLive() === 'lymow', 'yarbo off skips Yarbo even if override says mowing');
+
+$view = $vb->publicView();
+assert_true(($view['smart_display'] ?? null) === true, 'publicView exposes smart_display');
+
 $src = (string) file_get_contents(__DIR__ . '/../src/YarboVestaboard.php');
 assert_true(str_contains($src, 'ACTIVITY_SWAP_SECONDS'), 'swap constant');
 assert_true(str_contains($src, 'ROTATE_MAX_SECONDS'), 'rotate max constant');
 assert_true(str_contains($src, 'applyActivityLivePolicy'), 'activity policy');
+assert_true(str_contains($src, "'smart_display'"), 'smart_display setting');
+$js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
+assert_true(str_contains($js, 'updateVestaboardSmartHint'), 'settings hint adapts to modules');
+assert_true(str_contains($js, 'vestaboard_smart_display'), 'settings save smart display');
+$index = (string) file_get_contents(__DIR__ . '/../public/index.php');
+assert_true(str_contains($index, 'Vestaboard Smart Display'), 'settings checkbox label');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.210]'), 'changelog 4.0.210');
 assert_true(str_contains($change, '## [4.0.209]'), 'changelog 4.0.209');
 $docs = (string) file_get_contents(__DIR__ . '/../docs/vestaboard.md');
-assert_true(str_contains($docs, 'mowing'), 'docs mention mowing auto-switch');
+assert_true(str_contains($docs, 'Smart Display'), 'docs mention Smart Display');
 
 echo "test_vestaboard_activity.php ok\n";

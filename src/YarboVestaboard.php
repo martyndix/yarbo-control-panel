@@ -131,6 +131,7 @@ final class YarboVestaboard
             'rotate_minutes' => self::ROTATE_DEFAULT_MINUTES,
             'rotate_at' => null,
             'rotate_started_at' => null,
+            'smart_display' => true,
             'live_resume' => null,
             'activity_focus' => null,
             'activity_swap_at' => null,
@@ -189,6 +190,9 @@ final class YarboVestaboard
                 && $decoded['rotate_started_at'] !== ''
                 ? $decoded['rotate_started_at']
                 : null,
+            'smart_display' => array_key_exists('smart_display', $decoded)
+                ? (bool) $decoded['smart_display']
+                : true,
             'live_resume' => $this->normalizeLiveResume($decoded['live_resume'] ?? null),
             'activity_focus' => $this->normalizeActivityFocus($decoded['activity_focus'] ?? null),
             'activity_swap_at' => isset($decoded['activity_swap_at']) && is_string($decoded['activity_swap_at'])
@@ -312,6 +316,9 @@ final class YarboVestaboard
                     ? $input['rotate_started_at']
                     : null)
                 : ($current['rotate_started_at'] ?? null),
+            'smart_display' => array_key_exists('smart_display', $input) || array_key_exists('vestaboard_smart_display', $input)
+                ? (bool) ($input['smart_display'] ?? $input['vestaboard_smart_display'])
+                : (bool) ($current['smart_display'] ?? true),
             'live_resume' => array_key_exists('live_resume', $input)
                 ? $this->normalizeLiveResume($input['live_resume'])
                 : $this->normalizeLiveResume($current['live_resume'] ?? null),
@@ -324,6 +331,20 @@ final class YarboVestaboard
                     : null)
                 : ($current['activity_swap_at'] ?? null),
         ];
+        // Turning Smart Display off clears an in-progress mowing override and
+        // puts the Note back on the page that was showing before the override.
+        if (array_key_exists('smart_display', $input) || array_key_exists('vestaboard_smart_display', $input)) {
+            $wantSmart = (bool) ($input['smart_display'] ?? $input['vestaboard_smart_display']);
+            if (!$wantSmart) {
+                $resume = $this->normalizeLiveResume($current['live_resume'] ?? null);
+                if ($resume !== null) {
+                    (new YarboHub($this->projectRoot))->save(['vestaboard_live' => $resume]);
+                }
+                $next['live_resume'] = null;
+                $next['activity_focus'] = null;
+                $next['activity_swap_at'] = null;
+            }
+        }
         $json = json_encode($next, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
             return false;
@@ -356,6 +377,7 @@ final class YarboVestaboard
             'quiet_hours_active' => $this->isQuietHours(),
             'quiet_timezone' => $this->resolveQuietTimezone($config),
             'quiet_clock_now' => $this->quietNowHm($config),
+            'smart_display' => (bool) ($config['smart_display'] ?? true),
             'connection_warning' => $this->connectionWarning(),
         ] + $this->rotatePublicFields($config);
     }
@@ -845,8 +867,27 @@ final class YarboVestaboard
     {
         $hub = new YarboHub($this->projectRoot);
         $modules = $hub->load()['modules'];
+        $config = $this->load();
+        $current = $hub->vestaboardLive();
+        $smartOn = (bool) ($config['smart_display'] ?? true);
+        if (!$smartOn) {
+            if (($config['live_resume'] ?? null) !== null || ($config['activity_focus'] ?? null) !== null) {
+                return ['active' => false, 'changed' => $this->restoreLiveAfterActivity($hub, $config, $current)];
+            }
+
+            return ['active' => false, 'changed' => false];
+        }
+
         $yarboOn = !empty($modules[YarboHub::MODULE_YARBO]);
         $lymowOn = !empty($modules[YarboHub::MODULE_LYMOW]);
+        // No robot modules → nothing for Smart Display to follow.
+        if (!$yarboOn && !$lymowOn) {
+            if (($config['live_resume'] ?? null) !== null || ($config['activity_focus'] ?? null) !== null) {
+                return ['active' => false, 'changed' => $this->restoreLiveAfterActivity($hub, $config, $current)];
+            }
+
+            return ['active' => false, 'changed' => false];
+        }
         if ($yarboOverride !== null) {
             $yarbo = $yarboOverride;
         } elseif ($yarboOn) {
@@ -871,8 +912,6 @@ final class YarboVestaboard
         ];
         $yActive = !empty($yarbo['mowing']) || !empty($yarbo['error']);
         $lActive = !empty($lymow['mowing']) || !empty($lymow['error']);
-        $config = $this->load();
-        $current = $hub->vestaboardLive();
 
         if (!$yActive && !$lActive) {
             if (($config['live_resume'] ?? null) === null && ($config['activity_focus'] ?? null) === null) {

@@ -1244,6 +1244,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span>Enable Vestaboard Note</span>
                             </label>
                             <div id="settings-vestaboard-fields" class="hidden">
+                                <label class="settings-field settings-checkbox">
+                                    <input type="checkbox" id="settings-vestaboard-smart" name="vestaboard_smart_display" checked>
+                                    <span>Vestaboard Smart Display</span>
+                                </label>
+                                <p class="hint" id="settings-vestaboard-smart-hint">When on, the Note follows the robots that are actually working. Off modules are skipped automatically.</p>
                                 <div class="map-mode vestaboard-transport" role="radiogroup" aria-label="Vestaboard API">
                                     <label>
                                         <input type="radio" name="vestaboard-transport" value="local" checked>

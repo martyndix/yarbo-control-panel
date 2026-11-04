@@ -116,6 +116,8 @@ const els = {
     settingsVestaboardQuietEnd: document.getElementById('settings-vestaboard-quiet-end'),
     settingsVestaboardQuietBoard: document.getElementById('settings-vestaboard-quiet-board'),
     settingsVestaboardQuietPalette: document.getElementById('settings-vestaboard-quiet-palette'),
+    settingsVestaboardSmart: document.getElementById('settings-vestaboard-smart'),
+    settingsVestaboardSmartHint: document.getElementById('settings-vestaboard-smart-hint'),
     settingsRainSensitivity: document.getElementById('settings-rain-sensitivity'),
     vestaboardCard: document.getElementById('vestaboard-card'),
     homeDoorsCard: document.getElementById('home-doors-card'),
@@ -9423,6 +9425,11 @@ function onModuleCheckboxChange(event) {
         return;
     }
     applyCompanionSettingsVisibility();
+    updateVestaboardSmartHint({
+        yarbo: yarboOn,
+        powerwall: powerwallOn,
+        lymow: lymowOn,
+    });
 }
 
 function updateStatus(data) {
@@ -10722,8 +10729,12 @@ async function loadSettings() {
         if (els.settingsVestaboardQuietEnd) {
             els.settingsVestaboardQuietEnd.value = data.vestaboard?.quiet_end || '07:00';
         }
+        if (els.settingsVestaboardSmart) {
+            els.settingsVestaboardSmart.checked = data.vestaboard?.smart_display !== false;
+        }
         setQuietCodes(data.vestaboard?.quiet_codes);
         updateQuietHoursClockHint(data.vestaboard);
+        updateVestaboardSmartHint(data.hub?.modules || {});
         if (els.settingsRainSensitivity) {
             const n = data.rain?.sensitivity;
             els.settingsRainSensitivity.value = n != null ? String(n) : '';
@@ -12370,6 +12381,27 @@ function updateQuietHoursClockHint(board) {
         + ' A custom message from the Vestaboard app during this window stays until quiet hours end (Resume previous status on the dashboard takes the panel back). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.';
 }
 
+function updateVestaboardSmartHint(modules) {
+    const hint = els.settingsVestaboardSmartHint;
+    if (!hint) return;
+    const yarboOn = modules?.yarbo !== false;
+    const powerwallOn = Boolean(modules?.powerwall);
+    const lymowOn = Boolean(modules?.lymow);
+    const robots = [];
+    if (yarboOn) robots.push('Yarbo');
+    if (lymowOn) robots.push('Lymow');
+    const idle = powerwallOn ? 'Powerwall' : (robots[0] || 'the first enabled module');
+    let body;
+    if (robots.length === 0) {
+        body = `No robot modules are on, so Smart Display has nothing to follow — the Note stays on your chosen view (idle default ${idle}). Turn on Yarbo and/or Lymow under Modules to use it.`;
+    } else if (robots.length === 1) {
+        body = `While ${robots[0]} is mowing or in error, the Note switches to that robot. ALL and Rotate yield until the job ends. Idle default is ${idle}. Off modules are skipped.`;
+    } else {
+        body = `While Yarbo or Lymow is mowing or in error, the Note switches to that robot. Both mowing swaps every 5 minutes; an error sticks until cleared. ALL and Rotate yield during a job. Idle default is ${idle}. Rotate stops after 24 hours and returns to ${idle}. Off modules are skipped.`;
+    }
+    hint.textContent = body;
+}
+
 function vestaboardTransport() {
     const checked = document.querySelector('input[name="vestaboard-transport"]:checked');
     return checked?.value === 'cloud' ? 'cloud' : 'local';
@@ -12575,6 +12607,7 @@ async function saveSettings(event) {
             vestaboard_quiet_end: els.settingsVestaboardQuietEnd?.value || '07:00',
             vestaboard_quiet_codes: quietCodesSnapshot(),
             vestaboard_quiet_timezone: clientTimezone(),
+            vestaboard_smart_display: Boolean(els.settingsVestaboardSmart?.checked),
             module_yarbo: Boolean(els.settingsModuleYarbo?.checked),
             module_powerwall: Boolean(els.settingsModulePowerwall?.checked),
             module_lymow: Boolean(els.settingsModuleLymow?.checked),
