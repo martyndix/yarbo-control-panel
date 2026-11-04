@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.210] - 2026-11-04
+
+### Added
+- **Vestaboard Smart Display setting:** Settings → Vestaboard explains and can turn off the mowing/error auto-switch. Off modules are skipped (no dual swap without both robots; idle default follows whatever is enabled). On by default.
+
 ## [4.0.209] - 2026-11-04
 
 ### Added
