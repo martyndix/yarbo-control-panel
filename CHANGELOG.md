@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.213] - 2026-11-05
+
+### Added
+- **Work Plans stay in the browser:** after Load (or the first automatic fetch), the list is restored on revisit from `localStorage`. A quiet refresh runs about once a day when the cache is older than 24 hours; **Load plans** still refreshes immediately.
+
 ## [4.0.212] - 2026-11-05
 
 ### Changed
