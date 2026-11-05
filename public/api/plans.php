@@ -160,55 +160,17 @@ try {
         ]);
     }
 
-    if ($action === 'delete') {
-        $planId = $input['plan_id'] ?? $input['planId'] ?? null;
-        if ($planId === null || $planId === '') {
-            json_response(['ok' => false, 'error' => 'plan_id is required'], 400);
-        }
-        if (!($input['confirm'] ?? false)) {
-            json_response(['ok' => false, 'error' => 'confirm=true is required to delete a plan'], 400);
-        }
-
-        $payload = [
-            'planId' => is_numeric($planId) ? (int) $planId : (string) $planId,
-        ];
-        $result = $agent->publish('del_plan', $payload, 'work');
-        if (!($result['ok'] ?? false)) {
-            json_response([
-                'ok' => false,
-                'error' => (string) ($result['error'] ?? 'Delete failed'),
-                'via' => 'agent',
-            ], 500);
-        }
-
+    if ($action === 'delete' || $action === 'delete_all') {
         json_response([
-            'ok' => true,
-            'action' => 'delete',
-            'plan_id' => $planId,
-            'via' => 'agent',
-        ]);
-    }
-
-    if ($action === 'delete_all') {
-        if (!($input['confirm'] ?? false)) {
-            json_response(['ok' => false, 'error' => 'confirm=true is required to delete all plans'], 400);
-        }
-
-        $result = $agent->publish('del_all_plan', [], 'work');
-        if (!($result['ok'] ?? false)) {
-            json_response([
-                'ok' => false,
-                'error' => (string) ($result['error'] ?? 'Delete all failed'),
-                'via' => 'agent',
-            ], 500);
-        }
-
-        json_response(['ok' => true, 'action' => 'delete_all', 'via' => 'agent']);
+            'ok' => false,
+            'error' => 'Plan delete is disabled. Create and delete plans in the Yarbo app.',
+            'plan_manage' => false,
+        ], 403);
     }
 
     json_response([
         'ok' => false,
-        'error' => 'Unknown action. Valid: start, delete, delete_all',
+        'error' => 'Unknown action. Valid: start',
     ], 400);
 } catch (Throwable $e) {
     json_response(['ok' => false, 'error' => friendly_error($e)], 500);

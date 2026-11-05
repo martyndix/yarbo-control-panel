@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.214] - 2026-11-05
+
+### Changed
+- **Work Plans Manage removed:** create and delete plans in the Yarbo app. The panel still lists and starts plans.
+
 ## [4.0.213] - 2026-11-05
 
 ### Added
