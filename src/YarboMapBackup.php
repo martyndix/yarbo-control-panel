@@ -263,341 +263,14 @@ final class YarboMapBackup
         string $serial = '',
     ): array
     {
-        if (!$confirm) {
-            return ['ok' => false, 'error' => 'confirm=true is required'];
-        }
-
-        $stored = $this->loadPersisted();
-        if ($stored === null || !YarboMap::isAppMap($stored['map'] ?? [])) {
-            $live = $this->loadLiveMap();
-            if (is_array($live)) {
-                $stored = [
-                    'map' => $live,
-                    'map_source' => 'get_map',
-                    'backup_id' => null,
-                ];
-            }
-        }
-        if ($stored === null || !YarboMap::isAppMap($stored['map'] ?? [])) {
-            return ['ok' => false, 'error' => 'Load the map first.'];
-        }
-        $safety = $this->safetyCheck($client);
-        if (($safety['ok'] ?? false) !== true) {
-            return $safety;
-        }
-
-        $encoded = YarboMap::encodeDraft($stored['map'], $collection);
-        if (!($encoded['ok'] ?? false) || !isset($encoded['map'])) {
-            $live = $this->loadLiveMap();
-            if (is_array($live)) {
-                $retry = YarboMap::encodeDraft($live, $collection);
-                if (($retry['ok'] ?? false) && isset($retry['map'])) {
-                    $encoded = $retry;
-                }
-            }
-        }
-        if (!($encoded['ok'] ?? false) || !isset($encoded['map'])) {
-            return [
-                'ok' => false,
-                'error' => self::encodeErrorMessage(
-                    $encoded['errors'] ?? ['Could not encode the draft'],
-                    $stored['map'],
-                    $collection
-                ),
-            ];
-        }
-
-        $payload = $this->payloadWithMap($stored, $encoded['map']);
-        if (isset($stored['backup_id']) && $stored['backup_id'] !== null && $stored['backup_id'] !== '') {
-            $payload['id'] = is_numeric($stored['backup_id']) ? (int) $stored['backup_id'] : $stored['backup_id'];
-        }
-        $sentMap = self::locateMap($payload)['map'] ?? $encoded['map'];
-        $encodeDelta = (float) ($encoded['max_delta_m'] ?? 0);
-        $blobDelta = YarboMap::maxRangeDelta($stored['map'], $sentMap);
-        if ($encodeDelta > self::VERIFY_M && $blobDelta <= self::VERIFY_M) {
-            return [
-                'ok' => false,
-                'error' => 'The original line is still in the draft. Click the zone and drag its vertices — do not draw a new shape on top.',
-                'encode_delta_m' => $encodeDelta,
-                'blob_delta_m' => $blobDelta,
-            ];
-        }
-
-        $restoreFile = $this->writeRestoreCopy($stored);
-        $backupChanges = self::changedZones($stored['map'], $sentMap);
-        if ($backupChanges === []) {
-            $collisionNote = YarboMap::formatCrossTypeCollisions(
-                self::draftNameCollisions($collection)
-            );
-            $error = 'Nothing changed on the loaded map.';
-            if ($collisionNote !== '') {
-                $error .= ' ' . $collisionNote;
-            }
-
-            return [
-                'ok' => false,
-                'error' => $error,
-                'encode_delta_m' => $encodeDelta,
-                'blob_delta_m' => $blobDelta,
-            ];
-        }
-
-        $preferCloud = $cloud !== null && $serial !== '';
-        $liveBefore = $this->readCurrentMap($client, $cloud, $serial, $preferCloud);
-        $liveFromCache = false;
-        if (!is_array($liveBefore)) {
-            $liveBefore = $this->loadLiveMap();
-            $liveFromCache = is_array($liveBefore);
-        }
-        if (!is_array($liveBefore)) {
-            return [
-                'ok' => false,
-                'error' => 'Live get_map timed out. Wait until the robot is idle, then load the map again.',
-            ];
-        }
-        if ($liveFromCache) {
-            $preferCloud = false;
-        }
-        $collisionNote = YarboMap::formatCrossTypeCollisions(
-            YarboMap::crossTypeNameCollisions($liveBefore)
-        );
-
-        $changes = [];
-        $patchedLive = $liveBefore;
-        foreach ($backupChanges as $change) {
-            $liveList = YarboMap::zoneList($liveBefore, $change['canonical']);
-            $target = YarboMap::findMatchingZone($liveList, $change['zone'])
-                ?? YarboMap::findMatchingZone($liveList, $change['original']);
-            if ($target === null) {
-                continue;
-            }
-            $rebased = YarboMap::rebaseZoneOnto($change['zone'], $target);
-            $key = YarboMap::presentListKey($liveBefore, $change['canonical']) ?? $change['key'];
-            $changes[] = [
-                'canonical' => $change['canonical'],
-                'key' => $key,
-                'index' => $change['index'],
-                'zone' => $rebased,
-                'original' => $target,
-                'delta_m' => YarboMap::maxRangeDelta(['area' => [$target]], ['area' => [$rebased]]),
-            ];
-            $patchedLive = YarboMap::replaceMatchingZone($patchedLive, $change['canonical'], $rebased);
-        }
-        if ($changes === []) {
-            $error = 'The edited zone was not found on live get_map (id/name). Original is on the Pi: ' . basename($restoreFile);
-            if ($collisionNote !== '') {
-                $error .= ' ' . $collisionNote;
-            }
-
-            return [
-                'ok' => false,
-                'error' => $error,
-                'restore_file' => basename($restoreFile),
-            ];
-        }
-
-        $unsupported = [];
-        foreach ($changes as $change) {
-            if ($this->saveCommandsFor((string) ($change['canonical'] ?? '')) === []) {
-                $unsupported[] = (string) $change['canonical'];
-            }
-        }
-        if ($unsupported !== []) {
-            $error = 'Save can write mowing areas and pathways. This edit is '
-                . implode(', ', array_unique($unsupported))
-                . '. Original is on the Pi: ' . basename($restoreFile);
-            if ($collisionNote !== '') {
-                $error .= ' ' . $collisionNote;
-            }
-
-            return [
-                'ok' => false,
-                'error' => $error,
-                'restore_file' => basename($restoreFile),
-            ];
-        }
-
-        $editedCanonicals = array_values(array_unique(array_map(
-            static fn (array $change): string => (string) $change['canonical'],
-            $changes
-        )));
-        $alreadyOnLive = YarboMap::maxAlignedRangeDelta($patchedLive, $liveBefore, $editedCanonicals) <= self::VERIFY_M;
-        if ($alreadyOnLive) {
-            $message = 'The robot already has this draft.';
-            if ($collisionNote !== '') {
-                $message .= ' ' . $collisionNote;
-            }
-
-            return [
-                'ok' => true,
-                'via' => $preferCloud ? 'cloud' : 'local',
-                'verified' => true,
-                'unchanged' => true,
-                'restore_file' => basename($restoreFile),
-                'message' => $message,
-            ];
-        }
-
-        $write = $this->saveChangedZones($client, $cloud, $serial, $changes, $patchedLive, $preferCloud, null, $liveBefore);
-        $ack = $write['envelope'];
-        $via = $write['via'];
-        $saveShape = $write['shape'];
-        $saveCmd = $write['command'];
-        $uploadState = null;
-        if ($ack === null) {
-            $kinds = array_values(array_unique(array_map(
-                static fn (array $change): string => (string) $change['canonical'],
-                $changes
-            )));
-            $pathway = in_array('pathways', $kinds, true);
-            $error = $pathway
-                ? 'The robot did not accept the path save. Wait until it is idle, then try again.'
-                : 'The robot did not accept the save. Wait until it is idle, then try again.';
-
-            return [
-                'ok' => false,
-                'error' => $error,
-                'restore_file' => basename($restoreFile),
-                'save_command' => $saveCmd,
-                'save_shape' => $saveShape,
-                'tried_shapes' => $write['tried'],
-            ];
-        }
-
-        $editedCanonicals = array_values(array_unique(array_map(
-            static fn (array $change): string => (string) $change['canonical'],
-            $changes
-        )));
-        $readMap = $write['read_map'];
-        $listFromOriginal = is_array($readMap) ? YarboMap::alignedListDeltas($liveBefore, $readMap) : [];
-        $delta = is_array($readMap) ? YarboMap::maxAlignedRangeDelta($patchedLive, $readMap, $editedCanonicals) : null;
-        $vsOriginal = is_array($readMap) ? YarboMap::maxAlignedRangeDelta($liveBefore, $readMap, $editedCanonicals) : null;
-        $sideEffect = is_array($readMap)
-            ? YarboMap::maxAlignedRangeDelta(
-                $liveBefore,
-                $readMap,
-                array_values(array_diff(array_keys(YarboMap::canonicalListNames()), $editedCanonicals))
-            )
-            : null;
-        $robotMoved = ($vsOriginal !== null && $vsOriginal > self::VERIFY_M)
-            || ($sideEffect !== null && $sideEffect > self::VERIFY_M);
-        if ($delta === null && !is_array($readMap)) {
-            sleep(2);
-            $retryMap = $this->readCurrentMap($client, $cloud, $serial, $preferCloud);
-            if (is_array($retryMap)) {
-                $readMap = $retryMap;
-                $listFromOriginal = YarboMap::alignedListDeltas($liveBefore, $readMap);
-                $delta = YarboMap::maxAlignedRangeDelta($patchedLive, $readMap, $editedCanonicals);
-                $vsOriginal = YarboMap::maxAlignedRangeDelta($liveBefore, $readMap, $editedCanonicals);
-                $sideEffect = YarboMap::maxAlignedRangeDelta(
-                    $liveBefore,
-                    $readMap,
-                    array_values(array_diff(array_keys(YarboMap::canonicalListNames()), $editedCanonicals))
-                );
-                $robotMoved = $vsOriginal > self::VERIFY_M || $sideEffect > self::VERIFY_M;
-            }
-        }
-
-        $matchesSent = $delta !== null && $delta <= self::VERIFY_M;
-        $sideOk = $sideEffect === null || $sideEffect <= self::VERIFY_M;
-        $verified = $matchesSent && $sideOk && ($blobDelta <= self::VERIFY_M || ($vsOriginal !== null && $vsOriginal > self::VERIFY_M));
-        $unchanged = $blobDelta > self::VERIFY_M && !$robotMoved;
-        $rolledBack = false;
-        if (!$verified && $robotMoved && is_array($readMap)) {
-            $this->saveChangedZones(
-                $client,
-                $cloud,
-                $serial,
-                self::zonesDiffering($readMap, $liveBefore),
-                $liveBefore,
-                $via === 'cloud',
-                null,
-                $readMap,
-                null
-            );
-            $rolledBack = true;
-        }
-        if ($verified) {
-            $snap = $this->sendUnpublished(
-                $client,
-                $cloud,
-                $serial,
-                self::UPLOAD_CMD,
-                [],
-                $preferCloud,
-                8.0,
-                12.0,
-                self::UPLOAD_TOPICS,
-                false
-            );
-            $uploadState = $snap['envelope']['state'] ?? null;
-        }
-
-        $message = $this->restoreMessage(
-            $verified,
-            $unchanged,
-            $rolledBack,
-            $delta,
-            $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
-            $via,
-            (string) ($stored['map_source'] ?? ''),
-            $ack['state'] ?? null,
-            basename($restoreFile),
-            is_array($readMap),
-            $vsOriginal,
-            null,
-            $uploadState,
-            $saveShape,
-            $saveCmd,
-            $listFromOriginal
-        );
-        if ($collisionNote !== '') {
-            $message = rtrim($message) . ' ' . $collisionNote;
-        }
-
-        $this->persistProbe([
-            'saved_at' => gmdate('c'),
-            'action' => 'restore',
-            'via' => $via,
-            'map_source' => $stored['map_source'] ?? null,
-            'backup_id' => $stored['backup_id'] ?? null,
-            'save_command' => $saveCmd,
-            'save_shape' => $saveShape,
-            'tried_shapes' => $write['tried'],
-            'save_state' => $ack['state'] ?? null,
-            'upload_state' => $uploadState,
-            'encode_delta_m' => $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
-            'blob_delta_m' => $blobDelta,
-            'readback_delta_m' => $delta,
-            'vs_original_m' => $vsOriginal,
-            'side_effect_m' => $sideEffect,
-            'list_deltas_m' => $listFromOriginal,
-            'verified' => $verified,
-            'unchanged' => $unchanged,
-            'rolled_back' => $rolledBack,
-        ]);
+        // Map editing / Save to robot removed — never publish save_clean_area,
+        // save_pathway, upload_cloud_map_backup, or map_recovery from the panel.
+        unset($client, $collection, $confirm, $cloud, $serial);
 
         return [
-            'ok' => $verified,
-            'via' => $via,
-            'map_source' => $stored['map_source'] ?? null,
-            'backup_id' => $stored['backup_id'] ?? null,
-            'save_command' => $saveCmd,
-            'save_shape' => $saveShape,
-            'tried_shapes' => $write['tried'],
-            'save_state' => $ack['state'] ?? null,
-            'upload_state' => $uploadState,
-            'encode_delta_m' => $blobDelta > self::VERIFY_M ? $blobDelta : $encodeDelta,
-            'blob_delta_m' => $blobDelta,
-            'readback_delta_m' => $delta,
-            'vs_original_m' => $vsOriginal,
-            'side_effect_m' => $sideEffect,
-            'list_deltas_m' => $listFromOriginal,
-            'verified' => $verified,
-            'unchanged' => $unchanged,
-            'rolled_back' => $rolledBack,
-            'restore_file' => basename($restoreFile),
-            'message' => $message,
+            'ok' => false,
+            'error' => 'Map writes are disabled. This panel only reads Yarbo maps; edit zones in the Yarbo app.',
+            'map_writes' => false,
         ];
     }
 
@@ -677,6 +350,18 @@ final class YarboMapBackup
         ?array $originalMap = null,
         ?string $onlyCmd = null,
     ): array {
+        // Hard block — map writes are disabled panel-wide.
+        unset($client, $cloud, $serial, $changes, $sentMap, $originalMap);
+
+        return [
+            'envelope' => null,
+            'via' => $preferCloud ? 'cloud' : 'local',
+            'shape' => $onlyShape,
+            'command' => $onlyCmd,
+            'tried' => [['error' => 'map_writes_disabled']],
+            'read_map' => null,
+            'blocked' => true,
+        ];
         $tried = [];
         $last = [
             'envelope' => null,
@@ -978,6 +663,21 @@ final class YarboMapBackup
         array $acceptTopics = [],
         bool $tryBoth = true,
     ): array {
+        // Never publish map-mutating commands from this panel.
+        if (
+            $cmd === self::SAVE_AREA_CMD
+            || $cmd === self::SAVE_PATH_CMD
+            || $cmd === self::UPLOAD_CMD
+            || $cmd === self::RECOVERY_CMD
+            || in_array($cmd, self::SAVE_AREA_TOPICS, true)
+            || in_array($cmd, self::SAVE_PATH_TOPICS, true)
+            || in_array($cmd, self::UPLOAD_TOPICS, true)
+        ) {
+            unset($client, $cloud, $serial, $payload, $acceptTopics, $lanTimeout, $cloudTimeout, $tryBoth);
+
+            return ['envelope' => null, 'via' => $preferCloud ? 'cloud' : 'local', 'blocked' => true];
+        }
+
         $order = $preferCloud ? ['cloud', 'local'] : ['local', 'cloud'];
         if (!$tryBoth) {
             $order = [$order[0]];
@@ -1337,14 +1037,14 @@ final class YarboMapBackup
         }
         if ($compatible) {
             return sprintf(
-                'Backup file extracted via %s (%s). Edit these zones, then Save to robot while docked.',
+                'Backup file extracted via %s (%s). View-only — map writes from this panel are disabled.',
                 $via,
                 self::formatCounts(self::publicSummary($map)['counts'])
             );
         }
         $preview = $livePreview
-            ? ' Live map is shown for viewing. Save stays off because map_recovery ignores get_map (the robot map does not change).'
-            : ' Save stays off.';
+            ? ' Live map is shown for viewing. Map writes from this panel are disabled.'
+            : ' Map writes from this panel are disabled.';
 
         return 'Backup list is metadata only (id, name, timestamp). Need the backup file from get_map_buckup_from_id.'
             . $ids . $keys . $fetchHint . $preview;

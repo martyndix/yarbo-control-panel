@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.212] - 2026-11-05
+
+### Changed
+- **Location Map is read-only:** removed Edit map / Save to robot. The panel never publishes map writes (`save_clean_area`, `save_pathway`, `upload_cloud_map_backup`, `map_recovery`). Load and Export GeoJSON still work; edit zones in the Yarbo app.
+
 ## [4.0.211] - 2026-11-04
 
 ### Fixed

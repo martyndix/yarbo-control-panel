@@ -48,20 +48,14 @@ try {
     }
 
     if ($action === 'restore') {
-        $collection = $input['geojson'] ?? null;
-        if (!is_array($collection)) {
-            json_response(['ok' => false, 'error' => 'geojson draft is required'], 400);
-        }
-        json_response($backups->restoreDraft(
-            $client,
-            $collection,
-            (bool) ($input['confirm'] ?? false),
-            $cloud,
-            $serial
-        ));
+        json_response([
+            'ok' => false,
+            'error' => 'Map writes are disabled. This panel only reads Yarbo maps; edit zones in the Yarbo app.',
+            'map_writes' => false,
+        ], 403);
     }
 
-    json_response(['ok' => false, 'error' => 'Unknown action. Valid: list, restore'], 400);
+    json_response(['ok' => false, 'error' => 'Unknown action. Valid: list'], 400);
 } catch (Throwable $e) {
     json_response([
         'ok' => false,

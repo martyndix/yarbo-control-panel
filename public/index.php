@@ -68,11 +68,6 @@ $credentialBannerSafe = htmlspecialchars($credentialBannerText, ENT_QUOTES | ENT
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin=""
     >
-    <link
-        rel="stylesheet"
-        href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
-        crossorigin=""
-    >
 </head>
 <body>
 <?php
@@ -302,7 +297,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-            <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors).</p>
+            <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors). Map view is read-only — this panel never writes zones to Yarbo.</p>
             <div class="map-actions">
                 <label class="data-source-field">
                     Map data
@@ -315,8 +310,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas</button>
                 <button type="button" class="btn btn-secondary" id="map-load-backups">Load map backups</button>
             </div>
-            <p id="map-listen-status" class="map-areas-status">Load the live map, edit a zone, then Save while docked.</p>
-            <p id="map-edit-tip" class="map-edit-tip hidden">Click a zone, then drag its vertices.</p>
+            <p id="map-listen-status" class="map-areas-status">Load the live map or a backup to view zones. Editing and Save to robot are disabled.</p>
             <div class="map-wrap">
                 <div id="map" class="map"></div>
                 <div id="map-loading" class="map-loading hidden" aria-live="polite" aria-busy="false">
@@ -334,18 +328,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <summary>Map zones</summary>
                     <ul id="map-zone-list" class="map-zone-list"></ul>
                     <div class="map-editor-actions">
-                        <button type="button" class="btn btn-secondary" id="map-edit-toggle">Edit map (draft)</button>
                         <button type="button" class="btn btn-secondary" id="map-export">Export GeoJSON</button>
-                        <button type="button" class="btn btn-secondary" id="map-export-draft" disabled>Export draft</button>
-                        <button
-                            type="button"
-                            class="btn btn-secondary"
-                            id="map-save-robot"
-                            disabled
-                            title="Save while docked"
-                        >Save to robot</button>
                     </div>
-                    <p class="hint map-editor-hint">Load saved mowing areas, edit, dock, then Save. Load map backups is optional if you want a Previous Maps file instead.</p>
+                    <p class="hint map-editor-hint">Zones are view-only. Change boundaries in the Yarbo app — this panel only reads maps.</p>
                 </details>
             </div>
         </section>
@@ -2287,10 +2272,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
     <script
         src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-        crossorigin=""
-    ></script>
-    <script
-        src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"
         crossorigin=""
     ></script>
     <script src="/assets/app.js?v=<?= htmlspecialchars($assetVersion, ENT_QUOTES, 'UTF-8') ?>"></script>

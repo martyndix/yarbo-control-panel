@@ -454,19 +454,16 @@ Map load can take **20–30 seconds** — the robot may only respond to `get_map
 
 After a successful load, zones are **cached in the browser** so a page refresh redraws them without another MQTT fetch. Use **Load saved mowing areas** again to refresh from the robot.
 
-### Map zones and draft editing
+### Map zones (read-only)
 
 | Control | Behaviour |
 |---------|-----------|
-| **Map zones** | Collapsed until opened; lists loaded zones with type colours and the draft edit/export tools |
+| **Map zones** | Collapsed until opened; lists loaded zones with type colours |
 | **Export GeoJSON** | Download the currently loaded zones |
-| **Edit map (draft)** | Click one zone, then drag its vertices. The original line is hidden. Do not edit every path at once |
-| **Export draft** | Download edited draft GeoJSON |
-| **Save to robot** | Writes a live-frame zone. Mowing areas use `save_clean_area`. Pathways use `save_pathway`. If cloud times out, Save retries on the LAN. If the same name exists as both an area and a path, delete the extra area in the Yarbo app. Robot must be docked. |
 
-To change zones: **Load saved mowing areas**, edit vertices, dock, then **Save to robot**. **Load map backups** is optional (a stored Previous Maps file). Enable **Settings → cloud fallback** if the phone uses Yarbo’s cloud.
+This panel **never writes** map geometry to Yarbo (`save_clean_area`, `save_pathway`, `upload_cloud_map_backup`, and `map_recovery` are blocked). Edit boundaries in the Yarbo app. **Load map backups** is optional (a stored Previous Maps file for viewing). Enable **Settings → cloud fallback** if the phone uses Yarbo’s cloud.
 
-CLI equivalents (optional):
+CLI equivalents (optional, listen / discover only):
 
 ```bash
 # Log MQTT while you save/edit a map in the Yarbo app (default 5 minutes)
@@ -475,7 +472,7 @@ php scripts/capture_map_mqtt.php 300
 # Cloud listen (Yardstick / official app)
 .venv/bin/python scripts/capture_map_cloud.py 180
 
-# List candidate write commands (dry run)
+# List candidate write commands (dry run only — probes are not sent)
 php scripts/discover_map.php --probe-writes
 ```
 

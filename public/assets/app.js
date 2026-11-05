@@ -1181,7 +1181,6 @@ function setMapLoading(active, message = 'Loading saved map areas') {
             }
         }, 1000);
         if (els.mapDataSource) els.mapDataSource.disabled = true;
-        if (els.mapEditToggle) els.mapEditToggle.disabled = true;
         if (els.mapLoadAreas) els.mapLoadAreas.disabled = true;
         if (els.mapLoadBackups) els.mapLoadBackups.disabled = true;
         return;
@@ -1192,7 +1191,6 @@ function setMapLoading(active, message = 'Loading saved map areas') {
     clearInterval(mapLoadingTimer);
     mapLoadingTimer = null;
     if (els.mapDataSource) els.mapDataSource.disabled = false;
-    if (els.mapEditToggle) els.mapEditToggle.disabled = false;
     if (els.mapLoadAreas) els.mapLoadAreas.disabled = false;
     if (els.mapLoadBackups) els.mapLoadBackups.disabled = false;
 }
@@ -1507,7 +1505,6 @@ function renderMapInspector() {
             <input type="checkbox" id="map-zone-vis-${index}" data-zone-index="${index}" ${entry.visible ? 'checked' : ''}>
             <span class="map-zone-swatch" style="background:${palette.color}"></span>
             <label class="map-zone-meta" for="map-zone-vis-${index}">${name} · ${typeLabel} · ${points} pts</label>
-            <button type="button" class="btn btn-secondary map-zone-edit" data-zone-edit="${index}">Edit</button>
         </li>`;
     }).join('');
 
@@ -1515,12 +1512,6 @@ function renderMapInspector() {
         input.addEventListener('change', () => {
             const index = Number(input.dataset.zoneIndex);
             setMapZoneVisible(index, input.checked);
-        });
-    });
-
-    els.mapZoneList.querySelectorAll('[data-zone-edit]').forEach((button) => {
-        button.addEventListener('click', () => {
-            focusZoneForEditing(Number(button.dataset.zoneEdit));
         });
     });
 }
@@ -1735,10 +1726,11 @@ function updateMapEditToggleStyle(editing) {
 }
 
 function setMapEditMode(enabled) {
-    if (!map || typeof L.Edit?.Poly === 'undefined') {
-        if (enabled) {
-            showToast('Map editor requires Leaflet.draw to load', 'error');
-        }
+    if (enabled) {
+        showToast('Map editing is disabled. Change zones in the Yarbo app.', 'error');
+        return;
+    }
+    if (!map) {
         return;
     }
 
@@ -1793,7 +1785,7 @@ function setMapEditMode(enabled) {
 }
 
 function saveMapDraft() {
-    restoreMapBackupDraft();
+    showToast('Map writes are disabled. This panel only reads Yarbo maps.', 'error');
 }
 
 function currentMapDraftCollection() {
@@ -1810,11 +1802,11 @@ function currentMapDraftCollection() {
 
 function setMapSaveEnabled(enabled) {
     mapBackupCompatible = Boolean(enabled);
-    if (!els.mapSaveRobot) return;
-    els.mapSaveRobot.disabled = !mapBackupCompatible;
-    els.mapSaveRobot.title = mapBackupCompatible
-        ? 'Save the edited zones to the robot (must be docked)'
-        : 'Load the map first';
+    // Save to robot removed — keep compatibility flag for load status only.
+    if (els.mapSaveRobot) {
+        els.mapSaveRobot.disabled = true;
+        els.mapSaveRobot.title = 'Map writes are disabled';
+    }
 }
 
 function formatBackupCounts(summary) {
@@ -1869,48 +1861,7 @@ async function loadMapBackups() {
 }
 
 async function restoreMapBackupDraft() {
-    if (!mapBackupCompatible) {
-        showToast('Load the map first', 'error');
-        return;
-    }
-    const collection = currentMapDraftCollection();
-    if (!collection.features.length) {
-        showToast('Load or edit a map first', 'error');
-        return;
-    }
-    if (!onChargePad) {
-        showToast('Dock the robot before restoring a map', 'error');
-        return;
-    }
-    if (!window.confirm('Save these edits to the robot? Keep it docked.')) {
-        return;
-    }
-    if (els.mapSaveRobot) els.mapSaveRobot.disabled = true;
-    setMapLoading(true, 'Saving to robot');
-    try {
-        const res = await fetchWithTimeout('/api/map_backup.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                action: 'restore',
-                confirm: true,
-                geojson: collection,
-            }),
-        }, 50000);
-        const data = await parseJsonResponse(res);
-        const text = data.message || data.error || 'Save finished';
-        updateMapAreasStatus(text);
-        showToast(text, data.ok ? 'success' : 'error');
-        if (data.ok && mapEditMode) {
-            setMapEditMode(false);
-        }
-    } catch (err) {
-        const aborted = isAbortError(err);
-        showToast(aborted ? 'Save timed out. Wait until the robot is idle, then try again.' : (err.message || 'Save failed'), 'error');
-    } finally {
-        setMapLoading(false);
-        setMapSaveEnabled(mapBackupCompatible);
-    }
+    showToast('Map writes are disabled. This panel only reads Yarbo maps.', 'error');
 }
 
 function setMapLayer(layer) {
@@ -13871,10 +13822,6 @@ if (document.getElementById('map-load-backups')) {
         .catch(() => {});
 }
 
-document.getElementById('map-edit-toggle')?.addEventListener('click', () => {
-    setMapEditMode(!mapEditMode);
-});
-
 els.mapFullscreen?.addEventListener('click', () => {
     setMapFullscreen(!mapFullscreen);
 });
@@ -13895,8 +13842,6 @@ document.addEventListener('webkitfullscreenchange', () => {
 });
 
 document.getElementById('map-export')?.addEventListener('click', exportLoadedMapGeoJson);
-document.getElementById('map-export-draft')?.addEventListener('click', exportDraftGeoJson);
-document.getElementById('map-save-robot')?.addEventListener('click', saveMapDraft);
 
 els.planStartPercent?.addEventListener('input', () => {
     if (els.planStartPercentLabel) {
