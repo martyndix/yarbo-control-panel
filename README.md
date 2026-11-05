@@ -562,11 +562,11 @@ The panel can manage saved work plans and waypoint navigation using the same MQT
 
 ### Work plans
 
-- **Load plans** — `read_all_plan` via `GET /api/plans.php`
-- **Start plan** — one `start_plan` message with `planId`, `id`, and `percent` (0–100) on the live controller session. The agent waits for the robot ack. Confirmations use the plan name. Delete is under **Manage…**, not on the main list.
-- **Delete plan** — `del_plan` with confirmation
+- **Load plans** — `read_all_plan` via `GET /api/plans.php` (cached in the browser; quiet refresh about once a day)
+- **Start plan** — one `start_plan` message with `planId`, `id`, and `percent` (0–100) on the live controller session. The agent waits for the robot ack. Confirmations use the plan name.
+- Create / delete plans in the Yarbo app — this panel does not manage them.
 
-UI: **Work Plans** card → adjust start percentage → **Load plans** → **Start** or **Delete** on a plan.
+UI: **Work Plans** card → adjust start percentage → **Load plans** → **Start**.
 
 Note: some robots/firmware only respond to `read_all_plan` when the robot is active or while a plan is running. If loading returns empty, try again after waking the robot or starting a job from the Yarbo app.
 
@@ -594,7 +594,6 @@ Controls and manual drive talk through a **persistent MQTT agent** (`scripts/mqt
 | Return to Dock | `wireless_charging_cmd` then `cmd_recharge` | `{cmd: 0}` then `{cmd: 2}` on the live controller session |
 | Stop | `cmd_vel` 0, `dstopp`, `dstop`, `stop`, `stop_plan` | Immediate; no confirmation |
 | Start work plan | `start_plan` | One message: `planId`, `id`, and `percent` (0–100) |
-| Delete work plan | `del_plan` | Destructive — requires confirm in UI |
 | Go to waypoint | `start_way_point` | `index` 0–9999 |
 | Manual drive D-pad | `set_working_state` (`state: 1`) + `cmd_vel` | Hold to move; **test with extreme care in a clear area** (see safety warning above) |
 

@@ -394,7 +394,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Work Plans</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Saved plans stay in this browser after Load (or the first automatic fetch). They refresh quietly about once a day, or sooner if you click Load plans. Listing plans does not stop a running job. Start at 0% means from the beginning. Starting a plan wakes the robot and holds control so the official app cannot cancel it.</p>
+            <p class="hint">Saved plans stay in this browser after Load (or the first automatic fetch). They refresh quietly about once a day, or sooner if you click Load plans. Listing plans does not stop a running job. Create or delete plans in the Yarbo app — this panel only starts them. Start at 0% means from the beginning. Starting a plan wakes the robot and holds control so the official app cannot cancel it.</p>
             <div class="plans-toolbar">
                 <label class="plan-percent">
                     Start at
@@ -410,7 +410,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </select>
                 </label>
                 <button type="button" class="btn btn-secondary" id="plans-load">Load plans</button>
-                <button type="button" class="btn-text" id="plans-manage" disabled title="Load plans first">Manage…</button>
             </div>
             <div id="plans-status" class="plan-activity is-idle">
                 <div class="plan-activity-row">
@@ -2223,18 +2222,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <div id="battery-cells-list" class="battery-cells-list"></div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" data-battery-cells-close>Close</button>
-                </div>
-            </div>
-        </div>
-
-        <div id="plans-manage-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="plans-manage-title">
-            <button type="button" class="modal-backdrop" data-plans-manage-close aria-label="Close plan management"></button>
-            <div class="modal-panel card plans-manage-panel">
-                <h2 id="plans-manage-title">Manage plans</h2>
-                <p class="hint">Deleting a plan cannot be undone. Start remains on the main Work Plans list.</p>
-                <div id="plans-manage-list" class="plans-manage-list"></div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" data-plans-manage-close>Close</button>
                 </div>
             </div>
         </div>

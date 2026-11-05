@@ -61,9 +61,6 @@ const els = {
     plansActivityDetail: document.getElementById('plans-activity-detail'),
     plansNote: document.getElementById('plans-note'),
     plansList: document.getElementById('plans-list'),
-    plansManage: document.getElementById('plans-manage'),
-    plansManageModal: document.getElementById('plans-manage-modal'),
-    plansManageList: document.getElementById('plans-manage-list'),
     waypointIndex: document.getElementById('waypoint-index'),
     waypointName: document.getElementById('waypoint-name'),
     waypointSaveForm: document.getElementById('waypoint-save-form'),
@@ -429,7 +426,6 @@ let loadedPlans = [];
 let lastStatusData = null;
 let lastHub = null;
 let powerwallPasswordSet = false;
-let pendingPlanDeleteId = null;
 let lastRobotFix = null;
 let mapZoneLayers = [];
 let loadedMapFeatures = [];
@@ -456,7 +452,6 @@ const SETTINGS_PANES = ['connection', 'modules', 'yarbo', 'lymow', 'powerwall', 
 function syncBodyModalClass() {
     const open = [
         els.batteryCellsModal,
-        els.plansManageModal,
         els.updateConfirmModal,
         els.vestaboardRotateModal,
         els.unifiLiveModal,
@@ -9949,14 +9944,12 @@ function renderPlansList(plans, note) {
 
     loadedPlans = plans;
     els.plansNote.textContent = note || (plans.length ? `${plans.length} plan(s) loaded.` : 'No saved plans returned.');
-    updatePlansManageButton();
     if (lastStatusData) {
         updatePlanActivity(lastStatusData);
     }
 
     if (!plans.length) {
         els.plansList.innerHTML = '';
-        renderPlansManageList();
         return;
     }
 
@@ -9980,14 +9973,6 @@ function renderPlansList(plans, note) {
     els.plansList.querySelectorAll('[data-plan-start]').forEach((button) => {
         button.addEventListener('click', () => startPlan(button.dataset.planStart, button));
     });
-    renderPlansManageList();
-}
-
-function updatePlansManageButton() {
-    if (!els.plansManage) return;
-    const hasPlans = loadedPlans.length > 0;
-    els.plansManage.disabled = !hasPlans;
-    els.plansManage.title = hasPlans ? 'Delete saved plans' : 'Load plans first';
 }
 
 function planDisplayName(plan) {
@@ -9995,75 +9980,6 @@ function planDisplayName(plan) {
     const id = plan?.id != null ? String(plan.id) : '';
     if (name && name !== id) return name;
     return id ? `Plan ${id}` : 'this plan';
-}
-
-function renderPlansManageList() {
-    if (!els.plansManageList) return;
-    if (!loadedPlans.length) {
-        els.plansManageList.innerHTML = '<p class="hint">No saved plans loaded.</p>';
-        return;
-    }
-
-    els.plansManageList.innerHTML = loadedPlans.map((plan) => {
-        const id = String(plan.id);
-        const confirming = pendingPlanDeleteId === id;
-        const areas = Array.isArray(plan.area_ids) && plan.area_ids.length
-            ? `Areas: ${plan.area_ids.join(', ')}`
-            : 'No area IDs';
-        const actions = confirming
-            ? `
-                <div class="plan-manage-confirm">
-                    <p class="plan-manage-confirm-note">Delete permanently? This cannot be undone.</p>
-                    <button type="button" class="btn btn-danger" data-plan-delete-confirm="${escapeHtml(id)}">Delete</button>
-                    <button type="button" class="btn btn-secondary" data-plan-delete-cancel>Cancel</button>
-                </div>
-            `
-            : `<button type="button" class="btn-text-danger" data-plan-delete="${escapeHtml(id)}">Delete</button>`;
-        return `
-            <article class="plan-manage-item">
-                <div>
-                    <strong>${escapeHtml(planDisplayName(plan))}</strong>
-                    <p class="hint">ID ${escapeHtml(id)} · ${escapeHtml(areas)}</p>
-                </div>
-                ${actions}
-            </article>
-        `;
-    }).join('');
-
-    els.plansManageList.querySelectorAll('[data-plan-delete]').forEach((button) => {
-        button.addEventListener('click', () => {
-            pendingPlanDeleteId = button.dataset.planDelete;
-            renderPlansManageList();
-        });
-    });
-    els.plansManageList.querySelectorAll('[data-plan-delete-cancel]').forEach((button) => {
-        button.addEventListener('click', () => {
-            pendingPlanDeleteId = null;
-            renderPlansManageList();
-        });
-    });
-    els.plansManageList.querySelectorAll('[data-plan-delete-confirm]').forEach((button) => {
-        button.addEventListener('click', () => deletePlan(button.dataset.planDeleteConfirm, button));
-    });
-}
-
-function openPlansManageModal() {
-    if (!els.plansManageModal) return;
-    if (!loadedPlans.length) {
-        showToast('Load plans first', 'error');
-        return;
-    }
-    pendingPlanDeleteId = null;
-    renderPlansManageList();
-    els.plansManageModal.classList.remove('hidden');
-    document.body.classList.add('modal-open');
-}
-
-function closePlansManageModal() {
-    if (!els.plansManageModal) return;
-    pendingPlanDeleteId = null;
-    els.plansManageModal.classList.add('hidden');
-    syncBodyModalClass();
 }
 
 function escapeHtml(value) {
@@ -10240,36 +10156,6 @@ async function startPlan(planId, button) {
         noteCommandQuiet();
     } catch (err) {
         showToast(err.message || 'Start failed', 'error');
-    } finally {
-        button.disabled = false;
-    }
-}
-
-async function deletePlan(planId, button) {
-    if (!planId) return;
-
-    button.disabled = true;
-    try {
-        const res = await fetch('/api/plans.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                action: 'delete',
-                plan_id: planId,
-                confirm: true,
-            }),
-        });
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error || 'Delete failed');
-        pendingPlanDeleteId = null;
-        showToast(`Plan ${planId} deleted`, 'success');
-        await loadPlans();
-        if (!loadedPlans.length) {
-            closePlansManageModal();
-        }
-    } catch (err) {
-        showToast(err.message || 'Delete failed', 'error');
-        renderPlansManageList();
     } finally {
         button.disabled = false;
     }
@@ -13954,10 +13840,6 @@ els.planStartPercent?.addEventListener('input', () => {
 els.plansLoad?.addEventListener('click', (e) => {
     loadPlans(e.currentTarget);
 });
-els.plansManage?.addEventListener('click', openPlansManageModal);
-document.querySelectorAll('[data-plans-manage-close]').forEach((button) => {
-    button.addEventListener('click', closePlansManageModal);
-});
 
 els.waypointSaveForm?.addEventListener('submit', saveWaypointBookmark);
 
@@ -15412,10 +15294,6 @@ document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (els.updateConfirmModal && !els.updateConfirmModal.classList.contains('hidden')) {
         closeUpdateConfirmModal(false);
-        return;
-    }
-    if (els.plansManageModal && !els.plansManageModal.classList.contains('hidden')) {
-        closePlansManageModal();
         return;
     }
     if (els.settingsModal && !els.settingsModal.classList.contains('hidden')) {
