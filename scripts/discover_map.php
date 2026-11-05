@@ -30,6 +30,10 @@ $writeCandidates = [
 
 $probeWrites = in_array('--probe-writes', $argv, true);
 $sendProbes = in_array('--send-probes', $argv, true);
+if ($sendProbes) {
+    fwrite(STDERR, "Refusing --send-probes: map writes from this panel/scripts are disabled. Use --probe-writes for a dry-run list only.\n");
+    exit(2);
+}
 
 $attempts = 3;
 $timeoutSeconds = 6.0;
