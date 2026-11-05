@@ -394,7 +394,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Work Plans</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Load saved plans from the robot (read-only — does not stop a running job). Start at 0% means from the beginning. Starting a plan wakes the robot and holds control so the official app cannot cancel it.</p>
+            <p class="hint">Saved plans stay in this browser after Load (or the first automatic fetch). They refresh quietly about once a day, or sooner if you click Load plans. Listing plans does not stop a running job. Start at 0% means from the beginning. Starting a plan wakes the robot and holds control so the official app cannot cancel it.</p>
             <div class="plans-toolbar">
                 <label class="plan-percent">
                     Start at
@@ -433,7 +433,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 </div>
                 <p id="plans-activity-detail" class="plan-activity-detail hidden"></p>
             </div>
-            <p id="plans-note" class="plans-note">No plans loaded yet.</p>
+            <p id="plans-note" class="plans-note">Loading saved plans…</p>
             <div id="plans-list" class="plans-list"></div>
         </section>
 

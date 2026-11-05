@@ -344,6 +344,8 @@ const DRIVE_VECTORS = {
 const MAP_CACHE_KEY = 'yarbo_map_cache';
 const MAP_VIEW_KEY = 'yarbo_map_view';
 const MAP_CENTER_ZOOM = 20;
+const PLAN_CACHE_KEY = 'yarbo_plans_cache';
+const PLAN_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PANEL_ORDER_KEY = 'yarbo_panel_order';
 const PANEL_HIDDEN_KEY = 'yarbo_panel_hidden';
 const THEME_KEY = 'yarbo_theme';
@@ -10076,9 +10078,95 @@ function planStartPercent() {
     return Number(els.planStartPercent?.value ?? 0);
 }
 
-async function loadPlans(button) {
+function savePlansCache(plans, meta = {}) {
+    try {
+        if (!Array.isArray(plans) || plans.length === 0) {
+            localStorage.removeItem(PLAN_CACHE_KEY);
+            return;
+        }
+        localStorage.setItem(PLAN_CACHE_KEY, JSON.stringify({
+            plans,
+            source: meta.source || els.plansDataSource?.value || defaultDataSource,
+            loaded_at: meta.loaded_at || new Date().toISOString(),
+            note: meta.note || null,
+        }));
+    } catch {
+        // ignore quota errors
+    }
+}
+
+function plansCacheAgeMs(cache) {
+    const stamp = Date.parse(cache?.loaded_at || '');
+    if (!Number.isFinite(stamp)) {
+        return Number.POSITIVE_INFINITY;
+    }
+    return Math.max(0, Date.now() - stamp);
+}
+
+function formatPlansCacheAge(loadedAt) {
+    const age = plansCacheAgeMs({ loaded_at: loadedAt });
+    if (!Number.isFinite(age)) {
+        return '';
+    }
+    const minutes = Math.floor(age / 60000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+}
+
+function restorePlansCache() {
+    if (!els.plansList) return false;
+    try {
+        const raw = localStorage.getItem(PLAN_CACHE_KEY);
+        if (!raw) return false;
+        const cache = JSON.parse(raw);
+        const plans = Array.isArray(cache?.plans) ? cache.plans : [];
+        if (!plans.length) {
+            localStorage.removeItem(PLAN_CACHE_KEY);
+            return false;
+        }
+        const ageLabel = formatPlansCacheAge(cache.loaded_at);
+        const note = `${plans.length} plan(s) from cache${ageLabel ? ` (${ageLabel})` : ''}. Auto-refreshes about once a day.`;
+        renderPlansList(plans, note);
+        return true;
+    } catch {
+        try {
+            localStorage.removeItem(PLAN_CACHE_KEY);
+        } catch {
+            // ignore
+        }
+        return false;
+    }
+}
+
+function plansCacheIsStale() {
+    try {
+        const raw = localStorage.getItem(PLAN_CACHE_KEY);
+        if (!raw) return true;
+        const cache = JSON.parse(raw);
+        if (!Array.isArray(cache?.plans) || cache.plans.length === 0) {
+            return true;
+        }
+        return plansCacheAgeMs(cache) >= PLAN_CACHE_TTL_MS;
+    } catch {
+        return true;
+    }
+}
+
+function maybeRefreshPlansCache({ force = false } = {}) {
+    if (!els.plansLoad && !els.plansList) return;
+    if (!force && !plansCacheIsStale()) return;
+    loadPlans(null, { quiet: true });
+}
+
+async function loadPlans(button, options = {}) {
+    const quiet = Boolean(options.quiet);
     if (button) button.disabled = true;
-    if (els.plansNote) els.plansNote.textContent = 'Loading plans from robot...';
+    if (!quiet && els.plansNote && loadedPlans.length === 0) {
+        els.plansNote.textContent = 'Loading plans from robot...';
+    }
 
     try {
         const source = els.plansDataSource?.value || defaultDataSource;
@@ -10087,18 +10175,32 @@ async function loadPlans(button) {
         if (!data.ok) {
             throw new Error(data.error || 'Failed to load plans');
         }
+        const plans = Array.isArray(data.plans) ? data.plans : [];
         const note = data.note
             ? (data.source ? `${data.note} (${data.source})` : data.note)
             : null;
-        renderPlansList(data.plans || [], note);
-        if ((data.plans || []).length) {
-            showToast(`Loaded ${data.plans.length} plan(s)`, 'success');
-        } else if (!data.responded) {
-            showToast('No response — try again while the robot is active', 'error');
+        renderPlansList(plans, note);
+        savePlansCache(plans, {
+            source: data.source || source,
+            note,
+            loaded_at: new Date().toISOString(),
+        });
+        if (!quiet) {
+            if (plans.length) {
+                showToast(`Loaded ${plans.length} plan(s)`, 'success');
+            } else if (!data.responded) {
+                showToast('No response — try again while the robot is active', 'error');
+            }
         }
     } catch (err) {
+        if (quiet && loadedPlans.length) {
+            // Keep the cached list visible; note already explains age.
+            return;
+        }
         if (els.plansNote) els.plansNote.textContent = err.message || 'Could not load plans';
-        showToast(err.message || 'Could not load plans', 'error');
+        if (!quiet) {
+            showToast(err.message || 'Could not load plans', 'error');
+        }
     } finally {
         if (button) button.disabled = false;
     }
@@ -15338,6 +15440,10 @@ if (document.getElementById('camera-grid')) {
 }
 if (document.getElementById('map')) {
     initMap();
+}
+if (els.plansList || els.plansLoad) {
+    const restoredPlans = restorePlansCache();
+    maybeRefreshPlansCache({ force: !restoredPlans });
 }
 setupDrivePad();
 setupBatteryTempClick();
