@@ -2832,6 +2832,25 @@ html[data-theme="light"] .plan-activity {
     font-size: 0.82rem;
 }
 
+.home-doors-card .home-device-title {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.home-doors-card .home-device-changed {
+    margin: 0;
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1.15;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .vestaboard-preview--dashboard .vestaboard-cell {
     font-size: 0.95rem;
 }
