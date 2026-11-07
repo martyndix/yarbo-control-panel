@@ -2275,22 +2275,22 @@ function formatConnectionError(message) {
     if (!message) return message;
     const lower = message.toLowerCase();
     if (lower.includes('connection refused') || message.includes('[111]')) {
-        return 'Cannot reach the Yarbo robot at the configured IP address (MQTT port 1883 refused the connection). Open Settings and check the broker IP matches your Yarbo base station, the robot is powered on, and this device is on the same home network.';
+        return 'Cannot reach Yarbo cloud MQTT. Check internet on this panel and the account email/password under Settings → Yarbo.';
     }
     if (lower.includes('no route to host') || message.includes('[113]')) {
-        return 'Cannot find the Yarbo robot on the network at the configured IP address. Verify the broker IP in Settings and that you are on the same Wi‑Fi or LAN.';
+        return 'Cannot reach Yarbo cloud hosts. Check internet/DNS on this panel, then confirm Settings → Yarbo email and password.';
     }
     if (lower.includes('network is unreachable') || message.includes('[101]')) {
-        return 'The network route to the Yarbo robot is unreachable. Check your Wi‑Fi connection and the broker IP in Settings.';
+        return 'No network route to Yarbo cloud. Check internet on this panel.';
     }
-    if (lower.includes('telemetry_timeout') || lower.includes('no telemetry received') || lower.includes('connected to the yarbo mqtt broker but the robot did not respond')) {
-        return 'Connected to the Yarbo MQTT broker but the robot did not respond. Check the serial number in Settings, wake the robot, and try again.';
+    if (lower.includes('telemetry_timeout') || lower.includes('no telemetry received') || lower.includes('cloud mqtt connected but the robot did not reply') || lower.includes('connected to the yarbo mqtt broker but the robot did not respond')) {
+        return 'Cloud MQTT connected but the robot did not reply. Check the serial in Settings → Yarbo and that the robot is online in the Yarbo app.';
     }
     if (lower.includes('timed out') || lower.includes('timeout')) {
-        return 'Connection to the Yarbo robot timed out. Check the broker IP and serial number in Settings, and make sure the robot is powered on and on your home network.';
+        return 'Yarbo cloud login or MQTT timed out. Check internet access and the email/password under Settings → Yarbo.';
     }
-    if (lower.includes('establishing a connection to the mqtt broker failed')) {
-        return 'Cannot connect to the Yarbo MQTT broker. Check the broker IP and port (1883) in Settings, and confirm the robot is powered on.';
+    if (lower.includes('establishing a connection to the mqtt broker failed') || lower.includes('cloud mqtt')) {
+        return 'Cannot connect to Yarbo cloud MQTT. Check Settings → Yarbo account login and serial.';
     }
     return message;
 }
@@ -10781,12 +10781,18 @@ async function loadSettings() {
             updateVestaboardDashboard({ vestaboard: data.vestaboard, hub: data.hub });
         }
         if (els.settingsRobotName) els.settingsRobotName.value = data.robot_name || '';
-        if (els.settingsCloudEnabled) els.settingsCloudEnabled.checked = Boolean(data.cloud?.cloud_enabled);
+        if (els.settingsCloudEnabled) {
+            if (els.settingsCloudEnabled.type === 'checkbox') {
+                els.settingsCloudEnabled.checked = true;
+            } else {
+                els.settingsCloudEnabled.value = '1';
+            }
+        }
         if (els.settingsCloudEmail) els.settingsCloudEmail.value = data.cloud?.cloud_email || '';
         if (els.settingsCloudPassword) els.settingsCloudPassword.value = '';
         if (els.settingsDataSource) {
-            defaultDataSource = data.cloud?.data_source || 'auto';
-            els.settingsDataSource.value = defaultDataSource;
+            defaultDataSource = 'cloud';
+            els.settingsDataSource.value = 'cloud';
             if (els.mapDataSource) els.mapDataSource.value = defaultDataSource;
             if (els.plansDataSource) els.plansDataSource.value = defaultDataSource;
         }
@@ -12639,14 +12645,23 @@ async function saveSettings(event) {
     const brokerHost = els.settingsHost?.value.trim() ?? '';
     const serial = els.settingsSerial?.value.trim() ?? '';
     const robotName = els.settingsRobotName?.value.trim() ?? '';
-    const cloudEnabled = Boolean(els.settingsCloudEnabled?.checked);
+    const cloudEnabled = els.settingsCloudEnabled
+        ? (els.settingsCloudEnabled.type === 'checkbox'
+            ? Boolean(els.settingsCloudEnabled.checked)
+            : String(els.settingsCloudEnabled.value || '1') !== '0')
+        : true;
     const cloudEmail = els.settingsCloudEmail?.value.trim() ?? '';
     const cloudPassword = els.settingsCloudPassword?.value ?? '';
-    const dataSource = els.settingsDataSource?.value || 'auto';
+    const dataSource = els.settingsDataSource?.value || 'cloud';
     const yarboOn = Boolean(els.settingsModuleYarbo?.checked);
-    if (yarboOn && (!brokerHost || !serial)) {
+    if (yarboOn && !serial) {
         showSettingsPane('yarbo');
-        setSettingsError('Broker IP and serial number are required.');
+        setSettingsError('Serial number is required.');
+        return;
+    }
+    if (yarboOn && !cloudEmail) {
+        showSettingsPane('yarbo');
+        setSettingsError('Yarbo account email is required for cloud MQTT.');
         return;
     }
     if (yarboOn && robotName && looksLikeRobotSerial(robotName, serial)) {
@@ -12784,7 +12799,7 @@ async function saveSettings(event) {
         }
         if (els.settingsPowerwallPassword) els.settingsPowerwallPassword.value = '';
         if (data.mqtt_agent_restarted) {
-            showToast('Settings saved — MQTT agent restarted for the new broker/serial', 'success');
+            showToast('Settings saved — cloud agent restarted for the new serial/account', 'success');
         } else {
             showToast('Settings saved', 'success');
         }
@@ -12845,10 +12860,10 @@ async function testCloudConnection(button) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 action: 'test',
-                cloud_enabled: Boolean(els.settingsCloudEnabled?.checked),
+                cloud_enabled: true,
                 cloud_email: els.settingsCloudEmail?.value.trim() ?? '',
                 cloud_password: els.settingsCloudPassword?.value ?? '',
-                data_source: els.settingsDataSource?.value || 'auto',
+                data_source: 'cloud',
             }),
         });
         const data = await parseJsonResponse(res);

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.218] - 2026-11-07
+
+### Changed
+- **Yarbo controls use cloud MQTT only:** Start / Dock / Stop / lights / drive go through your Yarbo app account (official SDK) instead of LAN port 1883. Recent Yarbo firmware closed local MQTT; Settings → Yarbo now requires serial + account email/password. Local broker IP is no longer used for control. Maps/plans also default to cloud.
+
 ## [4.0.217] - 2026-11-07
 
 ### Added

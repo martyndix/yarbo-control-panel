@@ -7,7 +7,6 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboErrors;
 use Yarbo\YarboHub;
 use Yarbo\YarboLymow;
-use Yarbo\YarboMqtt;
 use Yarbo\YarboUnifi;
 use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboPowerwall;
@@ -15,9 +14,6 @@ use Yarbo\YarboRobotName;
 use Yarbo\YarboTelemetry;
 use Yarbo\YarboVestaboard;
 use Yarbo\YarboWifi;
-
-$host = (string) ($config['broker_host'] ?? '');
-$port = (int) ($config['broker_port'] ?? 1883);
 
 function vestaboard_board(): YarboVestaboard
 {
@@ -181,113 +177,62 @@ if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
     ));
 }
 
-// Prefer persistent Python agent so status does not open a competing MQTT session.
+// Cloud MQTT agent only — local LAN :1883 is no longer used for status/control.
 $agent = YarboMqttAgentClient::fromEnv();
 $ping = $agent->ping();
-if (($ping['engine'] ?? '') === 'php' || !($ping['ok'] ?? false)) {
+$engine = (string) ($ping['engine'] ?? '');
+$isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
+if (!$isCloudAgent || !($ping['ok'] ?? false)) {
     try {
         $agent = YarboMqttAgentClient::requireRunning();
         $ping = $agent->ping();
-    } catch (Throwable) {
-        $ping = ['ok' => false];
-    }
-}
-
-$agentTelemetry = ($ping['ok'] ?? false)
-    && (($ping['telemetry'] ?? false) || (($ping['engine'] ?? '') === 'python-yarbo'));
-
-if ($agentTelemetry) {
-    try {
-        $result = $agent->telemetry(4.0, true);
-        status_from_agent($result);
-
-        $error = (string) ($result['error'] ?? 'telemetry timeout');
-        $unknown = str_contains(strtolower($error), 'unknown op');
-        $disconnected = str_contains(strtolower($error), 'mqtt not connected');
-        if ($unknown || $disconnected) {
-            // PHP fallback agent, or Python still connecting — use a direct read.
-        } else {
-            status_failure(
-                YarboErrors::friendly($error),
-                'telemetry',
-                504,
-                [
-                    'via' => 'agent',
-                    'transient' => (bool) ($result['transient'] ?? false),
-                ],
-            );
-        }
+        $engine = (string) ($ping['engine'] ?? '');
+        $isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
     } catch (Throwable $e) {
-        $message = $e->getMessage();
-        if (!str_contains(strtolower($message), 'mqtt agent is not running')) {
-            status_failure(friendly_error($e), 'telemetry', 504, [
-                'via' => 'agent',
-                'transient' => false,
-            ]);
-        }
+        status_failure(YarboErrors::friendly($e->getMessage()), 'agent', 503, [
+            'via' => 'agent',
+        ]);
     }
 }
 
-// Fail fast on unreachable broker so the single-threaded php -S server is not blocked for 30s+.
-$tcp = YarboMqtt::probeTcp($host, $port, 2.0);
-if (!$tcp['ok']) {
-    $detail = strtolower((string) ($tcp['error'] ?? ''));
-    $errno = (int) ($tcp['errno'] ?? 0);
-    if (str_contains($detail, 'connection refused') || $errno === 111) {
-        $message = YarboErrors::MSG_REFUSED;
-    } elseif (str_contains($detail, 'no route to host') || $errno === 113) {
-        $message = YarboErrors::MSG_NO_ROUTE;
-    } elseif (str_contains($detail, 'network is unreachable') || $errno === 101) {
-        $message = YarboErrors::MSG_UNREACHABLE;
-    } elseif (str_contains($detail, 'timed out') || $errno === 60 || $errno === 110) {
-        $message = YarboErrors::MSG_TIMEOUT;
-    } else {
-        $message = YarboErrors::friendly((string) ($tcp['error'] ?? 'TCP connection failed'));
-    }
-
-    status_failure($message, 'tcp');
+if (!($ping['ok'] ?? false) || !$isCloudAgent) {
+    status_failure(
+        'Yarbo cloud agent is not running. Set account email/password in Settings → Yarbo, then Save.',
+        'agent',
+        503,
+        ['via' => 'agent'],
+    );
 }
 
-try {
-    $client = yarbo_client($config);
-    $client->connect();
-} catch (Throwable $e) {
-    status_failure(friendly_error($e), 'connect');
-}
-
-try {
-    $raw = $client->requestTelemetry(4);
-    $wifiResponse = null;
-    $cellTemps = null;
-    if ($raw !== null) {
-        // WiFi is nice-to-have; keep it short so a slow reply does not stall the panel.
-        $wifiResponse = $client->requestDataFeedback('get_connect_wifi_name', [], 1.5, false);
-        $cellResponse = $client->requestDataFeedback('battery_cell_temp_msg', [], 1.5, false);
-        if (is_array($cellResponse)) {
-            $cellTemps = is_array($cellResponse['data'] ?? null) ? $cellResponse['data'] : $cellResponse;
-        }
-    }
-    $client->disconnect();
-
-    if ($raw === null) {
-        status_failure(
-            friendly_message('telemetry_timeout: No telemetry received within timeout. Check serial number.'),
-            'telemetry',
-            504,
-        );
-    }
-
-    $parsed = attach_robot_name(YarboTelemetry::parseForPanel($raw, $cellTemps, dirname(__DIR__, 2)));
-    json_response(array_merge(
-        ['ok' => true, 'via' => 'direct'],
-        $parsed,
+if (empty($ping['connected'])) {
+    status_failure(
+        YarboErrors::MSG_MQTT_FAILED,
+        'mqtt',
+        503,
         [
-            'wifi' => YarboWifi::parse(is_array($wifiResponse) ? $wifiResponse : null),
-            'vestaboard' => vestaboard_status_payload($parsed, true),
+            'via' => 'agent',
+            'transient' => true,
         ],
-        hub_status_extras(),
-    ));
+    );
+}
+
+try {
+    $result = $agent->telemetry(4.0, true);
+    status_from_agent($result);
+
+    $error = (string) ($result['error'] ?? 'telemetry timeout');
+    status_failure(
+        YarboErrors::friendly($error),
+        'telemetry',
+        504,
+        [
+            'via' => 'agent',
+            'transient' => (bool) ($result['transient'] ?? false),
+        ],
+    );
 } catch (Throwable $e) {
-    $client->disconnect();
-    status_failure(friendly_error($e), 'telemetry');
+    status_failure(friendly_error($e), 'telemetry', 504, [
+        'via' => 'agent',
+        'transient' => false,
+    ]);
 }

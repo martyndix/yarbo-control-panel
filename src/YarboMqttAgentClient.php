@@ -40,8 +40,8 @@ final class YarboMqttAgentClient
         $client->ensureStarted();
         if (!$client->isAvailable()) {
             throw new \RuntimeException(
-                'MQTT agent is not running. Start the panel with ./scripts/dev.sh '
-                . '(or ./scripts/panel.sh).'
+                'Yarbo cloud agent is not running. Set account email/password in Settings → Yarbo, '
+                . 'install yarbo-data-sdk (./scripts/install.sh), then start with ./scripts/dev.sh.'
             );
         }
 
@@ -68,12 +68,13 @@ final class YarboMqttAgentClient
     }
 
     /**
-     * If a PHP fallback is sitting on the port and python-yarbo is installed, replace it.
+     * Prefer the cloud Python agent; replace a stale local/PHP agent when needed.
      */
     public function ensurePreferredEngine(): void
     {
         $ping = $this->ping();
-        if (($ping['ok'] ?? false) && ($ping['engine'] ?? '') === 'python-yarbo') {
+        $engine = (string) ($ping['engine'] ?? '');
+        if (($ping['ok'] ?? false) && ($engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud')) {
             return;
         }
 
@@ -104,18 +105,15 @@ final class YarboMqttAgentClient
         }
         $this->spawnDetached($root, $pythonArgv, $log);
 
-        $deadline = microtime(true) + 5.0;
+        $deadline = microtime(true) + 8.0;
         while (microtime(true) < $deadline) {
-            usleep(200000);
+            usleep(250000);
             $again = $this->ping();
-            if (($again['engine'] ?? '') === 'python-yarbo') {
+            $againEngine = (string) ($again['engine'] ?? '');
+            if (($again['ok'] ?? false) && ($againEngine === 'yarbo-cloud' || ($again['transport'] ?? '') === 'cloud')) {
                 return;
             }
         }
-
-        // Python did not come up — start the PHP agent so controls still work.
-        self::$spawnAttempted = false;
-        $this->ensureStarted();
     }
 
     /**
@@ -129,7 +127,8 @@ final class YarboMqttAgentClient
         self::$spawnAttempted = true;
 
         $ping = $this->ping();
-        if (($ping['ok'] ?? false) && (($ping['engine'] ?? '') === 'python-yarbo' || ($ping['engine'] ?? '') === 'php')) {
+        $engine = (string) ($ping['engine'] ?? '');
+        if (($ping['ok'] ?? false) && ($engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud')) {
             return;
         }
 
@@ -141,13 +140,7 @@ final class YarboMqttAgentClient
 
         $argv = $this->pythonAgentArgv($root);
         if ($argv === null) {
-            $phpAgent = $root . '/scripts/mqtt_agent.php';
-            if (is_file($phpAgent)) {
-                $php = defined('PHP_BINARY') && PHP_BINARY !== '' ? PHP_BINARY : 'php';
-                $argv = [escapeshellarg($php), escapeshellarg($phpAgent)];
-            }
-        }
-        if ($argv === null) {
+            // Local PHP MQTT agent is retired — controls require cloud Python + account.
             return;
         }
 
@@ -163,8 +156,8 @@ final class YarboMqttAgentClient
     }
 
     /**
-     * Kill and respawn the MQTT agent so it re-reads config.php (broker IP / serial).
-     * Needed after swapping robots — the agent only loads host/SN at process start.
+     * Kill and respawn the cloud agent so it re-reads serial + cloud-config.json.
+     * Needed after swapping robots or updating Yarbo account credentials.
      *
      * @param bool $waitForBroker when true, wait until ping reports MQTT connected
      */
@@ -218,7 +211,11 @@ final class YarboMqttAgentClient
                 continue;
             }
             $code = 1;
-            @exec(escapeshellarg($python) . ' -c ' . escapeshellarg('import yarbo') . ' 2>/dev/null', $out, $code);
+            @exec(
+                escapeshellarg($python) . ' -c ' . escapeshellarg('import yarbo_robot_sdk') . ' 2>/dev/null',
+                $out,
+                $code
+            );
             if ($code === 0) {
                 return [escapeshellarg($python), escapeshellarg($pyAgent)];
             }
@@ -425,8 +422,8 @@ final class YarboMqttAgentClient
         }
         if ($socket === false) {
             throw new \RuntimeException(
-                'MQTT agent is not running. Start the panel with ./scripts/dev.sh '
-                . '(or ./scripts/panel.sh).'
+                'Yarbo cloud agent is not running. Set account email/password in Settings → Yarbo, '
+                . 'then start with ./scripts/dev.sh.'
             );
         }
 

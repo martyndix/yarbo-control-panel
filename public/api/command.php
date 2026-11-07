@@ -7,7 +7,7 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboCommands;
 use Yarbo\YarboMqttAgentClient;
 
-const AGENT_REQUIRED_ERROR = 'MQTT agent is not running. Start the panel with ./scripts/dev.sh (or run .venv/bin/python scripts/mqtt_agent.py). Connect–disconnect control would flash lights off.';
+const AGENT_REQUIRED_ERROR = 'Yarbo cloud agent is not running. Set account email/password in Settings → Yarbo, install yarbo-data-sdk, then start with ./scripts/dev.sh (or .venv/bin/python scripts/mqtt_agent.py).';
 
 /** @var array<string, array{kind: string, variants?: callable(): array<int, array{cmd: string, payload: array<string, mixed>}>, lights?: bool}> $ACTIONS */
 $ACTIONS = [

@@ -79,37 +79,67 @@ $prevHost = trim((string) ($config['broker_host'] ?? ''));
 $prevSerial = trim((string) ($config['serial'] ?? ''));
 $brokerChanged = false;
 
+$cloudEmail = trim((string) ($input['cloud_email'] ?? $input['email'] ?? ''));
+$cloudPasswordIn = array_key_exists('cloud_password', $input) || array_key_exists('password', $input)
+    ? (string) ($input['cloud_password'] ?? $input['password'] ?? '')
+    : null;
+$prevCloud = $cloudSettings->load();
+$effectiveCloudEmail = $cloudEmail !== '' ? $cloudEmail : (string) ($prevCloud['email'] ?? '');
+$effectiveCloudPassword = $cloudPasswordIn !== null && $cloudPasswordIn !== ''
+    ? $cloudPasswordIn
+    : (string) ($prevCloud['password'] ?? '');
+
 if ($yarboOn) {
-    if ($host === '') {
-        json_response(['ok' => false, 'error' => 'broker_host is required'], 400);
-    }
     if ($serial === '') {
         json_response(['ok' => false, 'error' => 'serial is required'], 400);
     }
-    if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
-        json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address'], 400);
+    if ($effectiveCloudEmail === '' || $effectiveCloudPassword === '') {
+        json_response([
+            'ok' => false,
+            'error' => 'Yarbo account email and password are required (cloud MQTT). Local LAN MQTT is no longer used.',
+        ], 400);
+    }
+    if ($host !== '' && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+        json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address when set'], 400);
     }
 
+    // Keep an optional broker IP in config for display/legacy tools; controls use cloud.
+    $settingsWrite = ['serial' => $serial];
+    if ($host !== '') {
+        $settingsWrite['broker_host'] = $host;
+    } elseif ($prevHost !== '') {
+        $settingsWrite['broker_host'] = $prevHost;
+        $host = $prevHost;
+    } else {
+        $settingsWrite['broker_host'] = '0.0.0.0';
+        $host = '0.0.0.0';
+    }
     $brokerChanged = ($host !== $prevHost || $serial !== $prevSerial);
-    if (!YarboConfig::applySettings($configPath, [
-        'broker_host' => $host,
-        'serial' => $serial,
-    ])) {
+    if (!YarboConfig::applySettings($configPath, $settingsWrite)) {
         json_response([
             'ok' => false,
             'error' => 'Could not write config.php. Check file permissions on the server.',
         ], 500);
     }
-} elseif ($host !== '' || $serial !== '') {
-    if ($host !== '' && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
-        json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address'], 400);
+    // Controls require cloud — force enable + cloud data source.
+    $input['cloud_enabled'] = true;
+    if (!isset($input['data_source']) || (string) $input['data_source'] === 'local') {
+        $input['data_source'] = 'cloud';
     }
-    if ($host !== '' && $serial !== '') {
-        $brokerChanged = ($host !== $prevHost || $serial !== $prevSerial);
-        if (!YarboConfig::applySettings($configPath, [
-            'broker_host' => $host,
-            'serial' => $serial,
-        ])) {
+    if ($cloudEmail === '') {
+        $input['cloud_email'] = $effectiveCloudEmail;
+    }
+} elseif ($serial !== '') {
+    if ($host !== '' && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+        json_response(['ok' => false, 'error' => 'broker_host must be a valid IPv4 address when set'], 400);
+    }
+    $settingsWrite = ['serial' => $serial];
+    if ($host !== '') {
+        $settingsWrite['broker_host'] = $host;
+    }
+    $brokerChanged = ($host !== $prevHost || $serial !== $prevSerial);
+    if ($settingsWrite !== ['serial' => $serial] || $serial !== $prevSerial) {
+        if (!YarboConfig::applySettings($configPath, $settingsWrite + ($host === '' && $prevHost !== '' ? ['broker_host' => $prevHost] : []))) {
             json_response([
                 'ok' => false,
                 'error' => 'Could not write config.php. Check file permissions on the server.',
@@ -117,6 +147,11 @@ if ($yarboOn) {
         }
     }
 }
+
+$cloudCredChanged = $yarboOn && (
+    $effectiveCloudEmail !== (string) ($prevCloud['email'] ?? '')
+    || ($cloudPasswordIn !== null && $cloudPasswordIn !== '' && $cloudPasswordIn !== (string) ($prevCloud['password'] ?? ''))
+);
 
 if (!$cloudSettings->save($input)) {
     json_response([
@@ -174,13 +209,11 @@ if ($serial !== '' && !$robotName->saveFromInput($input, $serial)) {
     ], 500);
 }
 
-// Agent loads broker IP / serial only at process start. Restart it when those change
-// so a replacement Yarbo (new IP/SN) is used immediately — otherwise Controller On
-// keeps talking to the old robot and returns "MQTT not connected".
+// Agent loads serial + cloud credentials only at process start. Restart when they change.
 $mqttAgentRestarted = false;
-if ($brokerChanged) {
+if ($brokerChanged || $cloudCredChanged) {
     try {
-        $mqttAgentRestarted = YarboMqttAgentClient::fromEnv()->restart();
+        $mqttAgentRestarted = YarboMqttAgentClient::fromEnv()->restart(true);
     } catch (Throwable) {
         $mqttAgentRestarted = false;
     }

@@ -25,12 +25,22 @@ assert_true(str_contains($clientPhp, 'waitForBroker'), 'restart can wait for MQT
 assert_true(str_contains($settingsPhp, 'YarboMqttAgentClient'), 'settings imports MQTT agent client');
 assert_true(str_contains($settingsPhp, 'brokerChanged'), 'settings detects broker/serial change');
 assert_true(str_contains($settingsPhp, 'mqtt_agent_restarted'), 'settings reports mqtt_agent_restarted');
-assert_true(str_contains($settingsPhp, '->restart()'), 'settings restarts agent when broker changes');
+assert_true(str_contains($settingsPhp, '->restart(true)'), 'settings restarts agent when serial/account changes');
+assert_true(str_contains($settingsPhp, 'cloudCredChanged'), 'settings restarts agent when cloud credentials change');
 assert_true(str_contains($commandPhp, 'runWithMqttRetry') || str_contains($commandPhp, 'mqtt not connected'), 'command retries after MQTT not connected');
 assert_true(str_contains($commandPhp, 'restart(true)'), 'command wait-for-broker restart on retry');
-assert_true(str_contains($agentPy, 'Check Broker IP and serial'), 'agent error hints at Settings');
+assert_true(
+    str_contains($agentPy, 'Check Yarbo account email/password')
+    || str_contains($agentPy, 'Settings → Yarbo'),
+    'agent error hints at Settings → Yarbo'
+);
 assert_true(str_contains($js, 'mqtt_agent_restarted'), 'UI notes MQTT agent restart after save');
-assert_true(str_contains($index, 'replacement robot') || str_contains($index, 'restarts the MQTT agent'), 'Settings hint about replacement robot');
+assert_true(
+    str_contains($index, 'restarts the cloud agent')
+    || str_contains($index, 'restarts the MQTT agent')
+    || str_contains($index, 'replacement robot'),
+    'Settings hint about agent restart after serial/account change'
+);
 assert_true(str_contains($change, '## [4.0.202]'), 'changelog 4.0.202');
 assert_true(str_contains($change, 'MQTT not connected') || str_contains($change, 'Replacement Yarbo'), 'changelog mentions replacement / MQTT');
 

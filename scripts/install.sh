@@ -152,7 +152,7 @@ install_project() {
         echo "    WARNING: Python packages did not import after install — cloud fallback may be unavailable"
       fi
     else
-      echo "    WARNING: could not install yarbo-data-sdk / python-yarbo (optional)"
+      echo "    WARNING: could not install yarbo-data-sdk (required for Yarbo cloud MQTT controls)"
       echo "    The PHP panel still works. Cloud map/plan reads and the Python MQTT agent need pip."
       echo "    On macOS: brew install python && python3 -m ensurepip --upgrade && ./scripts/install.sh"
       echo "    On Debian/Pi: sudo apt install python3-venv python3-pip && ./scripts/install.sh"

@@ -899,19 +899,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section hidden" id="settings-yarbo-section" data-settings-pane="yarbo">
                             <h3 class="settings-subtitle">Yarbo</h3>
-                            <p class="hint">Local MQTT for the robot, optional cloud map fallback, and rain sensitivity. Same fields as before — they now live on this Yarbo page instead of Connection / Cloud / Rain.</p>
+                            <p class="hint">Controls use <strong>Yarbo cloud MQTT</strong> with your app account (recent firmware closed LAN port 1883). Serial + account login are required. Maps and plans also use this account.</p>
                             <div id="settings-yarbo-connection-fields">
-                            <label class="settings-field">
-                                <span class="label">Broker IP (Yarbo host)</span>
-                                <input
-                                    type="text"
-                                    id="settings-host"
-                                    name="broker_host"
-                                    placeholder="192.168.1.24"
-                                    autocomplete="off"
-                                    inputmode="decimal"
-                                >
-                            </label>
                             <label class="settings-field">
                                 <span class="label">Serial number</span>
                                 <input
@@ -923,7 +912,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     spellcheck="false"
                                 >
                             </label>
-                            <p class="hint">After you change the IP or serial (for example a replacement robot), Save restarts the MQTT agent so Controller On talks to the new Yarbo.</p>
+                            <label class="settings-field">
+                                <span class="label">Yarbo account email</span>
+                                <input type="email" id="settings-cloud-email" name="cloud_email" autocomplete="username">
+                            </label>
+                            <label class="settings-field">
+                                <span class="label">Yarbo account password</span>
+                                <input type="password" id="settings-cloud-password" name="cloud_password" autocomplete="current-password" placeholder="Leave blank to keep saved password">
+                            </label>
+                            <p class="hint">After you change the serial or account, Save restarts the cloud agent so Controller On talks to the right robot.</p>
                             <label class="settings-field">
                                 <span class="label">Yarbo name</span>
                                 <input
@@ -937,35 +934,15 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 >
                             </label>
                             <p class="hint">Shown on the Yarbo page under the title, and on PaperMono / Paper Colour Yarbo pages. Leave blank to hide it. Do not use the serial number.</p>
-                            <p id="settings-connection-result" class="settings-cloud-result hidden" role="status"></p>
-                            <button type="button" class="btn btn-secondary" id="settings-connection-test">Test local connection</button>
-                            </div>
-
-                            <h3 class="settings-subtitle">Cloud reads (optional)</h3>
-                            <p class="hint">Map/plan data from your Yarbo account when local MQTT returns nothing. Controls always use local MQTT.</p>
-                            <label class="settings-field settings-checkbox">
-                                <input type="checkbox" id="settings-cloud-enabled" name="cloud_enabled">
-                                <span>Enable cloud fallback reads</span>
-                            </label>
-                            <label class="settings-field">
-                                <span class="label">Yarbo account email</span>
-                                <input type="email" id="settings-cloud-email" name="cloud_email" autocomplete="username">
-                            </label>
-                            <label class="settings-field">
-                                <span class="label">Yarbo account password</span>
-                                <input type="password" id="settings-cloud-password" name="cloud_password" autocomplete="current-password" placeholder="Leave blank to keep saved password">
-                            </label>
-                            <label class="settings-field">
-                                <span class="label">Default data source</span>
-                                <select id="settings-data-source" name="data_source">
-                                    <option value="auto">Auto (local, then cloud)</option>
-                                    <option value="local">Local MQTT only</option>
-                                    <option value="cloud">Cloud only</option>
-                                </select>
-                            </label>
+                            <input type="hidden" id="settings-cloud-enabled" name="cloud_enabled" value="1">
+                            <input type="hidden" id="settings-data-source" name="data_source" value="cloud">
+                            <input type="hidden" id="settings-host" name="broker_host" value="">
                             <p id="settings-cloud-status" class="hint">Cloud bridge: checking…</p>
+                            <p id="settings-connection-result" class="settings-cloud-result hidden" role="status"></p>
                             <p id="settings-cloud-result" class="settings-cloud-result hidden" role="status"></p>
                             <button type="button" class="btn btn-secondary" id="settings-cloud-test">Test cloud connection</button>
+                            <button type="button" class="btn btn-secondary hidden" id="settings-connection-test">Test local connection</button>
+                            </div>
 
                             <h3 class="settings-subtitle">Rain sensitivity</h3>
                             <p class="hint">Match the Yarbo app <strong>Detection &amp; Rain Sensitivity</strong> slider (20–1000). Status and the Vestaboard only show rain when the sensor reading is at or above this value. Readings below 20 always clear (the app never blocks mowing there). Leave blank to use 20. If the robot publishes its slider over MQTT, that value is used instead.</p>
@@ -980,7 +957,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">Turn dashboards on or off. Keep at least one. The header switcher jumps between enabled modules. Off modules leave the website, PaperMono, Paper Colour, and Vestaboard live / rotate lists. Quiet hours and Vestaboard-app hold still apply.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-yarbo" name="module_yarbo" checked>
-                                <span>Yarbo (mower / snow, local MQTT)</span>
+                                <span>Yarbo (mower / snow, cloud MQTT)</span>
                             </label>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-module-powerwall" name="module_powerwall">

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Persistent Yarbo MQTT agent — one live broker connection.
+"""Persistent Yarbo MQTT agent — one live **cloud** MQTT session.
+
+Uses the Yarbo account in ``data/cloud-config.json`` (official SDK) so controls
+keep working after firmware that closed LAN :1883. Local broker IP is not used.
 
 Does not claim get_controller on connect. Watching telemetry must not stop a job.
 Controller is claimed for explicit Controller/Lights or for work commands.
 Start plan / dock wake until the job latches, then stop poking. Do not wait
 on data_feedback while holding the agent lock (that blocks keepalive).
 
-Talks JSON-lines over TCP 127.0.0.1:8765 (same protocol as scripts/mqtt_agent.php).
+Talks JSON-lines over TCP 127.0.0.1:8765 (same protocol as before).
 
 Usage:
   .venv/bin/python scripts/mqtt_agent.py
@@ -629,7 +632,14 @@ async def handle_request(
     req: dict[str, Any],
     state: dict[str, Any],
 ) -> dict[str, Any]:
-    from yarbo.exceptions import YarboNotControllerError, YarboTimeoutError
+    try:
+        from yarbo.exceptions import YarboNotControllerError, YarboTimeoutError
+    except ImportError:  # python-yarbo optional; cloud client raises RuntimeError instead
+        class YarboNotControllerError(Exception):
+            pass
+
+        class YarboTimeoutError(Exception):
+            pass
 
     op = str(req.get("op") or "")
 
@@ -638,7 +648,8 @@ async def handle_request(
             "ok": True,
             "controller": bool(getattr(client, "controller_acquired", False)),
             "connected": bool(getattr(client, "is_connected", False)),
-            "engine": "python-yarbo",
+            "engine": "yarbo-cloud",
+            "transport": "cloud",
             "telemetry": True,
             **state_flags(state, client),
         }
@@ -647,8 +658,8 @@ async def handle_request(
         return {
             "ok": False,
             "error": (
-                "MQTT not connected. Check Broker IP and serial in Settings → Yarbo, "
-                "then Save (that restarts the MQTT agent for a new robot)."
+                "Cloud MQTT not connected. Check Yarbo account email/password and serial "
+                "in Settings → Yarbo, then Save (that restarts the agent)."
             ),
         }
 
@@ -1189,15 +1200,15 @@ async def connect_mqtt(client: Any) -> None:
         try:
             if not getattr(client, "is_connected", False):
                 await client.connect()
-                log("MQTT connected (controller not held until panel requests it)")
+                log("Cloud MQTT connected (controller not held until panel requests it)")
             try:
                 await client.start_polling(interval_seconds=15.0, acquire_controller=False)
-                log("Telemetry polling started")
+                log("Cloud telemetry subscription ready")
             except Exception as e:
                 log(f"WARNING: start_polling failed: {e}")
             return
         except Exception as e:
-            log(f"MQTT connect failed: {e} (retry in {delay:.0f}s)")
+            log(f"Cloud MQTT connect failed: {e} (retry in {delay:.0f}s)")
             await asyncio.sleep(delay)
             delay = min(15.0, delay * 1.5)
 
@@ -1221,25 +1232,55 @@ async def vestaboard_tick_loop() -> None:
             log(f"vestaboard tick failed: {e}")
 
 
+def load_cloud_credentials() -> dict[str, str]:
+    path = ROOT / "data" / "cloud-config.json"
+    if not path.is_file():
+        return {"email": "", "password": ""}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"email": "", "password": ""}
+    if not isinstance(data, dict):
+        return {"email": "", "password": ""}
+    return {
+        "email": str(data.get("email") or "").strip(),
+        "password": str(data.get("password") or ""),
+    }
+
+
 async def amain() -> int:
     try:
-        from yarbo.local import YarboLocalClient
+        from yarbo_cloud_control import YarboCloudControlClient
     except ImportError:
-        log("python-yarbo is not installed. Run: .venv/bin/pip install python-yarbo")
+        sys.path.insert(0, str(ROOT / "scripts"))
+        try:
+            from yarbo_cloud_control import YarboCloudControlClient
+        except ImportError as e:
+            log(f"yarbo_cloud_control import failed: {e}")
+            return 1
+
+    try:
+        import yarbo_robot_sdk  # noqa: F401
+    except ImportError:
+        log("yarbo-data-sdk is not installed. Run: ./scripts/install.sh")
         return 1
 
     config = load_config()
-    host = str(config.get("broker_host") or "")
-    port = int(config.get("broker_port") or 1883)
-    serial = str(config.get("serial") or "")
+    serial = str(config.get("serial") or "").strip()
+    cloud = load_cloud_credentials()
+    email = cloud["email"]
+    password = cloud["password"]
     agent_port = int(os.environ.get("YARBO_MQTT_AGENT_PORT") or 8765)
 
-    if not host or not serial:
-        log("broker_host and serial must be set in config.php")
+    if not serial:
+        log("serial must be set in config.php")
+        return 1
+    if not email or not password:
+        log("Cloud email/password required in data/cloud-config.json (Settings → Yarbo)")
         return 1
 
     # Bind the local control port before MQTT connect so the panel cannot
-    # spawn a PHP fallback agent onto 8765 while we are still reaching the robot.
+    # spawn a second agent onto 8765 while we are still reaching the robot.
     lock = asyncio.Lock()
     state: dict[str, Any] = {
         "hold_controller": False,
@@ -1262,7 +1303,7 @@ async def amain() -> int:
         "last_keepalive": 0.0,
         "keepalive_soon": False,
     }
-    client = YarboLocalClient(broker=host, sn=serial, port=port, auto_controller=False)
+    client = YarboCloudControlClient(email=email, password=password, sn=serial)
 
     async def _on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await handle_client(reader, writer, client, lock, state)
@@ -1274,7 +1315,7 @@ async def amain() -> int:
         return 1
 
     sockets = ", ".join(str(s.getsockname()) for s in (server.sockets or []))
-    log(f"Agent listening on {sockets} (MQTT connecting {host}:{port} SN={serial})")
+    log(f"Agent listening on {sockets} (cloud MQTT SN={serial} email={email})")
 
     asyncio.create_task(connect_mqtt(client))
     asyncio.create_task(plan_feedback_loop(client, state))
