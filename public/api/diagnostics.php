@@ -7,7 +7,7 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboCloud;
 use Yarbo\YarboCloudSettings;
 use Yarbo\YarboErrors;
-use Yarbo\YarboMqtt;
+use Yarbo\YarboMqttAgentClient;
 
 $projectRoot = dirname(__DIR__, 2);
 $dataDir = $projectRoot . '/data';
@@ -32,130 +32,99 @@ if ($method === 'POST') {
     json_response(['ok' => false, 'error' => 'Method not allowed'], 405);
 }
 
-$host = trim((string) ($input['broker_host'] ?? $config['broker_host'] ?? ''));
-$port = (int) ($input['broker_port'] ?? $config['broker_port'] ?? 1883);
 $serial = trim((string) ($input['serial'] ?? $config['serial'] ?? ''));
+$cloudView = $cloudSettings->publicView();
+$email = trim((string) ($input['cloud_email'] ?? $cloudView['cloud_email'] ?? ''));
 
-if ($host === '') {
-    json_response(['ok' => false, 'error' => 'broker_host is required'], 400);
-}
 if ($serial === '') {
     json_response(['ok' => false, 'error' => 'serial is required'], 400);
+}
+if ($email === '' || empty($cloudView['cloud_password_set'])) {
+    // Allow password in this request for a one-shot test before Save.
+    $password = (string) ($input['cloud_password'] ?? '');
+    if ($email === '' || $password === '') {
+        json_response([
+            'ok' => false,
+            'error' => 'Yarbo account email and password are required for cloud MQTT',
+        ], 400);
+    }
 }
 
 $steps = [];
 
-$tcp = YarboMqtt::probeTcp($host, $port, 3.0);
-$tcpMessage = "Port {$port} is reachable at {$host}.";
-if (!$tcp['ok']) {
-    $detail = strtolower((string) ($tcp['error'] ?? ''));
-    $errno = (int) ($tcp['errno'] ?? 0);
-    if (str_contains($detail, 'connection refused') || $errno === 111) {
-        $tcpMessage = YarboErrors::MSG_REFUSED;
-    } elseif (str_contains($detail, 'no route to host') || $errno === 113) {
-        $tcpMessage = YarboErrors::MSG_NO_ROUTE;
-    } elseif (str_contains($detail, 'network is unreachable') || $errno === 101) {
-        $tcpMessage = YarboErrors::MSG_UNREACHABLE;
-    } elseif (str_contains($detail, 'timed out') || $errno === 60 || $errno === 110) {
-        $tcpMessage = 'Cannot reach the Yarbo robot at the configured IP address (connection timed out). '
-            . 'Check the broker IP in Settings, confirm the robot is powered on, and that this device is on the same home network.';
-    } else {
-        $tcpMessage = YarboErrors::friendly((string) ($tcp['error'] ?? 'TCP connection failed'));
-    }
-}
-
-$steps['tcp'] = [
-    'ok' => $tcp['ok'],
-    'label' => "TCP {$host}:{$port}",
-    'message' => $tcpMessage,
-    'detail' => $tcp['error'] ?? null,
-    'errno' => $tcp['errno'] ?? null,
+$bridge = $cloud->status();
+$steps['sdk'] = [
+    'ok' => !empty($bridge['sdk_installed']),
+    'label' => 'yarbo-data-sdk',
+    'message' => !empty($bridge['sdk_installed'])
+        ? 'Official Yarbo SDK is installed.'
+        : (string) ($bridge['sdk_path_hint'] ?? 'Install yarbo-data-sdk via ./scripts/install.sh'),
 ];
 
-$mqttConnectOk = false;
-$mqttConnectMessage = 'Skipped because TCP probe failed.';
-if ($tcp['ok']) {
+$login = $cloud->testLogin();
+$steps['login'] = [
+    'ok' => (bool) ($login['ok'] ?? false),
+    'label' => 'Cloud login',
+    'message' => (string) ($login['ok'] ?? false
+        ? ('Signed in' . (isset($login['login']['device_count']) ? (' · ' . (int) $login['login']['device_count'] . ' device(s)') : ''))
+        : YarboErrors::friendly((string) ($login['error'] ?? 'Cloud login failed'))),
+];
+
+$agentOk = false;
+$agentMessage = 'Skipped because cloud login failed.';
+$connected = false;
+if ($steps['login']['ok']) {
     try {
-        $client = new YarboMqtt($host, $port, $serial);
-        $client->connect();
-        $mqttConnectOk = true;
-        $mqttConnectMessage = 'MQTT broker accepted the connection.';
-        $client->disconnect();
+        $agent = YarboMqttAgentClient::fromEnv();
+        $agent->restart(true);
+        $ping = $agent->ping(2.0);
+        $agentOk = (bool) ($ping['ok'] ?? false);
+        $connected = !empty($ping['connected']);
+        if ($agentOk && $connected) {
+            $agentMessage = 'Cloud MQTT agent connected.';
+        } elseif ($agentOk) {
+            $agentMessage = 'Agent is up but cloud MQTT is not connected yet — wait a few seconds and retry.';
+        } else {
+            $agentMessage = YarboErrors::friendly((string) ($ping['error'] ?? 'Cloud agent did not respond'));
+        }
     } catch (Throwable $e) {
-        $mqttConnectMessage = YarboErrors::friendly($e->getMessage());
+        $agentMessage = YarboErrors::friendly($e->getMessage());
     }
 }
-
-$steps['mqtt_connect'] = [
-    'ok' => $mqttConnectOk,
-    'label' => 'MQTT connect',
-    'message' => $mqttConnectMessage,
+$steps['agent'] = [
+    'ok' => $agentOk && $connected,
+    'label' => 'Cloud MQTT agent',
+    'message' => $agentMessage,
 ];
 
 $telemetryOk = false;
-$telemetryMessage = 'Skipped because MQTT connect failed.';
-if ($mqttConnectOk) {
+$telemetryMessage = 'Skipped because cloud MQTT is not connected.';
+if ($steps['agent']['ok']) {
     try {
-        $client = new YarboMqtt($host, $port, $serial);
-        $client->connect();
-        $raw = $client->requestTelemetry(8);
-        $client->disconnect();
-        if ($raw !== null) {
+        $agent = YarboMqttAgentClient::fromEnv();
+        $tel = $agent->telemetry(8.0, true, false);
+        if (($tel['ok'] ?? false) === true && is_array($tel['raw'] ?? null)) {
             $telemetryOk = true;
-            $telemetryMessage = 'Robot replied to get_device_msg.';
+            $telemetryMessage = 'Robot replied with DeviceMSG over cloud MQTT.';
         } else {
-            $telemetryMessage = YarboErrors::MSG_TELEMETRY_TIMEOUT;
+            $telemetryMessage = YarboErrors::friendly((string) ($tel['error'] ?? YarboErrors::MSG_TELEMETRY_TIMEOUT));
         }
     } catch (Throwable $e) {
         $telemetryMessage = YarboErrors::friendly($e->getMessage());
     }
 }
-
 $steps['telemetry'] = [
     'ok' => $telemetryOk,
     'label' => 'Robot telemetry',
     'message' => $telemetryMessage,
 ];
 
-$cloudStatus = $cloud->status();
-$cloudSdkOk = (bool) ($cloudStatus['sdk_installed'] ?? false);
-$cloudMessage = $cloudSdkOk
-    ? 'Python SDK is installed.'
-    : (string) ($cloudStatus['sdk_path_hint'] ?? 'Python SDK not installed.');
-
-if ($cloudSdkOk && ($cloudStatus['configured'] ?? false)) {
-    $login = $cloud->testLogin();
-    if ($login['ok'] ?? false) {
-        $deviceCount = (int) ($login['login']['device_count'] ?? 0);
-        $cloudMessage = $deviceCount > 0
-            ? "Cloud login OK ({$deviceCount} robot" . ($deviceCount === 1 ? '' : 's') . ' in account).'
-            : 'Cloud login OK.';
-    } else {
-        $cloudMessage = (string) ($login['error'] ?? 'Cloud login failed');
-    }
-    $cloudSdkOk = (bool) ($login['ok'] ?? false);
-}
-
-$steps['cloud_sdk'] = [
-    'ok' => $cloudSdkOk,
-    'label' => 'Cloud SDK',
-    'message' => $cloudMessage,
-    'status' => $cloudStatus,
-];
-
-$allOk = $steps['tcp']['ok'] && $steps['mqtt_connect']['ok'] && $steps['telemetry']['ok'];
-
+$ok = $steps['sdk']['ok'] && $steps['login']['ok'] && $steps['agent']['ok'];
 json_response([
-    'ok' => $allOk,
-    'broker_host' => $host,
-    'broker_port' => $port,
-    'serial' => $serial,
+    'ok' => $ok,
+    'message' => $ok
+        ? 'Cloud MQTT connection successful.'
+        : 'Cloud MQTT connection failed — see steps.',
     'steps' => $steps,
-    'message' => $allOk
-        ? 'Local MQTT connection successful.'
-        : ($steps['telemetry']['ok'] === false && $steps['mqtt_connect']['ok']
-            ? YarboErrors::MSG_TELEMETRY_TIMEOUT
-            : ($steps['tcp']['ok'] === false
-                ? $steps['tcp']['message']
-                : $steps['mqtt_connect']['message'])),
+    'transport' => 'cloud',
 ]);

@@ -97,7 +97,7 @@ try {
                 $cloudResult = load_plans_cloud($cloud, $serial);
                 if ($cloudResult['responded'] && $cloudResult['plans'] !== []) {
                     $result = $cloudResult;
-                    $note = 'Loaded via Yarbo cloud (local MQTT returned no plans).';
+                    $note = 'Loaded via Yarbo cloud MQTT.';
                 }
             }
         }

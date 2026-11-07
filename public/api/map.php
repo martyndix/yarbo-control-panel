@@ -184,7 +184,7 @@ try {
                         );
                         if ($cloudNormalized['status'] === 'ready') {
                             $result = $cloudResult;
-                            $note = 'Loaded via Yarbo cloud (local MQTT returned no drawable map).';
+                            $note = 'Loaded via Yarbo cloud MQTT.';
                         }
                     }
                 } catch (Throwable $cloudError) {

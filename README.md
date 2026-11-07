@@ -2,13 +2,13 @@
 
 A lightweight **web control panel** for [Yarbo](https://www.yarbo.com/) robot mowers and snow blowers. Open it in any browser on your home network to view live status, drive manually, run plans, and manage your robot.
 
-**Local-first by design:** all controls (drive, pause, lights, plan start/delete, waypoints, head controls) use **local MQTT** on your LAN — the same path as the community Home Assistant integration. **No Yarbo cloud account is required** for day-to-day control.
+**Cloud MQTT controls:** Start / Dock / Stop / lights / drive use your **Yarbo app account** over Yarbo cloud MQTT (official `yarbo-data-sdk`). Recent Yarbo firmware closed LAN port **1883**, so this panel no longer uses local robot MQTT for control. Enter serial + account email/password under **Settings → Yarbo**. Maps and work plans also load via that account.
 
-**Optional cloud reads:** if local MQTT does not return saved map or plan data on your firmware, you can enable an optional cloud fallback in the web **Settings** page (Yarbo account + Python `yarbo-data-sdk`) to load mowing areas and work plans via the official [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK). Cloud is read-only for map/plans; commands always stay on local MQTT.
+Home, UniFi, Powerwall, and Lymow modules are unchanged and do not need the Yarbo account.
 
 This project was originally built to run on a **Raspberry Pi** (alongside Homebridge) as an always-on panel you can open from any phone, tablet, or computer on your LAN. It also runs fine on a Mac, Linux PC, NAS, or any machine with PHP — useful for development and testing.
 
-The local MQTT protocol is based on community reverse-engineering documented in [home-assistant-yarbo](https://github.com/markus-lassfolk/home-assistant-yarbo) and [python-yarbo](https://github.com/markus-lassfolk/python-yarbo). Optional cloud reads follow patterns from the official Yarbo Data SDK.
+Control and telemetry go through the official [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK) cloud MQTT path (`yarbo-data-sdk`). Older LAN `:1883` reverse-engineering ([home-assistant-yarbo](https://github.com/markus-lassfolk/home-assistant-yarbo), [python-yarbo](https://github.com/markus-lassfolk/python-yarbo)) is no longer used for panel control after recent Yarbo firmware closed that port.
 
 > **Disclaimer — read before use**
 >
@@ -91,32 +91,31 @@ Opening the panel only watches live telemetry. It does **not** take the MQTT con
 ## How it works
 
 ```
-Browser  →  PHP web server  →  Local MQTT (port 1883)  →  Yarbo robot
-           (this project)         on your LAN              (controls + live status)
+Browser  →  PHP web server  →  mqtt_agent.py  →  Yarbo cloud MQTT  →  robot
+           (this project)      (yarbo-data-sdk)   (account login)     (controls + live status)
 
 PaperMono / Paper Colour (optional):
-E-ink tablet  →  HTTP JSON  →  this panel  →  MQTT  →  robot
+E-ink tablet  →  HTTP JSON  →  this panel  →  cloud MQTT agent  →  robot
 (pick hardware in Settings, flash/Wi-Fi over USB)
 
-Optional (map/plan reads only):
+Maps / plans:
 Browser  →  PHP  →  cloud_bridge.py  →  Yarbo cloud  →  robot data
-                     (yarbo-data-sdk)     (Settings)
+                     (yarbo-data-sdk)     (same account)
 ```
 
 | Path | Used for | Account needed? |
 |------|----------|-----------------|
-| **Local MQTT** | Live status, GPS, drive, controls, plans start/delete, waypoints | No — robot IP + serial only |
-| **Cloud (optional)** | Reading saved maps and work plans when local MQTT returns nothing | Yes — Yarbo app account in Settings |
+| **Cloud MQTT** | Live status, GPS, drive, controls, plans start/delete, waypoints | Yes — Yarbo app email/password + serial in Settings |
+| **Cloud reads** | Saved maps and work plans | Same Yarbo account |
 
 1. The browser loads a simple HTML/JS UI from the PHP built-in web server (or systemd on a Pi).
-2. API endpoints connect to the Yarbo MQTT broker on your LAN for telemetry and commands.
-3. Payloads are zlib-compressed JSON, matching the format used by the Yarbo app and Home Assistant integration.
-4. Telemetry is requested with `get_device_msg`; WiFi details use `get_connect_wifi_name`.
-5. Map/plan loads try local MQTT first (`read_gps_ref`, `get_map`, `read_all_plan`). If enabled, **Settings → cloud fallback** can fetch the same data via the official SDK.
+2. `scripts/mqtt_agent.py` keeps one cloud MQTT session (official SDK) and the panel talks to it on `127.0.0.1:8765`.
+3. Commands publish on Yarbo cloud topics (`snowbot/{sn}/app/...`); telemetry comes from DeviceMSG subscriptions.
+4. Map/plan loads use the same account via `cloud_bridge.py`.
 
 GPS map fields (`latitude`, `longitude`, `altitude`, `fix_quality`, `gps_valid`) are parsed from `rtk_base_data.rover.gngga` when the robot reports a valid GNSS/RTK fix.
 
-You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (printed on the device / found in the Yarbo app). Cloud credentials are optional and only used for map/plan reads.
+You need your Yarbo **serial number** and the **Yarbo app account** email/password (Settings → Yarbo). A local broker IP is no longer required.
 
 ---
 
@@ -127,9 +126,8 @@ You need your Yarbo's **IP address** (MQTT broker host) and **serial number** (p
 | **PHP 8.1+** | CLI and built-in web server |
 | **PHP zlib extension** | Usually included by default |
 | **Composer** | To install the MQTT client dependency |
-| **Same network as Yarbo** | The host must reach the robot on port **1883** |
-| **Python 3 + yarbo-data-sdk** | Optional — cloud map/plan reads (`./scripts/install.sh`) |
-| **Python 3 + python-yarbo** | Recommended for controls — MQTT agent (`scripts/mqtt_agent.py`); install puts it in `.venv` |
+| **Internet access** | Panel host must reach Yarbo cloud (account login + MQTT) |
+| **Python 3 + yarbo-data-sdk** | Required for Yarbo controls and map/plan reads (`./scripts/install.sh` puts it in `.venv`) |
 | **PaperMono / Paper Colour (optional)** | USB flash from Settings → **E-paper companions**, or **Download USB setup kit** to flash from a Mac/Windows laptop. Pick hardware so the matching firmware is written. **Install USB tools** adds `pyserial` + `esptool` on the panel host. Building firmware needs PlatformIO. |
 | **Vestaboard Note (optional)** | Local API (LAN + local key) or Cloud API (Vestaboard token). Enable in Settings. See [Vestaboard Note](#vestaboard-note-optional) |
 | **ffmpeg** | Only relevant if experimenting with cameras (not working for most users — see below) |
@@ -155,7 +153,7 @@ This one command:
 4. Installs and **enables a systemd service** so the panel starts on boot
 5. Starts the panel immediately
 
-Then open the URL printed at the end (e.g. `http://192.168.0.50:8080`), click **Settings**, and enter your **Yarbo broker IP** and **serial number**. No need to edit `config.php` by hand.
+Then open the URL printed at the end (e.g. `http://192.168.0.50:8080`), click **Settings → Yarbo**, and enter your **serial number** plus **Yarbo app email/password**. No need to edit `config.php` by hand.
 
 If PHP and Composer are already installed:
 
@@ -179,15 +177,14 @@ cd yarbo-control-panel
 
 Hard-refresh the browser after start, and **close the official Yarbo app** while testing controls.
 
-Open **http://localhost:8080**, click **Settings**, and enter broker IP and serial. For browser microphone features (Radio **Announce** Record), use **https://localhost:8443** (self-signed — accept once); Paper tablets keep using HTTP :8080. macOS has no systemd — keep the terminal open, or run on a Pi for always-on use.
+Open **http://localhost:8080**, click **Settings → Yarbo**, and enter serial + Yarbo app email/password. For browser microphone features (Radio **Announce** Record), use **https://localhost:8443** (self-signed — accept once); Paper tablets keep using HTTP :8080. macOS has no systemd — keep the terminal open, or run on a Pi for always-on use.
 
 ### After install
 
 | Step | What to do |
 |------|------------|
-| **Connect robot** | Pi/host must be on the same network as Yarbo; port **1883** reachable |
-| **Configure** | Web **Settings → Yarbo** → broker IP + serial (writes `config.php`). Panel name stays under **Connection**. |
-| **Optional cloud** | Settings → Yarbo → enable cloud fallback for map/plan reads |
+| **Connect robot** | Pi/host needs internet to reach Yarbo cloud MQTT |
+| **Configure** | Web **Settings → Yarbo** → serial + app email/password (writes `config.php` + `data/cloud-config.json`). Panel name stays under **Connection**. |
 | **Lymow (unofficial)** | Settings → Modules → Lymow, then app email/password + camera IP. See [docs/lymow.md](docs/lymow.md) |
 | **Home (Matter)** | Settings → Modules → Home. Panel updates install the Matter server on a Pi. Pair Hue Bridge / Apple share / any Matter code. See [docs/home.md](docs/home.md) |
 | **UniFi** | Settings → Modules → UniFi, then console host + Protect API key and/or Access token. Tick devices to show on Home. See [docs/unifi.md](docs/unifi.md) |
@@ -196,7 +193,7 @@ Open **http://localhost:8080**, click **Settings**, and enter broker IP and seri
 | **Check status** | `sudo systemctl status yarbo-panel` (Linux with systemd) |
 | **Update panel** | Settings → **Panel updates**, or `./scripts/update.sh` (see [Updating](#updating-an-existing-install)) |
 
-The install script runs `composer install`, creates `config.php` if missing, creates the `data/` directory, and optionally installs the Python `yarbo-data-sdk` package for cloud map/plan reads.
+The install script runs `composer install`, creates `config.php` if missing, creates the `data/` directory, and installs the Python `yarbo-data-sdk` package for cloud MQTT controls and map/plan reads.
 
 ## Vestaboard Note (optional)
 
@@ -338,7 +335,7 @@ cd ~/yarbo && sudo ./scripts/install.sh
 
 **3. Configure in the browser**
 
-Open `http://<pi-ip>:8080` → **Settings** → broker IP and serial.
+Open `http://<pi-ip>:8080` → **Settings → Yarbo** → serial + app email/password.
 
 </details>
 
@@ -354,9 +351,9 @@ cd yarbo-control-panel
 ./scripts/dev.sh
 ```
 
-Open **http://localhost:8080** → **Settings** → broker IP and serial.
+Open **http://localhost:8080** → **Settings → Yarbo** → serial + app email/password.
 
-Keep the `./scripts/dev.sh` terminal open. **Do not use `php -S` alone** — that starts the web UI without the MQTT agent and can leave status tiles blank (“Failed to Fetch”) on macOS.
+Keep the `./scripts/dev.sh` terminal open. **Do not use `php -S` alone** — that starts the web UI without the cloud MQTT agent and can leave status tiles blank (“Failed to Fetch”) on macOS.
 
 macOS does not use systemd. For always-on hosting, use a Raspberry Pi with `sudo ./scripts/install.sh --deps`. Zip downloads cannot use Settings → Panel updates (that needs a `git clone`).
 
@@ -391,7 +388,7 @@ Not the primary target platform, but it works if you have PHP and Composer insta
 2. Clone this repo in PowerShell or Git Bash
 3. Run `./scripts/install.sh` (or `composer install` and copy `config.example.php` to `config.php`)
 4. Start the panel: `./scripts/dev.sh` (Git Bash) so the MQTT agent starts with the UI
-5. Open **http://localhost:8080** → **Settings** → broker IP and serial
+5. Open **http://localhost:8080** → **Settings → Yarbo** → serial + app email/password
 
 For an always-on setup, a Raspberry Pi with `sudo ./scripts/install.sh --deps` is simpler.
 
@@ -407,18 +404,18 @@ Docker is not included yet. The panel is a single PHP process with no database �
 
 The installer creates `config.php` from `config.example.php`. **`config.php` is git-ignored** — never commit your serial number or network details.
 
-**Recommended:** click **Settings** in the panel header to set **broker IP** and **serial number**. This writes `config.php` for you — no SSH or text editor required.
+**Recommended:** click **Settings → Yarbo** and enter **serial number** plus **Yarbo app email/password**. This writes `config.php` and `data/cloud-config.json` for you — no SSH or text editor required.
 
 | Setting | Description |
 |---------|-------------|
-| `broker_host` | Yarbo robot IP address (MQTT broker) — set via **Settings** |
-| `broker_port` | Usually `1883` |
-| `serial` | Robot serial number — set via **Settings** |
+| `serial` | Robot serial number — set via **Settings → Yarbo** |
+| `broker_host` | Legacy leftover (unused for control after cloud MQTT) |
+| `broker_port` | Legacy leftover (unused for control) |
 | `cameras_enabled` | `false` — **keep disabled**; local camera streams do not work yet (see below) |
-| `camera_host` | Override RTSP host; `null` uses `broker_host` (experimental only) |
+| `camera_host` | Override RTSP host; `null` falls back to `broker_host` (experimental only) |
 | `ffmpeg_path` | Path to ffmpeg binary (only needed if experimenting with cameras) |
 
-Optional cloud map/plan credentials are stored in `data/cloud-config.json` (also via **Settings**), not in `config.php`.
+Yarbo account credentials for cloud MQTT are stored in `data/cloud-config.json` (also via **Settings → Yarbo**), not in `config.php`.
 
 ---
 
@@ -445,14 +442,13 @@ Use **Load saved mowing areas** on the Location Map card to draw zones from the 
 
 ### How it works
 
-1. **Local MQTT (default)** — the panel calls `get_map` (and optionally `read_gps_ref`) over the same broker as controls.
+1. **Cloud MQTT** — the panel loads maps via the same Yarbo account used for controls ([Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK) / `cloud_bridge.py`).
 2. **Decode** — many firmware versions return `get_map` as a **base64 + zlib** compressed blob; the panel decodes this automatically.
 3. **Convert to GPS** — local metres use the official SDK frame (**X west, Y north**). App maps use `areas` / `pathways` with per-zone `ref` (lat/lon) and `range` points. Pathways are drawn as lines, not filled polygons.
-4. **Cloud fallback (optional)** — if local MQTT returns nothing, enable **Settings → cloud fallback** (`auto` or `cloud`) to read the same data via the [Yarbo Data SDK](https://github.com/YarboInc/YarboDataSDK).
 
-Map load can take **20–30 seconds** — the robot may only respond to `get_map` after a short retry window.
+Map load can take **20–30 seconds** while the cloud bridge fetches and decodes map data.
 
-After a successful load, zones are **cached in the browser** so a page refresh redraws them without another MQTT fetch. Use **Load saved mowing areas** again to refresh from the robot.
+After a successful load, zones are **cached in the browser** so a page refresh redraws them without another fetch. Use **Load saved mowing areas** again to refresh from the robot.
 
 ### Map zones (read-only)
 
@@ -625,8 +621,8 @@ Do not install ffmpeg or spend time on camera tunnels unless you have independen
 
 ## Security
 
-- The Yarbo MQTT broker (port **1883**) has **no authentication**. Anyone on your Wi‑Fi who knows the robot IP can read telemetry and send commands.
-- Keep this control panel on your **LAN only** — do not port-forward port 8080 or 1883 to the internet. Optional Paper tablet **Remote access** uses an outbound Tailscale Funnel (or an HTTPS URL you already have) that only exposes `/api/device.php` with a pairing token.
+- Yarbo controls use your **app account** over cloud MQTT — protect that email/password the same way you protect the official Yarbo app.
+- Keep this control panel on your **LAN only** — do not port-forward port 8080 to the internet. Optional Paper tablet **Remote access** uses an outbound Tailscale Funnel (or an HTTPS URL you already have) that only exposes `/api/device.php` with a pairing token.
 - **Manual drive**: test with **extreme care**. Clear the area of people, pets, and obstacles before using the D-pad; stay ready to release / Stop. Use only on open, flat ground.
 
 ---
@@ -647,15 +643,15 @@ To turn it off, set `YARBO_METRICS=0` in the systemd unit (`sudo systemctl edit 
 
 | Problem | What to check |
 |---------|---------------|
-| Status shows an error | `nc -zv <yarbo-ip> 1883` from the host running the panel |
+| Status shows an error | Settings → Yarbo → **Test cloud connection**. Check internet + account email/password + serial. |
 | Blank tiles / “Failed to Fetch” | Start with `./scripts/dev.sh`, not `php -S` alone. `killall php` then retry. |
 | Commands do nothing / start is cancelled | The official app and this panel cannot both command at once. Close the Yarbo app (or leave its remote-control screen) and try again. Watching status does **not** require closing the app. |
-| Lights flash then off | Agent not running — panel no longer uses connect–disconnect control; start `./scripts/dev.sh` |
+| Lights flash then off | Cloud agent not running — start `./scripts/dev.sh` and confirm Settings → Yarbo account is saved |
 | Map looks flipped vs the phone app | Reload saved areas after v1.3.1 (local X is west, matching the official SDK). The phone app is often not north-up; compare satellite overlay to the real yard. |
 | Page won't load | Is PHP running? `curl http://127.0.0.1:8080/api/status.php` |
 | Pi service won't start | `sudo journalctl -u yarbo-panel -n 50` — check PHP path in the service file |
 | Zip install cannot update | Settings updates need a `git clone`. Reinstall from git to get one-click updates. |
-| Wrong subnet | Pi and Yarbo must be able to route to each other (e.g. `192.168.9.x` → `192.168.1.x`) |
+| Cloud login fails | Re-enter Yarbo app email/password under Settings → Yarbo; confirm the robot appears in that account |
 
 **API smoke test:**
 

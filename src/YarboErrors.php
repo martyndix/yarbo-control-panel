@@ -6,26 +6,22 @@ namespace Yarbo;
 
 final class YarboErrors
 {
-    public const MSG_TIMEOUT = 'Connection to the Yarbo robot timed out. Check the broker IP and serial number in Settings, '
-        . 'and make sure the robot is powered on and on your home network.';
+    public const MSG_TIMEOUT = 'Yarbo cloud login or MQTT timed out. Check internet access and the email/password under Settings → Yarbo.';
 
-    public const MSG_TELEMETRY_TIMEOUT = 'Connected to the Yarbo MQTT broker but the robot did not respond. '
-        . 'Check the serial number in Settings, wake the robot, and try again.';
+    public const MSG_TELEMETRY_TIMEOUT = 'Cloud MQTT connected but the robot did not reply. Check the serial in Settings → Yarbo, '
+        . 'confirm the robot is online in the Yarbo app, then try again.';
 
-    public const MSG_REFUSED = 'Cannot reach the Yarbo robot at the configured IP address (MQTT port 1883 refused the connection). '
-        . 'Open Settings and check the broker IP matches your Yarbo base station, the robot is powered on, '
-        . 'and this device is on the same home network.';
+    public const MSG_REFUSED = 'Cannot reach Yarbo over cloud MQTT. Open Settings → Yarbo and check the account email/password '
+        . 'and serial, confirm the robot is online in the Yarbo app, then Save (restarts the cloud agent).';
 
-    public const MSG_NO_ROUTE = 'Cannot find the Yarbo robot on the network at the configured IP address. '
-        . 'Verify the broker IP in Settings and that you are on the same Wi‑Fi or LAN.';
+    public const MSG_NO_ROUTE = 'Cannot reach Yarbo cloud from this Pi. Check internet on the panel host and try Test cloud connection.';
 
-    public const MSG_UNREACHABLE = 'The network route to the Yarbo robot is unreachable. '
-        . 'Check your Wi‑Fi connection and the broker IP in Settings.';
+    public const MSG_UNREACHABLE = 'Network route to Yarbo cloud is unreachable. Check internet on the panel host.';
 
-    public const MSG_MQTT_FAILED = 'Cannot connect to the Yarbo MQTT broker. Check the broker IP and port (1883) in Settings, '
-        . 'and confirm the robot is powered on.';
+    public const MSG_MQTT_FAILED = 'Cannot connect to Yarbo cloud MQTT. Check Settings → Yarbo account login and serial, '
+        . 'and confirm the robot shows online in the Yarbo app.';
 
-    public const MSG_MQTT_CLOSED = 'The MQTT connection dropped during save (the LAN broker closed an idle socket while waiting on cloud). Try Save again.';
+    public const MSG_MQTT_CLOSED = 'The cloud MQTT connection dropped. Try Save again under Settings → Yarbo, or Test cloud connection.';
 
     public static function friendly(string $message): string
     {
