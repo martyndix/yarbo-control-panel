@@ -246,8 +246,6 @@ const els = {
     updateConfirmFootnote: document.getElementById('update-confirm-footnote'),
     updateConfirmActions: document.getElementById('update-confirm-actions'),
     updateConfirmRun: document.getElementById('update-confirm-run'),
-    mapDataSource: document.getElementById('map-data-source'),
-    plansDataSource: document.getElementById('plans-data-source'),
     mapInspector: document.getElementById('map-inspector'),
     mapZoneList: document.getElementById('map-zone-list'),
     mapEditToggle: document.getElementById('map-edit-toggle'),
@@ -420,7 +418,7 @@ let vestaboardSyncAt = 0;
 let vestaboardSyncInFlight = false;
 let lastVestaboardRotate = { rotate_enabled: false, rotate_views: ['yarbo'], rotate_minutes: 5, rotating: false };
 let currentHeadType = null;
-let defaultDataSource = 'auto';
+let defaultDataSource = 'cloud';
 let areasLayer = null;
 let loadedPlans = [];
 let lastStatusData = null;
@@ -1177,7 +1175,6 @@ function setMapLoading(active, message = 'Loading saved map areas') {
                 els.mapLoadingText.textContent = `${message}… ${secs}s`;
             }
         }, 1000);
-        if (els.mapDataSource) els.mapDataSource.disabled = true;
         if (els.mapLoadAreas) els.mapLoadAreas.disabled = true;
         if (els.mapLoadBackups) els.mapLoadBackups.disabled = true;
         return;
@@ -1187,7 +1184,6 @@ function setMapLoading(active, message = 'Loading saved map areas') {
     els.mapLoading.setAttribute('aria-busy', 'false');
     clearInterval(mapLoadingTimer);
     mapLoadingTimer = null;
-    if (els.mapDataSource) els.mapDataSource.disabled = false;
     if (els.mapLoadAreas) els.mapLoadAreas.disabled = false;
     if (els.mapLoadBackups) els.mapLoadBackups.disabled = false;
 }
@@ -1362,7 +1358,7 @@ function saveMapCache(apiData, features) {
     try {
         localStorage.setItem(MAP_CACHE_KEY, JSON.stringify({
             geojson: { type: 'FeatureCollection', features },
-            source: els.mapDataSource?.value || defaultDataSource,
+            source: 'cloud',
             loaded_at: new Date().toISOString(),
             meta: {
                 feature_count: features.length,
@@ -2142,7 +2138,7 @@ async function loadSavedAreas(button = null) {
     updateMapAreasStatus('Loading saved map areas...');
 
     try {
-        const source = els.mapDataSource?.value || defaultDataSource;
+        const source = 'cloud';
         const res = await fetchWithTimeout(`/api/map.php?source=${encodeURIComponent(source)}`, { cache: 'no-store' }, 45000);
         const data = await parseJsonResponse(res);
         if (!data.ok) {
@@ -10246,7 +10242,7 @@ function savePlansCache(plans, meta = {}) {
         }
         localStorage.setItem(PLAN_CACHE_KEY, JSON.stringify({
             plans,
-            source: meta.source || els.plansDataSource?.value || defaultDataSource,
+            source: meta.source || 'cloud',
             loaded_at: meta.loaded_at || new Date().toISOString(),
             note: meta.note || null,
         }));
@@ -10329,7 +10325,7 @@ async function loadPlans(button, options = {}) {
     }
 
     try {
-        const source = els.plansDataSource?.value || defaultDataSource;
+        const source = 'cloud';
         const res = await fetch(`/api/plans.php?source=${encodeURIComponent(source)}`);
         const data = await res.json();
         if (!data.ok) {
@@ -10897,8 +10893,6 @@ async function loadSettings() {
         if (els.settingsDataSource) {
             defaultDataSource = 'cloud';
             els.settingsDataSource.value = 'cloud';
-            if (els.mapDataSource) els.mapDataSource.value = defaultDataSource;
-            if (els.plansDataSource) els.plansDataSource.value = defaultDataSource;
         }
         if (els.settingsVestaboardEnabled) {
             els.settingsVestaboardEnabled.checked = Boolean(data.vestaboard?.enabled);
@@ -12870,9 +12864,8 @@ async function saveSettings(event) {
         });
         const data = await parseJsonResponse(res);
         if (!data.ok) throw new Error(data.error || 'Save failed');
-        defaultDataSource = data.cloud?.data_source || dataSource;
-        if (els.mapDataSource) els.mapDataSource.value = defaultDataSource;
-        if (els.plansDataSource) els.plansDataSource.value = defaultDataSource;
+        defaultDataSource = 'cloud';
+        if (els.settingsDataSource) els.settingsDataSource.value = 'cloud';
         if (els.settingsCloudStatus && data.cloud_status) {
             els.settingsCloudStatus.textContent = formatCloudStatus(data.cloud_status);
         }

@@ -15,8 +15,7 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $projectRoot = dirname(__DIR__, 2);
 $cloudSettings = new YarboCloudSettings($projectRoot . '/data');
 $cloud = new YarboCloud($cloudSettings, $projectRoot);
-$cloudConfig = $cloudSettings->load();
-$dataSource = (string) ($_GET['source'] ?? $cloudConfig['data_source'] ?? YarboCloudSettings::DATA_SOURCE_AUTO);
+// Local MQTT is closed on current Yarbo firmware — plans always load via cloud.
 
 function plans_input(): array
 {
@@ -32,18 +31,6 @@ function plans_input(): array
     }
 
     return $input;
-}
-
-function load_plans_local(\Yarbo\YarboMqtt $client): array
-{
-    $response = $client->requestDataFeedback('read_all_plan', [], 10.0, false);
-
-    return [
-        'plans' => YarboPlans::parseList($response),
-        'responded' => $response !== null,
-        'raw' => $response,
-        'via' => 'local',
-    ];
 }
 
 function load_plans_cloud(YarboCloud $cloud, string $serial): array
@@ -78,36 +65,17 @@ try {
         $result = null;
         $note = null;
 
-        if ($dataSource === YarboCloudSettings::DATA_SOURCE_CLOUD) {
-            $result = load_plans_cloud($cloud, $serial);
-            if (($result['error'] ?? null) !== null) {
-                $note = (string) $result['error'];
-            }
-        } else {
-            $client = yarbo_client($config);
-            $client->connect();
-            $result = load_plans_local($client);
-            $client->disconnect();
-
-            if (
-                $dataSource === YarboCloudSettings::DATA_SOURCE_AUTO
-                && (!$result['responded'] || $result['plans'] === [])
-                && $cloudConfig['enabled']
-            ) {
-                $cloudResult = load_plans_cloud($cloud, $serial);
-                if ($cloudResult['responded'] && $cloudResult['plans'] !== []) {
-                    $result = $cloudResult;
-                    $note = 'Loaded via Yarbo cloud MQTT.';
-                }
-            }
+        $result = load_plans_cloud($cloud, $serial);
+        if (($result['error'] ?? null) !== null) {
+            $note = (string) $result['error'];
         }
 
         $plans = $result['plans'] ?? [];
         $responded = (bool) ($result['responded'] ?? false);
         if ($note === null) {
             $note = !$responded
-                ? 'No response to read_all_plan. Try cloud fallback in Settings or load while the robot is active.'
-                : ($plans === [] ? 'Robot responded but returned no saved plans.' : null);
+                ? 'No response loading plans from Yarbo cloud. Check Settings → Yarbo account and that the robot is online in the app.'
+                : ($plans === [] ? 'Cloud responded but returned no saved plans.' : null);
         }
 
         json_response([
@@ -115,7 +83,7 @@ try {
             'plans' => $plans,
             'count' => count($plans),
             'responded' => $responded,
-            'source' => $result['via'] ?? 'local',
+            'source' => $result['via'] ?? 'cloud',
             'note' => $note,
             'updated_at' => gmdate('c'),
         ]);
