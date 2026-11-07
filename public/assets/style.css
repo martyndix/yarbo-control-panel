@@ -4713,6 +4713,45 @@ button.unifi-live-open:focus-visible img {
     font-size: 0.82rem;
 }
 
+.home-plug-auto-off {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.65rem;
+    margin-top: 0.35rem;
+    width: 100%;
+}
+
+.home-plug-auto-off-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.home-plug-auto-off-fields {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.home-plug-auto-off-fields input[type="number"] {
+    width: 4.2rem;
+    min-width: 4.2rem;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.82rem;
+}
+
+.home-plug-auto-off-fields select {
+    width: auto;
+    min-width: 4.2rem;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.82rem;
+}
+
 .unifi-pick-name {
     flex: 1 1 auto;
     min-width: 0;

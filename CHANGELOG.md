@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.221] - 2026-11-07
+
+### Fixed
+- **Load map backups over cloud MQTT:** that button no longer tries LAN `:1883` first (which failed after Yarbo closed local MQTT and showed a connection error). Backups list/fetch via the same Yarbo cloud account as controls.
+
+### Added
+- **Hue / Matter plug auto-off:** in Home ⚙️ manage mode, each Matter plug (including Philips Hue plugs) can optionally turn Off after a timer whenever it is turned On (Home, scenes, or automations). Manual Off cancels it.
+
 ## [4.0.220] - 2026-11-07
 
 ### Changed

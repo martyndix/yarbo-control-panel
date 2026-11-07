@@ -5242,6 +5242,9 @@ function homeDeviceCardHtml(d, hidden, rooms) {
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
         : `<button type="button" class="btn btn-secondary btn-compact" data-home-hide="${escapeHtml(d.id)}">Hide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`;
+    const plugAutoOff = (!hidden && !unifi && String(d.kind || '') === 'plug')
+        ? homePlugAutoOffHtml(d)
+        : '';
     const label = homeManageOpen
         ? `<input type="text" class="home-device-name-input" data-home-name="${escapeHtml(d.id)}" value="${escapeHtml(d.name)}" placeholder="${escapeHtml(defaultName)}" maxlength="48" aria-label="Device name">`
         : `<p class="home-device-name">${escapeHtml(d.name)}</p>`;
@@ -5262,8 +5265,62 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ${roomSelect}
         ${groupSelect}
         ${actions}
-        <div class="home-device-manage">${manage}</div>
+        <div class="home-device-manage">${manage}${plugAutoOff}</div>
     </article>`;
+}
+
+function homePlugAutoOffParts(sec) {
+    const seconds = Math.max(0, Math.round(Number(sec) || 0));
+    if (seconds <= 0) {
+        return { enabled: false, value: 5, unit: 60 };
+    }
+    if (seconds % 3600 === 0) {
+        return { enabled: true, value: Math.max(1, seconds / 3600), unit: 3600 };
+    }
+    if (seconds % 60 === 0) {
+        return { enabled: true, value: Math.max(1, seconds / 60), unit: 60 };
+    }
+    return { enabled: true, value: seconds, unit: 1 };
+}
+
+function homePlugAutoOffHtml(d) {
+    if (!homeManageOpen) return '';
+    const id = String(d.id || '');
+    if (!id) return '';
+    const parts = homePlugAutoOffParts(d.auto_off_sec);
+    return `<div class="home-plug-auto-off" data-home-auto-off-wrap="${escapeHtml(id)}">
+        <label class="home-plug-auto-off-toggle">
+            <input type="checkbox" data-home-auto-off-enabled="${escapeHtml(id)}" ${parts.enabled ? 'checked' : ''}>
+            <span>Auto-off after</span>
+        </label>
+        <span class="home-plug-auto-off-fields${parts.enabled ? '' : ' hidden'}">
+            <input type="number" min="1" max="1440" step="1" value="${escapeHtml(String(parts.value))}" data-home-auto-off-value="${escapeHtml(id)}" aria-label="Auto-off after amount">
+            <select data-home-auto-off-unit="${escapeHtml(id)}" aria-label="Auto-off unit">
+                <option value="1"${parts.unit === 1 ? ' selected' : ''}>sec</option>
+                <option value="60"${parts.unit === 60 ? ' selected' : ''}>min</option>
+                <option value="3600"${parts.unit === 3600 ? ' selected' : ''}>hr</option>
+            </select>
+        </span>
+    </div>`;
+}
+
+async function homeSavePlugAutoOff(id) {
+    const wrap = document.querySelector(`[data-home-auto-off-wrap="${CSS.escape(id)}"]`);
+    if (!wrap) return;
+    const enabled = wrap.querySelector(`[data-home-auto-off-enabled="${CSS.escape(id)}"]`);
+    const on = Boolean(enabled?.checked);
+    const value = Math.max(1, Math.round(Number(wrap.querySelector(`[data-home-auto-off-value="${CSS.escape(id)}"]`)?.value || 5)));
+    const unit = Number(wrap.querySelector(`[data-home-auto-off-unit="${CSS.escape(id)}"]`)?.value || 60) || 60;
+    const sec = on ? value * unit : 0;
+    wrap.querySelector('.home-plug-auto-off-fields')?.classList.toggle('hidden', !on);
+    try {
+        const data = await homeApi({ action: 'auto_off', id, sec }, 8000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not update auto-off');
+        const row = (homeDash.devices || []).find((d) => d.id === id);
+        if (row) row.auto_off_sec = Number(data.auto_off_sec || 0);
+    } catch (err) {
+        showToast(err.message || 'Could not update auto-off', 'error');
+    }
 }
 
 function homeDeviceActionsHtml(d, bright, color) {
@@ -6495,6 +6552,15 @@ function bindHomeDashboard() {
         if (bright) syncHomeBrightPct(bright);
     });
     document.getElementById('home-devices')?.addEventListener('change', async (event) => {
+        const plugAutoOff = event.target.closest('[data-home-auto-off-enabled], [data-home-auto-off-value], [data-home-auto-off-unit]');
+        if (plugAutoOff) {
+            const id = plugAutoOff.getAttribute('data-home-auto-off-enabled')
+                || plugAutoOff.getAttribute('data-home-auto-off-value')
+                || plugAutoOff.getAttribute('data-home-auto-off-unit')
+                || '';
+            if (id) await homeSavePlugAutoOff(id);
+            return;
+        }
         const assign = event.target.closest('[data-home-room-assign]');
         if (assign) {
             const id = assign.getAttribute('data-home-room-assign') || '';

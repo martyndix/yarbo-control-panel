@@ -26,6 +26,12 @@ if ($method === 'GET') {
         }
     } catch (Throwable) {
     }
+    try {
+        if ($hub->enabled(YarboHub::MODULE_HOME)) {
+            $home->flushAutoOff();
+        }
+    } catch (Throwable) {
+    }
     json_response($home->dashboard());
 }
 
@@ -53,6 +59,23 @@ try {
         'unhide' => $home->hideDevice((string) ($input['id'] ?? ''), false),
         'remove' => $home->removeDevice((string) ($input['id'] ?? ''), (bool) ($input['whole_node'] ?? false)),
         'command' => $home->command($input),
+        'auto_off' => (static function () use ($home, $input): array {
+            $id = trim((string) ($input['id'] ?? ''));
+            $sec = (int) ($input['sec'] ?? $input['auto_off_sec'] ?? 0);
+            if ($id === '') {
+                return ['ok' => false, 'error' => 'Pick a plug'];
+            }
+            if (!$home->setAutoOff($id, $sec)) {
+                return ['ok' => false, 'error' => 'Auto-off is only for Matter/Hue plugs'];
+            }
+
+            return [
+                'ok' => true,
+                'id' => $id,
+                'auto_off_sec' => $home->autoOffSec($id),
+                'auto_off_map' => $home->autoOffMap(),
+            ];
+        })(),
         'rename' => $home->saveMeta(['names' => [$input['id'] ?? '' => $input['name'] ?? '']]),
         'room' => $home->assignDeviceRoom((string) ($input['id'] ?? ''), (string) ($input['room_id'] ?? $input['room'] ?? '')),
         'contact_kind' => $home->assignContactKind((string) ($input['id'] ?? ''), (string) ($input['contact_kind'] ?? $input['kind'] ?? '')),
