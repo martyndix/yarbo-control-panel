@@ -10,18 +10,12 @@ use Yarbo\YarboCodec;
 use Yarbo\YarboMap;
 use Yarbo\YarboMapBackup;
 
-$commands = [
-    'get_map',
-    'read_gps_ref',
-];
-
 set_time_limit(40);
 
 $projectRoot = dirname(__DIR__, 2);
 $cloudSettings = new YarboCloudSettings($projectRoot . '/data');
 $cloud = new YarboCloud($cloudSettings, $projectRoot);
-$cloudConfig = $cloudSettings->load();
-$dataSource = (string) ($_GET['source'] ?? $cloudConfig['data_source'] ?? YarboCloudSettings::DATA_SOURCE_AUTO);
+// Local MQTT is closed on current Yarbo firmware — maps always load via cloud.
 $serial = (string) ($config['serial'] ?? '');
 
 /**
@@ -42,17 +36,6 @@ function wrap_cloud_feedback(string $cmd, ?array $payload): ?array
         'state' => 0,
         'data' => $payload,
     ];
-}
-
-function load_map_local(\Yarbo\YarboMqtt $client, array $commands): array
-{
-    $batch = [
-        'get_map' => 10.0,
-        'read_gps_ref' => 5.0,
-    ];
-    $responses = $client->requestDataFeedbackBatch($batch, false);
-
-    return ['responses' => $responses, 'via' => 'local'];
 }
 
 function load_map_cloud(YarboCloud $cloud, string $serial): array
@@ -153,45 +136,9 @@ try {
     $result = null;
     $note = null;
 
-    if ($dataSource === YarboCloudSettings::DATA_SOURCE_CLOUD) {
-        $result = load_map_cloud($cloud, $serial);
-        if (($result['error'] ?? null) !== null) {
-            $note = (string) $result['error'];
-        }
-    } else {
-        $client = yarbo_client($config);
-        $client->connect();
-        $result = load_map_local($client, $commands);
-        $client->disconnect();
-
-        if (
-            $dataSource === YarboCloudSettings::DATA_SOURCE_AUTO
-            && $cloudConfig['enabled']
-            && $cloudConfig['email'] !== ''
-            && $cloudConfig['password'] !== ''
-        ) {
-            $localNormalized = YarboMap::normalize(
-                $result['responses'],
-                $result['responses']['read_gps_ref'] ?? null,
-            );
-            if ($localNormalized['status'] !== 'ready') {
-                try {
-                    $cloudResult = load_map_cloud($cloud, $serial);
-                    if (($cloudResult['error'] ?? null) === null) {
-                        $cloudNormalized = YarboMap::normalize(
-                            $cloudResult['responses'],
-                            $cloudResult['responses']['read_gps_ref'] ?? null,
-                        );
-                        if ($cloudNormalized['status'] === 'ready') {
-                            $result = $cloudResult;
-                            $note = 'Loaded via Yarbo cloud MQTT.';
-                        }
-                    }
-                } catch (Throwable $cloudError) {
-                    $note = 'Local map empty; cloud fallback failed: ' . $cloudError->getMessage();
-                }
-            }
-        }
+    $result = load_map_cloud($cloud, $serial);
+    if (($result['error'] ?? null) !== null) {
+        $note = (string) $result['error'];
     }
 
     $responses = $result['responses'] ?? [];
@@ -224,7 +171,7 @@ try {
                 ? $note
                 : 'Live get_map did not reply. The robot may still be applying an app edit. Wait until it is idle, then try again.',
             'status' => $normalized['status'] ?? 'empty',
-            'data_via' => $result['via'] ?? 'local',
+            'data_via' => $result['via'] ?? 'cloud',
         ], 504);
     }
 
@@ -232,7 +179,7 @@ try {
         'ok' => true,
         'status' => $normalized['status'],
         'source' => $normalized['source'],
-        'data_via' => $result['via'] ?? 'local',
+        'data_via' => $result['via'] ?? 'cloud',
         'gps_ref' => $normalized['gps_ref'],
         'warnings' => $normalized['warnings'],
         'probes' => $normalized['probes'],

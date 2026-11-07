@@ -297,16 +297,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-            <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors). Map view is read-only — this panel never writes zones to Yarbo.</p>
+            <p class="hint">Live GPS from RTK telemetry. Valid GPS lock is required (outdoors). Map view is read-only — this panel never writes zones to Yarbo. Saved areas load via Yarbo cloud MQTT (local MQTT is closed on current firmware).</p>
             <div class="map-actions">
-                <label class="data-source-field">
-                    Map data
-                    <select id="map-data-source">
-                        <option value="auto">Auto (local, then cloud)</option>
-                        <option value="local">Local MQTT only</option>
-                        <option value="cloud">Cloud only</option>
-                    </select>
-                </label>
                 <button type="button" class="btn btn-secondary" id="map-load-areas">Load saved mowing areas</button>
                 <button type="button" class="btn btn-secondary" id="map-load-backups">Load map backups</button>
             </div>
@@ -394,20 +386,12 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <h2>Work Plans</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Saved plans stay in this browser after Load (or the first automatic fetch). They refresh quietly about once a day, or sooner if you click Load plans. Listing plans does not stop a running job. Create or delete plans in the Yarbo app — this panel only starts them. Start at 0% means from the beginning. Starting a plan wakes the robot and holds control so the official app cannot cancel it.</p>
+            <p class="hint">Saved plans stay in this browser after Load (or the first automatic fetch). They refresh quietly about once a day, or sooner if you click Load plans. Listing plans does not stop a running job. Create or delete plans in the Yarbo app — this panel only starts them. Plans load via Yarbo cloud MQTT. Start at 0% means from the beginning. Starting a plan wakes the robot and holds control so the official app cannot cancel it.</p>
             <div class="plans-toolbar">
                 <label class="plan-percent">
                     Start at
                     <input type="range" id="plan-start-percent" min="0" max="100" value="0">
                     <span id="plan-start-percent-label">0%</span>
-                </label>
-                <label class="data-source-field">
-                    Plan data
-                    <select id="plans-data-source">
-                        <option value="auto">Auto (local, then cloud)</option>
-                        <option value="local">Local MQTT only</option>
-                        <option value="cloud">Cloud only</option>
-                    </select>
                 </label>
                 <button type="button" class="btn btn-secondary" id="plans-load">Load plans</button>
             </div>

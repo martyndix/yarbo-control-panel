@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.220] - 2026-11-07
+
+### Changed
+- **Map / Plans cloud-only UI:** removed the Auto / Local MQTT / Cloud data-source dropdowns from Location Map and Work Plans. Yarbo closed local MQTT, so those loads always use cloud now (same account as Settings → Yarbo).
+
 ## [4.0.219] - 2026-11-07
 
 ### Added
@@ -14,7 +19,7 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ## [4.0.218] - 2026-11-07
 
 ### Changed
-- **Yarbo controls use cloud MQTT only:** Start / Dock / Stop / lights / drive go through your Yarbo app account (official SDK) instead of LAN port 1883. Recent Yarbo firmware closed local MQTT; Settings → Yarbo now requires serial + account email/password. Local broker IP is no longer used for control. Maps/plans also default to cloud.
+- **Yarbo works on cloud MQTT only (required update):** Yarbo firmware closed LAN port **1883**, so local robot MQTT no longer works. This update moves Start / Dock / Stop / lights / drive / status onto your **Yarbo app account** over cloud MQTT (official SDK). Set serial + email/password under **Settings → Yarbo**. Without this update the panel cannot control the robot on current firmware.
 
 ## [4.0.217] - 2026-11-07
 

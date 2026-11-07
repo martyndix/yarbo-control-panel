@@ -50,6 +50,19 @@ $html = (string) file_get_contents($root . '/public/index.php');
 assert_true(str_contains($html, 'cloud MQTT'), 'Settings copy mentions cloud MQTT');
 assert_true(str_contains($html, 'id="settings-cloud-email"'), 'email field present');
 assert_true(!str_contains($html, 'Broker IP (Yarbo host)'), 'broker IP label removed from Yarbo settings');
+assert_true(!str_contains($html, 'id="map-data-source"'), 'map data-source dropdown removed');
+assert_true(!str_contains($html, 'id="plans-data-source"'), 'plans data-source dropdown removed');
+assert_true(!str_contains($html, 'Local MQTT only'), 'Local MQTT only option removed from UI');
+
+$mapApi = (string) file_get_contents($root . '/public/api/map.php');
+assert_true(str_contains($mapApi, 'load_map_cloud'), 'map API loads via cloud');
+assert_true(!str_contains($mapApi, 'function load_map_local'), 'map API local loader removed');
+assert_true(str_contains($mapApi, 'maps always load via cloud'), 'map API documents cloud-only');
+
+$plansApi = (string) file_get_contents($root . '/public/api/plans.php');
+assert_true(str_contains($plansApi, 'load_plans_cloud'), 'plans API loads via cloud');
+assert_true(!str_contains($plansApi, 'function load_plans_local'), 'plans API local loader removed');
+assert_true(str_contains($plansApi, 'plans always load via cloud'), 'plans API documents cloud-only');
 
 $diag = (string) file_get_contents($root . '/public/api/diagnostics.php');
 assert_true(str_contains($diag, 'transport') && str_contains($diag, 'cloud'), 'diagnostics are cloud-based');
@@ -72,6 +85,9 @@ assert_true(is_array($ping), 'agent ping returns array even when down');
 
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.218]'), 'changelog 4.0.218');
+assert_true(str_contains($change, '## [4.0.220]'), 'changelog 4.0.220');
 assert_true(str_contains($change, 'cloud MQTT only'), 'changelog mentions cloud MQTT only');
+assert_true(str_contains($change, 'closed LAN port'), 'changelog explains Yarbo closed local MQTT');
+assert_true(str_contains($change, 'Map / Plans cloud-only UI'), 'changelog notes dropdown removal');
 
 fwrite(STDOUT, "test_yarbo_cloud_mqtt.php ok\n");
