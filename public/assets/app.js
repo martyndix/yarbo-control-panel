@@ -2644,11 +2644,22 @@ function unifiKindLabel(d) {
     }
 }
 
+function unifiPickerMissingAutoOff(devices) {
+    return (Array.isArray(devices) ? devices : []).some((d) => {
+        if (String(d?.kind || '') !== 'relay') return false;
+        const id = String(d.id || '');
+        return id !== '' && !document.querySelector(`[data-unifi-auto-off-wrap="${CSS.escape(id)}"]`);
+    });
+}
+
 function renderUnifiHomePicker(data, { replace = false } = {}) {
     const wraps = [els.settingsUnifiDevices, document.getElementById('unifi-home-picker')].filter(Boolean);
     if (!wraps.length) return;
     const devices = Array.isArray(data?.devices) ? data.devices : [];
     const existing = document.querySelectorAll('input[data-unifi-home]');
+    if (!replace && existing.length && unifiPickerMissingAutoOff(devices)) {
+        replace = true;
+    }
     if (!replace && existing.length && unifiPickerDirty) {
         return;
     }
