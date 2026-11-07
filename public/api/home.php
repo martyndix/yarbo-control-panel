@@ -7,6 +7,7 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboHome;
 use Yarbo\YarboHomeAutomations;
 use Yarbo\YarboHub;
+use Yarbo\YarboUnifi;
 
 $projectRoot = dirname(__DIR__, 2);
 $hub = new YarboHub($projectRoot);
@@ -17,6 +18,12 @@ if ($method === 'GET') {
     set_time_limit(8);
     try {
         (new YarboHomeAutomations($projectRoot))->kickRunner();
+    } catch (Throwable) {
+    }
+    try {
+        if ($hub->enabled(YarboHub::MODULE_UNIFI)) {
+            (new YarboUnifi($projectRoot))->flushAutoOff();
+        }
     } catch (Throwable) {
     }
     json_response($home->dashboard());

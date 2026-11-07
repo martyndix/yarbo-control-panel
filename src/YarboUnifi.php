@@ -159,6 +159,7 @@ final class YarboUnifi
             'access_path' => '',
             'access_use_protect_key' => false,
             'show_on_home' => [],
+            'auto_off_sec' => [],
             'doors_tile' => true,
             'doors_tile_sensors' => false,
             'speakers_enabled' => true,
@@ -191,6 +192,7 @@ final class YarboUnifi
                 : '',
             'access_use_protect_key' => (bool) ($decoded['access_use_protect_key'] ?? false),
             'show_on_home' => $this->normalizeIdList($decoded['show_on_home'] ?? []),
+            'auto_off_sec' => $this->normalizeAutoOffMap($decoded['auto_off_sec'] ?? null),
             'doors_tile' => array_key_exists('doors_tile', $decoded)
                 ? (bool) $decoded['doors_tile']
                 : true,
@@ -282,6 +284,9 @@ final class YarboUnifi
         $show = array_key_exists('unifi_show_on_home', $input) || array_key_exists('show_on_home', $input)
             ? $this->normalizeIdList($input['unifi_show_on_home'] ?? $input['show_on_home'] ?? [])
             : $current['show_on_home'];
+        $autoOff = array_key_exists('unifi_auto_off_sec', $input) || array_key_exists('auto_off_sec', $input)
+            ? $this->normalizeAutoOffMap($input['unifi_auto_off_sec'] ?? $input['auto_off_sec'] ?? [])
+            : ($current['auto_off_sec'] ?? []);
         $doorsTile = array_key_exists('unifi_doors_tile', $input) || array_key_exists('doors_tile', $input)
             ? YarboHub::asBool($input['unifi_doors_tile'] ?? $input['doors_tile'] ?? true)
             : $current['doors_tile'];
@@ -305,6 +310,7 @@ final class YarboUnifi
             'access_path' => $accessPath,
             'access_use_protect_key' => $useProtect,
             'show_on_home' => $show,
+            'auto_off_sec' => $autoOff,
             'doors_tile' => $doorsTile,
             'doors_tile_sensors' => $doorsTileSensors,
             'speakers_enabled' => $speakersEnabled,
@@ -338,6 +344,68 @@ final class YarboUnifi
         }
 
         return $this->save(['show_on_home' => $list]);
+    }
+
+    /**
+     * Optional auto-off for a Protect relay (USL-Relay output). 0 clears.
+     */
+    public function setAutoOff(string $homeId, int $seconds): bool
+    {
+        $homeId = trim($homeId);
+        if ($homeId === '' || !self::isRelayHomeId($homeId)) {
+            return false;
+        }
+        $seconds = self::clampAutoOffSec($seconds);
+        $config = $this->load();
+        $map = is_array($config['auto_off_sec'] ?? null) ? $config['auto_off_sec'] : [];
+        if ($seconds <= 0) {
+            if (!isset($map[$homeId])) {
+                $this->cancelAutoOff($homeId);
+
+                return true;
+            }
+            unset($map[$homeId]);
+        } else {
+            $map[$homeId] = $seconds;
+        }
+        if (!$this->save(['auto_off_sec' => $map])) {
+            return false;
+        }
+        if ($seconds <= 0) {
+            $this->cancelAutoOff($homeId);
+        }
+
+        return true;
+    }
+
+    public function autoOffSec(string $homeId): int
+    {
+        $homeId = trim($homeId);
+        if ($homeId === '') {
+            return 0;
+        }
+        $map = $this->load()['auto_off_sec'] ?? [];
+
+        return is_array($map) ? self::clampAutoOffSec((int) ($map[$homeId] ?? 0)) : 0;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    public function autoOffMap(): array
+    {
+        $map = $this->load()['auto_off_sec'] ?? [];
+
+        return is_array($map) ? $this->normalizeAutoOffMap($map) : [];
+    }
+
+    public static function clampAutoOffSec(int $seconds): int
+    {
+        if ($seconds <= 0) {
+            return 0;
+        }
+
+        return min(86400, max(1, $seconds));
     }
 
     public function doorsTileEnabled(): bool
@@ -504,6 +572,7 @@ final class YarboUnifi
      */
     public function publicView(): array
     {
+        $this->flushAutoOff();
         $config = $this->load();
         $inventory = $this->readInventory();
 
@@ -517,6 +586,7 @@ final class YarboUnifi
             'access_port' => $config['access_port'],
             'access_standalone' => $config['access_port'] === 12445,
             'show_on_home' => $config['show_on_home'],
+            'auto_off_sec' => $config['auto_off_sec'] ?? [],
             'doors_tile' => $config['doors_tile'] !== false,
             'doors_tile_sensors' => !empty($config['doors_tile_sensors']),
             'speakers_enabled' => ($config['speakers_enabled'] ?? true) !== false,
@@ -815,6 +885,7 @@ final class YarboUnifi
      */
     public function dashboardPayload(bool $refresh = true): array
     {
+        $this->flushAutoOff();
         $config = $this->load();
         $inventory = $this->readInventory();
         if ($refresh && $config['host'] !== '' && ($config['protect_api_key'] !== '' || $config['access_token'] !== '')) {
@@ -2130,6 +2201,12 @@ final class YarboUnifi
             return ['ok' => false, 'error' => $res['error'] ?? ('Protect relay HTTP ' . $res['status'])];
         }
         $this->patchInventoryOn(self::KIND_RELAY, $id, $on);
+        $homeId = self::homeId(self::KIND_RELAY, $id);
+        if ($on) {
+            $this->scheduleAutoOff($homeId);
+        } else {
+            $this->cancelAutoOff($homeId);
+        }
 
         return ['ok' => true, 'on' => $on];
     }
@@ -2327,6 +2404,7 @@ final class YarboUnifi
     public function catalogFromInventory(array $inventory, array $showOnHome): array
     {
         $show = array_fill_keys($showOnHome, true);
+        $autoOff = $this->autoOffMap();
         $out = [];
         foreach (['cameras', 'lights', 'sensors', 'relays', 'doors', 'hubs'] as $group) {
             foreach ($inventory[$group] ?? [] as $row) {
@@ -2340,7 +2418,189 @@ final class YarboUnifi
                 if ($group === 'cameras' || ($row['kind'] ?? '') === self::KIND_CAMERA) {
                     $row['on'] = false;
                 }
-                $out[] = $row + ['show_on_home' => isset($show[$id])];
+                $extra = ['show_on_home' => isset($show[$id])];
+                if (($row['kind'] ?? '') === self::KIND_RELAY || $group === 'relays') {
+                    $extra['auto_off_sec'] = (int) ($autoOff[$id] ?? 0);
+                }
+                $out[] = $row + $extra;
+            }
+        }
+
+        return $out;
+    }
+
+    public function autoOffStatePath(): string
+    {
+        return $this->projectRoot . '/data/unifi-auto-off.json';
+    }
+
+    /**
+     * Turn due auto-off relays Off. Safe to call on every dashboard poll.
+     *
+     * @return list<string> home ids turned off
+     */
+    public function flushAutoOff(?int $now = null): array
+    {
+        $now = $now ?? time();
+        $state = $this->readAutoOffState();
+        $pending = is_array($state['pending'] ?? null) ? $state['pending'] : [];
+        if ($pending === []) {
+            return [];
+        }
+        $due = [];
+        $keep = [];
+        foreach ($pending as $id => $job) {
+            $id = trim((string) $id);
+            if ($id === '') {
+                continue;
+            }
+            $at = (int) (is_array($job) ? ($job['at'] ?? 0) : 0);
+            if ($at > 0 && $at <= $now) {
+                $due[$id] = is_array($job) ? $job : ['at' => $at, 'sec' => 0];
+            } else {
+                $keep[$id] = is_array($job) ? $job : ['at' => $at, 'sec' => 0];
+            }
+        }
+        if ($due === []) {
+            return [];
+        }
+        $this->writeAutoOffState(['pending' => $keep]);
+        $done = [];
+        foreach ($due as $id => $job) {
+            $parsed = self::parseHomeId($id);
+            if ($parsed === null || $parsed['kind'] !== self::KIND_RELAY) {
+                continue;
+            }
+            $res = $this->setRelay($parsed['native_id'], false);
+            if (($res['ok'] ?? false) === true) {
+                $done[] = $id;
+                continue;
+            }
+            $retry = $this->readAutoOffState();
+            $pendingRetry = is_array($retry['pending'] ?? null) ? $retry['pending'] : [];
+            $pendingRetry[$id] = [
+                'at' => $now + 30,
+                'sec' => self::clampAutoOffSec((int) ($job['sec'] ?? 0)),
+            ];
+            $this->writeAutoOffState(['pending' => $pendingRetry]);
+        }
+
+        return $done;
+    }
+
+    private function scheduleAutoOff(string $homeId, ?int $now = null): void
+    {
+        $homeId = trim($homeId);
+        $sec = $this->autoOffSec($homeId);
+        if ($homeId === '' || $sec <= 0) {
+            $this->cancelAutoOff($homeId);
+
+            return;
+        }
+        $now = $now ?? time();
+        $state = $this->readAutoOffState();
+        $pending = is_array($state['pending'] ?? null) ? $state['pending'] : [];
+        $pending[$homeId] = ['at' => $now + $sec, 'sec' => $sec];
+        $this->writeAutoOffState(['pending' => $pending]);
+    }
+
+    private function cancelAutoOff(string $homeId): void
+    {
+        $homeId = trim($homeId);
+        if ($homeId === '') {
+            return;
+        }
+        $state = $this->readAutoOffState();
+        $pending = is_array($state['pending'] ?? null) ? $state['pending'] : [];
+        if (!isset($pending[$homeId])) {
+            return;
+        }
+        unset($pending[$homeId]);
+        $this->writeAutoOffState(['pending' => $pending]);
+    }
+
+    /**
+     * @return array{pending: array<string, array{at: int, sec: int}>}
+     */
+    private function readAutoOffState(): array
+    {
+        $path = $this->autoOffStatePath();
+        if (!is_file($path)) {
+            return ['pending' => []];
+        }
+        $raw = file_get_contents($path);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        if (!is_array($decoded)) {
+            return ['pending' => []];
+        }
+        $pending = [];
+        foreach (is_array($decoded['pending'] ?? null) ? $decoded['pending'] : [] as $id => $job) {
+            $id = trim((string) $id);
+            if ($id === '' || !self::isRelayHomeId($id) || !is_array($job)) {
+                continue;
+            }
+            $at = isset($job['at']) && is_numeric($job['at']) ? (int) $job['at'] : 0;
+            if ($at <= 0) {
+                continue;
+            }
+            $pending[$id] = [
+                'at' => $at,
+                'sec' => self::clampAutoOffSec((int) ($job['sec'] ?? 0)),
+            ];
+        }
+
+        return ['pending' => $pending];
+    }
+
+    /**
+     * @param array{pending?: array<string, array{at: int, sec: int}>} $state
+     */
+    private function writeAutoOffState(array $state): void
+    {
+        $dir = dirname($this->autoOffStatePath());
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        $pending = [];
+        foreach (is_array($state['pending'] ?? null) ? $state['pending'] : [] as $id => $job) {
+            $id = trim((string) $id);
+            if ($id === '' || !is_array($job)) {
+                continue;
+            }
+            $at = (int) ($job['at'] ?? 0);
+            if ($at <= 0) {
+                continue;
+            }
+            $pending[$id] = [
+                'at' => $at,
+                'sec' => self::clampAutoOffSec((int) ($job['sec'] ?? 0)),
+            ];
+        }
+        $json = json_encode(['pending' => $pending], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            return;
+        }
+        @file_put_contents($this->autoOffStatePath(), $json . "\n", LOCK_EX);
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array<string, int>
+     */
+    private function normalizeAutoOffMap(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $id => $sec) {
+            $id = trim((string) $id);
+            if ($id === '' || !self::isRelayHomeId($id)) {
+                continue;
+            }
+            $n = self::clampAutoOffSec((int) $sec);
+            if ($n > 0) {
+                $out[$id] = $n;
             }
         }
 

@@ -2644,11 +2644,22 @@ function unifiKindLabel(d) {
     }
 }
 
+function unifiPickerMissingAutoOff(devices) {
+    return (Array.isArray(devices) ? devices : []).some((d) => {
+        if (String(d?.kind || '') !== 'relay') return false;
+        const id = String(d.id || '');
+        return id !== '' && !document.querySelector(`[data-unifi-auto-off-wrap="${CSS.escape(id)}"]`);
+    });
+}
+
 function renderUnifiHomePicker(data, { replace = false } = {}) {
     const wraps = [els.settingsUnifiDevices, document.getElementById('unifi-home-picker')].filter(Boolean);
     if (!wraps.length) return;
     const devices = Array.isArray(data?.devices) ? data.devices : [];
     const existing = document.querySelectorAll('input[data-unifi-home]');
+    if (!replace && existing.length && unifiPickerMissingAutoOff(devices)) {
+        replace = true;
+    }
     if (!replace && existing.length && unifiPickerDirty) {
         return;
     }
@@ -2667,6 +2678,83 @@ function renderUnifiHomePicker(data, { replace = false } = {}) {
     wraps.forEach((wrap) => {
         wrap.innerHTML = html;
     });
+}
+
+function unifiAutoOffParts(sec) {
+    const n = Math.max(0, Math.round(Number(sec) || 0));
+    if (n <= 0) return { enabled: false, value: 5, unit: 60 };
+    if (n % 3600 === 0) return { enabled: true, value: n / 3600, unit: 3600 };
+    if (n % 60 === 0) return { enabled: true, value: n / 60, unit: 60 };
+    return { enabled: true, value: n, unit: 1 };
+}
+
+function unifiAutoOffHtml(d) {
+    const id = String(d?.id || '');
+    if (!id || String(d?.kind || '') !== 'relay') return '';
+    const parts = unifiAutoOffParts(d.auto_off_sec);
+    return `<div class="unifi-pick-auto-off" data-unifi-auto-off-wrap="${escapeHtml(id)}">
+        <label class="unifi-pick-auto-off-toggle">
+            <input type="checkbox" data-unifi-auto-off-enabled="${escapeHtml(id)}" ${parts.enabled ? 'checked' : ''}>
+            <span>Auto-off</span>
+        </label>
+        <span class="unifi-pick-auto-off-fields${parts.enabled ? '' : ' hidden'}">
+            <input type="number" min="1" max="1440" step="1" value="${escapeHtml(String(parts.value))}" data-unifi-auto-off-value="${escapeHtml(id)}" aria-label="Auto-off after amount">
+            <select data-unifi-auto-off-unit="${escapeHtml(id)}" aria-label="Auto-off unit">
+                <option value="1"${parts.unit === 1 ? ' selected' : ''}>sec</option>
+                <option value="60"${parts.unit === 60 ? ' selected' : ''}>min</option>
+                <option value="3600"${parts.unit === 3600 ? ' selected' : ''}>hr</option>
+            </select>
+        </span>
+    </div>`;
+}
+
+function unifiReadAutoOffSec(id) {
+    const wrap = document.querySelector(`[data-unifi-auto-off-wrap="${CSS.escape(id)}"]`);
+    if (!wrap) return 0;
+    const enabled = wrap.querySelector(`[data-unifi-auto-off-enabled="${CSS.escape(id)}"]`);
+    if (!enabled?.checked) return 0;
+    const value = Math.max(1, Math.round(Number(wrap.querySelector(`[data-unifi-auto-off-value="${CSS.escape(id)}"]`)?.value || 5)));
+    const unit = Number(wrap.querySelector(`[data-unifi-auto-off-unit="${CSS.escape(id)}"]`)?.value || 60) || 60;
+    return Math.min(86400, value * unit);
+}
+
+function unifiSyncAutoOffFields(id) {
+    document.querySelectorAll(`[data-unifi-auto-off-wrap="${CSS.escape(id)}"]`).forEach((wrap) => {
+        const enabled = wrap.querySelector(`[data-unifi-auto-off-enabled="${CSS.escape(id)}"]`);
+        const fields = wrap.querySelector('.unifi-pick-auto-off-fields');
+        if (fields) fields.classList.toggle('hidden', !enabled?.checked);
+    });
+}
+
+async function saveUnifiAutoOff(id) {
+    const sec = unifiReadAutoOffSec(id);
+    unifiSyncAutoOffFields(id);
+    document.querySelectorAll(`[data-unifi-auto-off-wrap="${CSS.escape(id)}"]`).forEach((wrap) => {
+        const srcEnabled = document.querySelector(`[data-unifi-auto-off-enabled="${CSS.escape(id)}"]`);
+        const srcValue = document.querySelector(`[data-unifi-auto-off-value="${CSS.escape(id)}"]`);
+        const srcUnit = document.querySelector(`[data-unifi-auto-off-unit="${CSS.escape(id)}"]`);
+        wrap.querySelectorAll(`[data-unifi-auto-off-enabled="${CSS.escape(id)}"]`).forEach((el) => {
+            if (srcEnabled && el !== srcEnabled) el.checked = srcEnabled.checked;
+        });
+        wrap.querySelectorAll(`[data-unifi-auto-off-value="${CSS.escape(id)}"]`).forEach((el) => {
+            if (srcValue && el !== srcValue) el.value = srcValue.value;
+        });
+        wrap.querySelectorAll(`[data-unifi-auto-off-unit="${CSS.escape(id)}"]`).forEach((el) => {
+            if (srcUnit && el !== srcUnit) el.value = srcUnit.value;
+        });
+        unifiSyncAutoOffFields(id);
+    });
+    try {
+        const data = await unifiApi({ action: 'auto_off', id, sec }, 8000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not update auto-off');
+        if (unifiDash?.devices) {
+            const row = unifiDash.devices.find((d) => String(d.id) === id);
+            if (row) row.auto_off_sec = Number(data.auto_off_sec || 0);
+        }
+        if (unifiDash?.config) unifiDash.config.auto_off_sec = data.auto_off_map || unifiDash.config.auto_off_sec;
+    } catch (err) {
+        showToast(err.message || 'Could not update auto-off', 'error');
+    }
 }
 
 function unifiPickerHtml(devices) {
@@ -2694,16 +2782,32 @@ function unifiPickerHtml(devices) {
     groups.forEach((group) => {
         const rows = byGroup.get(group.id) || [];
         if (!rows.length) return;
-        out += `<section class="unifi-pick-group"><h4 class="unifi-pick-title">${escapeHtml(group.title)} <span class="unifi-pick-count">${rows.length}</span></h4><div class="unifi-pick-rows">`;
+        out += `<section class="unifi-pick-group"><h4 class="unifi-pick-title">${escapeHtml(group.title)} <span class="unifi-pick-count">${rows.length}</span></h4>`;
+        if (group.id === 'relays') {
+            out += '<p class="hint unifi-pick-auto-off-hint">Optional auto-off: when enabled, that relay turns Off after the timer every time it is turned On.</p>';
+        }
+        out += '<div class="unifi-pick-rows">';
         rows.forEach((d) => {
             const id = String(d.id || '');
             const checked = preserved ? preserved.has(id) : Boolean(d.show_on_home);
             const meta = d.status || unifiKindLabel(d);
-            out += `<label class="unifi-pick-row" data-unifi-pick="${escapeHtml(id)}">
-                <input type="checkbox" data-unifi-home="${escapeHtml(id)}" ${checked ? 'checked' : ''}>
-                <span class="unifi-pick-name">${escapeHtml(d.name || id)}</span>
-                <span class="unifi-pick-meta">${escapeHtml(meta)}</span>
-            </label>`;
+            const autoOff = unifiAutoOffHtml(d);
+            if (autoOff) {
+                out += `<div class="unifi-pick-row unifi-pick-row--relay" data-unifi-pick="${escapeHtml(id)}">
+                    <label class="unifi-pick-home">
+                        <input type="checkbox" data-unifi-home="${escapeHtml(id)}" ${checked ? 'checked' : ''}>
+                        <span class="unifi-pick-name">${escapeHtml(d.name || id)}</span>
+                        <span class="unifi-pick-meta">${escapeHtml(meta)}</span>
+                    </label>
+                    ${autoOff}
+                </div>`;
+            } else {
+                out += `<label class="unifi-pick-row" data-unifi-pick="${escapeHtml(id)}">
+                    <input type="checkbox" data-unifi-home="${escapeHtml(id)}" ${checked ? 'checked' : ''}>
+                    <span class="unifi-pick-name">${escapeHtml(d.name || id)}</span>
+                    <span class="unifi-pick-meta">${escapeHtml(meta)}</span>
+                </label>`;
+            }
         });
         out += '</div></section>';
     });
@@ -15268,16 +15372,23 @@ els.radioPlayerModal?.addEventListener('change', async (event) => {
         showToast(err.message || 'Could not update speakers', 'error');
     }
 });
-document.getElementById('unifi-card')?.addEventListener('change', (event) => {
-    const input = event.target.closest('input[data-unifi-home]');
-    if (!input) return;
-    saveUnifiShowOnHome(input.getAttribute('data-unifi-home') || '', input.checked);
-});
-els.settingsUnifiDevices?.addEventListener('change', (event) => {
-    const input = event.target.closest('input[data-unifi-home]');
-    if (!input) return;
-    saveUnifiShowOnHome(input.getAttribute('data-unifi-home') || '', input.checked);
-});
+function handleUnifiPickerChange(event) {
+    const home = event.target.closest('input[data-unifi-home]');
+    if (home) {
+        saveUnifiShowOnHome(home.getAttribute('data-unifi-home') || '', home.checked);
+        return;
+    }
+    const autoOff = event.target.closest('[data-unifi-auto-off-enabled], [data-unifi-auto-off-value], [data-unifi-auto-off-unit]');
+    if (!autoOff) return;
+    const id = autoOff.getAttribute('data-unifi-auto-off-enabled')
+        || autoOff.getAttribute('data-unifi-auto-off-value')
+        || autoOff.getAttribute('data-unifi-auto-off-unit')
+        || '';
+    if (!id) return;
+    saveUnifiAutoOff(id);
+}
+document.getElementById('unifi-card')?.addEventListener('change', handleUnifiPickerChange);
+els.settingsUnifiDevices?.addEventListener('change', handleUnifiPickerChange);
 document.getElementById('unifi-card')?.addEventListener('click', async (event) => {
     const toggleBtn = event.target.closest('[data-unifi-light], [data-unifi-relay]');
     if (toggleBtn) {

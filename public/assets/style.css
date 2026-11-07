@@ -4655,6 +4655,64 @@ button.unifi-live-open:focus-visible img {
     cursor: pointer;
 }
 
+.unifi-pick-row--relay {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+    cursor: default;
+}
+
+.unifi-pick-home {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.unifi-pick-auto-off-hint {
+    margin: 0 0 0.35rem;
+}
+
+.unifi-pick-auto-off {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.65rem;
+    padding-left: 1.7rem;
+}
+
+.unifi-pick-auto-off-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.unifi-pick-auto-off-fields {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.unifi-pick-auto-off-fields input[type="number"] {
+    width: 4.2rem;
+    min-width: 4.2rem;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.82rem;
+}
+
+.unifi-pick-auto-off-fields select {
+    width: auto;
+    min-width: 4.2rem;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.82rem;
+}
+
 .unifi-pick-name {
     flex: 1 1 auto;
     min-width: 0;

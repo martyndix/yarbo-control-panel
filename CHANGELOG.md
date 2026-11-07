@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.219] - 2026-11-07
+
+### Added
+- **UniFi relay auto-off:** on Settings → UniFi, each Protect relay (USL-Relay / plug) can optionally turn Off after a timer. When enabled, that timer starts every time the relay is turned On (Home, UniFi, scenes, or automations). Manual Off cancels it.
+
 ## [4.0.218] - 2026-11-07
 
 ### Changed
