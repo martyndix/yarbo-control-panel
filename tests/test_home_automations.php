@@ -883,6 +883,45 @@ $auto->delete('a-night');
 $commands = [];
 @unlink($auto->statePath());
 
+$sunOff = $auto->save([
+    'id' => 'a-sun-off',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'off_at_sun' => ['event' => 'sunset'],
+    'cooldown_sec' => 0,
+    'names' => ['unifi:sensor:s1' => 'Kitchen Sensor', 'unifi:light:porch' => 'Porch'],
+]);
+assert_true(!empty($sunOff['ok']), 'save off at sunset: ' . json_encode($sunOff));
+assert_true(($sunOff['automation']['off_at_sun']['event'] ?? '') === 'sunset', 'off_at_sun persisted');
+assert_true(($sunOff['automation']['off_after_sec'] ?? 1) === 0, 'off at sun clears timer');
+assert_true(empty($sunOff['automation']['off_when_false']), 'off at sun clears when-false');
+assert_true(
+    str_contains(YarboHomeAutomations::sentence($sunOff['automation'] ?? []), 'off at sunset'),
+    'sentence names off at sunset: ' . YarboHomeAutomations::sentence($sunOff['automation'] ?? [])
+);
+$sunsetAt = $auto->nextSunUnix('sunset', 0, $noonLocal->getTimestamp());
+assert_true(is_int($sunsetAt) && $sunsetAt > $noonLocal->getTimestamp(), 'next sunset after noon: ' . json_encode($sunsetAt));
+$commands = [];
+$auto->tick($motionSnap(false), $noonLocal->getTimestamp() - 1);
+$r = $auto->tick($motionSnap(true), $noonLocal->getTimestamp());
+assert_true($r['fired'] === ['a-sun-off'], 'Then fires at noon for sun-off: ' . json_encode($r));
+assert_true(($commands[0]['command'] ?? '') === 'on', 'Then turns porch on for sun-off');
+$stateSun = json_decode((string) file_get_contents($auto->statePath()), true);
+$delayedSun = $stateSun['delayed']['a-sun-off'] ?? null;
+assert_true(is_array($delayedSun) && $delayedSun !== [], 'off at sunset queues delayed: ' . json_encode($delayedSun));
+$jobAt = (int) (($delayedSun[0]['at'] ?? $delayedSun['at'] ?? 0));
+assert_true($jobAt === $sunsetAt, "delayed at sunset ($jobAt) vs nextSunUnix ($sunsetAt)");
+$commands = [];
+$r = $auto->tick($motionSnap(false), $sunsetAt - 1);
+assert_true(($r['turned_off'] ?? []) === [] && $commands === [], 'must not off before sunset');
+$r = $auto->tick($motionSnap(false), $sunsetAt);
+assert_true(($r['turned_off'] ?? []) === ['a-sun-off'], 'off at sunset: ' . json_encode($r));
+assert_true(($commands[0]['command'] ?? '') === 'off', 'sunset turns porch off: ' . json_encode($commands));
+$auto->delete('a-sun-off');
+$commands = [];
+@unlink($auto->statePath());
+
 $tzRoot = sys_get_temp_dir() . '/yarbo-auto-tzc-' . bin2hex(random_bytes(3));
 mkdir($tzRoot . '/data', 0775, true);
 file_put_contents($tzRoot . '/data/hub-config.json', json_encode([
@@ -1832,8 +1871,15 @@ assert_true(str_contains($index, 'id="auto-hold-sec"'), 'trigger delay select');
 assert_true(str_contains($index, 'After Then'), 'After Then label');
 assert_true(str_contains($index, 'Off when When stops'), 'turn off when When is false');
 assert_true(str_contains($index, 'Off after a timer'), 'timer After Then option');
+assert_true(str_contains($index, 'Off at sunset'), 'sunset After Then option');
+assert_true(str_contains($index, 'Off at sunrise'), 'sunrise After Then option');
 assert_true(str_contains($js, 'homeAutoReadOffWhenFalse'), 'off-when-false reader');
+assert_true(str_contains($js, 'homeAutoReadOffAtSun'), 'off-at-sun reader');
+assert_true(str_contains($js, 'off_at_sun: autoDraft.off_at_sun || null'), 'save sends off_at_sun');
 assert_true(str_contains($js, 'off_when_false: Boolean(autoDraft.off_when_false)'), 'save sends off_when_false');
+$autoPhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHomeAutomations.php');
+assert_true(str_contains($autoPhp, 'function normalizeOffAtSun'), 'normalizeOffAtSun exists');
+assert_true(str_contains($autoPhp, 'function nextSunUnix'), 'nextSunUnix schedules off at sun');
 assert_true(str_contains($index, 'data-auto-if="powerwall"'), 'only-if Powerwall button');
 assert_true(str_contains($js, 'homeAutoSanitizeThenLooks'), 'Then drops colour the bulb cannot do');
 assert_true(str_contains($js, 'homeColorInputsHtml'), 'Home colour controls helper');

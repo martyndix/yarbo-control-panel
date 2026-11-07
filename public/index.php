@@ -776,6 +776,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="0">Stay on</option>
                                     <option value="false">Off when When stops</option>
                                     <option value="1">Off after a timer</option>
+                                    <option value="sunset">Off at sunset</option>
+                                    <option value="sunrise">Off at sunrise</option>
                                 </select>
                                 <span id="auto-off-after-fields" class="auto-off-after-fields hidden">
                                     <input type="number" min="1" id="auto-off-after-value" value="5" aria-label="Turn off after amount">

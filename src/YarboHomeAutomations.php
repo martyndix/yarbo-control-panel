@@ -1338,8 +1338,15 @@ final class YarboHomeAutomations
             }
         }
         $offAfter = (int) ($rule['off_after_sec'] ?? 0);
+        $offAtSun = self::normalizeOffAtSun($rule['off_at_sun'] ?? null);
         if (!empty($rule['off_when_false'])) {
             $text .= ', then off when no longer true';
+        } elseif ($offAtSun !== null) {
+            $text .= ', off at ' . $offAtSun['event'];
+            if (($offAtSun['offset_min'] ?? 0) !== 0) {
+                $mins = (int) $offAtSun['offset_min'];
+                $text .= ($mins > 0 ? ' +' : ' ') . $mins . ' min';
+            }
         } elseif (!$actionOff && $offAfter > 0) {
             $text .= ', off after ' . self::formatDuration($offAfter);
         }
@@ -1626,7 +1633,8 @@ final class YarboHomeAutomations
             $cooldown = $hold;
         }
         $offWhenFalse = self::truthy($row['off_when_false'] ?? false);
-        if ($offWhenFalse) {
+        $offAtSun = self::normalizeOffAtSun($row['off_at_sun'] ?? null);
+        if ($offWhenFalse || $offAtSun !== null) {
             $offAfter = 0;
             foreach ($actions as $i => $action) {
                 if (isset($action['off_after_sec'])) {
@@ -1634,6 +1642,9 @@ final class YarboHomeAutomations
                 }
             }
             $actions = array_values($actions);
+        }
+        if ($offAtSun !== null) {
+            $offWhenFalse = false;
         }
         $name = YarboHub::normalizeDisplayName((string) ($row['name'] ?? ''), 64);
         if ($name === '' && $trigger !== null) {
@@ -1644,6 +1655,7 @@ final class YarboHomeAutomations
                 'actions' => $actions,
                 'off_after_sec' => $offAfter,
                 'off_when_false' => $offWhenFalse,
+                'off_at_sun' => $offAtSun,
                 'hold_sec' => $hold,
             ], $names), 64);
         }
@@ -1662,8 +1674,36 @@ final class YarboHomeAutomations
             'actions' => $actions,
             'off_after_sec' => $offAfter,
             'off_when_false' => $offWhenFalse,
+            'off_at_sun' => $offAtSun,
             'cooldown_sec' => $cooldown,
             'hold_sec' => $hold,
+        ];
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array{event: string, offset_min: int}|null
+     */
+    public static function normalizeOffAtSun(mixed $raw): ?array
+    {
+        if (!is_array($raw)) {
+            return null;
+        }
+        $event = strtolower(trim((string) ($raw['event'] ?? '')));
+        if ($event !== 'sunset' && $event !== 'sunrise') {
+            return null;
+        }
+        $offset = (int) ($raw['offset_min'] ?? 0);
+        if ($offset < -180) {
+            $offset = -180;
+        }
+        if ($offset > 180) {
+            $offset = 180;
+        }
+
+        return [
+            'event' => $event,
+            'offset_min' => $offset,
         ];
     }
 
@@ -2621,7 +2661,8 @@ final class YarboHomeAutomations
         if (!isset($state['delayed'][$id]) || !is_array($state['delayed'][$id])) {
             return;
         }
-        $jobs = $this->offAfterJobs($rule, 0);
+        $now = time();
+        $jobs = $this->offFollowJobs($rule, $now);
         if (empty($rule['enabled']) || $jobs === []) {
             unset($state['delayed'][$id]);
             $this->writeState($state);
@@ -2630,11 +2671,16 @@ final class YarboHomeAutomations
         }
         $existing = $state['delayed'][$id];
         $list = isset($existing['at']) ? [$existing] : (array_is_list($existing) ? $existing : [$existing]);
+        $isSun = self::normalizeOffAtSun($rule['off_at_sun'] ?? null) !== null;
         foreach ($jobs as $i => $job) {
+            if ($isSun) {
+                // Keep the absolute sun deadline from offFollowJobs.
+                continue;
+            }
             if (isset($list[$i]['at'])) {
                 $jobs[$i]['at'] = (int) $list[$i]['at'];
             } else {
-                $jobs[$i]['at'] = time() + (int) ($job['at'] ?? 0);
+                $jobs[$i]['at'] = $now + (int) ($job['at'] ?? 0);
             }
         }
         $state['delayed'][$id] = $jobs;
@@ -2648,7 +2694,7 @@ final class YarboHomeAutomations
     private function queueOffAfter(array &$state, array $rule, int $now): void
     {
         $id = (string) ($rule['id'] ?? '');
-        $jobs = $this->offAfterJobs($rule, $now);
+        $jobs = $this->offFollowJobs($rule, $now);
         if ($id === '' || $jobs === []) {
             unset($state['delayed'][$id]);
 
@@ -2661,11 +2707,30 @@ final class YarboHomeAutomations
     }
 
     /**
+     * Timer or next sunset/sunrise offs (mutually exclusive with off_when_false).
+     *
+     * @param array<string, mixed> $rule
+     * @return list<array{at: int, actions: list<array<string, mixed>>}>
+     */
+    private function offFollowJobs(array $rule, int $now): array
+    {
+        $timer = $this->offAfterJobs($rule, $now);
+        if ($timer !== []) {
+            return $timer;
+        }
+
+        return $this->offAtSunJobs($rule, $now);
+    }
+
+    /**
      * @param array<string, mixed> $rule
      * @return list<array{at: int, actions: list<array<string, mixed>>}>
      */
     private function offAfterJobs(array $rule, int $now): array
     {
+        if (self::normalizeOffAtSun($rule['off_at_sun'] ?? null) !== null) {
+            return [];
+        }
         $ruleSec = (int) ($rule['off_after_sec'] ?? 0);
         $jobs = [];
         foreach (is_array($rule['actions'] ?? null) ? $rule['actions'] : [] as $action) {
@@ -2684,6 +2749,57 @@ final class YarboHomeAutomations
         }
 
         return $jobs;
+    }
+
+    /**
+     * @param array<string, mixed> $rule
+     * @return list<array{at: int, actions: list<array<string, mixed>>}>
+     */
+    private function offAtSunJobs(array $rule, int $now): array
+    {
+        $sun = self::normalizeOffAtSun($rule['off_at_sun'] ?? null);
+        if ($sun === null) {
+            return [];
+        }
+        $offs = $this->offActions(is_array($rule['actions'] ?? null) ? $rule['actions'] : []);
+        if ($offs === []) {
+            return [];
+        }
+        $at = $this->nextSunUnix($sun['event'], (int) $sun['offset_min'], $now);
+        if ($at === null || $at <= $now) {
+            return [];
+        }
+
+        return [['at' => $at, 'actions' => $offs]];
+    }
+
+    public function nextSunUnix(string $event, int $offsetMin, int $now): ?int
+    {
+        $event = self::sunEventName($event);
+        $coords = $this->resolveCoords();
+        $lat = $coords['latitude'] ?? null;
+        $lon = $coords['longitude'] ?? null;
+        if (!is_float($lat) && !is_int($lat)) {
+            return null;
+        }
+        if (!is_float($lon) && !is_int($lon)) {
+            return null;
+        }
+        $tz = new \DateTimeZone($this->timezoneName());
+        for ($day = 0; $day <= 1; $day++) {
+            $probe = $now + ($day * 86400);
+            $hm = $this->sunEventHm($event, $probe, (float) $lat, (float) $lon, $offsetMin, $tz);
+            if ($hm === null || !preg_match('/^(\d{2}):(\d{2})$/', $hm, $m)) {
+                continue;
+            }
+            $local = (new \DateTimeImmutable('@' . $probe))->setTimezone($tz);
+            $at = $local->setTime((int) $m[1], (int) $m[2], 0)->getTimestamp();
+            if ($at > $now) {
+                return $at;
+            }
+        }
+
+        return null;
     }
 
     /**
