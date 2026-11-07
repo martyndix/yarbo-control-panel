@@ -2942,6 +2942,16 @@ function unifiDoorLockButtonHtml(d, { home = false } = {}) {
     return `<button type="button" class="btn btn-secondary btn-compact" data-unifi-door="${escapeHtml(d.id)}" data-unifi-cmd="unlock">${escapeHtml(label)}</button>`;
 }
 
+function homeDoorOpenChangedHtml(d) {
+    const text = String(d?.open_changed_text || '').trim();
+    if (!text) return '';
+    const at = Number(d?.open_changed_at || 0);
+    const title = at > 0 ? (() => {
+        try { return new Date(at * 1000).toLocaleString(); } catch { return text; }
+    })() : text;
+    return `<p class="home-device-changed" data-home-open-changed title="${escapeHtml(title)}">${escapeHtml(text)}</p>`;
+}
+
 function homeDoorsTileCardHtml(d) {
     const sensor = String(d.kind || '') === 'sensor';
     const gate = !sensor && d.gate
@@ -2952,10 +2962,14 @@ function homeDoorsTileCardHtml(d) {
     const unlock = sensor ? '' : unifiDoorLockButtonHtml(d, { home: true });
     const emoji = homeContactEmoji(d) || (sensor && homeContactRole(d) === 'window' ? '🪟' : '🚪');
     const label = `${emoji} ${d.name || (sensor ? (homeContactRole(d) === 'window' ? 'Window' : 'Door sensor') : 'Door')}`;
+    const changed = homeDoorOpenChangedHtml(d);
     return `<article class="home-device home-device--door home-device--unifi${sensor ? ' home-device--sensor' : ''}" data-home-id="${escapeHtml(d.id)}">
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
-            <p class="home-device-name">${escapeHtml(label)}</p>
+            <div class="home-device-title">
+                <p class="home-device-name">${escapeHtml(label)}</p>
+                ${changed}
+            </div>
         </div>
         <div class="home-device-actions">
             ${unifiDpsMetaHtml(d, 'data-home-dps')}
@@ -3011,10 +3025,44 @@ function renderHomeDoorsTile(data) {
             const emoji = homeContactEmoji(d) || (String(d.kind || '') === 'sensor' && homeContactRole(d) === 'window' ? '🪟' : '🚪');
             name.textContent = `${emoji} ${d.name}`;
         }
+        let titleWrap = el.querySelector('.home-device-title');
+        if (!titleWrap && name?.parentElement) {
+            titleWrap = document.createElement('div');
+            titleWrap.className = 'home-device-title';
+            name.parentElement.insertBefore(titleWrap, name);
+            titleWrap.appendChild(name);
+        }
+        let changed = el.querySelector('[data-home-open-changed]');
+        const changedText = String(d.open_changed_text || '').trim();
+        if (changedText) {
+            if (!changed && titleWrap) {
+                changed = document.createElement('p');
+                changed.className = 'home-device-changed';
+                changed.setAttribute('data-home-open-changed', '');
+                titleWrap.appendChild(changed);
+            }
+            if (changed) {
+                changed.textContent = changedText;
+                const at = Number(d.open_changed_at || 0);
+                try {
+                    changed.title = at > 0 ? new Date(at * 1000).toLocaleString() : changedText;
+                } catch {
+                    changed.title = changedText;
+                }
+            }
+        } else if (changed) {
+            changed.remove();
+        }
         const status = el.querySelector('[data-home-dps]');
         if (status) {
-            const label = String(d.dps_label || '').trim()
-                || (d.open === true ? 'Open' : (d.open === false && (d.has_dps || d.dps) ? 'Closed' : status.textContent));
+            let label = String(d.dps_label || '').trim();
+            if (!label && d.has_open) {
+                const st = String(d.status || '').trim();
+                if (/(^|[·\s])(Open|Closed)(\s|$|[·])/i.test(st)) label = st;
+            }
+            if (!label) {
+                label = d.open === true ? 'Open' : (d.open === false && (d.has_dps || d.dps || d.has_open) ? 'Closed' : status.textContent);
+            }
             if (label) status.textContent = label;
             status.classList.toggle('is-open', d.open === true || d.dps === 'open' || d.dps === 'opened' || /^Open\b/i.test(String(label || '')));
         }
@@ -3087,15 +3135,22 @@ function unifiDoorCommandToast(cmd) {
 function unifiDpsMetaHtml(d, attr) {
     let label = String(d?.dps_label || '').trim()
         || (d?.dps === 'open' || d?.dps === 'opened' ? 'Open' : (d?.dps === 'close' || d?.dps === 'closed' ? 'Closed' : ''));
+    // Protect contact sensors pack Open/Closed · temp · RH into status.
+    if ((!label || /^(Open|Closed)$/i.test(label)) && d?.has_open) {
+        const status = String(d?.status || '').trim();
+        if (/(^|[·\s])(Open|Closed)(\s|$|[·])/i.test(status) && /[·°%]/.test(status)) {
+            label = status;
+        }
+    }
     if (!label && d?.open === true) label = 'Open';
     if (!label && d?.open === false && (d?.has_dps || d?.has_open)) label = 'Closed';
     if (!label) {
         const status = String(d?.status || '');
-        if (/(^|[·\s])Open(\s|$)/i.test(status)) label = 'Open';
-        else if (/(^|[·\s])Closed(\s|$)/i.test(status)) label = 'Closed';
+        if (/(^|[·\s])Open(\s|$|[·])/i.test(status)) label = status.includes('·') ? status : 'Open';
+        else if (/(^|[·\s])Closed(\s|$|[·])/i.test(status)) label = status.includes('·') ? status : 'Closed';
     }
     if (!label && !d?.has_dps && !d?.has_open) return '';
-    const open = label === 'Open' || d?.open === true;
+    const open = /^Open\b/i.test(label) || d?.open === true;
     return `<span class="home-device-meta${open ? ' is-open' : ''}" ${attr}>${escapeHtml(label || '—')}</span>`;
 }
 

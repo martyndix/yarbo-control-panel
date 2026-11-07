@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.217] - 2026-11-07
+
+### Added
+- **Doors tile — last opened/closed:** each row shows very small muted text under the name (e.g. `Opened 14:32` / `Closed 2 Nov 18:04`) after the panel sees an Open↔Closed change. UniFi does not report this, so the Pi remembers the last flip.
+
 ## [4.0.216] - 2026-11-07
 
 ### Added

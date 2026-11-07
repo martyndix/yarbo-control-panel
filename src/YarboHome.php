@@ -100,6 +100,7 @@ final class YarboHome
             'active_scene_id' => '',
             'last_devices' => [],
             'last_trigger' => [],
+            'open_changed' => [],
             'contact_kind' => [],
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
         ];
@@ -236,6 +237,7 @@ final class YarboHome
                 is_array($decoded['last_devices'] ?? null) ? $decoded['last_devices'] : []
             ),
             'last_trigger' => $this->normalizeLastTrigger($decoded['last_trigger'] ?? null),
+            'open_changed' => $this->normalizeOpenChanged($decoded['open_changed'] ?? null),
             'contact_kind' => $this->normalizeContactKind($decoded['contact_kind'] ?? null),
             'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
         ];
@@ -2149,6 +2151,107 @@ final class YarboHome
     }
 
     /**
+     * Tiny Doors-tile caption: "Opened 14:32" / "Closed 2 Nov 18:04".
+     */
+    public static function openChangedText(bool $open, int $at, string $timezone = 'Europe/Zurich'): string
+    {
+        if ($at <= 0) {
+            return '';
+        }
+        $when = self::lastTriggerClock($at, $timezone);
+        if ($when === '') {
+            return '';
+        }
+
+        return ($open ? 'Opened' : 'Closed') . ' ' . $when;
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array<string, array{open: bool, at: int}>
+     */
+    private function normalizeOpenChanged(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $id => $row) {
+            $id = trim((string) $id);
+            if ($id === '' || !is_array($row)) {
+                continue;
+            }
+            if (!array_key_exists('open', $row) || ($row['open'] !== true && $row['open'] !== false && $row['open'] !== 0 && $row['open'] !== 1 && $row['open'] !== '0' && $row['open'] !== '1')) {
+                continue;
+            }
+            $at = isset($row['at']) && is_numeric($row['at']) ? (int) $row['at'] : 0;
+            if ($at < 0) {
+                $at = 0;
+            }
+            $out[$id] = [
+                'open' => (bool) $row['open'],
+                'at' => $at,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Remember Open↔Closed edges for the Doors tile (UniFi has no last-changed field).
+     *
+     * @param list<array<string, mixed>> $rows
+     * @param array<string, mixed> $store
+     * @return list<array<string, mixed>>
+     */
+    private function applyOpenChanged(array $rows, array $store): array
+    {
+        $all = is_array($store['open_changed'] ?? null) ? $store['open_changed'] : [];
+        $tz = $this->triggerTimezone();
+        $now = time();
+        $dirty = false;
+        foreach ($rows as &$row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $open = $row['open'] ?? null;
+            if ($open !== true && $open !== false) {
+                continue;
+            }
+            $prev = is_array($all[$id] ?? null) ? $all[$id] : null;
+            if ($prev === null) {
+                // First sight: keep state, hide caption until a real edge.
+                $all[$id] = ['open' => $open, 'at' => 0];
+                $dirty = true;
+            } elseif ((bool) ($prev['open'] ?? null) !== $open) {
+                $all[$id] = ['open' => $open, 'at' => $now];
+                $dirty = true;
+            }
+            $at = (int) ($all[$id]['at'] ?? 0);
+            if ($at > 0) {
+                $row['open_changed_at'] = $at;
+                $row['open_changed_text'] = self::openChangedText($open, $at, $tz);
+            }
+        }
+        unset($row);
+        if ($dirty) {
+            if (count($all) > 400) {
+                uasort($all, static fn (array $a, array $b): int => ((int) ($a['at'] ?? 0)) <=> ((int) ($b['at'] ?? 0)));
+                $all = array_slice($all, -300, null, true);
+            }
+            $fresh = $this->load();
+            $fresh['open_changed'] = $all;
+            $this->write($fresh);
+        }
+
+        return $rows;
+    }
+
+    /**
      * Room and group On/Off only switch lights (Hue, Matter bulbs, UniFi floodlights).
      * Cameras, sensors, heaters, vacuums, relays, plugs, and switches are not lights.
      *
@@ -2771,7 +2874,7 @@ final class YarboHome
             $out[] = $row;
         }
 
-        return $out;
+        return $this->applyOpenChanged($out, $store);
     }
 
     /**

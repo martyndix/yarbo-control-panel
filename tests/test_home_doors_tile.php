@@ -193,6 +193,52 @@ assert_true(($byTile['unifi:door:garage']['dps_label'] ?? '') === 'Open', 'tile 
 assert_true(($byTile['unifi:door:garage']['open'] ?? null) === true, 'tile keeps open boolean');
 assert_true(($byTile['unifi:door:side']['dps_label'] ?? '') === 'Closed', 'tile keeps live Closed');
 assert_true(($byTile['unifi:hub:h-gate']['gate'] ?? false) === true, 'gate hub keeps gate controls');
+assert_true(empty($byTile['unifi:door:garage']['open_changed_text'] ?? null), 'first sight has no last-changed caption yet');
+
+$tz = 'Europe/Zurich';
+$noon = (new DateTimeImmutable('2026-11-07 14:32:00', new DateTimeZone($tz)))->getTimestamp();
+assert_true(
+    YarboHome::openChangedText(true, $noon, $tz) === 'Opened 14:32',
+    'openChangedText same-day opened'
+);
+assert_true(
+    YarboHome::openChangedText(false, $noon, $tz) === 'Closed 14:32',
+    'openChangedText same-day closed'
+);
+$yesterday = (new DateTimeImmutable('2026-11-06 18:04:00', new DateTimeZone($tz)))->getTimestamp();
+assert_true(
+    YarboHome::openChangedText(false, $yesterday, $tz) === 'Closed 6 Nov 18:04',
+    'openChangedText prior-day closed'
+);
+assert_true(YarboHome::openChangedText(true, 0, $tz) === '', 'openChangedText empty when at is 0');
+
+$seeded = json_decode((string) file_get_contents($root . '/data/home.json'), true);
+assert_true(is_array($seeded['open_changed']['unifi:door:garage'] ?? null), 'first sight seeds open_changed');
+assert_true(($seeded['open_changed']['unifi:door:garage']['at'] ?? 1) === 0, 'first sight at is 0 until a flip');
+assert_true(($seeded['open_changed']['unifi:door:garage']['open'] ?? null) === true, 'first sight remembers open');
+
+$inv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+foreach ($inv['doors'] as &$doorRow) {
+    if (($doorRow['id'] ?? '') === 'unifi:door:garage') {
+        $doorRow['open'] = false;
+        $doorRow['dps'] = 'close';
+        $doorRow['dps_label'] = 'Closed';
+        $doorRow['on'] = true;
+    }
+}
+unset($doorRow);
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+$afterFlip = (new YarboHome($root))->dashboard();
+$garageAfter = [];
+foreach ($afterFlip['unifi_doors'] as $row) {
+    if (($row['id'] ?? '') === 'unifi:door:garage') {
+        $garageAfter = $row;
+        break;
+    }
+}
+assert_true(($garageAfter['open'] ?? null) === false, 'tile sees closed after flip');
+assert_true(is_string($garageAfter['open_changed_text'] ?? null) && str_starts_with((string) $garageAfter['open_changed_text'], 'Closed '), 'flip adds Closed caption');
+assert_true((int) ($garageAfter['open_changed_at'] ?? 0) > 0, 'flip stores open_changed_at');
 
 assert_true($unifi->setDoorsTile(false), 'can turn the doors tile off');
 assert_true($unifi->doorsTileEnabled() === false, 'doors tile off persists');
@@ -268,12 +314,17 @@ assert_true(str_contains($js, 'function homeDoorsTileCardHtml'), 'JS builds comp
 assert_true(str_contains($js, 'function pinHomeDoorsAfterVestaboard'), 'JS keeps the tile under Vestaboard after reorder');
 assert_true(str_contains($js, 'unifiDoorLockButtonHtml(d, { home: true })'), 'tile reuses the live Unlock/Lock label');
 assert_true(str_contains($js, "unifiDpsMetaHtml(d, 'data-home-dps')"), 'tile shows live Open/Closed');
+assert_true(str_contains($js, 'function homeDoorOpenChangedHtml'), 'JS builds last opened/closed microcopy');
+assert_true(str_contains($js, 'data-home-open-changed'), 'JS marks last opened/closed element');
 assert_true(str_contains($js, "action: 'doors_tile'"), 'JS saves the optional tick without Settings → Save');
 assert_true(str_contains($js, "action: 'doors_tile_sensors'"), 'JS saves the door-sensors tick without Settings → Save');
 assert_true(str_contains($js, "const sensor = String(d.kind || '') === 'sensor'"), 'sensor rows on the tile have no Unlock/Lock');
 assert_true(str_contains($js, 'homeUnifiDoorClick'), 'Unlock/Lock on the tile uses the Home UniFi command');
 assert_true(str_contains($css, '.home-doors-card'), 'compact doors tile has CSS');
+assert_true(str_contains($css, '.home-device-changed'), 'last opened/closed has very small muted CSS');
 assert_true(str_contains($change, '## [4.0.149]'), 'changelog 4.0.149');
 assert_true(str_contains($change, '## [4.0.150]'), 'changelog 4.0.150');
+assert_true(str_contains($change, '## [4.0.217]'), 'changelog 4.0.217');
+assert_true(str_contains($change, 'last opened/closed'), 'changelog mentions last opened/closed');
 
 fwrite(STDOUT, "test_home_doors_tile.php ok\n");
