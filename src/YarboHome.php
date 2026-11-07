@@ -2172,13 +2172,50 @@ final class YarboHome
     }
 
     /**
-     * Room headers stay green only when a light is on.
+     * Room headers stay fully green only when a light is on.
      *
      * @param array<string, mixed> $device
      */
     public static function countsTowardRoomOn(array $device): bool
     {
         return self::isRoomLight($device);
+    }
+
+    /**
+     * Plugs and relays light their own tiles when on, but must not paint the room row.
+     * Collapsed rooms still get a green name-dot via has_active.
+     *
+     * @param array<string, mixed> $device
+     */
+    public static function isRoomOutlet(array $device): bool
+    {
+        $id = trim((string) ($device['id'] ?? ''));
+        $kind = strtolower(trim((string) ($device['kind'] ?? '')));
+        $parsed = $id !== '' ? YarboUnifi::parseHomeId($id) : null;
+        $isUnifi = $parsed !== null || strtolower((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE;
+        if ($isUnifi) {
+            if ($parsed !== null) {
+                $kind = strtolower((string) ($parsed['kind'] ?? $kind));
+            }
+
+            return $kind === YarboUnifi::KIND_RELAY;
+        }
+
+        return $kind === self::KIND_PLUG || $kind === 'relay';
+    }
+
+    /**
+     * Green name-dot on a room/group when a light, plug, or relay is on.
+     *
+     * @param array<string, mixed> $device
+     */
+    public static function countsTowardRoomActiveDot(array $device): bool
+    {
+        if (empty($device['on'])) {
+            return false;
+        }
+
+        return self::isRoomLight($device) || self::isRoomOutlet($device);
     }
 
     /**
@@ -5095,7 +5132,7 @@ final class YarboHome
     /**
      * @param array{room_defs?: list<array{id: string, name: string}>, group_defs?: list<array{id: string, name: string, room_id: string}>} $store
      * @param list<array<string, mixed>> $visibleDevices
-     * @return list<array{id: string, name: string, on: bool, brightness: ?int, dimmable: bool, switchable: bool, count: int, groups: list<array<string, mixed>>}>
+     * @return list<array{id: string, name: string, on: bool, has_active: bool, brightness: ?int, dimmable: bool, switchable: bool, count: int, groups: list<array<string, mixed>>}>
      */
     private function roomsPayload(array $store, array $visibleDevices): array
     {
@@ -5115,6 +5152,7 @@ final class YarboHome
                 'id' => $id,
                 'name' => $name,
                 'on' => $stats['on'],
+                'has_active' => $stats['has_active'],
                 'brightness' => $stats['brightness'],
                 'dimmable' => $stats['dimmable'],
                 'switchable' => $stats['switchable'],
@@ -5129,7 +5167,7 @@ final class YarboHome
     /**
      * @param array{group_defs?: list<array{id: string, name: string, room_id: string}>} $store
      * @param list<array<string, mixed>> $inRoom
-     * @return list<array{id: string, name: string, room_id: string, on: bool, brightness: ?int, dimmable: bool, switchable: bool, count: int}>
+     * @return list<array{id: string, name: string, room_id: string, on: bool, has_active: bool, brightness: ?int, dimmable: bool, switchable: bool, count: int}>
      */
     private function groupsPayload(array $store, string $roomId, array $inRoom): array
     {
@@ -5150,6 +5188,7 @@ final class YarboHome
                 'name' => $name,
                 'room_id' => $roomId,
                 'on' => $stats['on'],
+                'has_active' => $stats['has_active'],
                 'brightness' => $stats['brightness'],
                 'dimmable' => $stats['dimmable'],
                 'switchable' => $stats['switchable'],
@@ -5162,16 +5201,20 @@ final class YarboHome
 
     /**
      * @param list<array<string, mixed>> $devices
-     * @return array{on: bool, dimmable: bool, switchable: bool, brightness: ?int, count: int}
+     * @return array{on: bool, has_active: bool, dimmable: bool, switchable: bool, brightness: ?int, count: int}
      */
     private function aggregateDeviceStats(array $devices): array
     {
         $on = false;
+        $hasActive = false;
         $dimmable = false;
         $switchable = false;
         $brightSum = 0;
         $brightN = 0;
         foreach ($devices as $device) {
+            if (self::countsTowardRoomActiveDot($device)) {
+                $hasActive = true;
+            }
             if (!self::isRoomLight($device)) {
                 continue;
             }
@@ -5189,6 +5232,7 @@ final class YarboHome
 
         return [
             'on' => $on,
+            'has_active' => $hasActive || $on,
             'dimmable' => $dimmable,
             'switchable' => $switchable,
             'brightness' => $brightN > 0 ? (int) round($brightSum / $brightN) : null,

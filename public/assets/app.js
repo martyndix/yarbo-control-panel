@@ -3835,6 +3835,33 @@ function homeIsLight(d) {
     return !d?.kind || d.kind === 'light';
 }
 
+function homeIsOutlet(d) {
+    if (!d) return false;
+    if (homeIsUnifi(d)) return String(d.kind || '') === 'relay';
+    const kind = String(d.kind || '').toLowerCase();
+    return kind === 'plug' || kind === 'relay';
+}
+
+function homeMembersHaveOutletOn(members) {
+    return (members || []).some((d) => Boolean(d?.on) && homeIsOutlet(d));
+}
+
+function homeMembersHaveLightOn(members) {
+    return (members || []).some((d) => Boolean(d?.on) && homeIsLight(d));
+}
+
+function homeHeadingHasActive(members, lightOn) {
+    if (lightOn === true || homeMembersHaveLightOn(members)) return true;
+    return homeMembersHaveOutletOn(members);
+}
+
+function syncHomeHeadingActive(heading, members, lightOn) {
+    if (!heading) return;
+    const lights = lightOn == null ? homeMembersHaveLightOn(members) : Boolean(lightOn);
+    heading.classList.toggle('is-on', lights);
+    heading.classList.toggle('has-active', homeHeadingHasActive(members, lights));
+}
+
 function homeDeviceHoverTitle(d) {
     const bits = [d?.kind, d?.room, d?.product && d.product !== d.name ? d.product : '']
         .filter(Boolean);
@@ -3933,13 +3960,15 @@ function syncHomeAlertsForDevice(id) {
     if (!device?.room_id) return;
     const devices = [...(homeDash.devices || []), ...(homeDash.hidden_devices || [])];
     const roomMembers = devices.filter((d) => d.room_id === device.room_id);
-    syncHomeHeadingAlerts(document.querySelector(`[data-home-room="${CSS.escape(device.room_id)}"]`), roomMembers);
+    const roomHeading = document.querySelector(`[data-home-room="${CSS.escape(device.room_id)}"]`);
+    syncHomeHeadingAlerts(roomHeading, roomMembers);
+    syncHomeHeadingActive(roomHeading, roomMembers);
     if (!device.group_id) return;
     const wrap = document.querySelector(`[data-home-group="${CSS.escape(device.group_id)}"]`);
-    syncHomeHeadingAlerts(
-        wrap?.querySelector('.home-group-heading') || wrap,
-        roomMembers.filter((d) => d.group_id === device.group_id)
-    );
+    const groupMembers = roomMembers.filter((d) => d.group_id === device.group_id);
+    const groupHeading = wrap?.querySelector('.home-group-heading') || wrap;
+    syncHomeHeadingAlerts(groupHeading, groupMembers);
+    syncHomeHeadingActive(groupHeading, groupMembers);
 }
 
 function homeMembersHaveLight(members) {
@@ -4466,6 +4495,7 @@ function setHomeDeviceOn(id, on) {
     const device = homeDeviceRecord(id);
     if (device) device.on = Boolean(on);
     patchHomeDeviceVisual(id, on);
+    syncHomeAlertsForDevice(id);
 }
 
 function homeDomIds(sel) {
@@ -4523,23 +4553,33 @@ function patchHomeDashboard(data) {
     (data.rooms || []).forEach((room) => {
         const el = document.querySelector(`[data-home-room="${CSS.escape(room.id)}"]`);
         if (!el) return;
-        el.classList.toggle('is-on', Boolean(room.on));
         const btn = el.querySelector('[data-home-room-toggle]');
         if (btn) btn.textContent = room.on ? 'Off' : 'On';
         const roomMembers = next.filter((d) => d.room_id === room.id);
         patchHomeBrightInput(el.querySelector('[data-home-room-bright]'), room.brightness);
         patchHomeClusterAdaptive(el, roomMembers);
         syncHomeHeadingAlerts(el, roomMembers);
+        // Full green tile only for lights; has-active greens the name-dot for plugs/relays too.
+        el.classList.toggle('is-on', Boolean(room.on));
+        el.classList.toggle(
+            'has-active',
+            room.has_active != null ? Boolean(room.has_active) : homeHeadingHasActive(roomMembers, room.on)
+        );
         (room.groups || []).forEach((group) => {
             const wrap = document.querySelector(`[data-home-group="${CSS.escape(group.id)}"]`);
             if (!wrap) return;
-            wrap.querySelector('.home-group-heading')?.classList.toggle('is-on', Boolean(group.on));
+            const heading = wrap.querySelector('.home-group-heading') || wrap;
             const gbtn = wrap.querySelector('[data-home-group-toggle]');
             if (gbtn) gbtn.textContent = group.on ? 'Off' : 'On';
             const groupMembers = roomMembers.filter((d) => d.group_id === group.id);
             patchHomeBrightInput(wrap.querySelector('[data-home-group-bright]'), group.brightness);
             patchHomeClusterAdaptive(wrap, groupMembers);
-            syncHomeHeadingAlerts(wrap.querySelector('.home-group-heading') || wrap, groupMembers);
+            syncHomeHeadingAlerts(heading, groupMembers);
+            heading.classList.toggle('is-on', Boolean(group.on));
+            heading.classList.toggle(
+                'has-active',
+                group.has_active != null ? Boolean(group.has_active) : homeHeadingHasActive(groupMembers, group.on)
+            );
         });
     });
     if (!homeManageOpen) {
@@ -4903,6 +4943,7 @@ function homeGroupSelectHtml(d, rooms) {
 
 function homeRoomHeadingHtml(room, members) {
     const on = Boolean(room.on);
+    const active = room.has_active != null ? Boolean(room.has_active) : homeHeadingHasActive(members, on);
     const switchable = homeMembersHaveLight(members) || homeRoomSwitchable(room);
     const dimmable = homeMembersDimmable(members) || Boolean(room.dimmable);
     const expanded = homeExpandedRooms.has(room.id);
@@ -4918,7 +4959,7 @@ function homeRoomHeadingHtml(room, members) {
         : `<h3 class="home-room-title">${escapeHtml(room.name)}</h3>`;
     const count = Number(room.count || 0);
     return `<div class="home-room-group${expanded ? ' is-open' : ''}" data-home-room-group="${escapeHtml(room.id)}">
-        <div class="home-room${on ? ' is-on' : ''}" data-home-room="${escapeHtml(room.id)}">
+        <div class="home-room${on ? ' is-on' : ''}${active ? ' has-active' : ''}" data-home-room="${escapeHtml(room.id)}">
         ${homeReorderHandleHtml()}
         <button type="button" class="home-room-expand" data-home-room-expand="${escapeHtml(room.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? 'Hide lights in this room' : 'Show lights in this room'}" aria-label="${expanded ? 'Hide lights in this room' : 'Show lights in this room'}">${expanded ? '−' : '+'}</button>
         <div class="home-device-label">
@@ -4940,6 +4981,7 @@ function homeRoomHeadingHtml(room, members) {
 
 function homeGroupHeadingHtml(group, members) {
     const on = Boolean(group.on);
+    const active = group.has_active != null ? Boolean(group.has_active) : homeHeadingHasActive(members, on);
     const switchable = homeMembersHaveLight(members) || homeGroupSwitchable(group);
     const dimmable = homeMembersDimmable(members) || Boolean(group.dimmable);
     const expanded = homeExpandedGroups.has(group.id);
@@ -4955,7 +4997,7 @@ function homeGroupHeadingHtml(group, members) {
         : `<h3 class="home-room-title">${escapeHtml(group.name)}</h3>`;
     const count = Number(group.count || 0);
     return `<div class="home-group${expanded ? ' is-open' : ''}" data-home-group="${escapeHtml(group.id)}">
-        <div class="home-room home-group-heading${on ? ' is-on' : ''}">
+        <div class="home-room home-group-heading${on ? ' is-on' : ''}${active ? ' has-active' : ''}">
         ${homeReorderHandleHtml()}
         <button type="button" class="home-room-expand" data-home-group-expand="${escapeHtml(group.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? 'Hide lights in this group' : 'Show lights in this group'}" aria-label="${expanded ? 'Hide lights in this group' : 'Show lights in this group'}">${expanded ? '−' : '+'}</button>
         <div class="home-device-label">
@@ -5580,12 +5622,14 @@ function refreshHomeRoomCounts() {
         room.switchable = homeMembersHaveLight(members);
         room.dimmable = homeMembersDimmable(members);
         room.on = members.some((d) => d.on && homeIsLight(d));
+        room.has_active = homeHeadingHasActive(members, room.on);
         (room.groups || []).forEach((group) => {
             const gm = members.filter((d) => d.group_id === group.id);
             group.count = gm.length;
             group.switchable = homeMembersHaveLight(gm);
             group.dimmable = homeMembersDimmable(gm);
             group.on = gm.some((d) => d.on && homeIsLight(d));
+            group.has_active = homeHeadingHasActive(gm, group.on);
         });
     });
 }
