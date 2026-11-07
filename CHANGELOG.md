@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.216] - 2026-11-07
+
+### Added
+- **Automations After Then — Off at sunset / sunrise:** turn Then lights or scenes off at the next sunset or sunrise without a second automation. Needs the same location as other sun rules.
+
 ## [4.0.215] - 2026-11-07
 
 ### Fixed
