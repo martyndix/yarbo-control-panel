@@ -101,6 +101,20 @@ if ($action === 'show_on_home') {
     json_response(['ok' => true, 'show_on_home' => $unifi->load()['show_on_home']]);
 }
 
+if ($action === 'auto_off') {
+    $id = (string) ($input['id'] ?? '');
+    $sec = (int) ($input['sec'] ?? $input['auto_off_sec'] ?? $input['seconds'] ?? 0);
+    if (!$unifi->setAutoOff($id, $sec)) {
+        json_response(['ok' => false, 'error' => 'Could not update auto-off (Protect relays only)'], 400);
+    }
+    json_response([
+        'ok' => true,
+        'id' => $id,
+        'auto_off_sec' => $unifi->autoOffSec($id),
+        'auto_off_map' => $unifi->autoOffMap(),
+    ]);
+}
+
 if ($action === 'doors_tile') {
     $show = YarboHub::asBool($input['show'] ?? $input['on'] ?? $input['doors_tile'] ?? true);
     if (!$unifi->setDoorsTile($show)) {
