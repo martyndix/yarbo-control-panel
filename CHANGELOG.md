@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.215] - 2026-11-07
+
+### Fixed
+- **Collapsed rooms show a green name-dot** when a plug or relay inside is on, without painting the whole room tile green (lights still do). Motion 👤 and open door/window 🚪/🪟 icons beside the room name still update live.
+
 ## [4.0.214] - 2026-11-05
 
 ### Changed
