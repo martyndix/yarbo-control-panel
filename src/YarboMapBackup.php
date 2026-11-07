@@ -54,24 +54,29 @@ final class YarboMapBackup
     /**
      * @return array<string, mixed>
      */
-    public function listAndFetch(YarboMqtt $client, mixed $backupId = null, ?YarboCloud $cloud = null, string $serial = ''): array
+    public function listAndFetch(?YarboMqtt $client = null, mixed $backupId = null, ?YarboCloud $cloud = null, string $serial = ''): array
     {
-        $listEnvelope = $client->requestDataFeedback(self::LIST_CMD, [], 8.0, false);
-        $via = 'local';
+        // Prefer cloud — current Yarbo firmware closed LAN :1883.
+        $listEnvelope = null;
+        $via = 'cloud';
         $cloudError = null;
-        if ($listEnvelope === null && $cloud !== null && $serial !== '') {
+        if ($cloud !== null && $serial !== '') {
             $raw = $cloud->command(self::LIST_CMD, $serial, [], 25.0);
             $listEnvelope = $this->envelopeFromCloud($raw, self::LIST_CMD);
-            if ($listEnvelope !== null) {
-                $via = 'cloud';
-            } else {
+            if ($listEnvelope === null) {
                 $cloudError = (string) ($raw['error'] ?? '');
+            }
+        }
+        if ($listEnvelope === null && $client !== null) {
+            $listEnvelope = $client->requestDataFeedback(self::LIST_CMD, [], 8.0, false);
+            if ($listEnvelope !== null) {
+                $via = 'local';
             }
         }
         if ($listEnvelope === null) {
             $hint = $cloudError !== null && $cloudError !== ''
                 ? $cloudError
-                : 'Map backup/restore uses Yarbo cloud MQTT, not the LAN broker. Enable Settings → cloud fallback with the same account as the app, then try again.';
+                : 'Could not list map backups over Yarbo cloud MQTT. Check Settings → Yarbo account email/password and serial, confirm the robot is online in the app, then Save.';
             return ['ok' => false, 'error' => $hint];
         }
 
@@ -96,34 +101,37 @@ final class YarboMapBackup
 
         if ($chosenId !== null && ($fetched === null || !YarboMap::isAppMap($fetched['map'] ?? []))) {
             $payload = self::fetchPayloads($chosenId, $chosenFields)[0] ?? ['id' => $chosenId];
-            $candidate = $client->requestDataFeedback(
-                self::FETCH_CMD,
-                $payload,
-                30.0,
-                false,
-                self::FETCH_TOPICS,
-                true
-            );
-            $tryVia = 'local';
+            $candidate = null;
+            $tryVia = 'cloud';
             $fetchCmdUsed = self::FETCH_CMD;
-            if ($candidate === null) {
+            $attemptError = null;
+            if ($cloud !== null && $serial !== '') {
+                $raw = $cloud->command(self::FETCH_CMD, $serial, $payload, 40.0);
+                $candidate = $this->envelopeFromCloud($raw, self::FETCH_CMD);
+                $attemptError = $candidate === null ? (string) ($raw['error'] ?? 'No cloud reply') : null;
+            }
+            if ($candidate === null && $client !== null) {
                 $candidate = $client->requestDataFeedback(
-                    self::FETCH_CMD_ALIAS,
+                    self::FETCH_CMD,
                     $payload,
-                    20.0,
+                    30.0,
                     false,
                     self::FETCH_TOPICS,
                     true
                 );
-                $fetchCmdUsed = self::FETCH_CMD_ALIAS;
-            }
-            if ($candidate === null && $cloud !== null && $serial !== '') {
-                $raw = $cloud->command(self::FETCH_CMD, $serial, $payload, 40.0);
-                $candidate = $this->envelopeFromCloud($raw, self::FETCH_CMD);
-                $tryVia = 'cloud';
+                $tryVia = 'local';
                 $fetchCmdUsed = self::FETCH_CMD;
-                $attemptError = $candidate === null ? (string) ($raw['error'] ?? 'No cloud reply') : null;
-            } else {
+                if ($candidate === null) {
+                    $candidate = $client->requestDataFeedback(
+                        self::FETCH_CMD_ALIAS,
+                        $payload,
+                        20.0,
+                        false,
+                        self::FETCH_TOPICS,
+                        true
+                    );
+                    $fetchCmdUsed = self::FETCH_CMD_ALIAS;
+                }
                 $attemptError = $candidate === null ? 'No LAN reply' : null;
             }
             if ($candidate === null) {
@@ -312,7 +320,7 @@ final class YarboMapBackup
     /**
      * @return array<string, mixed>|null
      */
-    private function fetchLiveMap(YarboMqtt $client, ?YarboCloud $cloud, string $serial): ?array
+    private function fetchLiveMap(?YarboMqtt $client, ?YarboCloud $cloud, string $serial): ?array
     {
         $map = $this->readCurrentMap($client, $cloud, $serial, $cloud !== null && $serial !== '');
         if (is_array($map)) {
@@ -829,7 +837,7 @@ final class YarboMapBackup
      *
      * @return array<string, mixed>|null
      */
-    private function readCurrentMap(YarboMqtt $client, ?YarboCloud $cloud, string $serial, bool $preferCloud = false): ?array
+    private function readCurrentMap(?YarboMqtt $client, ?YarboCloud $cloud, string $serial, bool $preferCloud = false): ?array
     {
         $tryCloud = static function () use ($cloud, $serial): ?array {
             if ($cloud === null || $serial === '') {
@@ -844,6 +852,9 @@ final class YarboMapBackup
             return $located['map'];
         };
         $tryLocal = function () use ($client): ?array {
+            if ($client === null) {
+                return null;
+            }
             try {
                 $client->ensureConnected();
                 $envelope = $client->requestDataFeedback('get_map', [], 6.0, false);
@@ -861,7 +872,7 @@ final class YarboMapBackup
             return $located['map'];
         };
 
-        $order = $preferCloud ? ['cloud', 'local'] : ['local', 'cloud'];
+        $order = $preferCloud || $client === null ? ['cloud', 'local'] : ['local', 'cloud'];
         foreach ($order as $via) {
             $map = $via === 'cloud' ? $tryCloud() : $tryLocal();
             if (is_array($map)) {

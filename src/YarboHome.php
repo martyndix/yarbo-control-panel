@@ -103,6 +103,7 @@ final class YarboHome
             'open_changed' => [],
             'contact_kind' => [],
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
+            'auto_off_sec' => [],
         ];
         if (!is_file($path)) {
             $recovered = $this->recoverUserMeta($defaults);
@@ -240,6 +241,7 @@ final class YarboHome
             'open_changed' => $this->normalizeOpenChanged($decoded['open_changed'] ?? null),
             'contact_kind' => $this->normalizeContactKind($decoded['contact_kind'] ?? null),
             'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
+            'auto_off_sec' => $this->normalizeAutoOffMap($decoded['auto_off_sec'] ?? null),
         ];
         $recovered = $this->recoverUserMeta($store);
         if ($recovered !== null) {
@@ -350,6 +352,7 @@ final class YarboHome
                 'device_order' => $store['device_order'],
                 'last_devices' => $store['last_devices'],
                 'contact_kind' => $store['contact_kind'] ?? [],
+                'auto_off_sec' => $store['auto_off_sec'] ?? [],
             ],
             'automations' => (new YarboHomeAutomations($this->projectRoot))->exportStore(),
         ];
@@ -388,9 +391,11 @@ final class YarboHome
         $current = $this->load();
         if ($homeIn !== null) {
             $this->snapshotStore($current);
-            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind'] as $key) {
+            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind', 'auto_off_sec'] as $key) {
                 if (isset($homeIn[$key]) && is_array($homeIn[$key])) {
-                    $current[$key] = $homeIn[$key];
+                    $current[$key] = $key === 'auto_off_sec'
+                        ? $this->normalizeAutoOffMap($homeIn[$key])
+                        : $homeIn[$key];
                 }
             }
             if (isset($homeIn['last_devices']) && is_array($homeIn['last_devices'])) {
@@ -655,6 +660,9 @@ final class YarboHome
             );
             if ($trig !== null) {
                 $row['last_trigger'] = $trig;
+            }
+            if (!$isUnifi && ($row['kind'] ?? '') === self::KIND_PLUG) {
+                $row['auto_off_sec'] = $this->autoOffSec($id);
             }
             if ($row['hidden']) {
                 $hiddenDevices[] = $row;
@@ -1183,6 +1191,289 @@ final class YarboHome
             }
         }
         $this->rememberCommandTrigger($id, $action, $input, $out);
+        $this->maybeSchedulePlugAutoOff($id, $kind, $action, $out);
+
+        return $out;
+    }
+
+    /**
+     * Optional auto-off for Matter/Hue plugs. 0 clears.
+     */
+    public function setAutoOff(string $id, int $seconds): bool
+    {
+        $id = trim($id);
+        if ($id === '' || YarboUnifi::isHomeId($id)) {
+            return false;
+        }
+        $kind = $this->deviceKindMap()[$id] ?? '';
+        if ($kind !== '' && $kind !== self::KIND_PLUG) {
+            return false;
+        }
+        if ($kind === '') {
+            $knownPlug = false;
+            foreach ($this->load()['last_devices'] ?? [] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                if ((string) ($row['id'] ?? '') === $id && (string) ($row['kind'] ?? '') === self::KIND_PLUG) {
+                    $knownPlug = true;
+                    break;
+                }
+            }
+            // UI only offers this for plugs; allow first-time configure when kind is not cached yet.
+            if (!$knownPlug && !preg_match('/^\d+:\d+$/', $id)) {
+                return false;
+            }
+        }
+        $seconds = self::clampAutoOffSec($seconds);
+        $store = $this->load();
+        $map = is_array($store['auto_off_sec'] ?? null) ? $store['auto_off_sec'] : [];
+        if ($seconds <= 0) {
+            if (!isset($map[$id])) {
+                $this->cancelAutoOff($id);
+
+                return true;
+            }
+            unset($map[$id]);
+        } else {
+            $map[$id] = $seconds;
+        }
+        $store['auto_off_sec'] = $map;
+        if (!$this->write($store)) {
+            return false;
+        }
+        if ($seconds <= 0) {
+            $this->cancelAutoOff($id);
+        }
+
+        return true;
+    }
+
+    public function autoOffSec(string $id): int
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return 0;
+        }
+        $map = $this->load()['auto_off_sec'] ?? [];
+
+        return is_array($map) ? self::clampAutoOffSec((int) ($map[$id] ?? 0)) : 0;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    public function autoOffMap(): array
+    {
+        $map = $this->load()['auto_off_sec'] ?? [];
+
+        return is_array($map) ? $this->normalizeAutoOffMap($map) : [];
+    }
+
+    public static function clampAutoOffSec(int $seconds): int
+    {
+        if ($seconds <= 0) {
+            return 0;
+        }
+
+        return max(1, min(86400, $seconds));
+    }
+
+    public function autoOffStatePath(): string
+    {
+        return $this->projectRoot . '/data/home-auto-off.json';
+    }
+
+    /**
+     * Turn due Matter/Hue plugs Off. Safe to call on every Home dashboard poll.
+     *
+     * @return list<string>
+     */
+    public function flushAutoOff(?int $now = null): array
+    {
+        $now = $now ?? time();
+        $state = $this->readAutoOffState();
+        $pending = is_array($state['pending'] ?? null) ? $state['pending'] : [];
+        if ($pending === []) {
+            return [];
+        }
+        $due = [];
+        $keep = [];
+        foreach ($pending as $id => $job) {
+            $id = trim((string) $id);
+            if ($id === '' || YarboUnifi::isHomeId($id)) {
+                continue;
+            }
+            $at = (int) (is_array($job) ? ($job['at'] ?? 0) : 0);
+            if ($at > 0 && $at <= $now) {
+                $due[$id] = is_array($job) ? $job : ['at' => $at, 'sec' => 0];
+            } else {
+                $keep[$id] = is_array($job) ? $job : ['at' => $at, 'sec' => 0];
+            }
+        }
+        if ($due === []) {
+            return [];
+        }
+        $this->writeAutoOffState(['pending' => $keep]);
+        $done = [];
+        foreach ($due as $id => $job) {
+            $res = $this->command(['id' => $id, 'command' => 'off', 'kind' => self::KIND_PLUG]);
+            if (($res['ok'] ?? false) === true) {
+                $done[] = $id;
+                $this->cancelAutoOff($id);
+                continue;
+            }
+            $retry = $this->readAutoOffState();
+            $pendingRetry = is_array($retry['pending'] ?? null) ? $retry['pending'] : [];
+            $pendingRetry[$id] = [
+                'at' => $now + 30,
+                'sec' => self::clampAutoOffSec((int) ($job['sec'] ?? 0)),
+            ];
+            $this->writeAutoOffState(['pending' => $pendingRetry]);
+        }
+
+        return $done;
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     */
+    private function maybeSchedulePlugAutoOff(string $id, string $kind, string $action, array $result): void
+    {
+        if (!($result['ok'] ?? false) || YarboUnifi::isHomeId($id)) {
+            return;
+        }
+        if ($kind === '') {
+            $kind = $this->deviceKindMap()[$id] ?? '';
+        }
+        if ($kind !== self::KIND_PLUG || !in_array($action, ['on', 'off', 'toggle'], true)) {
+            return;
+        }
+        $on = $action === 'on' || ($action === 'toggle' && !empty($result['on']));
+        if ($action === 'off' || ($action === 'toggle' && empty($result['on']))) {
+            $this->cancelAutoOff($id);
+
+            return;
+        }
+        if ($on) {
+            $this->scheduleAutoOff($id);
+        }
+    }
+
+    private function scheduleAutoOff(string $id, ?int $now = null): void
+    {
+        $id = trim($id);
+        $sec = $this->autoOffSec($id);
+        if ($id === '' || $sec <= 0) {
+            $this->cancelAutoOff($id);
+
+            return;
+        }
+        $now = $now ?? time();
+        $state = $this->readAutoOffState();
+        $pending = is_array($state['pending'] ?? null) ? $state['pending'] : [];
+        $pending[$id] = ['at' => $now + $sec, 'sec' => $sec];
+        $this->writeAutoOffState(['pending' => $pending]);
+    }
+
+    private function cancelAutoOff(string $id): void
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return;
+        }
+        $state = $this->readAutoOffState();
+        $pending = is_array($state['pending'] ?? null) ? $state['pending'] : [];
+        if (!isset($pending[$id])) {
+            return;
+        }
+        unset($pending[$id]);
+        $this->writeAutoOffState(['pending' => $pending]);
+    }
+
+    /**
+     * @return array{pending: array<string, array{at: int, sec: int}>}
+     */
+    private function readAutoOffState(): array
+    {
+        $path = $this->autoOffStatePath();
+        if (!is_file($path)) {
+            return ['pending' => []];
+        }
+        $raw = file_get_contents($path);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        if (!is_array($decoded)) {
+            return ['pending' => []];
+        }
+        $pending = [];
+        foreach (is_array($decoded['pending'] ?? null) ? $decoded['pending'] : [] as $id => $job) {
+            $id = trim((string) $id);
+            if ($id === '' || YarboUnifi::isHomeId($id) || !is_array($job)) {
+                continue;
+            }
+            $at = isset($job['at']) && is_numeric($job['at']) ? (int) $job['at'] : 0;
+            if ($at <= 0) {
+                continue;
+            }
+            $pending[$id] = [
+                'at' => $at,
+                'sec' => self::clampAutoOffSec((int) ($job['sec'] ?? 0)),
+            ];
+        }
+
+        return ['pending' => $pending];
+    }
+
+    /**
+     * @param array{pending?: array<string, array{at: int, sec: int}>} $state
+     */
+    private function writeAutoOffState(array $state): void
+    {
+        $dir = dirname($this->autoOffStatePath());
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        $pending = [];
+        foreach (is_array($state['pending'] ?? null) ? $state['pending'] : [] as $id => $job) {
+            $id = trim((string) $id);
+            if ($id === '' || !is_array($job)) {
+                continue;
+            }
+            $at = (int) ($job['at'] ?? 0);
+            if ($at <= 0) {
+                continue;
+            }
+            $pending[$id] = [
+                'at' => $at,
+                'sec' => self::clampAutoOffSec((int) ($job['sec'] ?? 0)),
+            ];
+        }
+        $json = json_encode(['pending' => $pending], JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            return;
+        }
+        @file_put_contents($this->autoOffStatePath(), $json . "\n", LOCK_EX);
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function normalizeAutoOffMap(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $id => $sec) {
+            $id = trim((string) $id);
+            if ($id === '' || YarboUnifi::isHomeId($id)) {
+                continue;
+            }
+            $seconds = self::clampAutoOffSec((int) $sec);
+            if ($seconds > 0) {
+                $out[$id] = $seconds;
+            }
+        }
 
         return $out;
     }

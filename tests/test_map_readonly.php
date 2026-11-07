@@ -39,6 +39,10 @@ if (!str_contains($api, '403') || !str_contains($api, 'Map writes are disabled')
     fwrite(STDERR, "map_backup API must reject restore with 403\n");
     exit(1);
 }
+if (!str_contains($api, 'listAndFetch(null') || str_contains($api, 'yarbo_client($config)')) {
+    fwrite(STDERR, "map_backup API must load backups via cloud only (no local MQTT connect)\n");
+    exit(1);
+}
 
 $index = file_get_contents($root . '/public/index.php');
 if ($index === false) {

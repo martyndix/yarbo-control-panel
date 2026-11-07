@@ -37,14 +37,11 @@ if ($input === []) {
 }
 
 $action = (string) ($input['action'] ?? 'list');
-$client = null;
 
 try {
-    $client = yarbo_client($config);
-    $client->connect();
-
     if ($action === 'list') {
-        json_response($backups->listAndFetch($client, $input['backup_id'] ?? null, $cloud, $serial));
+        // Local LAN MQTT is closed on current Yarbo firmware — backups use cloud only.
+        json_response($backups->listAndFetch(null, $input['backup_id'] ?? null, $cloud, $serial));
     }
 
     if ($action === 'restore') {
@@ -61,11 +58,4 @@ try {
         'ok' => false,
         'error' => friendly_error($e),
     ], 500);
-} finally {
-    if ($client !== null) {
-        try {
-            $client->disconnect();
-        } catch (Throwable) {
-        }
-    }
 }
