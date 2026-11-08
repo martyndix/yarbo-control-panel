@@ -21,12 +21,17 @@ $proto = (string) file_get_contents($root . '/scripts/lib/lymow_protocol.py');
 assert_true(str_contains($proto, 'USER_CTRL_CLEAN = 1'), 'protocol CLEAN=1');
 assert_true(str_contains($proto, 'USER_CTRL_FORCE_REINIT = 28'), 'protocol FORCE_REINIT=28');
 assert_true(str_contains($proto, 'USER_CTRL_RECHARGE_DOCK = 33'), 'protocol RECHARGE_DOCK=33');
+assert_true(str_contains($proto, 'USER_CTRL_RESUME_DOCK = 22'), 'protocol RESUME_DOCK=22');
+assert_true(str_contains($proto, 'def resolve_dock_userctrl'), 'protocol resolve_dock_userctrl');
 assert_true(str_contains($proto, '"cancel": USER_CTRL_FORCE_REINIT'), 'protocol cancel maps to FORCE_REINIT=28');
 assert_true(str_contains($proto, 'USER_CTRL_QUERY_MAP = 19'), 'protocol QUERY_MAP=19');
+
 assert_true(str_contains($proto, 'def encode_start_zones'), 'protocol encode_start_zones');
 assert_true(str_contains($proto, 'def decode_map_zones'), 'protocol decode_map_zones');
 
 $bridge = (string) file_get_contents($root . '/scripts/lymow_bridge.py');
+assert_true(str_contains($bridge, 'resolve_dock_userctrl'), 'bridge uses resolve_dock_userctrl');
+assert_true(str_contains($bridge, 'work_status='), 'bridge passes work_status for dock');
 assert_true(str_contains($bridge, 'mqtt_query_map'), 'bridge mqtt_query_map');
 assert_true(str_contains($bridge, 'cmd_maps'), 'bridge cmd_maps');
 assert_true(str_contains($bridge, '--zones'), 'bridge --zones');
@@ -134,6 +139,8 @@ assert_true(str_contains($docs, 'does not return to dock'), 'docs say Cancel doe
 assert_true(str_contains($docs, 'MOWING ·'), 'docs mention active zone in State');
 
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.228]'), 'changelog 4.0.228');
+assert_true(str_contains($change, 'Dock after Cancel'), 'changelog mentions Dock after Cancel');
 assert_true(str_contains($change, '## [4.0.227]'), 'changelog 4.0.227');
 assert_true(str_contains($change, 'FORCE_REINIT'), 'changelog mentions FORCE_REINIT');
 assert_true(str_contains($change, '## [4.0.226]'), 'changelog 4.0.226');

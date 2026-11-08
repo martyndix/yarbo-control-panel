@@ -14,12 +14,15 @@ sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 from lymow_protocol import (  # noqa: E402
     USER_CTRL_ACTIONS,
     USER_CTRL_CLEAN,
+    USER_CTRL_DOCK,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_PAUSE,
     USER_CTRL_QUERY_MAP,
     USER_CTRL_QUERY_WIFI_4G,
     USER_CTRL_RECHARGE_DOCK,
     USER_CTRL_RESUME,
+    USER_CTRL_RESUME_DOCK,
+    resolve_dock_userctrl,
     _field_bytes,
     _field_i32,
     _field_str,
@@ -61,7 +64,6 @@ def test_pause_resume_dock_hex() -> None:
     expect_hex = {
         "pause": "10312803",
         "resume": "10312804",
-        "dock": "10312821",
         "cancel": "1031281c",
     }
     for action, hex_value in expect_hex.items():
@@ -70,6 +72,19 @@ def test_pause_resume_dock_hex() -> None:
             fail(f"{action}: got {pb.hex()}, want {hex_value}")
         if pb != encode_userctrl(USER_CTRL_ACTIONS[action]):
             fail(f"{action}: encode_action != encode_userctrl")
+    # Mid-mow Dock keeps progress (33); idle Dock uses 2; pause-docking resumes return (22).
+    if encode_action("dock", work_status=2).hex() != "10312821":
+        fail("dock while mowing must be RECHARGE_DOCK")
+    if encode_action("dock", work_status=1).hex() != "10312802":
+        fail("dock while waiting must be DOCK=2")
+    if encode_action("dock", work_status=0).hex() != "10312802":
+        fail("dock while idle must be DOCK=2")
+    if encode_action("dock", work_status=10).hex() != encode_userctrl(USER_CTRL_RESUME_DOCK).hex():
+        fail("dock while pause-docking must be RESUME_DOCK")
+    if resolve_dock_userctrl(2) != USER_CTRL_RECHARGE_DOCK:
+        fail("resolve_dock_userctrl mowing")
+    if resolve_dock_userctrl(1) != USER_CTRL_DOCK:
+        fail("resolve_dock_userctrl waiting")
 
 
 def test_start_requires_zones() -> None:

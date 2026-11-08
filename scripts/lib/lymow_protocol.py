@@ -16,21 +16,46 @@ PB_VERSION = 49
 
 # MQTT userCtrl codes (ha-lymow / Android traffic capture).
 USER_CTRL_CLEAN = 1  # start mow (with map payload = selected zones)
-USER_CTRL_DOCK = 2  # dock and forget task progress (destructive)
+USER_CTRL_DOCK = 2  # dock when idle / forget progress (destructive)
 USER_CTRL_PAUSE = 3
 USER_CTRL_RESUME = 4
 USER_CTRL_QUERY_MAP = 19
+USER_CTRL_RESUME_DOCK = 22  # resume a paused return-to-dock
 USER_CTRL_FORCE_REINIT = 28  # Cancel Task: stop in place, clear task (does not dock)
 USER_CTRL_RECHARGE_DOCK = 33  # dock and keep task progress
 USER_CTRL_QUERY_WIFI_4G = 52  # read-only status poke
+
+# workStatus values that need Dock=2; RECHARGE_DOCK=33 no-ops with no active task.
+WORK_STATUS_NONE = 0
+WORK_STATUS_WAITING = 1
+WORK_STATUS_PAUSE_DOCKING = 10
 
 USER_CTRL_ACTIONS = {
     "start": USER_CTRL_CLEAN,
     "pause": USER_CTRL_PAUSE,
     "resume": USER_CTRL_RESUME,
-    "dock": USER_CTRL_RECHARGE_DOCK,
+    "dock": USER_CTRL_RECHARGE_DOCK,  # default; encode_action picks by work_status
     "cancel": USER_CTRL_FORCE_REINIT,
 }
+
+
+def resolve_dock_userctrl(work_status: int | None = None) -> int:
+    """Pick Dock MQTT code from live workStatus (ha-lymow async_dock).
+
+    - PAUSE_DOCKING → RESUME_DOCK (22)
+    - NONE / WAITING (idle, e.g. after Cancel) → DOCK (2); RECHARGE_DOCK no-ops
+    - otherwise (mowing / pause / …) → RECHARGE_DOCK (33), keep progress
+    - unknown/None → RECHARGE_DOCK (safer mid-mow default)
+    """
+    try:
+        ws = int(work_status) if work_status is not None else None
+    except (TypeError, ValueError):
+        ws = None
+    if ws == WORK_STATUS_PAUSE_DOCKING:
+        return USER_CTRL_RESUME_DOCK
+    if ws in (WORK_STATUS_NONE, WORK_STATUS_WAITING):
+        return USER_CTRL_DOCK
+    return USER_CTRL_RECHARGE_DOCK
 
 # PbMap content field (inside PbOutput.f23 → f2 → f3).
 _MAP_CONTENT_GO_ZONES = 1
@@ -95,13 +120,19 @@ def encode_start_zones(zone_hash_ids: list[str]) -> bytes:
     return pb + _field_bytes(12, map_pb)
 
 
-def encode_action(action: str, zone_hash_ids: list[str] | None = None) -> bytes:
+def encode_action(
+    action: str,
+    zone_hash_ids: list[str] | None = None,
+    work_status: int | None = None,
+) -> bytes:
     """Encode Pause / Resume / Dock / Cancel, or Start with required zone hash IDs."""
     key = str(action or "").strip().lower()
     if key not in USER_CTRL_ACTIONS:
         raise ValueError(f"Unknown Lymow action: {action!r} (use start, pause, resume, dock, cancel)")
     if key == "start":
         return encode_start_zones(list(zone_hash_ids or []))
+    if key == "dock":
+        return encode_userctrl(resolve_dock_userctrl(work_status))
     return encode_userctrl(USER_CTRL_ACTIONS[key])
 
 
