@@ -1223,6 +1223,18 @@ body.modal-open {
     color: var(--muted);
 }
 
+.lymow-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin: 0.65rem 0 0.15rem;
+}
+
+.lymow-cmd-status {
+    min-height: 1.1em;
+    margin: 0.15rem 0 0.35rem;
+}
+
 .lymow-mode {
     margin: 0.5rem 0 0.35rem;
 }

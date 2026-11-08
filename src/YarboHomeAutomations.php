@@ -27,6 +27,7 @@ final class YarboHomeAutomations
     public const LYMOW_ID = 'lymow';
     public const ROBOT_EVENTS = ['error', 'ok'];
     public const YARBO_COMMANDS = ['start_plan', 'return_to_dock', 'stop'];
+    public const LYMOW_COMMANDS = ['start', 'pause', 'resume', 'dock'];
     public const HOLD_MIN_SEC = 60;
     public const HOLD_MAX_SEC = 300;
 
@@ -1504,6 +1505,15 @@ final class YarboHomeAutomations
                 'stop' => 'Stop',
                 default => 'Yarbo',
             };
+        } elseif (($action['kind'] ?? '') === 'lymow') {
+            $cmd = (string) ($action['command'] ?? '');
+            $text = match ($cmd) {
+                'start' => 'Lymow Start',
+                'pause' => 'Lymow Pause',
+                'resume' => 'Lymow Resume',
+                'dock' => 'Lymow Dock',
+                default => 'Lymow',
+            };
         } elseif (($action['kind'] ?? '') === 'scene') {
             $name = $names['scene:' . ($action['id'] ?? '')] ?? $names[(string) ($action['id'] ?? '')] ?? 'Scene';
             $cmd = (string) ($action['command'] ?? 'run');
@@ -1788,6 +1798,14 @@ final class YarboHomeAutomations
             }
 
             return $out;
+        }
+        if ($kind === 'lymow') {
+            $cmd = strtolower(trim((string) ($action['command'] ?? '')));
+            if (!in_array($cmd, self::LYMOW_COMMANDS, true)) {
+                return null;
+            }
+
+            return ['kind' => 'lymow', 'command' => $cmd];
         }
         if ($kind === 'scene') {
             $id = trim((string) ($action['id'] ?? ''));
@@ -2637,6 +2655,8 @@ final class YarboHomeAutomations
             $label = $names['scene:' . ($action['id'] ?? '')] ?? $names[(string) ($action['id'] ?? '')] ?? '';
         } elseif (($action['kind'] ?? '') === 'yarbo') {
             $label = 'Yarbo';
+        } elseif (($action['kind'] ?? '') === 'lymow') {
+            $label = 'Lymow';
         } else {
             $label = $names[(string) ($action['id'] ?? '')] ?? '';
         }
@@ -2821,7 +2841,7 @@ final class YarboHomeAutomations
                 $out[] = ['kind' => 'scene', 'id' => (string) $action['id'], 'command' => 'stop'];
                 continue;
             }
-            if (($action['kind'] ?? '') === 'yarbo') {
+            if (($action['kind'] ?? '') === 'yarbo' || ($action['kind'] ?? '') === 'lymow') {
                 continue;
             }
             $cmd = (string) ($action['command'] ?? 'on');
@@ -3009,11 +3029,16 @@ final class YarboHomeAutomations
         if (($action['kind'] ?? '') === 'yarbo') {
             return $this->runYarboAction($action);
         }
+        if (($action['kind'] ?? '') === 'lymow') {
+            return $this->runLymowAction($action);
+        }
         if ((string) ($action['command'] ?? '') === 'pulse') {
             return $this->runPulseAction($home, $action);
         }
         if (!empty($action['adaptive']) && empty($action['adaptive_tick'])
-            && ($action['kind'] ?? '') !== 'scene' && ($action['kind'] ?? '') !== 'yarbo') {
+            && ($action['kind'] ?? '') !== 'scene'
+            && ($action['kind'] ?? '') !== 'yarbo'
+            && ($action['kind'] ?? '') !== 'lymow') {
             $id = trim((string) ($action['id'] ?? ''));
             if ($id !== '') {
                 $home->addAdaptiveExtra($id);
@@ -3070,6 +3095,30 @@ final class YarboHomeAutomations
                 'stop' => $agent->stop(),
                 default => ['ok' => false, 'error' => 'Unknown Yarbo command'],
             };
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $action
+     * @return array<string, mixed>
+     */
+    private function runLymowAction(array $action): array
+    {
+        $hub = new YarboHub($this->projectRoot);
+        if (!$hub->enabled(YarboHub::MODULE_LYMOW)) {
+            return ['ok' => false, 'error' => 'Turn on the Lymow module first'];
+        }
+        $cmd = strtolower(trim((string) ($action['command'] ?? '')));
+        if (!in_array($cmd, self::LYMOW_COMMANDS, true)) {
+            return ['ok' => false, 'error' => 'Unknown Lymow command'];
+        }
+        if ($this->commandHandler !== null) {
+            return ($this->commandHandler)($action);
+        }
+        try {
+            return (new YarboLymow($this->projectRoot))->sendCommand($cmd);
         } catch (\Throwable $e) {
             return ['ok' => false, 'error' => $e->getMessage()];
         }
@@ -3280,7 +3329,9 @@ final class YarboHomeAutomations
     private function applyActionSnapshot(array $curr, array $actions): array
     {
         foreach ($actions as $action) {
-            if (($action['kind'] ?? '') === 'scene' || ($action['kind'] ?? '') === 'yarbo') {
+            if (($action['kind'] ?? '') === 'scene'
+                || ($action['kind'] ?? '') === 'yarbo'
+                || ($action['kind'] ?? '') === 'lymow') {
                 continue;
             }
             if ((string) ($action['command'] ?? '') === 'pulse') {

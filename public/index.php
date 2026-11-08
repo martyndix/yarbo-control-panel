@@ -561,6 +561,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span id="lymow-cam" class="value">—</span>
                 </div>
             </div>
+            <div class="lymow-controls" role="group" aria-label="Lymow controls">
+                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="start">Start</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="pause">Pause</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="resume">Resume</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="dock">Dock</button>
+            </div>
+            <p id="lymow-cmd-status" class="hint lymow-cmd-status" role="status" aria-live="polite"></p>
             <div class="camera-mode lymow-mode" role="radiogroup" aria-label="Lymow camera mode">
                 <label>
                     <input type="radio" name="lymow-cam-mode" value="stills" checked>
@@ -973,7 +980,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section hidden" id="settings-lymow-section" data-settings-pane="lymow">
                             <h3 class="settings-subtitle">Lymow</h3>
-                            <p class="hint">Unofficial Lymow app login (same account as the phone app) for battery and work status. Camera is the LAN IP — stream path is always <code>rtsp://IP:10022/h264ESVideoTest</code>. Needs <code>ffmpeg</code> on this host. This panel does not send start, dock, or pause. Protocol notes from <a href="https://github.com/8408323/ha-lymow" target="_blank" rel="noopener">ha-lymow</a> (MIT). See <code>docs/lymow.md</code>.</p>
+                            <p class="hint">Unofficial Lymow app login (same account as the phone app) for battery, work status, and Start / Pause / Resume / Dock. Camera is the LAN IP — stream path is always <code>rtsp://IP:10022/h264ESVideoTest</code>. Needs <code>ffmpeg</code> on this host. Protocol notes from <a href="https://github.com/8408323/ha-lymow" target="_blank" rel="noopener">ha-lymow</a> (MIT). See <code>docs/lymow.md</code>.</p>
                             <label class="settings-field">
                                 <span class="label">Lymow email</span>
                                 <input type="email" id="settings-lymow-email" name="lymow_email" autocomplete="username" spellcheck="false" placeholder="app login email">

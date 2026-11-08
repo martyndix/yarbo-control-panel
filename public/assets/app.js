@@ -223,6 +223,7 @@ const els = {
     lymowCam: document.getElementById('lymow-cam'),
     lymowStream: document.getElementById('lymow-stream'),
     lymowStreamError: document.getElementById('lymow-stream-error'),
+    lymowCmdStatus: document.getElementById('lymow-cmd-status'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
@@ -6852,6 +6853,7 @@ function homeAutoWhenEvents(d) {
 
 function homeAutoThenCanOffAfter(action) {
     if (action?.kind === 'yarbo') return false;
+    if (action?.kind === 'lymow') return false;
     const cmd = String(action?.command || (action?.kind === 'scene' ? 'run' : 'on'));
     return !['off', 'stop', 'unlock', 'lock', 'open', 'close', 'pulse'].includes(cmd);
 }
@@ -7172,6 +7174,13 @@ function homeAutoThenPhrase(action, names) {
         if (action.command === 'stop') return 'Stop';
         return 'Yarbo';
     }
+    if (action.kind === 'lymow') {
+        if (action.command === 'start') return 'Lymow Start';
+        if (action.command === 'pause') return 'Lymow Pause';
+        if (action.command === 'resume') return 'Lymow Resume';
+        if (action.command === 'dock') return 'Lymow Dock';
+        return 'Lymow';
+    }
     if (action.kind === 'scene') {
         const name = names[`scene:${action.id}`] || names[action.id] || 'Scene';
         let text = action.command === 'stop' ? `${name} off` : name;
@@ -7257,6 +7266,11 @@ function homeAutoYarboAction(command, planId, planName) {
         if (planName) action.plan_name = planName;
     }
     return action;
+}
+
+function homeAutoLymowAction(command) {
+    const cmd = ['start', 'pause', 'resume', 'dock'].includes(command) ? command : 'dock';
+    return { kind: 'lymow', command: cmd };
 }
 
 async function homeAutoLoadPlans() {
@@ -7967,6 +7981,14 @@ function homeAutoThenChipHtml(action, index) {
             <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
+    if (action.kind === 'lymow') {
+        const labels = { start: 'Start', pause: 'Pause', resume: 'Resume', dock: 'Dock' };
+        const body = labels[action.command] || 'Lymow';
+        return `<div class="auto-chip auto-chip--robot" data-auto-then="${index}">
+            Lymow ${body}
+            <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
     const isScene = action.kind === 'scene';
     const d = isScene
         ? { id: `scene:${action.id}`, kind: 'scene', name: homeAutoSceneById(action.id)?.name || 'Scene' }
@@ -8239,6 +8261,7 @@ function homeAutoTrayUsedKeys() {
         if (!action) return;
         if (action.kind === 'scene') keys.add(`scene:${String(action.id || '').replace(/^scene:/, '')}`);
         else if (action.kind === 'yarbo') keys.add(`yarbo:${action.command || ''}`);
+        else if (action.kind === 'lymow') keys.add(`lymow:${action.command || ''}`);
         else if (action.id) keys.add(`device:${action.id}`);
     });
     (autoDraft.conditions || []).forEach((cond) => {
@@ -8577,6 +8600,10 @@ function homeAutoTrayGroups(devices, scenes) {
         buckets.lymow.push(
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:error`, 'Error', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:ok`, 'OK', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('lymow', 'start', 'Start', 'auto-chip--robot', '', 'then'),
+            homeAutoTrayChipSpec('lymow', 'pause', 'Pause', 'auto-chip--robot', '', 'then'),
+            homeAutoTrayChipSpec('lymow', 'resume', 'Resume', 'auto-chip--robot', '', 'then'),
+            homeAutoTrayChipSpec('lymow', 'dock', 'Dock', 'auto-chip--robot', '', 'then'),
         );
     }
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
@@ -8660,7 +8687,7 @@ function homeAutoApplyTray(kind, id, zone) {
         if (zone === 'then') {
             showToast(
                 robot === HOME_AUTO_LYMOW_ID
-                    ? 'This panel does not send Lymow start, dock, or pause. Lymow Error goes in When or Only if'
+                    ? 'Lymow Error and OK go in When or Only if. Use Start, Pause, Resume, or Dock in Then'
                     : 'Yarbo Error goes in When or Only if',
                 'error',
             );
@@ -8669,6 +8696,20 @@ function homeAutoApplyTray(kind, id, zone) {
         const trigger = homeAutoRobotTrigger(robot, event);
         if (zone === 'if') autoDraft.conditions.push(trigger);
         else homeAutoApplyWhen(trigger);
+        homeAutoFollowName();
+        renderHomeAutoEditor();
+        return;
+    }
+    if (kind === 'lymow') {
+        if (!homeAutoLymowOn()) {
+            showToast('Turn on the Lymow module first', 'error');
+            return;
+        }
+        if (zone === 'when' || zone === 'if') {
+            showToast('Start, Pause, Resume, and Dock go in Then', 'error');
+            return;
+        }
+        autoDraft.actions.push(homeAutoLymowAction(id || 'dock'));
         homeAutoFollowName();
         renderHomeAutoEditor();
         return;
@@ -9539,6 +9580,37 @@ function startLymowCloudPoll() {
     };
     tick();
     lymowCloudTimer = setInterval(tick, 4000);
+}
+
+let lymowCmdBusy = false;
+
+async function sendLymowCommand(action, button) {
+    const cmd = String(action || '').toLowerCase();
+    if (!['start', 'pause', 'resume', 'dock'].includes(cmd) || lymowCmdBusy) return;
+    lymowCmdBusy = true;
+    const buttons = document.querySelectorAll('[data-lymow-cmd]');
+    buttons.forEach((btn) => { btn.disabled = true; });
+    if (els.lymowCmdStatus) els.lymowCmdStatus.textContent = 'Sending…';
+    try {
+        const res = await fetch('/api/lymow.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: cmd }),
+        });
+        const data = await parseJsonResponse(res);
+        updateLymowDashboard(data);
+        const msg = data.message || data.error || (data.ok ? 'Sent.' : 'Failed.');
+        if (els.lymowCmdStatus) els.lymowCmdStatus.textContent = msg;
+        showToast(msg, data.ok ? 'success' : 'error');
+    } catch (err) {
+        const msg = err.message || 'Could not reach Lymow.';
+        if (els.lymowCmdStatus) els.lymowCmdStatus.textContent = msg;
+        showToast(msg, 'error');
+    } finally {
+        lymowCmdBusy = false;
+        buttons.forEach((btn) => { btn.disabled = false; });
+        if (button) button.blur();
+    }
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -14397,6 +14469,11 @@ document.querySelectorAll('input[name="lymow-cam-mode"]').forEach((input) => {
     input.addEventListener('change', () => {
         lymowCameraModeStarted = '';
         startLymowCamera();
+    });
+});
+document.querySelectorAll('[data-lymow-cmd]').forEach((button) => {
+    button.addEventListener('click', () => {
+        sendLymowCommand(button.getAttribute('data-lymow-cmd'), button);
     });
 });
 els.settingsUnifiTest?.addEventListener('click', async (e) => {
