@@ -9819,7 +9819,7 @@ async function refreshLymowZones(force = true) {
 async function sendLymowCommand(action, button) {
     const cmd = String(action || '').toLowerCase();
     if (!['start', 'pause', 'resume', 'dock', 'cancel'].includes(cmd) || lymowCmdBusy) return;
-    if (cmd === 'cancel' && !confirm('Cancel the current Lymow task? This docks and clears mow progress (Dock alone keeps progress).')) {
+    if (cmd === 'cancel' && !confirm('Cancel the current Lymow task? This clears mow progress and leaves the mower where it is (it does not return to dock).')) {
         return;
     }
     const zones = [...lymowZonesSelected];

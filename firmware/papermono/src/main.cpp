@@ -2765,7 +2765,7 @@ void lymowSend(const char *lyCmd)
             lymowState = "Docking";
             lymowWorkStatus = 4;
         } else if (strcmp(lyCmd, "cancel") == 0) {
-            lymowState = "Cancel";
+            lymowState = "Cancelled";
             lymowWorkStatus = 1;
         }
         drawScreen(false);

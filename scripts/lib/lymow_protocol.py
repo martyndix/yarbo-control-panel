@@ -16,10 +16,11 @@ PB_VERSION = 49
 
 # MQTT userCtrl codes (ha-lymow / Android traffic capture).
 USER_CTRL_CLEAN = 1  # start mow (with map payload = selected zones)
-USER_CTRL_DOCK = 2  # dock + cancel / clear the current task (destructive)
+USER_CTRL_DOCK = 2  # dock and forget task progress (destructive)
 USER_CTRL_PAUSE = 3
 USER_CTRL_RESUME = 4
 USER_CTRL_QUERY_MAP = 19
+USER_CTRL_FORCE_REINIT = 28  # Cancel Task: stop in place, clear task (does not dock)
 USER_CTRL_RECHARGE_DOCK = 33  # dock and keep task progress
 USER_CTRL_QUERY_WIFI_4G = 52  # read-only status poke
 
@@ -28,7 +29,7 @@ USER_CTRL_ACTIONS = {
     "pause": USER_CTRL_PAUSE,
     "resume": USER_CTRL_RESUME,
     "dock": USER_CTRL_RECHARGE_DOCK,
-    "cancel": USER_CTRL_DOCK,
+    "cancel": USER_CTRL_FORCE_REINIT,
 }
 
 # PbMap content field (inside PbOutput.f23 → f2 → f3).

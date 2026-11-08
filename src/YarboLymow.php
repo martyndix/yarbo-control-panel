@@ -773,7 +773,7 @@ final class YarboLymow
 
     /**
      * Send Start (with zone hash IDs) / Pause / Resume / Dock / Cancel over cloud MQTT.
-     * Dock keeps task progress; Cancel docks and clears the current task (ha-lymow USER_CTRL_DOCK=2).
+     * Dock keeps task progress; Cancel clears the task in place (ha-lymow USER_CTRL_FORCE_REINIT=28, no dock).
      *
      * @param list<string>|string $zones Zone hashIds required for start
      * @return array<string, mixed>

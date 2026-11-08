@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.227] - 2026-11-08
+
+### Changed
+- **Lymow Cancel stays put:** Cancel now uses ha-lymow `FORCE_REINIT` (28) — clears the mowing task without returning to dock. Use **Dock** when you want it home (keeps progress).
+
 ## [4.0.226] - 2026-11-08
 
 ### Added
