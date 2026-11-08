@@ -45,6 +45,7 @@
 /data/lymow-listen.log
 /data/unifi-config.json
 /data/unifi-inventory.json
+/data/unifi-dps.log
 /data/unifi-snap-*.jpg
 /data/unifi-announce/
 /data/unifi-radio-*.log
