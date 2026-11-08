@@ -577,7 +577,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="start" id="lymow-cmd-start" disabled title="Select one or more zones">Start</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="pause">Pause</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="resume">Resume</button>
-                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="dock" title="Dock and keep mow progress">Dock</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="dock" title="Return to dock (keeps progress while a task is active; still works after Cancel)">Dock</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="cancel" title="Clear the current mowing task without docking">Cancel</button>
             </div>
             <p id="lymow-cmd-status" class="hint lymow-cmd-status" role="status" aria-live="polite"></p>

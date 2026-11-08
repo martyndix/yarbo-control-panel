@@ -29,12 +29,16 @@ sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 
 from lymow_protocol import (  # noqa: E402
     USER_CTRL_ACTIONS,
+    USER_CTRL_DOCK,
+    USER_CTRL_RECHARGE_DOCK,
+    USER_CTRL_RESUME_DOCK,
     decode_map_zones,
     decode_pboutput,
     encode_action,
     encode_app_connect_heartbeat,
     encode_query_map,
     encode_status_query,
+    resolve_dock_userctrl,
     unwrap_envelope,
     wrap_envelope,
 )
@@ -805,8 +809,9 @@ def mqtt_publish_command(
     thing: str,
     action: str,
     zone_hash_ids: list[str] | None = None,
+    work_status: int | None = None,
 ) -> dict[str, Any]:
-    """Publish Start (with zones) / Pause / Resume / Dock to pbinput."""
+    """Publish Start (with zones) / Pause / Resume / Dock / Cancel to pbinput."""
     key = str(action or "").strip().lower()
     if key not in USER_CTRL_ACTIONS:
         return {"ok": False, "error": f"Unknown Lymow action: {action!r}"}
@@ -814,7 +819,11 @@ def mqtt_publish_command(
     if key == "start" and not zones:
         return {"ok": False, "error": "Pick at least one Lymow zone to start."}
     try:
-        body_pb = encode_action(key, zones if key == "start" else None)
+        body_pb = encode_action(
+            key,
+            zones if key == "start" else None,
+            work_status=work_status if key == "dock" else None,
+        )
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     built = _mqtt_client_session(config, thing, client_prefix="yarbo-lymow-cmd")
@@ -824,13 +833,20 @@ def mqtt_publish_command(
     body = wrap_envelope(body_pb).encode()
     session_id = uuid.uuid4().hex
     heartbeat = wrap_envelope(encode_app_connect_heartbeat(session_id)).encode()
+    user_ctrl = (
+        resolve_dock_userctrl(work_status)
+        if key == "dock"
+        else USER_CTRL_ACTIONS[key]
+    )
     got: dict[str, Any] = {
         "ok": False,
         "action": key,
-        "user_ctrl": USER_CTRL_ACTIONS[key],
+        "user_ctrl": user_ctrl,
     }
     if key == "start":
         got["zones"] = zones
+    if key == "dock":
+        got["work_status"] = work_status
     connected = {"ok": False}
 
     def on_connect(client: Any, _userdata: Any, *_args: Any) -> None:
@@ -878,11 +894,17 @@ def mqtt_publish_command(
         if key == "start":
             n = len(zones)
             got["message"] = f"Sent Lymow Start for {n} zone{'s' if n != 1 else ''}."
+        elif key == "dock":
+            if user_ctrl == USER_CTRL_RESUME_DOCK:
+                got["message"] = "Sent Lymow Dock (resume return)."
+            elif user_ctrl == USER_CTRL_DOCK:
+                got["message"] = "Sent Lymow Dock."
+            else:
+                got["message"] = "Sent Lymow Dock (keeping progress)."
         else:
             labels = {
                 "pause": "Pause",
                 "resume": "Resume",
-                "dock": "Dock",
                 "cancel": "Cancel",
             }
             got["message"] = f"Sent Lymow {labels.get(key, key)}."
@@ -1287,10 +1309,21 @@ def cmd_command(config_path: Path, state_path: Path, action: str, zones_raw: str
         config["device_thing_name"] = thing
         config["last_error"] = ""
         save_config(config_path, config)
-        result = mqtt_publish_command(config, thing, key, zones if key == "start" else None)
+        prev = read_previous_state(state_path)
+        work_status = prev.get("work_status")
+        try:
+            work_status_i = int(work_status) if work_status is not None else None
+        except (TypeError, ValueError):
+            work_status_i = None
+        result = mqtt_publish_command(
+            config,
+            thing,
+            key,
+            zones if key == "start" else None,
+            work_status=work_status_i if key == "dock" else None,
+        )
         if result.get("ok"):
             try:
-                prev = read_previous_state(state_path)
                 mqtt_state = collect_live_state(config, thing, 4.0, stop_on_battery=False)
                 if key == "start":
                     mqtt_state["task_zones"] = resolve_task_zones(
@@ -1304,6 +1337,20 @@ def cmd_command(config_path: Path, state_path: Path, action: str, zones_raw: str
                             shown += "…"
                         result["message"] = f"Sent Lymow Start for {shown}."
                 elif key == "cancel":
+                    mqtt_state["task_zones"] = []
+                    # Cancel leaves the mower idle in place; pin WAITING so a
+                    # following Dock uses userCtrl=2 (33 no-ops with no task).
+                    if mqtt_state.get("workStatus") is None:
+                        mqtt_state["workStatus"] = 1
+                    else:
+                        try:
+                            live_ws = int(mqtt_state["workStatus"])
+                        except (TypeError, ValueError):
+                            live_ws = -1
+                        if live_ws in (2, 3, 4, 8, 9, 10):
+                            mqtt_state["workStatus"] = 1
+                elif key == "dock" and int(result.get("user_ctrl") or 0) == USER_CTRL_DOCK:
+                    # Idle Dock (2) forgets progress — drop remembered Start zones.
                     mqtt_state["task_zones"] = []
                 state = merge_state(bundle, mqtt_state, prev)
                 write_state(state_path, state)

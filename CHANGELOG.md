@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.228] - 2026-11-08
+
+### Fixed
+- **Lymow Dock after Cancel:** Dock picks the MQTT code from work status — idle / after Cancel uses `DOCK` (2) because `RECHARGE_DOCK` (33) no-ops with no active task; mid-mow still uses 33 to keep progress.
+
 ## [4.0.227] - 2026-11-08
 
 ### Changed
