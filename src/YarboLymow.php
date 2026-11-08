@@ -208,6 +208,16 @@ final class YarboLymow
         $robotState = isset($cloud['robot_state']) && is_numeric($cloud['robot_state'])
             ? (int) $cloud['robot_state']
             : null;
+        $charging = !empty($cloud['is_charging']) || !empty($cloud['is_recharging']);
+        $taskZones = self::taskZonesFromData($cloud);
+        if ($taskZones !== [] && !self::taskZonesActive($work, !empty($cloud['is_charging']))) {
+            $taskZones = [];
+        }
+        $baseLabel = $hasError ? 'ERROR' : self::workLabel($work, !empty($cloud['is_charging']));
+        $taskLabel = self::taskZonesLabel($taskZones);
+        $workLabel = $taskLabel !== '' && $baseLabel !== '—'
+            ? ($baseLabel . ' · ' . $taskLabel)
+            : $baseLabel;
 
         return [
             'ok' => $camOk || $cloudOk,
@@ -224,10 +234,11 @@ final class YarboLymow
             'battery_label' => $battery !== null ? $battery . '%' : '—',
             'work_status' => $work,
             'robot_state' => $robotState,
-            'work_label' => $hasError ? 'ERROR' : self::workLabel($work, !empty($cloud['is_charging'])),
+            'work_label' => $workLabel,
+            'work_label_base' => $baseLabel,
             'error_code' => $errorCode,
             'error_codes' => self::errorCodesFromData($cloud),
-            'charging' => !empty($cloud['is_charging']) || !empty($cloud['is_recharging']),
+            'charging' => $charging,
             'charging_label' => !empty($cloud['is_charging']) ? 'Yes' : (!empty($cloud['is_recharging']) ? 'Returning' : 'No'),
             'mow_progress' => $showProgress ? $progress : null,
             'mow_progress_label' => $showProgress ? $progress . '%' : '—',
@@ -240,6 +251,8 @@ final class YarboLymow
             'zones_fetched_at' => isset($cloud['zones_fetched_at']) && is_string($cloud['zones_fetched_at'])
                 ? $cloud['zones_fetched_at']
                 : null,
+            'task_zones' => $taskZones,
+            'task_zones_label' => $taskLabel !== '' ? $taskLabel : null,
         ];
     }
 
@@ -279,6 +292,84 @@ final class YarboLymow
         }
 
         return $out;
+    }
+
+    /**
+     * Zones from the last Start command (cleared when idle / Cancel).
+     *
+     * @param array<string, mixed> $data
+     * @return list<array{hash_id: string, name: string}>
+     */
+    public static function taskZonesFromData(array $data): array
+    {
+        $raw = $data['task_zones'] ?? [];
+        if (!is_array($raw)) {
+            return [];
+        }
+        $known = [];
+        foreach (self::zonesFromData($data) as $zone) {
+            $known[$zone['hash_id']] = $zone['name'];
+        }
+        $out = [];
+        $seen = [];
+        foreach ($raw as $row) {
+            if (is_string($row) || is_int($row)) {
+                $hash = trim((string) $row);
+                $name = $known[$hash] ?? $hash;
+            } elseif (is_array($row)) {
+                $hash = trim((string) ($row['hash_id'] ?? $row['hashId'] ?? ''));
+                $name = trim((string) ($row['name'] ?? ''));
+                if ($name === '' && $hash !== '') {
+                    $name = $known[$hash] ?? $hash;
+                }
+            } else {
+                continue;
+            }
+            if ($hash === '' || isset($seen[$hash])) {
+                continue;
+            }
+            $seen[$hash] = true;
+            $out[] = ['hash_id' => $hash, 'name' => $name !== '' ? $name : $hash];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array{hash_id?: string, name?: string}> $zones
+     */
+    public static function taskZonesLabel(array $zones): string
+    {
+        $names = [];
+        foreach ($zones as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $name = trim((string) ($row['name'] ?? $row['hash_id'] ?? ''));
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+        if ($names === []) {
+            return '';
+        }
+        if (count($names) === 1) {
+            return $names[0];
+        }
+        if (count($names) === 2) {
+            return $names[0] . ' + ' . $names[1];
+        }
+
+        return $names[0] . ' +' . (count($names) - 1);
+    }
+
+    public static function taskZonesActive(?int $work, bool $charging = false): bool
+    {
+        if ($work !== null && in_array($work, [1, 2, 3, 4, 5, 8, 9, 10, 14], true)) {
+            return true;
+        }
+
+        return $charging && $work !== null && !in_array($work, [0, 11, 12, 13], true);
     }
 
     /**

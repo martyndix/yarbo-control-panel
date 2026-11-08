@@ -2673,7 +2673,7 @@ void drawLymowPage(bool forceFull)
     if (!st.length()) {
         st = "—";
     }
-    M5.Display.drawString(st.substring(0, 22), 16, 140);
+    M5.Display.drawString(st.substring(0, 28), 16, 140);
     drawButton(W - 16 - 110, 100, 110, 42, "REFRESH", false);
 
     bool paused = lymowPaused();

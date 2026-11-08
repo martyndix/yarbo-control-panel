@@ -20,10 +20,10 @@ $php = (string) file_get_contents($rootDir . '/src/YarboPaperDevice.php');
 $fw = (string) file_get_contents($rootDir . '/firmware/papermono/src/main.cpp');
 $api = (string) file_get_contents($rootDir . '/public/api/device.php');
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.78"'), 'firmware 0.1.78');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.79"'), 'firmware 0.1.79');
 assert_true(str_contains($ver, 'PAPERMONO_LYMOW_ZONE_MAX'), 'zone max define');
 assert_true(str_contains($ver, 'PAPERMONO_LYMOW_ZONE_VISIBLE'), 'zone visible define');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.78';"), 'panel pin 0.1.78');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.79';"), 'panel pin 0.1.79');
 assert_true(str_contains($php, "'lymow_zones'"), 'compact includes lymow_zones');
 assert_true(str_contains($php, "'lymow_work_status'"), 'compact includes work status');
 
@@ -79,6 +79,8 @@ assert_true(($out['lymow_work_status'] ?? -2) === 1, 'work status in compact');
 assert_true(($out['lymow_battery'] ?? -1) === 88, 'battery in compact');
 
 $change = (string) file_get_contents($rootDir . '/CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.226]'), 'changelog 4.0.226');
+assert_true(str_contains($change, 'active zone'), 'changelog mentions active zone');
 assert_true(str_contains($change, '## [4.0.225]'), 'changelog 4.0.225');
 assert_true(str_contains($change, 'Cancel'), 'changelog mentions Cancel');
 assert_true(str_contains($change, 'PaperMono'), 'changelog mentions PaperMono');

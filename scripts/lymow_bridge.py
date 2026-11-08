@@ -1088,6 +1088,40 @@ def _lymow_nickname(device: dict[str, Any], info: dict[str, Any]) -> str:
     return ""
 
 
+def resolve_task_zones(
+    zone_hash_ids: list[str],
+    zones_list: list[Any] | None = None,
+) -> list[dict[str, str]]:
+    """Map Start hash IDs to {hash_id, name} using the cached map zone list."""
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in zones_list or []:
+        if not isinstance(row, dict):
+            continue
+        hid = str(row.get("hash_id") or row.get("hashId") or "").strip()
+        if not hid:
+            continue
+        by_id[hid] = row
+    out: list[dict[str, str]] = []
+    for raw in zone_hash_ids:
+        hid = str(raw or "").strip()
+        if not hid:
+            continue
+        row = by_id.get(hid) or {}
+        name = str(row.get("name") or "").strip() or hid
+        out.append({"hash_id": hid, "name": name})
+    return out
+
+
+def task_zones_active(work: Any) -> bool:
+    """Keep the last Start zone list while a task can still resume."""
+    try:
+        code = int(work)
+    except (TypeError, ValueError):
+        return False
+    # WAIT / MOWING / PAUSE / DOCKING / CHARGE / ESCAPE (and zone variants)
+    return code in {1, 2, 3, 4, 5, 8, 9, 10, 14}
+
+
 def merge_state(
     bundle: dict[str, Any],
     mqtt_state: dict[str, Any] | None,
@@ -1118,6 +1152,15 @@ def merge_state(
     if not isinstance(zones, list):
         zones = previous.get("zones") if isinstance(previous.get("zones"), list) else []
     zones_fetched_at = mqtt_state.get("zones_fetched_at") or previous.get("zones_fetched_at")
+    if "task_zones" in mqtt_state:
+        task_zones = mqtt_state.get("task_zones")
+        if not isinstance(task_zones, list):
+            task_zones = []
+    else:
+        task_zones = previous.get("task_zones") if isinstance(previous.get("task_zones"), list) else []
+    # Idle / finished / cancelled — drop the remembered Start zones.
+    if work is not None and not task_zones_active(work) and int(work) in {0, 11, 12, 13}:
+        task_zones = []
     return {
         "ok": True,
         "online": str(info.get("deviceState") or device.get("deviceState") or "").lower() == "online"
@@ -1142,6 +1185,7 @@ def merge_state(
         "lte_signal": mqtt_state.get("lteSignalQuality"),
         "zones": zones,
         "zones_fetched_at": zones_fetched_at,
+        "task_zones": task_zones,
         "last_mow": last_mow,
         "clean_summary": bundle.get("clean_summary") or {},
         "mqtt_error": mqtt_state.get("mqtt_error") if battery is None else None,
@@ -1246,11 +1290,26 @@ def cmd_command(config_path: Path, state_path: Path, action: str, zones_raw: str
         result = mqtt_publish_command(config, thing, key, zones if key == "start" else None)
         if result.get("ok"):
             try:
+                prev = read_previous_state(state_path)
                 mqtt_state = collect_live_state(config, thing, 4.0, stop_on_battery=False)
-                state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
+                if key == "start":
+                    mqtt_state["task_zones"] = resolve_task_zones(
+                        zones,
+                        mqtt_state.get("zones") if isinstance(mqtt_state.get("zones"), list) else prev.get("zones"),
+                    )
+                    names = [z["name"] for z in mqtt_state["task_zones"] if z.get("name")]
+                    if names:
+                        shown = ", ".join(names[:3])
+                        if len(names) > 3:
+                            shown += "…"
+                        result["message"] = f"Sent Lymow Start for {shown}."
+                elif key == "cancel":
+                    mqtt_state["task_zones"] = []
+                state = merge_state(bundle, mqtt_state, prev)
                 write_state(state_path, state)
                 result.update({k: state.get(k) for k in (
                     "battery", "work_status", "robot_state", "work_done", "charging", "page_name", "zones",
+                    "task_zones",
                 ) if k in state})
             except Exception:  # noqa: BLE001
                 pass
