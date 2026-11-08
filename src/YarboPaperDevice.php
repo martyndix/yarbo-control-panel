@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.76';
+    public const FIRMWARE_VERSION = '0.1.77';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.26-colour';
     public const OTA_ONLINE_MONO_S = 90;
@@ -1169,6 +1169,13 @@ final class YarboPaperDevice
             'lymow_state' => $this->lymowCompanionState($ly),
             'lymow_charging' => (string) ($ly['charging_label'] ?? '—'),
             'lymow_name' => (string) ($ly['page_name'] ?? ''),
+            'lymow_work_status' => isset($ly['work_status']) && is_numeric($ly['work_status'])
+                ? (int) $ly['work_status']
+                : -1,
+            'lymow_zones' => $lyEnabled ? YarboLymow::zonesFromData($ly) : [],
+            'lymow_zones_fetched_at' => $lyEnabled
+                ? (isset($ly['zones_fetched_at']) && is_string($ly['zones_fetched_at']) ? $ly['zones_fetched_at'] : null)
+                : null,
             'yarbo_error' => $yarboEnabled && $online && ((int) $errorCode !== 0 || $powerFault > 0),
             'powerwall_error' => false,
             'lymow_error' => $lyEnabled && YarboLymow::hasError($ly),

@@ -15,6 +15,8 @@ Settings → **Lymow**:
 
 On the Lymow card: tap **Refresh** under **Zones** to load go-zone names from the Lymow map (same unofficial MQTT `QUERY_MAP` as ha-lymow). Select one or more zones, then **Start** (sends those hash IDs only — not “mow everything”). **Pause**, **Resume**, and **Dock** (dock keeps current mow progress) work without a zone pick. The same Start-with-zones path is available as an Automations **Then** action.
 
+**PaperMono** (firmware **0.1.77+**): the Lymow page shows the same zone chips, **REFRESH**, and **START** / **PAUSE** / **RESUME** / **DOCK**. Update the panel, build/flash PaperMono, then open Lymow (or Robots → Lymow).
+
 Leave the password blank on later saves to keep the stored one. Login files (`data/lymow-config.json`, `data/lymow-cloud.json`) stay on the host across updates; this feature does not wipe them.
 
 To roll back to the previous status-only build, check out git tag `lymow-readonly-baseline` (or the panel version you had before 4.0.222).

@@ -380,6 +380,25 @@ if ($action === 'command') {
         );
         exit;
     }
+    if ($cmd === 'lymow_maps' || $cmd === 'lymow_zones') {
+        device_json_ack_continue(['ok' => true, 'command' => 'lymow_maps']);
+        (new \Yarbo\YarboLymow(dirname(__DIR__, 2)))->fetchZones(true);
+        exit;
+    }
+    if ($cmd === 'lymow_command' || $cmd === 'lymow') {
+        $lyCmd = strtolower(trim((string) ($input['lymow_cmd'] ?? $input['lymow_action'] ?? $input['home_action'] ?? '')));
+        if (!in_array($lyCmd, \Yarbo\YarboLymow::COMMANDS, true)) {
+            json_response(['ok' => false, 'error' => 'Unsupported Lymow command'], 400);
+        }
+        $zones = $input['zones'] ?? $input['zone_ids'] ?? $input['zone_hash_ids'] ?? [];
+        $zoneIds = \Yarbo\YarboLymow::normalizeZoneIds(is_array($zones) || is_string($zones) ? $zones : []);
+        if ($lyCmd === 'start' && $zoneIds === []) {
+            json_response(['ok' => false, 'error' => 'Pick at least one Lymow zone'], 400);
+        }
+        device_json_ack_continue(['ok' => true, 'command' => 'lymow_command', 'lymow_cmd' => $lyCmd]);
+        (new \Yarbo\YarboLymow(dirname(__DIR__, 2)))->sendCommand($lyCmd, $zoneIds);
+        exit;
+    }
     if ($cmd === 'vestaboard_live') {
         $live = (string) ($input['vestaboard_live'] ?? $input['live'] ?? '');
         $result = (new \Yarbo\YarboVestaboard(dirname(__DIR__, 2)))->setLiveModule($live);
