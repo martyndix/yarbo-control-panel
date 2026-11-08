@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.224] - 2026-11-08
+
+### Added
+- **PaperMono Lymow controls (0.1.77):** Lymow page shows map zone chips (names from the Lymow account), Refresh, and Start selected zones / Pause / Resume / Dock via the same unofficial MQTT commands as the web panel.
+
 ## [4.0.223] - 2026-11-08
 
 ### Added
