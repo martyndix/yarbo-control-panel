@@ -879,7 +879,12 @@ def mqtt_publish_command(
             n = len(zones)
             got["message"] = f"Sent Lymow Start for {n} zone{'s' if n != 1 else ''}."
         else:
-            labels = {"pause": "Pause", "resume": "Resume", "dock": "Dock"}
+            labels = {
+                "pause": "Pause",
+                "resume": "Resume",
+                "dock": "Dock",
+                "cancel": "Cancel",
+            }
             got["message"] = f"Sent Lymow {labels.get(key, key)}."
     return got
 
@@ -1224,7 +1229,7 @@ def cmd_command(config_path: Path, state_path: Path, action: str, zones_raw: str
         return 1
     key = str(action or "").strip().lower()
     if key not in USER_CTRL_ACTIONS:
-        emit({"ok": False, "error": f"Unknown Lymow action: {action!r} (use start, pause, resume, dock)"})
+        emit({"ok": False, "error": f"Unknown Lymow action: {action!r} (use start, pause, resume, dock, cancel)"})
         return 1
     zones = _parse_zone_ids(zones_raw)
     if key == "start" and not zones:
@@ -1335,7 +1340,7 @@ def main() -> int:
     parser.add_argument(
         "--action",
         default="",
-        help="For command: start, pause, resume, or dock",
+        help="For command: start, pause, resume, dock, or cancel",
     )
     parser.add_argument(
         "--zones",

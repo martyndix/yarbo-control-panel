@@ -81,6 +81,7 @@ String lymowState = "—";
 String lymowCharging = "—";
 int lymowWorkStatus = -1;
 int lymowZoneN = 0;
+int lymowZonePage = 0;
 String lymowZoneIds[PAPERMONO_LYMOW_ZONE_MAX];
 String lymowZoneNames[PAPERMONO_LYMOW_ZONE_MAX];
 bool lymowZoneOn[PAPERMONO_LYMOW_ZONE_MAX];
@@ -787,7 +788,7 @@ String screenKey()
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + vestaboardLive + "|"
         + (vestaboardOn ? "1" : "0") + "|" + (yarboOn ? "1" : "0") + "|" + (powerwallOn ? "1" : "0") + "|"
         + (lymowOn ? "1" : "0") + "|" + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
-        + String(lymowWorkStatus) + "|" + String(lymowZoneN) + "|"
+        + String(lymowWorkStatus) + "|" + String(lymowZoneN) + "|" + String(lymowZonePage) + "|"
         + String(powerwallPct) + "|" + powerwallSolar + "|" + powerwallLoad + "|"
         + powerwallGrid + "|" + powerwallBattery + "|"
         + String((int) WiFi.status()) + "|" + logoHash + "|" + String(screenLocked ? 1 : 0) + "|"
@@ -2624,15 +2625,32 @@ bool lymowAllZonesOn()
     return any && all;
 }
 
-void lymowGeom(int &cmdY, int &cmdH, int &zoneY, int &zoneH, int &zoneGap, int &zoneW)
+void lymowClampZonePage()
+{
+    int pages = 1;
+    if (lymowZoneN > PAPERMONO_LYMOW_ZONE_VISIBLE) {
+        pages = (lymowZoneN + PAPERMONO_LYMOW_ZONE_VISIBLE - 1) / PAPERMONO_LYMOW_ZONE_VISIBLE;
+    }
+    if (lymowZonePage < 0) {
+        lymowZonePage = 0;
+    }
+    if (lymowZonePage >= pages) {
+        lymowZonePage = pages - 1;
+    }
+}
+
+void lymowGeom(int &cmdY, int &cmdH, int &zoneY, int &zoneH, int &zoneGap, int &zoneW, int &allY, int &navY)
 {
     int W = M5.Display.width();
     cmdY = 168;
     cmdH = 52;
-    zoneY = cmdY + cmdH + 14;
+    allY = cmdY + cmdH + 12;
     zoneH = 48;
     zoneGap = 10;
+    zoneY = allY + zoneH + zoneGap;
     zoneW = (W - 32 - zoneGap) / 2;
+    int rows = (PAPERMONO_LYMOW_ZONE_VISIBLE + 1) / 2;
+    navY = zoneY + rows * (zoneH + zoneGap);
 }
 
 void drawLymowPage(bool forceFull)
@@ -2644,8 +2662,9 @@ void drawLymowPage(bool forceFull)
     M5.Display.setTextDatum(TL_DATUM);
     int W = M5.Display.width();
     int gap = 10;
-    int cmdY, cmdH, zoneY, zoneH, zoneGap, zoneW;
-    lymowGeom(cmdY, cmdH, zoneY, zoneH, zoneGap, zoneW);
+    int cmdY, cmdH, zoneY, zoneH, zoneGap, zoneW, allY, navY;
+    lymowClampZonePage();
+    lymowGeom(cmdY, cmdH, zoneY, zoneH, zoneGap, zoneW, allY, navY);
     M5.Display.setTextSize(4);
     String bat = lymowBattery >= 0 ? (String(lymowBattery) + "%") : String("--");
     M5.Display.drawString(bat, 16, 100);
@@ -2659,7 +2678,8 @@ void drawLymowPage(bool forceFull)
 
     bool paused = lymowPaused();
     bool running = lymowRunning();
-    int cmds = 2 + (running && !paused ? 1 : 0);
+    // START/RESUME, optional PAUSE, DOCK, CANCEL
+    int cmds = 3 + (running && !paused ? 1 : 0);
     int cw = (W - 32 - gap * (cmds - 1)) / cmds;
     int cx = 16;
     drawButton(cx, cmdY, cw, cmdH, paused ? "RESUME" : "START", false);
@@ -2669,31 +2689,38 @@ void drawLymowPage(bool forceFull)
         cx += cw + gap;
     }
     drawButton(cx, cmdY, cw, cmdH, "DOCK", false);
+    cx += cw + gap;
+    drawButton(cx, cmdY, cw, cmdH, "CANCEL", false);
 
     if (lymowZoneN < 1) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString("No zones yet. Tap REFRESH.", 16, zoneY + 8);
+        M5.Display.drawString("No zones yet. Tap REFRESH.", 16, allY + 8);
     } else {
         bool allOn = lymowAllZonesOn();
-        int shown = lymowZoneN + 1;
-        if (shown > PAPERMONO_LYMOW_ZONE_MAX + 1) {
-            shown = PAPERMONO_LYMOW_ZONE_MAX + 1;
+        drawButton(16, allY, W - 32, zoneH, "ALL ZONES", allOn);
+        int start = lymowZonePage * PAPERMONO_LYMOW_ZONE_VISIBLE;
+        int shown = lymowZoneN - start;
+        if (shown > PAPERMONO_LYMOW_ZONE_VISIBLE) {
+            shown = PAPERMONO_LYMOW_ZONE_VISIBLE;
         }
         for (int i = 0; i < shown; i++) {
+            int z = start + i;
             int col = i % 2;
             int row = i / 2;
             int bx = 16 + col * (zoneW + gap);
             int by = zoneY + row * (zoneH + zoneGap);
-            String label = "ALL";
-            bool on = allOn;
-            if (i > 0) {
-                label = lymowZoneNames[i - 1];
-                on = allOn || lymowZoneOn[i - 1];
-                if (!lymowZoneEnabled[i - 1]) {
-                    label = label.substring(0, 10) + " off";
-                }
+            String label = lymowZoneNames[z];
+            bool on = allOn || lymowZoneOn[z];
+            if (!lymowZoneEnabled[z]) {
+                label = label.substring(0, 10) + " off";
             }
             drawButton(bx, by, zoneW, zoneH, label, on);
+        }
+        int pages = (lymowZoneN + PAPERMONO_LYMOW_ZONE_VISIBLE - 1) / PAPERMONO_LYMOW_ZONE_VISIBLE;
+        if (pages > 1) {
+            int nw = (W - 32 - gap) / 2;
+            drawButton(16, navY, nw, zoneH, "PREV", false);
+            drawButton(16 + nw + gap, navY, nw, zoneH, "NEXT " + String(lymowZonePage + 1) + "/" + String(pages), false);
         }
     }
     if (lastError.length()) {
@@ -2737,6 +2764,9 @@ void lymowSend(const char *lyCmd)
         } else if (strcmp(lyCmd, "dock") == 0) {
             lymowState = "Docking";
             lymowWorkStatus = 4;
+        } else if (strcmp(lyCmd, "cancel") == 0) {
+            lymowState = "Cancel";
+            lymowWorkStatus = 1;
         }
         drawScreen(false);
         httpLymowCommand(lyCmd, nullptr, 0);
@@ -2749,8 +2779,9 @@ void handleLymowTouch(int x, int y)
 {
     int W = M5.Display.width();
     int gap = 10;
-    int cmdY, cmdH, zoneY, zoneH, zoneGap, zoneW;
-    lymowGeom(cmdY, cmdH, zoneY, zoneH, zoneGap, zoneW);
+    int cmdY, cmdH, zoneY, zoneH, zoneGap, zoneW, allY, navY;
+    lymowClampZonePage();
+    lymowGeom(cmdY, cmdH, zoneY, zoneH, zoneGap, zoneW, allY, navY);
     if (x >= W - 16 - 110 && x <= W - 16 && y >= 100 && y <= 142) {
         lastError = "Loading zones…";
         drawScreen(false);
@@ -2761,7 +2792,7 @@ void handleLymowTouch(int x, int y)
     }
     bool paused = lymowPaused();
     bool running = lymowRunning();
-    int cmds = 2 + (running && !paused ? 1 : 0);
+    int cmds = 3 + (running && !paused ? 1 : 0);
     int cw = (W - 32 - gap * (cmds - 1)) / cmds;
     int cx = 16;
     if (y >= cmdY && y <= cmdY + cmdH) {
@@ -2776,12 +2807,17 @@ void handleLymowTouch(int x, int y)
         if (hit < 0) {
             return;
         }
+        int pauseSlot = (running && !paused) ? 1 : -1;
+        int dockSlot = (running && !paused) ? 2 : 1;
+        int cancelSlot = (running && !paused) ? 3 : 2;
         if (hit == 0) {
             lymowSend(paused ? "resume" : "start");
-        } else if (hit == 1 && running && !paused) {
+        } else if (hit == pauseSlot) {
             lymowSend("pause");
-        } else {
+        } else if (hit == dockSlot) {
             lymowSend("dock");
+        } else if (hit == cancelSlot) {
+            lymowSend("cancel");
         }
         return;
     }
@@ -2789,8 +2825,21 @@ void handleLymowTouch(int x, int y)
         return;
     }
     bool allOn = lymowAllZonesOn();
-    int shown = lymowZoneN + 1;
+    if (y >= allY && y <= allY + zoneH && x >= 16 && x <= W - 16) {
+        bool turnOn = !allOn;
+        for (int z = 0; z < lymowZoneN; z++) {
+            lymowZoneOn[z] = turnOn && lymowZoneEnabled[z];
+        }
+        drawScreen(false);
+        return;
+    }
+    int start = lymowZonePage * PAPERMONO_LYMOW_ZONE_VISIBLE;
+    int shown = lymowZoneN - start;
+    if (shown > PAPERMONO_LYMOW_ZONE_VISIBLE) {
+        shown = PAPERMONO_LYMOW_ZONE_VISIBLE;
+    }
     for (int i = 0; i < shown; i++) {
+        int z = start + i;
         int col = i % 2;
         int row = i / 2;
         int bx = 16 + col * (zoneW + gap);
@@ -2798,27 +2847,37 @@ void handleLymowTouch(int x, int y)
         if (x < bx || x > bx + zoneW || y < by || y > by + zoneH) {
             continue;
         }
-        if (i == 0) {
-            bool turnOn = !allOn;
-            for (int z = 0; z < lymowZoneN; z++) {
-                lymowZoneOn[z] = turnOn && lymowZoneEnabled[z];
+        if (!lymowZoneEnabled[z]) {
+            return;
+        }
+        if (allOn) {
+            for (int j = 0; j < lymowZoneN; j++) {
+                lymowZoneOn[j] = false;
             }
+            lymowZoneOn[z] = true;
         } else {
-            int z = i - 1;
-            if (!lymowZoneEnabled[z]) {
-                return;
-            }
-            if (allOn) {
-                for (int j = 0; j < lymowZoneN; j++) {
-                    lymowZoneOn[j] = false;
-                }
-                lymowZoneOn[z] = true;
-            } else {
-                lymowZoneOn[z] = !lymowZoneOn[z];
-            }
+            lymowZoneOn[z] = !lymowZoneOn[z];
         }
         drawScreen(false);
         return;
+    }
+    int pages = (lymowZoneN + PAPERMONO_LYMOW_ZONE_VISIBLE - 1) / PAPERMONO_LYMOW_ZONE_VISIBLE;
+    if (pages > 1 && y >= navY && y <= navY + zoneH) {
+        int nw = (W - 32 - gap) / 2;
+        if (x >= 16 && x <= 16 + nw) {
+            if (lymowZonePage > 0) {
+                lymowZonePage--;
+                drawScreen(false);
+            }
+            return;
+        }
+        if (x >= 16 + nw + gap && x <= 16 + nw + gap + nw) {
+            if (lymowZonePage + 1 < pages) {
+                lymowZonePage++;
+                drawScreen(false);
+            }
+            return;
+        }
     }
 }
 
@@ -5080,6 +5139,7 @@ bool httpGetStatus()
             lymowZoneOn[lymowZoneN] = on;
             lymowZoneN++;
         }
+        lymowClampZonePage();
     }
     /* Logo download can take tens of seconds — never do it on the lock screen
      * (Unlock must stay live) or while the panel is still refreshing. */

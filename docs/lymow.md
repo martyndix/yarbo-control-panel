@@ -1,8 +1,8 @@
 # Lymow (unofficial)
 
-Battery, work status, Start / Pause / Resume / Dock, and the mower camera on this panel. **Not affiliated with Lymow.**
+Battery, work status, Start / Pause / Resume / Dock / Cancel, and the mower camera on this panel. **Not affiliated with Lymow.**
 
-Controls use the same unofficial cloud MQTT `userCtrl` codes as [ha-lymow](https://github.com/8408323/ha-lymow) (MIT): Start = clean (1), Pause (3), Resume (4), Dock = recharge and keep progress (33). Status decoding follows the same notes.
+Controls use the same unofficial cloud MQTT `userCtrl` codes as [ha-lymow](https://github.com/8408323/ha-lymow) (MIT): Start = clean (1), Cancel = dock and clear task (2), Pause (3), Resume (4), Dock = recharge and keep progress (33). Status decoding follows the same notes.
 
 ## Account
 
@@ -13,9 +13,9 @@ Settings → **Lymow**:
 3. Region **Auto** tries Europe first, then NA / AU / Asia.
 4. **Sign in / Test Lymow**. The panel installs `paho-mqtt` and `websocket-client` on this host if they are missing (`python3 -m pip install --break-system-packages …`). Battery and work state then come from Lymow cloud MQTT (not the camera). The first reading can take up to a minute.
 
-On the Lymow card: tap **Refresh** under **Zones** to load go-zone names from the Lymow map (same unofficial MQTT `QUERY_MAP` as ha-lymow). Select one or more zones, then **Start** (sends those hash IDs only — not “mow everything”). **Pause**, **Resume**, and **Dock** (dock keeps current mow progress) work without a zone pick. The same Start-with-zones path is available as an Automations **Then** action.
+On the Lymow card: tap **Refresh** under **Zones** to load go-zone names from the Lymow map (same unofficial MQTT `QUERY_MAP` as ha-lymow). Select one or more zones, then **Start** (sends those hash IDs only — not “mow everything”). **Pause**, **Resume**, and **Dock** (dock keeps current mow progress) work without a zone pick. **Cancel** docks and clears the current mowing task (use this when Dock alone left the task queued). The same commands are available as Automations **Then** actions.
 
-**PaperMono** (firmware **0.1.77+**): the Lymow page shows the same zone chips, **REFRESH**, and **START** / **PAUSE** / **RESUME** / **DOCK**. Update the panel, build/flash PaperMono, then open Lymow (or Robots → Lymow).
+**PaperMono** (firmware **0.1.78+**): the Lymow page shows zone chips (six at a time with **PREV** / **NEXT** when there are more), **ALL ZONES**, **REFRESH**, and **START** / **PAUSE** / **RESUME** / **DOCK** / **CANCEL**. Update the panel, build/flash PaperMono, then open Lymow (or Robots → Lymow).
 
 Leave the password blank on later saves to keep the stored one. Login files (`data/lymow-config.json`, `data/lymow-cloud.json`) stay on the host across updates; this feature does not wipe them.
 

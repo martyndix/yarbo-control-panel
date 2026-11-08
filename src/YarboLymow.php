@@ -678,10 +678,11 @@ final class YarboLymow
         return ['ok' => true, 'message' => 'Updated Lymow status.'] + $this->dashboardPayload();
     }
 
-    public const COMMANDS = ['start', 'pause', 'resume', 'dock'];
+    public const COMMANDS = ['start', 'pause', 'resume', 'dock', 'cancel'];
 
     /**
-     * Send Start (with zone hash IDs) / Pause / Resume / Dock over cloud MQTT.
+     * Send Start (with zone hash IDs) / Pause / Resume / Dock / Cancel over cloud MQTT.
+     * Dock keeps task progress; Cancel docks and clears the current task (ha-lymow USER_CTRL_DOCK=2).
      *
      * @param list<string>|string $zones Zone hashIds required for start
      * @return array<string, mixed>
@@ -690,7 +691,7 @@ final class YarboLymow
     {
         $key = strtolower(trim($action));
         if (!in_array($key, self::COMMANDS, true)) {
-            return ['ok' => false, 'error' => 'Unknown Lymow command. Use start, pause, resume, or dock.'];
+            return ['ok' => false, 'error' => 'Unknown Lymow command. Use start, pause, resume, dock, or cancel.'];
         }
         $zoneIds = self::normalizeZoneIds($zones);
         if ($key === 'start' && $zoneIds === []) {
@@ -715,6 +716,7 @@ final class YarboLymow
             'pause' => 'Pause',
             'resume' => 'Resume',
             'dock' => 'Dock',
+            'cancel' => 'Cancel',
         ];
         $message = (string) ($result['message'] ?? ('Sent Lymow ' . ($labels[$key] ?? $key) . '.'));
 

@@ -577,7 +577,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="start" id="lymow-cmd-start" disabled title="Select one or more zones">Start</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="pause">Pause</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="resume">Resume</button>
-                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="dock">Dock</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="dock" title="Dock and keep mow progress">Dock</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="cancel" title="Dock and clear the current mowing task">Cancel</button>
             </div>
             <p id="lymow-cmd-status" class="hint lymow-cmd-status" role="status" aria-live="polite"></p>
             <div class="camera-mode lymow-mode" role="radiogroup" aria-label="Lymow camera mode">
@@ -992,7 +993,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section hidden" id="settings-lymow-section" data-settings-pane="lymow">
                             <h3 class="settings-subtitle">Lymow</h3>
-                            <p class="hint">Unofficial Lymow app login (same account as the phone app) for battery, work status, and Start / Pause / Resume / Dock. Camera is the LAN IP — stream path is always <code>rtsp://IP:10022/h264ESVideoTest</code>. Needs <code>ffmpeg</code> on this host. Protocol notes from <a href="https://github.com/8408323/ha-lymow" target="_blank" rel="noopener">ha-lymow</a> (MIT). See <code>docs/lymow.md</code>.</p>
+                            <p class="hint">Unofficial Lymow app login (same account as the phone app) for battery, work status, and Start / Pause / Resume / Dock / Cancel. Camera is the LAN IP — stream path is always <code>rtsp://IP:10022/h264ESVideoTest</code>. Needs <code>ffmpeg</code> on this host. Protocol notes from <a href="https://github.com/8408323/ha-lymow" target="_blank" rel="noopener">ha-lymow</a> (MIT). See <code>docs/lymow.md</code>.</p>
                             <label class="settings-field">
                                 <span class="label">Lymow email</span>
                                 <input type="email" id="settings-lymow-email" name="lymow_email" autocomplete="username" spellcheck="false" placeholder="app login email">
@@ -1852,7 +1853,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="398" y="449" width="36" height="6" fill="#f4f1e8"/>
                                         <rect x="414" y="431" width="6" height="42" fill="#f4f1e8"/>
                                     </svg>
-                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.77.</figcaption>
+                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.78.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">
@@ -2019,7 +2020,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.77 / 0.2.26-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.78 / 0.2.26-colour. Click <strong>Build firmware</strong> on this page before <strong>Update</strong> — a stale binary cannot be pushed over Wi-Fi. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the last poll used the Funnel HTTPS URL. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

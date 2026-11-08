@@ -7203,6 +7203,7 @@ function homeAutoThenPhrase(action, names) {
         if (action.command === 'pause') return 'Lymow Pause';
         if (action.command === 'resume') return 'Lymow Resume';
         if (action.command === 'dock') return 'Lymow Dock';
+        if (action.command === 'cancel') return 'Lymow Cancel';
         return 'Lymow';
     }
     if (action.kind === 'scene') {
@@ -7296,7 +7297,7 @@ function homeAutoYarboAction(command, planId, planName) {
 let homeAutoLymowZones = [];
 
 function homeAutoLymowAction(command, zoneIds, zoneNames) {
-    const cmd = ['start', 'pause', 'resume', 'dock'].includes(command) ? command : 'dock';
+    const cmd = ['start', 'pause', 'resume', 'dock', 'cancel'].includes(command) ? command : 'dock';
     const action = { kind: 'lymow', command: cmd };
     if (cmd === 'start') {
         const zones = Array.isArray(zoneIds)
@@ -8043,7 +8044,7 @@ function homeAutoThenChipHtml(action, index) {
         </div>`;
     }
     if (action.kind === 'lymow') {
-        const labels = { start: 'Start', pause: 'Pause', resume: 'Resume', dock: 'Dock' };
+        const labels = { start: 'Start', pause: 'Pause', resume: 'Resume', dock: 'Dock', cancel: 'Cancel' };
         const body = labels[action.command] || 'Lymow';
         let extra = '';
         if (action.command === 'start') {
@@ -8681,6 +8682,7 @@ function homeAutoTrayGroups(devices, scenes) {
             homeAutoTrayChipSpec('lymow', 'pause', 'Pause', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('lymow', 'resume', 'Resume', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('lymow', 'dock', 'Dock', 'auto-chip--robot', '', 'then'),
+            homeAutoTrayChipSpec('lymow', 'cancel', 'Cancel', 'auto-chip--robot', '', 'then'),
         );
     }
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
@@ -8764,7 +8766,7 @@ function homeAutoApplyTray(kind, id, zone) {
         if (zone === 'then') {
             showToast(
                 robot === HOME_AUTO_LYMOW_ID
-                    ? 'Lymow Error and OK go in When or Only if. Use Start, Pause, Resume, or Dock in Then'
+                    ? 'Lymow Error and OK go in When or Only if. Use Start, Pause, Resume, Dock, or Cancel in Then'
                     : 'Yarbo Error goes in When or Only if',
                 'error',
             );
@@ -8783,7 +8785,7 @@ function homeAutoApplyTray(kind, id, zone) {
             return;
         }
         if (zone === 'when' || zone === 'if') {
-            showToast('Start, Pause, Resume, and Dock go in Then', 'error');
+            showToast('Start, Pause, Resume, Dock, and Cancel go in Then', 'error');
             return;
         }
         const cmd = id || 'dock';
@@ -9792,7 +9794,10 @@ async function refreshLymowZones(force = true) {
 
 async function sendLymowCommand(action, button) {
     const cmd = String(action || '').toLowerCase();
-    if (!['start', 'pause', 'resume', 'dock'].includes(cmd) || lymowCmdBusy) return;
+    if (!['start', 'pause', 'resume', 'dock', 'cancel'].includes(cmd) || lymowCmdBusy) return;
+    if (cmd === 'cancel' && !confirm('Cancel the current Lymow task? This docks and clears mow progress (Dock alone keeps progress).')) {
+        return;
+    }
     const zones = [...lymowZonesSelected];
     if (cmd === 'start' && !zones.length) {
         showToast('Select one or more Lymow zones first', 'error');

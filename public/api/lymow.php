@@ -56,7 +56,7 @@ if ($method === 'POST') {
     if ($action === 'maps' || $action === 'zones' || $action === 'refresh_zones') {
         json_response($lymow->fetchZones(true) + ['config' => $lymow->publicView()]);
     }
-    if (in_array($action, ['start', 'pause', 'resume', 'dock', 'command'], true)) {
+    if (in_array($action, ['start', 'pause', 'resume', 'dock', 'cancel', 'command'], true)) {
         $cmd = $action === 'command'
             ? (string) ($input['command'] ?? $input['cmd'] ?? '')
             : $action;

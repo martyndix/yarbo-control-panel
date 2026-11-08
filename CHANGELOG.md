@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.225] - 2026-11-08
+
+### Added
+- **Lymow Cancel:** docks and clears the current mowing task (`userCtrl` 2; Dock alone still keeps progress). On the web Lymow card, Automations Then, and PaperMono (**0.1.78**). PaperMono also pages zones six at a time with PREV/NEXT when there are many map zones.
+
 ## [4.0.224] - 2026-11-08
 
 ### Added
