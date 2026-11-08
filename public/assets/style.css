@@ -1223,6 +1223,64 @@ body.modal-open {
     color: var(--muted);
 }
 
+.lymow-zones {
+    margin: 0.7rem 0 0.25rem;
+}
+
+.lymow-zones-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+}
+
+.lymow-zones-head .label {
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.lymow-zones-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.lymow-zones-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    min-height: 1.75rem;
+}
+
+.lymow-zone-chip {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 0.35rem 0.7rem;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.lymow-zone-chip.is-on {
+    border-color: var(--accent, #3d7a4a);
+    background: color-mix(in srgb, var(--accent, #3d7a4a) 18%, var(--surface));
+}
+
+.lymow-zone-chip:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.lymow-zones-hint {
+    margin: 0.35rem 0 0;
+}
+
 .lymow-controls {
     display: flex;
     flex-wrap: wrap;

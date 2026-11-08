@@ -19,84 +19,99 @@ $root = dirname(__DIR__);
 
 $proto = (string) file_get_contents($root . '/scripts/lib/lymow_protocol.py');
 assert_true(str_contains($proto, 'USER_CTRL_CLEAN = 1'), 'protocol CLEAN=1');
-assert_true(str_contains($proto, 'USER_CTRL_PAUSE = 3'), 'protocol PAUSE=3');
-assert_true(str_contains($proto, 'USER_CTRL_RESUME = 4'), 'protocol RESUME=4');
-assert_true(str_contains($proto, 'USER_CTRL_RECHARGE_DOCK = 33'), 'protocol DOCK=33 keep progress');
-assert_true(str_contains($proto, 'def encode_action'), 'protocol encode_action');
+assert_true(str_contains($proto, 'USER_CTRL_QUERY_MAP = 19'), 'protocol QUERY_MAP=19');
+assert_true(str_contains($proto, 'def encode_start_zones'), 'protocol encode_start_zones');
+assert_true(str_contains($proto, 'def decode_map_zones'), 'protocol decode_map_zones');
 
 $bridge = (string) file_get_contents($root . '/scripts/lymow_bridge.py');
-assert_true(str_contains($bridge, 'mqtt_publish_command'), 'bridge mqtt_publish_command');
-assert_true(str_contains($bridge, 'cmd_command'), 'bridge cmd_command');
-assert_true(str_contains($bridge, '"command"') || str_contains($bridge, "'command'"), 'bridge command CLI');
+assert_true(str_contains($bridge, 'mqtt_query_map'), 'bridge mqtt_query_map');
+assert_true(str_contains($bridge, 'cmd_maps'), 'bridge cmd_maps');
+assert_true(str_contains($bridge, '--zones'), 'bridge --zones');
 
 $lymowPhp = (string) file_get_contents($root . '/src/YarboLymow.php');
 assert_true(str_contains($lymowPhp, 'function sendCommand'), 'YarboLymow::sendCommand');
-assert_true(str_contains($lymowPhp, "['start', 'pause', 'resume', 'dock']"), 'COMMANDS list');
+assert_true(str_contains($lymowPhp, 'function fetchZones'), 'YarboLymow::fetchZones');
+assert_true(str_contains($lymowPhp, 'function zonesFromData'), 'YarboLymow::zonesFromData');
 
 $api = (string) file_get_contents($root . '/public/api/lymow.php');
-assert_true(str_contains($api, "sendCommand"), 'API calls sendCommand');
-assert_true(str_contains($api, "'start', 'pause', 'resume', 'dock'"), 'API accepts control actions');
+assert_true(str_contains($api, "'maps'"), 'API maps action');
+assert_true(str_contains($api, 'fetchZones'), 'API fetchZones');
+assert_true(str_contains($api, "sendCommand"), 'API sendCommand');
 
 $index = (string) file_get_contents($root . '/public/index.php');
-assert_true(str_contains($index, 'data-lymow-cmd="start"'), 'Lymow Start button');
-assert_true(str_contains($index, 'data-lymow-cmd="pause"'), 'Lymow Pause button');
-assert_true(str_contains($index, 'data-lymow-cmd="resume"'), 'Lymow Resume button');
-assert_true(str_contains($index, 'data-lymow-cmd="dock"'), 'Lymow Dock button');
-assert_true(!str_contains($index, 'This panel does not send start, dock, or pause'), 'settings hint updated');
+assert_true(str_contains($index, 'id="lymow-zones-list"'), 'zone list');
+assert_true(str_contains($index, 'id="lymow-zones-refresh"'), 'zones refresh');
+assert_true(str_contains($index, 'data-lymow-cmd="start"'), 'Start button');
 
 $js = (string) file_get_contents($root . '/public/assets/app.js');
-assert_true(str_contains($js, 'function sendLymowCommand'), 'JS sendLymowCommand');
-assert_true(str_contains($js, 'function homeAutoLymowAction'), 'JS homeAutoLymowAction');
-assert_true(str_contains($js, "homeAutoTrayChipSpec('lymow', 'start'"), 'tray Start Then chip');
-assert_true(str_contains($js, "kind: 'lymow'"), 'lymow Then kind');
-assert_true(!str_contains($js, 'This panel does not send Lymow start'), 'old Then toast removed');
+assert_true(str_contains($js, 'function renderLymowZones'), 'JS renderLymowZones');
+assert_true(str_contains($js, 'function refreshLymowZones'), 'JS refreshLymowZones');
+assert_true(str_contains($js, 'body.zones = zones'), 'JS start sends zones');
+assert_true(str_contains($js, 'function homeAutoLoadLymowZones'), 'JS auto load zones');
+assert_true(str_contains($js, 'data-auto-lymow-zones'), 'JS auto zone select');
 
 $autoPhp = (string) file_get_contents($root . '/src/YarboHomeAutomations.php');
-assert_true(str_contains($autoPhp, 'LYMOW_COMMANDS'), 'automations LYMOW_COMMANDS');
-assert_true(str_contains($autoPhp, 'function runLymowAction'), 'automations runLymowAction');
+assert_true(str_contains($autoPhp, "\$out['zones'] = \$zones"), 'automations store start zones');
 
-$tmp = sys_get_temp_dir() . '/yarbo-lymow-ctrl-' . bin2hex(random_bytes(3));
+$tmp = sys_get_temp_dir() . '/yarbo-lymow-zones-' . bin2hex(random_bytes(3));
 mkdir($tmp . '/data', 0775, true);
 $auto = new YarboHomeAutomations($tmp);
-$saved = $auto->save([
-    'id' => 'a-lymow-dock',
-    'name' => 'Dock Lymow',
+
+$badStart = $auto->save([
+    'id' => 'a-lymow-bare-start',
+    'name' => 'Bare start',
     'trigger' => ['type' => 'time', 'at' => '21:00'],
-    'actions' => [['kind' => 'lymow', 'command' => 'dock']],
+    'actions' => [['kind' => 'lymow', 'command' => 'start']],
 ]);
-assert_true(!empty($saved['ok']), 'save lymow Then action: ' . json_encode($saved));
+assert_true(empty($badStart['ok']), 'reject start without zones: ' . json_encode($badStart));
+
+$saved = $auto->save([
+    'id' => 'a-lymow-start-zones',
+    'name' => 'Start front',
+    'trigger' => ['type' => 'time', 'at' => '21:00'],
+    'actions' => [[
+        'kind' => 'lymow',
+        'command' => 'start',
+        'zones' => ['wsmjco1T'],
+        'zone_names' => ['Front Lawn'],
+    ]],
+]);
+assert_true(!empty($saved['ok']), 'save start with zones: ' . json_encode($saved));
 $store = $auto->load();
 $rule = null;
 foreach ($store['automations'] as $row) {
-    if (($row['id'] ?? '') === 'a-lymow-dock') {
+    if (($row['id'] ?? '') === 'a-lymow-start-zones') {
         $rule = $row;
         break;
     }
 }
 assert_true(is_array($rule), 'saved rule present');
-assert_true(($rule['actions'][0]['kind'] ?? '') === 'lymow', 'normalized kind lymow');
-assert_true(($rule['actions'][0]['command'] ?? '') === 'dock', 'normalized command dock');
+assert_true(($rule['actions'][0]['zones'][0] ?? '') === 'wsmjco1T', 'zone hash stored');
 assert_true(
-    YarboHomeAutomations::thenPhrase(['kind' => 'lymow', 'command' => 'start']) === 'Lymow Start',
-    'thenPhrase start'
+    str_contains(YarboHomeAutomations::thenPhrase($rule['actions'][0]), 'Front Lawn'),
+    'thenPhrase includes zone name'
 );
 
-$bad = $auto->save([
-    'id' => 'a-lymow-bad',
-    'name' => 'Bad',
-    'trigger' => ['type' => 'time', 'at' => '22:00'],
-    'actions' => [['kind' => 'lymow', 'command' => 'cancel']],
+$zones = YarboLymow::zonesFromData([
+    'zones' => [
+        ['hashId' => 'a1', 'name' => 'Side', 'isEnabled' => true, 'area' => 12.5],
+        ['hash_id' => 'b2', 'name' => '', 'enabled' => false],
+        ['name' => 'skip me'],
+    ],
 ]);
-assert_true(empty($bad['ok']), 'reject unknown lymow command: ' . json_encode($bad));
+assert_true(count($zones) === 2, 'zonesFromData count');
+assert_true($zones[0]['hash_id'] === 'a1' && $zones[0]['name'] === 'Side', 'zonesFromData name');
+assert_true($zones[0]['area_m2'] === 12.5, 'zonesFromData area');
+assert_true($zones[1]['name'] === 'b2' && $zones[1]['enabled'] === false, 'zonesFromData fallback name');
 
-assert_true(YarboLymow::COMMANDS === ['start', 'pause', 'resume', 'dock'], 'COMMANDS const');
+assert_true(YarboLymow::normalizeZoneIds('a, b;c') === ['a', 'b', 'c'], 'normalizeZoneIds');
 
 $docs = (string) file_get_contents($root . '/docs/lymow.md');
-assert_true(str_contains($docs, 'Start'), 'docs mention Start');
-assert_true(!str_contains($docs, 'Start, dock, and pause are not sent'), 'docs no longer say controls disabled');
+assert_true(str_contains($docs, 'Refresh'), 'docs mention Refresh zones');
+assert_true(str_contains($docs, 'hash IDs'), 'docs mention hash IDs');
 
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
-assert_true(str_contains($change, '## [4.0.222]'), 'changelog 4.0.222');
-assert_true(str_contains($change, 'Lymow'), 'changelog mentions Lymow');
+assert_true(str_contains($change, '## [4.0.223]'), 'changelog 4.0.223');
+assert_true(str_contains($change, 'zone picker'), 'changelog mentions zone picker');
 
 fwrite(STDOUT, "test_lymow_controls.php ok\n");

@@ -236,7 +236,49 @@ final class YarboLymow
             'page_name' => $this->pageName($config, $cloud),
             'cloud_updated' => $cloud['fetched_at'] ?? null,
             'cloud_error' => $this->cloudHint($cloud, $battery),
+            'zones' => self::zonesFromData($cloud),
+            'zones_fetched_at' => isset($cloud['zones_fetched_at']) && is_string($cloud['zones_fetched_at'])
+                ? $cloud['zones_fetched_at']
+                : null,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return list<array{hash_id: string, name: string, enabled: bool, area_m2?: float|int}>
+     */
+    public static function zonesFromData(array $data): array
+    {
+        $raw = $data['zones'] ?? [];
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $hash = trim((string) ($row['hash_id'] ?? $row['hashId'] ?? ''));
+            if ($hash === '') {
+                continue;
+            }
+            $name = trim((string) ($row['name'] ?? ''));
+            $zone = [
+                'hash_id' => $hash,
+                'name' => $name !== '' ? $name : $hash,
+                'enabled' => array_key_exists('enabled', $row)
+                    ? (bool) $row['enabled']
+                    : (array_key_exists('isEnabled', $row) ? (bool) $row['isEnabled'] : true),
+            ];
+            if (isset($row['area_m2']) && is_numeric($row['area_m2'])) {
+                $zone['area_m2'] = (float) $row['area_m2'];
+            } elseif (isset($row['area']) && is_numeric($row['area'])) {
+                $zone['area_m2'] = (float) $row['area'];
+            }
+            $out[] = $zone;
+        }
+
+        return $out;
     }
 
     /**
@@ -639,22 +681,32 @@ final class YarboLymow
     public const COMMANDS = ['start', 'pause', 'resume', 'dock'];
 
     /**
-     * Send Start / Pause / Resume / Dock over cloud MQTT (ha-lymow userCtrl).
+     * Send Start (with zone hash IDs) / Pause / Resume / Dock over cloud MQTT.
      *
+     * @param list<string>|string $zones Zone hashIds required for start
      * @return array<string, mixed>
      */
-    public function sendCommand(string $action): array
+    public function sendCommand(string $action, array|string $zones = []): array
     {
         $key = strtolower(trim($action));
         if (!in_array($key, self::COMMANDS, true)) {
             return ['ok' => false, 'error' => 'Unknown Lymow command. Use start, pause, resume, or dock.'];
+        }
+        $zoneIds = self::normalizeZoneIds($zones);
+        if ($key === 'start' && $zoneIds === []) {
+            return ['ok' => false, 'error' => 'Pick at least one Lymow zone to start.'] + $this->dashboardPayload();
         }
         if (!$this->cloudSignedIn() && $this->load()['email'] === '') {
             return ['ok' => false, 'error' => 'Sign in to Lymow under Settings first.'];
         }
         $this->syncCloudFile($this->load());
         $this->startListener();
-        $result = $this->runBridge(['command', '--action', $key], 35.0);
+        $args = ['command', '--action', $key];
+        if ($key === 'start') {
+            $args[] = '--zones';
+            $args[] = implode(',', $zoneIds);
+        }
+        $result = $this->runBridge($args, 35.0);
         if (!($result['ok'] ?? false)) {
             return $result + $this->dashboardPayload();
         }
@@ -666,7 +718,69 @@ final class YarboLymow
         ];
         $message = (string) ($result['message'] ?? ('Sent Lymow ' . ($labels[$key] ?? $key) . '.'));
 
-        return ['ok' => true, 'message' => $message, 'action' => $key] + $this->dashboardPayload();
+        return [
+            'ok' => true,
+            'message' => $message,
+            'action' => $key,
+            'zones' => $key === 'start' ? $zoneIds : ($result['zones'] ?? null),
+        ] + $this->dashboardPayload();
+    }
+
+    /**
+     * Refresh go-zones + names from the Lymow map (QUERY_MAP over MQTT).
+     *
+     * @return array<string, mixed>
+     */
+    public function fetchZones(bool $force = true): array
+    {
+        if (!$this->cloudSignedIn() && $this->load()['email'] === '') {
+            return ['ok' => false, 'error' => 'Sign in to Lymow under Settings first.'] + $this->dashboardPayload();
+        }
+        $dash = $this->dashboardPayload();
+        if (!$force && ($dash['zones'] ?? []) !== []) {
+            return ['ok' => true, 'message' => 'Using cached Lymow zones.', 'cached' => true] + $dash;
+        }
+        $this->syncCloudFile($this->load());
+        $this->startListener();
+        $result = $this->runBridge(['maps', '--wait', '25'], 45.0);
+        $dash = $this->dashboardPayload();
+        if (!($result['ok'] ?? false)) {
+            if (($dash['zones'] ?? []) !== []) {
+                return [
+                    'ok' => true,
+                    'cached' => true,
+                    'message' => (string) ($result['error'] ?? 'Could not refresh zones; showing last list.'),
+                    'warning' => (string) ($result['error'] ?? ''),
+                ] + $dash;
+            }
+
+            return $result + $dash;
+        }
+
+        return [
+            'ok' => true,
+            'message' => (string) ($result['message'] ?? 'Loaded Lymow zones.'),
+        ] + $this->dashboardPayload();
+    }
+
+    /**
+     * @param list<string>|string $zones
+     * @return list<string>
+     */
+    public static function normalizeZoneIds(array|string $zones): array
+    {
+        if (is_string($zones)) {
+            $zones = preg_split('/[\s,;]+/', $zones) ?: [];
+        }
+        $out = [];
+        foreach ($zones as $z) {
+            $id = trim((string) $z);
+            if ($id !== '' && !in_array($id, $out, true)) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
     }
 
     public function refreshCloudIfStale(): void

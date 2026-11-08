@@ -13,7 +13,7 @@ Settings → **Lymow**:
 3. Region **Auto** tries Europe first, then NA / AU / Asia.
 4. **Sign in / Test Lymow**. The panel installs `paho-mqtt` and `websocket-client` on this host if they are missing (`python3 -m pip install --break-system-packages …`). Battery and work state then come from Lymow cloud MQTT (not the camera). The first reading can take up to a minute.
 
-On the Lymow card: **Start**, **Pause**, **Resume**, and **Dock** (dock keeps current mow progress). The same commands are available as Automations **Then** actions. Map / zone pickers are not on this panel yet.
+On the Lymow card: tap **Refresh** under **Zones** to load go-zone names from the Lymow map (same unofficial MQTT `QUERY_MAP` as ha-lymow). Select one or more zones, then **Start** (sends those hash IDs only — not “mow everything”). **Pause**, **Resume**, and **Dock** (dock keeps current mow progress) work without a zone pick. The same Start-with-zones path is available as an Automations **Then** action.
 
 Leave the password blank on later saves to keep the stored one. Login files (`data/lymow-config.json`, `data/lymow-cloud.json`) stay on the host across updates; this feature does not wipe them.
 

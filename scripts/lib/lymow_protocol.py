@@ -15,9 +15,10 @@ from typing import Any
 PB_VERSION = 49
 
 # MQTT userCtrl codes (ha-lymow / Android traffic capture).
-USER_CTRL_CLEAN = 1  # start mow
+USER_CTRL_CLEAN = 1  # start mow (bare = all enabled; with map payload = selected zones)
 USER_CTRL_PAUSE = 3
 USER_CTRL_RESUME = 4
+USER_CTRL_QUERY_MAP = 19
 USER_CTRL_RECHARGE_DOCK = 33  # dock and keep task progress
 USER_CTRL_QUERY_WIFI_4G = 52  # read-only status poke
 
@@ -27,6 +28,9 @@ USER_CTRL_ACTIONS = {
     "resume": USER_CTRL_RESUME,
     "dock": USER_CTRL_RECHARGE_DOCK,
 }
+
+# PbMap content field (inside PbOutput.f23 → f2 → f3).
+_MAP_CONTENT_GO_ZONES = 1
 
 
 def _encode_varint(value: int) -> bytes:
@@ -51,6 +55,10 @@ def _field_bytes(field_no: int, data: bytes) -> bytes:
     return _encode_varint((field_no << 3) | 2) + _encode_varint(len(data)) + data
 
 
+def _field_str(field_no: int, value: str) -> bytes:
+    return _field_bytes(field_no, value.encode("utf-8"))
+
+
 def wrap_envelope(pb_bytes: bytes) -> str:
     return json.dumps({"message": base64.b64encode(pb_bytes).decode()})
 
@@ -64,11 +72,33 @@ def encode_status_query() -> bytes:
     return encode_userctrl(USER_CTRL_QUERY_WIFI_4G)
 
 
-def encode_action(action: str) -> bytes:
-    """Encode Start / Pause / Resume / Dock for pbinput (ha-lymow wire format)."""
+def encode_query_map(query_index: int = 0) -> bytes:
+    """Ask the robot for the live map / zone list (USER_CTRL_QUERY_MAP=19)."""
+    sub = _field_i32(1, query_index) + _field_i32(4, 1)
+    return _field_i32(2, PB_VERSION) + _field_i32(5, USER_CTRL_QUERY_MAP) + _field_bytes(23, sub)
+
+
+def encode_start_zones(zone_hash_ids: list[str]) -> bytes:
+    """Start mowing specific go-zones by hashId (ha-lymow encode_start_zones)."""
+    ids = [str(z).strip() for z in zone_hash_ids if str(z).strip()]
+    if not ids:
+        raise ValueError("Pick at least one Lymow zone")
+    pb = _field_i32(2, PB_VERSION) + _field_i32(5, USER_CTRL_CLEAN)
+    map_pb = b""
+    for i, hash_id in enumerate(ids, start=1):
+        basic_info = _field_str(3, hash_id) + _field_i32(8, i)
+        zone = _field_bytes(1, basic_info)
+        map_pb += _field_bytes(1, zone)
+    return pb + _field_bytes(12, map_pb)
+
+
+def encode_action(action: str, zone_hash_ids: list[str] | None = None) -> bytes:
+    """Encode Pause / Resume / Dock, or Start with required zone hash IDs."""
     key = str(action or "").strip().lower()
     if key not in USER_CTRL_ACTIONS:
         raise ValueError(f"Unknown Lymow action: {action!r} (use start, pause, resume, dock)")
+    if key == "start":
+        return encode_start_zones(list(zone_hash_ids or []))
     return encode_userctrl(USER_CTRL_ACTIONS[key])
 
 
@@ -154,8 +184,61 @@ def _first(fields: list[tuple[int, int, Any]], field_no: int, default: Any = Non
     return default
 
 
+def _all(fields: list[tuple[int, int, Any]], field_no: int) -> list[Any]:
+    return [val for fn, _wt, val in fields if fn == field_no]
+
+
 def _decode_f32(raw: int) -> float:
     return struct.unpack("<f", struct.pack("<I", raw & 0xFFFFFFFF))[0]
+
+
+def decode_map_zones(pb_bytes: bytes) -> list[dict[str, Any]]:
+    """Slim go-zone list from a QUERY_MAP pboutput (hashId, name, enabled, area).
+
+    Navigation path matches ha-lymow: PbOutput.f23 → f2 → f3 → goZones(f1).
+    Names are the ones stored on the robot / Lymow app map.
+    """
+    top = _decode_fields(pb_bytes)
+    outer_raw = _first(top, 23)
+    if not isinstance(outer_raw, bytes):
+        return []
+    wrapper_raw = _first(_decode_fields(outer_raw), 2)
+    if not isinstance(wrapper_raw, bytes):
+        return []
+    content_raw = _first(_decode_fields(wrapper_raw), 3)
+    if not isinstance(content_raw, bytes):
+        return []
+    content = _decode_fields(content_raw)
+    zones: list[dict[str, Any]] = []
+    for zone_raw in _all(content, _MAP_CONTENT_GO_ZONES):
+        if not isinstance(zone_raw, bytes):
+            continue
+        zf = _decode_fields(zone_raw)
+        bi_raw = _first(zf, 1)
+        if not isinstance(bi_raw, bytes):
+            continue
+        bi = _decode_fields(bi_raw)
+        hash_raw = _first(bi, 3)
+        hash_id = hash_raw.decode("utf-8", errors="replace") if isinstance(hash_raw, bytes) else ""
+        if not hash_id:
+            continue
+        name_raw = _first(bi, 2)
+        name = name_raw.decode("utf-8", errors="replace") if isinstance(name_raw, bytes) and name_raw else ""
+        zone: dict[str, Any] = {
+            "hash_id": hash_id,
+            "name": name or hash_id,
+            "enabled": bool(_first(bi, 4, 1)),
+        }
+        pp_raw = _first(zf, 3)
+        if isinstance(pp_raw, bytes):
+            area = _first(_decode_fields(pp_raw), 3)
+            if area is not None:
+                try:
+                    zone["area_m2"] = float(area)
+                except (TypeError, ValueError):
+                    pass
+        zones.append(zone)
+    return zones
 
 
 def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
