@@ -15,7 +15,8 @@ from typing import Any
 PB_VERSION = 49
 
 # MQTT userCtrl codes (ha-lymow / Android traffic capture).
-USER_CTRL_CLEAN = 1  # start mow (bare = all enabled; with map payload = selected zones)
+USER_CTRL_CLEAN = 1  # start mow (with map payload = selected zones)
+USER_CTRL_DOCK = 2  # dock + cancel / clear the current task (destructive)
 USER_CTRL_PAUSE = 3
 USER_CTRL_RESUME = 4
 USER_CTRL_QUERY_MAP = 19
@@ -27,6 +28,7 @@ USER_CTRL_ACTIONS = {
     "pause": USER_CTRL_PAUSE,
     "resume": USER_CTRL_RESUME,
     "dock": USER_CTRL_RECHARGE_DOCK,
+    "cancel": USER_CTRL_DOCK,
 }
 
 # PbMap content field (inside PbOutput.f23 → f2 → f3).
@@ -93,10 +95,10 @@ def encode_start_zones(zone_hash_ids: list[str]) -> bytes:
 
 
 def encode_action(action: str, zone_hash_ids: list[str] | None = None) -> bytes:
-    """Encode Pause / Resume / Dock, or Start with required zone hash IDs."""
+    """Encode Pause / Resume / Dock / Cancel, or Start with required zone hash IDs."""
     key = str(action or "").strip().lower()
     if key not in USER_CTRL_ACTIONS:
-        raise ValueError(f"Unknown Lymow action: {action!r} (use start, pause, resume, dock)")
+        raise ValueError(f"Unknown Lymow action: {action!r} (use start, pause, resume, dock, cancel)")
     if key == "start":
         return encode_start_zones(list(zone_hash_ids or []))
     return encode_userctrl(USER_CTRL_ACTIONS[key])

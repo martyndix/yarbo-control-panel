@@ -27,7 +27,7 @@ final class YarboHomeAutomations
     public const LYMOW_ID = 'lymow';
     public const ROBOT_EVENTS = ['error', 'ok'];
     public const YARBO_COMMANDS = ['start_plan', 'return_to_dock', 'stop'];
-    public const LYMOW_COMMANDS = ['start', 'pause', 'resume', 'dock'];
+    public const LYMOW_COMMANDS = ['start', 'pause', 'resume', 'dock', 'cancel'];
     public const HOLD_MIN_SEC = 60;
     public const HOLD_MAX_SEC = 300;
 
@@ -1531,6 +1531,7 @@ final class YarboHomeAutomations
                     'pause' => 'Lymow Pause',
                     'resume' => 'Lymow Resume',
                     'dock' => 'Lymow Dock',
+                    'cancel' => 'Lymow Cancel',
                     default => 'Lymow',
                 };
             }

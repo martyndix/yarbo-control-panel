@@ -19,6 +19,9 @@ $root = dirname(__DIR__);
 
 $proto = (string) file_get_contents($root . '/scripts/lib/lymow_protocol.py');
 assert_true(str_contains($proto, 'USER_CTRL_CLEAN = 1'), 'protocol CLEAN=1');
+assert_true(str_contains($proto, 'USER_CTRL_DOCK = 2'), 'protocol DOCK/cancel=2');
+assert_true(str_contains($proto, 'USER_CTRL_RECHARGE_DOCK = 33'), 'protocol RECHARGE_DOCK=33');
+assert_true(str_contains($proto, '"cancel": USER_CTRL_DOCK'), 'protocol cancel maps to DOCK=2');
 assert_true(str_contains($proto, 'USER_CTRL_QUERY_MAP = 19'), 'protocol QUERY_MAP=19');
 assert_true(str_contains($proto, 'def encode_start_zones'), 'protocol encode_start_zones');
 assert_true(str_contains($proto, 'def decode_map_zones'), 'protocol decode_map_zones');
@@ -42,11 +45,13 @@ $index = (string) file_get_contents($root . '/public/index.php');
 assert_true(str_contains($index, 'id="lymow-zones-list"'), 'zone list');
 assert_true(str_contains($index, 'id="lymow-zones-refresh"'), 'zones refresh');
 assert_true(str_contains($index, 'data-lymow-cmd="start"'), 'Start button');
+assert_true(str_contains($index, 'data-lymow-cmd="cancel"'), 'Cancel button');
 
 $js = (string) file_get_contents($root . '/public/assets/app.js');
 assert_true(str_contains($js, 'function renderLymowZones'), 'JS renderLymowZones');
 assert_true(str_contains($js, 'function refreshLymowZones'), 'JS refreshLymowZones');
 assert_true(str_contains($js, 'body.zones = zones'), 'JS start sends zones');
+assert_true(str_contains($js, "'cancel'"), 'JS cancel command');
 assert_true(str_contains($js, 'function homeAutoLoadLymowZones'), 'JS auto load zones');
 assert_true(str_contains($js, 'data-auto-lymow-zones'), 'JS auto zone select');
 
@@ -109,8 +114,11 @@ assert_true(YarboLymow::normalizeZoneIds('a, b;c') === ['a', 'b', 'c'], 'normali
 $docs = (string) file_get_contents($root . '/docs/lymow.md');
 assert_true(str_contains($docs, 'Refresh'), 'docs mention Refresh zones');
 assert_true(str_contains($docs, 'hash IDs'), 'docs mention hash IDs');
+assert_true(str_contains($docs, 'Cancel'), 'docs mention Cancel');
 
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.225]'), 'changelog 4.0.225');
+assert_true(str_contains($change, 'Cancel'), 'changelog mentions Cancel');
 assert_true(str_contains($change, '## [4.0.223]'), 'changelog 4.0.223');
 assert_true(str_contains($change, 'zone picker'), 'changelog mentions zone picker');
 
