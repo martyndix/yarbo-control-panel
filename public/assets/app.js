@@ -223,6 +223,12 @@ const els = {
     lymowCam: document.getElementById('lymow-cam'),
     lymowStream: document.getElementById('lymow-stream'),
     lymowStreamError: document.getElementById('lymow-stream-error'),
+    lymowZonesList: document.getElementById('lymow-zones-list'),
+    lymowZonesHint: document.getElementById('lymow-zones-hint'),
+    lymowZonesAll: document.getElementById('lymow-zones-all'),
+    lymowZonesNone: document.getElementById('lymow-zones-none'),
+    lymowZonesRefresh: document.getElementById('lymow-zones-refresh'),
+    lymowCmdStart: document.getElementById('lymow-cmd-start'),
     lymowCmdStatus: document.getElementById('lymow-cmd-status'),
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
@@ -349,6 +355,11 @@ const ACTIVE_MODULE_KEY = 'yarbo_active_module';
 let activeModuleId = 'yarbo';
 let yarboDeviceName = '';
 let lymowPageName = '';
+/** @type {Array<{hash_id: string, name: string, enabled?: boolean, area_m2?: number}>} */
+let lymowZones = [];
+/** @type {Set<string>} */
+let lymowZonesSelected = new Set();
+let lymowZonesBusy = false;
 const LIGHTS_ON_KEY = 'yarbo_lights_on';
 const CONTROLLER_HOLD_KEY = 'yarbo_hold_controller';
 const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls', 'powerwall', 'lymow'];
@@ -2530,6 +2541,7 @@ function setActiveModule(id, persist = true) {
         if (prevModuleId !== 'lymow') {
             startLymowCamera();
             startLymowCloudPoll();
+            if (!lymowZones.length) refreshLymowZones(false);
         }
     } else {
         stopLymowCamera();
@@ -2579,6 +2591,7 @@ function updateLymowDashboard(ly) {
         if (els.lymowCam) els.lymowCam.textContent = '—';
         lymowPageName = '';
         applyLymowDeviceName();
+        renderLymowZones([]);
         return;
     }
     const camOk = Boolean(ly.camera_ok);
@@ -2593,6 +2606,10 @@ function updateLymowDashboard(ly) {
     lymowPageName = String(ly.page_name || ly.display_name || ly.device_name || '').trim();
     applyLymowDeviceName();
     applyDeviceNameSubtitle();
+    if (Array.isArray(ly.zones)) {
+        renderLymowZones(ly.zones);
+    }
+    syncLymowStartEnabled();
 }
 
 const UNIFI_SNAP_INTERVAL_MS = 5000;
@@ -7175,7 +7192,14 @@ function homeAutoThenPhrase(action, names) {
         return 'Yarbo';
     }
     if (action.kind === 'lymow') {
-        if (action.command === 'start') return 'Lymow Start';
+        if (action.command === 'start') {
+            const names = Array.isArray(action.zone_names) && action.zone_names.length
+                ? action.zone_names
+                : (Array.isArray(action.zones) ? action.zones : []);
+            if (!names.length) return 'Lymow Start';
+            const shown = names.slice(0, 3).join(', ');
+            return `Lymow Start ${shown}${names.length > 3 ? '…' : ''}`;
+        }
         if (action.command === 'pause') return 'Lymow Pause';
         if (action.command === 'resume') return 'Lymow Resume';
         if (action.command === 'dock') return 'Lymow Dock';
@@ -7268,9 +7292,44 @@ function homeAutoYarboAction(command, planId, planName) {
     return action;
 }
 
-function homeAutoLymowAction(command) {
+/** @type {Array<{hash_id: string, name: string, enabled?: boolean}>} */
+let homeAutoLymowZones = [];
+
+function homeAutoLymowAction(command, zoneIds, zoneNames) {
     const cmd = ['start', 'pause', 'resume', 'dock'].includes(command) ? command : 'dock';
-    return { kind: 'lymow', command: cmd };
+    const action = { kind: 'lymow', command: cmd };
+    if (cmd === 'start') {
+        const zones = Array.isArray(zoneIds)
+            ? zoneIds.map((z) => String(z || '').trim()).filter(Boolean)
+            : [];
+        action.zones = zones;
+        if (Array.isArray(zoneNames) && zoneNames.length) {
+            action.zone_names = zoneNames.map((n) => String(n || '').trim()).filter(Boolean);
+        }
+    }
+    return action;
+}
+
+async function homeAutoLoadLymowZones() {
+    if (!homeAutoLymowOn()) return;
+    try {
+        const res = await fetch('/api/lymow.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'maps' }),
+        });
+        const data = await parseJsonResponse(res);
+        const zones = Array.isArray(data.zones) ? data.zones : [];
+        homeAutoLymowZones = zones.map((z) => ({
+            hash_id: String(z.hash_id || z.hashId || '').trim(),
+            name: String(z.name || z.hash_id || z.hashId || '').trim(),
+            enabled: z.enabled !== false && z.isEnabled !== false,
+        })).filter((z) => z.hash_id);
+        if (Array.isArray(data.zones)) renderLymowZones(data.zones);
+        if (autoPageOpen && autoDraft) renderHomeAutoEditor();
+    } catch {
+        homeAutoLymowZones = Array.isArray(homeAutoLymowZones) ? homeAutoLymowZones : [];
+    }
 }
 
 async function homeAutoLoadPlans() {
@@ -7583,9 +7642,11 @@ function openHomeAutomations({ updateHash = true } = {}) {
     autoDraft = null;
     autoNameLocked = false;
     if (homeAutoYarboOn()) homeAutoLoadPlans();
+    if (homeAutoLymowOn()) homeAutoLoadLymowZones();
     loadHomeDashboard({ force: true }).then(async () => {
         await homeAutoEnsureTimezone();
         if (homeAutoYarboOn()) await homeAutoLoadPlans();
+        if (homeAutoLymowOn()) await homeAutoLoadLymowZones();
         if (autoPageOpen) renderHomeAutomations();
     }).catch(() => {});
     renderHomeAutomations();
@@ -7984,8 +8045,24 @@ function homeAutoThenChipHtml(action, index) {
     if (action.kind === 'lymow') {
         const labels = { start: 'Start', pause: 'Pause', resume: 'Resume', dock: 'Dock' };
         const body = labels[action.command] || 'Lymow';
+        let extra = '';
+        if (action.command === 'start') {
+            const selected = new Set((action.zones || []).map(String));
+            const opts = (homeAutoLymowZones.length ? homeAutoLymowZones : (action.zones || []).map((id) => ({
+                hash_id: id,
+                name: (action.zone_names || [])[(action.zones || []).indexOf(id)] || id,
+            }))).map((z) => {
+                const id = String(z.hash_id || z);
+                const name = String(z.name || id);
+                return `<option value="${escapeHtml(id)}" ${selected.has(id) ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+            });
+            if (!opts.length) {
+                opts.push('<option value="">Refresh Lymow zones first</option>');
+            }
+            extra = ` <select multiple data-auto-lymow-zones aria-label="Lymow zones" size="${Math.min(4, Math.max(2, opts.length))}">${opts.join('')}</select>`;
+        }
         return `<div class="auto-chip auto-chip--robot" data-auto-then="${index}">
-            Lymow ${body}
+            Lymow ${body}${extra}
             <button type="button" class="auto-chip-x" data-auto-then-x="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
@@ -8709,7 +8786,27 @@ function homeAutoApplyTray(kind, id, zone) {
             showToast('Start, Pause, Resume, and Dock go in Then', 'error');
             return;
         }
-        autoDraft.actions.push(homeAutoLymowAction(id || 'dock'));
+        const cmd = id || 'dock';
+        if (cmd === 'start') {
+            const fromCard = [...lymowZonesSelected];
+            const pool = homeAutoLymowZones.length ? homeAutoLymowZones : lymowZones;
+            let zones = fromCard.length
+                ? fromCard
+                : pool.filter((z) => z.enabled !== false).map((z) => z.hash_id);
+            if (!zones.length) {
+                showToast('Refresh Lymow zones and select which ones to Start', 'error');
+                refreshLymowZones(true);
+                homeAutoLoadLymowZones();
+                return;
+            }
+            const names = zones.map((zid) => {
+                const row = pool.find((z) => z.hash_id === zid);
+                return row?.name || zid;
+            });
+            autoDraft.actions.push(homeAutoLymowAction('start', zones, names));
+        } else {
+            autoDraft.actions.push(homeAutoLymowAction(cmd));
+        }
         homeAutoFollowName();
         renderHomeAutoEditor();
         return;
@@ -9267,6 +9364,18 @@ function bindHomeAutomations() {
                 action.plan_name = plan?.name || '';
             }
         }
+        if (event.target.matches('[data-auto-lymow-zones]')) {
+            const i = homeAutoThenLookIndex(event.target);
+            const action = autoDraft.actions?.[i];
+            if (action?.kind === 'lymow' && action.command === 'start') {
+                const selected = [...event.target.selectedOptions].map((opt) => opt.value).filter(Boolean);
+                action.zones = selected;
+                action.zone_names = selected.map((id) => {
+                    const row = homeAutoLymowZones.find((z) => z.hash_id === id);
+                    return row?.name || id;
+                });
+            }
+        }
         if (event.target.matches('[data-auto-thresh]')) {
             const i = homeAutoTriggerIndex(event.target);
             const list = homeAutoTriggers();
@@ -9584,18 +9693,122 @@ function startLymowCloudPoll() {
 
 let lymowCmdBusy = false;
 
+function renderLymowZones(zones) {
+    const list = Array.isArray(zones) ? zones : [];
+    const prevSelected = new Set(lymowZonesSelected);
+    lymowZones = list.map((z) => ({
+        hash_id: String(z.hash_id || z.hashId || '').trim(),
+        name: String(z.name || z.hash_id || z.hashId || '').trim(),
+        enabled: z.enabled !== false && z.isEnabled !== false,
+        area_m2: z.area_m2 != null ? Number(z.area_m2) : (z.area != null ? Number(z.area) : null),
+    })).filter((z) => z.hash_id);
+    const known = new Set(lymowZones.map((z) => z.hash_id));
+    lymowZonesSelected = new Set([...prevSelected].filter((id) => known.has(id)));
+    if (!els.lymowZonesList) {
+        syncLymowStartEnabled();
+        return;
+    }
+    if (!lymowZones.length) {
+        els.lymowZonesList.innerHTML = '';
+        if (els.lymowZonesHint) {
+            els.lymowZonesHint.textContent = 'No zones yet. Tap Refresh to load names from the Lymow map.';
+            els.lymowZonesHint.classList.remove('hidden');
+        }
+        syncLymowStartEnabled();
+        return;
+    }
+    els.lymowZonesList.innerHTML = lymowZones.map((z) => {
+        const on = lymowZonesSelected.has(z.hash_id);
+        const area = Number.isFinite(z.area_m2) && z.area_m2 > 0
+            ? ` · ${Math.round(z.area_m2)} m²`
+            : '';
+        const disabled = z.enabled === false ? ' disabled' : '';
+        return `<button type="button" class="lymow-zone-chip${on ? ' is-on' : ''}" data-lymow-zone="${escapeHtml(z.hash_id)}"${disabled} aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(z.name || z.hash_id)}${escapeHtml(area)}</button>`;
+    }).join('');
+    if (els.lymowZonesHint) {
+        const n = lymowZonesSelected.size;
+        els.lymowZonesHint.textContent = n
+            ? `${n} zone${n === 1 ? '' : 's'} selected for Start.`
+            : 'Select one or more zones, then Start.';
+        els.lymowZonesHint.classList.remove('hidden');
+    }
+    syncLymowStartEnabled();
+}
+
+function syncLymowStartEnabled() {
+    if (!els.lymowCmdStart) return;
+    els.lymowCmdStart.disabled = lymowCmdBusy || lymowZonesSelected.size < 1;
+    els.lymowCmdStart.title = lymowZonesSelected.size
+        ? `Start ${lymowZonesSelected.size} selected zone${lymowZonesSelected.size === 1 ? '' : 's'}`
+        : 'Select one or more zones';
+}
+
+function toggleLymowZone(hashId) {
+    const id = String(hashId || '').trim();
+    if (!id) return;
+    if (lymowZonesSelected.has(id)) lymowZonesSelected.delete(id);
+    else lymowZonesSelected.add(id);
+    renderLymowZones(lymowZones);
+}
+
+function selectAllLymowZones() {
+    lymowZones.forEach((z) => {
+        if (z.enabled !== false) lymowZonesSelected.add(z.hash_id);
+    });
+    renderLymowZones(lymowZones);
+}
+
+function clearLymowZonesSelection() {
+    lymowZonesSelected.clear();
+    renderLymowZones(lymowZones);
+}
+
+async function refreshLymowZones(force = true) {
+    if (lymowZonesBusy) return;
+    lymowZonesBusy = true;
+    if (els.lymowZonesRefresh) els.lymowZonesRefresh.disabled = true;
+    if (els.lymowZonesHint) els.lymowZonesHint.textContent = 'Loading zones from Lymow…';
+    try {
+        const res = await fetch('/api/lymow.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'maps' }),
+        });
+        const data = await parseJsonResponse(res);
+        updateLymowDashboard(data);
+        const msg = data.message || data.error || (data.ok ? 'Zones updated.' : 'Could not load zones.');
+        if (els.lymowCmdStatus && force) els.lymowCmdStatus.textContent = msg;
+        if (force && !data.ok && !data.cached) showToast(msg, 'error');
+        else if (force && data.ok) showToast(msg, 'success');
+    } catch (err) {
+        const msg = err.message || 'Could not load Lymow zones.';
+        if (els.lymowZonesHint) els.lymowZonesHint.textContent = msg;
+        if (force) showToast(msg, 'error');
+    } finally {
+        lymowZonesBusy = false;
+        if (els.lymowZonesRefresh) els.lymowZonesRefresh.disabled = false;
+    }
+}
+
 async function sendLymowCommand(action, button) {
     const cmd = String(action || '').toLowerCase();
     if (!['start', 'pause', 'resume', 'dock'].includes(cmd) || lymowCmdBusy) return;
+    const zones = [...lymowZonesSelected];
+    if (cmd === 'start' && !zones.length) {
+        showToast('Select one or more Lymow zones first', 'error');
+        return;
+    }
     lymowCmdBusy = true;
     const buttons = document.querySelectorAll('[data-lymow-cmd]');
     buttons.forEach((btn) => { btn.disabled = true; });
     if (els.lymowCmdStatus) els.lymowCmdStatus.textContent = 'Sending…';
     try {
+        const body = { action: cmd };
+        if (cmd === 'start') body.zones = zones;
         const res = await fetch('/api/lymow.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: cmd }),
+            body: JSON.stringify(body),
         });
         const data = await parseJsonResponse(res);
         updateLymowDashboard(data);
@@ -9608,7 +9821,11 @@ async function sendLymowCommand(action, button) {
         showToast(msg, 'error');
     } finally {
         lymowCmdBusy = false;
-        buttons.forEach((btn) => { btn.disabled = false; });
+        buttons.forEach((btn) => {
+            if (btn.getAttribute('data-lymow-cmd') === 'start') return;
+            btn.disabled = false;
+        });
+        syncLymowStartEnabled();
         if (button) button.blur();
     }
 }
@@ -14476,6 +14693,14 @@ document.querySelectorAll('[data-lymow-cmd]').forEach((button) => {
         sendLymowCommand(button.getAttribute('data-lymow-cmd'), button);
     });
 });
+els.lymowZonesList?.addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-lymow-zone]');
+    if (!chip || chip.disabled) return;
+    toggleLymowZone(chip.getAttribute('data-lymow-zone'));
+});
+els.lymowZonesAll?.addEventListener('click', () => selectAllLymowZones());
+els.lymowZonesNone?.addEventListener('click', () => clearLymowZonesSelection());
+els.lymowZonesRefresh?.addEventListener('click', () => refreshLymowZones(true));
 els.settingsUnifiTest?.addEventListener('click', async (e) => {
     const button = e.currentTarget;
     button.disabled = true;

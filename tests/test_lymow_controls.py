@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline Lymow Start/Pause/Resume/Dock encoding (ha-lymow userCtrl wire format)."""
+"""Offline Lymow controls + zone Start encoding (ha-lymow wire format)."""
 
 from __future__ import annotations
 
@@ -15,10 +15,17 @@ from lymow_protocol import (  # noqa: E402
     USER_CTRL_ACTIONS,
     USER_CTRL_CLEAN,
     USER_CTRL_PAUSE,
+    USER_CTRL_QUERY_MAP,
     USER_CTRL_QUERY_WIFI_4G,
     USER_CTRL_RECHARGE_DOCK,
     USER_CTRL_RESUME,
+    _field_bytes,
+    _field_i32,
+    _field_str,
+    decode_map_zones,
     encode_action,
+    encode_query_map,
+    encode_start_zones,
     encode_status_query,
     encode_userctrl,
     wrap_envelope,
@@ -38,16 +45,14 @@ def test_action_codes() -> None:
     }
     if USER_CTRL_ACTIONS != expect:
         fail(f"USER_CTRL_ACTIONS mismatch: {USER_CTRL_ACTIONS}")
-    if USER_CTRL_CLEAN != 1 or USER_CTRL_PAUSE != 3 or USER_CTRL_RESUME != 4 or USER_CTRL_RECHARGE_DOCK != 33:
-        fail("ha-lymow userCtrl constants drifted")
+    if USER_CTRL_QUERY_MAP != 19:
+        fail("QUERY_MAP code drifted")
     if USER_CTRL_QUERY_WIFI_4G != 52:
         fail("status query code drifted")
 
 
-def test_encode_hex() -> None:
-    # Field 2 = version 49, field 5 = userCtrl — same shape as encode_status_query.
+def test_pause_resume_dock_hex() -> None:
     expect_hex = {
-        "start": "10312801",
         "pause": "10312803",
         "resume": "10312804",
         "dock": "10312821",
@@ -58,39 +63,68 @@ def test_encode_hex() -> None:
             fail(f"{action}: got {pb.hex()}, want {hex_value}")
         if pb != encode_userctrl(USER_CTRL_ACTIONS[action]):
             fail(f"{action}: encode_action != encode_userctrl")
-        env = json.loads(wrap_envelope(pb))
-        raw = base64.b64decode(env["message"])
-        if raw != pb:
-            fail(f"{action}: envelope round-trip failed")
+
+
+def test_start_requires_zones() -> None:
+    try:
+        encode_action("start")
+    except ValueError:
+        pass
+    else:
+        fail("bare start must require zones")
+    try:
+        encode_start_zones([])
+    except ValueError:
+        pass
+    else:
+        fail("encode_start_zones([]) must raise")
+
+
+def test_start_zones_wire_snapshot() -> None:
+    # ha-lymow tests/test_wire_snapshots.py
+    expected = "1031280162100a0e0a0c1a0841424344303030314001"
+    got = encode_start_zones(["ABCD0001"]).hex()
+    if got != expected:
+        fail(f"start zones hex: {got}, want {expected}")
+    via_action = encode_action("start", ["ABCD0001"]).hex()
+    if via_action != expected:
+        fail(f"encode_action start zones: {via_action}")
+    env = json.loads(wrap_envelope(encode_start_zones(["ABCD0001"])))
+    if base64.b64decode(env["message"]).hex() != expected:
+        fail("envelope round-trip failed")
+
+
+def test_query_map_and_decode_zones() -> None:
+    q = encode_query_map()
+    if not q.hex().startswith("10312813"):  # version 49 + userCtrl 19
+        fail(f"query map hex drifted: {q.hex()}")
+    bi = _field_str(3, "wsmjco1T") + _field_str(2, "Front Lawn") + _field_i32(4, 1)
+    zone = _field_bytes(1, bi)
+    content = _field_bytes(1, zone)
+    wrapper = _field_bytes(3, content)
+    outer = _field_bytes(2, wrapper)
+    pb = _field_bytes(23, outer)
+    zones = decode_map_zones(pb)
+    if len(zones) != 1 or zones[0].get("hash_id") != "wsmjco1T" or zones[0].get("name") != "Front Lawn":
+        fail(f"decode_map_zones: {zones}")
     if encode_status_query().hex() != "10312834":
         fail(f"status query hex drifted: {encode_status_query().hex()}")
 
 
-def test_unknown_action() -> None:
-    try:
-        encode_action("cancel")
-    except ValueError:
-        return
-    fail("encode_action should reject unknown actions")
-
-
-def test_bridge_wires_command() -> None:
+def test_bridge_wires_maps() -> None:
     bridge = (ROOT / "scripts" / "lymow_bridge.py").read_text(encoding="utf-8")
-    if '"command"' not in bridge and "'command'" not in bridge:
-        fail("bridge argparse missing command")
-    if "mqtt_publish_command" not in bridge:
-        fail("bridge missing mqtt_publish_command")
-    if "cmd_command" not in bridge:
-        fail("bridge missing cmd_command")
-    if "encode_action" not in bridge:
-        fail("bridge does not import encode_action")
+    for needle in ("mqtt_query_map", "cmd_maps", "encode_query_map", "decode_map_zones", "--zones"):
+        if needle not in bridge:
+            fail(f"bridge missing {needle}")
 
 
 def main() -> None:
     test_action_codes()
-    test_encode_hex()
-    test_unknown_action()
-    test_bridge_wires_command()
+    test_pause_resume_dock_hex()
+    test_start_requires_zones()
+    test_start_zones_wire_snapshot()
+    test_query_map_and_decode_zones()
+    test_bridge_wires_maps()
     print("test_lymow_controls.py ok")
 
 

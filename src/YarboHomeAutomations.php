@@ -1507,13 +1507,33 @@ final class YarboHomeAutomations
             };
         } elseif (($action['kind'] ?? '') === 'lymow') {
             $cmd = (string) ($action['command'] ?? '');
-            $text = match ($cmd) {
-                'start' => 'Lymow Start',
-                'pause' => 'Lymow Pause',
-                'resume' => 'Lymow Resume',
-                'dock' => 'Lymow Dock',
-                default => 'Lymow',
-            };
+            if ($cmd === 'start') {
+                $names = [];
+                foreach (is_array($action['zone_names'] ?? null) ? $action['zone_names'] : [] as $label) {
+                    $label = trim((string) $label);
+                    if ($label !== '') {
+                        $names[] = $label;
+                    }
+                }
+                if ($names === [] && is_array($action['zones'] ?? null)) {
+                    foreach ($action['zones'] as $zid) {
+                        $zid = trim((string) $zid);
+                        if ($zid !== '') {
+                            $names[] = $zid;
+                        }
+                    }
+                }
+                $text = $names === []
+                    ? 'Lymow Start'
+                    : ('Lymow Start ' . implode(', ', array_slice($names, 0, 3)) . (count($names) > 3 ? '…' : ''));
+            } else {
+                $text = match ($cmd) {
+                    'pause' => 'Lymow Pause',
+                    'resume' => 'Lymow Resume',
+                    'dock' => 'Lymow Dock',
+                    default => 'Lymow',
+                };
+            }
         } elseif (($action['kind'] ?? '') === 'scene') {
             $name = $names['scene:' . ($action['id'] ?? '')] ?? $names[(string) ($action['id'] ?? '')] ?? 'Scene';
             $cmd = (string) ($action['command'] ?? 'run');
@@ -1804,8 +1824,29 @@ final class YarboHomeAutomations
             if (!in_array($cmd, self::LYMOW_COMMANDS, true)) {
                 return null;
             }
+            $out = ['kind' => 'lymow', 'command' => $cmd];
+            if ($cmd === 'start') {
+                $zones = YarboLymow::normalizeZoneIds($action['zones'] ?? $action['zone_ids'] ?? $action['zone_hash_ids'] ?? []);
+                if ($zones === []) {
+                    return null;
+                }
+                $out['zones'] = $zones;
+                $names = [];
+                $rawNames = $action['zone_names'] ?? $action['zoneNames'] ?? [];
+                if (is_array($rawNames)) {
+                    foreach ($rawNames as $label) {
+                        $label = trim((string) $label);
+                        if ($label !== '') {
+                            $names[] = $label;
+                        }
+                    }
+                }
+                if ($names !== []) {
+                    $out['zone_names'] = $names;
+                }
+            }
 
-            return ['kind' => 'lymow', 'command' => $cmd];
+            return $out;
         }
         if ($kind === 'scene') {
             $id = trim((string) ($action['id'] ?? ''));
@@ -3114,11 +3155,15 @@ final class YarboHomeAutomations
         if (!in_array($cmd, self::LYMOW_COMMANDS, true)) {
             return ['ok' => false, 'error' => 'Unknown Lymow command'];
         }
+        $zones = YarboLymow::normalizeZoneIds($action['zones'] ?? $action['zone_ids'] ?? []);
+        if ($cmd === 'start' && $zones === []) {
+            return ['ok' => false, 'error' => 'Pick at least one Lymow zone'];
+        }
         if ($this->commandHandler !== null) {
             return ($this->commandHandler)($action);
         }
         try {
-            return (new YarboLymow($this->projectRoot))->sendCommand($cmd);
+            return (new YarboLymow($this->projectRoot))->sendCommand($cmd, $zones);
         } catch (\Throwable $e) {
             return ['ok' => false, 'error' => $e->getMessage()];
         }

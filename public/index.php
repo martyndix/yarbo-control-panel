@@ -561,8 +561,20 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <span id="lymow-cam" class="value">—</span>
                 </div>
             </div>
+            <div class="lymow-zones" id="lymow-zones">
+                <div class="lymow-zones-head">
+                    <span class="label">Zones</span>
+                    <div class="lymow-zones-actions">
+                        <button type="button" class="btn btn-secondary btn-compact" id="lymow-zones-all">All</button>
+                        <button type="button" class="btn btn-secondary btn-compact" id="lymow-zones-none">None</button>
+                        <button type="button" class="btn btn-secondary btn-compact" id="lymow-zones-refresh">Refresh</button>
+                    </div>
+                </div>
+                <div id="lymow-zones-list" class="lymow-zones-list" role="group" aria-label="Lymow mowing zones"></div>
+                <p id="lymow-zones-hint" class="hint lymow-zones-hint">Sign in under Settings, then tap Refresh to load zone names from the Lymow map.</p>
+            </div>
             <div class="lymow-controls" role="group" aria-label="Lymow controls">
-                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="start">Start</button>
+                <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="start" id="lymow-cmd-start" disabled title="Select one or more zones">Start</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="pause">Pause</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="resume">Resume</button>
                 <button type="button" class="btn btn-secondary btn-compact" data-lymow-cmd="dock">Dock</button>

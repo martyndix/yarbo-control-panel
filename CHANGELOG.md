@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.223] - 2026-11-08
+
+### Added
+- **Lymow zone picker:** loads go-zone names from the Lymow map (`QUERY_MAP`) and Start mows only the selected zones (ha-lymow `encode_start_zones`). Bare “mow all” Start is no longer offered. Automations Then Start stores the chosen zone hash IDs.
+
 ## [4.0.222] - 2026-11-08
 
 ### Added

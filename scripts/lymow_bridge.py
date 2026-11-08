@@ -29,9 +29,11 @@ sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 
 from lymow_protocol import (  # noqa: E402
     USER_CTRL_ACTIONS,
+    decode_map_zones,
     decode_pboutput,
     encode_action,
     encode_app_connect_heartbeat,
+    encode_query_map,
     encode_status_query,
     unwrap_envelope,
     wrap_envelope,
@@ -756,14 +758,16 @@ def write_state(state_path: Path, state: dict[str, Any]) -> None:
     tmp.replace(state_path)
 
 
-def mqtt_publish_command(config: dict[str, Any], thing: str, action: str) -> dict[str, Any]:
-    """Publish one Start/Pause/Resume/Dock userCtrl to /device/{thing}/pbinput."""
+def _mqtt_client_session(
+    config: dict[str, Any],
+    thing: str,
+    *,
+    client_prefix: str,
+) -> tuple[Any, Any, str, dict[str, Any]] | dict[str, Any]:
+    """Build a connected-ready paho client + host, or an error dict."""
     mqtt, import_error = ensure_paho()
     if mqtt is None:
         return {"ok": False, "error": import_error or "paho-mqtt is not installed"}
-    key = str(action or "").strip().lower()
-    if key not in USER_CTRL_ACTIONS:
-        return {"ok": False, "error": f"Unknown Lymow action: {action!r}"}
     region = resolved_region(config)
     config["region"] = region
     host = str(REGION_CONFIG[region]["iot_host"])
@@ -780,11 +784,53 @@ def mqtt_publish_command(config: dict[str, Any], thing: str, action: str) -> dic
         str(creds.get("SecretKey") or ""),
         str(creds.get("SessionToken") or ""),
     )
-    body = wrap_envelope(encode_action(key)).encode()
+    kwargs: dict[str, Any] = {
+        "client_id": f"{client_prefix}-{uuid.uuid4().hex[:8]}",
+        "transport": "websockets",
+        "protocol": mqtt.MQTTv311,
+    }
+    if hasattr(mqtt, "CallbackAPIVersion"):
+        kwargs["callback_api_version"] = mqtt.CallbackAPIVersion.VERSION2
+    client = mqtt.Client(**kwargs)
+    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+    try:
+        client.ws_set_options(path=path, headers={"Host": host})
+    except TypeError:
+        client.ws_set_options(path=path)
+    return mqtt, client, host, {"thing": thing}
+
+
+def mqtt_publish_command(
+    config: dict[str, Any],
+    thing: str,
+    action: str,
+    zone_hash_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Publish Start (with zones) / Pause / Resume / Dock to pbinput."""
+    key = str(action or "").strip().lower()
+    if key not in USER_CTRL_ACTIONS:
+        return {"ok": False, "error": f"Unknown Lymow action: {action!r}"}
+    zones = [str(z).strip() for z in (zone_hash_ids or []) if str(z).strip()]
+    if key == "start" and not zones:
+        return {"ok": False, "error": "Pick at least one Lymow zone to start."}
+    try:
+        body_pb = encode_action(key, zones if key == "start" else None)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    built = _mqtt_client_session(config, thing, client_prefix="yarbo-lymow-cmd")
+    if isinstance(built, dict):
+        return built
+    _mqtt, client, host, _meta = built
+    body = wrap_envelope(body_pb).encode()
     session_id = uuid.uuid4().hex
     heartbeat = wrap_envelope(encode_app_connect_heartbeat(session_id)).encode()
-    client_id = f"yarbo-lymow-cmd-{uuid.uuid4().hex[:8]}"
-    got: dict[str, Any] = {"ok": False, "action": key, "user_ctrl": USER_CTRL_ACTIONS[key]}
+    got: dict[str, Any] = {
+        "ok": False,
+        "action": key,
+        "user_ctrl": USER_CTRL_ACTIONS[key],
+    }
+    if key == "start":
+        got["zones"] = zones
     connected = {"ok": False}
 
     def on_connect(client: Any, _userdata: Any, *_args: Any) -> None:
@@ -806,19 +852,6 @@ def mqtt_publish_command(config: dict[str, Any], thing: str, action: str) -> dic
         else:
             got["error"] = "MQTT publish returned no message id"
 
-    kwargs: dict[str, Any] = {
-        "client_id": client_id,
-        "transport": "websockets",
-        "protocol": mqtt.MQTTv311,
-    }
-    if hasattr(mqtt, "CallbackAPIVersion"):
-        kwargs["callback_api_version"] = mqtt.CallbackAPIVersion.VERSION2
-    client = mqtt.Client(**kwargs)
-    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-    try:
-        client.ws_set_options(path=path, headers={"Host": host})
-    except TypeError:
-        client.ws_set_options(path=path)
     client.on_connect = on_connect
     try:
         client.connect(host, 443, 60)
@@ -826,7 +859,6 @@ def mqtt_publish_command(config: dict[str, Any], thing: str, action: str) -> dic
         while time.time() < deadline:
             client.loop(timeout=0.5)
             if got.get("ok") or got.get("error"):
-                # Give the broker a moment to flush QoS 1 after mid is assigned.
                 client.loop(timeout=0.5)
                 break
     except Exception as exc:  # noqa: BLE001
@@ -843,8 +875,86 @@ def mqtt_publish_command(config: dict[str, Any], thing: str, action: str) -> dic
         else:
             got["error"] = "MQTT publish did not complete"
     if got.get("ok"):
-        labels = {"start": "Start", "pause": "Pause", "resume": "Resume", "dock": "Dock"}
-        got["message"] = f"Sent Lymow {labels.get(key, key)}."
+        if key == "start":
+            n = len(zones)
+            got["message"] = f"Sent Lymow Start for {n} zone{'s' if n != 1 else ''}."
+        else:
+            labels = {"pause": "Pause", "resume": "Resume", "dock": "Dock"}
+            got["message"] = f"Sent Lymow {labels.get(key, key)}."
+    return got
+
+
+def mqtt_query_map(config: dict[str, Any], thing: str, wait_s: float = 20.0) -> dict[str, Any]:
+    """Publish QUERY_MAP and wait for go-zone list (names from the Lymow map)."""
+    built = _mqtt_client_session(config, thing, client_prefix="yarbo-lymow-map")
+    if isinstance(built, dict):
+        return built
+    _mqtt, client, host, _meta = built
+    session_id = uuid.uuid4().hex
+    heartbeat = wrap_envelope(encode_app_connect_heartbeat(session_id)).encode()
+    query = wrap_envelope(encode_query_map()).encode()
+    got: dict[str, Any] = {"ok": False, "zones": []}
+    connected = {"ok": False}
+
+    def on_connect(client: Any, _userdata: Any, *_args: Any) -> None:
+        rc = 0
+        if len(_args) >= 2:
+            code = _args[1]
+            rc = int(getattr(code, "value", code) or 0)
+        if rc not in (0,):
+            got["error"] = f"MQTT connect failed ({rc})"
+            return
+        connected["ok"] = True
+        client.subscribe(f"/device/{thing}/pboutput", qos=1)
+        client.publish(f"/device/{thing}/pbinput", heartbeat, qos=1)
+        client.publish(f"/device/{thing}/pbinput", query, qos=1)
+
+    def on_message(_client: Any, _userdata: Any, message: Any) -> None:
+        try:
+            pb = unwrap_envelope(message.payload)
+            zones = decode_map_zones(pb)
+            if zones:
+                got["zones"] = zones
+                got["ok"] = True
+                got.pop("error", None)
+                return
+            # Keep battery/status if the same packet carries it.
+            decoded = decode_pboutput(pb)
+            for key in ("battery", "workStatus", "robotState", "isCharging"):
+                if key in decoded:
+                    got[key] = decoded[key]
+        except Exception as exc:  # noqa: BLE001
+            if not got.get("zones"):
+                got["error"] = f"Map decode failed: {exc}"
+
+    client.on_connect = on_connect
+    client.on_message = on_message
+    try:
+        client.connect(host, 443, 60)
+        deadline = time.time() + max(5.0, wait_s)
+        while time.time() < deadline:
+            client.loop(timeout=0.5)
+            if got.get("ok") and got.get("zones"):
+                break
+            if got.get("error") and not connected["ok"]:
+                break
+    except Exception as exc:  # noqa: BLE001
+        got["error"] = str(exc)
+        got["ok"] = False
+    finally:
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+    if got.get("ok"):
+        got["message"] = f"Loaded {len(got['zones'])} Lymow zone{'s' if len(got['zones']) != 1 else ''}."
+    elif not got.get("error"):
+        if not connected["ok"]:
+            got["error"] = "MQTT did not connect"
+        else:
+            got["error"] = (
+                "Map query got no zones yet. Make sure the mower is online in the Lymow app, then try again."
+            )
     return got
 
 
@@ -999,6 +1109,10 @@ def merge_state(
     recharging = mqtt_state.get("isRecharging")
     if recharging is None:
         recharging = previous.get("is_recharging")
+    zones = mqtt_state.get("zones")
+    if not isinstance(zones, list):
+        zones = previous.get("zones") if isinstance(previous.get("zones"), list) else []
+    zones_fetched_at = mqtt_state.get("zones_fetched_at") or previous.get("zones_fetched_at")
     return {
         "ok": True,
         "online": str(info.get("deviceState") or device.get("deviceState") or "").lower() == "online"
@@ -1021,6 +1135,8 @@ def merge_state(
         "mow_progress": mqtt_state.get("mowProgress", previous.get("mow_progress")),
         "wifi_signal": mqtt_state.get("wifiSignalQuality"),
         "lte_signal": mqtt_state.get("lteSignalQuality"),
+        "zones": zones,
+        "zones_fetched_at": zones_fetched_at,
         "last_mow": last_mow,
         "clean_summary": bundle.get("clean_summary") or {},
         "mqtt_error": mqtt_state.get("mqtt_error") if battery is None else None,
@@ -1088,7 +1204,20 @@ def cmd_state(config_path: Path, state_path: Path, wait_s: float) -> int:
         return 1
 
 
-def cmd_command(config_path: Path, state_path: Path, action: str) -> int:
+def _parse_zone_ids(raw: str | list[str] | None) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(z).strip() for z in raw if str(z).strip()]
+    parts: list[str] = []
+    for chunk in str(raw).replace(";", ",").split(","):
+        chunk = chunk.strip()
+        if chunk:
+            parts.append(chunk)
+    return parts
+
+
+def cmd_command(config_path: Path, state_path: Path, action: str, zones_raw: str = "") -> int:
     mqtt, err = ensure_paho()
     if mqtt is None:
         emit({"ok": False, "error": err or "Could not install paho-mqtt / websocket-client."})
@@ -1096,6 +1225,10 @@ def cmd_command(config_path: Path, state_path: Path, action: str) -> int:
     key = str(action or "").strip().lower()
     if key not in USER_CTRL_ACTIONS:
         emit({"ok": False, "error": f"Unknown Lymow action: {action!r} (use start, pause, resume, dock)"})
+        return 1
+    zones = _parse_zone_ids(zones_raw)
+    if key == "start" and not zones:
+        emit({"ok": False, "error": "Pick at least one Lymow zone to start."})
         return 1
     config = load_config(config_path)
     try:
@@ -1105,18 +1238,57 @@ def cmd_command(config_path: Path, state_path: Path, action: str) -> int:
         config["device_thing_name"] = thing
         config["last_error"] = ""
         save_config(config_path, config)
-        result = mqtt_publish_command(config, thing, key)
+        result = mqtt_publish_command(config, thing, key, zones if key == "start" else None)
         if result.get("ok"):
-            # Refresh status briefly so the panel can show the new work state.
             try:
                 mqtt_state = collect_live_state(config, thing, 4.0, stop_on_battery=False)
                 state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
                 write_state(state_path, state)
                 result.update({k: state.get(k) for k in (
-                    "battery", "work_status", "robot_state", "work_done", "charging", "page_name",
+                    "battery", "work_status", "robot_state", "work_done", "charging", "page_name", "zones",
                 ) if k in state})
             except Exception:  # noqa: BLE001
                 pass
+        emit(result)
+        return 0 if result.get("ok") else 1
+    except Exception as exc:  # noqa: BLE001
+        emit({"ok": False, "error": str(exc)})
+        return 1
+
+
+def cmd_maps(config_path: Path, state_path: Path, wait_s: float = 20.0) -> int:
+    mqtt, err = ensure_paho()
+    if mqtt is None:
+        emit({"ok": False, "error": err or "Could not install paho-mqtt / websocket-client."})
+        return 1
+    config = load_config(config_path)
+    try:
+        config = ensure_tokens(config)
+        bundle = fetch_device_bundle(config)
+        thing = str(bundle["thing"])
+        config["device_thing_name"] = thing
+        config["last_error"] = ""
+        save_config(config_path, config)
+        result = mqtt_query_map(config, thing, wait_s)
+        prev = read_previous_state(state_path)
+        if result.get("ok") and isinstance(result.get("zones"), list):
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            mqtt_state = {
+                "zones": result["zones"],
+                "zones_fetched_at": stamp,
+            }
+            for key in ("battery", "workStatus", "robotState", "isCharging"):
+                if key in result:
+                    mqtt_state[key] = result[key]
+            state = merge_state(bundle, mqtt_state, prev)
+            write_state(state_path, state)
+            result["zones_fetched_at"] = stamp
+            result["zones"] = state.get("zones") or result["zones"]
+        elif isinstance(prev.get("zones"), list) and prev["zones"]:
+            result["zones"] = prev["zones"]
+            result["zones_fetched_at"] = prev.get("zones_fetched_at")
+            if not result.get("ok"):
+                result["cached"] = True
         emit(result)
         return 0 if result.get("ok") else 1
     except Exception as exc:  # noqa: BLE001
@@ -1156,7 +1328,7 @@ def cmd_listen(config_path: Path, state_path: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Lymow unofficial cloud bridge")
-    parser.add_argument("command", choices=["deps", "login", "state", "listen", "command"])
+    parser.add_argument("command", choices=["deps", "login", "state", "listen", "command", "maps"])
     parser.add_argument("--config", required=True)
     parser.add_argument("--state", default="")
     parser.add_argument("--wait", type=float, default=8.0)
@@ -1164,6 +1336,11 @@ def main() -> int:
         "--action",
         default="",
         help="For command: start, pause, resume, or dock",
+    )
+    parser.add_argument(
+        "--zones",
+        default="",
+        help="For start: comma-separated go-zone hashIds from the Lymow map",
     )
     args = parser.parse_args()
     config_path = Path(args.config)
@@ -1174,8 +1351,10 @@ def main() -> int:
         return cmd_login(config_path, state_path)
     if args.command == "state":
         return cmd_state(config_path, state_path, args.wait)
+    if args.command == "maps":
+        return cmd_maps(config_path, state_path, max(args.wait, 20.0))
     if args.command == "command":
-        return cmd_command(config_path, state_path, args.action)
+        return cmd_command(config_path, state_path, args.action, args.zones)
     return cmd_listen(config_path, state_path)
 
 
