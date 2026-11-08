@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.226] - 2026-11-08
+
+### Added
+- **Lymow active zone display:** after Start, State shows the zone name(s) being mowed (for example `MOWING · South Lawn`), the zone chips stay highlighted, and PaperMono (**0.1.79**) shows the same label. Cleared on Cancel or when the robot goes idle.
+
 ## [4.0.225] - 2026-11-08
 
 ### Added

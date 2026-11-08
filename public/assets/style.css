@@ -1272,6 +1272,15 @@ body.modal-open {
     background: color-mix(in srgb, var(--accent, #3d7a4a) 18%, var(--surface));
 }
 
+.lymow-zone-chip.is-mowing {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #3d7a4a) 55%, transparent);
+    font-weight: 600;
+}
+
+.lymow-zone-chip.is-mowing:not(.is-on) {
+    border-color: color-mix(in srgb, var(--accent, #3d7a4a) 45%, var(--border));
+}
+
 .lymow-zone-chip:disabled {
     opacity: 0.55;
     cursor: not-allowed;

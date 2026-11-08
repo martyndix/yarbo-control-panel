@@ -2590,6 +2590,8 @@ function updateLymowDashboard(ly) {
         if (els.lymowCharging) els.lymowCharging.textContent = '—';
         if (els.lymowCam) els.lymowCam.textContent = '—';
         lymowPageName = '';
+        lymowTaskZones = new Set();
+        lymowTaskZonesLabel = '';
         applyLymowDeviceName();
         renderLymowZones([]);
         return;
@@ -2599,15 +2601,28 @@ function updateLymowDashboard(ly) {
         els.lymowBattery.textContent = ly.battery_label || '—';
         applyBatteryLevel(els.lymowBattery, ly.battery, ly.charging_label);
     }
-    if (els.lymowState) els.lymowState.textContent = ly.work_label || '—';
+    if (els.lymowState) {
+        els.lymowState.textContent = ly.work_label || '—';
+        els.lymowState.title = ly.task_zones_label
+            ? `${ly.work_label_base || ly.work_label || 'State'}: ${ly.task_zones_label}`
+            : '';
+    }
     if (els.lymowProgress) els.lymowProgress.textContent = ly.mow_progress_label || '—';
     if (els.lymowCharging) els.lymowCharging.textContent = ly.charging_label || '—';
     if (els.lymowCam) els.lymowCam.textContent = camOk ? 'Up' : 'Down';
     lymowPageName = String(ly.page_name || ly.display_name || ly.device_name || '').trim();
+    lymowTaskZones = new Set(
+        (Array.isArray(ly.task_zones) ? ly.task_zones : [])
+            .map((z) => String(z.hash_id || z.hashId || z || '').trim())
+            .filter(Boolean),
+    );
+    lymowTaskZonesLabel = String(ly.task_zones_label || '').trim();
     applyLymowDeviceName();
     applyDeviceNameSubtitle();
     if (Array.isArray(ly.zones)) {
         renderLymowZones(ly.zones);
+    } else {
+        renderLymowZones(lymowZones);
     }
     syncLymowStartEnabled();
 }
@@ -9694,6 +9709,9 @@ function startLymowCloudPoll() {
 }
 
 let lymowCmdBusy = false;
+/** @type {Set<string>} */
+let lymowTaskZones = new Set();
+let lymowTaskZonesLabel = '';
 
 function renderLymowZones(zones) {
     const list = Array.isArray(zones) ? zones : [];
@@ -9721,17 +9739,23 @@ function renderLymowZones(zones) {
     }
     els.lymowZonesList.innerHTML = lymowZones.map((z) => {
         const on = lymowZonesSelected.has(z.hash_id);
+        const mowing = lymowTaskZones.has(z.hash_id);
         const area = Number.isFinite(z.area_m2) && z.area_m2 > 0
             ? ` · ${Math.round(z.area_m2)} m²`
             : '';
         const disabled = z.enabled === false ? ' disabled' : '';
-        return `<button type="button" class="lymow-zone-chip${on ? ' is-on' : ''}" data-lymow-zone="${escapeHtml(z.hash_id)}"${disabled} aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(z.name || z.hash_id)}${escapeHtml(area)}</button>`;
+        const cls = `lymow-zone-chip${on ? ' is-on' : ''}${mowing ? ' is-mowing' : ''}`;
+        return `<button type="button" class="${cls}" data-lymow-zone="${escapeHtml(z.hash_id)}"${disabled} aria-pressed="${on ? 'true' : 'false'}"${mowing ? ' title="Currently in the active mow task"' : ''}>${escapeHtml(z.name || z.hash_id)}${escapeHtml(area)}</button>`;
     }).join('');
     if (els.lymowZonesHint) {
-        const n = lymowZonesSelected.size;
-        els.lymowZonesHint.textContent = n
-            ? `${n} zone${n === 1 ? '' : 's'} selected for Start.`
-            : 'Select one or more zones, then Start.';
+        if (lymowTaskZonesLabel) {
+            els.lymowZonesHint.textContent = `Mowing ${lymowTaskZonesLabel}. Select zones for the next Start.`;
+        } else {
+            const n = lymowZonesSelected.size;
+            els.lymowZonesHint.textContent = n
+                ? `${n} zone${n === 1 ? '' : 's'} selected for Start.`
+                : 'Select one or more zones, then Start.';
+        }
         els.lymowZonesHint.classList.remove('hidden');
     }
     syncLymowStartEnabled();

@@ -120,9 +120,34 @@ def test_query_map_and_decode_zones() -> None:
 
 def test_bridge_wires_maps() -> None:
     bridge = (ROOT / "scripts" / "lymow_bridge.py").read_text(encoding="utf-8")
-    for needle in ("mqtt_query_map", "cmd_maps", "encode_query_map", "decode_map_zones", "--zones"):
+    for needle in (
+        "mqtt_query_map",
+        "cmd_maps",
+        "encode_query_map",
+        "decode_map_zones",
+        "--zones",
+        "resolve_task_zones",
+        "task_zones",
+    ):
         if needle not in bridge:
             fail(f"bridge missing {needle}")
+
+
+def test_resolve_task_zones() -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from lymow_bridge import resolve_task_zones, task_zones_active  # noqa: WPS433
+
+    rows = resolve_task_zones(
+        ["a1", "b2"],
+        [{"hash_id": "a1", "name": "South Lawn"}, {"hash_id": "b2", "name": "Orchard"}],
+    )
+    if rows != [
+        {"hash_id": "a1", "name": "South Lawn"},
+        {"hash_id": "b2", "name": "Orchard"},
+    ]:
+        fail(f"resolve_task_zones: {rows}")
+    if not task_zones_active(2) or task_zones_active(0):
+        fail("task_zones_active drift")
 
 
 def main() -> None:
@@ -132,6 +157,7 @@ def main() -> None:
     test_start_zones_wire_snapshot()
     test_query_map_and_decode_zones()
     test_bridge_wires_maps()
+    test_resolve_task_zones()
     print("test_lymow_controls.py ok")
 
 

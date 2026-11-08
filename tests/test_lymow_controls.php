@@ -52,6 +52,8 @@ assert_true(str_contains($js, 'function renderLymowZones'), 'JS renderLymowZones
 assert_true(str_contains($js, 'function refreshLymowZones'), 'JS refreshLymowZones');
 assert_true(str_contains($js, 'body.zones = zones'), 'JS start sends zones');
 assert_true(str_contains($js, "'cancel'"), 'JS cancel command');
+assert_true(str_contains($js, 'is-mowing'), 'JS highlights active mow zones');
+assert_true(str_contains($js, 'lymowTaskZones'), 'JS tracks task zones');
 assert_true(str_contains($js, 'function homeAutoLoadLymowZones'), 'JS auto load zones');
 assert_true(str_contains($js, 'data-auto-lymow-zones'), 'JS auto zone select');
 
@@ -111,12 +113,28 @@ assert_true($zones[1]['name'] === 'b2' && $zones[1]['enabled'] === false, 'zones
 
 assert_true(YarboLymow::normalizeZoneIds('a, b;c') === ['a', 'b', 'c'], 'normalizeZoneIds');
 
+$task = YarboLymow::taskZonesFromData([
+    'zones' => [
+        ['hash_id' => 'a1', 'name' => 'South Lawn'],
+        ['hash_id' => 'b2', 'name' => 'Orchard'],
+    ],
+    'task_zones' => [['hash_id' => 'a1'], 'b2'],
+]);
+assert_true(count($task) === 2, 'taskZonesFromData count');
+assert_true($task[0]['name'] === 'South Lawn', 'taskZonesFromData resolves name');
+assert_true(YarboLymow::taskZonesLabel($task) === 'South Lawn + Orchard', 'taskZonesLabel two');
+assert_true(YarboLymow::taskZonesActive(2), 'task active while mowing');
+assert_true(!YarboLymow::taskZonesActive(0), 'task inactive when idle');
+
 $docs = (string) file_get_contents($root . '/docs/lymow.md');
 assert_true(str_contains($docs, 'Refresh'), 'docs mention Refresh zones');
 assert_true(str_contains($docs, 'hash IDs'), 'docs mention hash IDs');
 assert_true(str_contains($docs, 'Cancel'), 'docs mention Cancel');
+assert_true(str_contains($docs, 'MOWING ·'), 'docs mention active zone in State');
 
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.226]'), 'changelog 4.0.226');
+assert_true(str_contains($change, 'active zone'), 'changelog mentions active zone');
 assert_true(str_contains($change, '## [4.0.225]'), 'changelog 4.0.225');
 assert_true(str_contains($change, 'Cancel'), 'changelog mentions Cancel');
 assert_true(str_contains($change, '## [4.0.223]'), 'changelog 4.0.223');
