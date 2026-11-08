@@ -1,8 +1,8 @@
 # Lymow (unofficial)
 
-Battery, work status, and the mower camera on this panel. **Not affiliated with Lymow.** Start, dock, and pause are not sent from here.
+Battery, work status, Start / Pause / Resume / Dock, and the mower camera on this panel. **Not affiliated with Lymow.**
 
-Status decoding follows the MIT-licensed [ha-lymow](https://github.com/8408323/ha-lymow) notes.
+Controls use the same unofficial cloud MQTT `userCtrl` codes as [ha-lymow](https://github.com/8408323/ha-lymow) (MIT): Start = clean (1), Pause (3), Resume (4), Dock = recharge and keep progress (33). Status decoding follows the same notes.
 
 ## Account
 
@@ -13,7 +13,11 @@ Settings → **Lymow**:
 3. Region **Auto** tries Europe first, then NA / AU / Asia.
 4. **Sign in / Test Lymow**. The panel installs `paho-mqtt` and `websocket-client` on this host if they are missing (`python3 -m pip install --break-system-packages …`). Battery and work state then come from Lymow cloud MQTT (not the camera). The first reading can take up to a minute.
 
-Leave the password blank on later saves to keep the stored one.
+On the Lymow card: **Start**, **Pause**, **Resume**, and **Dock** (dock keeps current mow progress). The same commands are available as Automations **Then** actions. Map / zone pickers are not on this panel yet.
+
+Leave the password blank on later saves to keep the stored one. Login files (`data/lymow-config.json`, `data/lymow-cloud.json`) stay on the host across updates; this feature does not wipe them.
+
+To roll back to the previous status-only build, check out git tag `lymow-readonly-baseline` (or the panel version you had before 4.0.222).
 
 **Lymow name** is shown under the title on the Lymow page (same place as the Yarbo name). Leave the Settings field blank to use the nickname from the Lymow app when that is published. PaperMono and Paper Colour Lymow pages show the same name after a reflash.
 

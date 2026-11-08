@@ -53,6 +53,12 @@ if ($method === 'POST') {
         $lymow->refreshCloudIfStale();
         json_response(['ok' => true] + $lymow->dashboardPayload() + ['config' => $lymow->publicView()]);
     }
+    if (in_array($action, ['start', 'pause', 'resume', 'dock', 'command'], true)) {
+        $cmd = $action === 'command'
+            ? (string) ($input['command'] ?? $input['cmd'] ?? '')
+            : $action;
+        json_response($lymow->sendCommand($cmd) + ['config' => $lymow->publicView()]);
+    }
     if ($action === 'start_live') {
         json_response($lymow->startLive() + ['config' => $lymow->publicView()]);
     }

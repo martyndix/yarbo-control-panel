@@ -636,6 +636,39 @@ final class YarboLymow
         return ['ok' => true, 'message' => 'Updated Lymow status.'] + $this->dashboardPayload();
     }
 
+    public const COMMANDS = ['start', 'pause', 'resume', 'dock'];
+
+    /**
+     * Send Start / Pause / Resume / Dock over cloud MQTT (ha-lymow userCtrl).
+     *
+     * @return array<string, mixed>
+     */
+    public function sendCommand(string $action): array
+    {
+        $key = strtolower(trim($action));
+        if (!in_array($key, self::COMMANDS, true)) {
+            return ['ok' => false, 'error' => 'Unknown Lymow command. Use start, pause, resume, or dock.'];
+        }
+        if (!$this->cloudSignedIn() && $this->load()['email'] === '') {
+            return ['ok' => false, 'error' => 'Sign in to Lymow under Settings first.'];
+        }
+        $this->syncCloudFile($this->load());
+        $this->startListener();
+        $result = $this->runBridge(['command', '--action', $key], 35.0);
+        if (!($result['ok'] ?? false)) {
+            return $result + $this->dashboardPayload();
+        }
+        $labels = [
+            'start' => 'Start',
+            'pause' => 'Pause',
+            'resume' => 'Resume',
+            'dock' => 'Dock',
+        ];
+        $message = (string) ($result['message'] ?? ('Sent Lymow ' . ($labels[$key] ?? $key) . '.'));
+
+        return ['ok' => true, 'message' => $message, 'action' => $key] + $this->dashboardPayload();
+    }
+
     public function refreshCloudIfStale(): void
     {
         if (!$this->cloudSignedIn()) {

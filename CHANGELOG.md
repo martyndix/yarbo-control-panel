@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.222] - 2026-11-08
+
+### Added
+- **Lymow Start / Pause / Resume / Dock:** unofficial cloud MQTT controls on the Lymow card (same `userCtrl` codes as ha-lymow; Dock keeps mow progress). Also available as Automations Then actions. Login/config files are unchanged; tag `lymow-readonly-baseline` keeps the prior status-only build recoverable.
+
 ## [4.0.221] - 2026-11-07
 
 ### Fixed

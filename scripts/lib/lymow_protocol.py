@@ -13,7 +13,20 @@ import struct
 from typing import Any
 
 PB_VERSION = 49
-USER_CTRL_QUERY_WIFI_4G = 52
+
+# MQTT userCtrl codes (ha-lymow / Android traffic capture).
+USER_CTRL_CLEAN = 1  # start mow
+USER_CTRL_PAUSE = 3
+USER_CTRL_RESUME = 4
+USER_CTRL_RECHARGE_DOCK = 33  # dock and keep task progress
+USER_CTRL_QUERY_WIFI_4G = 52  # read-only status poke
+
+USER_CTRL_ACTIONS = {
+    "start": USER_CTRL_CLEAN,
+    "pause": USER_CTRL_PAUSE,
+    "resume": USER_CTRL_RESUME,
+    "dock": USER_CTRL_RECHARGE_DOCK,
+}
 
 
 def _encode_varint(value: int) -> bytes:
@@ -49,6 +62,14 @@ def encode_userctrl(command: int) -> bytes:
 def encode_status_query() -> bytes:
     """Read-only Wi-Fi/4G query the app sends at startup; reply includes robot info."""
     return encode_userctrl(USER_CTRL_QUERY_WIFI_4G)
+
+
+def encode_action(action: str) -> bytes:
+    """Encode Start / Pause / Resume / Dock for pbinput (ha-lymow wire format)."""
+    key = str(action or "").strip().lower()
+    if key not in USER_CTRL_ACTIONS:
+        raise ValueError(f"Unknown Lymow action: {action!r} (use start, pause, resume, dock)")
+    return encode_userctrl(USER_CTRL_ACTIONS[key])
 
 
 def encode_app_connect_heartbeat(session_id: str) -> bytes:

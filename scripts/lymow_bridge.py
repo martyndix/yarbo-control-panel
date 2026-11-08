@@ -28,7 +28,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 
 from lymow_protocol import (  # noqa: E402
+    USER_CTRL_ACTIONS,
     decode_pboutput,
+    encode_action,
     encode_app_connect_heartbeat,
     encode_status_query,
     unwrap_envelope,
@@ -754,6 +756,98 @@ def write_state(state_path: Path, state: dict[str, Any]) -> None:
     tmp.replace(state_path)
 
 
+def mqtt_publish_command(config: dict[str, Any], thing: str, action: str) -> dict[str, Any]:
+    """Publish one Start/Pause/Resume/Dock userCtrl to /device/{thing}/pbinput."""
+    mqtt, import_error = ensure_paho()
+    if mqtt is None:
+        return {"ok": False, "error": import_error or "paho-mqtt is not installed"}
+    key = str(action or "").strip().lower()
+    if key not in USER_CTRL_ACTIONS:
+        return {"ok": False, "error": f"Unknown Lymow action: {action!r}"}
+    region = resolved_region(config)
+    config["region"] = region
+    host = str(REGION_CONFIG[region]["iot_host"])
+    id_token = str(config.get("id_token") or "")
+    try:
+        ident = aws_credentials(id_token, region)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"AWS credentials failed: {exc}"}
+    creds = ident["credentials"]
+    path = build_presigned_ws_path(
+        host,
+        region,
+        str(creds.get("AccessKeyId") or ""),
+        str(creds.get("SecretKey") or ""),
+        str(creds.get("SessionToken") or ""),
+    )
+    body = wrap_envelope(encode_action(key)).encode()
+    session_id = uuid.uuid4().hex
+    heartbeat = wrap_envelope(encode_app_connect_heartbeat(session_id)).encode()
+    client_id = f"yarbo-lymow-cmd-{uuid.uuid4().hex[:8]}"
+    got: dict[str, Any] = {"ok": False, "action": key, "user_ctrl": USER_CTRL_ACTIONS[key]}
+    connected = {"ok": False}
+
+    def on_connect(client: Any, _userdata: Any, *_args: Any) -> None:
+        rc = 0
+        if len(_args) >= 2:
+            code = _args[1]
+            rc = int(getattr(code, "value", code) or 0)
+        if rc not in (0,):
+            got["error"] = f"MQTT connect failed ({rc})"
+            return
+        connected["ok"] = True
+        client.publish(f"/device/{thing}/pbinput", heartbeat, qos=1)
+        info = client.publish(f"/device/{thing}/pbinput", body, qos=1)
+        mid = int(getattr(info, "mid", 0) or 0)
+        got["mqtt_mid"] = mid
+        if mid > 0:
+            got["ok"] = True
+            got.pop("error", None)
+        else:
+            got["error"] = "MQTT publish returned no message id"
+
+    kwargs: dict[str, Any] = {
+        "client_id": client_id,
+        "transport": "websockets",
+        "protocol": mqtt.MQTTv311,
+    }
+    if hasattr(mqtt, "CallbackAPIVersion"):
+        kwargs["callback_api_version"] = mqtt.CallbackAPIVersion.VERSION2
+    client = mqtt.Client(**kwargs)
+    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+    try:
+        client.ws_set_options(path=path, headers={"Host": host})
+    except TypeError:
+        client.ws_set_options(path=path)
+    client.on_connect = on_connect
+    try:
+        client.connect(host, 443, 60)
+        deadline = time.time() + 12.0
+        while time.time() < deadline:
+            client.loop(timeout=0.5)
+            if got.get("ok") or got.get("error"):
+                # Give the broker a moment to flush QoS 1 after mid is assigned.
+                client.loop(timeout=0.5)
+                break
+    except Exception as exc:  # noqa: BLE001
+        got["error"] = str(exc)
+        got["ok"] = False
+    finally:
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+    if not got.get("ok") and not got.get("error"):
+        if not connected["ok"]:
+            got["error"] = "MQTT did not connect"
+        else:
+            got["error"] = "MQTT publish did not complete"
+    if got.get("ok"):
+        labels = {"start": "Start", "pause": "Pause", "resume": "Resume", "dock": "Dock"}
+        got["message"] = f"Sent Lymow {labels.get(key, key)}."
+    return got
+
+
 def mqtt_listen_session(
     config: dict[str, Any],
     thing: str,
@@ -994,6 +1088,42 @@ def cmd_state(config_path: Path, state_path: Path, wait_s: float) -> int:
         return 1
 
 
+def cmd_command(config_path: Path, state_path: Path, action: str) -> int:
+    mqtt, err = ensure_paho()
+    if mqtt is None:
+        emit({"ok": False, "error": err or "Could not install paho-mqtt / websocket-client."})
+        return 1
+    key = str(action or "").strip().lower()
+    if key not in USER_CTRL_ACTIONS:
+        emit({"ok": False, "error": f"Unknown Lymow action: {action!r} (use start, pause, resume, dock)"})
+        return 1
+    config = load_config(config_path)
+    try:
+        config = ensure_tokens(config)
+        bundle = fetch_device_bundle(config)
+        thing = str(bundle["thing"])
+        config["device_thing_name"] = thing
+        config["last_error"] = ""
+        save_config(config_path, config)
+        result = mqtt_publish_command(config, thing, key)
+        if result.get("ok"):
+            # Refresh status briefly so the panel can show the new work state.
+            try:
+                mqtt_state = collect_live_state(config, thing, 4.0, stop_on_battery=False)
+                state = merge_state(bundle, mqtt_state, read_previous_state(state_path))
+                write_state(state_path, state)
+                result.update({k: state.get(k) for k in (
+                    "battery", "work_status", "robot_state", "work_done", "charging", "page_name",
+                ) if k in state})
+            except Exception:  # noqa: BLE001
+                pass
+        emit(result)
+        return 0 if result.get("ok") else 1
+    except Exception as exc:  # noqa: BLE001
+        emit({"ok": False, "error": str(exc)})
+        return 1
+
+
 def cmd_listen(config_path: Path, state_path: Path) -> int:
     mqtt, err = ensure_paho()
     if mqtt is None:
@@ -1026,10 +1156,15 @@ def cmd_listen(config_path: Path, state_path: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Lymow unofficial cloud bridge")
-    parser.add_argument("command", choices=["deps", "login", "state", "listen"])
+    parser.add_argument("command", choices=["deps", "login", "state", "listen", "command"])
     parser.add_argument("--config", required=True)
     parser.add_argument("--state", default="")
     parser.add_argument("--wait", type=float, default=8.0)
+    parser.add_argument(
+        "--action",
+        default="",
+        help="For command: start, pause, resume, or dock",
+    )
     args = parser.parse_args()
     config_path = Path(args.config)
     state_path = Path(args.state) if args.state else config_path.parent / "lymow-state.json"
@@ -1039,6 +1174,8 @@ def main() -> int:
         return cmd_login(config_path, state_path)
     if args.command == "state":
         return cmd_state(config_path, state_path, args.wait)
+    if args.command == "command":
+        return cmd_command(config_path, state_path, args.action)
     return cmd_listen(config_path, state_path)
 
 
