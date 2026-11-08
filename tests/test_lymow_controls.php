@@ -19,9 +19,9 @@ $root = dirname(__DIR__);
 
 $proto = (string) file_get_contents($root . '/scripts/lib/lymow_protocol.py');
 assert_true(str_contains($proto, 'USER_CTRL_CLEAN = 1'), 'protocol CLEAN=1');
-assert_true(str_contains($proto, 'USER_CTRL_DOCK = 2'), 'protocol DOCK/cancel=2');
+assert_true(str_contains($proto, 'USER_CTRL_FORCE_REINIT = 28'), 'protocol FORCE_REINIT=28');
 assert_true(str_contains($proto, 'USER_CTRL_RECHARGE_DOCK = 33'), 'protocol RECHARGE_DOCK=33');
-assert_true(str_contains($proto, '"cancel": USER_CTRL_DOCK'), 'protocol cancel maps to DOCK=2');
+assert_true(str_contains($proto, '"cancel": USER_CTRL_FORCE_REINIT'), 'protocol cancel maps to FORCE_REINIT=28');
 assert_true(str_contains($proto, 'USER_CTRL_QUERY_MAP = 19'), 'protocol QUERY_MAP=19');
 assert_true(str_contains($proto, 'def encode_start_zones'), 'protocol encode_start_zones');
 assert_true(str_contains($proto, 'def decode_map_zones'), 'protocol decode_map_zones');
@@ -130,9 +130,12 @@ $docs = (string) file_get_contents($root . '/docs/lymow.md');
 assert_true(str_contains($docs, 'Refresh'), 'docs mention Refresh zones');
 assert_true(str_contains($docs, 'hash IDs'), 'docs mention hash IDs');
 assert_true(str_contains($docs, 'Cancel'), 'docs mention Cancel');
+assert_true(str_contains($docs, 'does not return to dock'), 'docs say Cancel does not dock');
 assert_true(str_contains($docs, 'MOWING ·'), 'docs mention active zone in State');
 
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.227]'), 'changelog 4.0.227');
+assert_true(str_contains($change, 'FORCE_REINIT'), 'changelog mentions FORCE_REINIT');
 assert_true(str_contains($change, '## [4.0.226]'), 'changelog 4.0.226');
 assert_true(str_contains($change, 'active zone'), 'changelog mentions active zone');
 assert_true(str_contains($change, '## [4.0.225]'), 'changelog 4.0.225');

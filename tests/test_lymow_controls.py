@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 from lymow_protocol import (  # noqa: E402
     USER_CTRL_ACTIONS,
     USER_CTRL_CLEAN,
-    USER_CTRL_DOCK,
+    USER_CTRL_FORCE_REINIT,
     USER_CTRL_PAUSE,
     USER_CTRL_QUERY_MAP,
     USER_CTRL_QUERY_WIFI_4G,
@@ -43,12 +43,12 @@ def test_action_codes() -> None:
         "pause": USER_CTRL_PAUSE,
         "resume": USER_CTRL_RESUME,
         "dock": USER_CTRL_RECHARGE_DOCK,
-        "cancel": USER_CTRL_DOCK,
+        "cancel": USER_CTRL_FORCE_REINIT,
     }
     if USER_CTRL_ACTIONS != expect:
         fail(f"USER_CTRL_ACTIONS mismatch: {USER_CTRL_ACTIONS}")
-    if USER_CTRL_DOCK != 2:
-        fail("cancel USER_CTRL_DOCK must be 2")
+    if USER_CTRL_FORCE_REINIT != 28:
+        fail("cancel FORCE_REINIT must be 28")
     if USER_CTRL_RECHARGE_DOCK != 33:
         fail("dock keep-progress must stay 33")
     if USER_CTRL_QUERY_MAP != 19:
@@ -62,7 +62,7 @@ def test_pause_resume_dock_hex() -> None:
         "pause": "10312803",
         "resume": "10312804",
         "dock": "10312821",
-        "cancel": "10312802",
+        "cancel": "1031281c",
     }
     for action, hex_value in expect_hex.items():
         pb = encode_action(action)
