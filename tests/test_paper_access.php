@@ -347,11 +347,13 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_ACCESS 12'), 'access page id');
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_COUNT 14'), 'page count includes HEAT');
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.84"'), 'firmware 0.1.84');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.84';"), 'panel pin 0.1.84');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.85"'), 'firmware 0.1.85');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.85';"), 'panel pin 0.1.85');
 assert_true(str_contains($homePhp, 'function paperAccessItems'), 'paper ACCESS helper');
 assert_true(str_contains($homePhp, 'paperContactOpen'), 'ACCESS fill uses paperContactOpen / DPS');
 assert_true(str_contains($homePhp, 'function assignContactKind'), 'contact_kind save');
+assert_true(str_contains($homePhp, 'function openChangedShort'), 'compact ACCESS time helper');
+assert_true(str_contains($homePhp, "\$row['changed'] = \$short"), 'ACCESS items include changed');
 assert_true(str_contains($api, "'contact_kind'"), 'home API contact_kind');
 assert_true(str_contains($fw, 'void drawAccessPage(bool forceFull)'), 'firmware ACCESS page');
 assert_true(str_contains($fw, 'void layoutAccessGrid'), 'ACCESS grid shrinks to fit one screen');
@@ -363,12 +365,60 @@ assert_true(str_contains($fw, 'void drawWindowGlyph'), 'window glyph');
 assert_true(str_contains($fw, 'void drawLockMark'), 'lockable doors have a lock mark');
 assert_true(str_contains($fw, 'void handleAccessTouch'), 'ACCESS tap handler');
 assert_true(str_contains($fw, 'accessUnlock[i]'), 'only lockable tiles send unlock');
+assert_true(str_contains($fw, 'accessChanged[i]'), 'ACCESS draws changed time');
 assert_true(str_contains($fw, 'accessHaveItems'), 'menu can show ACCESS before compact');
+assert_true(str_contains($fw, 'o["changed"]'), 'firmware parses changed');
 assert_true(str_contains($html, 'data-menu-id="access"'), 'settings ACCESS row');
 assert_true(str_contains($js, 'data-home-contact-assign'), 'Home ⚙️ Door/Window select');
 assert_true(str_contains($js, '🪟'), 'Home uses a window emoji');
 assert_true(str_contains($change, '## [4.0.153]'), 'changelog 4.0.153');
+assert_true(str_contains($change, '## [4.0.245]'), 'changelog 4.0.245');
 assert_true(str_contains($html, 'thick lockable-door borders'), 'settings preview uses a thick door border');
 assert_true(str_contains($homePhp, 'Home rows only: UniFi Hide unticks Show on Home'), 'ACCESS uses Home rows, not all UniFi devices');
+
+$today = time();
+$todayShort = YarboHome::openChangedShort($today, 'Europe/Zurich');
+assert_true(preg_match('/^\d{1,2}:\d{2}$/', $todayShort) === 1, 'today short is H:i: ' . $todayShort);
+$older = $today - 86400 * 3;
+$olderShort = YarboHome::openChangedShort($older, 'Europe/Zurich');
+assert_true($olderShort !== '' && !str_contains($olderShort, 'Last'), 'older short has no Last: ' . $olderShort);
+assert_true(YarboHome::openChangedShort(0) === '', 'zero at is empty');
+
+$stampRoot = sys_get_temp_dir() . '/yarbo-paper-access-stamp-' . bin2hex(random_bytes(3));
+mkdir($stampRoot . '/data', 0775, true);
+file_put_contents($stampRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($stampRoot . '/data/unifi-config.json', json_encode([
+    'host' => '',
+    'show_on_home' => ['unifi:sensor:kitchen-window'],
+], JSON_UNESCAPED_SLASHES));
+$stampAt = $today - 120;
+file_put_contents($stampRoot . '/data/unifi-inventory.json', json_encode([
+    'cameras' => [],
+    'lights' => [],
+    'relays' => [],
+    'doors' => [],
+    'hubs' => [],
+    'sensors' => [[
+        'id' => 'unifi:sensor:kitchen-window',
+        'native_id' => 'usp-kitchen',
+        'name' => 'Kitchen window',
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'product' => 'USP Sensor',
+        'has_open' => true,
+        'open' => true,
+        'open_changed_at' => $stampAt,
+        'status' => 'Open',
+        'on' => false,
+    ]],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($stampRoot . '/data/home.json', json_encode(['hidden' => [], 'last_devices' => []], JSON_UNESCAPED_SLASHES));
+$stampItems = (new YarboHome($stampRoot))->paperAccessItems();
+assert_true(count($stampItems) === 1, 'stamp access has one item');
+assert_true(($stampItems[0]['changed_at'] ?? 0) === $stampAt, 'changed_at passed through: ' . json_encode($stampItems));
+assert_true(isset($stampItems[0]['changed']) && $stampItems[0]['changed'] !== '', 'changed short present: ' . json_encode($stampItems));
+assert_true(!str_contains((string) $stampItems[0]['changed'], 'Last'), 'no Last change prefix: ' . $stampItems[0]['changed']);
 
 echo "ok: paper access\n";

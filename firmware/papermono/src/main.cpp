@@ -239,6 +239,7 @@ bool accessHaveItems = false;
 String accessIds[PAPERMONO_ACCESS_MAX];
 String accessNames[PAPERMONO_ACCESS_MAX];
 String accessRoles[PAPERMONO_ACCESS_MAX];
+String accessChanged[PAPERMONO_ACCESS_MAX];
 bool accessOnState[PAPERMONO_ACCESS_MAX];
 bool accessUnlock[PAPERMONO_ACCESS_MAX];
 int heatCount = 0;
@@ -890,7 +891,7 @@ String screenKey()
     }
     for (int i = 0; i < accessCount; i++) {
         key += "|" + accessIds[i] + "|" + accessRoles[i] + "|" + String(accessOnState[i] ? 1 : 0)
-            + "|" + String(accessUnlock[i] ? 1 : 0);
+            + "|" + String(accessUnlock[i] ? 1 : 0) + "|" + accessChanged[i];
     }
     for (int i = 0; i < heatCount; i++) {
         key += "|" + heatIds[i] + "|" + String(heatOnState[i] ? 1 : 0)
@@ -2078,19 +2079,31 @@ void drawAccessPage(bool forceFull)
             }
         }
         int padL = 8 + glyphW + (lockH > 0 ? lockH + 6 : 4);
-        int labelH = h - 8;
+        bool haveChanged = accessChanged[i].length() > 0;
+        int timeH = haveChanged ? 16 : 0;
+        int labelH = h - 8 - timeH;
         if (labelH < 10) {
             labelH = 10;
         }
-        drawFittedLabel(x + padL + (w - padL) / 2, y + h / 2, w - padL - 8, labelH, accessNames[i], fg, bg);
-        int gy = y + (h - glyphH) / 2;
+        int nameCy = haveChanged ? (y + 6 + labelH / 2) : (y + h / 2);
+        drawFittedLabel(x + padL + (w - padL) / 2, nameCy, w - padL - 8, labelH, accessNames[i], fg, bg);
+        int gy = y + (h - glyphH - timeH) / 2;
+        if (gy < y + 4) {
+            gy = y + 4;
+        }
         if (window) {
             drawWindowGlyph(x + 8, gy, glyphH, fg);
         } else {
             drawDoorGlyph(x + 8, gy, glyphH, fg);
         }
         if (lockH > 0) {
-            drawLockMark(x + 10 + glyphW, y + (h - lockH) / 2, lockH, fg);
+            drawLockMark(x + 10 + glyphW, gy + (glyphH - lockH) / 2, lockH, fg);
+        }
+        if (haveChanged) {
+            M5.Display.setTextColor(fg, bg);
+            M5.Display.setTextDatum(BR_DATUM);
+            M5.Display.setTextSize(1);
+            M5.Display.drawString(clipLabelToWidth(accessChanged[i], w - 16), x + w - 8, y + h - 4);
         }
         M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
         M5.Display.setTextDatum(TL_DATUM);
@@ -5196,6 +5209,7 @@ bool httpGetStatus()
                 accessRoles[accessCount] = String((const char *) (o["role"] | "door"));
                 accessOnState[accessCount] = o["on"] | false;
                 accessUnlock[accessCount] = o["unlock"] | false;
+                accessChanged[accessCount] = String((const char *) (o["changed"] | ""));
                 if (accessIds[accessCount].length() && accessNames[accessCount].length()) {
                     accessCount++;
                 }

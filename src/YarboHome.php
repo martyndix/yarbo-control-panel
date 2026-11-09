@@ -2462,6 +2462,32 @@ final class YarboHome
     }
 
     /**
+     * Compact PaperMono ACCESS caption — clock only, no "Last change" prefix.
+     * Today: "14:32". Earlier this year: "2 Nov". Older: "2 Nov 25".
+     */
+    public static function openChangedShort(int $at, string $timezone = 'Europe/Zurich'): string
+    {
+        if ($at <= 0) {
+            return '';
+        }
+        try {
+            $tz = new \DateTimeZone($timezone !== '' ? $timezone : 'Europe/Zurich');
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('Europe/Zurich');
+        }
+        $when = (new \DateTimeImmutable('@' . $at))->setTimezone($tz);
+        $now = new \DateTimeImmutable('now', $tz);
+        if ($when->format('Y-m-d') === $now->format('Y-m-d')) {
+            return $when->format('H:i');
+        }
+        if ($when->format('Y') === $now->format('Y')) {
+            return $when->format('j M');
+        }
+
+        return $when->format('j M y');
+    }
+
+    /**
      * @param mixed $raw
      * @return array<string, array{open: bool, at: int}>
      */
@@ -4832,14 +4858,25 @@ final class YarboHome
             }
             $sensors[] = $device;
         }
+        $combined = array_merge($lockable, $sensors);
+        foreach ($combined as &$device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            // applyOpenChanged keys off bool open — fill from DPS / contact.
+            $device['open'] = self::paperContactOpen($device);
+        }
+        unset($device);
+        $merged = $this->applyOpenChanged($combined, $store);
+        $tz = $this->triggerTimezone();
         $out = [];
-        foreach (array_merge($lockable, $sensors) as $device) {
+        foreach ($merged as $device) {
             $id = trim((string) ($device['id'] ?? ''));
             $kind = strtolower(trim((string) ($device['kind'] ?? 'sensor')));
             if ($kind === '') {
                 $kind = 'sensor';
             }
-            $out[] = [
+            $row = [
                 'id' => $id,
                 'name' => YarboHub::normalizeDisplayName(
                     (string) ($store['names'][$id] ?? $device['name'] ?? $id),
@@ -4851,6 +4888,17 @@ final class YarboHome
                 'on' => self::paperContactOpen($device),
                 'unlock' => self::isLockableDoor($device),
             ];
+            $at = isset($device['open_changed_at']) && is_numeric($device['open_changed_at'])
+                ? (int) $device['open_changed_at']
+                : 0;
+            if ($at > 0) {
+                $short = self::openChangedShort($at, $tz);
+                if ($short !== '') {
+                    $row['changed_at'] = $at;
+                    $row['changed'] = $short;
+                }
+            }
+            $out[] = $row;
             if (count($out) >= self::PAPER_ACCESS_MAX) {
                 break;
             }

@@ -15,7 +15,7 @@ Settings → **Lymow**:
 
 On the Lymow card: tap **Refresh** under **Zones** to load go-zone names from the Lymow map (same unofficial MQTT `QUERY_MAP` as ha-lymow). Select one or more zones, then **Start** (sends those hash IDs only — not “mow everything”). While a task is active, **State** shows the zone name(s) (for example `MOWING · South Lawn`) and those chips stay highlighted. **Pause**, **Resume**, and **Dock** work without a zone pick — Dock keeps mow progress while a task is active, and still sends the mower home after Cancel when it is sitting idle. **Cancel** clears the current mowing task and leaves the mower where it is (it does not return to dock by itself). The same commands are available as Automations **Then** actions.
 
-**PaperMono** (firmware **0.1.84+**): the Lymow page shows zone chips (six at a time with **PREV** / **NEXT** when there are more), **ALL ZONES**, **REFRESH**, and **START** / **PAUSE** / **RESUME** / **DOCK** / **CANCEL**. Zones start unselected; **START** is inactive until you pick at least one (or **ALL ZONES**). Update the panel, build/flash PaperMono, then open Lymow (or Robots → Lymow).
+**PaperMono** (firmware **0.1.85+**): the Lymow page shows zone chips (six at a time with **PREV** / **NEXT** when there are more), **ALL ZONES**, **REFRESH**, and **START** / **PAUSE** / **RESUME** / **DOCK** / **CANCEL**. Zones start unselected; **START** is inactive until you pick at least one (or **ALL ZONES**). Update the panel, build/flash PaperMono, then open Lymow (or Robots → Lymow).
 
 Leave the password blank on later saves to keep the stored one. Login files (`data/lymow-config.json`, `data/lymow-cloud.json`) stay on the host across updates; this feature does not wipe them.
 
