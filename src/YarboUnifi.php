@@ -2800,6 +2800,7 @@ final class YarboUnifi
         $open = $this->sensorOpened($row);
         $motion = $this->sensorMotionNow($row);
         $motionAt = $this->sensorMotionAt($row);
+        $openChangedAt = $this->sensorOpenChangedAt($row);
         $leak = $this->truthy($row['leakDetected'] ?? $row['is_leaking'] ?? false);
         $temp = $this->nestedNumber($row, ['stats', 'temperature', 'value'])
             ?? $this->nestedNumber($row, ['stats', 'temperature'])
@@ -2850,6 +2851,8 @@ final class YarboUnifi
             'has_open' => $caps['has_open'],
             'has_motion' => $caps['has_motion'],
             'motion_at' => $caps['has_motion'] ? $motionAt : 0,
+            // Protect contact sensors report when isOpened last flipped.
+            'open_changed_at' => ($caps['has_open'] && $openChangedAt > 0) ? $openChangedAt : 0,
             'temperature' => $temp,
             'humidity' => $humidity,
         ];
@@ -3214,6 +3217,12 @@ final class YarboUnifi
         if ($dpsLabel !== '') {
             $parts[] = $dpsLabel;
         }
+        $openChangedAt = $this->sensorOpenChangedAt($row);
+        if ($openChangedAt < 1) {
+            $openChangedAt = self::epochSeconds(
+                $row['last_activity'] ?? $row['lastActivity'] ?? $row['last_event_at'] ?? $row['lastEventAt'] ?? null
+            );
+        }
 
         return [
             'id' => self::homeId(self::KIND_DOOR, $id),
@@ -3233,6 +3242,7 @@ final class YarboUnifi
             'dps' => $dps,
             'dps_label' => $dpsLabel,
             'open' => $dpsLabel === 'Open' ? true : ($dpsLabel === 'Closed' ? false : null),
+            'open_changed_at' => $openChangedAt > 0 ? $openChangedAt : 0,
         ];
     }
 
@@ -3439,6 +3449,12 @@ final class YarboUnifi
             $hub['dps'] = (string) ($door['dps'] ?? '');
             $hub['dps_label'] = $dpsLabel;
             $hub['open'] = array_key_exists('open', $door) ? $door['open'] : ($dpsLabel === 'Open');
+            $doorChangedAt = isset($door['open_changed_at']) && is_numeric($door['open_changed_at'])
+                ? (int) $door['open_changed_at']
+                : 0;
+            if ($doorChangedAt > 0) {
+                $hub['open_changed_at'] = $doorChangedAt;
+            }
         }
         $parts = [str_starts_with((string) ($hub['status'] ?? ''), 'Offline') ? 'Offline' : 'Online'];
         if (trim((string) ($hub['door_id'] ?? '')) === '') {
@@ -3473,6 +3489,12 @@ final class YarboUnifi
         $closed = $dpsLabel === 'Closed';
         $status = $dpsLabel !== '' ? $dpsLabel : 'Unknown';
         $doorName = $this->displayName($row, 'Door');
+        $openChangedAt = $this->sensorOpenChangedAt($row);
+        if ($openChangedAt < 1) {
+            $openChangedAt = self::epochSeconds(
+                $row['last_activity'] ?? $row['lastActivity'] ?? $row['last_event_at'] ?? $row['lastEventAt'] ?? null
+            );
+        }
 
         return [
             'id' => self::homeId(self::KIND_SENSOR, 'dps-' . $doorId),
@@ -3491,6 +3513,7 @@ final class YarboUnifi
             'dps_label' => $dpsLabel !== '' ? $dpsLabel : $status,
             'has_dps' => true,
             'open' => $open ? true : ($closed ? false : null),
+            'open_changed_at' => $openChangedAt > 0 ? $openChangedAt : 0,
         ];
     }
 
@@ -3785,6 +3808,41 @@ final class YarboUnifi
         if (is_array($stats)) {
             $candidates[] = $stats['motionDetectedAt'] ?? null;
             $candidates[] = $stats['motion_detected_at'] ?? null;
+        }
+        foreach ($candidates as $value) {
+            $sec = self::epochSeconds($value);
+            if ($sec > 0) {
+                return $sec;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Protect UP Sense / contact: when isOpened last changed (epoch seconds).
+     *
+     * @param array<string, mixed> $row
+     */
+    private function sensorOpenChangedAt(array $row): int
+    {
+        $candidates = [
+            $row['openStatusChangedAt'] ?? null,
+            $row['open_status_changed_at'] ?? null,
+            $row['openChangedAt'] ?? null,
+            $row['open_changed_at'] ?? null,
+            $row['lastOpen'] ?? null,
+            $row['last_open'] ?? null,
+        ];
+        $stats = $row['stats'] ?? null;
+        if (is_array($stats)) {
+            $candidates[] = $stats['openStatusChangedAt'] ?? null;
+            $candidates[] = $stats['open_status_changed_at'] ?? null;
+            $candidates[] = $stats['openChangedAt'] ?? null;
+            if (is_array($stats['open'] ?? null)) {
+                $candidates[] = $stats['open']['statusChangedAt'] ?? null;
+                $candidates[] = $stats['open']['changedAt'] ?? null;
+            }
         }
         foreach ($candidates as $value) {
             $sec = self::epochSeconds($value);
