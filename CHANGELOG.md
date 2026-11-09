@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.230] - 2026-11-09
+
+### Fixed
+- **Doors tile — Access DPS Last change:** Open/Closed and Last change for Access doors (Gates, Garage, Workshop, Utility, …) follow the door-position sensor on the controller, not unlock `last_activity`. Remotes and push buttons that bypass UniFi still update the time when the DPS flips. Stale unlock-based stamps are cleared once.
+
 ## [4.0.229] - 2026-11-09
 
 ### Changed

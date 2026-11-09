@@ -101,6 +101,7 @@ final class YarboHome
             'last_devices' => [],
             'last_trigger' => [],
             'open_changed' => [],
+            'open_changed_dps_v' => 0,
             'contact_kind' => [],
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
             'auto_off_sec' => [],
@@ -239,6 +240,7 @@ final class YarboHome
             ),
             'last_trigger' => $this->normalizeLastTrigger($decoded['last_trigger'] ?? null),
             'open_changed' => $this->normalizeOpenChanged($decoded['open_changed'] ?? null),
+            'open_changed_dps_v' => max(0, (int) ($decoded['open_changed_dps_v'] ?? 0)),
             'contact_kind' => $this->normalizeContactKind($decoded['contact_kind'] ?? null),
             'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
             'auto_off_sec' => $this->normalizeAutoOffMap($decoded['auto_off_sec'] ?? null),
@@ -2481,10 +2483,14 @@ final class YarboHome
             if ($at < 0) {
                 $at = 0;
             }
-            $out[$id] = [
+            $entry = [
                 'open' => (bool) $row['open'],
                 'at' => $at,
             ];
+            if (!empty($row['observed'])) {
+                $entry['observed'] = true;
+            }
+            $out[$id] = $entry;
         }
 
         return $out;
@@ -2492,8 +2498,10 @@ final class YarboHome
 
     /**
      * Last Open↔Closed time for the Doors tile.
-     * Prefer UniFi timestamps (Protect openStatusChangedAt / Access last_activity);
-     * otherwise remember flips the panel observes between polls.
+     * Prefer UniFi timestamps that track the contact/DPS (Protect openStatusChangedAt,
+     * Access door-position stamps). Access unlock last_activity is ignored — remotes
+     * and push buttons still move the door-position sensor. When Access has no DPS
+     * stamp, remember Open↔Closed flips the panel observes between polls.
      *
      * @param list<array<string, mixed>> $rows
      * @param array<string, mixed> $store
@@ -2505,6 +2513,18 @@ final class YarboHome
         $tz = $this->triggerTimezone();
         $now = time();
         $dirty = false;
+        // Drop Access unlock-based stamps from before DPS-only Last change (4.0.230).
+        if ((int) ($store['open_changed_dps_v'] ?? 0) < 1) {
+            foreach (array_keys($all) as $id) {
+                $id = (string) $id;
+                if (str_starts_with($id, 'unifi:door:') || str_starts_with($id, 'unifi:hub:')) {
+                    unset($all[$id]);
+                    $dirty = true;
+                }
+            }
+            $store['open_changed_dps_v'] = 1;
+            $dirty = true;
+        }
         foreach ($rows as &$row) {
             if (!is_array($row)) {
                 continue;
@@ -2523,6 +2543,8 @@ final class YarboHome
             if ($reported < 0) {
                 $reported = 0;
             }
+            // Access controller DPS: only trust a real door-position change stamp, never unlock activity.
+            $accessDps = !empty($row['has_dps']) && empty($row['has_open']);
             $prev = is_array($all[$id] ?? null) ? $all[$id] : null;
             $prevAt = (int) ($prev['at'] ?? 0);
             $prevOpen = array_key_exists('open', $prev ?? []) ? (bool) $prev['open'] : null;
@@ -2537,8 +2559,16 @@ final class YarboHome
                 $all[$id] = ['open' => $open, 'at' => 0];
                 $dirty = true;
             } elseif ($prevOpen !== $open) {
+                // DPS (or Protect) open state flipped — stamp now (covers remote / button opens).
                 $all[$id] = ['open' => $open, 'at' => $now];
                 $dirty = true;
+            } elseif ($accessDps && $prevAt > 0 && $reported < 1 && empty($prev['observed'])) {
+                // Legacy unlock stamp with no DPS report: drop until the next DPS edge.
+                $all[$id] = ['open' => $open, 'at' => 0];
+                $dirty = true;
+            }
+            if (isset($all[$id]) && $reported < 1 && (int) ($all[$id]['at'] ?? 0) > 0) {
+                $all[$id]['observed'] = true;
             }
             $at = (int) ($all[$id]['at'] ?? 0);
             if ($at > 0) {
@@ -2556,6 +2586,7 @@ final class YarboHome
             }
             $fresh = $this->load();
             $fresh['open_changed'] = $all;
+            $fresh['open_changed_dps_v'] = 1;
             $this->write($fresh);
         }
 

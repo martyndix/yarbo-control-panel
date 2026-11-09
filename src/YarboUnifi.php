@@ -3217,12 +3217,8 @@ final class YarboUnifi
         if ($dpsLabel !== '') {
             $parts[] = $dpsLabel;
         }
-        $openChangedAt = $this->sensorOpenChangedAt($row);
-        if ($openChangedAt < 1) {
-            $openChangedAt = self::epochSeconds(
-                $row['last_activity'] ?? $row['lastActivity'] ?? $row['last_event_at'] ?? $row['lastEventAt'] ?? null
-            );
-        }
+        // DPS open/closed only — never last_activity (unlock / remote / button).
+        $openChangedAt = $this->accessDoorOpenChangedAt($row);
 
         return [
             'id' => self::homeId(self::KIND_DOOR, $id),
@@ -3242,6 +3238,7 @@ final class YarboUnifi
             'dps' => $dps,
             'dps_label' => $dpsLabel,
             'open' => $dpsLabel === 'Open' ? true : ($dpsLabel === 'Closed' ? false : null),
+            // Prefer a real DPS change stamp from Access; otherwise Home observes flips.
             'open_changed_at' => $openChangedAt > 0 ? $openChangedAt : 0,
         ];
     }
@@ -3489,12 +3486,7 @@ final class YarboUnifi
         $closed = $dpsLabel === 'Closed';
         $status = $dpsLabel !== '' ? $dpsLabel : 'Unknown';
         $doorName = $this->displayName($row, 'Door');
-        $openChangedAt = $this->sensorOpenChangedAt($row);
-        if ($openChangedAt < 1) {
-            $openChangedAt = self::epochSeconds(
-                $row['last_activity'] ?? $row['lastActivity'] ?? $row['last_event_at'] ?? $row['lastEventAt'] ?? null
-            );
-        }
+        $openChangedAt = $this->accessDoorOpenChangedAt($row);
 
         return [
             'id' => self::homeId(self::KIND_SENSOR, 'dps-' . $doorId),
@@ -3543,7 +3535,16 @@ final class YarboUnifi
             if (!isset($row[$nest]) || !is_array($row[$nest]) || array_is_list($row[$nest])) {
                 continue;
             }
-            foreach (['door_position_status', 'doorPositionStatus', 'dps_status', 'dpsStatus', 'is_opened', 'isOpened'] as $key) {
+            foreach ([
+                'door_position_status',
+                'doorPositionStatus',
+                'dps_status',
+                'dpsStatus',
+                'uah-input_state_dps',
+                'uah_input_state_dps',
+                'is_opened',
+                'isOpened',
+            ] as $key) {
                 if (!array_key_exists($key, $row[$nest]) || $row[$nest][$key] === null) {
                     continue;
                 }
@@ -3843,6 +3844,46 @@ final class YarboUnifi
                 $candidates[] = $stats['open']['statusChangedAt'] ?? null;
                 $candidates[] = $stats['open']['changedAt'] ?? null;
             }
+        }
+        foreach ($candidates as $value) {
+            $sec = self::epochSeconds($value);
+            if ($sec > 0) {
+                return $sec;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Access door-position change time when the controller reports one.
+     * Does not use last_activity — that tracks unlock/credential events, not the DPS.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function accessDoorOpenChangedAt(array $row): int
+    {
+        $candidates = [
+            $row['door_position_changed_at'] ?? null,
+            $row['doorPositionChangedAt'] ?? null,
+            $row['dps_changed_at'] ?? null,
+            $row['dpsChangedAt'] ?? null,
+            $row['door_position_updated_at'] ?? null,
+            $row['doorPositionUpdatedAt'] ?? null,
+            $row['openStatusChangedAt'] ?? null,
+            $row['open_status_changed_at'] ?? null,
+            $row['openChangedAt'] ?? null,
+        ];
+        foreach (['extras', 'extra', 'status', 'state'] as $nest) {
+            if (!isset($row[$nest]) || !is_array($row[$nest]) || array_is_list($row[$nest])) {
+                continue;
+            }
+            $candidates[] = $row[$nest]['door_position_changed_at'] ?? null;
+            $candidates[] = $row[$nest]['doorPositionChangedAt'] ?? null;
+            $candidates[] = $row[$nest]['dps_changed_at'] ?? null;
+            $candidates[] = $row[$nest]['dpsChangedAt'] ?? null;
+            $candidates[] = $row[$nest]['openStatusChangedAt'] ?? null;
+            $candidates[] = $row[$nest]['open_status_changed_at'] ?? null;
         }
         foreach ($candidates as $value) {
             $sec = self::epochSeconds($value);
