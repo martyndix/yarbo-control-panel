@@ -12907,9 +12907,9 @@ let quietCodes = DEFAULT_QUIET_CODES.map((row) => row.slice());
 let quietCell = { r: 0, c: 0 };
 let nightCodes = DEFAULT_QUIET_CODES.map((row) => row.slice());
 let nightCell = { r: 0, c: 0 };
-// Bottom row preview for the night editor (BUILDING SECURE / DOOR OPEN).
-const NIGHT_SECURE_ROW = [2, 21, 9, 12, 4, 9, 14, 7, 0, 19, 5, 3, 21, 18, 5]; // BUILDING SECURE
-const NIGHT_OPEN_ROW = [0, 0, 0, 4, 15, 15, 18, 0, 15, 16, 5, 14, 0, 0, 0]; // DOOR OPEN centered approx
+// Bottom row preview for the night editor (HOUSE SECURE with green pads / DOOR OPEN with red).
+const NIGHT_SECURE_ROW = [66, 8, 15, 21, 19, 5, 0, 19, 5, 3, 21, 18, 5, 66, 66]; // HOUSE SECURE
+const NIGHT_OPEN_ROW = [63, 63, 63, 4, 15, 15, 18, 0, 15, 16, 5, 14, 63, 63, 63]; // DOOR OPEN
 
 function cloneQuietCodes(raw) {
     const fallback = DEFAULT_QUIET_CODES.map((row) => row.slice());

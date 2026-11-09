@@ -2732,16 +2732,17 @@ final class YarboVestaboard
         $open = $forceOpen ?? (($summary['open'] ?? 0) > 0);
         $kind = $forceKind ?? (string) ($summary['open_kind'] ?? '');
         if ($open) {
+            // Keep phrases under 13 chars so at least one red pad fits each side.
             $phrase = match ($kind) {
-                'window' => 'WINDOW OPEN',
+                'window' => 'WIN OPEN',
                 'both' => 'DOORS OPEN',
                 default => 'DOOR OPEN',
             };
             [$line3, $codes3] = $this->packCenteredStatus($phrase, self::COLOR_RED);
             $verb = 'NIGHT_OPEN';
         } else {
-            // 15 chars fills the row (no green pads). Shorter phrases get green surrounds.
-            [$line3, $codes3] = $this->packCenteredStatus('BUILDING SECURE', self::COLOR_GREEN);
+            // HOUSE SECURE (12) leaves green pads; longer phrases fill the row with no colour.
+            [$line3, $codes3] = $this->packCenteredStatus('HOUSE SECURE', self::COLOR_GREEN);
             $verb = 'NIGHT';
             $kind = '';
         }

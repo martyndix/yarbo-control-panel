@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.235] - 2026-11-09
+
+### Changed
+- **Vestaboard Night hours status copy:** bottom row is **HOUSE SECURE** with green pads (was BUILDING SECURE, which filled the row). Open phrases stay short (**DOOR OPEN** / **WIN OPEN** / **DOORS OPEN**) so red pads always fit.
+
 ## [4.0.234] - 2026-11-09
 
 ### Fixed
@@ -14,7 +19,7 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ## [4.0.233] - 2026-11-09
 
 ### Added
-- **Vestaboard Night hours:** overnight mode (mutually exclusive with Quiet hours) with a custom top two lines and a bottom status from UniFi doors/windows — **BUILDING SECURE** when closed, or **DOOR OPEN** / **WINDOW OPEN** / **DOORS OPEN** with red flaps when open. Only shown when UniFi is on and contacts exist; disclaimer that it cannot guarantee building security.
+- **Vestaboard Night hours:** overnight mode (mutually exclusive with Quiet hours) with a custom top two lines and a bottom status from UniFi doors/windows — **HOUSE SECURE** when closed, or **DOOR OPEN** / **WIN OPEN** / **DOORS OPEN** with red flaps when open. Only shown when UniFi is on and contacts exist; disclaimer that it cannot guarantee building security.
 
 ## [4.0.232] - 2026-11-09
 
