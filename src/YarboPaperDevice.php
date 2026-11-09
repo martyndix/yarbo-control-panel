@@ -16,10 +16,10 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.79';
+    public const FIRMWARE_VERSION = '0.1.80';
     public const MENU_LABEL_MAX = 20;
-    public const FIRMWARE_VERSION_COLOR = '0.2.26-colour';
-    public const OTA_ONLINE_MONO_S = 90;
+    public const FIRMWARE_VERSION_COLOR = '0.2.27-colour';
+    public const OTA_ONLINE_MONO_S = 120;
     public const OTA_ONLINE_COLOR_S = 180;
     public const OTA_PENDING_TTL_S = 900;
     public const OTA_MIN_BATTERY_PCT = 50;
@@ -1189,11 +1189,16 @@ final class YarboPaperDevice
             $ly
         ) + [
             'ota_pending' => $this->otaPendingActive($forDevice),
-            'remote_url' => (new YarboPaperRemote($this->projectRoot))->tabletOrigin(),
         ] + $this->logoPublicView()
             + $this->prefsCompact($forDevice)
             + $this->vestaboardCompact($vbObj, $vb, $parsed, $online)
             + $this->clockCompact($vbObj);
+        // Only send remote_url when set — an empty string used to wipe the
+        // tablet's stored Funnel origin and break travel Wi-Fi (no R / offline).
+        $remoteOrigin = (new YarboPaperRemote($this->projectRoot))->tabletOrigin();
+        if ($remoteOrigin !== '') {
+            $out['remote_url'] = $remoteOrigin;
+        }
         $out['menu_visible'] = YarboHub::menuVisibleForModules(
             is_array($out['menu_visible'] ?? null) ? $out['menu_visible'] : [],
             [

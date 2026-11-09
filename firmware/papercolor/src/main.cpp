@@ -1270,10 +1270,11 @@ bool httpGetStatus()
         unlockPage = unlock;
         saveConfig();
     }
+    // Only adopt a non-empty Funnel URL — empty compact must not wipe remurl.
     if (!doc["remote_url"].isNull()) {
         String ru = doc["remote_url"] | "";
         paperNetNormalize(ru);
-        if (ru != remoteUrl) {
+        if (ru.length() && ru != remoteUrl) {
             remoteUrl = ru;
             saveConfig();
         }

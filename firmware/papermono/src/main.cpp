@@ -4226,10 +4226,13 @@ void applyCompactExtras(JsonDocument &doc)
     bool prevBoard = vestaboardOn;
     bool prevKnown = vestaboardKnown;
     applyCompanionFields(doc, false);
+    // Only adopt a non-empty Funnel URL. An empty remote_url from compact
+    // (remote off / origin not ready yet) must not wipe a stored remurl —
+    // that made travel Wi-Fi hang on the LAN IP with no R and no polls.
     if (!doc["remote_url"].isNull()) {
         String ru = doc["remote_url"] | "";
         paperNetNormalize(ru);
-        if (ru != remoteUrl) {
+        if (ru.length() && ru != remoteUrl) {
             remoteUrl = ru;
             saveConfig();
         }

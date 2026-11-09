@@ -58,6 +58,14 @@ if (($dash['paper_remote']['origin'] ?? '') !== 'https://panel.example.ts.net') 
     exit(1);
 }
 
+$phpDevice = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
+if (!str_contains($phpDevice, "if (\$remoteOrigin !== '')")
+    || !str_contains($phpDevice, "\$out['remote_url'] = \$remoteOrigin")
+    || !str_contains($phpDevice, 'Only send remote_url when set')) {
+    fwrite(STDERR, "compact must only send remote_url when the Funnel origin is set\n");
+    exit(1);
+}
+
 $allow = $remote->allowRemoteRequest(
     'GET',
     '/api/device.php',
@@ -162,13 +170,29 @@ foreach ([
     'guestSsid.length() && WiFi.SSID() == guestSsid',
     'PAPER_ISRG_ROOT_X1',
     'drawString("R"',
-    '#define PAPERMONO_FW_VERSION "0.1.79"',
+    'if (ru.length() && ru != remoteUrl)',
+    'Do not clear usingRemote here',
+    '#define PAPERMONO_FW_VERSION "0.1.80"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {
         fwrite(STDERR, "papermono missing: {$needle}\n");
         exit(1);
     }
+}
+// Off-home SSID must skip LAN even when remurl is empty (otherwise Funnel never runs).
+if (!preg_match('/inline bool paperNetLanReachable\(\)\s*\{(.*?)^\}/ms', $net, $lanMatch)) {
+    fwrite(STDERR, "papermono paperNetLanReachable missing\n");
+    exit(1);
+}
+$lanFn = $lanMatch[1];
+if (str_contains($lanFn, '!remoteUrl.length()') || str_contains($lanFn, 'remoteUrl == panelUrl')) {
+    fwrite(STDERR, "papermono paperNetLanReachable must not require remurl before SSID checks\n");
+    exit(1);
+}
+if (!str_contains($lanFn, 'WiFi.SSID() != wifiSsid')) {
+    fwrite(STDERR, "papermono paperNetLanReachable must skip LAN off home SSID\n");
+    exit(1);
 }
 foreach ([
     'String remoteUrl;',
@@ -177,7 +201,9 @@ foreach ([
     'paperNetGet',
     'paperNetLanReachable',
     'WiFi.SSID() != wifiSsid',
-    '#define PAPERMONO_FW_VERSION "0.2.26-colour"',
+    'if (ru.length() && ru != remoteUrl)',
+    'Do not clear usingRemote here',
+    '#define PAPERMONO_FW_VERSION "0.2.27-colour"',
     'void finishEpdFrame()',
     'M5.Display.startWrite();',
 ] as $needle) {
@@ -186,6 +212,20 @@ foreach ([
         fwrite(STDERR, "papercolor missing: {$needle}\n");
         exit(1);
     }
+}
+$cnet = (string) file_get_contents(__DIR__ . '/../firmware/papercolor/src/paper_net.h');
+if (!preg_match('/inline bool paperNetLanReachable\(\)\s*\{(.*?)^\}/ms', $cnet, $clanMatch)) {
+    fwrite(STDERR, "papercolor paperNetLanReachable missing\n");
+    exit(1);
+}
+$clanFn = $clanMatch[1];
+if (str_contains($clanFn, '!remoteUrl.length()') || str_contains($clanFn, 'remoteUrl == panelUrl')) {
+    fwrite(STDERR, "papercolor paperNetLanReachable must not require remurl before SSID checks\n");
+    exit(1);
+}
+if (!str_contains($clanFn, 'WiFi.SSID() != wifiSsid')) {
+    fwrite(STDERR, "papercolor paperNetLanReachable must skip LAN off home SSID\n");
+    exit(1);
 }
 if (!str_contains($html, 'id="papermono-remote-enabled"')) {
     fwrite(STDERR, "settings remote toggle missing\n");
