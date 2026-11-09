@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.240] - 2026-11-09
+
+### Fixed
+- **PaperMono Lymow zones:** zones no longer arrive pre-selected. **START** stays inactive (and ignores taps) until at least one zone is chosen; **RESUME** is unchanged. Firmware **0.1.82**.
+
 ## [4.0.239] - 2026-11-09
 
 ### Fixed
