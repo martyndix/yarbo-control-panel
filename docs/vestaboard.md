@@ -94,6 +94,17 @@ At the start of the window the panel writes your custom 3×15 message once (tap 
 
 This is separate from Quiet Hours in the Vestaboard **app**. The app setting can still drop **Cloud** writes; panel Quiet Hours also covers Local API and actually stops the watcher.
 
+**Quiet hours** and **Night hours** cannot both be on — only one overnight board owner.
+
+## Night hours
+
+In **Settings → Vestaboard Note**, enable **Night hours** when the UniFi module is on and at least one Access door controller or door/window contact is present. Edit the **top two rows** of a custom message; the **bottom row** is filled automatically from UniFi:
+
+- **BUILDING SECURE** when every watched door/window contact is closed
+- **DOOR OPEN**, **WINDOW OPEN**, or **DOORS OPEN** (with red colour flaps) when something is open
+
+Night hours only uses UniFi Access doors and door/window sensors known to this panel. It cannot see any other sensors and **cannot guarantee the security of the building**. If UniFi is off or no contacts exist, Night hours is hidden and cannot be enabled.
+
 ## Messages from the Vestaboard app
 
 The watcher **GETs** the Note (same Local key or Cloud Read token) about every 15 seconds and shows that grid on the dashboard card.

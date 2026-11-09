@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.233] - 2026-11-09
+
+### Added
+- **Vestaboard Night hours:** overnight mode (mutually exclusive with Quiet hours) with a custom top two lines and a bottom status from UniFi doors/windows — **BUILDING SECURE** when closed, or **DOOR OPEN** / **WINDOW OPEN** / **DOORS OPEN** with red flaps when open. Only shown when UniFi is on and contacts exist; disclaimer that it cannot guarantee building security.
+
 ## [4.0.232] - 2026-11-09
 
 ### Fixed

@@ -1205,7 +1205,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
                         <section class="settings-section" id="settings-vestaboard-section" data-settings-pane="vestaboard">
                             <h3 class="settings-subtitle">Vestaboard Note <span class="settings-beta-badge">Optional</span></h3>
-                            <p class="hint">Show live status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The Note updates in the background while the panel (or MQTT agent) is running — the browser does not need to stay open. Writes happen when the message changes (at most every 15 seconds). A message from the Vestaboard app pauses live status for one hour (or until Quiet hours end overnight). Optional Quiet hours pause those writes overnight. See <code>docs/vestaboard.md</code>.</p>
+                            <p class="hint">Show live status on a <a href="https://docs.vestaboard.com/docs/read-write-api/introduction/" target="_blank" rel="noopener">Vestaboard Note</a> (3×15). Choose Local API on your LAN or Vestaboard’s Cloud API. Credentials stay hidden until enabled. When enabled, a matching 3×15 section appears on the main dashboard. The Note updates in the background while the panel (or MQTT agent) is running — the browser does not need to stay open. Writes happen when the message changes (at most every 15 seconds). A message from the Vestaboard app pauses live status for one hour (or until Quiet / Night hours end overnight). Optional <strong>Quiet hours</strong> hold a static overnight message; optional <strong>Night hours</strong> watch UniFi doors/windows (not both at once). See <code>docs/vestaboard.md</code>.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-vestaboard-enabled" name="vestaboard_enabled">
                                 <span>Enable Vestaboard Note</span>
@@ -1257,6 +1257,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <option value="rain">Sample: rain</option>
                                         <option value="error">Sample: error</option>
                                         <option value="quiet">Quiet hours message</option>
+                                        <option value="night-secure">Night hours: building secure</option>
+                                        <option value="night-open">Night hours: door open</option>
                                     </select>
                                 </label>
                                 <div class="vestaboard-preview" id="settings-vestaboard-preview" aria-label="Vestaboard Note 3 by 15 preview"></div>
@@ -1265,7 +1267,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <input type="checkbox" id="settings-vestaboard-quiet" name="vestaboard_quiet_hours">
                                     <span>Quiet hours</span>
                                 </label>
-                                <p class="hint" id="settings-vestaboard-quiet-hint">Stops live status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open. Times use your local timezone (not UTC). A custom message from the Vestaboard app during this window stays until quiet hours end (Resume previous status on the dashboard takes the panel back). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.</p>
+                                <p class="hint" id="settings-vestaboard-quiet-hint">Stops live status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open. Times use your local timezone (not UTC). A custom message from the Vestaboard app during this window stays until quiet hours end (Resume previous status on the dashboard takes the panel back). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes. Cannot be on at the same time as Night hours.</p>
                                 <div id="settings-vestaboard-quiet-fields" class="hidden">
                                     <div class="vestaboard-quiet-times">
                                         <label class="settings-field">
@@ -1289,6 +1291,37 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--violet" data-quiet-code="68" title="Violet"></button>
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--white" data-quiet-code="69" title="White"></button>
                                     </div>
+                                </div>
+                                <label class="settings-field settings-checkbox" id="settings-vestaboard-night-wrap">
+                                    <input type="checkbox" id="settings-vestaboard-night" name="vestaboard_night_hours">
+                                    <span>Night hours</span>
+                                </label>
+                                <p class="hint" id="settings-vestaboard-night-hint">Overnight building watch from UniFi doors and windows. Your custom message fills the top two rows; the bottom row shows <strong>BUILDING SECURE</strong> when every watched contact is closed, or <strong>DOOR OPEN</strong> / <strong>WINDOW OPEN</strong> / <strong>DOORS OPEN</strong> with red tiles when something is open. Only uses UniFi Access door controllers and door/window sensors that are present in this panel — it cannot see any other sensors and <strong>cannot guarantee the security of the building</strong>. Hidden when UniFi is off or no door/window contacts are found. Cannot be on at the same time as Quiet hours.</p>
+                                <p class="hint hidden" id="settings-vestaboard-night-unavailable">Night hours need the UniFi module on, with at least one Access door controller or door/window contact sensor.</p>
+                                <div id="settings-vestaboard-night-fields" class="hidden">
+                                    <div class="vestaboard-quiet-times">
+                                        <label class="settings-field">
+                                            <span class="label">Start</span>
+                                            <input type="time" id="settings-vestaboard-night-start" name="vestaboard_night_start" value="22:00">
+                                        </label>
+                                        <label class="settings-field">
+                                            <span class="label">End</span>
+                                            <input type="time" id="settings-vestaboard-night-end" name="vestaboard_night_end" value="07:00">
+                                        </label>
+                                    </div>
+                                    <p class="hint">Edit the top two rows only. The bottom row is filled automatically from UniFi door/window state. Overnight wrap is allowed (for example 22:00–07:00).</p>
+                                    <div class="vestaboard-preview vestaboard-preview--edit" id="settings-vestaboard-night-board" tabindex="0" role="grid" aria-label="Night hours top two lines"></div>
+                                    <div class="vestaboard-palette" id="settings-vestaboard-night-palette" role="toolbar" aria-label="Night hours colours">
+                                        <button type="button" class="vestaboard-palette-btn" data-night-code="0">Blank</button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--red" data-night-code="63" title="Red"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--orange" data-night-code="64" title="Orange"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--yellow" data-night-code="65" title="Yellow"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--green" data-night-code="66" title="Green"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--blue" data-night-code="67" title="Blue"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--violet" data-night-code="68" title="Violet"></button>
+                                        <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--white" data-night-code="69" title="White"></button>
+                                    </div>
+                                    <p class="hint" id="settings-vestaboard-night-watch-count"></p>
                                 </div>
                                 <p id="settings-vestaboard-health" class="hint hidden" role="status"></p>
                                 <p id="settings-vestaboard-result" class="settings-cloud-result hidden" role="status"></p>

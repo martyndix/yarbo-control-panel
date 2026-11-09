@@ -2934,6 +2934,11 @@ html[data-theme="light"] .plan-activity {
     font-size: 0.95rem;
 }
 
+.vestaboard-cell--locked {
+    opacity: 0.85;
+    cursor: default;
+}
+
 .vestaboard-cell--red {
     background: #c43c3c;
     color: transparent;
