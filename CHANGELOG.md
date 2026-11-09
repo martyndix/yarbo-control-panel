@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.234] - 2026-11-09
+
+### Fixed
+- **Vestaboard Night hours — live open/close:** each night-hours tick re-reads UniFi Access door position and Protect contacts, and rewrites the Note as soon as a door or window opens or closes (not only at the start of the window).
+
 ## [4.0.233] - 2026-11-09
 
 ### Added
