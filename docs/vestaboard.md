@@ -98,14 +98,16 @@ This is separate from Quiet Hours in the Vestaboard **app**. The app setting can
 
 ## Night hours
 
-In **Settings → Vestaboard Note**, enable **Night hours** when the UniFi module is on and at least one Access door controller or door/window contact is present. Edit the **top two rows** of a custom message; the **bottom row** is filled automatically from UniFi:
+In **Settings → Vestaboard Note**, enable **Night hours** when the UniFi module is on and at least one Access door controller or door/window contact is present. Edit the **top two rows** of a custom message for the secure state:
 
-- **HOUSE SECURE** (with green colour flaps) when every watched door/window contact is closed
-- **DOOR OPEN**, **WIN OPEN**, or **DOORS OPEN** (with red colour flaps) when something is open — phrases stay short so colour pads fit
+- **Closed:** your custom top two rows + **HOUSE SECURE** on the bottom row (green colour flaps)
+- **Open:** the Note uses **all three rows** with red colour flaps — a short header (**DOOR OPEN**, **WIN OPEN**, **DOORS OPEN**, **OPEN**, or **N OPEN**) plus truncated UniFi contact name(s). Two opens get two name rows; three or more show the first name and **+N MORE**
+
+Names are uppercased to Vestaboard characters and shortened to 15 flaps, preferring whole words (for example `Garage Side Entrance Door` → `GARAGE SIDE`). Use **Simulate open** under the night editor (or the Preview dropdown **Night hours: something open**) to see the alert with your watched contacts without writing the Note.
 
 Night hours only uses UniFi Access doors and door/window sensors known to this panel. It cannot see any other sensors and **cannot guarantee the security of the building**. If UniFi is off or no contacts exist, Night hours is hidden and cannot be enabled.
 
-While the window is active the watcher re-reads those contacts every tick (~8s) and updates the bottom row as soon as something opens or closes.
+While the window is active the watcher re-reads those contacts every tick (~8s) and rewrites the Note as soon as something opens, closes, or another contact joins the open set.
 
 ## Messages from the Vestaboard app
 

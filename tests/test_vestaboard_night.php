@@ -107,15 +107,21 @@ assert_true(($secure['verb'] ?? '') === 'NIGHT', 'secure verb');
 assert_true(empty($secure['open']), 'secure open flag');
 
 $doorOpen = $vb->nightLayout(true, 'door');
-assert_true(str_contains((string) ($doorOpen['lines'][2] ?? ''), 'DOOR OPEN'), 'door open phrase: ' . ($doorOpen['lines'][2] ?? ''));
-assert_true(in_array(YarboVestaboard::COLOR_RED, $doorOpen['codes'][2], true), 'door open has red pads');
+assert_true(str_contains((string) ($doorOpen['lines'][0] ?? ''), 'DOOR OPEN'), 'door open header: ' . ($doorOpen['lines'][0] ?? ''));
+assert_true(str_contains((string) ($doorOpen['lines'][1] ?? ''), 'GARAGE'), 'door open names the contact: ' . ($doorOpen['lines'][1] ?? ''));
+assert_true(in_array(YarboVestaboard::COLOR_RED, $doorOpen['codes'][0], true), 'door open header has red pads');
+assert_true(in_array(YarboVestaboard::COLOR_RED, $doorOpen['codes'][2], true), 'door open filler row is red');
 $winOpen = $vb->nightLayout(true, 'window');
-assert_true(str_contains((string) ($winOpen['lines'][2] ?? ''), 'WIN OPEN'), 'window open phrase');
-assert_true(in_array(YarboVestaboard::COLOR_RED, $winOpen['codes'][2], true), 'window open has red pads');
+assert_true(str_contains((string) ($winOpen['lines'][0] ?? ''), 'WIN OPEN'), 'window open header');
+assert_true(str_contains((string) ($winOpen['lines'][1] ?? ''), 'KITCHEN'), 'window open names the contact');
+assert_true(in_array(YarboVestaboard::COLOR_RED, $winOpen['codes'][0], true), 'window open has red pads');
 $bothOpen = $vb->nightLayout(true, 'both');
-assert_true(str_contains((string) ($bothOpen['lines'][2] ?? ''), 'DOORS OPEN'), 'both open phrase');
-assert_true(in_array(YarboVestaboard::COLOR_RED, $bothOpen['codes'][2], true), 'both open has red pads');
-foreach (['DOOR OPEN', 'WIN OPEN', 'DOORS OPEN', 'HOUSE SECURE'] as $phrase) {
+assert_true(str_contains((string) ($bothOpen['lines'][0] ?? ''), 'OPEN'), 'both open header');
+assert_true(count($bothOpen['open_names'] ?? []) >= 2, 'both open lists two names');
+assert_true(in_array(YarboVestaboard::COLOR_RED, $bothOpen['codes'][0], true), 'both open has red pads');
+assert_true($vb->fitNightName('Garage Side Entrance Door', 15) === 'GARAGE SIDE', 'fitNightName keeps whole words');
+assert_true(strlen($vb->fitNightName('SUPERCALIFRAGILISTICEXPIALIDOCIOUS', 15)) === 15, 'fitNightName hard-truncates long tokens');
+foreach (['DOOR OPEN', 'WIN OPEN', 'DOORS OPEN', 'HOUSE SECURE', '3 OPEN', '+2 MORE'] as $phrase) {
     assert_true(strlen($phrase) <= 13, 'status phrase leaves room for colour pads: ' . $phrase);
 }
 
@@ -124,7 +130,8 @@ $inv['sensors'][0]['open'] = true;
 file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
 $live = $vb->nightLayout();
 assert_true(!empty($live['open']), 'live layout sees open window');
-assert_true(str_contains((string) ($live['lines'][2] ?? ''), 'WIN OPEN'), 'live window open: ' . ($live['lines'][2] ?? ''));
+assert_true(str_contains((string) ($live['lines'][0] ?? ''), 'WIN OPEN'), 'live window open header: ' . ($live['lines'][0] ?? ''));
+assert_true(str_contains((string) ($live['lines'][1] ?? ''), 'KITCHEN'), 'live window open name: ' . ($live['lines'][1] ?? ''));
 
 $view = $vb->publicView();
 assert_true(!empty($view['night_hours_available']), 'publicView night available');
@@ -133,6 +140,10 @@ assert_true(($view['night_watch']['count'] ?? 0) >= 2, 'publicView watch count')
 $preview = $vb->preview('night-secure');
 assert_true(($preview['ok'] ?? false) === true, 'night-secure preview');
 assert_true(str_contains((string) ($preview['lines'][2] ?? ''), 'HOUSE SECURE'), 'preview secure line');
+$previewOpen = $vb->preview('night-open');
+assert_true(($previewOpen['ok'] ?? false) === true, 'night-open preview');
+assert_true(!empty($previewOpen['open']), 'night-open preview is open');
+assert_true(in_array(YarboVestaboard::COLOR_RED, $previewOpen['codes'][0] ?? [], true), 'night-open preview red');
 
 // UniFi off → night unavailable / cannot enable.
 file_put_contents($root . '/data/hub-config.json', json_encode([
@@ -170,29 +181,59 @@ file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_U
 $layoutAfter = $vb->nightLayout();
 assert_true(!empty($layoutAfter['open']), 'inventory open door is seen by nightLayout');
 assert_true(($layoutAfter['open_kind'] ?? '') === 'door', 'open kind is door: ' . ($layoutAfter['open_kind'] ?? ''));
-assert_true(str_contains((string) ($layoutAfter['lines'][2] ?? ''), 'DOOR OPEN'), 'open door flips bottom row');
+assert_true(str_contains((string) ($layoutAfter['lines'][0] ?? ''), 'DOOR OPEN'), 'open door uses three-row alert');
+assert_true(str_contains((string) ($layoutAfter['lines'][1] ?? ''), 'GARAGE'), 'open door names garage');
+assert_true(($layoutAfter['open_key'] ?? '') !== '', 'open key set for change tracking');
 assert_true(
     hash('sha256', json_encode($layoutAfter['codes'])) !== $secureHash,
     'open layout hash differs from secure'
 );
+
+// Three opens → header count + first name + +N MORE.
+$inv['doors'][0]['name'] = 'Garage Side Entrance Door';
+$inv['sensors'][0]['open'] = true;
+$inv['sensors'][] = [
+    'id' => 'unifi:sensor:office-window',
+    'native_id' => 'usp-office',
+    'name' => 'Office Window Sensor',
+    'kind' => 'sensor',
+    'source' => 'unifi',
+    'product' => 'USP Sensor',
+    'has_open' => true,
+    'open' => true,
+];
+file_put_contents($root . '/data/home.json', json_encode([
+    'contact_kind' => [
+        'unifi:sensor:kitchen-window' => 'window',
+        'unifi:sensor:office-window' => 'window',
+    ],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+$multi = $vb->nightLayout();
+assert_true(($multi['open'] ?? false) === true, 'multi open');
+assert_true(str_contains((string) ($multi['lines'][0] ?? ''), '3 OPEN'), 'multi header: ' . ($multi['lines'][0] ?? ''));
+assert_true(str_contains((string) ($multi['lines'][1] ?? ''), 'GARAGE'), 'multi first name');
+assert_true(str_contains((string) ($multi['lines'][2] ?? ''), '+2 MORE'), 'multi remainder: ' . ($multi['lines'][2] ?? ''));
+
 $phpSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboVestaboard.php');
 assert_true(str_contains($phpSrc, 'refreshNightContacts'), 'tick refreshes UniFi during night hours');
 assert_true(str_contains($phpSrc, 'openChanged'), 'tick forces write when open state changes');
-assert_true(str_contains($phpSrc, 'night_last_kind'), 'tick tracks open kind across ticks');
+assert_true(str_contains($phpSrc, 'night_last_open_key'), 'tick tracks which contacts are open');
+assert_true(str_contains($phpSrc, 'nightOpenAlertLayout'), 'open alert uses full board');
 
 $change = (string) file_get_contents(dirname(__DIR__) . '/CHANGELOG.md');
 $docs = (string) file_get_contents(dirname(__DIR__) . '/docs/vestaboard.md');
 $html = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
-assert_true(str_contains($change, '## [4.0.233]'), 'changelog 4.0.233');
-assert_true(str_contains($change, '## [4.0.234]'), 'changelog 4.0.234');
-assert_true(str_contains($change, '## [4.0.235]'), 'changelog 4.0.235');
-assert_true(str_contains($docs, 'HOUSE SECURE'), 'docs HOUSE SECURE');
+assert_true(str_contains($change, '## [4.0.236]'), 'changelog 4.0.236');
+assert_true(str_contains($docs, 'Simulate open'), 'docs Simulate open');
 assert_true(str_contains($html, 'settings-vestaboard-night'), 'settings night checkbox');
+assert_true(str_contains($html, 'settings-vestaboard-night-simulate'), 'settings simulate button');
 assert_true(str_contains($html, 'HOUSE SECURE'), 'settings HOUSE SECURE');
 assert_true(str_contains($html, 'cannot guarantee the security'), 'disclaimer in settings');
 assert_true(str_contains($js, 'vestaboard_night_hours'), 'JS saves night hours');
 assert_true(str_contains($js, 'function applyVestaboardNightHours'), 'JS night hours UI');
+assert_true(str_contains($js, 'function toggleNightOpenSimulate'), 'JS simulate open');
 assert_true(str_contains($js, 'HOUSE SECURE'), 'JS night preview HOUSE SECURE');
 
 fwrite(STDOUT, "test_vestaboard_night.php ok\n");

@@ -1257,8 +1257,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <option value="rain">Sample: rain</option>
                                         <option value="error">Sample: error</option>
                                         <option value="quiet">Quiet hours message</option>
-                                        <option value="night-secure">Night hours: building secure</option>
-                                        <option value="night-open">Night hours: door open</option>
+                                        <option value="night-secure">Night hours: house secure</option>
+                                        <option value="night-open">Night hours: something open</option>
                                     </select>
                                 </label>
                                 <div class="vestaboard-preview" id="settings-vestaboard-preview" aria-label="Vestaboard Note 3 by 15 preview"></div>
@@ -1296,7 +1296,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <input type="checkbox" id="settings-vestaboard-night" name="vestaboard_night_hours">
                                     <span>Night hours</span>
                                 </label>
-                                <p class="hint" id="settings-vestaboard-night-hint">Overnight house watch from UniFi doors and windows. Your custom message fills the top two rows; the bottom row shows <strong>HOUSE SECURE</strong> with green tiles when every watched contact is closed, or <strong>DOOR OPEN</strong> / <strong>WIN OPEN</strong> / <strong>DOORS OPEN</strong> with red tiles when something is open. Only uses UniFi Access door controllers and door/window sensors that are present in this panel — it cannot see any other sensors and <strong>cannot guarantee the security of the building</strong>. Hidden when UniFi is off or no door/window contacts are found. Cannot be on at the same time as Quiet hours.</p>
+                                <p class="hint" id="settings-vestaboard-night-hint">Overnight house watch from UniFi doors and windows. When everything is closed, your custom message fills the top two rows and the bottom row shows <strong>HOUSE SECURE</strong> with green tiles. If something opens, the Note uses all three rows with red tiles — a short alert plus the truncated contact name(s). Only uses UniFi Access door controllers and door/window sensors that are present in this panel — it cannot see any other sensors and <strong>cannot guarantee the security of the building</strong>. Hidden when UniFi is off or no door/window contacts are found. Cannot be on at the same time as Quiet hours.</p>
                                 <p class="hint hidden" id="settings-vestaboard-night-unavailable">Night hours need the UniFi module on, with at least one Access door controller or door/window contact sensor.</p>
                                 <div id="settings-vestaboard-night-fields" class="hidden">
                                     <div class="vestaboard-quiet-times">
@@ -1309,7 +1309,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                             <input type="time" id="settings-vestaboard-night-end" name="vestaboard_night_end" value="07:00">
                                         </label>
                                     </div>
-                                    <p class="hint">Edit the top two rows only. The bottom row is filled automatically from UniFi door/window state. Overnight wrap is allowed (for example 22:00–07:00).</p>
+                                    <p class="hint" id="settings-vestaboard-night-edit-hint">Edit the top two rows only. The bottom row is <strong>HOUSE SECURE</strong> while closed. Overnight wrap is allowed (for example 22:00–07:00). Use <strong>Simulate open</strong> to preview the three-row open alert with your watched contact names.</p>
                                     <div class="vestaboard-preview vestaboard-preview--edit" id="settings-vestaboard-night-board" tabindex="0" role="grid" aria-label="Night hours top two lines"></div>
                                     <div class="vestaboard-palette" id="settings-vestaboard-night-palette" role="toolbar" aria-label="Night hours colours">
                                         <button type="button" class="vestaboard-palette-btn" data-night-code="0">Blank</button>
@@ -1320,6 +1320,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--blue" data-night-code="67" title="Blue"></button>
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--violet" data-night-code="68" title="Violet"></button>
                                         <button type="button" class="vestaboard-palette-btn vestaboard-palette-btn--white" data-night-code="69" title="White"></button>
+                                    </div>
+                                    <div class="papermono-actions" style="margin-top:0.5rem">
+                                        <button type="button" class="btn btn-secondary" id="settings-vestaboard-night-simulate">Simulate open</button>
                                     </div>
                                     <p class="hint" id="settings-vestaboard-night-watch-count"></p>
                                 </div>

@@ -124,6 +124,7 @@ final class YarboVestaboard
             'night_active' => false,
             'night_last_open' => false,
             'night_last_kind' => '',
+            'night_last_open_key' => '',
             'last_live_codes' => null,
             'quiet_timezone' => '',
             'last_progress_stable_hash' => '',
@@ -180,6 +181,7 @@ final class YarboVestaboard
             'night_active' => (bool) ($decoded['night_active'] ?? false),
             'night_last_open' => (bool) ($decoded['night_last_open'] ?? false),
             'night_last_kind' => (string) ($decoded['night_last_kind'] ?? ''),
+            'night_last_open_key' => (string) ($decoded['night_last_open_key'] ?? ''),
             'last_live_codes' => self::normalizeLiveCodes($decoded['last_live_codes'] ?? null),
             'quiet_timezone' => self::normalizeTimezone((string) ($decoded['quiet_timezone'] ?? '')),
             'last_progress_stable_hash' => (string) ($decoded['last_progress_stable_hash'] ?? ''),
@@ -325,6 +327,9 @@ final class YarboVestaboard
             'night_last_kind' => array_key_exists('night_last_kind', $input)
                 ? (string) $input['night_last_kind']
                 : (string) ($current['night_last_kind'] ?? ''),
+            'night_last_open_key' => array_key_exists('night_last_open_key', $input)
+                ? (string) $input['night_last_open_key']
+                : (string) ($current['night_last_open_key'] ?? ''),
             'last_live_codes' => array_key_exists('last_live_codes', $input)
                 ? (self::normalizeLiveCodes($input['last_live_codes']) ?? ($current['last_live_codes'] ?? null))
                 : ($current['last_live_codes'] ?? null),
@@ -575,7 +580,22 @@ final class YarboVestaboard
                 return ['ok' => true, 'online' => false] + $layout;
             }
             if ($sample === 'night-open' || $sample === 'night_open') {
+                $layout = $this->nightLayout(true);
+
+                return ['ok' => true, 'online' => false] + $layout;
+            }
+            if ($sample === 'night-open-door' || $sample === 'night_open_door') {
                 $layout = $this->nightLayout(true, 'door');
+
+                return ['ok' => true, 'online' => false] + $layout;
+            }
+            if ($sample === 'night-open-window' || $sample === 'night_open_window') {
+                $layout = $this->nightLayout(true, 'window');
+
+                return ['ok' => true, 'online' => false] + $layout;
+            }
+            if ($sample === 'night-open-multi' || $sample === 'night_open_multi') {
+                $layout = $this->nightLayout(true, 'both');
 
                 return ['ok' => true, 'online' => false] + $layout;
             }
@@ -655,8 +675,10 @@ final class YarboVestaboard
             $layout = $this->nightLayout();
             $openNow = !empty($layout['open']);
             $kindNow = (string) ($layout['open_kind'] ?? '');
+            $openKey = (string) ($layout['open_key'] ?? '');
             $openChanged = (bool) ($config['night_last_open'] ?? false) !== $openNow
-                || ((string) ($config['night_last_kind'] ?? '')) !== $kindNow;
+                || ((string) ($config['night_last_kind'] ?? '')) !== $kindNow
+                || ((string) ($config['night_last_open_key'] ?? '')) !== $openKey;
             // Entering night, or a door/window edge: write immediately (bypass 15s gap).
             // Unchanged status relies on hash skip so flaps stay still.
             $force = !$wasNight || $openChanged;
@@ -666,6 +688,7 @@ final class YarboVestaboard
                 'quiet_active' => false,
                 'night_last_open' => $openNow,
                 'night_last_kind' => $kindNow,
+                'night_last_open_key' => $openKey,
             ]);
 
             return $result;
@@ -2596,7 +2619,8 @@ final class YarboVestaboard
      *   open: int,
      *   doors_open: int,
      *   windows_open: int,
-     *   open_kind: string
+     *   open_kind: string,
+     *   open_names: list<string>
      * }
      */
     public function nightWatchSummary(): array
@@ -2609,6 +2633,7 @@ final class YarboVestaboard
             'doors_open' => 0,
             'windows_open' => 0,
             'open_kind' => '',
+            'open_names' => [],
         ];
         try {
             $hub = new YarboHub($this->projectRoot);
@@ -2622,16 +2647,13 @@ final class YarboVestaboard
         if ($rows === []) {
             return $empty + ['unifi' => true];
         }
-        $home = new YarboHome($this->projectRoot);
-        $store = $home->load();
+        $opens = $this->nightOpenContacts();
         $doorsOpen = 0;
         $windowsOpen = 0;
-        foreach ($rows as $row) {
-            if (!YarboHome::contactIsOpen($row)) {
-                continue;
-            }
-            $role = $home->contactRoleFor($row, $store);
-            if ($role === YarboHome::CONTACT_WINDOW) {
+        $names = [];
+        foreach ($opens as $open) {
+            $names[] = (string) ($open['label'] ?? '');
+            if (($open['role'] ?? '') === YarboHome::CONTACT_WINDOW) {
                 $windowsOpen++;
             } else {
                 $doorsOpen++;
@@ -2654,7 +2676,43 @@ final class YarboVestaboard
             'doors_open' => $doorsOpen,
             'windows_open' => $windowsOpen,
             'open_kind' => $openKind,
+            'open_names' => $names,
         ];
+    }
+
+    /**
+     * Currently open night-hours contacts with Vestaboard-safe labels.
+     *
+     * @return list<array{id: string, label: string, role: string}>
+     */
+    public function nightOpenContacts(): array
+    {
+        $out = [];
+        try {
+            $home = new YarboHome($this->projectRoot);
+            $store = $home->load();
+        } catch (\Throwable) {
+            return [];
+        }
+        foreach ($this->nightWatchRows() as $row) {
+            if (!is_array($row) || !YarboHome::contactIsOpen($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $role = $home->contactRoleFor($row, $store);
+            $out[] = [
+                'id' => $id,
+                'label' => $this->nightContactLabel($row, $role),
+                'role' => $role === YarboHome::CONTACT_WINDOW
+                    ? YarboHome::CONTACT_WINDOW
+                    : YarboHome::CONTACT_DOOR,
+            ];
+        }
+
+        return $out;
     }
 
     /**
@@ -2720,46 +2778,313 @@ final class YarboVestaboard
     }
 
     /**
-     * Custom top two lines + bottom status from UniFi door/window contacts.
+     * Secure: custom top two lines + HOUSE SECURE.
+     * Open: full 3×15 alert with red pads and truncated contact names.
      *
-     * @return array{lines: list<string>, codes: list<list<int>>, verb: string, open: bool}
+     * @return array{
+     *   lines: list<string>,
+     *   codes: list<list<int>>,
+     *   verb: string,
+     *   open: bool,
+     *   open_kind: string,
+     *   open_key: string,
+     *   open_names: list<string>
+     * }
      */
     public function nightLayout(?bool $forceOpen = null, ?string $forceKind = null): array
     {
+        $opens = $this->nightOpenContacts();
+        $open = $forceOpen ?? ($opens !== []);
+        if ($open) {
+            if ($opens === []) {
+                $opens = $this->nightSimulateOpenContacts($forceKind);
+            } elseif ($forceKind !== null && $forceKind !== '') {
+                // Preview samples can force a kind even when contacts are already open.
+                $filtered = array_values(array_filter(
+                    $opens,
+                    static function (array $row) use ($forceKind): bool {
+                        $role = (string) ($row['role'] ?? '');
+                        if ($forceKind === 'window') {
+                            return $role === YarboHome::CONTACT_WINDOW;
+                        }
+                        if ($forceKind === 'door') {
+                            return $role !== YarboHome::CONTACT_WINDOW;
+                        }
+
+                        return true;
+                    }
+                ));
+                if ($filtered !== []) {
+                    $opens = $filtered;
+                }
+                if ($forceKind === 'both' && count($opens) < 2) {
+                    $opens = $this->nightSimulateOpenContacts('both');
+                }
+            }
+
+            return $this->nightOpenAlertLayout($opens);
+        }
+
         $config = $this->load();
         $top = self::normalizeQuietCodes($config['night_codes'] ?? self::defaultNightCodesStatic());
-        $summary = $this->nightWatchSummary();
-        $open = $forceOpen ?? (($summary['open'] ?? 0) > 0);
-        $kind = $forceKind ?? (string) ($summary['open_kind'] ?? '');
-        if ($open) {
-            // Keep phrases under 13 chars so at least one red pad fits each side.
-            $phrase = match ($kind) {
-                'window' => 'WIN OPEN',
-                'both' => 'DOORS OPEN',
-                default => 'DOOR OPEN',
-            };
-            [$line3, $codes3] = $this->packCenteredStatus($phrase, self::COLOR_RED);
-            $verb = 'NIGHT_OPEN';
-        } else {
-            // HOUSE SECURE (12) leaves green pads; longer phrases fill the row with no colour.
-            [$line3, $codes3] = $this->packCenteredStatus('HOUSE SECURE', self::COLOR_GREEN);
-            $verb = 'NIGHT';
-            $kind = '';
-        }
-        $codes = [$top[0], $top[1], $codes3];
-        $lines = [
-            self::linesFromCodes([$top[0]])[0],
-            self::linesFromCodes([$top[1]])[0],
-            $line3,
-        ];
+        [$line3, $codes3] = $this->packCenteredStatus('HOUSE SECURE', self::COLOR_GREEN);
 
         return [
-            'lines' => $lines,
-            'codes' => $codes,
-            'verb' => $verb,
-            'open' => $open,
-            'open_kind' => $kind,
+            'lines' => [
+                self::linesFromCodes([$top[0]])[0],
+                self::linesFromCodes([$top[1]])[0],
+                $line3,
+            ],
+            'codes' => [$top[0], $top[1], $codes3],
+            'verb' => 'NIGHT',
+            'open' => false,
+            'open_kind' => '',
+            'open_key' => '',
+            'open_names' => [],
         ];
+    }
+
+    /**
+     * @param list<array{id?: string, label: string, role: string}> $opens
+     * @return array{
+     *   lines: list<string>,
+     *   codes: list<list<int>>,
+     *   verb: string,
+     *   open: bool,
+     *   open_kind: string,
+     *   open_key: string,
+     *   open_names: list<string>
+     * }
+     */
+    public function nightOpenAlertLayout(array $opens): array
+    {
+        $clean = [];
+        foreach ($opens as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $label = $this->fitNightName((string) ($row['label'] ?? ''), self::COLS);
+            if ($label === '') {
+                continue;
+            }
+            $role = (string) ($row['role'] ?? YarboHome::CONTACT_DOOR);
+            $clean[] = [
+                'id' => trim((string) ($row['id'] ?? $label)),
+                'label' => $label,
+                'role' => $role === YarboHome::CONTACT_WINDOW
+                    ? YarboHome::CONTACT_WINDOW
+                    : YarboHome::CONTACT_DOOR,
+            ];
+        }
+        if ($clean === []) {
+            $clean = [[
+                'id' => 'sample:door',
+                'label' => 'DOOR',
+                'role' => YarboHome::CONTACT_DOOR,
+            ]];
+        }
+
+        $doors = 0;
+        $windows = 0;
+        foreach ($clean as $row) {
+            if ($row['role'] === YarboHome::CONTACT_WINDOW) {
+                $windows++;
+            } else {
+                $doors++;
+            }
+        }
+        $n = count($clean);
+        $kind = '';
+        if ($doors > 0 && $windows > 0) {
+            $kind = 'both';
+        } elseif ($windows > 0) {
+            $kind = 'window';
+        } else {
+            $kind = 'door';
+        }
+
+        if ($n >= 3) {
+            $header = $n > 9 ? '9+ OPEN' : ($n . ' OPEN');
+        } elseif ($kind === 'both') {
+            $header = 'OPEN';
+        } elseif ($kind === 'window') {
+            $header = $n === 1 ? 'WIN OPEN' : 'WINS OPEN';
+        } else {
+            $header = $n === 1 ? 'DOOR OPEN' : 'DOORS OPEN';
+        }
+
+        [$line1, $codes1] = $this->packCenteredStatus($header, self::COLOR_RED);
+        if ($n === 1) {
+            [$line2, $codes2] = $this->packCenteredStatus($clean[0]['label'], self::COLOR_RED);
+            [$line3, $codes3] = $this->packCenteredStatus('', self::COLOR_RED);
+        } elseif ($n === 2) {
+            [$line2, $codes2] = $this->packCenteredStatus($clean[0]['label'], self::COLOR_RED);
+            [$line3, $codes3] = $this->packCenteredStatus($clean[1]['label'], self::COLOR_RED);
+        } else {
+            [$line2, $codes2] = $this->packCenteredStatus($clean[0]['label'], self::COLOR_RED);
+            $more = '+' . min(9, $n - 1) . ' MORE';
+            [$line3, $codes3] = $this->packCenteredStatus($more, self::COLOR_RED);
+        }
+
+        $ids = array_map(static fn(array $row): string => (string) $row['id'], $clean);
+        sort($ids);
+
+        return [
+            'lines' => [$line1, $line2, $line3],
+            'codes' => [$codes1, $codes2, $codes3],
+            'verb' => 'NIGHT_OPEN',
+            'open' => true,
+            'open_kind' => $kind,
+            'open_key' => implode('|', $ids),
+            'open_names' => array_map(static fn(array $row): string => (string) $row['label'], $clean),
+        ];
+    }
+
+    /**
+     * @return list<array{id: string, label: string, role: string}>
+     */
+    private function nightSimulateOpenContacts(?string $forceKind = null): array
+    {
+        $kind = $forceKind ?: 'both';
+        $picked = [];
+        try {
+            $home = new YarboHome($this->projectRoot);
+            $store = $home->load();
+        } catch (\Throwable) {
+            $home = null;
+            $store = [];
+        }
+        foreach ($this->nightWatchRows() as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $role = $home !== null
+                ? $home->contactRoleFor($row, $store)
+                : YarboHome::CONTACT_DOOR;
+            $isWindow = $role === YarboHome::CONTACT_WINDOW;
+            if ($kind === 'window' && !$isWindow) {
+                continue;
+            }
+            if ($kind === 'door' && $isWindow) {
+                continue;
+            }
+            $picked[] = [
+                'id' => $id,
+                'label' => $this->nightContactLabel($row, $role),
+                'role' => $isWindow ? YarboHome::CONTACT_WINDOW : YarboHome::CONTACT_DOOR,
+            ];
+            if ($kind !== 'both' && count($picked) >= 1) {
+                break;
+            }
+            if ($kind === 'both' && count($picked) >= 2) {
+                break;
+            }
+        }
+        if ($picked === []) {
+            if ($kind === 'window') {
+                return [[
+                    'id' => 'sample:window',
+                    'label' => 'KITCHEN WIN',
+                    'role' => YarboHome::CONTACT_WINDOW,
+                ]];
+            }
+            if ($kind === 'both') {
+                return [
+                    [
+                        'id' => 'sample:door',
+                        'label' => 'FRONT DOOR',
+                        'role' => YarboHome::CONTACT_DOOR,
+                    ],
+                    [
+                        'id' => 'sample:window',
+                        'label' => 'KITCHEN WIN',
+                        'role' => YarboHome::CONTACT_WINDOW,
+                    ],
+                ];
+            }
+
+            return [[
+                'id' => 'sample:door',
+                'label' => 'FRONT DOOR',
+                'role' => YarboHome::CONTACT_DOOR,
+            ]];
+        }
+        if ($kind === 'both' && count($picked) === 1) {
+            $haveWindow = ($picked[0]['role'] ?? '') === YarboHome::CONTACT_WINDOW;
+            $picked[] = $haveWindow
+                ? [
+                    'id' => 'sample:door',
+                    'label' => 'FRONT DOOR',
+                    'role' => YarboHome::CONTACT_DOOR,
+                ]
+                : [
+                    'id' => 'sample:window',
+                    'label' => 'KITCHEN WIN',
+                    'role' => YarboHome::CONTACT_WINDOW,
+                ];
+        }
+
+        return $picked;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function nightContactLabel(array $row, string $role): string
+    {
+        $name = strtoupper(trim((string) ($row['name'] ?? '')));
+        $name = preg_replace('/[^A-Z0-9 !@#$()\-+;:\'"%,.\/?]/', '', $name) ?? '';
+        $name = preg_replace('/\s+/', ' ', $name) ?? '';
+        $name = trim($name);
+        $name = preg_replace(
+            '/\s+(SENSOR|CONTACT|POSITION|DPS|DOOR POSITION|USP)$/',
+            '',
+            $name
+        ) ?? $name;
+        $name = trim($name);
+        if (str_starts_with($name, 'THE ')) {
+            $name = trim(substr($name, 4));
+        }
+        if ($name === '') {
+            $name = $role === YarboHome::CONTACT_WINDOW ? 'WINDOW' : 'DOOR';
+        }
+
+        return $this->fitNightName($name, self::COLS);
+    }
+
+    /**
+     * Fit a label into the Vestaboard row width, preferring whole words.
+     */
+    public function fitNightName(string $name, int $max = self::COLS): string
+    {
+        $name = strtoupper(trim($name));
+        $name = preg_replace('/[^A-Z0-9 !@#$()\-+;:\'"%,.\/?]/', '', $name) ?? '';
+        $name = preg_replace('/\s+/', ' ', $name) ?? '';
+        $name = trim($name);
+        if ($max < 1) {
+            return '';
+        }
+        if (strlen($name) <= $max) {
+            return $name;
+        }
+        $parts = preg_split('/\s+/', $name) ?: [];
+        while (count($parts) > 1) {
+            array_pop($parts);
+            $joined = implode(' ', $parts);
+            if (strlen($joined) <= $max) {
+                return $joined;
+            }
+        }
+        $one = $parts[0] ?? '';
+        if (strlen($one) <= $max) {
+            return $one;
+        }
+
+        return substr($one, 0, $max);
     }
 
     /**

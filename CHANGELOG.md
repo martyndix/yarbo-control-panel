@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.236] - 2026-11-09
+
+### Changed
+- **Vestaboard Night hours — open alert:** when a door/window opens, the Note uses all three rows with red tiles — a short header plus truncated contact name(s) (`+N MORE` when three or more). Secure state is unchanged (custom top two + **HOUSE SECURE**). Settings adds **Simulate open** to preview the alert without writing the Note.
+
 ## [4.0.235] - 2026-11-09
 
 ### Changed

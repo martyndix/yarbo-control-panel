@@ -122,6 +122,8 @@ const els = {
     settingsVestaboardNightPalette: document.getElementById('settings-vestaboard-night-palette'),
     settingsVestaboardNightUnavailable: document.getElementById('settings-vestaboard-night-unavailable'),
     settingsVestaboardNightWatchCount: document.getElementById('settings-vestaboard-night-watch-count'),
+    settingsVestaboardNightSimulate: document.getElementById('settings-vestaboard-night-simulate'),
+    settingsVestaboardNightEditHint: document.getElementById('settings-vestaboard-night-edit-hint'),
     settingsVestaboardSmart: document.getElementById('settings-vestaboard-smart'),
     settingsVestaboardSmartHint: document.getElementById('settings-vestaboard-smart-hint'),
     settingsRainSensitivity: document.getElementById('settings-rain-sensitivity'),
@@ -12872,18 +12874,36 @@ function applyVestaboardNightHours(board) {
         applyVestaboardQuietHours();
     }
     els.settingsVestaboardNightFields?.classList.toggle('hidden', !on);
+    if (!on && nightSimulateOpen) {
+        nightSimulateOpen = false;
+        nightSimulateCodes = null;
+        syncNightSimulateUi();
+    }
     if (els.settingsVestaboardNightWatchCount) {
         if (!available) {
             els.settingsVestaboardNightWatchCount.textContent = '';
         } else {
             const n = Number(watch?.count) || 0;
             const open = Number(watch?.open) || 0;
-            els.settingsVestaboardNightWatchCount.textContent = open > 0
-                ? `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — ${open} open now.`
-                : `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — all closed.`;
+            const names = Array.isArray(watch?.open_names)
+                ? watch.open_names.filter(Boolean)
+                : [];
+            if (open > 0 && names.length) {
+                els.settingsVestaboardNightWatchCount.textContent =
+                    `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — open now: ${names.join(', ')}.`;
+            } else if (open > 0) {
+                els.settingsVestaboardNightWatchCount.textContent =
+                    `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — ${open} open now.`;
+            } else {
+                els.settingsVestaboardNightWatchCount.textContent =
+                    `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — all closed.`;
+            }
         }
     }
-    if (on) renderNightBoard();
+    if (on) {
+        syncNightSimulateUi();
+        renderNightBoard();
+    }
 }
 
 let lastVestaboardNightAvailable = false;
@@ -12907,9 +12927,10 @@ let quietCodes = DEFAULT_QUIET_CODES.map((row) => row.slice());
 let quietCell = { r: 0, c: 0 };
 let nightCodes = DEFAULT_QUIET_CODES.map((row) => row.slice());
 let nightCell = { r: 0, c: 0 };
-// Bottom row preview for the night editor (HOUSE SECURE with green pads / DOOR OPEN with red).
+// Bottom row preview for the night editor (HOUSE SECURE with green pads).
 const NIGHT_SECURE_ROW = [66, 8, 15, 21, 19, 5, 0, 19, 5, 3, 21, 18, 5, 66, 66]; // HOUSE SECURE
-const NIGHT_OPEN_ROW = [63, 63, 63, 4, 15, 15, 18, 0, 15, 16, 5, 14, 63, 63, 63]; // DOOR OPEN
+let nightSimulateOpen = false;
+let nightSimulateCodes = null;
 
 function cloneQuietCodes(raw) {
     const fallback = DEFAULT_QUIET_CODES.map((row) => row.slice());
@@ -12936,6 +12957,11 @@ function setNightCodes(raw) {
     nightCodes = cloneQuietCodes(raw);
     // Keep bottom row as live status preview in the editor.
     nightCodes[2] = NIGHT_SECURE_ROW.slice();
+    if (nightSimulateOpen) {
+        nightSimulateOpen = false;
+        nightSimulateCodes = null;
+        syncNightSimulateUi();
+    }
     renderNightBoard();
 }
 
@@ -12955,23 +12981,91 @@ function advanceNightCell() {
 }
 
 function setNightCellCode(code, advance) {
+    if (nightSimulateOpen) return;
     if (nightCell.r > 1) nightCell.r = 1;
     nightCodes[nightCell.r][nightCell.c] = code;
     if (advance) advanceNightCell();
     renderNightBoard();
 }
 
+function syncNightSimulateUi() {
+    const btn = els.settingsVestaboardNightSimulate;
+    if (btn) {
+        btn.textContent = nightSimulateOpen ? 'Back to editor' : 'Simulate open';
+        btn.setAttribute('aria-pressed', nightSimulateOpen ? 'true' : 'false');
+    }
+    els.settingsVestaboardNightPalette?.classList.toggle('hidden', nightSimulateOpen);
+    if (els.settingsVestaboardNightEditHint) {
+        els.settingsVestaboardNightEditHint.textContent = nightSimulateOpen
+            ? 'Simulated open alert (not sent to the Note). Red tiles and truncated UniFi contact names use all three rows. Press Back to editor to keep editing your secure message.'
+            : 'Edit the top two rows only. The bottom row is HOUSE SECURE while closed. Overnight wrap is allowed (for example 22:00–07:00). Use Simulate open to preview the three-row open alert with your watched contact names.';
+    }
+    if (els.settingsVestaboardNightBoard) {
+        els.settingsVestaboardNightBoard.setAttribute(
+            'aria-label',
+            nightSimulateOpen ? 'Night hours open alert preview' : 'Night hours top two lines'
+        );
+        els.settingsVestaboardNightBoard.classList.toggle('vestaboard-preview--edit', !nightSimulateOpen);
+    }
+}
+
+async function toggleNightOpenSimulate() {
+    if (nightSimulateOpen) {
+        nightSimulateOpen = false;
+        nightSimulateCodes = null;
+        syncNightSimulateUi();
+        renderNightBoard();
+        return;
+    }
+    const btn = els.settingsVestaboardNightSimulate;
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/vestaboard.php?action=preview&sample=night-open');
+        const data = await res.json();
+        if (!res.ok || !data.ok || !Array.isArray(data.codes)) {
+            throw new Error(data.error || 'Could not preview open alert');
+        }
+        nightSimulateCodes = cloneQuietCodes(data.codes);
+        nightSimulateOpen = true;
+        syncNightSimulateUi();
+        renderNightBoard();
+        if (els.settingsVestaboardSample) {
+            els.settingsVestaboardSample.value = 'night-open';
+        }
+        renderVestaboardPreview(data.lines, els.settingsVestaboardPreview, data.codes);
+        if (els.settingsVestaboardPreviewCaption) {
+            const names = Array.isArray(data.open_names) ? data.open_names.filter(Boolean) : [];
+            const who = names.length ? names.join(', ') : 'sample contacts';
+            els.settingsVestaboardPreviewCaption.textContent = `Night open preview · ${who} · 3×15 Note`;
+        }
+    } catch (err) {
+        nightSimulateOpen = false;
+        nightSimulateCodes = null;
+        syncNightSimulateUi();
+        if (els.settingsVestaboardNightWatchCount) {
+            els.settingsVestaboardNightWatchCount.textContent = err.message || 'Could not simulate open alert';
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 function renderNightBoard() {
     const root = els.settingsVestaboardNightBoard;
     if (!root) return;
-    nightCodes[2] = NIGHT_SECURE_ROW.slice();
+    const display = nightSimulateOpen && Array.isArray(nightSimulateCodes)
+        ? nightSimulateCodes
+        : (() => {
+            nightCodes[2] = NIGHT_SECURE_ROW.slice();
+            return nightCodes;
+        })();
     const colorClass = VESTABOARD_COLOR_CLASS;
     const cells = [];
     for (let r = 0; r < 3; r += 1) {
         for (let c = 0; c < 15; c += 1) {
-            const code = nightCodes[r][c];
+            const code = display[r][c];
             const color = colorClass[code];
-            const editable = r < 2;
+            const editable = !nightSimulateOpen && r < 2;
             const sel = editable && r === nightCell.r && c === nightCell.c ? ' is-selected' : '';
             const locked = editable ? '' : ' vestaboard-cell--locked';
             if (color) {
@@ -15951,6 +16045,7 @@ document.getElementById('unifi-card')?.addEventListener('click', async (event) =
 });
 els.settingsVestaboardQuiet?.addEventListener('change', () => applyVestaboardQuietHours());
 els.settingsVestaboardNight?.addEventListener('change', () => applyVestaboardNightHours());
+els.settingsVestaboardNightSimulate?.addEventListener('click', () => toggleNightOpenSimulate());
 els.settingsVestaboardQuietBoard?.addEventListener('click', (event) => {
     const cell = event.target.closest('[data-quiet-r]');
     if (!cell) return;
@@ -15992,6 +16087,7 @@ els.settingsVestaboardQuietPalette?.addEventListener('click', (event) => {
     els.settingsVestaboardQuietBoard?.focus();
 });
 els.settingsVestaboardNightBoard?.addEventListener('click', (event) => {
+    if (nightSimulateOpen) return;
     const cell = event.target.closest('[data-night-r]');
     if (!cell) return;
     const r = Number(cell.dataset.nightR);
@@ -16002,6 +16098,7 @@ els.settingsVestaboardNightBoard?.addEventListener('click', (event) => {
 });
 els.settingsVestaboardNightBoard?.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') return;
+    if (nightSimulateOpen) return;
     if (nightCell.r > 1) nightCell.r = 1;
     if (event.key === 'Backspace' || event.key === 'Delete') {
         event.preventDefault();
