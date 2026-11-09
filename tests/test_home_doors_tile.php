@@ -250,6 +250,49 @@ assert_true(
     'flip adds Last change caption'
 );
 assert_true((int) ($garageAfter['open_changed_at'] ?? 0) > 0, 'flip stores open_changed_at');
+$afterFlipStore = json_decode((string) file_get_contents($root . '/data/home.json'), true);
+assert_true(!empty($afterFlipStore['open_changed']['unifi:door:garage']['observed']), 'DPS flip marks observed');
+assert_true((int) ($afterFlipStore['open_changed_dps_v'] ?? 0) >= 1, 'DPS stamp schema version saved');
+
+// Stale unlock-era Access stamps (no observed) are cleared once.
+$stale = json_decode((string) file_get_contents($root . '/data/home.json'), true);
+$stale['open_changed_dps_v'] = 0;
+$stale['open_changed']['unifi:door:side'] = [
+    'open' => false,
+    'at' => (new DateTimeImmutable('2026-11-08 20:01:00', new DateTimeZone($tz)))->getTimestamp(),
+];
+file_put_contents($root . '/data/home.json', json_encode($stale, JSON_UNESCAPED_SLASHES));
+$cleared = (new YarboHome($root))->dashboard();
+$sideAfterClear = [];
+foreach ($cleared['unifi_doors'] as $row) {
+    if (($row['id'] ?? '') === 'unifi:door:side') {
+        $sideAfterClear = $row;
+        break;
+    }
+}
+assert_true(empty($sideAfterClear['open_changed_text'] ?? null), 'unlock-era Access stamp cleared until DPS flips');
+$clearedStore = json_decode((string) file_get_contents($root . '/data/home.json'), true);
+assert_true((int) ($clearedStore['open_changed']['unifi:door:side']['at'] ?? 1) === 0, 'side door re-seeded at 0');
+
+// Inventory last_activity must not reappear as Last change on Access doors.
+$inv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+foreach ($inv['doors'] as &$doorRow) {
+    if (($doorRow['id'] ?? '') === 'unifi:door:side') {
+        $doorRow['open_changed_at'] = 0;
+        $doorRow['last_activity'] = 1_600_000_000;
+    }
+}
+unset($doorRow);
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+$noActivity = (new YarboHome($root))->dashboard();
+$sideNoActivity = [];
+foreach ($noActivity['unifi_doors'] as $row) {
+    if (($row['id'] ?? '') === 'unifi:door:side') {
+        $sideNoActivity = $row;
+        break;
+    }
+}
+assert_true(empty($sideNoActivity['open_changed_text'] ?? null), 'Access last_activity ignored on tile');
 
 // Protect contact with openStatusChangedAt shows Last change on first sight.
 $inv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
@@ -373,7 +416,9 @@ assert_true(str_contains($js, 'homeUnifiDoorClick'), 'Unlock/Lock on the tile us
 assert_true(str_contains($css, '.home-doors-card'), 'compact doors tile has CSS');
 assert_true(str_contains($css, '.home-device-changed'), 'Last change has very small muted CSS');
 assert_true(str_contains($change, '## [4.0.229]'), 'changelog 4.0.229');
+assert_true(str_contains($change, '## [4.0.230]'), 'changelog 4.0.230');
 assert_true(str_contains($change, 'Last change'), 'changelog mentions Last change');
+assert_true(str_contains($change, 'door-position sensor'), 'changelog mentions Access DPS Last change');
 assert_true(str_contains($change, '## [4.0.149]'), 'changelog 4.0.149');
 assert_true(str_contains($change, '## [4.0.150]'), 'changelog 4.0.150');
 assert_true(str_contains($change, '## [4.0.217]'), 'changelog 4.0.217');

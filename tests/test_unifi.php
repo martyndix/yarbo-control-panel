@@ -238,6 +238,8 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                     'name' => 'Front',
                     'door_lock_relay_status' => 'lock',
                     'door_position_status' => $doorDps,
+                    // Unlock / credential activity — must not become Last change.
+                    'last_activity' => 1_600_000_000_000,
                     'is_bind_hub' => true,
                 ]],
             ]),
@@ -321,6 +323,14 @@ foreach ($probe['devices'] ?? [] as $row) {
 }
 if (($hubRow['dps_label'] ?? '') !== 'Closed' || ($doorRow['dps_label'] ?? '') !== 'Closed') {
     fwrite(STDERR, 'hub/door missing Closed DPS ' . json_encode([$hubRow, $doorRow]) . "\n");
+    exit(1);
+}
+if ((int) ($doorRow['open_changed_at'] ?? 0) !== 0) {
+    fwrite(STDERR, 'Access last_activity must not set open_changed_at ' . json_encode($doorRow) . "\n");
+    exit(1);
+}
+if (($doorRow['open'] ?? null) !== false) {
+    fwrite(STDERR, 'Access DPS Closed must set open=false ' . json_encode($doorRow) . "\n");
     exit(1);
 }
 $doorDps = 'open';
