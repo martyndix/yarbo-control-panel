@@ -117,6 +117,12 @@ final class YarboVestaboard
             'quiet_end' => '07:00',
             'quiet_codes' => self::defaultQuietCodesStatic(),
             'quiet_active' => false,
+            'night_hours_enabled' => false,
+            'night_start' => '22:00',
+            'night_end' => '07:00',
+            'night_codes' => self::defaultNightCodesStatic(),
+            'night_active' => false,
+            'night_last_open' => false,
             'last_live_codes' => null,
             'quiet_timezone' => '',
             'last_progress_stable_hash' => '',
@@ -166,6 +172,12 @@ final class YarboVestaboard
             'quiet_end' => self::normalizeClock((string) ($decoded['quiet_end'] ?? '07:00'), '07:00'),
             'quiet_codes' => self::normalizeQuietCodes($decoded['quiet_codes'] ?? null),
             'quiet_active' => (bool) ($decoded['quiet_active'] ?? false),
+            'night_hours_enabled' => (bool) ($decoded['night_hours_enabled'] ?? false),
+            'night_start' => self::normalizeClock((string) ($decoded['night_start'] ?? '22:00'), '22:00'),
+            'night_end' => self::normalizeClock((string) ($decoded['night_end'] ?? '07:00'), '07:00'),
+            'night_codes' => self::normalizeQuietCodes($decoded['night_codes'] ?? self::defaultNightCodesStatic()),
+            'night_active' => (bool) ($decoded['night_active'] ?? false),
+            'night_last_open' => (bool) ($decoded['night_last_open'] ?? false),
             'last_live_codes' => self::normalizeLiveCodes($decoded['last_live_codes'] ?? null),
             'quiet_timezone' => self::normalizeTimezone((string) ($decoded['quiet_timezone'] ?? '')),
             'last_progress_stable_hash' => (string) ($decoded['last_progress_stable_hash'] ?? ''),
@@ -241,7 +253,9 @@ final class YarboVestaboard
             ? $this->normalizeTransport($input['transport'] ?? $input['vestaboard_transport'] ?? $current['transport'])
             : $current['transport'];
 
-        $quietEnabled = array_key_exists('quiet_hours_enabled', $input) || array_key_exists('vestaboard_quiet_hours', $input)
+        $quietInInput = array_key_exists('quiet_hours_enabled', $input) || array_key_exists('vestaboard_quiet_hours', $input);
+        $nightInInput = array_key_exists('night_hours_enabled', $input) || array_key_exists('vestaboard_night_hours', $input);
+        $quietEnabled = $quietInInput
             ? (bool) ($input['quiet_hours_enabled'] ?? $input['vestaboard_quiet_hours'])
             : $current['quiet_hours_enabled'];
         $quietStart = array_key_exists('quiet_start', $input) || array_key_exists('vestaboard_quiet_start', $input)
@@ -253,6 +267,31 @@ final class YarboVestaboard
         $quietCodes = array_key_exists('quiet_codes', $input) || array_key_exists('vestaboard_quiet_codes', $input)
             ? self::normalizeQuietCodes($input['quiet_codes'] ?? $input['vestaboard_quiet_codes'] ?? null)
             : $current['quiet_codes'];
+        $nightEnabled = $nightInInput
+            ? (bool) ($input['night_hours_enabled'] ?? $input['vestaboard_night_hours'])
+            : (bool) ($current['night_hours_enabled'] ?? false);
+        $nightStart = array_key_exists('night_start', $input) || array_key_exists('vestaboard_night_start', $input)
+            ? self::normalizeClock((string) ($input['night_start'] ?? $input['vestaboard_night_start'] ?? ''), (string) ($current['night_start'] ?? '22:00'))
+            : self::normalizeClock((string) ($current['night_start'] ?? '22:00'), '22:00');
+        $nightEnd = array_key_exists('night_end', $input) || array_key_exists('vestaboard_night_end', $input)
+            ? self::normalizeClock((string) ($input['night_end'] ?? $input['vestaboard_night_end'] ?? ''), (string) ($current['night_end'] ?? '07:00'))
+            : self::normalizeClock((string) ($current['night_end'] ?? '07:00'), '07:00');
+        $nightCodes = array_key_exists('night_codes', $input) || array_key_exists('vestaboard_night_codes', $input)
+            ? self::normalizeQuietCodes($input['night_codes'] ?? $input['vestaboard_night_codes'] ?? null)
+            : self::normalizeQuietCodes($current['night_codes'] ?? self::defaultNightCodesStatic());
+        // Quiet hours and night hours cannot both own the overnight board.
+        if ($quietEnabled && $nightEnabled) {
+            if ($nightInInput && !$quietInInput) {
+                $quietEnabled = false;
+            } elseif ($quietInInput && !$nightInInput) {
+                $nightEnabled = false;
+            } else {
+                $quietEnabled = false;
+            }
+        }
+        if ($nightEnabled && !$this->nightHoursAvailable()) {
+            $nightEnabled = false;
+        }
 
         $next = [
             'enabled' => $enabled,
@@ -271,6 +310,16 @@ final class YarboVestaboard
             'quiet_active' => array_key_exists('quiet_active', $input)
                 ? (bool) $input['quiet_active']
                 : (bool) ($current['quiet_active'] ?? false),
+            'night_hours_enabled' => $nightEnabled,
+            'night_start' => $nightStart,
+            'night_end' => $nightEnd,
+            'night_codes' => $nightCodes,
+            'night_active' => array_key_exists('night_active', $input)
+                ? (bool) $input['night_active']
+                : (bool) ($current['night_active'] ?? false),
+            'night_last_open' => array_key_exists('night_last_open', $input)
+                ? (bool) $input['night_last_open']
+                : (bool) ($current['night_last_open'] ?? false),
             'last_live_codes' => array_key_exists('last_live_codes', $input)
                 ? (self::normalizeLiveCodes($input['last_live_codes']) ?? ($current['last_live_codes'] ?? null))
                 : ($current['last_live_codes'] ?? null),
@@ -377,6 +426,13 @@ final class YarboVestaboard
             'quiet_hours_active' => $this->isQuietHours(),
             'quiet_timezone' => $this->resolveQuietTimezone($config),
             'quiet_clock_now' => $this->quietNowHm($config),
+            'night_hours_enabled' => (bool) ($config['night_hours_enabled'] ?? false),
+            'night_start' => (string) ($config['night_start'] ?? '22:00'),
+            'night_end' => (string) ($config['night_end'] ?? '07:00'),
+            'night_codes' => self::normalizeQuietCodes($config['night_codes'] ?? self::defaultNightCodesStatic()),
+            'night_hours_active' => $this->isNightHours(),
+            'night_hours_available' => $this->nightHoursAvailable(),
+            'night_watch' => $this->nightWatchSummary(),
             'smart_display' => (bool) ($config['smart_display'] ?? true),
             'connection_warning' => $this->connectionWarning(),
         ] + $this->rotatePublicFields($config);
@@ -430,12 +486,36 @@ final class YarboVestaboard
                     'quiet_until' => $config['quiet_end'],
                     'quiet_timezone' => $this->resolveQuietTimezone($config),
                     'quiet_clock_now' => $this->quietNowHm($config),
+                    'night_hours' => $this->isNightHours(),
+                    'night_until' => $config['night_end'] ?? '07:00',
+                    'night_open' => false,
                     'last_sent_at' => $config['last_sent_at'],
                     'pending' => false,
                     'last_error' => $this->publicLastError($config['last_error']),
                     'watcher_ok' => !$this->watcherStale(),
                 ] + $this->rotatePublicFields($config);
             }
+        }
+        if ($this->isNightHours()) {
+            $layout = $this->nightLayout();
+            $hash = hash('sha256', json_encode($layout['codes']));
+
+            return $holdMeta + [
+                'enabled' => true,
+                'lines' => $layout['lines'],
+                'codes' => $layout['codes'],
+                'verb' => $layout['verb'],
+                'quiet_hours' => false,
+                'night_hours' => true,
+                'night_until' => $config['night_end'] ?? '07:00',
+                'night_open' => !empty($layout['open']),
+                'quiet_timezone' => $this->resolveQuietTimezone($config),
+                'quiet_clock_now' => $this->quietNowHm($config),
+                'last_sent_at' => $config['last_sent_at'],
+                'pending' => !$held && $hash !== (string) $config['last_hash'],
+                'last_error' => $this->publicLastError($config['last_error']),
+                'watcher_ok' => !$this->watcherStale(),
+            ] + $this->rotatePublicFields($config);
         }
         if ($this->isQuietHours()) {
             $layout = $this->quietLayout();
@@ -450,6 +530,7 @@ final class YarboVestaboard
                 'quiet_until' => $config['quiet_end'],
                 'quiet_timezone' => $this->resolveQuietTimezone($config),
                 'quiet_clock_now' => $this->quietNowHm($config),
+                'night_hours' => false,
                 'last_sent_at' => $config['last_sent_at'],
                 'pending' => !$held && $hash !== (string) $config['last_hash'],
                 'last_error' => $this->publicLastError($config['last_error']),
@@ -480,6 +561,16 @@ final class YarboVestaboard
         if ($sample !== null && $sample !== '' && $sample !== 'live') {
             if ($sample === 'quiet') {
                 $layout = $this->quietLayout();
+
+                return ['ok' => true, 'online' => false] + $layout;
+            }
+            if ($sample === 'night-secure' || $sample === 'night_secure') {
+                $layout = $this->nightLayout(false);
+
+                return ['ok' => true, 'online' => false] + $layout;
+            }
+            if ($sample === 'night-open' || $sample === 'night_open') {
+                $layout = $this->nightLayout(true, 'door');
 
                 return ['ok' => true, 'online' => false] + $layout;
             }
@@ -518,13 +609,22 @@ final class YarboVestaboard
 
         $this->refreshBoardFromDevice($config);
         $config = $this->load();
-        if ($this->isQuietHours() && $this->isExternalHoldActive($config)) {
+        $overnightHold = ($this->isNightHours() || $this->isQuietHours()) && $this->isExternalHoldActive($config);
+        if ($overnightHold) {
             $this->extendHoldThroughQuietHours($config);
-            $wasQuiet = !empty($config['quiet_active']);
-            if (!$wasQuiet || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
+            $wasOvernight = !empty($config['quiet_active']) || !empty($config['night_active']);
+            if (!$wasOvernight || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
                 $this->snapshotLiveLayout();
             }
-            $this->save(['quiet_active' => true]);
+            $patch = [];
+            if ($this->isNightHours()) {
+                $patch['night_active'] = true;
+                $patch['quiet_active'] = false;
+            } else {
+                $patch['quiet_active'] = true;
+                $patch['night_active'] = false;
+            }
+            $this->save($patch);
 
             return ['ok' => true, 'skipped' => true, 'reason' => 'external_hold'];
         }
@@ -533,17 +633,37 @@ final class YarboVestaboard
         }
 
         $wasQuiet = !empty($config['quiet_active']);
+        $wasNight = !empty($config['night_active']);
         $quietHash = $this->quietLayoutHash();
-        $forceResume = $wasQuiet
+        $nightHash = $this->nightLayoutHash();
+        $forceResume = $wasQuiet || $wasNight
             || ((string) $config['last_hash'] === $quietHash)
+            || ((string) $config['last_hash'] === $nightHash)
             || $this->isExternalHoldExpired($config);
+
+        if ($this->isNightHours()) {
+            if (!$wasNight || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
+                $this->snapshotLiveLayout();
+            }
+            $layout = $this->nightLayout();
+            $openNow = !empty($layout['open']);
+            $force = $forceResume || ($wasNight && (bool) ($config['night_last_open'] ?? false) !== $openNow);
+            $result = $this->sendLayout($layout, $force);
+            $this->save([
+                'night_active' => true,
+                'quiet_active' => false,
+                'night_last_open' => $openNow,
+            ]);
+
+            return $result;
+        }
 
         if ($this->isQuietHours()) {
             if (!$wasQuiet || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
                 $this->snapshotLiveLayout();
             }
             $result = $this->sendLayout($this->quietLayout(), $forceResume);
-            $this->save(['quiet_active' => true]);
+            $this->save(['quiet_active' => true, 'night_active' => false]);
 
             return $result;
         }
@@ -566,7 +686,7 @@ final class YarboVestaboard
                 if ($cached !== null) {
                     $result = $this->sendLayout($cached, true);
                     if (!empty($result['ok'])) {
-                        $this->save(['quiet_active' => false]);
+                        $this->save(['quiet_active' => false, 'night_active' => false]);
                     }
 
                     return $result;
@@ -582,7 +702,7 @@ final class YarboVestaboard
 
         $result = $this->sendLayout($layout, $forceResume || $rotated || !empty($activity['changed']));
         if ($forceResume && !empty($result['ok'])) {
-            $this->save(['quiet_active' => false]);
+            $this->save(['quiet_active' => false, 'night_active' => false]);
         }
 
         return $result;
@@ -616,6 +736,9 @@ final class YarboVestaboard
      */
     public function sendNow(array $override = []): array
     {
+        if ($this->isNightHours()) {
+            return $this->sendLayout($this->nightLayout(), true, $override);
+        }
         if ($this->isQuietHours()) {
             return $this->sendLayout($this->quietLayout(), true, $override);
         }
@@ -1963,6 +2086,38 @@ final class YarboVestaboard
     }
 
     /**
+     * @param array<string, mixed>|null $config
+     */
+    public function nightHoursEndAt(?array $config = null): ?\DateTimeImmutable
+    {
+        $config ??= $this->load();
+        if (!($config['night_hours_enabled'] ?? false) || !$this->nightHoursAvailable()) {
+            return null;
+        }
+        $start = (string) ($config['night_start'] ?? '');
+        $end = (string) ($config['night_end'] ?? '');
+        if ($start === '' || $end === '' || $start === $end) {
+            return null;
+        }
+        try {
+            $tz = new \DateTimeZone($this->resolveQuietTimezone($config));
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('UTC');
+        }
+        $now = new \DateTimeImmutable('now', $tz);
+        $endParts = array_map('intval', explode(':', $end));
+        $endToday = $now->setTime($endParts[0] ?? 0, $endParts[1] ?? 0, 0);
+        if ($start < $end) {
+            return $now < $endToday ? $endToday : $endToday->modify('+1 day');
+        }
+        if ($now < $endToday) {
+            return $endToday;
+        }
+
+        return $endToday->modify('+1 day');
+    }
+
+    /**
      * @param mixed $body
      * @return list<list<int>>|null
      */
@@ -2031,7 +2186,7 @@ final class YarboVestaboard
         $active = $this->isExternalHoldActive($config);
         $until = is_string($config['external_hold_until'] ?? null) ? $config['external_hold_until'] : null;
         $untilHm = $until !== null ? $this->formatHoldUntilHm($until, $config) : '';
-        $untilQuiet = $active && $this->isQuietHours();
+        $untilQuiet = $active && ($this->isQuietHours() || $this->isNightHours());
 
         return [
             'external_hold' => $active,
@@ -2247,6 +2402,9 @@ final class YarboVestaboard
      */
     private function holdUntilForExternalWrite(array $config, bool $resetTimer): ?\DateTimeImmutable
     {
+        if ($this->isNightHours()) {
+            return $this->nightHoursEndAt($config);
+        }
         if ($this->isQuietHours()) {
             return $this->quietHoursEndAt($config);
         }
@@ -2269,7 +2427,9 @@ final class YarboVestaboard
      */
     private function extendHoldThroughQuietHours(array $config): void
     {
-        $end = $this->quietHoursEndAt($config);
+        $end = $this->isNightHours()
+            ? $this->nightHoursEndAt($config)
+            : $this->quietHoursEndAt($config);
         if ($end === null) {
             return;
         }
@@ -2369,6 +2529,248 @@ final class YarboVestaboard
             array_fill(0, self::COLS, 0),
             array_fill(0, self::COLS, 0),
         ];
+    }
+
+    /**
+     * Top two custom lines (same default as quiet); bottom row is filled at runtime.
+     *
+     * @return list<list<int>>
+     */
+    public static function defaultNightCodesStatic(): array
+    {
+        return self::defaultQuietCodesStatic();
+    }
+
+    private function nightLayoutHash(): string
+    {
+        return hash('sha256', json_encode($this->nightLayout()['codes']));
+    }
+
+    public function isNightHours(?string $nowHm = null): bool
+    {
+        $config = $this->load();
+        if (!($config['night_hours_enabled'] ?? false)) {
+            return false;
+        }
+        if (!$this->nightHoursAvailable()) {
+            return false;
+        }
+        $start = (string) ($config['night_start'] ?? '');
+        $end = (string) ($config['night_end'] ?? '');
+        if ($start === '' || $end === '' || $start === $end) {
+            return false;
+        }
+        $now = $nowHm ?? $this->quietNowHm($config);
+        if ($start < $end) {
+            return $now >= $start && $now < $end;
+        }
+
+        return $now >= $start || $now < $end;
+    }
+
+    public function nightHoursAvailable(): bool
+    {
+        return !empty($this->nightWatchSummary()['available']);
+    }
+
+    /**
+     * UniFi door/window contacts night hours can watch.
+     *
+     * @return array{
+     *   available: bool,
+     *   unifi: bool,
+     *   count: int,
+     *   open: int,
+     *   doors_open: int,
+     *   windows_open: int,
+     *   open_kind: string
+     * }
+     */
+    public function nightWatchSummary(): array
+    {
+        $empty = [
+            'available' => false,
+            'unifi' => false,
+            'count' => 0,
+            'open' => 0,
+            'doors_open' => 0,
+            'windows_open' => 0,
+            'open_kind' => '',
+        ];
+        try {
+            $hub = new YarboHub($this->projectRoot);
+            if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
+                return $empty;
+            }
+        } catch (\Throwable) {
+            return $empty;
+        }
+        $rows = $this->nightWatchRows();
+        if ($rows === []) {
+            return $empty + ['unifi' => true];
+        }
+        $home = new YarboHome($this->projectRoot);
+        $store = $home->load();
+        $doorsOpen = 0;
+        $windowsOpen = 0;
+        foreach ($rows as $row) {
+            if (!YarboHome::contactIsOpen($row)) {
+                continue;
+            }
+            $role = $home->contactRoleFor($row, $store);
+            if ($role === YarboHome::CONTACT_WINDOW) {
+                $windowsOpen++;
+            } else {
+                $doorsOpen++;
+            }
+        }
+        $openKind = '';
+        if ($doorsOpen > 0 && $windowsOpen > 0) {
+            $openKind = 'both';
+        } elseif ($windowsOpen > 0) {
+            $openKind = 'window';
+        } elseif ($doorsOpen > 0) {
+            $openKind = 'door';
+        }
+
+        return [
+            'available' => true,
+            'unifi' => true,
+            'count' => count($rows),
+            'open' => $doorsOpen + $windowsOpen,
+            'doors_open' => $doorsOpen,
+            'windows_open' => $windowsOpen,
+            'open_kind' => $openKind,
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function nightWatchRows(): array
+    {
+        try {
+            $hub = new YarboHub($this->projectRoot);
+            if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
+                return [];
+            }
+            $unifi = new YarboUnifi($this->projectRoot);
+        } catch (\Throwable) {
+            return [];
+        }
+        $out = [];
+        $covered = [];
+        foreach ($unifi->lockableDoors() as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            // Only contacts with a known open/closed reading.
+            if (($row['open'] ?? null) !== true && ($row['open'] ?? null) !== false
+                && trim((string) ($row['dps'] ?? '')) === ''
+                && trim((string) ($row['dps_label'] ?? '')) === '') {
+                continue;
+            }
+            $out[] = $row;
+            $native = trim((string) ($row['native_id'] ?? ''));
+            if ($native !== '') {
+                $covered[$native] = true;
+            }
+            $doorId = trim((string) ($row['door_id'] ?? ''));
+            if ($doorId !== '') {
+                $covered[$doorId] = true;
+            }
+        }
+        foreach ($unifi->doorSensorRows() as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $doorId = trim((string) ($row['door_id'] ?? ''));
+            $native = (string) ($row['native_id'] ?? '');
+            if ($doorId !== '' && isset($covered[$doorId])) {
+                continue;
+            }
+            if (str_starts_with($native, 'dps-') && isset($covered[substr($native, 4)])) {
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Custom top two lines + bottom status from UniFi door/window contacts.
+     *
+     * @return array{lines: list<string>, codes: list<list<int>>, verb: string, open: bool}
+     */
+    public function nightLayout(?bool $forceOpen = null, ?string $forceKind = null): array
+    {
+        $config = $this->load();
+        $top = self::normalizeQuietCodes($config['night_codes'] ?? self::defaultNightCodesStatic());
+        $summary = $this->nightWatchSummary();
+        $open = $forceOpen ?? (($summary['open'] ?? 0) > 0);
+        $kind = $forceKind ?? (string) ($summary['open_kind'] ?? '');
+        if ($open) {
+            $phrase = match ($kind) {
+                'window' => 'WINDOW OPEN',
+                'both' => 'DOORS OPEN',
+                default => 'DOOR OPEN',
+            };
+            [$line3, $codes3] = $this->packCenteredStatus($phrase, self::COLOR_RED);
+            $verb = 'NIGHT_OPEN';
+        } else {
+            // 15 chars fills the row (no green pads). Shorter phrases get green surrounds.
+            [$line3, $codes3] = $this->packCenteredStatus('BUILDING SECURE', self::COLOR_GREEN);
+            $verb = 'NIGHT';
+        }
+        $codes = [$top[0], $top[1], $codes3];
+        $lines = [
+            self::linesFromCodes([$top[0]])[0],
+            self::linesFromCodes([$top[1]])[0],
+            $line3,
+        ];
+
+        return [
+            'lines' => $lines,
+            'codes' => $codes,
+            'verb' => $verb,
+            'open' => $open,
+        ];
+    }
+
+    /**
+     * Center a status phrase; empty flaps become $padColor (green/red).
+     *
+     * @return array{0: string, 1: list<int>}
+     */
+    private function packCenteredStatus(string $phrase, int $padColor): array
+    {
+        $phrase = strtoupper(trim($phrase));
+        $phrase = preg_replace('/[^A-Z0-9 !@#$()\-+;:\'"%,.\/?]/', '', $phrase) ?? '';
+        if (strlen($phrase) > self::COLS) {
+            $phrase = substr($phrase, 0, self::COLS);
+        }
+        $start = intdiv(self::COLS - strlen($phrase), 2);
+        $line = str_repeat(' ', $start) . $phrase . str_repeat(' ', self::COLS - $start - strlen($phrase));
+        $codes = $this->encodeLine($line);
+        $end = $start + strlen($phrase);
+        if ($padColor > 0 && strlen($phrase) < self::COLS) {
+            for ($i = 0; $i < self::COLS; $i++) {
+                if ($i < $start || $i >= $end) {
+                    $codes[$i] = $padColor;
+                }
+            }
+        }
+
+        return [$line, $codes];
     }
 
     public static function normalizeClock(string $value, string $fallback): string

@@ -113,6 +113,15 @@ const els = {
     settingsVestaboardQuietEnd: document.getElementById('settings-vestaboard-quiet-end'),
     settingsVestaboardQuietBoard: document.getElementById('settings-vestaboard-quiet-board'),
     settingsVestaboardQuietPalette: document.getElementById('settings-vestaboard-quiet-palette'),
+    settingsVestaboardNight: document.getElementById('settings-vestaboard-night'),
+    settingsVestaboardNightWrap: document.getElementById('settings-vestaboard-night-wrap'),
+    settingsVestaboardNightFields: document.getElementById('settings-vestaboard-night-fields'),
+    settingsVestaboardNightStart: document.getElementById('settings-vestaboard-night-start'),
+    settingsVestaboardNightEnd: document.getElementById('settings-vestaboard-night-end'),
+    settingsVestaboardNightBoard: document.getElementById('settings-vestaboard-night-board'),
+    settingsVestaboardNightPalette: document.getElementById('settings-vestaboard-night-palette'),
+    settingsVestaboardNightUnavailable: document.getElementById('settings-vestaboard-night-unavailable'),
+    settingsVestaboardNightWatchCount: document.getElementById('settings-vestaboard-night-watch-count'),
     settingsVestaboardSmart: document.getElementById('settings-vestaboard-smart'),
     settingsVestaboardSmartHint: document.getElementById('settings-vestaboard-smart-hint'),
     settingsRainSensitivity: document.getElementById('settings-rain-sensitivity'),
@@ -10280,6 +10289,11 @@ function updateVestaboardDashboard(data) {
             els.vestaboardUpdatedDetail.textContent = ' · sending…';
         } else if (board.watcher_ok === false) {
             els.vestaboardUpdatedDetail.textContent = ' · background updater idle — restart the panel';
+        } else if (board.night_hours) {
+            const until = board.night_until || '';
+            els.vestaboardUpdatedDetail.textContent = board.night_open
+                ? (until ? ` · night hours — door/window open until ${until}` : ' · night hours — door/window open')
+                : (until ? ` · night hours until ${until}` : ' · night hours');
         } else if (board.quiet_hours) {
             els.vestaboardUpdatedDetail.textContent = ` · quiet hours until ${board.quiet_until || ''}`;
         } else if (board.rotating) {
@@ -11296,11 +11310,23 @@ async function loadSettings() {
         if (els.settingsVestaboardQuietEnd) {
             els.settingsVestaboardQuietEnd.value = data.vestaboard?.quiet_end || '07:00';
         }
+        if (els.settingsVestaboardNight) {
+            els.settingsVestaboardNight.checked = Boolean(data.vestaboard?.night_hours_enabled);
+        }
+        if (els.settingsVestaboardNightStart) {
+            els.settingsVestaboardNightStart.value = data.vestaboard?.night_start || '22:00';
+        }
+        if (els.settingsVestaboardNightEnd) {
+            els.settingsVestaboardNightEnd.value = data.vestaboard?.night_end || '07:00';
+        }
         if (els.settingsVestaboardSmart) {
             els.settingsVestaboardSmart.checked = data.vestaboard?.smart_display !== false;
         }
         setQuietCodes(data.vestaboard?.quiet_codes);
+        setNightCodes(data.vestaboard?.night_codes);
         updateQuietHoursClockHint(data.vestaboard);
+        applyVestaboardQuietHours();
+        applyVestaboardNightHours(data.vestaboard);
         updateVestaboardSmartHint(data.hub?.modules || {});
         if (els.settingsRainSensitivity) {
             const n = data.rain?.sensitivity;
@@ -12820,9 +12846,48 @@ function applyVestaboardEnabled() {
 
 function applyVestaboardQuietHours() {
     const on = Boolean(els.settingsVestaboardQuiet?.checked);
+    if (on && els.settingsVestaboardNight?.checked) {
+        els.settingsVestaboardNight.checked = false;
+        applyVestaboardNightHours();
+    }
     els.settingsVestaboardQuietFields?.classList.toggle('hidden', !on);
     if (on) renderQuietBoard();
 }
+
+function applyVestaboardNightHours(board) {
+    const available = board ? Boolean(board.night_hours_available) : Boolean(lastVestaboardNightAvailable);
+    if (board && 'night_hours_available' in board) {
+        lastVestaboardNightAvailable = available;
+    }
+    const watch = board?.night_watch || lastVestaboardNightWatch;
+    if (board?.night_watch) lastVestaboardNightWatch = board.night_watch;
+    els.settingsVestaboardNightWrap?.classList.toggle('hidden', !available);
+    els.settingsVestaboardNightUnavailable?.classList.toggle('hidden', available);
+    if (!available && els.settingsVestaboardNight) {
+        els.settingsVestaboardNight.checked = false;
+    }
+    const on = available && Boolean(els.settingsVestaboardNight?.checked);
+    if (on && els.settingsVestaboardQuiet?.checked) {
+        els.settingsVestaboardQuiet.checked = false;
+        applyVestaboardQuietHours();
+    }
+    els.settingsVestaboardNightFields?.classList.toggle('hidden', !on);
+    if (els.settingsVestaboardNightWatchCount) {
+        if (!available) {
+            els.settingsVestaboardNightWatchCount.textContent = '';
+        } else {
+            const n = Number(watch?.count) || 0;
+            const open = Number(watch?.open) || 0;
+            els.settingsVestaboardNightWatchCount.textContent = open > 0
+                ? `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — ${open} open now.`
+                : `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — all closed.`;
+        }
+    }
+    if (on) renderNightBoard();
+}
+
+let lastVestaboardNightAvailable = false;
+let lastVestaboardNightWatch = { count: 0, open: 0 };
 
 const DEFAULT_QUIET_CODES = [
     [7, 15, 15, 4, 0, 14, 9, 7, 8, 20, 0, 0, 0, 0, 0],
@@ -12840,6 +12905,11 @@ const VESTABOARD_COLOR_CLASS = {
 };
 let quietCodes = DEFAULT_QUIET_CODES.map((row) => row.slice());
 let quietCell = { r: 0, c: 0 };
+let nightCodes = DEFAULT_QUIET_CODES.map((row) => row.slice());
+let nightCell = { r: 0, c: 0 };
+// Bottom row preview for the night editor (BUILDING SECURE / DOOR OPEN).
+const NIGHT_SECURE_ROW = [2, 21, 9, 12, 4, 9, 14, 7, 0, 19, 5, 3, 21, 18, 5]; // BUILDING SECURE
+const NIGHT_OPEN_ROW = [0, 0, 0, 4, 15, 15, 18, 0, 15, 16, 5, 14, 0, 0, 0]; // DOOR OPEN centered approx
 
 function cloneQuietCodes(raw) {
     const fallback = DEFAULT_QUIET_CODES.map((row) => row.slice());
@@ -12860,6 +12930,58 @@ function setQuietCodes(raw) {
 
 function quietCodesSnapshot() {
     return quietCodes.map((row) => row.slice());
+}
+
+function setNightCodes(raw) {
+    nightCodes = cloneQuietCodes(raw);
+    // Keep bottom row as live status preview in the editor.
+    nightCodes[2] = NIGHT_SECURE_ROW.slice();
+    renderNightBoard();
+}
+
+function nightCodesSnapshot() {
+    const snap = nightCodes.map((row) => row.slice());
+    // Bottom row is composed by the panel from UniFi — store blanks.
+    snap[2] = Array.from({ length: 15 }, () => 0);
+    return snap;
+}
+
+function advanceNightCell() {
+    nightCell.c += 1;
+    if (nightCell.c >= 15) {
+        nightCell.c = 0;
+        nightCell.r = nightCell.r >= 1 ? 0 : 1;
+    }
+}
+
+function setNightCellCode(code, advance) {
+    if (nightCell.r > 1) nightCell.r = 1;
+    nightCodes[nightCell.r][nightCell.c] = code;
+    if (advance) advanceNightCell();
+    renderNightBoard();
+}
+
+function renderNightBoard() {
+    const root = els.settingsVestaboardNightBoard;
+    if (!root) return;
+    nightCodes[2] = NIGHT_SECURE_ROW.slice();
+    const colorClass = VESTABOARD_COLOR_CLASS;
+    const cells = [];
+    for (let r = 0; r < 3; r += 1) {
+        for (let c = 0; c < 15; c += 1) {
+            const code = nightCodes[r][c];
+            const color = colorClass[code];
+            const editable = r < 2;
+            const sel = editable && r === nightCell.r && c === nightCell.c ? ' is-selected' : '';
+            const locked = editable ? '' : ' vestaboard-cell--locked';
+            if (color) {
+                cells.push(`<span class="vestaboard-cell vestaboard-cell--${color}${sel}${locked}" data-night-r="${r}" data-night-c="${c}"></span>`);
+            } else {
+                cells.push(`<span class="vestaboard-cell${sel}${locked}" data-night-r="${r}" data-night-c="${c}">${escapeHtml(vestaboardCodeToChar(code))}</span>`);
+            }
+        }
+    }
+    root.innerHTML = cells.join('');
 }
 
 function vestaboardCharToCode(ch) {
@@ -12945,7 +13067,7 @@ function updateQuietHoursClockHint(board) {
     const clock = tz && now ? ` Times use ${tz} (now ${now}), not UTC.` : ' Times use your local timezone (not UTC).';
     hint.textContent = 'Stops live status writes overnight so the flaps stay still. At the start of the window the Note shows your quiet message once; live status resumes at the end, with no browser open.'
         + clock
-        + ' A custom message from the Vestaboard app during this window stays until quiet hours end (Resume previous status on the dashboard takes the panel back). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes.';
+        + ' A custom message from the Vestaboard app during this window stays until quiet hours end (Resume previous status on the dashboard takes the panel back). Separate from Quiet Hours in the Vestaboard app, which can still drop Cloud writes. Cannot be on at the same time as Night hours.';
 }
 
 function updateVestaboardSmartHint(modules) {
@@ -13183,6 +13305,10 @@ async function saveSettings(event) {
             vestaboard_quiet_end: els.settingsVestaboardQuietEnd?.value || '07:00',
             vestaboard_quiet_codes: quietCodesSnapshot(),
             vestaboard_quiet_timezone: clientTimezone(),
+            vestaboard_night_hours: Boolean(els.settingsVestaboardNight?.checked),
+            vestaboard_night_start: els.settingsVestaboardNightStart?.value || '22:00',
+            vestaboard_night_end: els.settingsVestaboardNightEnd?.value || '07:00',
+            vestaboard_night_codes: nightCodesSnapshot(),
             vestaboard_smart_display: Boolean(els.settingsVestaboardSmart?.checked),
             module_yarbo: Boolean(els.settingsModuleYarbo?.checked),
             module_powerwall: Boolean(els.settingsModulePowerwall?.checked),
@@ -15824,6 +15950,7 @@ document.getElementById('unifi-card')?.addEventListener('click', async (event) =
     }
 });
 els.settingsVestaboardQuiet?.addEventListener('change', () => applyVestaboardQuietHours());
+els.settingsVestaboardNight?.addEventListener('change', () => applyVestaboardNightHours());
 els.settingsVestaboardQuietBoard?.addEventListener('click', (event) => {
     const cell = event.target.closest('[data-quiet-r]');
     if (!cell) return;
@@ -15863,6 +15990,49 @@ els.settingsVestaboardQuietPalette?.addEventListener('click', (event) => {
     if (!btn) return;
     setQuietCellCode(Number(btn.dataset.quietCode), true);
     els.settingsVestaboardQuietBoard?.focus();
+});
+els.settingsVestaboardNightBoard?.addEventListener('click', (event) => {
+    const cell = event.target.closest('[data-night-r]');
+    if (!cell) return;
+    const r = Number(cell.dataset.nightR);
+    if (r > 1) return;
+    nightCell = { r, c: Number(cell.dataset.nightC) };
+    els.settingsVestaboardNightBoard.focus();
+    renderNightBoard();
+});
+els.settingsVestaboardNightBoard?.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') return;
+    if (nightCell.r > 1) nightCell.r = 1;
+    if (event.key === 'Backspace' || event.key === 'Delete') {
+        event.preventDefault();
+        setNightCellCode(0, event.key === 'Backspace');
+        return;
+    }
+    if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        advanceNightCell();
+        renderNightBoard();
+        return;
+    }
+    if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        nightCell.c = nightCell.c > 0 ? nightCell.c - 1 : 14;
+        if (nightCell.c === 14) nightCell.r = nightCell.r > 0 ? nightCell.r - 1 : 1;
+        renderNightBoard();
+        return;
+    }
+    if (event.key.length === 1) {
+        const code = vestaboardCharToCode(event.key);
+        if (code === null) return;
+        event.preventDefault();
+        setNightCellCode(code, true);
+    }
+});
+els.settingsVestaboardNightPalette?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-night-code]');
+    if (!btn) return;
+    setNightCellCode(Number(btn.dataset.nightCode), true);
+    els.settingsVestaboardNightBoard?.focus();
 });
 els.papermonoPortsRefresh?.addEventListener('click', () => refreshPaperMonoPorts());
 els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbTools(e.currentTarget));
