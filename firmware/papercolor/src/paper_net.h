@@ -64,14 +64,12 @@ inline void paperNetNormalize(String &url)
 }
 
 /* Home LAN IP is unreachable on travel Wi-Fi. ESP32 connect() to that subnet
- * can hang far past HTTPClient's timeout, so Funnel never runs (no R). */
+ * can hang far past HTTPClient's timeout, so Funnel never runs (no R).
+ * Skip LAN whenever the joined SSID is not home — even if remurl is empty. */
 inline bool paperNetLanReachable()
 {
     if (!panelUrl.length()) {
         return false;
-    }
-    if (!remoteUrl.length() || remoteUrl == panelUrl) {
-        return true;
     }
     if (WiFi.status() != WL_CONNECTED) {
         return false;
@@ -101,12 +99,13 @@ inline bool paperNetBeginBase(HTTPClient &http, const String &base, const String
 
 inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs = 8000)
 {
-    usingRemote = false;
-    int lanMs = remoteUrl.length() ? 2000 : remoteMs;
+    // Do not clear usingRemote here — a failed poll would hide the R badge.
+    int lanMs = remoteMs;
     if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
         http.addHeader("X-PaperMono-Token", token);
         int code = http.GET();
         if (code == 200) {
+            usingRemote = false;
             return code;
         }
         http.end();
@@ -127,13 +126,13 @@ inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs =
 
 inline int paperNetPost(HTTPClient &http, const String &pathQuery, const String &payload, int remoteMs = 8000)
 {
-    usingRemote = false;
-    int lanMs = remoteUrl.length() ? 2000 : remoteMs;
+    int lanMs = remoteMs;
     if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
         http.addHeader("Content-Type", "application/json");
         http.addHeader("X-PaperMono-Token", token);
         int code = http.POST(payload);
         if (code == 200) {
+            usingRemote = false;
             return code;
         }
         http.end();

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.237] - 2026-11-09
+
+### Fixed
+- **PaperMono / Paper Colour remote online (no R):** travel Wi-Fi no longer tries the home LAN IP when the Funnel URL is missing from NVS (that hang blocked Funnel and hid the **R**). Compact no longer sends an empty `remote_url` that wiped a stored Funnel origin. The **R** badge stays after a successful Funnel poll instead of clearing on the next failed attempt. Firmware **0.1.80** / **0.2.27-colour**.
+
 ## [4.0.236] - 2026-11-09
 
 ### Changed

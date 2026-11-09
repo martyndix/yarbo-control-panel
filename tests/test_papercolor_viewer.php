@@ -103,9 +103,9 @@ $kit = (string) file_get_contents(__DIR__ . '/../scripts/paper_setup_kit.py');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 $mono = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
 
-assert_true(str_contains($ver, '0.2.26-colour'), 'firmware 0.2.26-colour');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.26-colour';"), 'panel colour pin 0.2.26-colour');
-assert_true(str_contains($mono, '#define PAPERMONO_FW_VERSION "0.1.79"'), 'PaperMono firmware 0.1.79');
+assert_true(str_contains($ver, '0.2.27-colour'), 'firmware 0.2.27-colour');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION_COLOR = '0.2.27-colour';"), 'panel colour pin 0.2.27-colour');
+assert_true(str_contains($mono, '#define PAPERMONO_FW_VERSION "0.1.80"'), 'PaperMono firmware 0.1.80');
 assert_true(str_contains($color, 'bool viewerOnly()'), 'viewer-only helper');
 assert_true(str_contains($color, 'void applyDisplayMode()'), 'landscape display mode');
 assert_true(str_contains($color, 'M5.Imu.getAccel'), 'IMU landscape left/right');
@@ -123,7 +123,7 @@ assert_true(!str_contains($color, '0x83'), 'Colour firmware does not send undocu
 assert_true(str_contains($color, 'int clockBand = 56;'), 'viewer reserves a time band');
 assert_true(str_contains($color, 'int glyphSize = (cell - 4) / 8;'), 'flap letters scale with cell size');
 assert_true(str_contains($html, 'id="papermono-vestaboard-viewer"'), 'settings viewer checkbox');
-assert_true(str_contains($html, '0.2.26-colour'), 'settings hint 0.2.26-colour');
+assert_true(str_contains($html, '0.2.27-colour'), 'settings hint 0.2.27-colour');
 assert_true(str_contains($color, 'int foot = 44;'), 'viewer leaves a footer for battery badge');
 assert_true(str_contains($color, 'void drawBatteryBadge(int right, int cy, int pct, bool compact)'), 'PaperMono-style battery badge');
 assert_true(str_contains($color, 'void drawChargeBolt(int cx, int cy, int size)'), 'charging bolt');
@@ -136,6 +136,6 @@ assert_true(str_contains($kit, 'vestaboard_viewer'), 'setup kit CFG includes vie
 assert_true(str_contains($change, '## [4.0.132]'), 'changelog 4.0.132');
 $docs = (string) file_get_contents(__DIR__ . '/../docs/papercolor.md');
 assert_true(str_contains($docs, '## Refresh'), 'docs explain Spectra 6 refresh options');
-assert_true(str_contains($docs, '0.2.26-colour'), 'docs pin 0.2.26-colour');
+assert_true(str_contains($docs, '0.2.27-colour'), 'docs pin 0.2.27-colour');
 
 echo "test_papercolor_viewer.php ok\n";
