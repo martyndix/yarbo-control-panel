@@ -155,7 +155,10 @@ int wifiLastOk = 0;
 uint32_t wifiTryAt = 0;
 uint32_t wifiLostAt = 0;
 bool wifiEverUp = false;
+bool wifiHomeAbsent = false; /* home SSID missing once this session — prefer travel */
 uint32_t lastHomeLook = 0;
+uint32_t lastWifiUiDraw = 0;
+int lastWifiUiStatus = -1;
 String wifiScanSsid[PAPERMONO_WIFI_SCAN_MAX];
 bool wifiScanOpen[PAPERMONO_WIFI_SCAN_MAX];
 int wifiScanCount = 0;
@@ -491,11 +494,41 @@ void wifiRetryLast()
         wifiStartGuest();
         return;
     }
+    // Away from home: after one "home not found", join travel first.
+    if (wifiHomeAbsent && guestSsid.length()) {
+        wifiStartGuest();
+        return;
+    }
     if (wifiSsid.length()) {
         wifiStartHome();
         return;
     }
     wifiStartGuest();
+}
+
+String wifiLiveStatusLine()
+{
+    if (WiFi.status() == WL_CONNECTED) {
+        String ssid = WiFi.SSID();
+        if (!ssid.length()) {
+            ssid = "(connected)";
+        }
+        return String("On  ") + ssid;
+    }
+    if (lastError.startsWith("joining ")) {
+        return lastError;
+    }
+    wl_status_t st = WiFi.status();
+    if (st == WL_NO_SSID_AVAIL) {
+        return String("AP not found (need 2.4 GHz)");
+    }
+    if (st == WL_CONNECT_FAILED) {
+        return String("Join failed — check password");
+    }
+    if (guestSsid.length() || wifiSsid.length()) {
+        return String("Wi-Fi offline");
+    }
+    return String("No Wi-Fi saved");
 }
 
 bool wifiHomeSsidVisible()
@@ -566,12 +599,22 @@ void wifiService()
     if (now - wifiTryAt < wait) {
         return;
     }
-    if (wifiTryStage == 1 && guestSsid.length()) {
-        wifiStartGuest();
+    if (wifiTryStage == 1) {
+        if (st == WL_NO_SSID_AVAIL) {
+            wifiHomeAbsent = true;
+        }
+        if (guestSsid.length()) {
+            wifiStartGuest();
+            return;
+        }
+    }
+    if (wifiTryStage == 2 && wifiSsid.length() && !wifiHomeAbsent) {
+        wifiStartHome();
         return;
     }
-    if (wifiTryStage == 2 && wifiSsid.length()) {
-        wifiStartHome();
+    if (wifiTryStage == 2 && guestSsid.length() && wifiHomeAbsent) {
+        // Stay on travel retries while home is known-missing.
+        wifiStartGuest();
         return;
     }
     wifiRetryLast();
@@ -683,6 +726,8 @@ void saveGuestWifi()
     kbNumbers = false;
     kbShift = false;
     if (WiFi.status() != WL_CONNECTED) {
+        wifiHomeAbsent = true;
+        wifiLastOk = 2;
         wifiStartGuest();
     }
 }
@@ -692,6 +737,7 @@ void clearGuestWifi()
     bool onGuest = guestSsid.length() && WiFi.SSID() == guestSsid;
     guestSsid = "";
     guestPass = "";
+    wifiHomeAbsent = false;
     saveGuestWifiPrefs();
     wifiUi = PAPERMONO_WIFI_IDLE;
     if (onGuest) {
@@ -3874,12 +3920,16 @@ void drawDevicePage(bool forceFull)
     String homeLab = wifiSsid.length() ? wifiSsid : String("(USB flash)");
     M5.Display.drawString("Home  " + clipLabelToWidth(homeLab, 360), 16, 312);
     if (guestSsid.length()) {
-        M5.Display.drawString("Travel  " + clipLabelToWidth(guestSsid, 240), 16, 348);
-        drawButton(320, 336, 144, 44, "CLEAR", false);
+        M5.Display.drawString("Travel  " + clipLabelToWidth(guestSsid, 200), 16, 348);
+        drawButton(248, 336, 100, 44, "JOIN", false);
+        drawButton(360, 336, 104, 44, "CLEAR", false);
     } else {
         M5.Display.drawString("No travel Wi-Fi saved.", 16, 348);
     }
-    drawButton(16, 396, 448, 72, "REMOTE WIFI", true);
+    M5.Display.setTextSize(2);
+    M5.Display.drawString(clipLabelToWidth(wifiLiveStatusLine(), 448), 16, 386);
+    M5.Display.drawString("Travel is 2.4 GHz only.", 16, 414);
+    drawButton(16, 444, 448, 64, "REMOTE WIFI", true);
     int H = M5.Display.height();
     int offY = H - 200;
     int offH = 120;
@@ -4777,12 +4827,22 @@ void handleDeviceTouch(int x, int y)
         }
         return;
     }
-    if (guestSsid.length() && y >= 330 && y <= 388 && x >= 310) {
-        clearGuestWifi();
-        drawScreen(false);
-        return;
+    if (guestSsid.length() && y >= 330 && y <= 388) {
+        if (x >= 350) {
+            clearGuestWifi();
+            drawScreen(false);
+            return;
+        }
+        if (x >= 240) {
+            // Force travel join (skip waiting on home SSID).
+            wifiHomeAbsent = true;
+            wifiLastOk = 2;
+            wifiStartGuest();
+            drawScreen(false);
+            return;
+        }
     }
-    if (y >= 390 && y <= 476) {
+    if (y >= 436 && y <= 520) {
         startWifiScan();
         return;
     }
@@ -5852,6 +5912,18 @@ void loop()
     wifiService();
     if (WiFi.status() == WL_CONNECTED) {
         ensureNtp();
+        wifiHomeAbsent = false;
+    }
+    // Refresh DEVICE while joining so the status line is not stuck.
+    if (currentPage == PAPERMONO_PAGE_DEVICE && wifiUi == PAPERMONO_WIFI_IDLE
+        && !screenLocked && !M5.Display.displayBusy()) {
+        int st = (int) WiFi.status();
+        uint32_t nowUi = millis();
+        if (st != lastWifiUiStatus || (st != WL_CONNECTED && nowUi - lastWifiUiDraw > 4000)) {
+            lastWifiUiStatus = st;
+            lastWifiUiDraw = nowUi;
+            redrawQueued = true;
+        }
     }
     String prevClock = clockLocal;
     refreshLocalClock();

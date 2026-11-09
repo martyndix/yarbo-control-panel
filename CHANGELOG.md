@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.239] - 2026-11-09
+
+### Fixed
+- **PaperMono travel Wi-Fi:** DEVICE shows live join status (`joining…` / `On …` / `AP not found (need 2.4 GHz)` / password failed), a **JOIN** button to force the travel SSID, and prefers travel after home is missing once — so a tablet away from **Home** is not stuck waiting on the USB SSID. Firmware **0.1.81**.
+
 ## [4.0.238] - 2026-11-09
 
 ### Fixed
