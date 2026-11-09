@@ -123,6 +123,7 @@ final class YarboVestaboard
             'night_codes' => self::defaultNightCodesStatic(),
             'night_active' => false,
             'night_last_open' => false,
+            'night_last_kind' => '',
             'last_live_codes' => null,
             'quiet_timezone' => '',
             'last_progress_stable_hash' => '',
@@ -178,6 +179,7 @@ final class YarboVestaboard
             'night_codes' => self::normalizeQuietCodes($decoded['night_codes'] ?? self::defaultNightCodesStatic()),
             'night_active' => (bool) ($decoded['night_active'] ?? false),
             'night_last_open' => (bool) ($decoded['night_last_open'] ?? false),
+            'night_last_kind' => (string) ($decoded['night_last_kind'] ?? ''),
             'last_live_codes' => self::normalizeLiveCodes($decoded['last_live_codes'] ?? null),
             'quiet_timezone' => self::normalizeTimezone((string) ($decoded['quiet_timezone'] ?? '')),
             'last_progress_stable_hash' => (string) ($decoded['last_progress_stable_hash'] ?? ''),
@@ -320,6 +322,9 @@ final class YarboVestaboard
             'night_last_open' => array_key_exists('night_last_open', $input)
                 ? (bool) $input['night_last_open']
                 : (bool) ($current['night_last_open'] ?? false),
+            'night_last_kind' => array_key_exists('night_last_kind', $input)
+                ? (string) $input['night_last_kind']
+                : (string) ($current['night_last_kind'] ?? ''),
             'last_live_codes' => array_key_exists('last_live_codes', $input)
                 ? (self::normalizeLiveCodes($input['last_live_codes']) ?? ($current['last_live_codes'] ?? null))
                 : ($current['last_live_codes'] ?? null),
@@ -642,17 +647,25 @@ final class YarboVestaboard
             || $this->isExternalHoldExpired($config);
 
         if ($this->isNightHours()) {
+            // Re-read Access DPS + Protect contacts every tick so open/close updates the Note.
+            $this->refreshNightContacts();
             if (!$wasNight || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
                 $this->snapshotLiveLayout();
             }
             $layout = $this->nightLayout();
             $openNow = !empty($layout['open']);
-            $force = $forceResume || ($wasNight && (bool) ($config['night_last_open'] ?? false) !== $openNow);
+            $kindNow = (string) ($layout['open_kind'] ?? '');
+            $openChanged = (bool) ($config['night_last_open'] ?? false) !== $openNow
+                || ((string) ($config['night_last_kind'] ?? '')) !== $kindNow;
+            // Entering night, or a door/window edge: write immediately (bypass 15s gap).
+            // Unchanged status relies on hash skip so flaps stay still.
+            $force = !$wasNight || $openChanged;
             $result = $this->sendLayout($layout, $force);
             $this->save([
                 'night_active' => true,
                 'quiet_active' => false,
                 'night_last_open' => $openNow,
+                'night_last_kind' => $kindNow,
             ]);
 
             return $result;
@@ -2719,17 +2732,19 @@ final class YarboVestaboard
         $open = $forceOpen ?? (($summary['open'] ?? 0) > 0);
         $kind = $forceKind ?? (string) ($summary['open_kind'] ?? '');
         if ($open) {
+            // Keep phrases under 13 chars so at least one red pad fits each side.
             $phrase = match ($kind) {
-                'window' => 'WINDOW OPEN',
+                'window' => 'WIN OPEN',
                 'both' => 'DOORS OPEN',
                 default => 'DOOR OPEN',
             };
             [$line3, $codes3] = $this->packCenteredStatus($phrase, self::COLOR_RED);
             $verb = 'NIGHT_OPEN';
         } else {
-            // 15 chars fills the row (no green pads). Shorter phrases get green surrounds.
-            [$line3, $codes3] = $this->packCenteredStatus('BUILDING SECURE', self::COLOR_GREEN);
+            // HOUSE SECURE (12) leaves green pads; longer phrases fill the row with no colour.
+            [$line3, $codes3] = $this->packCenteredStatus('HOUSE SECURE', self::COLOR_GREEN);
             $verb = 'NIGHT';
+            $kind = '';
         }
         $codes = [$top[0], $top[1], $codes3];
         $lines = [
@@ -2743,7 +2758,26 @@ final class YarboVestaboard
             'codes' => $codes,
             'verb' => $verb,
             'open' => $open,
+            'open_kind' => $kind,
         ];
+    }
+
+    /**
+     * Synchronous UniFi door/window refresh for Night hours (not the async Home kick).
+     */
+    private function refreshNightContacts(): void
+    {
+        try {
+            $hub = new YarboHub($this->projectRoot);
+            if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
+                return;
+            }
+            $unifi = new YarboUnifi($this->projectRoot);
+            $unifi->refreshProtectSensorsNow(1.5);
+            $unifi->refreshAccessDoorsNow(1.5);
+        } catch (\Throwable) {
+            // Keep last inventory; next tick retries.
+        }
     }
 
     /**

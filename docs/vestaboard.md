@@ -100,10 +100,12 @@ This is separate from Quiet Hours in the Vestaboard **app**. The app setting can
 
 In **Settings → Vestaboard Note**, enable **Night hours** when the UniFi module is on and at least one Access door controller or door/window contact is present. Edit the **top two rows** of a custom message; the **bottom row** is filled automatically from UniFi:
 
-- **BUILDING SECURE** when every watched door/window contact is closed
-- **DOOR OPEN**, **WINDOW OPEN**, or **DOORS OPEN** (with red colour flaps) when something is open
+- **HOUSE SECURE** (with green colour flaps) when every watched door/window contact is closed
+- **DOOR OPEN**, **WIN OPEN**, or **DOORS OPEN** (with red colour flaps) when something is open — phrases stay short so colour pads fit
 
 Night hours only uses UniFi Access doors and door/window sensors known to this panel. It cannot see any other sensors and **cannot guarantee the security of the building**. If UniFi is off or no contacts exist, Night hours is hidden and cannot be enabled.
+
+While the window is active the watcher re-reads those contacts every tick (~8s) and updates the bottom row as soon as something opens or closes.
 
 ## Messages from the Vestaboard app
 
