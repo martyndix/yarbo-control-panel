@@ -187,6 +187,7 @@ $unifi->setTransport(function (string $method, string $url, array $headers, ?str
                 'name' => 'Garage',
                 'type' => 'UFP-SENSE',
                 'isOpened' => $sensorOpen,
+                'openStatusChangedAt' => 1_700_000_000_000,
                 'stats' => [
                     'temperature' => ['value' => $sensorTemp],
                     'humidity' => ['value' => $sensorHumidity],
@@ -372,6 +373,10 @@ if (($garage['status'] ?? '') !== 'Closed · 21.9° · 72% RH' || ($garage['open
 }
 if (($garage['has_open'] ?? false) !== true || !empty($garage['has_motion'])) {
     fwrite(STDERR, 'Garage contact flags ' . json_encode($garage) . "\n");
+    exit(1);
+}
+if ((int) ($garage['open_changed_at'] ?? 0) !== 1_700_000_000) {
+    fwrite(STDERR, 'Protect openStatusChangedAt not mapped ' . json_encode($garage) . "\n");
     exit(1);
 }
 $bathMotion = null;

@@ -2442,10 +2442,12 @@ final class YarboHome
     }
 
     /**
-     * Tiny Doors-tile caption: "Opened 14:32" / "Closed 2 Nov 18:04".
+     * Tiny Doors-tile caption: "Last change 14:32" / "Last change 2 Nov 18:04".
+     * $open is kept for callers; the caption no longer says Opened/Closed.
      */
     public static function openChangedText(bool $open, int $at, string $timezone = 'Europe/Zurich'): string
     {
+        unset($open);
         if ($at <= 0) {
             return '';
         }
@@ -2454,7 +2456,7 @@ final class YarboHome
             return '';
         }
 
-        return ($open ? 'Opened' : 'Closed') . ' ' . $when;
+        return 'Last change ' . $when;
     }
 
     /**
@@ -2489,7 +2491,9 @@ final class YarboHome
     }
 
     /**
-     * Remember Open↔Closed edges for the Doors tile (UniFi has no last-changed field).
+     * Last Open↔Closed time for the Doors tile.
+     * Prefer UniFi timestamps (Protect openStatusChangedAt / Access last_activity);
+     * otherwise remember flips the panel observes between polls.
      *
      * @param list<array<string, mixed>> $rows
      * @param array<string, mixed> $store
@@ -2513,12 +2517,26 @@ final class YarboHome
             if ($open !== true && $open !== false) {
                 continue;
             }
+            $reported = isset($row['open_changed_at']) && is_numeric($row['open_changed_at'])
+                ? (int) $row['open_changed_at']
+                : 0;
+            if ($reported < 0) {
+                $reported = 0;
+            }
             $prev = is_array($all[$id] ?? null) ? $all[$id] : null;
-            if ($prev === null) {
-                // First sight: keep state, hide caption until a real edge.
+            $prevAt = (int) ($prev['at'] ?? 0);
+            $prevOpen = array_key_exists('open', $prev ?? []) ? (bool) $prev['open'] : null;
+            if ($reported > 0) {
+                // Controller knows the real last change — use it even on first sight.
+                if ($prev === null || $prevOpen !== $open || $prevAt !== $reported) {
+                    $all[$id] = ['open' => $open, 'at' => $reported];
+                    $dirty = true;
+                }
+            } elseif ($prev === null) {
+                // No UniFi stamp yet: seed state, hide caption until a real edge.
                 $all[$id] = ['open' => $open, 'at' => 0];
                 $dirty = true;
-            } elseif ((bool) ($prev['open'] ?? null) !== $open) {
+            } elseif ($prevOpen !== $open) {
                 $all[$id] = ['open' => $open, 'at' => $now];
                 $dirty = true;
             }
@@ -2526,6 +2544,8 @@ final class YarboHome
             if ($at > 0) {
                 $row['open_changed_at'] = $at;
                 $row['open_changed_text'] = self::openChangedText($open, $at, $tz);
+            } else {
+                unset($row['open_changed_at'], $row['open_changed_text']);
             }
         }
         unset($row);
@@ -3155,7 +3175,7 @@ final class YarboHome
                 'locked' => array_key_exists('locked', $device) ? (bool) $device['locked'] : null,
                 'status' => (string) ($device['status'] ?? ''),
             ];
-            foreach (['native_id', 'door_id', 'dps', 'dps_label', 'has_dps', 'has_open', 'open', 'product'] as $key) {
+            foreach (['native_id', 'door_id', 'dps', 'dps_label', 'has_dps', 'has_open', 'open', 'product', 'open_changed_at'] as $key) {
                 if (array_key_exists($key, $device)) {
                     $row[$key] = $device[$key];
                 }

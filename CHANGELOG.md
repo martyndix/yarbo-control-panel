@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.229] - 2026-11-09
+
+### Changed
+- **Doors tile — Last change:** the muted caption under each door/window is now `Last change …` (not `Opened` / `Closed`). Protect contact sensors use UniFi’s `openStatusChangedAt` so times show even when the panel missed the flip between polls; Access doors still remember flips when the controller has no stamp.
+
 ## [4.0.228] - 2026-11-08
 
 ### Fixed
