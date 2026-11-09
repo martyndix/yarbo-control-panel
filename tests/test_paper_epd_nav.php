@@ -17,8 +17,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.83"'), 'firmware 0.1.83');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.83';"), 'panel firmware pin 0.1.83');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.84"'), 'firmware 0.1.84');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.84';"), 'panel firmware pin 0.1.84');
 assert_true(str_contains($fw, 'void waitEpdReady()'), 'wait for e-paper BUSY');
 assert_true(str_contains($fw, 'void serviceTouchQueue()'), 'touch handled as a queue');
 if (!preg_match('/void waitEpdReady\(\)\n\{\n(?:.*\n)*?\}\n\n/', $fw, $wait)) {
@@ -57,11 +57,15 @@ assert_true(!str_contains($show[0], 'httpLymowMaps('), 'showPage must not block 
 assert_true(str_contains($fw, 'void serviceDeferredFetches()'), 'deferred fetch helper');
 assert_true(str_contains($fw, 'bool uiIsHot()'), 'ui hot window skips background HTTP');
 assert_true(str_contains($fw, 'never start background HTTP while the user is tapping'), 'loop prefers taps over poll');
+assert_true(str_contains($fw, 'PAPERMONO_EPD_MIN_GAP_MS'), 'beginEpdFrame enforces refresh gap');
+assert_true(str_contains($ver, '#define PAPERMONO_EPD_MIN_GAP_MS'), 'gap define in version.h');
 assert_true(str_contains($docs, 'A/B is taken while the panel is still refreshing'), 'docs mention A/B during refresh');
-assert_true(str_contains($docs, '0.1.83'), 'docs mention snappy nav firmware');
+assert_true(str_contains($docs, '0.1.84'), 'docs mention current firmware');
+assert_true(str_contains($docs, 'NIGHT MODE'), 'docs mention night mode on NOTE');
 assert_true(str_contains($change, '## [4.0.208]'), 'changelog 4.0.208');
 assert_true(str_contains($change, '## [4.0.207]'), 'changelog 4.0.207');
 assert_true(str_contains($change, '## [4.0.63]'), 'changelog 4.0.63');
 assert_true(str_contains($change, '## [4.0.243]'), 'changelog 4.0.243');
+assert_true(str_contains($change, '## [4.0.244]'), 'changelog 4.0.244');
 
 echo "test_paper_epd_nav.php ok\n";
