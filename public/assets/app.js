@@ -11527,11 +11527,16 @@ function applyPaperMonoKindUi(dashboard) {
     }
     if (els.papermonoFwStatus) {
         if (fw) {
-            let built = 'not built yet — click Build firmware';
-            if (fw.built && fw.needs_build) {
-                built = 'built, but source is newer — click Build firmware';
+            const auto = dashboard?.auto_build || {};
+            let built = 'not built yet — building automatically';
+            if (auto.running || auto.state === 'queued' || auto.state === 'running') {
+                built = auto.message || 'building automatically in the background';
+            } else if (fw.built && fw.needs_build) {
+                built = 'built, but source is newer — building automatically';
             } else if (fw.built) {
                 built = 'built on this host';
+            } else if (auto.state === 'failed' && auto.error) {
+                built = `build failed — ${auto.error}`;
             }
             els.papermonoFwStatus.textContent = `${label} firmware ${fw.version} (${built}).`;
         } else if (dashboard) {
@@ -11543,7 +11548,7 @@ function applyPaperMonoKindUi(dashboard) {
         const extra = kind === 'papercolor'
             ? ' Paper Colour is Spectra 6: A/B change pages, C locks. It is slow — do not expect 15-second redraws.'
             : ' The firmware keeps the SSD1677 healthy: full refresh every 10 partials, no redraw when nothing changed, 15s poll.';
-        hint.innerHTML = `Leave this Settings page open. Click <strong>Build firmware</strong> for this tablet (first build can take several minutes and installs PlatformIO if needed). <strong>Flash</strong> builds automatically if the binary is missing or stale, then sends Wi-Fi over USB. If the port list fails, click <strong>Install USB tools</strong>.${extra} Keep the tablet out of direct sun.`;
+        hint.innerHTML = `Leave this Settings page open. Missing or stale PaperMono / Paper Colour firmware builds automatically in the background after a panel update (or when this page loads). <strong>Build firmware</strong> still forces a rebuild now. <strong>Flash</strong> also builds first if needed, then sends Wi-Fi over USB. If the port list fails, click <strong>Install USB tools</strong>.${extra} Keep the tablet out of direct sun.`;
     }
     applyPaperPreviewModules();
 }
@@ -12339,13 +12344,36 @@ function paperCompanionPanelUrlDefault() {
     return window.location.origin;
 }
 
+async function ensurePaperFirmwareAutoBuild(dashboard) {
+    const needed = Boolean(
+        dashboard?.auto_build?.needed
+        || dashboard?.firmware?.papermono?.needs_build
+        || dashboard?.firmware?.papercolor?.needs_build
+    );
+    if (!needed || dashboard?.auto_build?.running) {
+        return dashboard;
+    }
+    try {
+        const res = await fetch('/api/device.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'ensure_firmware_build' }),
+        });
+        const data = await parseJsonResponse(res);
+        return data?.ok ? data : dashboard;
+    } catch (_err) {
+        return dashboard;
+    }
+}
+
 async function loadPaperMonoDashboard(opts = {}) {
     if (els.papermonoPanelUrl && !els.papermonoPanelUrl.value) {
         els.papermonoPanelUrl.value = paperCompanionPanelUrlDefault();
     }
     try {
         const res = await fetch('/api/device.php?action=dashboard');
-        const data = await parseJsonResponse(res);
+        let data = await parseJsonResponse(res);
+        data = await ensurePaperFirmwareAutoBuild(data) || data;
         paperMonoDashboardCache = data;
         applyPaperMonoKindUi(data);
         applyPaperLogoPreview(data.logo_url || null);

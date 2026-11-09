@@ -34,9 +34,20 @@ final class YarboPaperDevice
     public const FIRMWARE_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware.bin';
     public const FIRMWARE_FACTORY_RELATIVE = 'firmware/papermono/.pio/build/papermono/firmware-factory.bin';
     public const FIRMWARE_FACTORY_RELATIVE_COLOR = 'firmware/papercolor/.pio/build/papercolor/firmware-factory.bin';
+    public const AUTO_BUILD_LOCK_MAX_S = 2400;
 
     public function __construct(private readonly string $projectRoot)
     {
+    }
+
+    public function autoBuildLockPath(): string
+    {
+        return $this->projectRoot . '/data/paper-firmware-build.lock';
+    }
+
+    public function autoBuildStatusPath(): string
+    {
+        return $this->projectRoot . '/data/paper-firmware-build.json';
     }
 
     public function storePath(): string
@@ -112,11 +123,214 @@ final class YarboPaperDevice
                     'pio' => 'pio run -e papercolor -d firmware/papercolor',
                 ],
             ],
+            'auto_build' => $this->autoBuildPublic(),
             'devices' => $this->publicTablets(),
             'web_client' => $this->publicDevice($this->webClient()),
             'prefs' => $this->publicPrefs(),
             'paper_remote' => (new YarboPaperRemote($this->projectRoot))->publicView(),
         ] + $this->logoPublicView();
+    }
+
+    /**
+     * @return array{running: bool, state: string, message: ?string, kinds: list<string>, updated_at: ?string, error: ?string}
+     */
+    public function autoBuildPublic(): array
+    {
+        $status = $this->readAutoBuildStatus();
+        $running = $this->autoBuildRunning();
+
+        return [
+            'running' => $running,
+            'state' => $running
+                ? 'running'
+                : (string) ($status['state'] ?? 'idle'),
+            'message' => isset($status['message']) && is_string($status['message'])
+                ? $status['message']
+                : null,
+            'kinds' => isset($status['kinds']) && is_array($status['kinds'])
+                ? array_values(array_filter($status['kinds'], 'is_string'))
+                : [],
+            'updated_at' => isset($status['updated_at']) && is_string($status['updated_at'])
+                ? $status['updated_at']
+                : null,
+            'error' => isset($status['error']) && is_string($status['error'])
+                ? $status['error']
+                : null,
+            'needed' => $this->firmwareNeedsBuild(self::KIND_MONO)
+                || $this->firmwareNeedsBuild(self::KIND_COLOR),
+        ];
+    }
+
+    /**
+     * Start a background compile when PaperMono / Paper Colour binaries are missing or stale.
+     *
+     * @return array<string, mixed>
+     */
+    public function queueAutoBuild(): array
+    {
+        $needed = [];
+        if ($this->firmwareNeedsBuild(self::KIND_MONO)) {
+            $needed[] = self::KIND_MONO;
+        }
+        if ($this->firmwareNeedsBuild(self::KIND_COLOR)) {
+            $needed[] = self::KIND_COLOR;
+        }
+        if ($needed === []) {
+            return [
+                'ok' => true,
+                'queued' => false,
+                'needed' => false,
+                'message' => 'PaperMono and Paper Colour firmware binaries are current.',
+                'auto_build' => $this->autoBuildPublic(),
+            ] + $this->dashboard();
+        }
+        if ($this->autoBuildRunning()) {
+            return [
+                'ok' => true,
+                'queued' => false,
+                'needed' => true,
+                'running' => true,
+                'message' => 'Firmware build already running in the background.',
+                'auto_build' => $this->autoBuildPublic(),
+            ] + $this->dashboard();
+        }
+
+        $this->writeAutoBuildStatus([
+            'state' => 'queued',
+            'message' => 'Queued automatic firmware build for '
+                . implode(' and ', array_map([$this, 'kindLabel'], $needed)) . '.',
+            'kinds' => $needed,
+            'error' => null,
+        ]);
+
+        if (!$this->spawnAutoBuildProcess()) {
+            $this->writeAutoBuildStatus([
+                'state' => 'failed',
+                'message' => 'Could not start the automatic firmware build.',
+                'kinds' => $needed,
+                'error' => 'Could not start the automatic firmware build.',
+            ]);
+
+            return [
+                'ok' => false,
+                'queued' => false,
+                'needed' => true,
+                'error' => 'Could not start the automatic firmware build.',
+                'auto_build' => $this->autoBuildPublic(),
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'queued' => true,
+            'needed' => true,
+            'kinds' => $needed,
+            'message' => 'Building '
+                . implode(' and ', array_map([$this, 'kindLabel'], $needed))
+                . ' firmware in the background…',
+            'auto_build' => $this->autoBuildPublic(),
+        ] + $this->dashboard();
+    }
+
+    /**
+     * Called by scripts/paper_firmware_build.php — builds every stale kind.
+     *
+     * @return array<string, mixed>
+     */
+    public function runAutoBuild(): array
+    {
+        if (!$this->acquireAutoBuildLock()) {
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'message' => 'Another firmware build is already running.',
+                'auto_build' => $this->autoBuildPublic(),
+            ];
+        }
+
+        $kinds = [];
+        if ($this->firmwareNeedsBuild(self::KIND_MONO)) {
+            $kinds[] = self::KIND_MONO;
+        }
+        if ($this->firmwareNeedsBuild(self::KIND_COLOR)) {
+            $kinds[] = self::KIND_COLOR;
+        }
+        if ($kinds === []) {
+            $this->writeAutoBuildStatus([
+                'state' => 'idle',
+                'message' => 'PaperMono and Paper Colour firmware binaries are current.',
+                'kinds' => [],
+                'error' => null,
+            ]);
+            $this->releaseAutoBuildLock();
+
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'message' => 'Nothing to build.',
+                'auto_build' => $this->autoBuildPublic(),
+            ];
+        }
+
+        $built = [];
+        $logs = [];
+        try {
+            foreach ($kinds as $kind) {
+                $label = $this->kindLabel($kind);
+                $this->writeAutoBuildStatus([
+                    'state' => 'running',
+                    'message' => 'Building ' . $label . ' firmware…',
+                    'kinds' => $kinds,
+                    'current' => $kind,
+                    'error' => null,
+                ]);
+                $result = $this->buildFirmware($kind, false);
+                $logs[$kind] = $this->tailLog((string) ($result['log'] ?? ''), 600);
+                if (!($result['ok'] ?? false)) {
+                    $error = (string) ($result['error'] ?? ('Could not build ' . $label . ' firmware.'));
+                    $this->writeAutoBuildStatus([
+                        'state' => 'failed',
+                        'message' => $error,
+                        'kinds' => $kinds,
+                        'built' => $built,
+                        'error' => $error,
+                        'log' => $logs[$kind],
+                    ]);
+
+                    return [
+                        'ok' => false,
+                        'error' => $error,
+                        'built' => $built,
+                        'auto_build' => $this->autoBuildPublic(),
+                        'log' => $logs[$kind],
+                    ];
+                }
+                if (empty($result['skipped'])) {
+                    $built[] = $kind;
+                }
+            }
+            $labels = array_map([$this, 'kindLabel'], $built !== [] ? $built : $kinds);
+            $message = $built === []
+                ? 'PaperMono and Paper Colour firmware binaries are current.'
+                : implode(' and ', $labels) . ' firmware built automatically.';
+            $this->writeAutoBuildStatus([
+                'state' => 'done',
+                'message' => $message,
+                'kinds' => $kinds,
+                'built' => $built,
+                'error' => null,
+            ]);
+
+            return [
+                'ok' => true,
+                'built' => $built,
+                'kinds' => $kinds,
+                'message' => $message,
+                'auto_build' => $this->autoBuildPublic(),
+            ];
+        } finally {
+            $this->releaseAutoBuildLock();
+        }
     }
 
     public function logoPath(): string
@@ -2058,6 +2272,130 @@ final class YarboPaperDevice
             'message' => $label . ' firmware ' . $this->firmwareVersionForKind($kind) . ' is built. You can flash it over USB.',
             'log' => $this->tailLog($log, 800),
         ] + $this->dashboard();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function readAutoBuildStatus(): array
+    {
+        $path = $this->autoBuildStatusPath();
+        if (!is_file($path)) {
+            return [];
+        }
+        $raw = file_get_contents($path);
+        if (!is_string($raw) || trim($raw) === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * @param array<string, mixed> $status
+     */
+    private function writeAutoBuildStatus(array $status): void
+    {
+        $dir = dirname($this->autoBuildStatusPath());
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        $status['updated_at'] = gmdate('c');
+        file_put_contents(
+            $this->autoBuildStatusPath(),
+            json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
+        );
+    }
+
+    public function autoBuildRunning(): bool
+    {
+        $lock = $this->autoBuildLockPath();
+        if (!is_file($lock)) {
+            $status = $this->readAutoBuildStatus();
+            $state = (string) ($status['state'] ?? '');
+
+            return in_array($state, ['queued', 'running'], true)
+                && isset($status['updated_at'])
+                && is_string($status['updated_at'])
+                && (time() - (int) strtotime($status['updated_at'])) < 30;
+        }
+        $age = time() - (int) @filemtime($lock);
+        if ($age > self::AUTO_BUILD_LOCK_MAX_S) {
+            @unlink($lock);
+
+            return false;
+        }
+        $pid = (int) trim((string) @file_get_contents($lock));
+        if ($pid > 1 && function_exists('posix_kill') && @posix_kill($pid, 0)) {
+            return true;
+        }
+        // Lock without a live pid — treat recent locks as running (Windows / no posix).
+        if ($age < 15) {
+            return true;
+        }
+        @unlink($lock);
+
+        return false;
+    }
+
+    private function acquireAutoBuildLock(): bool
+    {
+        if ($this->autoBuildRunning()) {
+            return false;
+        }
+        $dir = dirname($this->autoBuildLockPath());
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return false;
+        }
+        @file_put_contents($this->autoBuildLockPath(), (string) getmypid() . "\n");
+
+        return true;
+    }
+
+    private function releaseAutoBuildLock(): void
+    {
+        $lock = $this->autoBuildLockPath();
+        if (is_file($lock)) {
+            @unlink($lock);
+        }
+    }
+
+    private function spawnAutoBuildProcess(): bool
+    {
+        $script = $this->projectRoot . '/scripts/paper_firmware_build.php';
+        if (!is_file($script)) {
+            return false;
+        }
+        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $log = $this->projectRoot . '/data/paper-firmware-build.log';
+        $command = sprintf(
+            'cd %s && %s %s --once >> %s 2>&1 < /dev/null &',
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($php),
+            escapeshellarg($script),
+            escapeshellarg($log)
+        );
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['file', $log, 'a'],
+            2 => ['file', $log, 'a'],
+        ];
+        $process = @proc_open(
+            ['bash', '-c', $command],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot
+        );
+        if (!is_resource($process)) {
+            return false;
+        }
+        if (isset($pipes[0]) && is_resource($pipes[0])) {
+            fclose($pipes[0]);
+        }
+        proc_close($process);
+
+        return true;
     }
 
     public function firmwareNeedsBuild(?string $kind = null): bool

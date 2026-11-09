@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.242] - 2026-11-09
+
+### Changed
+- **PaperMono / Paper Colour firmware auto-build:** missing or stale binaries compile in the background when the panel starts (and when E-paper Settings loads). You no longer need to click **Build firmware** after a panel update before USB flash or Wi-Fi Update — that button still forces a rebuild.
+
 ## [4.0.241] - 2026-11-09
 
 ### Changed

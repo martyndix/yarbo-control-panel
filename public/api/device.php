@@ -315,6 +315,10 @@ if ($action === 'build_firmware') {
     json_response($devices->buildFirmware($input['kind'] ?? null, true));
 }
 
+if ($action === 'ensure_firmware_build') {
+    json_response($devices->queueAutoBuild());
+}
+
 if ($action === 'configure_usb') {
     json_response($devices->configureUsb($input));
 }

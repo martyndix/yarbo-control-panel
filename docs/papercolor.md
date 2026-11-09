@@ -17,12 +17,12 @@ On the **same machine that runs the panel**:
 
 1. Plug the PaperColor in by USB. Hold the side power/reset about **3 seconds** for download mode (M5Stack docs).
 2. Open the panel → **Settings → E-paper companions**.
-3. Choose **Paper Colour** (not PaperMono). Click **Build firmware** and wait until it finishes.
+3. Choose **Paper Colour** (not PaperMono). Wait until the firmware status says built (auto-build runs after a panel update, or when E-paper Settings loads). **Build firmware** still forces a rebuild.
 4. Refresh USB ports and select the tablet. If the list fails, click **Install USB tools**.
 5. Enter 2.4 GHz Wi-Fi, the panel URL as the tablet will reach it (not `localhost`), and a device name.
 6. Click **Flash Paper Colour firmware & send Wi-Fi**. Leave Settings open. Flash builds first if needed.
 
-Rebuild after panel updates that bump Colour firmware (`0.2.11-colour` and later): **Build firmware**, then either USB flash once or, after this OTA-capable build is on the tablet, Settings → **Update** over Wi-Fi.
+After panel updates that bump Colour firmware, the binary rebuilds automatically in the background. When status says built, either USB flash once or, after this OTA-capable build is on the tablet, Settings → **Update** over Wi-Fi.
 
 **Send Wi-Fi only** reuses already-flashed firmware and pushes the same `CFG:{...}` JSON as PaperMono. After esptool resets the ESP32-S3, USB serial drops and the helper waits for `CFG_OK`.
 
