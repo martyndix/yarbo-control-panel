@@ -18,8 +18,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.80"'), 'firmware 0.1.80');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.80';"), 'panel firmware pin 0.1.80');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.81"'), 'firmware 0.1.81');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.81';"), 'panel firmware pin 0.1.81');
 assert_true(str_contains($ver, '#define PAPERMONO_WIFI_SCAN'), 'wifi scan UI constant');
 assert_true(str_contains($ver, '#define PAPERMONO_WIFI_SCAN_MS 400'), 'longer dwell per channel');
 assert_true(str_contains($fw, 'prefs.putString("gssid", guestSsid)'), 'guest SSID NVS');
@@ -36,7 +36,8 @@ assert_true(str_contains($fw, 'void wifiStartGuest()'), 'fall back to guest SSID
 assert_true(str_contains($fw, 'void saveGuestWifiPrefs()'), 'guest save does not rewrite home NVS');
 assert_true(str_contains($fw, 'saveGuestWifiPrefs();'), 'SAVE/CLEAR travel uses guest-only prefs');
 assert_true(str_contains($fw, 'if (wifiSsid.length() && ssid == wifiSsid)'), 'scan skips flashed home SSID');
-assert_true(str_contains($fw, "if (WiFi.status() != WL_CONNECTED) {\n        wifiStartGuest();"), 'saving at home does not join guest');
+assert_true(str_contains($fw, 'wifiHomeAbsent = true'), 'saving travel offline prefers guest');
+assert_true(str_contains($fw, 'wifiStartGuest();'), 'guest join helper used');
 assert_true(str_contains($fw, 'drawKeyboard(int y0, bool wifiKeys)'), 'password keyboard has SAVE/shift');
 assert_true(str_contains($fw, 'kbShift'), 'shift for mixed-case passwords');
 assert_true(!str_contains($fw, 'wifiSsid = wifiPickSsid'), 'guest save must not overwrite home SSID');
@@ -45,16 +46,22 @@ assert_true(str_contains($fw, 'drawString("Home  "'), 'DEVICE shows flashed Home
 assert_true(!str_contains($fw, 'drawString("Wi-Fi  "'), 'DEVICE must not label the live AP as Wi-Fi');
 assert_true(str_contains($docs, 'REMOTE WIFI'), 'docs DEVICE remote wifi');
 assert_true(str_contains($docs, 'does not overwrite USB'), 'docs home credentials stay');
-assert_true(str_contains($docs, 'USB-flashed **Home**'), 'docs Home vs Travel labels');
+assert_true(str_contains($docs, 'USB-flashed **Home**') || str_contains($docs, '**Home** (USB flash)'), 'docs Home vs Travel labels');
 assert_true(str_contains($change, '## [4.0.58]'), 'changelog 4.0.58');
 assert_true(str_contains($change, '## [4.0.59]'), 'changelog 4.0.59');
 assert_true(str_contains($change, '## [4.0.63]'), 'changelog 4.0.63');
-assert_true(str_contains($html, 'firmware 0.1.80'), 'settings hint 0.1.80');
+assert_true(str_contains($change, '## [4.0.239]'), 'changelog 4.0.239');
+assert_true(str_contains($html, 'firmware 0.1.81'), 'settings hint 0.1.81');
 assert_true(str_contains($fw, 'void wifiRetryLast()'), 'drop retries last AP');
 assert_true(str_contains($fw, 'WiFi.setAutoReconnect(true)'), 'driver auto-reconnect stays on');
 assert_true(str_contains($fw, 'WiFi.persistent(false)'), 'STA creds are not rewritten in NVS');
 assert_true(str_contains($ver, '#define PAPERMONO_WIFI_GRACE_MS 2000'), 'grace before forcing a rejoin');
 assert_true(str_contains($fw, "else if (WiFi.status() != WL_CONNECTED) {\n                wifiStartGuest();"), 'travel rejoin after home look scan');
 assert_true(!str_contains($fw, 'WiFi.disconnect(true, false)'), 'begin must not power the radio off');
+assert_true(str_contains($fw, 'wifiLiveStatusLine'), 'DEVICE shows live Wi-Fi status');
+assert_true(str_contains($fw, 'Travel is 2.4 GHz only'), 'DEVICE reminds 2.4 GHz');
+assert_true(str_contains($fw, 'drawButton(248, 336, 100, 44, "JOIN"'), 'DEVICE JOIN travel button');
+assert_true(str_contains($fw, 'wifiHomeAbsent'), 'prefer travel when home SSID missing');
+assert_true(str_contains($fw, 'AP not found (need 2.4 GHz)'), 'status explains missing AP');
 
 echo "test_paper_guest_wifi.php ok\n";
