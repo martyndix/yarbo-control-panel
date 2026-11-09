@@ -2652,6 +2652,16 @@ bool lymowRunning()
         || lymowWorkStatus == 8 || lymowWorkStatus == 9 || lymowWorkStatus == 10;
 }
 
+bool lymowAnyZoneOn()
+{
+    for (int i = 0; i < lymowZoneN; i++) {
+        if (lymowZoneOn[i] && lymowZoneEnabled[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool lymowAllZonesOn()
 {
     if (lymowZoneN < 1) {
@@ -2724,11 +2734,13 @@ void drawLymowPage(bool forceFull)
 
     bool paused = lymowPaused();
     bool running = lymowRunning();
+    bool canStart = paused || lymowAnyZoneOn();
     // START/RESUME, optional PAUSE, DOCK, CANCEL
     int cmds = 3 + (running && !paused ? 1 : 0);
     int cw = (W - 32 - gap * (cmds - 1)) / cmds;
     int cx = 16;
-    drawButton(cx, cmdY, cw, cmdH, paused ? "RESUME" : "START", false);
+    // START is inverted only when at least one zone is selected (RESUME always ready).
+    drawButton(cx, cmdY, cw, cmdH, paused ? "RESUME" : "START", canStart);
     cx += cw + gap;
     if (running && !paused) {
         drawButton(cx, cmdY, cw, cmdH, "PAUSE", false);
@@ -2756,7 +2768,7 @@ void drawLymowPage(bool forceFull)
             int bx = 16 + col * (zoneW + gap);
             int by = zoneY + row * (zoneH + zoneGap);
             String label = lymowZoneNames[z];
-            bool on = allOn || lymowZoneOn[z];
+            bool on = lymowZoneOn[z];
             if (!lymowZoneEnabled[z]) {
                 label = label.substring(0, 10) + " off";
             }
@@ -2857,6 +2869,11 @@ void handleLymowTouch(int x, int y)
         int dockSlot = (running && !paused) ? 2 : 1;
         int cancelSlot = (running && !paused) ? 3 : 2;
         if (hit == 0) {
+            if (!paused && !lymowAnyZoneOn()) {
+                lastError = "Select a zone";
+                drawScreen(false);
+                return;
+            }
             lymowSend(paused ? "resume" : "start");
         } else if (hit == pauseSlot) {
             lymowSend("pause");
@@ -5189,7 +5206,8 @@ bool httpGetStatus()
             } else if (!o["isEnabled"].isNull()) {
                 enabled = o["isEnabled"] | true;
             }
-            bool on = enabled;
+            // Never pre-select zones — START stays off until the user picks one.
+            bool on = false;
             for (int k = 0; k < keepN; k++) {
                 if (keepIds[k] == hid) {
                     on = keepSel[k] && enabled;

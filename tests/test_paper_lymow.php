@@ -20,10 +20,10 @@ $php = (string) file_get_contents($rootDir . '/src/YarboPaperDevice.php');
 $fw = (string) file_get_contents($rootDir . '/firmware/papermono/src/main.cpp');
 $api = (string) file_get_contents($rootDir . '/public/api/device.php');
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.81"'), 'firmware 0.1.81');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.82"'), 'firmware 0.1.82');
 assert_true(str_contains($ver, 'PAPERMONO_LYMOW_ZONE_MAX'), 'zone max define');
 assert_true(str_contains($ver, 'PAPERMONO_LYMOW_ZONE_VISIBLE'), 'zone visible define');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.81';"), 'panel pin 0.1.81');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.82';"), 'panel pin 0.1.82');
 assert_true(str_contains($php, "'lymow_zones'"), 'compact includes lymow_zones');
 assert_true(str_contains($php, "'lymow_work_status'"), 'compact includes work status');
 
@@ -41,6 +41,11 @@ assert_true(str_contains($fw, '"CANCEL"'), 'firmware Cancel button');
 assert_true(str_contains($fw, 'lymowSend("cancel")'), 'firmware cancel touch');
 assert_true(str_contains($fw, 'lymow_zones'), 'firmware parses lymow_zones');
 assert_true(str_contains($fw, 'PAPERMONO_PAGE_LYMOW)'), 'touch routes Lymow page');
+assert_true(str_contains($fw, 'lymowAnyZoneOn'), 'firmware any-zone helper');
+assert_true(str_contains($fw, 'bool on = false;'), 'zones default unselected');
+assert_true(str_contains($fw, 'Never pre-select zones'), 'comment documents no preselect');
+assert_true(str_contains($fw, 'paused || lymowAnyZoneOn()'), 'START gated on zone selection');
+assert_true(str_contains($fw, '!paused && !lymowAnyZoneOn()'), 'START touch ignored without zone');
 
 $tmp = sys_get_temp_dir() . '/yarbo-paper-lymow-' . bin2hex(random_bytes(3));
 mkdir($tmp . '/data', 0775, true);
@@ -82,6 +87,8 @@ $change = (string) file_get_contents($rootDir . '/CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.226]'), 'changelog 4.0.226');
 assert_true(str_contains($change, 'active zone'), 'changelog mentions active zone');
 assert_true(str_contains($change, '## [4.0.225]'), 'changelog 4.0.225');
+assert_true(str_contains($change, '## [4.0.240]'), 'changelog 4.0.240');
+assert_true(str_contains($change, 'no longer arrive pre-selected'), 'changelog mentions unselected zones');
 assert_true(str_contains($change, 'Cancel'), 'changelog mentions Cancel');
 assert_true(str_contains($change, 'PaperMono'), 'changelog mentions PaperMono');
 
@@ -89,5 +96,8 @@ $docs = (string) file_get_contents($rootDir . '/docs/papermono.md');
 assert_true(str_contains($docs, 'lymow_command'), 'docs mention lymow_command');
 assert_true(str_contains($docs, 'zone chips'), 'docs mention zone chips');
 assert_true(str_contains($docs, 'CANCEL'), 'docs mention CANCEL');
+assert_true(str_contains($docs, 'not pre-selected'), 'docs mention zones not pre-selected');
+$lyDocs = (string) file_get_contents($rootDir . '/docs/lymow.md');
+assert_true(str_contains($lyDocs, 'Zones start unselected'), 'lymow docs unselected start');
 
 fwrite(STDOUT, "test_paper_lymow.php ok\n");
