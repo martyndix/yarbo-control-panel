@@ -113,14 +113,71 @@ $php = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
 assert_true(str_contains($php, 'isExternalHoldActive($vb)'), 'paper compact checks Vestaboard app hold');
 assert_true(str_contains($php, "vestaboard_mode"), 'compact exposes vestaboard_mode');
 assert_true(str_contains($php, 'night_active'), 'compact checks night_active');
+assert_true(str_contains($php, 'isNightHours()'), 'compact uses night clock');
+assert_true(str_contains($php, 'isQuietHours()'), 'compact uses quiet clock');
 $fw = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/main.cpp');
 assert_true(str_contains($fw, 'NIGHT MODE'), 'Note page labels night mode');
 assert_true(str_contains($fw, 'QUIET MODE'), 'Note page labels quiet mode');
 assert_true(str_contains($fw, 'PAPERMONO_EPD_MIN_GAP_MS'), 'e-paper min gap');
 $ver = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
 assert_true(str_contains($ver, 'PAPERMONO_EPD_MIN_GAP_MS'), 'version.h defines EPD gap');
+assert_true(str_contains($ver, 'PAPERMONO_LOCK_POLL_MS 20000UL'), 'lock poll 20s');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.105]'), 'changelog 4.0.105');
 assert_true(str_contains($change, '## [4.0.244]'), 'changelog 4.0.244');
+assert_true(str_contains($change, '## [4.0.246]'), 'changelog 4.0.246');
+
+// Clock-only night (watcher has not set night_active yet): still night mode,
+// and prefer composed night layout over leftover live board_codes.
+$clockNightCodes = [
+    $vb->encodeLine('NIGHT   CLOCK  '),
+    $vb->encodeLine('BEFORE  POST   '),
+    $vb->encodeLine('HOUSE   SECURE '),
+];
+file_put_contents($root . '/data/vestaboard-config.json', json_encode([
+    'enabled' => true,
+    'night_hours_enabled' => true,
+    'night_start' => '00:00',
+    'night_end' => '23:59',
+    'night_active' => false,
+    'quiet_active' => false,
+    'quiet_timezone' => 'UTC',
+    'last_live_codes' => $liveCodes,
+    'board_codes' => $liveCodes,
+    'external_hold' => false,
+], JSON_UNESCAPED_SLASHES));
+// nightLayout needs UniFi contacts available — stub inventory so nightHoursAvailable.
+file_put_contents($root . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'powerwall' => true, 'vestaboard' => true, 'unifi' => true, 'home' => true],
+    'vestaboard_live' => 'powerwall',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($root . '/data/unifi-config.json', json_encode([
+    'host' => 'x',
+    'show_on_home' => ['unifi:sensor:front'],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($root . '/data/unifi-inventory.json', json_encode([
+    'cameras' => [],
+    'lights' => [],
+    'relays' => [],
+    'doors' => [],
+    'hubs' => [],
+    'sensors' => [[
+        'id' => 'unifi:sensor:front',
+        'native_id' => 'front',
+        'name' => 'Front Door',
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'has_open' => true,
+        'open' => false,
+        'status' => 'Closed',
+        'on' => false,
+    ]],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($root . '/data/home.json', json_encode(['hidden' => [], 'last_devices' => []], JSON_UNESCAPED_SLASHES));
+$clockNight = $compact->invoke(new YarboPaperDevice($root), null, false, null);
+assert_true(($clockNight['vestaboard_mode'] ?? '') === 'night', 'clock night sets mode: ' . json_encode($clockNight['vestaboard_mode'] ?? null));
+assert_true(!empty($clockNight['vestaboard_night']), 'clock night sets flag');
+$clockLines = implode("\n", is_array($clockNight['vestaboard_lines'] ?? null) ? $clockNight['vestaboard_lines'] : []);
+assert_true(!str_contains($clockLines, 'POWERWALL'), 'clock night must not keep live Powerwall: ' . $clockLines);
 
 echo "test_paper_vestaboard_hold.php ok\n";

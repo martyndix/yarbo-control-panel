@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.246] - 2026-11-09
+
+### Fixed
+- **PaperMono night/quiet faster:** compact uses the night/quiet clock (not only the watcher sticky flag) so the lock screen and NOTE switch as soon as the window starts, and lock-screen polls every 20s instead of 60s. Firmware **0.1.86**.
+
 ## [4.0.245] - 2026-11-09
 
 ### Changed

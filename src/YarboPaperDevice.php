@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.85';
+    public const FIRMWARE_VERSION = '0.1.86';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.27-colour';
     public const OTA_ONLINE_MONO_S = 120;
@@ -1580,14 +1580,22 @@ final class YarboPaperDevice
     {
         $codes = null;
         $lines = null;
-        $night = !empty($vb['night_active']);
-        $quiet = !empty($vb['quiet_active']);
+        // Sticky flags flip when vestaboard_watch writes; also use the clock so
+        // PaperMono does not wait up to a watcher tick after night/quiet starts.
+        $nightPosted = !empty($vb['night_active']);
+        $quietPosted = !empty($vb['quiet_active']);
+        $night = $nightPosted || $vbObj->isNightHours();
+        $quiet = !$night && ($quietPosted || $vbObj->isQuietHours());
         $hold = $vbObj->isExternalHoldActive($vb);
         // Mirror what is actually on the Note during app hold / night / quiet.
         // Do not recompose Powerwall/Yarbo live over NIGHT MODE / SLEEP WELL.
         if ($hold || $night || $quiet) {
             $onBoard = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
-            if (!$this->vestaboardCodesBlank($onBoard)) {
+            // Before the watcher posts overnight, board_codes are still live —
+            // prefer the composed night/quiet layout so the tablet is not stuck
+            // on Powerwall with a NIGHT MODE label.
+            $mirrorBoard = $hold || ($night && $nightPosted) || ($quiet && $quietPosted);
+            if ($mirrorBoard && !$this->vestaboardCodesBlank($onBoard)) {
                 $codes = $onBoard;
                 $lines = YarboVestaboard::linesFromCodes($onBoard);
             } elseif ($night) {
@@ -1598,6 +1606,9 @@ final class YarboPaperDevice
                 $layout = $vbObj->quietLayout();
                 $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null);
                 $lines = is_array($layout['lines'] ?? null) ? array_values($layout['lines']) : null;
+            } elseif (!$this->vestaboardCodesBlank($onBoard)) {
+                $codes = $onBoard;
+                $lines = YarboVestaboard::linesFromCodes($onBoard);
             }
         }
         if ($this->vestaboardCodesBlank($codes)) {
