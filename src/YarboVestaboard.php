@@ -1015,8 +1015,9 @@ final class YarboVestaboard
     }
 
     /**
-     * While Yarbo/Lymow are mowing or in error, force that live page (All/Rotate yield).
-     * Both mowing → swap every 5 minutes; an error sticks until cleared.
+     * While Yarbo/Lymow are out working (mowing, heading out, docking) or in error,
+     * force that live page (All/Rotate yield). Both active → swap every 5 minutes;
+     * an error sticks until cleared.
      *
      * @param array{mowing?: bool, error?: bool}|null $yarboOverride
      * @param array{mowing?: bool, error?: bool}|null $lymowOverride
@@ -1204,6 +1205,40 @@ final class YarboVestaboard
     }
 
     /**
+     * Smart Display "mowing" means the robot is out: mowing, heading to the job,
+     * or docking home — not idle on the pad / paused.
+     *
+     * @param array<string, mixed> $parsed
+     * @return array{mowing: bool, error: bool}
+     */
+    public static function yarboActivityFromParsed(array $parsed): array
+    {
+        $error = (int) ($parsed['error_code'] ?? 0) !== 0;
+        $paused = (bool) ($parsed['planning_paused'] ?? false);
+        $planRunning = (bool) ($parsed['plan_running'] ?? false);
+        $returning = (bool) ($parsed['returning_to_dock'] ?? false);
+        $mowing = !$error && ((!$paused && $planRunning) || $returning);
+
+        return ['mowing' => $mowing, 'error' => $error];
+    }
+
+    /**
+     * Lymow work_status: 2/8/9 mowing, 4 docking, 10 pause-docking.
+     *
+     * @return array{mowing: bool, error: bool}
+     */
+    public static function lymowActivityFromData(array $data): array
+    {
+        $error = YarboLymow::hasError($data);
+        $work = isset($data['work_status']) && is_numeric($data['work_status'])
+            ? (int) $data['work_status']
+            : null;
+        $mowing = !$error && in_array($work, [2, 4, 8, 9, 10], true);
+
+        return ['mowing' => $mowing, 'error' => $error];
+    }
+
+    /**
      * @return array{mowing: bool, error: bool}
      */
     private function yarboActivitySnapshot(): array
@@ -1220,11 +1255,8 @@ final class YarboVestaboard
         }
         $cells = is_array($result['battery_cells'] ?? null) ? $result['battery_cells'] : null;
         $parsed = YarboTelemetry::parseForPanel($raw, $cells, $this->projectRoot);
-        $error = (int) ($parsed['error_code'] ?? 0) !== 0;
-        $paused = (bool) ($parsed['planning_paused'] ?? false);
-        $mowing = !$error && !$paused && (bool) ($parsed['plan_running'] ?? false);
 
-        return ['mowing' => $mowing, 'error' => $error];
+        return self::yarboActivityFromParsed($parsed);
     }
 
     /**
@@ -1233,13 +1265,8 @@ final class YarboVestaboard
     private function lymowActivitySnapshot(): array
     {
         $data = (new YarboLymow($this->projectRoot))->dashboardPayload();
-        $error = YarboLymow::hasError($data);
-        $work = isset($data['work_status']) && is_numeric($data['work_status'])
-            ? (int) $data['work_status']
-            : null;
-        $mowing = !$error && in_array($work, [2, 8, 9], true);
 
-        return ['mowing' => $mowing, 'error' => $error];
+        return self::lymowActivityFromData($data);
     }
 
     private function normalizeLiveResume(mixed $raw): ?string
