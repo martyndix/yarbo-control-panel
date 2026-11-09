@@ -370,6 +370,21 @@ if (($hubOpenedWord['dps_label'] ?? '') !== 'Open') {
     fwrite(STDERR, 'opened must map to Open ' . json_encode($hubOpenedWord) . "\n");
     exit(1);
 }
+$dpsSensor = null;
+foreach ($openedWord['sensors'] ?? [] as $row) {
+    if (is_array($row) && ($row['id'] ?? '') === 'unifi:sensor:dps-door1') {
+        $dpsSensor = $row;
+        break;
+    }
+}
+if (($dpsSensor['has_open'] ?? false) !== true || ($dpsSensor['open'] ?? null) !== true) {
+    fwrite(STDERR, 'Access DPS sensor must expose has_open + open for Automations ' . json_encode($dpsSensor) . "\n");
+    exit(1);
+}
+if ((int) ($dpsSensor['open_changed_at'] ?? 0) !== 0) {
+    fwrite(STDERR, 'Access DPS sensor must not use last_activity as open_changed_at ' . json_encode($dpsSensor) . "\n");
+    exit(1);
+}
 $garage = null;
 foreach ($probe['devices'] ?? [] as $row) {
     if (is_array($row) && ($row['id'] ?? '') === 'unifi:sensor:sense1') {

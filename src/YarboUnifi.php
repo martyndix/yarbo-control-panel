@@ -3504,6 +3504,8 @@ final class YarboUnifi
             'dps' => $dps,
             'dps_label' => $dpsLabel !== '' ? $dpsLabel : $status,
             'has_dps' => true,
+            // Same open/close capability as Protect contacts so Automations offer opens/closes.
+            'has_open' => true,
             'open' => $open ? true : ($closed ? false : null),
             'open_changed_at' => $openChangedAt > 0 ? $openChangedAt : 0,
         ];

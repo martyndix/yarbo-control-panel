@@ -238,6 +238,150 @@ $auto->delete('a-edge');
 $commands = [];
 @unlink($auto->statePath());
 
+// Access door-position sensor (and hub) automations follow live DPS open — not unlock stamps.
+assert_true(YarboHome::automationOpenState([
+    'dps' => 'close',
+    'dps_label' => 'Closed',
+    'open' => null,
+]) === false, 'automationOpenState reads Closed DPS');
+assert_true(YarboHome::automationOpenState([
+    'dps' => 'open',
+    'dps_label' => 'Open',
+    'open' => null,
+]) === true, 'automationOpenState reads Open DPS');
+assert_true(YarboHome::automationOpenState([
+    'open' => false,
+    'dps_label' => 'Open',
+]) === false, 'explicit open boolean wins over stale dps_label');
+assert_true(YarboHome::contactIsOpen([
+    'has_dps' => true,
+    'dps' => 'open',
+]) === true, 'contactIsOpen uses DPS');
+
+file_put_contents($root . '/data/unifi-inventory.json', json_encode([
+    'cameras' => [],
+    'lights' => [['id' => 'unifi:light:porch', 'name' => 'Porch', 'kind' => 'light', 'source' => 'unifi', 'on' => false]],
+    'relays' => [],
+    'doors' => [[
+        'id' => 'unifi:door:gates',
+        'native_id' => 'gates',
+        'name' => 'Gates',
+        'kind' => 'door',
+        'source' => 'unifi',
+        'has_dps' => true,
+        'dps' => 'close',
+        'dps_label' => 'Closed',
+        'open' => false,
+        'locked' => true,
+        // Unlock activity must not drive Automations.
+        'last_activity' => 1_600_000_000,
+        'open_changed_at' => 0,
+    ]],
+    'hubs' => [[
+        'id' => 'unifi:hub:h-gates',
+        'native_id' => 'h-gates',
+        'door_id' => 'gates',
+        'name' => 'Gates hub',
+        'kind' => 'hub',
+        'source' => 'unifi',
+        'has_dps' => true,
+        'dps' => 'close',
+        'dps_label' => 'Closed',
+        'open' => false,
+        'locked' => true,
+    ]],
+    'sensors' => [[
+        'id' => 'unifi:sensor:dps-gates',
+        'native_id' => 'dps-gates',
+        'door_id' => 'gates',
+        'name' => 'Gates position',
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'product' => 'Door position sensor',
+        'has_dps' => true,
+        'has_open' => true,
+        'dps' => 'close',
+        'dps_label' => 'Closed',
+        'open' => false,
+    ]],
+    'errors' => [],
+], JSON_UNESCAPED_SLASHES));
+// Pollute Last change store the way a prior unlock stamp would — Automations must ignore it.
+file_put_contents($root . '/data/home.json', json_encode(array_merge(
+    json_decode((string) file_get_contents($root . '/data/home.json'), true) ?: [],
+    [
+        'open_changed' => [
+            'unifi:door:gates' => ['open' => false, 'at' => 1_700_000_100],
+            'unifi:sensor:dps-gates' => ['open' => false, 'at' => 1_700_000_100],
+        ],
+        'open_changed_dps_v' => 1,
+    ]
+), JSON_UNESCAPED_SLASHES));
+
+$liveHome = new YarboHome($root);
+$autoDevices = $liveHome->automationDevices();
+$byAutoId = [];
+foreach ($autoDevices as $row) {
+    $byAutoId[$row['id'] ?? ''] = $row;
+}
+assert_true(($byAutoId['unifi:door:gates']['open'] ?? null) === false, 'automationDevices door open from DPS Closed');
+assert_true(($byAutoId['unifi:hub:h-gates']['open'] ?? null) === false, 'automationDevices hub open from DPS Closed');
+assert_true(($byAutoId['unifi:sensor:dps-gates']['open'] ?? null) === false, 'automationDevices DPS sensor open from Closed');
+assert_true(!empty($byAutoId['unifi:sensor:dps-gates']['has_open']), 'DPS sensor has_open for Automations UI');
+assert_true(!empty($byAutoId['unifi:sensor:dps-gates']['has_dps']), 'DPS sensor has_dps for Automations UI');
+
+$dpsEdge = $auto->save([
+    'id' => 'a-dps-edge',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:dps-gates', 'event' => 'opens'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($dpsEdge['ok']), 'save DPS sensor opens rule');
+$doorEdge = $auto->save([
+    'id' => 'a-door-edge',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:door:gates', 'event' => 'opens'],
+    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
+    'cooldown_sec' => 0,
+]);
+assert_true(!empty($doorEdge['ok']), 'save Access door opens rule');
+
+$snapFromInv = static function (string $rootPath): array {
+    return (new YarboHome($rootPath))->automationDevices();
+};
+$auto->tick($snapFromInv($root), $t0);
+$inv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+foreach (['doors', 'hubs', 'sensors'] as $bucket) {
+    foreach ($inv[$bucket] as &$row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if (($row['id'] ?? '') === 'unifi:door:gates'
+            || ($row['id'] ?? '') === 'unifi:hub:h-gates'
+            || ($row['id'] ?? '') === 'unifi:sensor:dps-gates') {
+            $row['open'] = true;
+            $row['dps'] = 'open';
+            $row['dps_label'] = 'Open';
+            $row['on'] = true;
+            // Still no usable DPS change stamp — unlock activity stays stale.
+            $row['open_changed_at'] = 0;
+            $row['last_activity'] = 1_600_000_000;
+        }
+    }
+    unset($row);
+}
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+$r = $auto->tick($snapFromInv($root), $t0 + 1);
+sort($r['fired']);
+assert_true($r['fired'] === ['a-door-edge', 'a-dps-edge'], 'DPS open edge fires door + position sensor rules: ' . json_encode($r));
+assert_true(count($commands) >= 2, 'DPS open runs Then actions');
+
+$auto->delete('a-dps-edge');
+$auto->delete('a-door-edge');
+$commands = [];
+@unlink($auto->statePath());
+
 $orRule = $auto->save([
     'id' => 'a-or',
     'enabled' => true,
