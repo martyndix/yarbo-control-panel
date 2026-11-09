@@ -12329,9 +12329,19 @@ function ensurePaperPowerPoll() {
     }, 15000);
 }
 
+function paperCompanionPanelUrlDefault() {
+    // Browser HTTPS :8443 is self-signed. Tablets use HTTP :8080 on the LAN
+    // (Funnel HTTPS is separate and learned later via remote_url).
+    const host = location.hostname;
+    if (host && (location.protocol === 'https:' || location.port === '8443')) {
+        return `http://${host}:8080`;
+    }
+    return window.location.origin;
+}
+
 async function loadPaperMonoDashboard(opts = {}) {
     if (els.papermonoPanelUrl && !els.papermonoPanelUrl.value) {
-        els.papermonoPanelUrl.value = window.location.origin;
+        els.papermonoPanelUrl.value = paperCompanionPanelUrlDefault();
     }
     try {
         const res = await fetch('/api/device.php?action=dashboard');

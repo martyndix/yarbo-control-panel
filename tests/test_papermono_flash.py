@@ -173,6 +173,31 @@ class PaperMonoFlashTests(unittest.TestCase):
         self.assertIn("wait_for_app_ready", kit)
         self.assertIn("cdc_host_present", kit)
 
+    def test_setup_kit_prefers_usbmodem_over_bluetooth(self) -> None:
+        kit = (ROOT / "scripts" / "paper_setup_kit.py").read_text(encoding="utf-8")
+        flash = (ROOT / "scripts" / "papermono_flash.py").read_text(encoding="utf-8")
+        js = (ROOT / "public" / "assets" / "app.js").read_text(encoding="utf-8")
+        php = (ROOT / "src" / "YarboPaperDevice.php").read_text(encoding="utf-8")
+        self.assertIn("is_tablet_usb_port", kit)
+        self.assertIn("normalize_panel_url", kit)
+        self.assertIn("cu.JBL", kit)
+        self.assertIn("_is_tablet_usb_port", flash)
+        self.assertIn("paperCompanionPanelUrlDefault", js)
+        self.assertIn("http://' . $httpsMatch[1] . ':8080'", php)
+
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("paper_setup_kit", ROOT / "scripts" / "paper_setup_kit.py")
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.assertTrue(mod.is_tablet_usb_port("/dev/cu.usbmodem1101"))
+        self.assertFalse(mod.is_tablet_usb_port("/dev/cu.JBLFlip5"))
+        self.assertEqual(
+            mod.normalize_panel_url("https://192.168.9.253:8443"),
+            "http://192.168.9.253:8080",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

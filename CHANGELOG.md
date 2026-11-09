@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.238] - 2026-11-09
+
+### Fixed
+- **PaperMono USB setup kit:** ignores macOS Bluetooth serial ports (e.g. `cu.JBLFlip5`) and auto-picks `cu.usbmodem…` when that is the only real tablet port. Kits downloaded while the browser is on HTTPS `:8443` now store HTTP `:8080` for the tablet (self-signed browser HTTPS does not work on the ESP32).
+
 ## [4.0.237] - 2026-11-09
 
 ### Fixed

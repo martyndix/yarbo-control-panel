@@ -41,6 +41,26 @@ def emit(payload: dict) -> None:
     sys.stdout.flush()
 
 
+def _is_tablet_usb_port(device: str, desc: str = "") -> bool:
+    blob = f"{device} {desc}".lower()
+    name = device.rsplit("/", 1)[-1].lower()
+    needles = (
+        "usbmodem",
+        "usbserial",
+        "ttyacm",
+        "ttyusb",
+        "wchusbserial",
+        "cp210",
+        "ch340",
+        "silabs",
+        "esp32",
+        "usb jtag",
+        "usb-serial",
+        "usb serial",
+    )
+    return any(token in name or token in blob for token in needles)
+
+
 def _is_host_uart(info) -> bool:
     """Skip onboard / Bluetooth UARTs that are not a USB PaperMono."""
     device = (getattr(info, "device", None) or "").lower()
@@ -49,7 +69,13 @@ def _is_host_uart(info) -> bool:
     if name.startswith("ttyama") or name.startswith("ttys"):
         return True
     skip = ("bluetooth", "debug-console", "wlan-debug", "incoming-port")
-    return any(token in device or token in desc for token in skip)
+    if any(token in device or token in desc for token in skip):
+        return True
+    # macOS Bluetooth serial (cu.JBLFlip5, …) is not the tablet USB CDC port.
+    if name.startswith("cu.") or name.startswith("tty."):
+        if not _is_tablet_usb_port(device, desc):
+            return True
+    return False
 
 
 def list_ports() -> dict:
