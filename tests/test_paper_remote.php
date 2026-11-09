@@ -172,7 +172,7 @@ foreach ([
     'drawString("R"',
     'if (ru.length() && ru != remoteUrl)',
     'Do not clear usingRemote here',
-    '#define PAPERMONO_FW_VERSION "0.1.83"',
+    '#define PAPERMONO_FW_VERSION "0.1.84"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {

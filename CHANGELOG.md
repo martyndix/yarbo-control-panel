@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.244] - 2026-11-09
+
+### Fixed
+- **PaperMono Vestaboard night/quiet:** lock screen and Note page show what is actually on the board during night or quiet hours (not the live Powerwall/Yarbo view). Note labels **NIGHT MODE** / **QUIET MODE**.
+- **PaperMono mottling:** enforce a minimum gap between e-paper refreshes and stop DEVICE from redrawing every few seconds unless the Wi-Fi status line changed. Firmware **0.1.84**.
+
 ## [4.0.243] - 2026-11-09
 
 ### Fixed

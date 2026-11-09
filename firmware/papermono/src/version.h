@@ -1,6 +1,6 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.1.83"
+#define PAPERMONO_FW_VERSION "0.1.84"
 /* Status poll. Do not go much faster: SSD1677 must not stream partial refreshes. */
 #define PAPERMONO_LOGO_PX 160
 #define PAPERMONO_POLL_MS 15000
@@ -8,6 +8,10 @@
 #define PAPERMONO_LOCK_POLL_MS 60000UL
 /* Compact while locked uses a short budget so a slow Pi cannot brick touch. */
 #define PAPERMONO_LOCK_HTTP_MS 8000
+/* Minimum gap between e-paper waveforms (partial stacking mottles the panel). */
+#define PAPERMONO_EPD_MIN_GAP_MS 900UL
+/* Full quality refresh after this many fast partials. */
+#define PAPERMONO_EPD_PARTIAL_MAX 6
 /* If e-paper BUSY never clears, soft-reboot instead of a dead tablet. */
 #define PAPERMONO_EPD_STUCK_MS 45000UL
 #define PAPERMONO_PAGE_HOME 0

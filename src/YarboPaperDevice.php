@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.83';
+    public const FIRMWARE_VERSION = '0.1.84';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.27-colour';
     public const OTA_ONLINE_MONO_S = 120;
@@ -1580,11 +1580,24 @@ final class YarboPaperDevice
     {
         $codes = null;
         $lines = null;
-        if ($vbObj->isExternalHoldActive($vb)) {
-            $held = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
-            if (!$this->vestaboardCodesBlank($held)) {
-                $codes = $held;
-                $lines = YarboVestaboard::linesFromCodes($held);
+        $night = !empty($vb['night_active']);
+        $quiet = !empty($vb['quiet_active']);
+        $hold = $vbObj->isExternalHoldActive($vb);
+        // Mirror what is actually on the Note during app hold / night / quiet.
+        // Do not recompose Powerwall/Yarbo live over NIGHT MODE / SLEEP WELL.
+        if ($hold || $night || $quiet) {
+            $onBoard = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
+            if (!$this->vestaboardCodesBlank($onBoard)) {
+                $codes = $onBoard;
+                $lines = YarboVestaboard::linesFromCodes($onBoard);
+            } elseif ($night) {
+                $layout = $vbObj->nightLayout();
+                $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null);
+                $lines = is_array($layout['lines'] ?? null) ? array_values($layout['lines']) : null;
+            } elseif ($quiet) {
+                $layout = $vbObj->quietLayout();
+                $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null);
+                $lines = is_array($layout['lines'] ?? null) ? array_values($layout['lines']) : null;
             }
         }
         if ($this->vestaboardCodesBlank($codes)) {
@@ -1610,11 +1623,22 @@ final class YarboPaperDevice
         if (!is_array($lines) || count($lines) < 3) {
             $lines = YarboVestaboard::linesFromCodes($codes);
         }
+        $mode = 'live';
+        if ($hold) {
+            $mode = 'hold';
+        } elseif ($night) {
+            $mode = 'night';
+        } elseif ($quiet) {
+            $mode = 'quiet';
+        }
 
         return [
             'vestaboard_codes' => $codes,
             'vestaboard_lines' => $lines,
             'vestaboard_hash' => hash('sha256', json_encode($codes)),
+            'vestaboard_mode' => $mode,
+            'vestaboard_night' => $night,
+            'vestaboard_quiet' => $quiet,
         ];
     }
 

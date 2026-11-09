@@ -67,6 +67,9 @@ bool lightsOn = false;
 String vestaboardLive = "yarbo";
 bool vestaboardOn = true;
 bool vestaboardKnown = false;
+bool vestaboardNight = false;
+bool vestaboardQuiet = false;
+String vestaboardMode = "live";
 bool yarboOn = true;
 bool powerwallOn = false;
 bool lymowOn = false;
@@ -196,6 +199,8 @@ bool epdFrameOpen = false;
 bool pendingPlansFetch = false;
 bool pendingLymowMapsFetch = false;
 uint32_t uiHotUntil = 0;
+uint32_t lastEpdStartMs = 0;
+String lastWifiStatusDrawn = "";
 
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
@@ -784,9 +789,27 @@ void beginEpdFrame(bool forceQuality)
         redrawQueued = true;
         return;
     }
-    bool full = forceQuality || partialRefreshCount >= 6;
+    /* Leave a short gap after the previous waveform so partials do not stack. */
+    while (!forceQuality && lastEpdStartMs != 0
+        && (millis() - lastEpdStartMs) < PAPERMONO_EPD_MIN_GAP_MS
+        && (millis() - t0) < PAPERMONO_EPD_MIN_GAP_MS + 200) {
+        pollSerialConfig();
+        if (applyPendingPages()) {
+            /* Navigation won — draw the newest page once the gap clears. */
+            redrawQueued = true;
+        }
+        delay(5);
+    }
+    if (!forceQuality && lastEpdStartMs != 0
+        && (millis() - lastEpdStartMs) < PAPERMONO_EPD_MIN_GAP_MS) {
+        epdFrameOpen = false;
+        redrawQueued = true;
+        return;
+    }
+    bool full = forceQuality || partialRefreshCount >= PAPERMONO_EPD_PARTIAL_MAX;
     M5.Display.setEpdMode(full ? epd_mode_t::epd_quality : epd_mode_t::epd_fastest);
     partialRefreshCount = full ? 0 : (partialRefreshCount + 1);
+    lastEpdStartMs = millis();
     epdFrameOpen = true;
     M5.Display.startWrite();
 }
@@ -835,6 +858,7 @@ String screenKey()
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + vestaboardLive + "|"
+        + vestaboardMode + "|" + (vestaboardNight ? "1" : "0") + "|" + (vestaboardQuiet ? "1" : "0") + "|"
         + (vestaboardOn ? "1" : "0") + "|" + (yarboOn ? "1" : "0") + "|" + (powerwallOn ? "1" : "0") + "|"
         + (lymowOn ? "1" : "0") + "|" + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
         + String(lymowWorkStatus) + "|" + String(lymowZoneN) + "|" + String(lymowZonePage) + "|"
@@ -2613,17 +2637,36 @@ void drawNotePage(bool forceFull)
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(2);
-    String live = vestaboardLive.length() ? vestaboardLive : String("yarbo");
-    live.toUpperCase();
+    String live;
+    if (vestaboardNight || vestaboardMode == "night") {
+        live = "NIGHT MODE";
+    } else if (vestaboardQuiet || vestaboardMode == "quiet") {
+        live = "QUIET MODE";
+    } else if (vestaboardMode == "hold") {
+        live = "APP HOLD";
+    } else {
+        live = vestaboardLive.length() ? vestaboardLive : String("yarbo");
+        live.toUpperCase();
+    }
     M5.Display.drawString(live, W / 2, gy + gridH + 16);
     M5.Display.setTextDatum(TL_DATUM);
+    int noteHintY = gy + gridH + 42;
     if (!vestaboardOn) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString("Note off: lock screen still previews.", 16, gy + gridH + 42);
+        M5.Display.drawString("Note off: lock screen still previews.", 16, noteHintY);
+        noteHintY += 28;
+    } else if (vestaboardNight || vestaboardMode == "night") {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Showing night hours on the Note.", 16, noteHintY);
+        noteHintY += 28;
+    } else if (vestaboardQuiet || vestaboardMode == "quiet") {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("Showing quiet hours on the Note.", 16, noteHintY);
+        noteHintY += 28;
     }
     if (lastError.length()) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString(lastError.substring(0, 28), 16, gy + gridH + (vestaboardOn ? 42 : 70));
+        M5.Display.drawString(lastError.substring(0, 28), 16, noteHintY);
     }
     int bw, bh, btnGap, y0;
     layoutButtons(bw, bh, btnGap, y0);
@@ -4392,6 +4435,17 @@ void applyCompactExtras(JsonDocument &doc)
         loraSetSyncWord(radioSync);
     }
     vestaboardHash = doc["vestaboard_hash"] | vestaboardHash;
+    vestaboardNight = doc["vestaboard_night"] | false;
+    vestaboardQuiet = doc["vestaboard_quiet"] | false;
+    if (!doc["vestaboard_mode"].isNull()) {
+        vestaboardMode = String((const char *) (doc["vestaboard_mode"] | "live"));
+    } else if (vestaboardNight) {
+        vestaboardMode = "night";
+    } else if (vestaboardQuiet) {
+        vestaboardMode = "quiet";
+    } else {
+        vestaboardMode = "live";
+    }
     JsonArray lines = doc["vestaboard_lines"].as<JsonArray>();
     if (!lines.isNull()) {
         for (int r = 0; r < 3; r++) {
@@ -5978,15 +6032,24 @@ void loop()
         ensureNtp();
         wifiHomeAbsent = false;
     }
-    // Refresh DEVICE while joining so the status line is not stuck.
+    // Refresh DEVICE while joining — only when the status line text changes,
+    // and not more often than the e-paper gap (avoids mottling).
     if (currentPage == PAPERMONO_PAGE_DEVICE && wifiUi == PAPERMONO_WIFI_IDLE
         && !screenLocked && !M5.Display.displayBusy()) {
         int st = (int) WiFi.status();
+        String line = wifiLiveStatusLine();
         uint32_t nowUi = millis();
-        if (st != lastWifiUiStatus || (st != WL_CONNECTED && nowUi - lastWifiUiDraw > 4000)) {
-            lastWifiUiStatus = st;
-            lastWifiUiDraw = nowUi;
-            redrawQueued = true;
+        bool changed = st != lastWifiUiStatus || line != lastWifiStatusDrawn;
+        bool due = st != WL_CONNECTED && nowUi - lastWifiUiDraw > 8000;
+        if (changed || due) {
+            if (changed || line != lastWifiStatusDrawn) {
+                lastWifiUiStatus = st;
+                lastWifiUiDraw = nowUi;
+                lastWifiStatusDrawn = line;
+                redrawQueued = true;
+            } else {
+                lastWifiUiDraw = nowUi;
+            }
         }
     }
     String prevClock = clockLocal;
