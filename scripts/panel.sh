@@ -48,6 +48,10 @@ cleanup() {
     pkill -P "${VESTABOARD_PID}" 2>/dev/null || true
     kill "${VESTABOARD_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${PAPER_FW_PID:-}" ]]; then
+    pkill -P "${PAPER_FW_PID}" 2>/dev/null || true
+    kill "${PAPER_FW_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${HOME_AUTOMATIONS_PID:-}" ]]; then
     pkill -P "${HOME_AUTOMATIONS_PID}" 2>/dev/null || true
     kill "${HOME_AUTOMATIONS_PID}" 2>/dev/null || true
@@ -108,6 +112,24 @@ echo "==> Starting Vestaboard Note watcher"
   done
 ) &
 VESTABOARD_PID=$!
+
+echo "==> Starting PaperMono / Paper Colour firmware auto-build"
+mkdir -p "${ROOT}/data"
+(
+  while true; do
+    set +e
+    "$PHP_BIN" "${ROOT}/scripts/paper_firmware_build.php" --loop >> "${ROOT}/data/paper-firmware-build.log" 2>&1
+    code=$?
+    set -e
+    if [[ "$code" -eq 0 ]]; then
+      echo "paper_firmware_build: reloading"
+    else
+      echo "paper_firmware_build: exited ${code}, retrying" >&2
+    fi
+    sleep 5
+  done
+) &
+PAPER_FW_PID=$!
 
 echo "==> Starting Home automations"
 mkdir -p "${ROOT}/data"

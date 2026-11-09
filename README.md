@@ -212,7 +212,7 @@ Built for **[M5Stack PaperMono SKU C153](https://docs.m5stack.com/en/core/PaperM
 
 1. Plug the PaperMono into the computer that runs this panel, **or** download a **USB setup kit** from Settings and flash from a Mac/Windows laptop (same first USB flash, different computer).
 2. Open **Settings → E-paper companions** and pick **PaperMono** (or **Paper Colour** for the Spectra 6 tablet).
-3. Click **Build firmware**, then enter 2.4 GHz Wi-Fi, the panel URL (how the tablet reaches this host), and flash — or **Download USB setup kit** if the tablet is not plugged into this host.
+3. Wait for firmware to finish building (it starts automatically when missing/stale), then enter 2.4 GHz Wi-Fi, the panel URL (how the tablet reaches this host), and flash — or **Download USB setup kit** if the tablet is not plugged into this host. **Build firmware** still forces a rebuild.
 
 If USB ports fail to list on the panel host, use **Install USB tools** on that Settings page (`pyserial` + `esptool`). Away-from-Pi Mac/Windows steps: [`docs/papermono.md`](docs/papermono.md#set-up-away-from-the-panel).
 
