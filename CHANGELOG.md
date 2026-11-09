@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.232] - 2026-11-09
+
+### Fixed
+- **PaperMono ACCESS — DPS fill:** ACCESS (and HOUSE door) tiles fill from the door-position / contact sensor — open when the DPS says open, empty when closed — not from unlock state. Covers unlocked+closed doors and uncovered Access position sensors that only have `dps` / `dps_label`.
+
 ## [4.0.231] - 2026-11-09
 
 ### Fixed

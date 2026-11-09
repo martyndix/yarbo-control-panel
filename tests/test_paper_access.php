@@ -173,13 +173,30 @@ assert_true(!isset($byId['unifi:hub:hidden']), 'hub hidden from Home (not Show o
 assert_true(!isset($byId['unifi:door:spare']), 'door hidden from Home stays off ACCESS');
 assert_true(!isset($byId['unifi:sensor:spare-window']), 'sensor on the Home hidden list stays off ACCESS');
 assert_true(($byId['unifi:door:garage']['unlock'] ?? false) === true, 'garage is unlockable');
-assert_true(($byId['unifi:door:garage']['on'] ?? false) === true, 'open garage inverts');
+assert_true(($byId['unifi:door:garage']['on'] ?? false) === true, 'open garage inverts from DPS even when locked');
+assert_true(($byId['unifi:door:front']['on'] ?? true) === false, 'closed front must not invert even when unlocked');
+assert_true(($byId['unifi:door:front']['unlock'] ?? false) === true, 'front stays unlockable while closed');
 assert_true(($byId['unifi:door:garage']['role'] ?? '') === 'door', 'lockable stays door');
 assert_true(($byId['unifi:sensor:kitchen-window']['unlock'] ?? true) === false, 'window sensor is not tappable');
 assert_true(($byId['unifi:sensor:kitchen-window']['role'] ?? '') === 'window', 'window name infers window: ' . json_encode($byId['unifi:sensor:kitchen-window'] ?? null));
 assert_true(($byId['unifi:sensor:side-door']['role'] ?? '') === 'door', 'side door infers door');
 assert_true(($byId['unifi:sensor:kitchen-window']['on'] ?? false) === true, 'open window inverts');
+assert_true(($byId['unifi:sensor:side-door']['on'] ?? true) === false, 'closed side door sensor stays empty');
 assert_true(array_keys($byId)[0] === 'unifi:door:garage' || ($items[0]['unlock'] ?? false) === true, 'lockable doors are listed first');
+assert_true(YarboHome::paperContactOpen([
+    'open' => null,
+    'dps' => 'open',
+    'dps_label' => 'Open',
+    'on' => false,
+    'locked' => true,
+]) === true, 'paperContactOpen follows DPS when open boolean missing');
+assert_true(YarboHome::paperContactOpen([
+    'open' => false,
+    'dps' => 'close',
+    'dps_label' => 'Closed',
+    'on' => true,
+    'locked' => false,
+]) === false, 'paperContactOpen ignores unlock on');
 
 $saved = $home->assignContactKind('unifi:sensor:side-door', 'window');
 assert_true(!empty($saved['ok']), 'assign window: ' . json_encode($saved));
@@ -192,6 +209,63 @@ foreach ($again as $row) {
     }
 }
 assert_true(($side['role'] ?? '') === 'window', 'saved contact_kind wins: ' . json_encode($side));
+
+// Uncovered Access door-position sensor (no lockable door on Home) follows DPS.
+$dpsRoot = sys_get_temp_dir() . '/yarbo-paper-access-dps-' . bin2hex(random_bytes(3));
+mkdir($dpsRoot . '/data', 0775, true);
+file_put_contents($dpsRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($dpsRoot . '/data/unifi-config.json', json_encode([
+    'host' => '',
+    'show_on_home' => ['unifi:sensor:dps-workshop', 'unifi:sensor:usp-patio'],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($dpsRoot . '/data/unifi-inventory.json', json_encode([
+    'cameras' => [],
+    'lights' => [],
+    'relays' => [],
+    'doors' => [],
+    'hubs' => [],
+    'sensors' => [[
+        'id' => 'unifi:sensor:dps-workshop',
+        'native_id' => 'dps-workshop',
+        'door_id' => 'workshop',
+        'name' => 'Workshop position',
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'product' => 'Door position sensor',
+        'has_dps' => true,
+        'has_open' => true,
+        // Prefer dps_label when open is missing (live refresh edge cases).
+        'open' => null,
+        'dps' => 'open',
+        'dps_label' => 'Open',
+        'on' => false,
+        'status' => 'Open',
+    ], [
+        'id' => 'unifi:sensor:usp-patio',
+        'native_id' => 'usp-patio',
+        'name' => 'Patio window',
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'product' => 'USP Sensor',
+        'has_open' => true,
+        'open' => false,
+        'status' => 'Closed · 16.7° · 58% RH',
+        'on' => false,
+    ]],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($dpsRoot . '/data/home.json', json_encode(['hidden' => [], 'last_devices' => []], JSON_UNESCAPED_SLASHES));
+$dpsHome = new YarboHome($dpsRoot);
+$dpsItems = $dpsHome->paperAccessItems();
+$dpsById = [];
+foreach ($dpsItems as $row) {
+    $dpsById[$row['id']] = $row;
+}
+assert_true(isset($dpsById['unifi:sensor:dps-workshop']), 'uncovered Access DPS on ACCESS: ' . json_encode($dpsItems));
+assert_true(($dpsById['unifi:sensor:dps-workshop']['on'] ?? false) === true, 'Access DPS open fills from dps_label');
+assert_true(($dpsById['unifi:sensor:dps-workshop']['unlock'] ?? true) === false, 'Access DPS is not unlockable');
+assert_true(($dpsById['unifi:sensor:usp-patio']['on'] ?? true) === false, 'Protect contact closed stays empty');
 
 $store = $home->load();
 assert_true(($store['contact_kind']['unifi:sensor:side-door'] ?? '') === 'window', 'contact_kind persisted');
@@ -276,6 +350,7 @@ assert_true(str_contains($ver, '#define PAPERMONO_PAGE_COUNT 14'), 'page count i
 assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.79"'), 'firmware 0.1.79');
 assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.79';"), 'panel pin 0.1.79');
 assert_true(str_contains($homePhp, 'function paperAccessItems'), 'paper ACCESS helper');
+assert_true(str_contains($homePhp, 'paperContactOpen'), 'ACCESS fill uses paperContactOpen / DPS');
 assert_true(str_contains($homePhp, 'function assignContactKind'), 'contact_kind save');
 assert_true(str_contains($api, "'contact_kind'"), 'home API contact_kind');
 assert_true(str_contains($fw, 'void drawAccessPage(bool forceFull)'), 'firmware ACCESS page');

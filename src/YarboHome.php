@@ -4847,7 +4847,8 @@ final class YarboHome
                 ) ?: $id,
                 'kind' => $kind,
                 'role' => $this->contactRoleFor($device, $store),
-                'on' => self::contactIsOpen($device),
+                // Filled = physically open from DPS / contact — never unlock/on.
+                'on' => self::paperContactOpen($device),
                 'unlock' => self::isLockableDoor($device),
             ];
             if (count($out) >= self::PAPER_ACCESS_MAX) {
@@ -5051,8 +5052,9 @@ final class YarboHome
             $kind = self::KIND_LIGHT;
         }
         $on = YarboMatterFabric::attrBool($device['on'] ?? false);
-        if ($kind === 'door' || $kind === 'hub') {
-            $on = ($device['open'] ?? null) === true;
+        // Access doors/hubs and door-position / contact sensors invert from DPS open.
+        if ($kind === 'door' || $kind === 'hub' || self::isOpenCloseSensor($device)) {
+            $on = self::paperContactOpen($device);
         }
 
         return [
@@ -5061,6 +5063,17 @@ final class YarboHome
             'kind' => $kind,
             'on' => $on,
         ];
+    }
+
+    /**
+     * PaperMono ACCESS / HOUSE fill for doors and position sensors.
+     * True when the door-position / contact sensor says open — not when unlocked.
+     *
+     * @param array<string, mixed> $device
+     */
+    public static function paperContactOpen(array $device): bool
+    {
+        return self::contactIsOpen($device);
     }
 
     /**

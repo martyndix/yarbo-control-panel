@@ -151,6 +151,25 @@ assert_true(($byId['unifi:door:utility']['on'] ?? true) === false, 'unknown DPS 
 assert_true(($byId['unifi:hub:h1']['on'] ?? false) === true, 'hub invert must follow the linked door DPS');
 assert_true(($byId['1:1']['on'] ?? false) === true, 'Matter plug invert must still follow on');
 
+// dps_label alone (open missing) still inverts HOUSE doors via paperContactOpen.
+$inv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+foreach ($inv['doors'] as &$doorRow) {
+    if (($doorRow['id'] ?? '') === 'unifi:door:gates') {
+        $doorRow['open'] = null;
+        $doorRow['dps'] = 'open';
+        $doorRow['dps_label'] = 'Open';
+        $doorRow['on'] = true;
+        $doorRow['locked'] = false;
+    }
+}
+unset($doorRow);
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+$byDpsOnly = [];
+foreach ((new YarboHome($root))->paperItems('martyn') as $row) {
+    $byDpsOnly[$row['id']] = $row;
+}
+assert_true(($byDpsOnly['unifi:door:gates']['on'] ?? false) === true, 'HOUSE follows dps_label when open is null');
+
 $ids = array_column($items, 'id');
 assert_true($ids === [
     '1:1',
@@ -178,7 +197,7 @@ assert_true(str_contains($fw, 'homeKinds[i] == "door" || homeKinds[i] == "hub"')
 assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.79"'), 'firmware 0.1.79');
 assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.79';"), 'panel firmware pin 0.1.79');
 assert_true(str_contains($homePhp, 'mergeUnifiDevices($live[\'devices\'], true)'), 'paperItems must include UniFi doors not on web Home');
-assert_true(str_contains($homePhp, "(\$device['open'] ?? null) === true"), 'door invert follows DPS open');
+assert_true(str_contains($homePhp, 'paperContactOpen'), 'door invert follows DPS via paperContactOpen');
 assert_true(str_contains($docs, 'door glyph'), 'docs mention door glyph');
 assert_true(str_contains($change, '## [4.0.57]'), 'changelog 4.0.57');
 
