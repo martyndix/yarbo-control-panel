@@ -17,8 +17,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.82"'), 'firmware 0.1.82');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.82';"), 'panel firmware pin 0.1.82');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.83"'), 'firmware 0.1.83');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.83';"), 'panel firmware pin 0.1.83');
 assert_true(str_contains($fw, 'void waitEpdReady()'), 'wait for e-paper BUSY');
 assert_true(str_contains($fw, 'void serviceTouchQueue()'), 'touch handled as a queue');
 if (!preg_match('/void waitEpdReady\(\)\n\{\n(?:.*\n)*?\}\n\n/', $fw, $wait)) {
@@ -50,10 +50,18 @@ if (!preg_match('/void showPage\(int page, bool loadPlansIfNeeded\)\n\{[\s\S]*?\
 }
 assert_true(str_contains($show[0], 'drawScreen(false)'), 'showPage uses fast update');
 assert_true(!str_contains($show[0], 'drawScreen(true)'), 'showPage must not force a full refresh');
+assert_true(str_contains($show[0], 'pendingPlansFetch = true'), 'showPage defers plans HTTP');
+assert_true(str_contains($show[0], 'pendingLymowMapsFetch = true'), 'showPage defers lymow maps HTTP');
+assert_true(!str_contains($show[0], 'httpGetPlans('), 'showPage must not block on plans HTTP');
+assert_true(!str_contains($show[0], 'httpLymowMaps('), 'showPage must not block on maps HTTP');
+assert_true(str_contains($fw, 'void serviceDeferredFetches()'), 'deferred fetch helper');
+assert_true(str_contains($fw, 'bool uiIsHot()'), 'ui hot window skips background HTTP');
+assert_true(str_contains($fw, 'never start background HTTP while the user is tapping'), 'loop prefers taps over poll');
 assert_true(str_contains($docs, 'A/B is taken while the panel is still refreshing'), 'docs mention A/B during refresh');
-assert_true(str_contains($docs, '0.1.82'), 'docs mention lock-screen freeze fix');
+assert_true(str_contains($docs, '0.1.83'), 'docs mention snappy nav firmware');
 assert_true(str_contains($change, '## [4.0.208]'), 'changelog 4.0.208');
 assert_true(str_contains($change, '## [4.0.207]'), 'changelog 4.0.207');
 assert_true(str_contains($change, '## [4.0.63]'), 'changelog 4.0.63');
+assert_true(str_contains($change, '## [4.0.243]'), 'changelog 4.0.243');
 
 echo "test_paper_epd_nav.php ok\n";

@@ -193,6 +193,9 @@ volatile uint8_t touchQ = 0;
 bool inDraw = false;
 bool redrawQueued = false;
 bool epdFrameOpen = false;
+bool pendingPlansFetch = false;
+bool pendingLymowMapsFetch = false;
+uint32_t uiHotUntil = 0;
 
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
@@ -2521,9 +2524,6 @@ void handleRobotsTouch(int x, int y)
             }
             if (kind == "lymow") {
                 showPage(PAPERMONO_PAGE_LYMOW, false);
-                if (lymowZoneN < 1) {
-                    httpLymowMaps();
-                }
                 return;
             }
             robotsUi = PAPERMONO_ROBOT_VAC;
@@ -3328,12 +3328,51 @@ bool takeTouchPress(int &x, int &y)
     return false;
 }
 
+void markUiHot()
+{
+    /* Prefer taps / A-B over background HTTP for a short window after input. */
+    uiHotUntil = millis() + 500;
+}
+
+bool uiIsHot()
+{
+    return (int32_t) (millis() - uiHotUntil) < 0;
+}
+
 void noteActivity()
 {
     lastActivity = millis();
     lastLight = millis();
+    markUiHot();
     if (!lightOn) {
         applyFrontlight(true);
+    }
+}
+
+void serviceDeferredFetches()
+{
+    if (uiIsHot() || touchQ || pendingPageSteps || inDraw || M5.Display.displayBusy()) {
+        return;
+    }
+    bool changed = false;
+    if (pendingPlansFetch) {
+        pendingPlansFetch = false;
+        if ((currentPage == PAPERMONO_PAGE_PLANS || currentPage == PAPERMONO_PAGE_HOME)
+            && !plansLoaded) {
+            httpGetPlans(false);
+            changed = true;
+        }
+    }
+    if (pendingLymowMapsFetch) {
+        pendingLymowMapsFetch = false;
+        if (currentPage == PAPERMONO_PAGE_LYMOW && lymowZoneN < 1 && lymowOn) {
+            httpLymowMaps();
+            httpGetStatus();
+            changed = true;
+        }
+    }
+    if (changed) {
+        redrawQueued = true;
     }
 }
 
@@ -5546,12 +5585,13 @@ void showPage(int page, bool loadPlansIfNeeded)
         wifiUi = PAPERMONO_WIFI_IDLE;
     }
     noteActivity();
+    // Paint first — never block navigation on plans/maps HTTP.
     if ((currentPage == PAPERMONO_PAGE_PLANS || currentPage == PAPERMONO_PAGE_HOME)
         && loadPlansIfNeeded && !plansLoaded) {
-        httpGetPlans(false);
+        pendingPlansFetch = true;
     }
     if (currentPage == PAPERMONO_PAGE_LYMOW && lymowZoneN < 1 && lymowOn) {
-        httpLymowMaps();
+        pendingLymowMapsFetch = true;
     }
     drawScreen(false);
 }
@@ -5595,9 +5635,13 @@ bool applyPendingPages()
         lastYarboPage = currentPage;
     }
     offConfirm = false;
+    markUiHot();
     if ((currentPage == PAPERMONO_PAGE_PLANS || currentPage == PAPERMONO_PAGE_HOME)
         && !plansLoaded) {
-        httpGetPlans(false);
+        pendingPlansFetch = true;
+    }
+    if (currentPage == PAPERMONO_PAGE_LYMOW && lymowZoneN < 1 && lymowOn) {
+        pendingLymowMapsFetch = true;
     }
     return true;
 }
@@ -5622,6 +5666,7 @@ void inputTask(void *arg)
                 pendingPageSteps++;
                 lastActivity = millis();
                 lastLight = millis();
+                markUiHot();
                 if (!lightOn) {
                     applyFrontlight(true);
                 }
@@ -5630,6 +5675,7 @@ void inputTask(void *arg)
                 pendingPageSteps--;
                 lastActivity = millis();
                 lastLight = millis();
+                markUiHot();
                 if (!lightOn) {
                     applyFrontlight(true);
                 }
@@ -5958,6 +6004,7 @@ void loop()
 
     uint32_t now = millis();
     serviceTouchQueue();
+    flushPageButtons();
 
     now = millis();
     /* BUSY that never clears → soft reboot (better than a brick until power). */
@@ -5981,15 +6028,24 @@ void loop()
         applyFrontlight(false);
     }
 
-    flushPageButtons();
-
     if (redrawQueued) {
         drawScreen(false);
     }
 
-    if (prevClock != clockLocal && !M5.Display.displayBusy()) {
+    if (prevClock != clockLocal && !M5.Display.displayBusy() && !uiIsHot()) {
         drawScreen(false);
         flushPageButtons();
+    }
+
+    /* Keep navigation snappy: never start background HTTP while the user is tapping. */
+    if (uiIsHot() || touchQ || pendingPageSteps) {
+        delay(5);
+        return;
+    }
+
+    serviceDeferredFetches();
+    if (redrawQueued) {
+        drawScreen(false);
     }
 
     if (WiFi.status() != WL_CONNECTED) {
@@ -5998,10 +6054,18 @@ void loop()
     }
 
     uint32_t pollEvery = screenLocked ? PAPERMONO_LOCK_POLL_MS : (uint32_t) PAPERMONO_POLL_MS;
-    if (now - lastPoll > pollEvery && !M5.Display.displayBusy()) {
+    if (now - lastPoll > pollEvery && !M5.Display.displayBusy() && !uiIsHot()) {
         lastPoll = now;
         httpGetStatus();
-        if (!screenLocked && currentPage == PAPERMONO_PAGE_PLANS) {
+        serviceTouchQueue();
+        flushPageButtons();
+        if (uiIsHot() || touchQ || pendingPageSteps) {
+            delay(5);
+            return;
+        }
+        if (!screenLocked && currentPage == PAPERMONO_PAGE_PLANS && !plansLoaded) {
+            pendingPlansFetch = true;
+        } else if (!screenLocked && currentPage == PAPERMONO_PAGE_PLANS) {
             httpGetPlans(false);
         }
         drawScreen(false);

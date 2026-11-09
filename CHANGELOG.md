@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.243] - 2026-11-09
+
+### Fixed
+- **PaperMono snappier navigation:** page switches paint first and defer plans/maps HTTP, and background status polls wait while you are tapping — so visible buttons respond immediately. Firmware **0.1.83**.
+
 ## [4.0.242] - 2026-11-09
 
 ### Changed
