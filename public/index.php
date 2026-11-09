@@ -1215,7 +1215,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <input type="checkbox" id="settings-vestaboard-smart" name="vestaboard_smart_display" checked>
                                     <span>Vestaboard Smart Display</span>
                                 </label>
-                                <p class="hint" id="settings-vestaboard-smart-hint">When on, the Note follows the robots that are actually working. Off modules are skipped automatically.</p>
+                                <p class="hint" id="settings-vestaboard-smart-hint">When on, the Note follows the robots that are out working (mowing, heading out, or docking) or in error. Off modules are skipped automatically.</p>
                                 <div class="map-mode vestaboard-transport" role="radiogroup" aria-label="Vestaboard API">
                                     <label>
                                         <input type="radio" name="vestaboard-transport" value="local" checked>
@@ -2195,7 +2195,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <button type="button" class="modal-backdrop" data-vestaboard-rotate-close aria-label="Close rotate settings"></button>
             <div class="modal-panel card vestaboard-rotate-panel">
                 <h2 id="vestaboard-rotate-title">Rotate views</h2>
-                <p class="hint">Cycle the Note through the ticked views (needs two or more). Pauses while Yarbo or Lymow is mowing or in error, and stops after 24 hours (back to Powerwall).</p>
+                <p class="hint">Cycle the Note through the ticked views (needs two or more). Pauses while Yarbo or Lymow is out (mowing, heading out, docking) or in error, and stops after 24 hours (back to Powerwall).</p>
                 <label class="vestaboard-rotate-option">
                     <input type="checkbox" id="vestaboard-rotate-enabled">
                     <span>Rotate views</span>

@@ -13188,9 +13188,9 @@ function updateVestaboardSmartHint(modules) {
     if (robots.length === 0) {
         body = `No robot modules are on, so Smart Display has nothing to follow — the Note stays on your chosen view (idle default ${idle}). Turn on Yarbo and/or Lymow under Modules to use it.`;
     } else if (robots.length === 1) {
-        body = `While ${robots[0]} is mowing or in error, the Note switches to that robot. ALL and Rotate yield until the job ends. Idle default is ${idle}. Off modules are skipped.`;
+        body = `While ${robots[0]} is out (mowing, heading out, or docking) or in error, the Note switches to that robot. ALL and Rotate yield until the job ends. Idle default is ${idle}. Off modules are skipped.`;
     } else {
-        body = `While Yarbo or Lymow is mowing or in error, the Note switches to that robot. Both mowing swaps every 5 minutes; an error sticks until cleared. ALL and Rotate yield during a job. Idle default is ${idle}. Rotate stops after 24 hours and returns to ${idle}. Off modules are skipped.`;
+        body = `While Yarbo or Lymow is out (mowing, heading out, or docking) or in error, the Note switches to that robot. Both active swaps every 5 minutes; an error sticks until cleared. ALL and Rotate yield during a job. Idle default is ${idle}. Rotate stops after 24 hours and returns to ${idle}. Off modules are skipped.`;
     }
     hint.textContent = body;
 }

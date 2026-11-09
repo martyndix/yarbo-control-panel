@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.241] - 2026-11-09
+
+### Changed
+- **Vestaboard Smart Display:** also follows Yarbo / Lymow while **docking** or heading out (not only while mowing). Idle on the pad still restores ALL / Rotate / your previous page.
+
 ## [4.0.240] - 2026-11-09
 
 ### Fixed

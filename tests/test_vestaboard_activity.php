@@ -145,23 +145,92 @@ $r = $vb->applyActivityLivePolicy(
 assert_true(!empty($r['active']), 'lymow-only module still follows Lymow');
 assert_true($hub->vestaboardLive() === 'lymow', 'yarbo off skips Yarbo even if override says mowing');
 
+$hub->save([
+    'modules' => [
+        'yarbo' => true,
+        'powerwall' => true,
+        'lymow' => true,
+        'home' => false,
+        'unifi' => false,
+    ],
+    'vestaboard_live' => 'powerwall',
+]);
+$vb->save(['live_resume' => null, 'activity_focus' => null, 'activity_swap_at' => null]);
+
 $view = $vb->publicView();
 assert_true(($view['smart_display'] ?? null) === true, 'publicView exposes smart_display');
+
+$dockYarbo = Yarbo\YarboVestaboard::yarboActivityFromParsed([
+    'error_code' => 0,
+    'planning_paused' => false,
+    'plan_running' => false,
+    'returning_to_dock' => true,
+]);
+assert_true(!empty($dockYarbo['mowing']) && empty($dockYarbo['error']), 'Yarbo docking counts as active');
+
+$idleYarbo = Yarbo\YarboVestaboard::yarboActivityFromParsed([
+    'error_code' => 0,
+    'planning_paused' => false,
+    'plan_running' => false,
+    'returning_to_dock' => false,
+]);
+assert_true(empty($idleYarbo['mowing']), 'Yarbo idle is not active');
+
+$headingOut = Yarbo\YarboVestaboard::yarboActivityFromParsed([
+    'error_code' => 0,
+    'planning_paused' => false,
+    'plan_running' => true,
+    'returning_to_dock' => false,
+]);
+assert_true(!empty($headingOut['mowing']), 'Yarbo heading out / mowing counts as active');
+
+$lyDock = Yarbo\YarboVestaboard::lymowActivityFromData([
+    'work_status' => 4,
+    'robot_state' => 1,
+    'error_code' => 0,
+]);
+assert_true(!empty($lyDock['mowing']) && empty($lyDock['error']), 'Lymow docking (4) counts as active');
+
+$lyPauseDock = Yarbo\YarboVestaboard::lymowActivityFromData([
+    'work_status' => 10,
+    'robot_state' => 1,
+    'error_code' => 0,
+]);
+assert_true(!empty($lyPauseDock['mowing']), 'Lymow pause-docking (10) counts as active');
+
+$lyWait = Yarbo\YarboVestaboard::lymowActivityFromData([
+    'work_status' => 1,
+    'robot_state' => 1,
+    'error_code' => 0,
+]);
+assert_true(empty($lyWait['mowing']), 'Lymow WAIT is not active');
+
+$r = $vb->applyActivityLivePolicy(
+    ['mowing' => true, 'error' => false],
+    ['mowing' => false, 'error' => false]
+);
+assert_true(!empty($r['active']) && $hub->vestaboardLive() === 'yarbo', 'docking override still switches live');
 
 $src = (string) file_get_contents(__DIR__ . '/../src/YarboVestaboard.php');
 assert_true(str_contains($src, 'ACTIVITY_SWAP_SECONDS'), 'swap constant');
 assert_true(str_contains($src, 'ROTATE_MAX_SECONDS'), 'rotate max constant');
 assert_true(str_contains($src, 'applyActivityLivePolicy'), 'activity policy');
 assert_true(str_contains($src, "'smart_display'"), 'smart_display setting');
+assert_true(str_contains($src, 'returning_to_dock'), 'Yarbo docking in activity');
+assert_true(str_contains($src, 'in_array($work, [2, 4, 8, 9, 10], true)'), 'Lymow docking statuses');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 assert_true(str_contains($js, 'updateVestaboardSmartHint'), 'settings hint adapts to modules');
 assert_true(str_contains($js, 'vestaboard_smart_display'), 'settings save smart display');
+assert_true(str_contains($js, 'heading out, or docking'), 'settings hint mentions docking');
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'Vestaboard Smart Display'), 'settings checkbox label');
+assert_true(str_contains($index, 'heading out, or docking'), 'settings default hint mentions docking');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.210]'), 'changelog 4.0.210');
 assert_true(str_contains($change, '## [4.0.209]'), 'changelog 4.0.209');
+assert_true(str_contains($change, '## [4.0.241]'), 'changelog 4.0.241');
 $docs = (string) file_get_contents(__DIR__ . '/../docs/vestaboard.md');
 assert_true(str_contains($docs, 'Smart Display'), 'docs mention Smart Display');
+assert_true(str_contains($docs, 'docking home'), 'docs mention docking');
 
 echo "test_vestaboard_activity.php ok\n";
