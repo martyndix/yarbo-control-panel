@@ -2221,6 +2221,10 @@ final class YarboPaperDevice
                 'error' => 'Panel URL must be how the tablet will reach this server at the site, not localhost.',
             ];
         }
+        // Browser HTTPS :8443 is self-signed. Tablets need HTTP :8080 on the LAN.
+        if (preg_match('#^https://([^/:]+):8443$#i', $panelUrl, $httpsMatch) === 1) {
+            $panelUrl = 'http://' . $httpsMatch[1] . ':8080';
+        }
 
         $builtNow = false;
         if ($this->firmwareNeedsBuild($kind)) {
@@ -2357,6 +2361,7 @@ final class YarboPaperDevice
             . "     python3 -m venv .venv && .venv/bin/pip install esptool pyserial && .venv/bin/python flash.py\n"
             . "3. Plug the tablet in by USB-C. Hold power {$hold} for download mode (red LED blinks).\n"
             . "4. If more than one serial device: python3 flash.py --port /dev/cu.usbmodemXXXX\n"
+            . "   Use the usbmodem port for the tablet — not a Bluetooth speaker (cu.JBL…).\n"
             . "   List ports: python3 flash.py --list-ports\n"
             . "5. If it flashed but loops No CFG_OK yet: leave USB in on the setup screen\n"
             . "   (do not hold power) and run: python3 flash.py --wifi-only\n"

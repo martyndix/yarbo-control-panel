@@ -90,7 +90,29 @@ def load_config() -> dict:
     for key in ("ssid", "panel_url", "token", "name", "kind"):
         if not str(data.get(key) or "").strip():
             die(f"config.json is missing {key}. Download a new kit from the panel.")
+    data["panel_url"] = normalize_panel_url(str(data.get("panel_url") or ""))
     return data
+
+
+def is_tablet_usb_port(device: str, desc: str = "") -> bool:
+    """ESP32-S3 Paper tablets show up as usbmodem / ttyACM / usbserial — not Bluetooth speakers."""
+    blob = f"{device} {desc}".lower()
+    name = device.rsplit("/", 1)[-1].lower()
+    needles = (
+        "usbmodem",
+        "usbserial",
+        "ttyacm",
+        "ttyusb",
+        "wchusbserial",
+        "cp210",
+        "ch340",
+        "silabs",
+        "esp32",
+        "usb jtag",
+        "usb-serial",
+        "usb serial",
+    )
+    return any(token in name or token in blob for token in needles)
 
 
 def skip_port(info) -> bool:
@@ -100,7 +122,13 @@ def skip_port(info) -> bool:
     if name.startswith("ttyama") or name.startswith("ttys"):
         return True
     skip = ("bluetooth", "debug-console", "wlan-debug", "incoming-port")
-    return any(token in device or token in desc for token in skip)
+    if any(token in device or token in desc for token in skip):
+        return True
+    # macOS Bluetooth serial (cu.JBLFlip5, headphones, …) — not a USB tablet.
+    if name.startswith("cu.") or name.startswith("tty."):
+        if not is_tablet_usb_port(device, desc):
+            return True
+    return False
 
 
 def list_ports() -> list[dict]:
@@ -128,13 +156,32 @@ def pick_port(requested: str | None) -> str:
             "No USB serial port found. Plug the tablet in, put it in download mode, then try again.\n"
             "Windows: if no COM port appears, install the Espressif USB JTAG/serial driver for ESP32-S3."
         )
-    if len(ports) == 1:
-        print(f"Using {ports[0]['label']}")
-        return str(ports[0]["device"])
+    preferred = [row for row in ports if is_tablet_usb_port(str(row["device"]), str(row.get("label") or ""))]
+    if len(preferred) == 1:
+        print(f"Using {preferred[0]['label']}")
+        return str(preferred[0]["device"])
+    choices = preferred if preferred else ports
+    if len(choices) == 1:
+        print(f"Using {choices[0]['label']}")
+        return str(choices[0]["device"])
     print("More than one serial port. Pass --port with one of:")
-    for row in ports:
+    for row in choices:
         print(f"  {row['device']}")
-    die("Example: python3 flash.py --port " + str(ports[0]["device"]))
+    print("Use the usbmodem / COM port for the tablet — not a Bluetooth speaker.")
+    die("Example: python3 flash.py --port " + str(choices[0]["device"]))
+
+
+def normalize_panel_url(url: str) -> str:
+    """Tablets use HTTP :8080 on the LAN; browser HTTPS :8443 is self-signed and will not work."""
+    import re
+
+    raw = str(url or "").strip().rstrip("/")
+    match = re.match(r"^https://([^/:]+):8443$", raw, flags=re.IGNORECASE)
+    if match:
+        fixed = f"http://{match.group(1)}:8080"
+        print(f"Note: Panel URL was {raw} (browser HTTPS). Using {fixed} for the tablet.")
+        return fixed
+    return raw
 
 
 def esptool_write_flash_argvs(port: str) -> list[list[str]]:
@@ -344,7 +391,7 @@ def send_config(port: str, cfg: dict) -> None:
     body = {
         "ssid": cfg["ssid"],
         "password": cfg.get("password") or "",
-        "panel_url": str(cfg["panel_url"]).rstrip("/"),
+        "panel_url": normalize_panel_url(str(cfg["panel_url"])),
         "token": cfg["token"],
         "name": cfg["name"],
     }
