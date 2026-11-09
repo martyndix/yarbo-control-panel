@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.231] - 2026-11-09
+
+### Fixed
+- **Automations — door position sensors:** When rules trigger on Access door / door-position open or close, they keep using the live DPS `open` state (including remotes and push buttons). Unlock `last_activity` and Doors-tile Last change stamps are not used. Access DPS sensor rows now expose `has_open` so opens/closes stay available in the Automations picker.
+
 ## [4.0.230] - 2026-11-09
 
 ### Fixed

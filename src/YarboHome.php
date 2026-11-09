@@ -2799,6 +2799,14 @@ final class YarboHome
             if ($id === '') {
                 continue;
             }
+            // Automations edge on live open/closed from the door-position sensor (not unlock
+            // last_activity / Last change stamps). Fall back to dps / dps_label when needed.
+            $open = self::automationOpenState($device);
+            $hasDps = !empty($device['has_dps'])
+                || trim((string) ($device['dps'] ?? '')) !== ''
+                || trim((string) ($device['dps_label'] ?? '')) !== ''
+                || (string) ($device['product'] ?? '') === 'Door position sensor'
+                || str_starts_with((string) ($device['native_id'] ?? ''), 'dps-');
             $row = [
                 'id' => $id,
                 'name' => (string) ($device['name'] ?? $id),
@@ -2807,12 +2815,12 @@ final class YarboHome
                 'vendor' => (string) ($device['vendor'] ?? ''),
                 'product' => (string) ($device['product'] ?? ''),
                 'on' => YarboMatterFabric::attrBool($device['on'] ?? false),
-                'open' => array_key_exists('open', $device) && $device['open'] !== null ? (bool) $device['open'] : null,
+                'open' => $open,
                 'motion' => array_key_exists('motion', $device) && $device['motion'] !== null ? (bool) $device['motion'] : null,
-                'has_open' => !empty($device['has_open']) || ((string) ($device['kind'] ?? '') === 'door')
+                'has_open' => !empty($device['has_open']) || $hasDps || ((string) ($device['kind'] ?? '') === 'door')
                     || ((string) ($device['kind'] ?? '') === 'hub'),
                 'has_motion' => !empty($device['has_motion']),
-                'has_dps' => !empty($device['has_dps']),
+                'has_dps' => $hasDps,
                 'motion_at' => isset($device['motion_at']) && is_numeric($device['motion_at'])
                     ? (int) $device['motion_at']
                     : 0,
@@ -4952,16 +4960,43 @@ final class YarboHome
      */
     public static function contactIsOpen(array $device): bool
     {
-        if (($device['open'] ?? null) === true) {
+        return self::automationOpenState($device) === true;
+    }
+
+    /**
+     * Live open/closed for Automations and Home contact chips.
+     * Prefer the boolean, then Access door-position (dps / dps_label). Never uses
+     * unlock last_activity or Last change stamps.
+     *
+     * @param array<string, mixed> $device
+     */
+    public static function automationOpenState(array $device): ?bool
+    {
+        if (($device['open'] ?? null) === true || ($device['open'] ?? null) === 1 || ($device['open'] ?? null) === '1') {
             return true;
+        }
+        if (($device['open'] ?? null) === false || ($device['open'] ?? null) === 0 || ($device['open'] ?? null) === '0') {
+            return false;
         }
         $dps = strtolower(trim((string) ($device['dps'] ?? '')));
-        if ($dps === 'open' || $dps === 'opened') {
+        if (in_array($dps, ['open', 'opened', 'opening'], true)) {
             return true;
         }
-        $label = (string) ($device['dps_label'] ?? $device['status'] ?? '');
+        if (in_array($dps, ['close', 'closed', 'closing'], true)) {
+            return false;
+        }
+        $label = trim((string) ($device['dps_label'] ?? ''));
+        if ($label === '' && is_string($device['status'] ?? null)) {
+            $label = (string) $device['status'];
+        }
+        if (preg_match('/(^|[·\s])Open(\s|$|[·])/i', $label) === 1) {
+            return true;
+        }
+        if (preg_match('/(^|[·\s])Closed(\s|$|[·])/i', $label) === 1) {
+            return false;
+        }
 
-        return preg_match('/^Open\b/i', $label) === 1;
+        return null;
     }
 
     /**
