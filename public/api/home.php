@@ -103,8 +103,11 @@ try {
             if ($id === '') {
                 return ['ok' => false, 'error' => 'Pick a plug'];
             }
+            if ($watts > 0 && !$home->plugReportsPowerMetrics($id)) {
+                return ['ok' => false, 'error' => 'Motor mode needs a plug that reports watts'];
+            }
             if (!$home->setMotorMode($id, $watts)) {
-                return ['ok' => false, 'error' => 'Motor mode is only for Matter/Hue plugs'];
+                return ['ok' => false, 'error' => 'Motor mode is only for Matter/Hue plugs that report watts'];
             }
 
             return [
