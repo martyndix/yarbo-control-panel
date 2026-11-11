@@ -140,7 +140,9 @@ file_put_contents($root . '/data/unifi-inventory.json', json_encode([
             'on' => true,
             'has_open' => true,
             'open' => true,
-            'status' => 'Open',
+            'temperature' => 17.8,
+            'humidity' => 64,
+            'status' => 'Open · 17.8° · 64% RH',
         ],
         [
             'id' => 'unifi:sensor:rin-r1-0',
@@ -321,17 +323,19 @@ assert_true(
     ($side['open_changed_text'] ?? '') === YarboHome::openChangedText(false, $stamp, $tz),
     'Protect sensor shows Last change from controller stamp'
 );
-// Restore Open for the later tile-sensors assertions below.
+// Restore Open + climate readings for the later tile-sensors assertions below.
 $inv = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
 foreach ($inv['sensors'] as &$sensorRow) {
     if (($sensorRow['id'] ?? '') === 'unifi:sensor:side-door') {
         $sensorRow['open'] = true;
         $sensorRow['on'] = true;
-        $sensorRow['status'] = 'Open';
+        $sensorRow['temperature'] = 17.8;
+        $sensorRow['humidity'] = 64;
+        $sensorRow['status'] = 'Open · 17.8° · 64% RH';
     }
 }
 unset($sensorRow);
-file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
 assert_true($unifi->setDoorsTile(false), 'can turn the doors tile off');
 assert_true($unifi->doorsTileEnabled() === false, 'doors tile off persists');
@@ -364,6 +368,9 @@ foreach ($withSensors['unifi_doors'] as $row) {
 assert_true(($side['kind'] ?? '') === 'sensor', 'non-controllable row is a sensor');
 assert_true(($side['open'] ?? null) === true, 'door sensor keeps live Open');
 assert_true(($side['has_open'] ?? false) === true, 'door sensor keeps has_open');
+assert_true(($side['temperature'] ?? null) === 17.8, 'doors tile passes temperature for climate history');
+assert_true(($side['humidity'] ?? null) === 64.0 || ($side['humidity'] ?? null) === 64, 'doors tile passes humidity');
+assert_true(str_contains((string) ($side['status'] ?? ''), '17.8') && str_contains((string) ($side['status'] ?? ''), 'RH'), 'climate status keeps temp in the pill');
 
 assert_true(YarboUnifi::isDoorSensor([
     'kind' => 'sensor',
@@ -407,7 +414,10 @@ assert_true(str_contains($js, 'function homeDoorsTileCardHtml'), 'JS builds comp
 assert_true(str_contains($js, 'function pinHomeDoorsAfterVestaboard'), 'JS keeps the tile under Vestaboard after reorder');
 assert_true(str_contains($js, 'unifiDoorLockButtonHtml(d, { home: true })'), 'tile reuses the live Unlock/Lock label');
 assert_true(str_contains($js, "unifiDpsMetaHtml(d, 'data-home-dps')"), 'tile shows live Open/Closed');
+assert_true(str_contains($js, 'data-sensor-history'), 'climate status on the tile opens history');
+assert_true(str_contains($js, 'unifiStatusLooksClimate'), 'JS detects temp/RH in status pills');
 assert_true(str_contains($js, 'function homeDoorOpenChangedHtml'), 'JS builds Last change microcopy');
+assert_true(str_contains($change, '## [4.0.248]'), 'changelog 4.0.248');
 assert_true(str_contains($js, 'data-home-open-changed'), 'JS marks Last change element');
 assert_true(str_contains($js, "action: 'doors_tile'"), 'JS saves the optional tick without Settings → Save');
 assert_true(str_contains($js, "action: 'doors_tile_sensors'"), 'JS saves the door-sensors tick without Settings → Save');

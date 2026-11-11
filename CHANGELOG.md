@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.248] - 2026-11-11
+
+### Fixed
+- **Doors tile climate:** status pills that include temperature/humidity (e.g. `Closed · 17.8° · 64% RH`) open the same climate history chart as Home sensor tiles.
+
 ## [4.0.247] - 2026-11-11
 
 ### Added

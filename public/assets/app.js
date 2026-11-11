@@ -3533,18 +3533,37 @@ function renderHomeDoorsTile(data) {
         } else if (changed) {
             changed.remove();
         }
+        const actions = el.querySelector('.home-device-actions');
         const status = el.querySelector('[data-home-dps]');
-        if (status) {
+        if (actions) {
             let label = String(d.dps_label || '').trim();
             if (!label && d.has_open) {
                 const st = String(d.status || '').trim();
                 if (/(^|[·\s])(Open|Closed)(\s|$|[·])/i.test(st)) label = st;
             }
             if (!label) {
-                label = d.open === true ? 'Open' : (d.open === false && (d.has_dps || d.dps || d.has_open) ? 'Closed' : status.textContent);
+                label = d.open === true ? 'Open' : (d.open === false && (d.has_dps || d.dps || d.has_open) ? 'Closed' : (status?.textContent || ''));
             }
-            if (label) status.textContent = label;
-            status.classList.toggle('is-open', d.open === true || d.dps === 'open' || d.dps === 'opened' || /^Open\b/i.test(String(label || '')));
+            const climate = homeDeviceHasClimate(d) || unifiStatusLooksClimate(label) || unifiStatusLooksClimate(d.status);
+            const wantHistory = climate && d.id;
+            const isHistoryBtn = status?.hasAttribute('data-sensor-history');
+            if (wantHistory !== isHistoryBtn || !status) {
+                const html = unifiDpsMetaHtml(d, 'data-home-dps');
+                if (status) {
+                    status.outerHTML = html || '';
+                } else if (html) {
+                    actions.insertAdjacentHTML('afterbegin', html);
+                }
+            } else if (status) {
+                if (label) status.textContent = label;
+                status.classList.toggle('is-open', d.open === true || d.dps === 'open' || d.dps === 'opened' || /^Open\b/i.test(String(label || '')));
+                if (wantHistory) {
+                    status.setAttribute('data-sensor-history', String(d.id || ''));
+                    status.setAttribute('data-sensor-history-name', String(d.name || ''));
+                    status.setAttribute('title', 'Climate history');
+                    status.classList.add('home-device-meta--history');
+                }
+            }
         }
         patchUnifiDoorLockButton(el, d);
     });
@@ -3612,6 +3631,11 @@ function unifiDoorCommandToast(cmd) {
     return `${cmd} sent`;
 }
 
+function unifiStatusLooksClimate(labelOrStatus) {
+    const s = String(labelOrStatus || '');
+    return /°/.test(s) || /%\s*RH/i.test(s);
+}
+
 function unifiDpsMetaHtml(d, attr) {
     let label = String(d?.dps_label || '').trim()
         || (d?.dps === 'open' || d?.dps === 'opened' ? 'Open' : (d?.dps === 'close' || d?.dps === 'closed' ? 'Closed' : ''));
@@ -3631,7 +3655,12 @@ function unifiDpsMetaHtml(d, attr) {
     }
     if (!label && !d?.has_dps && !d?.has_open) return '';
     const open = /^Open\b/i.test(label) || d?.open === true;
-    return `<span class="home-device-meta${open ? ' is-open' : ''}" ${attr}>${escapeHtml(label || '—')}</span>`;
+    const climate = homeDeviceHasClimate(d) || unifiStatusLooksClimate(label) || unifiStatusLooksClimate(d?.status);
+    const cls = `home-device-meta${open ? ' is-open' : ''}${climate ? ' home-device-meta--history' : ''}`;
+    if (climate && d?.id) {
+        return `<button type="button" class="${cls}" ${attr} data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(label || '—')}</button>`;
+    }
+    return `<span class="${cls}" ${attr}>${escapeHtml(label || '—')}</span>`;
 }
 
 function unifiDeviceCardHtml(d) {
@@ -6574,6 +6603,15 @@ async function homeUnifiDoorClick(event) {
 function bindHomeDashboard() {
     bindHomeReorder();
     document.getElementById('home-doors-card')?.addEventListener('click', async (event) => {
+        const historyBtn = event.target.closest('[data-sensor-history]');
+        if (historyBtn) {
+            event.preventDefault();
+            await openSensorHistoryModal(
+                historyBtn.getAttribute('data-sensor-history') || '',
+                historyBtn.getAttribute('data-sensor-history-name') || ''
+            );
+            return;
+        }
         await homeUnifiDoorClick(event);
     });
     document.getElementById('home-doors-tile')?.addEventListener('change', (event) => {
@@ -16642,8 +16680,8 @@ setupSensorHistoryUi();
 document.body.addEventListener('click', async (event) => {
     const historyBtn = event.target.closest('[data-sensor-history]');
     if (!historyBtn) return;
-    // Home grid handles its own listener; this covers UniFi cards and other panels.
-    if (historyBtn.closest('#home-devices, #home-hidden-devices')) return;
+    // Home grid / doors tile handle their own listeners; this covers UniFi cards.
+    if (historyBtn.closest('#home-devices, #home-hidden-devices, #home-doors-card')) return;
     event.preventDefault();
     await openSensorHistoryModal(
         historyBtn.getAttribute('data-sensor-history') || '',
