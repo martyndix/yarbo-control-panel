@@ -14,6 +14,7 @@ final class YarboPaperRemote
     public const PROVIDER_TAILSCALE = 'tailscale';
     public const PROVIDER_CUSTOM = 'custom';
     public const VIA_HEADER = 'X-Yarbo-Paper-Via';
+    public const NET_HEADER = 'X-Yarbo-Paper-Net';
 
     /** @var list<string> */
     public const GET_ACTIONS = ['compact', 'plans', 'firmware', 'logo'];
@@ -227,6 +228,39 @@ final class YarboPaperRemote
         $q = strtolower(trim((string) ($query['via'] ?? $query['remote'] ?? '')));
 
         return in_array($q, ['1', 'true', 'yes', 'remote'], true);
+    }
+
+    /**
+     * Whether the tablet is joined to its flashed home SSID (not travel Wi-Fi).
+     * Null when the firmware did not report it (older builds).
+     *
+     * @param array<string, mixed> $query
+     */
+    public static function requestHomeWifi(array $query = []): ?bool
+    {
+        $net = strtolower(trim((string) ($_SERVER['HTTP_X_YARBO_PAPER_NET'] ?? '')));
+        if ($net === '' && function_exists('getallheaders')) {
+            $got = getallheaders();
+            if (is_array($got)) {
+                foreach ($got as $name => $value) {
+                    if (strtolower((string) $name) === 'x-yarbo-paper-net') {
+                        $net = strtolower(trim((string) $value));
+                        break;
+                    }
+                }
+            }
+        }
+        if ($net === '') {
+            $net = strtolower(trim((string) ($query['net'] ?? $query['wifi'] ?? '')));
+        }
+        if (in_array($net, ['home', 'lan', 'local', '1', 'true', 'yes'], true)) {
+            return true;
+        }
+        if (in_array($net, ['travel', 'guest', 'away', 'remote', '0', 'false', 'no'], true)) {
+            return false;
+        }
+
+        return null;
     }
 
     /**

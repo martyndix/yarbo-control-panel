@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.254] - 2026-11-12
+
+### Fixed
+- **PaperMono / Paper Colour home vs remote:** when Remote access (Funnel or a public subdomain) is on, a tablet on the home Wi-Fi that falls back to HTTPS no longer shows as **Online — remote**. Presence follows the flashed home SSID vs travel Wi-Fi. Firmware **0.1.87** / **0.2.28-colour** (Wi-Fi Update after this panel version).
+
 ## [4.0.253] - 2026-11-12
 
 ### Fixed

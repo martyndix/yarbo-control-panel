@@ -16,9 +16,9 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.86';
+    public const FIRMWARE_VERSION = '0.1.87';
     public const MENU_LABEL_MAX = 20;
-    public const FIRMWARE_VERSION_COLOR = '0.2.27-colour';
+    public const FIRMWARE_VERSION_COLOR = '0.2.28-colour';
     public const OTA_ONLINE_MONO_S = 120;
     public const OTA_ONLINE_COLOR_S = 180;
     public const OTA_PENDING_TTL_S = 900;
@@ -828,13 +828,25 @@ final class YarboPaperDevice
     }
 
     /**
-     * Last poll used Funnel / HTTPS remote_url, not the LAN Panel URL.
+     * True when the tablet is away from home Wi-Fi (travel), or — for older
+     * firmware that does not report SSID — when the last poll used Funnel.
      *
      * @param array<string, mixed> $device
      */
     public function deviceIsRemote(array $device): bool
     {
-        return $this->deviceIsOnline($device) && (($device['last_via'] ?? '') === 'remote');
+        if (!$this->deviceIsOnline($device)) {
+            return false;
+        }
+        $net = (string) ($device['last_net'] ?? '');
+        if ($net === 'home') {
+            return false;
+        }
+        if ($net === 'travel') {
+            return true;
+        }
+
+        return (($device['last_via'] ?? '') === 'remote');
     }
 
     /**
@@ -843,17 +855,19 @@ final class YarboPaperDevice
     public function presenceLabel(array $device): string
     {
         $via = (string) ($device['last_via'] ?? '');
+        $net = (string) ($device['last_net'] ?? '');
+        $away = $net === 'travel' || ($net === '' && $via === 'remote');
         if (!$this->deviceIsOnline($device)) {
             if ((string) ($device['last_seen_at'] ?? '') === '') {
                 return 'Offline — never seen';
             }
-            if ($via === 'remote') {
+            if ($away) {
                 return 'Offline — last seen remotely';
             }
 
             return 'Offline — last seen on the home network';
         }
-        if ($via === 'remote') {
+        if ($away) {
             return 'Online — remote';
         }
 
@@ -1099,8 +1113,14 @@ final class YarboPaperDevice
         return !$this->shouldDropOtaPending($device);
     }
 
-    public function touch(string $id, ?string $fwReported = null, ?int $batteryLevel = null, ?bool $charging = null, ?bool $viaRemote = null): void
-    {
+    public function touch(
+        string $id,
+        ?string $fwReported = null,
+        ?int $batteryLevel = null,
+        ?bool $charging = null,
+        ?bool $viaRemote = null,
+        ?bool $onHomeWifi = null,
+    ): void {
         $store = $this->load();
         foreach ($store['devices'] as &$device) {
             if (!is_array($device) || (string) ($device['id'] ?? '') !== $id) {
@@ -1109,6 +1129,9 @@ final class YarboPaperDevice
             $device['last_seen_at'] = gmdate('c');
             if ($viaRemote !== null) {
                 $device['last_via'] = $viaRemote ? 'remote' : 'lan';
+            }
+            if ($onHomeWifi !== null) {
+                $device['last_net'] = $onHomeWifi ? 'home' : 'travel';
             }
             if ($fwReported !== null && $fwReported !== '') {
                 $device['fw_reported'] = $fwReported;
@@ -3309,6 +3332,7 @@ final class YarboPaperDevice
             'last_seen_at' => $device['last_seen_at'] ?? null,
             'last_seen_label' => $this->formatLastSeen(isset($device['last_seen_at']) ? (string) $device['last_seen_at'] : null),
             'last_via' => (string) ($device['last_via'] ?? ''),
+            'last_net' => (string) ($device['last_net'] ?? ''),
             'remote' => $this->deviceIsRemote($device),
             'presence_label' => $this->presenceLabel($device),
             'fw_reported' => $device['fw_reported'] ?? null,

@@ -172,7 +172,9 @@ foreach ([
     'drawString("R"',
     'if (ru.length() && ru != remoteUrl)',
     'Do not clear usingRemote here',
-    '#define PAPERMONO_FW_VERSION "0.1.86"',
+    'X-Yarbo-Paper-Net',
+    'paperNetAddIdentityHeaders',
+    '#define PAPERMONO_FW_VERSION "0.1.87"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {
@@ -203,7 +205,9 @@ foreach ([
     'WiFi.SSID() != wifiSsid',
     'if (ru.length() && ru != remoteUrl)',
     'Do not clear usingRemote here',
-    '#define PAPERMONO_FW_VERSION "0.2.27-colour"',
+    'X-Yarbo-Paper-Net',
+    'paperNetAddIdentityHeaders',
+    '#define PAPERMONO_FW_VERSION "0.2.28-colour"',
     'void finishEpdFrame()',
     'M5.Display.startWrite();',
 ] as $needle) {
