@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.251] - 2026-11-11
+
+### Fixed
+- **Plug motor mode:** Home ⚙️ only offers motor mode on plugs that report watts (and the API rejects enabling it otherwise).
+
 ## [4.0.250] - 2026-11-11
 
 ### Added

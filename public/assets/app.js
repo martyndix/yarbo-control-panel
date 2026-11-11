@@ -5736,12 +5736,18 @@ async function homeSavePlugAutoOff(id) {
     }
 }
 
+function homePlugHasPowerMetrics(d) {
+    return d?.power_w != null && d.power_w !== '' && Number.isFinite(Number(d.power_w));
+}
+
 function homePlugMotorModeHtml(d) {
     if (!homeManageOpen) return '';
     const id = String(d.id || '');
     if (!id) return '';
     const watts = Math.max(0, Math.round(Number(d.motor_mode_w) || 0));
     const enabled = watts > 0;
+    // Motor mode needs live watts — hide unless the plug reports power (or mode is already on so it can be cleared).
+    if (!enabled && !homePlugHasPowerMetrics(d)) return '';
     const value = enabled ? watts : 100;
     return `<div class="home-plug-auto-off home-plug-motor-mode" data-home-motor-mode-wrap="${escapeHtml(id)}">
         <label class="home-plug-auto-off-toggle" title="Off waits until draw drops below this many watts (website, automations, auto-off). If Apple Home turns it off while loaded, it is turned back on until load is low enough for a queued Off.">

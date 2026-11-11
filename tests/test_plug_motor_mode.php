@@ -44,9 +44,36 @@ file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
 
 $home = new YarboHome($root);
 assert_true($home->motorModeWatts($plugId) === 0, 'default motor mode off');
+assert_true($home->plugReportsPowerMetrics($plugId), 'metering plug reports watts');
 assert_true($home->setMotorMode($plugId, 200), 'enable motor mode');
 assert_true($home->motorModeWatts($plugId) === 200, 'stores watts');
 assert_true(!$home->setMotorMode('unifi:relay:1:0', 100), 'rejects UniFi ids');
+
+$plainId = '13:1';
+file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
+    'v' => 5,
+    'devices' => [
+        [
+            'id' => $plugId,
+            'name' => 'Compressor',
+            'kind' => 'plug',
+            'on' => true,
+            'power_w' => 450.0,
+            'available' => true,
+        ],
+        [
+            'id' => $plainId,
+            'name' => 'Lamp',
+            'kind' => 'plug',
+            'on' => true,
+            'available' => true,
+        ],
+    ],
+], JSON_UNESCAPED_SLASHES));
+$homeGate = new YarboHome($root);
+assert_true(!$homeGate->plugReportsPowerMetrics($plainId), 'plain plug has no watts');
+assert_true(!$homeGate->setMotorMode($plainId, 100), 'rejects motor mode without watts');
+assert_true($homeGate->setMotorMode($plainId, 0), 'clear motor mode always allowed');
 
 assert_true($home->motorModeShouldDeferOff($plugId, 'off', 'plug'), 'defers off while drawing');
 assert_true(!$home->motorModeShouldDeferOff($plugId, 'on', 'plug'), 'on never deferred');
@@ -97,6 +124,7 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($api, "'motor_mode'"), 'API motor_mode');
 assert_true(str_contains($api, 'flushMotorPendingOff'), 'dashboard flushes queued Off');
 assert_true(str_contains($js, 'homePlugMotorModeHtml'), 'JS motor mode UI');
+assert_true(str_contains($js, 'homePlugHasPowerMetrics'), 'JS hides motor mode without watts');
 assert_true(str_contains($js, 'power_above'), 'JS watts above When');
 assert_true(str_contains($js, 'voltage_above'), 'JS volts above When');
 assert_true(str_contains($js, 'current_above'), 'JS amps above When');
@@ -109,6 +137,8 @@ assert_true(str_contains($agent, 'motor_mode_w'), 'agent reads motor_mode_w');
 assert_true(str_contains($agent, 'ATTR_RMS_VOLTAGE'), 'agent reads RMS voltage');
 assert_true(str_contains($agent, 'node_electrical_metrics'), 'agent merges sibling electrical endpoint');
 assert_true(str_contains($homePhp, 'scheduleMotorPendingOff'), 'Home queues Off');
-assert_true(str_contains($change, '## [4.0.250]'), 'changelog 4.0.250');
+assert_true(str_contains($homePhp, 'plugReportsPowerMetrics'), 'Home gates motor mode on watts');
+assert_true(str_contains($api, 'needs a plug that reports watts'), 'API rejects motor mode without watts');
+assert_true(str_contains($change, '## [4.0.251]'), 'changelog 4.0.251');
 
 echo "ok: plug motor mode + watts automations\n";

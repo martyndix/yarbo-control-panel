@@ -1565,7 +1565,8 @@ final class YarboHome
     }
 
     /**
-     * Motor mode: block Off while the plug draws at least this many watts. 0 clears.
+     * Motor mode: queue Off while the plug draws at least this many watts. 0 clears.
+     * Enabling requires the plug to report live power_w (metering plugs only).
      */
     public function setMotorMode(string $id, int $watts): bool
     {
@@ -1601,11 +1602,37 @@ final class YarboHome
             }
             unset($map[$id]);
         } else {
+            if (!$this->plugReportsPowerMetrics($id)) {
+                return false;
+            }
             $map[$id] = $watts;
         }
         $store['motor_mode_w'] = $map;
 
         return $this->write($store);
+    }
+
+    /** True when the plug currently reports Electrical Power Measurement watts. */
+    public function plugReportsPowerMetrics(string $id): bool
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return false;
+        }
+        $row = $this->cachedDeviceRow($id);
+        if (is_array($row) && isset($row['power_w']) && is_numeric($row['power_w'])) {
+            return true;
+        }
+        foreach ($this->load()['last_devices'] ?? [] as $one) {
+            if (!is_array($one) || (string) ($one['id'] ?? '') !== $id) {
+                continue;
+            }
+            if (isset($one['power_w']) && is_numeric($one['power_w'])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function motorModeWatts(string $id): int
