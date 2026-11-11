@@ -172,7 +172,14 @@ class YarboCloudControlClient:
         if isinstance(self._last_raw, dict) and age <= max(1.0, timeout):
             return SimpleNamespace(raw=self._last_raw)
 
-        raw = await asyncio.to_thread(self._get_device_msg_sync, timeout)
+        try:
+            raw = await asyncio.to_thread(self._get_device_msg_sync, timeout)
+        except TimeoutError as exc:
+            # SDK raises on missed data_feedback; keep last DeviceMSG push if any.
+            _LOGGER.debug("get_device_msg timed out: %s", exc)
+            if isinstance(self._last_raw, dict) and self._last_raw:
+                return SimpleNamespace(raw=self._last_raw, stale=True)
+            raise
         if isinstance(raw, dict) and raw:
             # request_with_feedback sometimes wraps under data / DeviceMSG
             unwrapped = _unwrap_device_msg(raw)
@@ -180,7 +187,7 @@ class YarboCloudControlClient:
             self._last_raw_at = time.time()
             return SimpleNamespace(raw=unwrapped)
         if isinstance(self._last_raw, dict):
-            return SimpleNamespace(raw=self._last_raw)
+            return SimpleNamespace(raw=self._last_raw, stale=True)
         return SimpleNamespace(raw=None)
 
     def _get_device_msg_sync(self, timeout: float) -> Any:

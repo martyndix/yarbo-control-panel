@@ -2638,7 +2638,14 @@ function formatConnectionError(message) {
     if (lower.includes('network is unreachable') || message.includes('[101]')) {
         return 'No network route to Yarbo cloud. Check internet on this panel.';
     }
-    if (lower.includes('telemetry_timeout') || lower.includes('no telemetry received') || lower.includes('cloud mqtt connected but the robot did not reply') || lower.includes('connected to the yarbo mqtt broker but the robot did not respond')) {
+    if (
+        lower.includes('telemetry_timeout')
+        || lower.includes('no telemetry received')
+        || lower.includes('no data_feedback response')
+        || lower.includes('get_device_msg')
+        || lower.includes('cloud mqtt connected but the robot did not reply')
+        || lower.includes('connected to the yarbo mqtt broker but the robot did not respond')
+    ) {
         return 'Cloud MQTT connected but the robot did not reply. Check the serial in Settings → Yarbo and that the robot is online in the Yarbo app.';
     }
     if (lower.includes('timed out') || lower.includes('timeout')) {

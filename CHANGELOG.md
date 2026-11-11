@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.252] - 2026-11-11
+
+### Fixed
+- **Intermittent `get_device_msg` banner:** when cloud MQTT misses a 4s `data_feedback` reply, the panel keeps the last robot snapshot (and hides the red banner once status was already loaded) instead of showing the raw SDK timeout.
+
 ## [4.0.251] - 2026-11-11
 
 ### Fixed
