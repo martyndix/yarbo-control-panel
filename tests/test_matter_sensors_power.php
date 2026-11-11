@@ -47,9 +47,23 @@ $plug = [
         '1/144/8' => 12500,
     ],
 ];
+$grillplats = [
+    'node_id' => 83,
+    'available' => true,
+    'attributes' => [
+        '0/40/1' => 'IKEA of Sweden',
+        '0/40/3' => 'GRILLPLATS',
+        '1/29/0' => [['deviceType' => 0x010A, 'revision' => 1]],
+        '1/6/0' => true,
+        '2/29/0' => [['deviceType' => 0x0510, 'revision' => 1]],
+        '2/144/8' => 12500,
+        '2/144/11' => 231000,
+        '2/144/12' => 55,
+    ],
+];
 
 $byId = [];
-foreach (YarboMatterFabric::flatten([$climate, $contact, $plug]) as $row) {
+foreach (YarboMatterFabric::flatten([$climate, $contact, $plug, $grillplats]) as $row) {
     $byId[(string) ($row['id'] ?? '')] = $row;
 }
 
@@ -70,6 +84,12 @@ assert_true(YarboHome::deviceAcceptsCommand('81:1', 'toggle', 'sensor') === fals
 $plugRow = $byId['82:1'] ?? [];
 assert_true(($plugRow['kind'] ?? '') === 'plug', 'plug kind');
 assert_true(($plugRow['power_w'] ?? null) === 12.5, 'plug watts from milliwatts');
+$grill = $byId['83:1'] ?? [];
+assert_true(($grill['kind'] ?? '') === 'plug', 'grillplats plug kind');
+assert_true(($grill['power_w'] ?? null) === 12.5, 'grillplats watts from sibling');
+assert_true(($grill['voltage_v'] ?? null) === 231.0, 'grillplats volts');
+assert_true(($grill['current_a'] ?? null) === 0.055, 'grillplats amps');
+assert_true(!isset($byId['83:2']), 'electrical sensor endpoint not a Home row');
 
 $root = sys_get_temp_dir() . '/yarbo-matter-access-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);

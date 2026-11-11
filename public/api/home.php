@@ -45,6 +45,7 @@ if ($method === 'GET') {
     try {
         if ($hub->enabled(YarboHub::MODULE_HOME)) {
             $home->flushAutoOff();
+            $home->flushMotorPendingOff();
         }
     } catch (Throwable) {
     }
@@ -94,6 +95,23 @@ try {
                 'id' => $id,
                 'auto_off_sec' => $home->autoOffSec($id),
                 'auto_off_map' => $home->autoOffMap(),
+            ];
+        })(),
+        'motor_mode' => (static function () use ($home, $input): array {
+            $id = trim((string) ($input['id'] ?? ''));
+            $watts = (int) ($input['watts'] ?? $input['motor_mode_w'] ?? 0);
+            if ($id === '') {
+                return ['ok' => false, 'error' => 'Pick a plug'];
+            }
+            if (!$home->setMotorMode($id, $watts)) {
+                return ['ok' => false, 'error' => 'Motor mode is only for Matter/Hue plugs'];
+            }
+
+            return [
+                'ok' => true,
+                'id' => $id,
+                'motor_mode_w' => $home->motorModeWatts($id),
+                'motor_mode_map' => $home->motorModeMap(),
             ];
         })(),
         'rename' => $home->saveMeta(['names' => [$input['id'] ?? '' => $input['name'] ?? '']]),

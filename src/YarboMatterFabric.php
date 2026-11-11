@@ -88,7 +88,11 @@ final class YarboMatterFabric
     private const ATTR_MEASURED_TEMP = 0;
     private const ATTR_MEASURED_HUMIDITY = 0;
     private const ATTR_BOOL_STATE_VALUE = 0;
+    private const ATTR_VOLTAGE = 4;
+    private const ATTR_ACTIVE_CURRENT = 5;
     private const ATTR_ACTIVE_POWER = 8;
+    private const ATTR_RMS_VOLTAGE = 11;
+    private const ATTR_RMS_CURRENT = 12;
     private const ATTR_LEGACY_ACTIVE_POWER = 0x050B;
     private const SYSTEM_MODE_OFF = 0;
     private const SYSTEM_MODE_FAN = 7;
@@ -286,6 +290,7 @@ final class YarboMatterFabric
                     break;
                 }
             }
+            $nodeElectrical = self::nodeElectricalMetrics($attributes);
             $parentNames = self::bridgedParentNames($attributes, $vendor, $product, $source);
             foreach ($sorted as $endpoint) {
                 if ($endpoint === 0) {
@@ -338,7 +343,10 @@ final class YarboMatterFabric
                 $thermo = $kind === 'heater' ? self::thermostatPayload($attributes, $endpoint) : [];
                 $vacuum = $kind === 'vacuum' ? self::vacuumPayload($attributes, $endpoint) : [];
                 $sensor = $kind === 'sensor' ? self::sensorPayload($attributes, $endpoint) : [];
-                $powerW = $kind === 'plug' ? self::plugPowerWatts($attributes, $endpoint) : null;
+                $electrical = ($kind === 'plug' && $nodeElectrical !== []) ? $nodeElectrical : [];
+                if ($kind === 'plug') {
+                    $electrical = array_merge($electrical, self::electricalPayload($attributes, $endpoint));
+                }
                 $on = self::attrBool($onVal);
                 if (array_key_exists('thermostat_on', $thermo) && $thermo['thermostat_on'] !== null) {
                     $on = (bool) $thermo['thermostat_on'];
@@ -374,8 +382,12 @@ final class YarboMatterFabric
                         'color_ct' => false,
                         'color_hex' => '',
                     ]) + $thermo + $vacuum + $sensor;
-                if ($powerW !== null) {
-                    $row['power_w'] = $powerW;
+                if ($kind === 'plug' && $electrical !== []) {
+                    foreach (['power_w', 'voltage_v', 'current_a'] as $key) {
+                        if (isset($electrical[$key]) && $electrical[$key] !== null) {
+                            $row[$key] = $electrical[$key];
+                        }
+                    }
                 }
                 $devices[] = $row;
             }
@@ -1473,6 +1485,103 @@ final class YarboMatterFabric
         return round($number / 1000.0, 1);
     }
 
+    private static function matterMillivoltsToVolts(mixed $raw): ?float
+    {
+        if (!is_numeric($raw)) {
+            return null;
+        }
+        $number = (float) $raw;
+        if ($number < 0 || $number > 1_000_000_000) {
+            return null;
+        }
+
+        return round($number / 1000.0, 1);
+    }
+
+    private static function matterMilliampsToAmps(mixed $raw): ?float
+    {
+        if (!is_numeric($raw)) {
+            return null;
+        }
+        $number = (float) $raw;
+        if ($number < 0 || $number > 1_000_000_000) {
+            return null;
+        }
+
+        return round($number / 1000.0, 3);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array<string, mixed>
+     */
+    private static function electricalPayload(array $attributes, int $endpoint): array
+    {
+        if (!self::endpointHasCluster($attributes, $endpoint, self::ELECTRICAL_POWER)) {
+            return [];
+        }
+        $out = [];
+        $power = self::matterPowerWatts(self::attrRaw($attributes, $endpoint, self::ELECTRICAL_POWER, self::ATTR_ACTIVE_POWER));
+        if ($power !== null) {
+            $out['power_w'] = $power;
+        }
+        $voltage = self::matterMillivoltsToVolts(
+            self::attrRaw($attributes, $endpoint, self::ELECTRICAL_POWER, self::ATTR_RMS_VOLTAGE)
+        );
+        if ($voltage === null) {
+            $voltage = self::matterMillivoltsToVolts(
+                self::attrRaw($attributes, $endpoint, self::ELECTRICAL_POWER, self::ATTR_VOLTAGE)
+            );
+        }
+        if ($voltage !== null) {
+            $out['voltage_v'] = $voltage;
+        }
+        $current = self::matterMilliampsToAmps(
+            self::attrRaw($attributes, $endpoint, self::ELECTRICAL_POWER, self::ATTR_RMS_CURRENT)
+        );
+        if ($current === null) {
+            $current = self::matterMilliampsToAmps(
+                self::attrRaw($attributes, $endpoint, self::ELECTRICAL_POWER, self::ATTR_ACTIVE_CURRENT)
+            );
+        }
+        if ($current !== null) {
+            $out['current_a'] = $current;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array<string, mixed>
+     */
+    private static function nodeElectricalMetrics(array $attributes): array
+    {
+        $merged = [];
+        foreach (self::endpointIds($attributes) as $endpoint) {
+            foreach (self::electricalPayload($attributes, $endpoint) as $key => $value) {
+                if ($value !== null) {
+                    $merged[$key] = $value;
+                }
+            }
+        }
+        if (!isset($merged['power_w'])) {
+            foreach (self::endpointIds($attributes) as $endpoint) {
+                if (!self::endpointHasCluster($attributes, $endpoint, self::ELECTRICAL_MEASUREMENT)) {
+                    continue;
+                }
+                $raw = self::attrRaw($attributes, $endpoint, self::ELECTRICAL_MEASUREMENT, self::ATTR_LEGACY_ACTIVE_POWER);
+                if (!is_numeric($raw)) {
+                    continue;
+                }
+                $merged['power_w'] = round(((float) $raw) / 10.0, 1);
+                break;
+            }
+        }
+
+        return $merged;
+    }
+
     /**
      * @param array<string, mixed> $attributes
      * @return array<string, mixed>
@@ -1517,27 +1626,6 @@ final class YarboMatterFabric
     /**
      * @param array<string, mixed> $attributes
      */
-    private static function plugPowerWatts(array $attributes, int $endpoint): ?float
-    {
-        if (self::endpointHasCluster($attributes, $endpoint, self::ELECTRICAL_POWER)) {
-            $watts = self::matterPowerWatts(
-                self::attrRaw($attributes, $endpoint, self::ELECTRICAL_POWER, self::ATTR_ACTIVE_POWER)
-            );
-            if ($watts !== null) {
-                return $watts;
-            }
-        }
-        if (self::endpointHasCluster($attributes, $endpoint, self::ELECTRICAL_MEASUREMENT)) {
-            $raw = self::attrRaw($attributes, $endpoint, self::ELECTRICAL_MEASUREMENT, self::ATTR_LEGACY_ACTIVE_POWER);
-            if (!is_numeric($raw)) {
-                return null;
-            }
-
-            return round(((float) $raw) / 10.0, 1);
-        }
-
-        return null;
-    }
 
     /**
      * @param array<string, mixed> $attributes

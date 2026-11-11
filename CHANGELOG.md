@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.250] - 2026-11-11
+
+### Added
+- **Automations watts / volts / amps:** Matter plugs with Electrical Power Measurement (IKEA **GRILLPLATS** and similar; also INSPELNING when reported) can use **watts / volts / amps above or below** as a When trigger or Only-if condition.
+- **Plug live electrical tile:** show **W · V · A** next to On/Off when the fabric reports them. GRILLPLATS puts metering on a sibling Electrical Sensor endpoint — those readings are merged onto the plug row.
+- **Plug motor mode:** on Home ⚙️, next to auto-off — Off from the website, automations, or plug auto-off is **queued** while draw is at or above the limit, then completed when load drops (so the Off is not missed). The tile shows **Cancel off** while queued. If Apple Home turns it off while loaded, the Matter agent turns it back **On** until a queued Off can finish safely.
+
 ## [4.0.249] - 2026-11-11
 
 ### Added

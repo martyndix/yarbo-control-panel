@@ -105,6 +105,7 @@ final class YarboHome
             'contact_kind' => [],
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
             'auto_off_sec' => [],
+            'motor_mode_w' => [],
         ];
         if (!is_file($path)) {
             $recovered = $this->recoverUserMeta($defaults);
@@ -244,6 +245,7 @@ final class YarboHome
             'contact_kind' => $this->normalizeContactKind($decoded['contact_kind'] ?? null),
             'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
             'auto_off_sec' => $this->normalizeAutoOffMap($decoded['auto_off_sec'] ?? null),
+            'motor_mode_w' => $this->normalizeMotorModeMap($decoded['motor_mode_w'] ?? null),
         ];
         $recovered = $this->recoverUserMeta($store);
         if ($recovered !== null) {
@@ -355,6 +357,7 @@ final class YarboHome
                 'last_devices' => $store['last_devices'],
                 'contact_kind' => $store['contact_kind'] ?? [],
                 'auto_off_sec' => $store['auto_off_sec'] ?? [],
+                'motor_mode_w' => $store['motor_mode_w'] ?? [],
             ],
             'automations' => (new YarboHomeAutomations($this->projectRoot))->exportStore(),
         ];
@@ -393,11 +396,13 @@ final class YarboHome
         $current = $this->load();
         if ($homeIn !== null) {
             $this->snapshotStore($current);
-            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind', 'auto_off_sec'] as $key) {
+            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind', 'auto_off_sec', 'motor_mode_w'] as $key) {
                 if (isset($homeIn[$key]) && is_array($homeIn[$key])) {
-                    $current[$key] = $key === 'auto_off_sec'
-                        ? $this->normalizeAutoOffMap($homeIn[$key])
-                        : $homeIn[$key];
+                    $current[$key] = match ($key) {
+                        'auto_off_sec' => $this->normalizeAutoOffMap($homeIn[$key]),
+                        'motor_mode_w' => $this->normalizeMotorModeMap($homeIn[$key]),
+                        default => $homeIn[$key],
+                    };
                 }
             }
             if (isset($homeIn['last_devices']) && is_array($homeIn['last_devices'])) {
@@ -651,9 +656,16 @@ final class YarboHome
                     }
                 }
             }
-            if (!$isUnifi && ($row['kind'] ?? '') === self::KIND_PLUG
-                && isset($device['power_w']) && is_numeric($device['power_w'])) {
-                $row['power_w'] = round((float) $device['power_w'], 1);
+            if (!$isUnifi && ($row['kind'] ?? '') === self::KIND_PLUG) {
+                if (isset($device['power_w']) && is_numeric($device['power_w'])) {
+                    $row['power_w'] = round((float) $device['power_w'], 1);
+                }
+                if (isset($device['voltage_v']) && is_numeric($device['voltage_v'])) {
+                    $row['voltage_v'] = round((float) $device['voltage_v'], 1);
+                }
+                if (isset($device['current_a']) && is_numeric($device['current_a'])) {
+                    $row['current_a'] = round((float) $device['current_a'], 3);
+                }
             }
             if (($row['kind'] ?? '') === self::KIND_VACUUM) {
                 $row['vacuum_status'] = (string) ($device['vacuum_status'] ?? '');
@@ -704,6 +716,8 @@ final class YarboHome
             }
             if (!$isUnifi && ($row['kind'] ?? '') === self::KIND_PLUG) {
                 $row['auto_off_sec'] = $this->autoOffSec($id);
+                $row['motor_mode_w'] = $this->motorModeWatts($id);
+                $row['motor_pending_off'] = $this->hasMotorPendingOff($id);
             }
             if ($row['hidden']) {
                 $hiddenDevices[] = $row;
@@ -1174,6 +1188,24 @@ final class YarboHome
         if (in_array($action, ['setpoint', 'temperature', 'heating_setpoint'], true)) {
             $body['mode'] = 'heat';
         }
+        if (in_array($action, ['on', 'off', 'toggle'], true) && ($kind === self::KIND_PLUG || $kind === '')) {
+            if ($action === 'on' || ($action === 'toggle' && !$this->deviceIsOn($id))) {
+                $this->cancelMotorPendingOff($id);
+            } elseif ($this->motorModeShouldDeferOff($id, $action, $kind)) {
+                $this->scheduleMotorPendingOff($id);
+                $this->patchCachedDeviceState($id, ['on' => true, 'motor_pending_off' => true]);
+
+                return [
+                    'ok' => true,
+                    'on' => true,
+                    'motor_pending_off' => true,
+                    'motor_mode' => true,
+                    'id' => $id,
+                ];
+            } else {
+                $this->cancelMotorPendingOff($id);
+            }
+        }
         $timeout = $kind === self::KIND_HEATER ? 80.0 : 60.0;
         $result = $agent->request($body, $timeout);
         if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
@@ -1233,6 +1265,12 @@ final class YarboHome
         }
         $this->rememberCommandTrigger($id, $action, $input, $out);
         $this->maybeSchedulePlugAutoOff($id, $kind, $action, $out);
+        if (($out['ok'] ?? false) && in_array($action, ['off', 'toggle'], true) && empty($out['on'])) {
+            $this->cancelMotorPendingOff($id);
+            $out['motor_pending_off'] = false;
+        } elseif (($out['ok'] ?? false) && $action === 'on') {
+            $out['motor_pending_off'] = false;
+        }
 
         return $out;
     }
@@ -1358,6 +1396,13 @@ final class YarboHome
         $this->writeAutoOffState(['pending' => $keep]);
         $done = [];
         foreach ($due as $id => $job) {
+            if ($this->motorModeShouldDeferOff($id, 'off', self::KIND_PLUG)) {
+                // Keep the Off intent: turn off as soon as load drops below motor mode.
+                $this->scheduleMotorPendingOff($id);
+                $this->cancelAutoOff($id);
+                $done[] = $id;
+                continue;
+            }
             $res = $this->command(['id' => $id, 'command' => 'off', 'kind' => self::KIND_PLUG]);
             if (($res['ok'] ?? false) === true) {
                 $done[] = $id;
@@ -1517,6 +1562,302 @@ final class YarboHome
         }
 
         return $out;
+    }
+
+    /**
+     * Motor mode: block Off while the plug draws at least this many watts. 0 clears.
+     */
+    public function setMotorMode(string $id, int $watts): bool
+    {
+        $id = trim($id);
+        if ($id === '' || YarboUnifi::isHomeId($id)) {
+            return false;
+        }
+        $kind = $this->deviceKindMap()[$id] ?? '';
+        if ($kind !== '' && $kind !== self::KIND_PLUG) {
+            return false;
+        }
+        if ($kind === '') {
+            $knownPlug = false;
+            foreach ($this->load()['last_devices'] ?? [] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                if ((string) ($row['id'] ?? '') === $id && (string) ($row['kind'] ?? '') === self::KIND_PLUG) {
+                    $knownPlug = true;
+                    break;
+                }
+            }
+            if (!$knownPlug && !preg_match('/^\d+:\d+$/', $id)) {
+                return false;
+            }
+        }
+        $watts = self::clampMotorModeWatts($watts);
+        $store = $this->load();
+        $map = is_array($store['motor_mode_w'] ?? null) ? $store['motor_mode_w'] : [];
+        if ($watts <= 0) {
+            if (!isset($map[$id])) {
+                return true;
+            }
+            unset($map[$id]);
+        } else {
+            $map[$id] = $watts;
+        }
+        $store['motor_mode_w'] = $map;
+
+        return $this->write($store);
+    }
+
+    public function motorModeWatts(string $id): int
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return 0;
+        }
+        $map = $this->load()['motor_mode_w'] ?? [];
+
+        return is_array($map) ? self::clampMotorModeWatts((int) ($map[$id] ?? 0)) : 0;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    public function motorModeMap(): array
+    {
+        $map = $this->load()['motor_mode_w'] ?? [];
+
+        return is_array($map) ? $this->normalizeMotorModeMap($map) : [];
+    }
+
+    public static function clampMotorModeWatts(int $watts): int
+    {
+        if ($watts <= 0) {
+            return 0;
+        }
+
+        return max(1, min(100000, $watts));
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function normalizeMotorModeMap(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $id => $watts) {
+            $id = trim((string) $id);
+            if ($id === '' || YarboUnifi::isHomeId($id)) {
+                continue;
+            }
+            $w = self::clampMotorModeWatts((int) $watts);
+            if ($w > 0) {
+                $out[$id] = $w;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * True when Off should wait until live watts drop below the motor-mode limit.
+     */
+    public function motorModeShouldDeferOff(string $id, string $action, string $kind = ''): bool
+    {
+        $id = trim($id);
+        $action = strtolower(trim($action));
+        if ($id === '' || !in_array($action, ['off', 'toggle'], true)) {
+            return false;
+        }
+        if ($kind === '') {
+            $kind = $this->deviceKindMap()[$id] ?? '';
+        }
+        if ($kind !== '' && $kind !== self::KIND_PLUG) {
+            return false;
+        }
+        $limit = $this->motorModeWatts($id);
+        if ($limit <= 0) {
+            return false;
+        }
+        $row = $this->cachedDeviceRow($id);
+        if ($action === 'toggle') {
+            $on = is_array($row) ? YarboMatterFabric::attrBool($row['on'] ?? false) : false;
+            if (!$on) {
+                return false;
+            }
+        }
+        $power = null;
+        if (is_array($row) && isset($row['power_w']) && is_numeric($row['power_w'])) {
+            $power = (float) $row['power_w'];
+        }
+
+        return $power !== null && $power >= $limit;
+    }
+
+    /** @deprecated Use motorModeShouldDeferOff — kept for older tests/callers. */
+    public function motorModeOffBlock(string $id, string $action, string $kind = ''): ?string
+    {
+        if (!$this->motorModeShouldDeferOff($id, $action, $kind)) {
+            return null;
+        }
+        $row = $this->cachedDeviceRow($id);
+        $power = is_array($row) && isset($row['power_w']) && is_numeric($row['power_w'])
+            ? (float) $row['power_w']
+            : 0.0;
+        $limit = $this->motorModeWatts($id);
+
+        return 'Motor mode: Off queued until below ' . $limit . ' W (now ' . round($power, 1) . ' W)';
+    }
+
+    private function deviceIsOn(string $id): bool
+    {
+        $row = $this->cachedDeviceRow($id);
+
+        return is_array($row) ? YarboMatterFabric::attrBool($row['on'] ?? false) : false;
+    }
+
+    public function motorPendingPath(): string
+    {
+        return $this->projectRoot . '/data/home-motor-pending.json';
+    }
+
+    public function hasMotorPendingOff(string $id): bool
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return false;
+        }
+        $state = $this->readMotorPendingState();
+
+        return isset($state['pending'][$id]);
+    }
+
+    /**
+     * @return array{pending: array<string, array{at: int, watts: int}>}
+     */
+    private function readMotorPendingState(): array
+    {
+        $path = $this->motorPendingPath();
+        if (!is_file($path)) {
+            return ['pending' => []];
+        }
+        $raw = file_get_contents($path);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        if (!is_array($decoded)) {
+            return ['pending' => []];
+        }
+        $pending = [];
+        foreach (is_array($decoded['pending'] ?? null) ? $decoded['pending'] : [] as $id => $job) {
+            $id = trim((string) $id);
+            if ($id === '' || YarboUnifi::isHomeId($id) || !is_array($job)) {
+                continue;
+            }
+            $pending[$id] = [
+                'at' => isset($job['at']) && is_numeric($job['at']) ? (int) $job['at'] : time(),
+                'watts' => self::clampMotorModeWatts((int) ($job['watts'] ?? 0)),
+            ];
+        }
+
+        return ['pending' => $pending];
+    }
+
+    /**
+     * @param array{pending: array<string, array{at: int, watts: int}>} $state
+     */
+    private function writeMotorPendingState(array $state): void
+    {
+        $dir = dirname($this->motorPendingPath());
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        $json = json_encode(['pending' => $state['pending'] ?? []], JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            return;
+        }
+        @file_put_contents($this->motorPendingPath(), $json . "\n", LOCK_EX);
+    }
+
+    public function scheduleMotorPendingOff(string $id, ?int $now = null): void
+    {
+        $id = trim($id);
+        $watts = $this->motorModeWatts($id);
+        if ($id === '' || $watts <= 0) {
+            return;
+        }
+        $now = $now ?? time();
+        $state = $this->readMotorPendingState();
+        $pending = is_array($state['pending'] ?? null) ? $state['pending'] : [];
+        $pending[$id] = ['at' => $now, 'watts' => $watts];
+        $this->writeMotorPendingState(['pending' => $pending]);
+    }
+
+    public function cancelMotorPendingOff(string $id): void
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return;
+        }
+        $state = $this->readMotorPendingState();
+        $pending = is_array($state['pending'] ?? null) ? $state['pending'] : [];
+        if (!isset($pending[$id])) {
+            return;
+        }
+        unset($pending[$id]);
+        $this->writeMotorPendingState(['pending' => $pending]);
+        $this->patchCachedDeviceState($id, ['motor_pending_off' => false]);
+    }
+
+    /**
+     * Complete queued motor-mode Offs once live watts are below the limit.
+     *
+     * @return list<string>
+     */
+    public function flushMotorPendingOff(): array
+    {
+        $pending = $this->readMotorPendingState()['pending'] ?? [];
+        if (!is_array($pending) || $pending === []) {
+            return [];
+        }
+        $done = [];
+        $keep = $pending;
+        foreach ($pending as $rawId => $job) {
+            $id = trim((string) $rawId);
+            if ($id === '' || !is_array($job)) {
+                unset($keep[$rawId]);
+                continue;
+            }
+            $limit = self::clampMotorModeWatts((int) ($job['watts'] ?? 0));
+            if ($limit <= 0) {
+                $limit = $this->motorModeWatts($id);
+            }
+            if ($limit <= 0) {
+                unset($keep[$rawId], $keep[$id]);
+                continue;
+            }
+            $row = $this->cachedDeviceRow($id);
+            $power = is_array($row) && isset($row['power_w']) && is_numeric($row['power_w'])
+                ? (float) $row['power_w']
+                : null;
+            if ($power === null || $power >= $limit) {
+                $keep[$id] = ['at' => (int) ($job['at'] ?? time()), 'watts' => $limit];
+                continue;
+            }
+            unset($keep[$rawId], $keep[$id]);
+            $this->writeMotorPendingState(['pending' => $keep]);
+            $res = $this->command(['id' => $id, 'command' => 'off', 'kind' => self::KIND_PLUG]);
+            if (($res['ok'] ?? false) === true && empty($res['motor_pending_off'])) {
+                $done[] = $id;
+                $this->cancelMotorPendingOff($id);
+            } else {
+                $keep[$id] = ['at' => time(), 'watts' => $limit];
+                $this->writeMotorPendingState(['pending' => $keep]);
+            }
+        }
+        $this->writeMotorPendingState(['pending' => $keep]);
+
+        return $done;
     }
 
     public function friendlyMatterError(string $error): string
@@ -2891,9 +3232,29 @@ final class YarboHome
                     : 0,
                 'temperature' => isset($device['temperature']) && is_numeric($device['temperature'])
                     ? (float) $device['temperature']
-                    : null,
+                    : (isset($device['local_temperature']) && is_numeric($device['local_temperature'])
+                        ? (float) $device['local_temperature']
+                        : null),
                 'humidity' => isset($device['humidity']) && is_numeric($device['humidity'])
                     ? (float) $device['humidity']
+                    : null,
+                'power' => isset($device['power_w']) && is_numeric($device['power_w'])
+                    ? (float) $device['power_w']
+                    : null,
+                'power_w' => isset($device['power_w']) && is_numeric($device['power_w'])
+                    ? (float) $device['power_w']
+                    : null,
+                'voltage' => isset($device['voltage_v']) && is_numeric($device['voltage_v'])
+                    ? (float) $device['voltage_v']
+                    : null,
+                'voltage_v' => isset($device['voltage_v']) && is_numeric($device['voltage_v'])
+                    ? (float) $device['voltage_v']
+                    : null,
+                'current' => isset($device['current_a']) && is_numeric($device['current_a'])
+                    ? (float) $device['current_a']
+                    : null,
+                'current_a' => isset($device['current_a']) && is_numeric($device['current_a'])
+                    ? (float) $device['current_a']
                     : null,
                 'companion_of' => (string) ($device['companion_of'] ?? ''),
                 'dimmable' => !empty($device['dimmable']),
@@ -4333,8 +4694,16 @@ final class YarboHome
                     $slim['status'] = $row['status'];
                 }
             }
-            if ($kind === self::KIND_PLUG && isset($row['power_w']) && is_numeric($row['power_w'])) {
-                $slim['power_w'] = round((float) $row['power_w'], 1);
+            if ($kind === self::KIND_PLUG) {
+                if (isset($row['power_w']) && is_numeric($row['power_w'])) {
+                    $slim['power_w'] = round((float) $row['power_w'], 1);
+                }
+                if (isset($row['voltage_v']) && is_numeric($row['voltage_v'])) {
+                    $slim['voltage_v'] = round((float) $row['voltage_v'], 1);
+                }
+                if (isset($row['current_a']) && is_numeric($row['current_a'])) {
+                    $slim['current_a'] = round((float) $row['current_a'], 3);
+                }
             }
             if ($kind === self::KIND_VACUUM || YarboMatterFabric::nameLooksVacuum((string) ($row['name'] ?? '') . ' ' . (string) ($row['product'] ?? ''))) {
                 $slim['vacuum_status'] = (string) ($row['vacuum_status'] ?? '');
