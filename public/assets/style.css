@@ -1017,6 +1017,42 @@ body.modal-open {
     margin-bottom: 0.5rem;
 }
 
+.papermono-alert-row {
+    margin: 0 0 0.65rem;
+}
+
+.papermono-alert-row.hidden {
+    display: none;
+}
+
+.papermono-alert-opts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem 0.85rem;
+    margin: 0.35rem 0 0 1.55rem;
+}
+
+.papermono-alert-color {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+}
+
+.papermono-alert-color .label {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.papermono-alert-color select {
+    width: auto;
+    min-width: 7.5rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.9rem;
+}
+
 .settings-inline-radio {
     display: flex;
     align-items: center;

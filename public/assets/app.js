@@ -327,9 +327,20 @@ const els = {
     papermonoLightOff: document.getElementById('papermono-light-off'),
     papermonoBrightness: document.getElementById('papermono-brightness'),
     papermonoAlertMessage: document.getElementById('papermono-alert-message'),
+    papermonoAlertMessageColor: document.getElementById('papermono-alert-message-color'),
+    papermonoAlertMessageFlash: document.getElementById('papermono-alert-message-flash'),
     papermonoAlertYarbo: document.getElementById('papermono-alert-yarbo'),
+    papermonoAlertYarboColor: document.getElementById('papermono-alert-yarbo-color'),
+    papermonoAlertYarboFlash: document.getElementById('papermono-alert-yarbo-flash'),
     papermonoAlertLymow: document.getElementById('papermono-alert-lymow'),
+    papermonoAlertLymowColor: document.getElementById('papermono-alert-lymow-color'),
+    papermonoAlertLymowFlash: document.getElementById('papermono-alert-lymow-flash'),
     papermonoAlertPowerwall: document.getElementById('papermono-alert-powerwall'),
+    papermonoAlertPowerwallColor: document.getElementById('papermono-alert-powerwall-color'),
+    papermonoAlertPowerwallFlash: document.getElementById('papermono-alert-powerwall-flash'),
+    papermonoAlertNightOpen: document.getElementById('papermono-alert-night-open'),
+    papermonoAlertNightOpenColor: document.getElementById('papermono-alert-night-open-color'),
+    papermonoAlertNightOpenFlash: document.getElementById('papermono-alert-night-open-flash'),
     papermonoPrefsSave: document.getElementById('papermono-prefs-save'),
     papermonoPrefsResult: document.getElementById('papermono-prefs-result'),
     papermonoResult: document.getElementById('papermono-result'),
@@ -10627,9 +10638,9 @@ function applyCompanionSettingsVisibility() {
     document.querySelector('[data-settings-nav="lymow"]')?.classList.toggle('hidden', !lymowOn);
     document.querySelector('[data-settings-nav="home"]')?.classList.toggle('hidden', !homeOn);
     document.querySelector('[data-settings-nav="unifi"]')?.classList.toggle('hidden', !unifiOn);
-    document.getElementById('papermono-alert-yarbo')?.closest('label')?.classList.toggle('hidden', !yarboOn);
-    document.getElementById('papermono-alert-powerwall')?.closest('label')?.classList.toggle('hidden', !powerwallOn);
-    document.getElementById('papermono-alert-lymow')?.closest('label')?.classList.toggle('hidden', !lymowOn);
+    document.querySelector('[data-alert-row="yarbo"]')?.classList.toggle('hidden', !yarboOn);
+    document.querySelector('[data-alert-row="powerwall"]')?.classList.toggle('hidden', !powerwallOn);
+    document.querySelector('[data-alert-row="lymow"]')?.classList.toggle('hidden', !lymowOn);
     document.querySelectorAll('#paper-menu-list [data-menu-id]').forEach((row) => {
         const id = row.getAttribute('data-menu-id') || '';
         let show = true;
@@ -13313,9 +13324,40 @@ function applyPaperMonoPrefs(prefs) {
     if (els.papermonoLightOff) els.papermonoLightOff.value = String(prefs.light_off_s ?? 15);
     if (els.papermonoBrightness) els.papermonoBrightness.value = String(prefs.brightness ?? 80);
     if (els.papermonoAlertMessage) els.papermonoAlertMessage.checked = prefs.alert_message !== false;
+    if (els.papermonoAlertMessageColor) {
+        els.papermonoAlertMessageColor.value = prefs.alert_message_color || 'cyan';
+    }
+    if (els.papermonoAlertMessageFlash) {
+        els.papermonoAlertMessageFlash.checked = prefs.alert_message_flash === true;
+    }
     if (els.papermonoAlertYarbo) els.papermonoAlertYarbo.checked = prefs.alert_yarbo !== false;
+    if (els.papermonoAlertYarboColor) {
+        els.papermonoAlertYarboColor.value = prefs.alert_yarbo_color || 'red';
+    }
+    if (els.papermonoAlertYarboFlash) {
+        els.papermonoAlertYarboFlash.checked = prefs.alert_yarbo_flash !== false;
+    }
     if (els.papermonoAlertLymow) els.papermonoAlertLymow.checked = prefs.alert_lymow !== false;
+    if (els.papermonoAlertLymowColor) {
+        els.papermonoAlertLymowColor.value = prefs.alert_lymow_color || 'red';
+    }
+    if (els.papermonoAlertLymowFlash) {
+        els.papermonoAlertLymowFlash.checked = prefs.alert_lymow_flash !== false;
+    }
     if (els.papermonoAlertPowerwall) els.papermonoAlertPowerwall.checked = prefs.alert_powerwall !== false;
+    if (els.papermonoAlertPowerwallColor) {
+        els.papermonoAlertPowerwallColor.value = prefs.alert_powerwall_color || 'red';
+    }
+    if (els.papermonoAlertPowerwallFlash) {
+        els.papermonoAlertPowerwallFlash.checked = prefs.alert_powerwall_flash !== false;
+    }
+    if (els.papermonoAlertNightOpen) els.papermonoAlertNightOpen.checked = prefs.alert_night_open !== false;
+    if (els.papermonoAlertNightOpenColor) {
+        els.papermonoAlertNightOpenColor.value = prefs.alert_night_open_color || 'red';
+    }
+    if (els.papermonoAlertNightOpenFlash) {
+        els.papermonoAlertNightOpenFlash.checked = prefs.alert_night_open_flash !== false;
+    }
     applyPaperPreviewModules();
 }
 
@@ -13424,9 +13466,20 @@ function paperMonoPrefsPayload() {
         light_off_s: Number(els.papermonoLightOff?.value || 15),
         brightness: Number(els.papermonoBrightness?.value || 80),
         alert_message: !!els.papermonoAlertMessage?.checked,
+        alert_message_color: els.papermonoAlertMessageColor?.value || 'cyan',
+        alert_message_flash: !!els.papermonoAlertMessageFlash?.checked,
         alert_yarbo: !!els.papermonoAlertYarbo?.checked,
+        alert_yarbo_color: els.papermonoAlertYarboColor?.value || 'red',
+        alert_yarbo_flash: !!els.papermonoAlertYarboFlash?.checked,
         alert_lymow: !!els.papermonoAlertLymow?.checked,
+        alert_lymow_color: els.papermonoAlertLymowColor?.value || 'red',
+        alert_lymow_flash: !!els.papermonoAlertLymowFlash?.checked,
         alert_powerwall: !!els.papermonoAlertPowerwall?.checked,
+        alert_powerwall_color: els.papermonoAlertPowerwallColor?.value || 'red',
+        alert_powerwall_flash: !!els.papermonoAlertPowerwallFlash?.checked,
+        alert_night_open: !!els.papermonoAlertNightOpen?.checked,
+        alert_night_open_color: els.papermonoAlertNightOpenColor?.value || 'red',
+        alert_night_open_flash: !!els.papermonoAlertNightOpenFlash?.checked,
     };
 }
 
