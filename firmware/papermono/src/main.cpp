@@ -131,9 +131,21 @@ bool alertMessageOn = true;
 bool alertYarboOn = true;
 bool alertLymowOn = true;
 bool alertPowerwallOn = true;
+bool alertNightOpenOn = true;
+String alertMessageColor = "cyan";
+String alertYarboColor = "red";
+String alertLymowColor = "red";
+String alertPowerwallColor = "red";
+String alertNightOpenColor = "red";
+bool alertMessageFlash = false;
+bool alertYarboFlash = true;
+bool alertLymowFlash = true;
+bool alertPowerwallFlash = true;
+bool alertNightOpenFlash = true;
 bool yarboError = false;
 bool lymowError = false;
 bool powerwallError = false;
+bool vestaboardNightOpen = false;
 uint32_t lastErrorAlert = 0;
 int tabletBat = -1;
 bool tabletCharging = false;
@@ -4424,6 +4436,29 @@ void applyCompactExtras(JsonDocument &doc)
     alertYarboOn = doc["alert_yarbo"] | alertYarboOn;
     alertLymowOn = doc["alert_lymow"] | alertLymowOn;
     alertPowerwallOn = doc["alert_powerwall"] | alertPowerwallOn;
+    alertNightOpenOn = doc["alert_night_open"] | alertNightOpenOn;
+    if (!doc["alert_message_color"].isNull()) {
+        alertMessageColor = String((const char *) (doc["alert_message_color"] | "cyan"));
+    }
+    if (!doc["alert_yarbo_color"].isNull()) {
+        alertYarboColor = String((const char *) (doc["alert_yarbo_color"] | "red"));
+    }
+    if (!doc["alert_lymow_color"].isNull()) {
+        alertLymowColor = String((const char *) (doc["alert_lymow_color"] | "red"));
+    }
+    if (!doc["alert_powerwall_color"].isNull()) {
+        alertPowerwallColor = String((const char *) (doc["alert_powerwall_color"] | "red"));
+    }
+    if (!doc["alert_night_open_color"].isNull()) {
+        alertNightOpenColor = String((const char *) (doc["alert_night_open_color"] | "red"));
+    }
+    alertMessageFlash = doc["alert_message_flash"] | alertMessageFlash;
+    alertYarboFlash = doc["alert_yarbo_flash"] | alertYarboFlash;
+    alertLymowFlash = doc["alert_lymow_flash"] | alertLymowFlash;
+    alertPowerwallFlash = doc["alert_powerwall_flash"] | alertPowerwallFlash;
+    alertNightOpenFlash = doc["alert_night_open_flash"] | alertNightOpenFlash;
+    alertSetMessageColor(alertMessageColor.c_str());
+    alertSetMessageFlash(alertMessageFlash);
     yarboError = doc["yarbo_error"] | false;
     lymowError = doc["lymow_error"] | false;
     powerwallError = doc["powerwall_error"] | false;
@@ -4450,6 +4485,7 @@ void applyCompactExtras(JsonDocument &doc)
     vestaboardHash = doc["vestaboard_hash"] | vestaboardHash;
     vestaboardNight = doc["vestaboard_night"] | false;
     vestaboardQuiet = doc["vestaboard_quiet"] | false;
+    vestaboardNightOpen = doc["vestaboard_night_open"] | false;
     if (!doc["vestaboard_mode"].isNull()) {
         vestaboardMode = String((const char *) (doc["vestaboard_mode"] | "live"));
     } else if (vestaboardNight) {
@@ -4558,7 +4594,27 @@ void applyCompactExtras(JsonDocument &doc)
     bool anyError = (yarboOn && yarboError && alertYarboOn)
         || (lymowOn && lymowError && alertLymowOn)
         || (powerwallOn && powerwallError && alertPowerwallOn);
-    alertsSetErrorActive(anyError);
+    bool nightOpenAlert = vestaboardNight && vestaboardNightOpen && alertNightOpenOn;
+    const char *activeColor = "red";
+    bool activeFlash = true;
+    if (yarboOn && yarboError && alertYarboOn) {
+        activeColor = alertYarboColor.c_str();
+        activeFlash = alertYarboFlash;
+    } else if (lymowOn && lymowError && alertLymowOn) {
+        activeColor = alertLymowColor.c_str();
+        activeFlash = alertLymowFlash;
+    } else if (powerwallOn && powerwallError && alertPowerwallOn) {
+        activeColor = alertPowerwallColor.c_str();
+        activeFlash = alertPowerwallFlash;
+    } else if (nightOpenAlert) {
+        activeColor = alertNightOpenColor.c_str();
+        activeFlash = alertNightOpenFlash;
+    }
+    if (anyError || nightOpenAlert) {
+        alertSetErrorColor(activeColor);
+        alertSetErrorFlash(activeFlash);
+    }
+    alertsSetErrorActive(anyError || nightOpenAlert);
     if (anyError && millis() - lastErrorAlert > 60000) {
         lastErrorAlert = millis();
         alertError();

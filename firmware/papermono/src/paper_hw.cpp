@@ -40,6 +40,14 @@ uint32_t rgbLastToggle = 0;
 bool rgbOn = false;
 bool rgbIsError = false;
 bool rgbMessageHold = false;
+bool msgR = false;
+bool msgG = true;
+bool msgB = true; /* cyan default for messages */
+bool msgFlash = false;
+bool errR = true;
+bool errG = false;
+bool errB = false; /* red default for errors */
+bool errFlash = true;
 
 void IRAM_ATTR onDio1()
 {
@@ -119,6 +127,48 @@ void writeRgb(bool r, bool g, bool b)
     }
     ioe1.digitalWrite(kLedG, g ? HIGH : LOW);
     ioe1.digitalWrite(kLedB, b ? HIGH : LOW);
+}
+
+void writeRgbChannels(bool on, bool r, bool g, bool b)
+{
+    writeRgb(on && r, on && g, on && b);
+}
+
+void parseAlertColor(const char *name, bool &r, bool &g, bool &b)
+{
+    String c = name ? String(name) : String("red");
+    c.toLowerCase();
+    c.trim();
+    if (c == "green") {
+        r = false;
+        g = true;
+        b = false;
+    } else if (c == "blue") {
+        r = false;
+        g = false;
+        b = true;
+    } else if (c == "yellow") {
+        r = true;
+        g = true;
+        b = false;
+    } else if (c == "cyan") {
+        r = false;
+        g = true;
+        b = true;
+    } else if (c == "magenta" || c == "purple" || c == "violet") {
+        r = true;
+        g = false;
+        b = true;
+    } else if (c == "white") {
+        r = true;
+        g = true;
+        b = true;
+    } else {
+        /* red (default) */
+        r = true;
+        g = false;
+        b = false;
+    }
 }
 
 void beep(int freq, int ms)
@@ -234,8 +284,9 @@ void rgbHoldMessage(bool on)
     if (on) {
         rgbUntil = 0;
         rgbOn = true;
+        rgbLastToggle = 0;
         if (!rgbError) {
-            writeRgb(false, true, true);
+            writeRgbChannels(true, msgR, msgG, msgB);
         }
         return;
     }
@@ -249,15 +300,29 @@ void rgbTick()
 {
     uint32_t now = millis();
     if (rgbError) {
+        if (!errFlash) {
+            writeRgbChannels(true, errR, errG, errB);
+            rgbOn = true;
+            return;
+        }
         if (now - rgbLastToggle >= 400) {
             rgbLastToggle = now;
             rgbOn = !rgbOn;
-            writeRgb(rgbOn, false, false);
+            writeRgbChannels(rgbOn, errR, errG, errB);
         }
         return;
     }
     if (rgbMessageHold) {
-        writeRgb(false, true, true);
+        if (!msgFlash) {
+            writeRgbChannels(true, msgR, msgG, msgB);
+            rgbOn = true;
+            return;
+        }
+        if (now - rgbLastToggle >= 400) {
+            rgbLastToggle = now;
+            rgbOn = !rgbOn;
+            writeRgbChannels(rgbOn, msgR, msgG, msgB);
+        }
         return;
     }
     if (rgbUntil == 0) {
@@ -271,7 +336,45 @@ void rgbTick()
     if (now - rgbLastToggle >= 180) {
         rgbLastToggle = now;
         rgbOn = !rgbOn;
-        writeRgb(false, rgbOn && !rgbIsError, rgbOn);
+        writeRgbChannels(rgbOn, msgR, msgG, msgB);
+    }
+}
+
+void alertSetMessageColor(const char *name)
+{
+    parseAlertColor(name, msgR, msgG, msgB);
+    if (rgbMessageHold && !rgbError) {
+        writeRgbChannels(true, msgR, msgG, msgB);
+        rgbOn = true;
+    }
+}
+
+void alertSetMessageFlash(bool flash)
+{
+    msgFlash = flash;
+    if (rgbMessageHold && !rgbError) {
+        rgbLastToggle = 0;
+        rgbOn = true;
+        writeRgbChannels(true, msgR, msgG, msgB);
+    }
+}
+
+void alertSetErrorColor(const char *name)
+{
+    parseAlertColor(name, errR, errG, errB);
+    if (rgbError) {
+        rgbOn = true;
+        writeRgbChannels(true, errR, errG, errB);
+    }
+}
+
+void alertSetErrorFlash(bool flash)
+{
+    errFlash = flash;
+    if (rgbError) {
+        rgbLastToggle = 0;
+        rgbOn = true;
+        writeRgbChannels(true, errR, errG, errB);
     }
 }
 
@@ -293,7 +396,7 @@ void alertError()
     rgbIsError = true;
     rgbLastToggle = 0;
     rgbOn = true;
-    writeRgb(true, false, false);
+    writeRgbChannels(true, errR, errG, errB);
     beep(700, 320);
     delay(80);
     beep(520, 400);
@@ -317,10 +420,14 @@ void alertsSetErrorActive(bool on)
         rgbError = true;
         rgbIsError = true;
         rgbLastToggle = 0;
+        rgbOn = true;
+        writeRgbChannels(true, errR, errG, errB);
     } else if (rgbError) {
         rgbError = false;
         if (rgbMessageHold) {
-            writeRgb(false, true, true);
+            rgbLastToggle = 0;
+            rgbOn = true;
+            writeRgbChannels(true, msgR, msgG, msgB);
         } else if (rgbUntil == 0) {
             writeRgb(false, false, false);
         }

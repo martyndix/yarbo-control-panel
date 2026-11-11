@@ -1583,10 +1583,92 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">PaperMono frontlight. Needs firmware 0.1.28 (earlier builds ignored this because LoRa init reset the light PWM).</p>
                             <fieldset class="settings-theme-fieldset">
                                 <legend class="label">Alerts</legend>
-                                <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer + RGB)</span></label>
-                                <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-yarbo" checked><span>Yarbo error (red + buzzer)</span></label>
-                                <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-lymow" checked><span>Lymow error (red + buzzer)</span></label>
-                                <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-powerwall" checked><span>Powerwall error (red + buzzer)</span></label>
+                                <p class="hint">RGB colour and flash need firmware 0.1.88. Night door/window lights only while Vestaboard Night hours is active.</p>
+                                <div class="papermono-alert-row" data-alert-row="message">
+                                    <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer)</span></label>
+                                    <div class="papermono-alert-opts">
+                                        <label class="papermono-alert-color"><span class="label">Colour</span>
+                                            <select id="papermono-alert-message-color">
+                                                <option value="cyan" selected>Cyan</option>
+                                                <option value="red">Red</option>
+                                                <option value="green">Green</option>
+                                                <option value="blue">Blue</option>
+                                                <option value="yellow">Yellow</option>
+                                                <option value="magenta">Magenta</option>
+                                                <option value="white">White</option>
+                                            </select>
+                                        </label>
+                                        <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message-flash"><span>Flash</span></label>
+                                    </div>
+                                </div>
+                                <div class="papermono-alert-row" data-alert-row="yarbo">
+                                    <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-yarbo" checked><span>Yarbo error (buzzer)</span></label>
+                                    <div class="papermono-alert-opts">
+                                        <label class="papermono-alert-color"><span class="label">Colour</span>
+                                            <select id="papermono-alert-yarbo-color">
+                                                <option value="red" selected>Red</option>
+                                                <option value="green">Green</option>
+                                                <option value="blue">Blue</option>
+                                                <option value="yellow">Yellow</option>
+                                                <option value="cyan">Cyan</option>
+                                                <option value="magenta">Magenta</option>
+                                                <option value="white">White</option>
+                                            </select>
+                                        </label>
+                                        <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-yarbo-flash" checked><span>Flash</span></label>
+                                    </div>
+                                </div>
+                                <div class="papermono-alert-row" data-alert-row="lymow">
+                                    <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-lymow" checked><span>Lymow error (buzzer)</span></label>
+                                    <div class="papermono-alert-opts">
+                                        <label class="papermono-alert-color"><span class="label">Colour</span>
+                                            <select id="papermono-alert-lymow-color">
+                                                <option value="red" selected>Red</option>
+                                                <option value="green">Green</option>
+                                                <option value="blue">Blue</option>
+                                                <option value="yellow">Yellow</option>
+                                                <option value="cyan">Cyan</option>
+                                                <option value="magenta">Magenta</option>
+                                                <option value="white">White</option>
+                                            </select>
+                                        </label>
+                                        <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-lymow-flash" checked><span>Flash</span></label>
+                                    </div>
+                                </div>
+                                <div class="papermono-alert-row" data-alert-row="powerwall">
+                                    <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-powerwall" checked><span>Powerwall error (buzzer)</span></label>
+                                    <div class="papermono-alert-opts">
+                                        <label class="papermono-alert-color"><span class="label">Colour</span>
+                                            <select id="papermono-alert-powerwall-color">
+                                                <option value="red" selected>Red</option>
+                                                <option value="green">Green</option>
+                                                <option value="blue">Blue</option>
+                                                <option value="yellow">Yellow</option>
+                                                <option value="cyan">Cyan</option>
+                                                <option value="magenta">Magenta</option>
+                                                <option value="white">White</option>
+                                            </select>
+                                        </label>
+                                        <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-powerwall-flash" checked><span>Flash</span></label>
+                                    </div>
+                                </div>
+                                <div class="papermono-alert-row" data-alert-row="night-open">
+                                    <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-night-open" checked><span>Night door/window open</span></label>
+                                    <div class="papermono-alert-opts">
+                                        <label class="papermono-alert-color"><span class="label">Colour</span>
+                                            <select id="papermono-alert-night-open-color">
+                                                <option value="red" selected>Red</option>
+                                                <option value="green">Green</option>
+                                                <option value="blue">Blue</option>
+                                                <option value="yellow">Yellow</option>
+                                                <option value="cyan">Cyan</option>
+                                                <option value="magenta">Magenta</option>
+                                                <option value="white">White</option>
+                                            </select>
+                                        </label>
+                                        <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-night-open-flash" checked><span>Flash</span></label>
+                                    </div>
+                                </div>
                             </fieldset>
                             <div class="papermono-actions">
                                 <button type="button" class="btn" id="papermono-prefs-save">Save companion settings</button>
@@ -1889,7 +1971,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="398" y="449" width="36" height="6" fill="#f4f1e8"/>
                                         <rect x="414" y="431" width="6" height="42" fill="#f4f1e8"/>
                                     </svg>
-                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.87.</figcaption>
+                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.88.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">
@@ -2056,7 +2138,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.87 / 0.2.28-colour. Missing or stale firmware builds automatically in the background after a panel update — wait until the E-paper status says built, then press <strong>Update</strong>. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the tablet is on travel Wi-Fi (not the flashed home SSID) — even if home polls sometimes use Funnel or a public subdomain. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.88 / 0.2.28-colour. Missing or stale firmware builds automatically in the background after a panel update — wait until the E-paper status says built, then press <strong>Update</strong>. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the tablet is on travel Wi-Fi (not the flashed home SSID) — even if home polls sometimes use Funnel or a public subdomain. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

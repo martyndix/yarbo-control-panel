@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.255] - 2026-11-12
+
+### Added
+- **PaperMono alert colours:** Settings → E-paper → Alerts lets you pick a colour and Flash for message received, Yarbo/Lymow/Powerwall errors, and a new **Night door/window open** light (only while Vestaboard Night hours is active and a watched UniFi contact is open). Firmware **0.1.88** (Wi-Fi Update after this panel version).
+
 ## [4.0.254] - 2026-11-12
 
 ### Fixed

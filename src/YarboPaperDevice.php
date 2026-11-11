@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.87';
+    public const FIRMWARE_VERSION = '0.1.88';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.28-colour';
     public const OTA_ONLINE_MONO_S = 120;
@@ -1665,6 +1665,14 @@ final class YarboPaperDevice
         } elseif ($quiet) {
             $mode = 'quiet';
         }
+        $nightOpen = false;
+        if ($night) {
+            try {
+                $nightOpen = $vbObj->nightOpenContacts() !== [];
+            } catch (\Throwable) {
+                $nightOpen = false;
+            }
+        }
 
         return [
             'vestaboard_codes' => $codes,
@@ -1673,6 +1681,7 @@ final class YarboPaperDevice
             'vestaboard_mode' => $mode,
             'vestaboard_night' => $night,
             'vestaboard_quiet' => $quiet,
+            'vestaboard_night_open' => $nightOpen,
         ];
     }
 
@@ -1991,11 +2000,45 @@ final class YarboPaperDevice
             'menu_order' => self::defaultMenuKeys(),
             'timezone' => '',
             'alert_message' => true,
+            'alert_message_color' => 'cyan',
+            'alert_message_flash' => false,
             'alert_yarbo' => true,
+            'alert_yarbo_color' => 'red',
+            'alert_yarbo_flash' => true,
             'alert_lymow' => true,
+            'alert_lymow_color' => 'red',
+            'alert_lymow_flash' => true,
             'alert_powerwall' => true,
+            'alert_powerwall_color' => 'red',
+            'alert_powerwall_flash' => true,
+            'alert_night_open' => true,
+            'alert_night_open_color' => 'red',
+            'alert_night_open_flash' => true,
             'vestaboard_viewer' => false,
         ];
+    }
+
+    /**
+     * Named RGB combinations PaperMono can light (R/G/B on/off only).
+     *
+     * @return list<string>
+     */
+    public static function alertColors(): array
+    {
+        return ['red', 'green', 'blue', 'yellow', 'cyan', 'magenta', 'white'];
+    }
+
+    public static function normalizeAlertColor(mixed $value, string $fallback = 'red'): string
+    {
+        $color = strtolower(trim((string) $value));
+        if ($color === 'purple' || $color === 'violet') {
+            $color = 'magenta';
+        }
+        if (!in_array($color, self::alertColors(), true)) {
+            return $fallback;
+        }
+
+        return $color;
     }
 
     /**
@@ -2176,9 +2219,41 @@ final class YarboPaperDevice
             'menu_order' => $this->normalizeMenuOrder($input['menu_order'] ?? []),
             'timezone' => $timezone,
             'alert_message' => $bool($input['alert_message'] ?? null, $defaults['alert_message']),
+            'alert_message_color' => self::normalizeAlertColor(
+                $input['alert_message_color'] ?? null,
+                (string) $defaults['alert_message_color']
+            ),
+            'alert_message_flash' => $bool($input['alert_message_flash'] ?? null, $defaults['alert_message_flash']),
             'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),
+            'alert_yarbo_color' => self::normalizeAlertColor(
+                $input['alert_yarbo_color'] ?? null,
+                (string) $defaults['alert_yarbo_color']
+            ),
+            'alert_yarbo_flash' => $bool($input['alert_yarbo_flash'] ?? null, $defaults['alert_yarbo_flash']),
             'alert_lymow' => $bool($input['alert_lymow'] ?? null, $defaults['alert_lymow']),
+            'alert_lymow_color' => self::normalizeAlertColor(
+                $input['alert_lymow_color'] ?? null,
+                (string) $defaults['alert_lymow_color']
+            ),
+            'alert_lymow_flash' => $bool($input['alert_lymow_flash'] ?? null, $defaults['alert_lymow_flash']),
             'alert_powerwall' => $bool($input['alert_powerwall'] ?? null, $defaults['alert_powerwall']),
+            'alert_powerwall_color' => self::normalizeAlertColor(
+                $input['alert_powerwall_color'] ?? null,
+                (string) $defaults['alert_powerwall_color']
+            ),
+            'alert_powerwall_flash' => $bool(
+                $input['alert_powerwall_flash'] ?? null,
+                $defaults['alert_powerwall_flash']
+            ),
+            'alert_night_open' => $bool($input['alert_night_open'] ?? null, $defaults['alert_night_open']),
+            'alert_night_open_color' => self::normalizeAlertColor(
+                $input['alert_night_open_color'] ?? null,
+                (string) $defaults['alert_night_open_color']
+            ),
+            'alert_night_open_flash' => $bool(
+                $input['alert_night_open_flash'] ?? null,
+                $defaults['alert_night_open_flash']
+            ),
             'vestaboard_viewer' => $bool($input['vestaboard_viewer'] ?? null, $defaults['vestaboard_viewer']),
         ];
     }
