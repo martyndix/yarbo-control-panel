@@ -4651,7 +4651,7 @@ function homeKindLabel(d) {
             if (homeCanAssignContact(d) || d.has_open || d.has_dps) {
                 return homeContactRole(d) === 'window' ? '🪟 Window' : '🚪 Door';
             }
-            return '';
+            return 'Sensor';
         default:
             return '';
     }
@@ -5778,6 +5778,14 @@ function homeDeviceActionsHtml(d, bright, color) {
     if (String(d.kind || '') === 'switch') {
         return `<div class="home-device-actions"><span class="home-device-meta">Switch</span></div>`;
     }
+    if (homeIsSensorKind(d)) {
+        const status = String(d.status || '');
+        const open = d.open === true || /^Open\b/i.test(status);
+        if (homeDeviceHasClimate(d)) {
+            return `<div class="home-device-actions"><button type="button" class="home-device-meta home-device-meta--history${open ? ' is-open' : ''}" data-home-status data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(status || '—')}</button></div>`;
+        }
+        return `<div class="home-device-actions"><span class="home-device-meta${open ? ' is-open' : ''}" data-home-status>${escapeHtml(status || '—')}</span></div>`;
+    }
     if (d.available === false) {
         return `<div class="home-device-actions"><span class="home-device-meta">Unavailable</span></div>`;
     }
@@ -5789,8 +5797,12 @@ function homeDeviceActionsHtml(d, bright, color) {
     const tod = homeCanAdaptive(d)
         ? `<label class="home-adaptive" title="Warm at night, cooler in the day"><input type="checkbox" data-home-adaptive="${escapeHtml(d.id)}" ${adaptive ? 'checked' : ''}> Time of day</label>`
         : '';
+    const power = (String(d.kind || '') === 'plug' && d.power_w != null && d.power_w !== '' && Number.isFinite(Number(d.power_w)))
+        ? `<span class="home-device-meta home-device-power" data-home-power-w title="Active power">${escapeHtml(String(Number(d.power_w)))} W</span>`
+        : '';
     return `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
+            ${power}
             ${bright}
             ${color}
             ${tod}
