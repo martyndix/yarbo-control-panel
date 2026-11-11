@@ -30,8 +30,8 @@ if (($never['presence_label'] ?? '') !== 'Offline — never seen' || ($never['la
     exit(1);
 }
 
-$devices->touch('tab1', '0.1.57', 100, false, false);
-$devices->touch('tab2', '0.1.57', 84, true, true);
+$devices->touch('tab1', '0.1.57', 100, false, false, true);
+$devices->touch('tab2', '0.1.57', 84, true, true, false);
 
 $after = [];
 foreach ($devices->publicTablets() as $row) {
@@ -46,6 +46,22 @@ if (($after['tab2']['presence_label'] ?? '') !== 'Online — remote' || empty($a
     exit(1);
 }
 
+// Home Wi-Fi + Funnel/subdomain transport must still show as home network.
+$devices->touch('tab1', '0.1.87', 100, false, true, true);
+$homeViaFunnel = null;
+foreach ($devices->publicTablets() as $row) {
+    if ($row['id'] === 'tab1') {
+        $homeViaFunnel = $row;
+    }
+}
+if (($homeViaFunnel['presence_label'] ?? '') !== 'Online — home network'
+    || !empty($homeViaFunnel['remote'])
+    || ($homeViaFunnel['last_via'] ?? '') !== 'remote'
+    || ($homeViaFunnel['last_net'] ?? '') !== 'home') {
+    fwrite(STDERR, 'home via Funnel ' . json_encode($homeViaFunnel) . "\n");
+    exit(1);
+}
+
 $store = json_decode((string) file_get_contents($root . '/data/papermono-devices.json'), true);
 if (!is_array($store)) {
     fwrite(STDERR, "store missing\n");
@@ -53,8 +69,10 @@ if (!is_array($store)) {
 }
 $store['devices'][0]['last_seen_at'] = gmdate('c', time() - 1000);
 $store['devices'][0]['last_via'] = 'lan';
+$store['devices'][0]['last_net'] = 'home';
 $store['devices'][1]['last_seen_at'] = gmdate('c', time() - 1000);
 $store['devices'][1]['last_via'] = 'remote';
+$store['devices'][1]['last_net'] = 'travel';
 file_put_contents($root . '/data/papermono-devices.json', json_encode($store, JSON_UNESCAPED_SLASHES));
 
 $stale = [];
@@ -91,6 +109,21 @@ if (!Yarbo\YarboPaperRemote::requestIsRemote(['via' => 'remote'])) {
     fwrite(STDERR, "via=remote query must mark remote\n");
     exit(1);
 }
+$_SERVER['HTTP_X_YARBO_PAPER_NET'] = 'home';
+if (Yarbo\YarboPaperRemote::requestHomeWifi() !== true) {
+    fwrite(STDERR, "net=home header must mark home Wi-Fi\n");
+    exit(1);
+}
+$_SERVER['HTTP_X_YARBO_PAPER_NET'] = 'travel';
+if (Yarbo\YarboPaperRemote::requestHomeWifi() !== false) {
+    fwrite(STDERR, "net=travel header must mark travel Wi-Fi\n");
+    exit(1);
+}
+unset($_SERVER['HTTP_X_YARBO_PAPER_NET']);
+if (Yarbo\YarboPaperRemote::requestHomeWifi() !== null) {
+    fwrite(STDERR, "missing net header must be unknown\n");
+    exit(1);
+}
 
 $src = file_get_contents(__DIR__ . '/../src/YarboPaperRemote.php');
 $js = file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -102,6 +135,19 @@ if ($src === false || $js === false || $css === false || $change === false) {
 }
 if (!str_contains($src, 'VIA_HEADER') || !str_contains($src, ': remote')) {
     fwrite(STDERR, "funnel proxy must mark remote polls\n");
+    exit(1);
+}
+if (!str_contains($src, 'NET_HEADER') || !str_contains($src, 'requestHomeWifi')) {
+    fwrite(STDERR, "panel must read home vs travel Wi-Fi header\n");
+    exit(1);
+}
+$monoNet = file_get_contents(__DIR__ . '/../firmware/papermono/src/paper_net.h');
+if ($monoNet === false || !str_contains($monoNet, 'X-Yarbo-Paper-Net')) {
+    fwrite(STDERR, "PaperMono must send home/travel net header\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.254]')) {
+    fwrite(STDERR, "changelog 4.0.254 missing\n");
     exit(1);
 }
 if (!str_contains($js, 'paperPresenceHtml') || !str_contains($js, 'paperLastSeenText')) {

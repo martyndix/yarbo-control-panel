@@ -97,12 +97,20 @@ inline bool paperNetBeginBase(HTTPClient &http, const String &base, const String
     return http.begin(paperNetPlain, url);
 }
 
+/* Tell the panel whether this tablet is on the flashed home SSID (vs travel),
+ * even when the poll went through Funnel / a public subdomain. */
+inline void paperNetAddIdentityHeaders(HTTPClient &http)
+{
+    http.addHeader("X-PaperMono-Token", token);
+    http.addHeader("X-Yarbo-Paper-Net", paperNetLanReachable() ? "home" : "travel");
+}
+
 inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs = 8000)
 {
     // Do not clear usingRemote here — a failed poll would hide the R badge.
     int lanMs = remoteMs;
     if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
-        http.addHeader("X-PaperMono-Token", token);
+        paperNetAddIdentityHeaders(http);
         int code = http.GET();
         if (code == 200) {
             usingRemote = false;
@@ -113,7 +121,7 @@ inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs =
     }
     if (remoteUrl.length() && remoteUrl != panelUrl) {
         if (paperNetBeginBase(http, remoteUrl, pathQuery, remoteMs)) {
-            http.addHeader("X-PaperMono-Token", token);
+            paperNetAddIdentityHeaders(http);
             int code = http.GET();
             if (code == 200) {
                 usingRemote = true;
@@ -129,7 +137,7 @@ inline int paperNetPost(HTTPClient &http, const String &pathQuery, const String 
     int lanMs = remoteMs;
     if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {
         http.addHeader("Content-Type", "application/json");
-        http.addHeader("X-PaperMono-Token", token);
+        paperNetAddIdentityHeaders(http);
         int code = http.POST(payload);
         if (code == 200) {
             usingRemote = false;
@@ -141,7 +149,7 @@ inline int paperNetPost(HTTPClient &http, const String &pathQuery, const String 
     if (remoteUrl.length() && remoteUrl != panelUrl) {
         if (paperNetBeginBase(http, remoteUrl, pathQuery, remoteMs)) {
             http.addHeader("Content-Type", "application/json");
-            http.addHeader("X-PaperMono-Token", token);
+            paperNetAddIdentityHeaders(http);
             int code = http.POST(payload);
             if (code == 200) {
                 usingRemote = true;
