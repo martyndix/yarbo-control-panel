@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.253] - 2026-11-12
+
+### Fixed
+- **Vestaboard Night hours after Updates:** Night hours stayed enabled in Settings unless UniFi door/window contacts were already loaded. Right after an update that inventory is often empty for a bit, so a watcher save or Settings refresh cleared the preference. The setting is kept across those UniFi blips; you can still turn it off manually.
+
 ## [4.0.252] - 2026-11-11
 
 ### Fixed

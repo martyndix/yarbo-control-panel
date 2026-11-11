@@ -145,7 +145,8 @@ assert_true(($previewOpen['ok'] ?? false) === true, 'night-open preview');
 assert_true(!empty($previewOpen['open']), 'night-open preview is open');
 assert_true(in_array(YarboVestaboard::COLOR_RED, $previewOpen['codes'][0] ?? [], true), 'night-open preview red');
 
-// UniFi off → night unavailable / cannot enable.
+// UniFi off → night unavailable / cannot newly enable (preference currently off).
+assert_true($vb->save(['night_hours_enabled' => false, 'quiet_hours_enabled' => false]) === true, 'clear night before unavailable test');
 file_put_contents($root . '/data/hub-config.json', json_encode([
     'modules' => ['yarbo' => true, 'unifi' => false],
     'vestaboard_live' => 'yarbo',
@@ -154,6 +155,35 @@ $off = new YarboVestaboard($root);
 assert_true($off->nightHoursAvailable() === false, 'night unavailable when UniFi off');
 $off->save(['night_hours_enabled' => true]);
 assert_true(empty($off->load()['night_hours_enabled']), 'cannot enable night without UniFi contacts');
+
+// Already-enabled Night hours must survive UniFi blips (e.g. after Updates).
+file_put_contents($root . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+    'vestaboard_live' => 'yarbo',
+], JSON_UNESCAPED_SLASHES));
+$armed = new YarboVestaboard($root);
+assert_true($armed->save([
+    'night_hours_enabled' => true,
+    'quiet_hours_enabled' => false,
+    'night_start' => '22:00',
+    'night_end' => '07:00',
+]) === true, 're-enable night with UniFi');
+assert_true(!empty($armed->load()['night_hours_enabled']), 'night enabled before blip');
+file_put_contents($root . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'unifi' => false],
+    'vestaboard_live' => 'yarbo',
+], JSON_UNESCAPED_SLASHES));
+$blip = new YarboVestaboard($root);
+assert_true($blip->nightHoursAvailable() === false, 'night unavailable during UniFi blip');
+assert_true($blip->save(['last_error' => 'transient']) === true, 'watcher-style save during blip');
+assert_true(!empty($blip->load()['night_hours_enabled']), 'night preference kept across UniFi blip');
+assert_true($blip->save(['night_hours_enabled' => true]) === true, 'explicit keep-on during blip');
+assert_true(!empty($blip->load()['night_hours_enabled']), 'explicit night=true kept when already on');
+file_put_contents($root . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+    'vestaboard_live' => 'yarbo',
+], JSON_UNESCAPED_SLASHES));
+$vb = new YarboVestaboard($root);
 
 // While night is active, an open door must flip the bottom row (tick also re-reads UniFi).
 file_put_contents($root . '/data/hub-config.json', json_encode([
@@ -232,8 +262,11 @@ assert_true(str_contains($html, 'settings-vestaboard-night-simulate'), 'settings
 assert_true(str_contains($html, 'HOUSE SECURE'), 'settings HOUSE SECURE');
 assert_true(str_contains($html, 'cannot guarantee the security'), 'disclaimer in settings');
 assert_true(str_contains($js, 'vestaboard_night_hours'), 'JS saves night hours');
+assert_true(str_contains($js, 'Do not uncheck Night hours'), 'JS keeps night checkbox across UniFi blips');
+assert_true(str_contains($phpSrc, 'already-enabled Night hours preference'), 'PHP keeps night preference across UniFi blips');
 assert_true(str_contains($js, 'function applyVestaboardNightHours'), 'JS night hours UI');
 assert_true(str_contains($js, 'function toggleNightOpenSimulate'), 'JS simulate open');
 assert_true(str_contains($js, 'HOUSE SECURE'), 'JS night preview HOUSE SECURE');
+assert_true(str_contains($change, '## [4.0.253]'), 'changelog 4.0.253');
 
 fwrite(STDOUT, "test_vestaboard_night.php ok\n");
