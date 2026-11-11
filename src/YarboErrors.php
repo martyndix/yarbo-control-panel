@@ -39,7 +39,12 @@ final class YarboErrors
             return self::MSG_UNREACHABLE;
         }
 
-        if (str_contains($lower, 'no telemetry received') || str_contains($lower, 'telemetry_timeout')) {
+        if (
+            str_contains($lower, 'no telemetry received')
+            || str_contains($lower, 'telemetry_timeout')
+            || str_contains($lower, 'no data_feedback response')
+            || str_contains($lower, 'get_device_msg')
+        ) {
             return self::MSG_TELEMETRY_TIMEOUT;
         }
 

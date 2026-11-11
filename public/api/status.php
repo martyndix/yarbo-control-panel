@@ -221,13 +221,19 @@ try {
     status_from_agent($result);
 
     $error = (string) ($result['error'] ?? 'telemetry timeout');
+    $lower = strtolower($error);
+    $transient = (bool) ($result['transient'] ?? false)
+        || str_contains($lower, 'data_feedback')
+        || str_contains($lower, 'get_device_msg')
+        || str_contains($lower, 'telemetry timeout')
+        || str_contains($lower, 'timeout');
     status_failure(
         YarboErrors::friendly($error),
         'telemetry',
         504,
         [
             'via' => 'agent',
-            'transient' => (bool) ($result['transient'] ?? false),
+            'transient' => $transient,
         ],
     );
 } catch (Throwable $e) {

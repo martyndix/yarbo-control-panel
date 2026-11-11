@@ -701,8 +701,30 @@ async def handle_request(
                     **state_flags(state, client),
                 }
 
-            status = await client.get_status(timeout=timeout, acquire_controller=False)
+            try:
+                status = await client.get_status(timeout=timeout, acquire_controller=False)
+            except TimeoutError as exc:
+                # Official SDK: "No data_feedback response for 'get_device_msg' within Xs"
+                if telemetry_raw_usable(state.get("last_raw")):
+                    await maybe_request_plan_feedback(client, state)
+                    return {
+                        "ok": True,
+                        "op": "telemetry",
+                        "raw": attach_plan_feedback(state["last_raw"], state),
+                        "wifi": state.get("last_wifi"),
+                        "battery_cells": state.get("last_battery_cells"),
+                        "cached": True,
+                        "transient": True,
+                        **state_flags(state, client),
+                    }
+                return {
+                    "ok": False,
+                    "error": str(exc) or "telemetry timeout",
+                    "transient": True,
+                    **state_flags(state, client),
+                }
             raw = getattr(status, "raw", None) if status is not None else None
+            stale = bool(getattr(status, "stale", False)) if status is not None else False
             if not store_last_raw(state, raw):
                 if telemetry_raw_usable(state.get("last_raw")):
                     await maybe_request_plan_feedback(client, state)
@@ -713,9 +735,22 @@ async def handle_request(
                         "wifi": state.get("last_wifi"),
                         "battery_cells": state.get("last_battery_cells"),
                         "cached": True,
+                        "transient": True,
                         **state_flags(state, client),
                     }
                 return {"ok": False, "error": "telemetry timeout", "transient": True}
+            if stale:
+                await maybe_request_plan_feedback(client, state)
+                return {
+                    "ok": True,
+                    "op": "telemetry",
+                    "raw": attach_plan_feedback(state["last_raw"], state),
+                    "wifi": state.get("last_wifi"),
+                    "battery_cells": state.get("last_battery_cells"),
+                    "cached": True,
+                    "transient": True,
+                    **state_flags(state, client),
+                }
             raw = state["last_raw"]
             await maybe_request_plan_feedback(client, state)
             if charging_status_of(raw) <= 0:
@@ -1090,12 +1125,24 @@ async def handle_request(
             "error": "Robot did not grant controller role. Close the Yarbo mobile app and try again.",
             "detail": str(e),
         }
-    except YarboTimeoutError as e:
+    except (YarboTimeoutError, TimeoutError) as e:
         try:
             client._controller_acquired = False  # noqa: SLF001
         except Exception:
             pass
-        return {"ok": False, "error": str(e)}
+        msg = str(e) or "telemetry timeout"
+        if op == "telemetry" and telemetry_raw_usable(state.get("last_raw")):
+            return {
+                "ok": True,
+                "op": "telemetry",
+                "raw": attach_plan_feedback(state["last_raw"], state),
+                "wifi": state.get("last_wifi"),
+                "battery_cells": state.get("last_battery_cells"),
+                "cached": True,
+                "transient": True,
+                **state_flags(state, client),
+            }
+        return {"ok": False, "error": msg, "transient": True}
     except Exception as e:
         log(f"Command error: {e}")
         traceback.print_exc(file=sys.stderr)
@@ -1103,7 +1150,23 @@ async def handle_request(
             client._controller_acquired = False  # noqa: SLF001
         except Exception:
             pass
-        return {"ok": False, "error": str(e)}
+        msg = str(e)
+        transient = "data_feedback" in msg.lower() or "get_device_msg" in msg.lower()
+        if op == "telemetry" and transient and telemetry_raw_usable(state.get("last_raw")):
+            return {
+                "ok": True,
+                "op": "telemetry",
+                "raw": attach_plan_feedback(state["last_raw"], state),
+                "wifi": state.get("last_wifi"),
+                "battery_cells": state.get("last_battery_cells"),
+                "cached": True,
+                "transient": True,
+                **state_flags(state, client),
+            }
+        out: dict[str, Any] = {"ok": False, "error": msg}
+        if transient:
+            out["transient"] = True
+        return out
 
 
 async def controller_keepalive_loop(

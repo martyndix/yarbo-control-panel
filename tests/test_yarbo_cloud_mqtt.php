@@ -78,6 +78,17 @@ assert_true(
     || str_contains(YarboErrors::MSG_REFUSED, 'account email'),
     'refused message points at cloud account'
 );
+assert_true(
+    YarboErrors::friendly("No data_feedback response for 'get_device_msg' within 4.0s")
+        === YarboErrors::MSG_TELEMETRY_TIMEOUT,
+    'SDK get_device_msg timeout maps to friendly telemetry message'
+);
+assert_true(str_contains($cloudPy, 'except TimeoutError'), 'cloud client catches get_device_msg TimeoutError');
+assert_true(str_contains($agentPy, 'No data_feedback response'), 'agent comments/handles SDK timeout');
+assert_true(str_contains($agentPy, '"transient": True'), 'agent marks telemetry misses transient');
+assert_true(str_contains($status, 'get_device_msg'), 'status treats get_device_msg as transient');
+$js = (string) file_get_contents($root . '/public/assets/app.js');
+assert_true(str_contains($js, 'no data_feedback response'), 'UI maps data_feedback timeout');
 
 $client = new YarboMqttAgentClient();
 $ping = $client->ping(0.2);
@@ -86,6 +97,7 @@ assert_true(is_array($ping), 'agent ping returns array even when down');
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.218]'), 'changelog 4.0.218');
 assert_true(str_contains($change, '## [4.0.220]'), 'changelog 4.0.220');
+assert_true(str_contains($change, '## [4.0.252]'), 'changelog 4.0.252');
 assert_true(str_contains($change, 'cloud MQTT only'), 'changelog mentions cloud MQTT only');
 assert_true(str_contains($change, 'closed LAN port'), 'changelog explains Yarbo closed local MQTT');
 assert_true(str_contains($change, 'Map / Plans cloud-only UI'), 'changelog notes dropdown removal');
