@@ -96,6 +96,23 @@ try {
                 'auto_off_map' => $home->autoOffMap(),
             ];
         })(),
+        'motor_mode' => (static function () use ($home, $input): array {
+            $id = trim((string) ($input['id'] ?? ''));
+            $watts = (int) ($input['watts'] ?? $input['motor_mode_w'] ?? 0);
+            if ($id === '') {
+                return ['ok' => false, 'error' => 'Pick a plug'];
+            }
+            if (!$home->setMotorMode($id, $watts)) {
+                return ['ok' => false, 'error' => 'Motor mode is only for Matter/Hue plugs'];
+            }
+
+            return [
+                'ok' => true,
+                'id' => $id,
+                'motor_mode_w' => $home->motorModeWatts($id),
+                'motor_mode_map' => $home->motorModeMap(),
+            ];
+        })(),
         'rename' => $home->saveMeta(['names' => [$input['id'] ?? '' => $input['name'] ?? '']]),
         'room' => $home->assignDeviceRoom((string) ($input['id'] ?? ''), (string) ($input['room_id'] ?? $input['room'] ?? '')),
         'contact_kind' => $home->assignContactKind((string) ($input['id'] ?? ''), (string) ($input['contact_kind'] ?? $input['kind'] ?? '')),

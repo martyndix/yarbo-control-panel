@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.250] - 2026-11-11
+
+### Added
+- **Automations watts:** Matter plugs with live power can use **watts above / below** as a When trigger or Only-if condition (same style as temperature or Powerwall load).
+- **Plug motor mode:** on Home ⚙️, next to auto-off — block Off (website, automations, plug auto-off) while the plug draws at or above a set wattage. If Apple Home or another fabric controller turns it off while that load was recently high, the Matter agent turns it back **On** (Matter cannot pre-block Apple’s Off command).
+
 ## [4.0.249] - 2026-11-11
 
 ### Added

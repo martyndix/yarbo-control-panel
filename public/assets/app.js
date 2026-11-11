@@ -5655,8 +5655,8 @@ function homeDeviceCardHtml(d, hidden, rooms) {
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
         : `<button type="button" class="btn btn-secondary btn-compact" data-home-hide="${escapeHtml(d.id)}">Hide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`;
-    const plugAutoOff = (!hidden && !unifi && String(d.kind || '') === 'plug')
-        ? homePlugAutoOffHtml(d)
+    const plugExtras = (!hidden && !unifi && String(d.kind || '') === 'plug')
+        ? `${homePlugAutoOffHtml(d)}${homePlugMotorModeHtml(d)}`
         : '';
     const label = homeManageOpen
         ? `<input type="text" class="home-device-name-input" data-home-name="${escapeHtml(d.id)}" value="${escapeHtml(d.name)}" placeholder="${escapeHtml(defaultName)}" maxlength="48" aria-label="Device name">`
@@ -5678,7 +5678,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ${roomSelect}
         ${groupSelect}
         ${actions}
-        <div class="home-device-manage">${manage}${plugAutoOff}</div>
+        <div class="home-device-manage">${manage}${plugExtras}</div>
     </article>`;
 }
 
@@ -5733,6 +5733,43 @@ async function homeSavePlugAutoOff(id) {
         if (row) row.auto_off_sec = Number(data.auto_off_sec || 0);
     } catch (err) {
         showToast(err.message || 'Could not update auto-off', 'error');
+    }
+}
+
+function homePlugMotorModeHtml(d) {
+    if (!homeManageOpen) return '';
+    const id = String(d.id || '');
+    if (!id) return '';
+    const watts = Math.max(0, Math.round(Number(d.motor_mode_w) || 0));
+    const enabled = watts > 0;
+    const value = enabled ? watts : 100;
+    return `<div class="home-plug-auto-off home-plug-motor-mode" data-home-motor-mode-wrap="${escapeHtml(id)}">
+        <label class="home-plug-auto-off-toggle" title="Block Off while the plug draws at least this many watts. Also turns it back on if Apple Home or another app turns it off while running.">
+            <input type="checkbox" data-home-motor-mode-enabled="${escapeHtml(id)}" ${enabled ? 'checked' : ''}>
+            <span>Motor mode above</span>
+        </label>
+        <span class="home-plug-auto-off-fields${enabled ? '' : ' hidden'}">
+            <input type="number" min="1" max="100000" step="1" value="${escapeHtml(String(value))}" data-home-motor-mode-watts="${escapeHtml(id)}" aria-label="Motor mode watts">
+            <span>W</span>
+        </span>
+    </div>`;
+}
+
+async function homeSavePlugMotorMode(id) {
+    const wrap = document.querySelector(`[data-home-motor-mode-wrap="${CSS.escape(id)}"]`);
+    if (!wrap) return;
+    const enabled = wrap.querySelector(`[data-home-motor-mode-enabled="${CSS.escape(id)}"]`);
+    const on = Boolean(enabled?.checked);
+    const value = Math.max(1, Math.round(Number(wrap.querySelector(`[data-home-motor-mode-watts="${CSS.escape(id)}"]`)?.value || 100)));
+    const watts = on ? value : 0;
+    wrap.querySelector('.home-plug-auto-off-fields')?.classList.toggle('hidden', !on);
+    try {
+        const data = await homeApi({ action: 'motor_mode', id, watts }, 8000);
+        if (!data?.ok) throw new Error(data?.error || 'Could not update motor mode');
+        const row = (homeDash.devices || []).find((d) => d.id === id);
+        if (row) row.motor_mode_w = Number(data.motor_mode_w || 0);
+    } catch (err) {
+        showToast(err.message || 'Could not update motor mode', 'error');
     }
 }
 
@@ -7007,6 +7044,14 @@ function bindHomeDashboard() {
             if (id) await homeSavePlugAutoOff(id);
             return;
         }
+        const plugMotor = event.target.closest('[data-home-motor-mode-enabled], [data-home-motor-mode-watts]');
+        if (plugMotor) {
+            const id = plugMotor.getAttribute('data-home-motor-mode-enabled')
+                || plugMotor.getAttribute('data-home-motor-mode-watts')
+                || '';
+            if (id) await homeSavePlugMotorMode(id);
+            return;
+        }
         const assign = event.target.closest('[data-home-room-assign]');
         if (assign) {
             const id = assign.getAttribute('data-home-room-assign') || '';
@@ -7273,6 +7318,12 @@ function homeAutoCanOnOff(d) {
     return ['light', 'plug', 'switch', 'heater', 'relay', 'vacuum'].includes(homeAutoKind(d));
 }
 
+function homeAutoHasPower(d) {
+    if (!d) return false;
+    const power = d.power ?? d.power_w;
+    return power != null && power !== '' && Number.isFinite(Number(power));
+}
+
 function homeAutoWhenEvents(d) {
     if (!d) return [];
     const events = [];
@@ -7289,6 +7340,9 @@ function homeAutoWhenEvents(d) {
         if (d.humidity != null) {
             events.push(['hum_above', 'humidity above'], ['hum_below', 'humidity below']);
         }
+    }
+    if (homeAutoHasPower(d) || String(d.kind || '') === 'plug') {
+        events.push(['power_above', 'watts above'], ['power_below', 'watts below']);
     }
     if (homeAutoCanOnOff(d) || events.length === 0) {
         events.push(['turns_on', 'turns on'], ['turns_off', 'turns off'], ['stays_on', 'is on for'], ['stays_off', 'is off for']);
@@ -7541,8 +7595,9 @@ function homeAutoWhenPhrase(trigger, names) {
     if (trigger.type === 'threshold') {
         const pw = trigger.id === HOME_AUTO_POWERWALL_ID;
         const name = pw ? 'Powerwall' : (names[trigger.id] || 'Sensor');
+        const metric = trigger.metric === 'power' ? 'watts' : trigger.metric;
         const unit = homeAutoThresholdUnit(trigger.metric);
-        return `${name} ${trigger.metric} ${trigger.op} ${trigger.value}${unit}`;
+        return `${name} ${metric} ${trigger.op} ${trigger.value}${unit}`;
     }
     if (trigger.type === 'robot') {
         const name = names[trigger.id] || (trigger.id === HOME_AUTO_LYMOW_ID ? 'Lymow' : 'Yarbo');
@@ -7679,7 +7734,7 @@ function homeAutoThenPhrase(action, names) {
 
 function homeAutoThresholdUnit(metric) {
     if (metric === 'humidity' || metric === 'battery') return '%';
-    if (metric === 'export' || metric === 'solar' || metric === 'load') return 'W';
+    if (metric === 'export' || metric === 'solar' || metric === 'load' || metric === 'power') return 'W';
     return '°';
 }
 
@@ -8417,15 +8472,32 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
             </div>`;
         }
         const d = homeAutoDeviceById(trigger.id);
+        const isPower = trigger.metric === 'power';
+        const events = homeAutoWhenEvents(d || { id: trigger.id, kind: isPower ? 'plug' : 'sensor' });
+        const selected = isPower
+            ? (trigger.op === 'below' ? 'power_below' : 'power_above')
+            : (trigger.metric === 'humidity'
+                ? (trigger.op === 'below' ? 'hum_below' : 'hum_above')
+                : (trigger.op === 'below' ? 'temp_below' : 'temp_above'));
+        const threshOpts = events.filter(([v]) =>
+            v === 'temp_above' || v === 'temp_below' || v === 'hum_above' || v === 'hum_below'
+            || v === 'power_above' || v === 'power_below'
+        );
+        const options = (threshOpts.length ? threshOpts : [
+            ['temp_above', 'temperature above'],
+            ['temp_below', 'temperature below'],
+            ['hum_above', 'humidity above'],
+            ['hum_below', 'humidity below'],
+            ['power_above', 'watts above'],
+            ['power_below', 'watts below'],
+        ]).map(([v, label]) =>
+            `<option value="${v}" ${v === selected ? 'selected' : ''}>${label}</option>`
+        ).join('');
         return `<div class="auto-chip" data-auto-when ${iAttr}>
             ${homeAutoChipNameHtml(d || { name: trigger.id })}
-            <select data-auto-event>
-                <option value="temp_above" ${trigger.metric === 'temperature' && trigger.op === 'above' ? 'selected' : ''}>temperature above</option>
-                <option value="temp_below" ${trigger.metric === 'temperature' && trigger.op === 'below' ? 'selected' : ''}>temperature below</option>
-                <option value="hum_above" ${trigger.metric === 'humidity' && trigger.op === 'above' ? 'selected' : ''}>humidity above</option>
-                <option value="hum_below" ${trigger.metric === 'humidity' && trigger.op === 'below' ? 'selected' : ''}>humidity below</option>
-            </select>
-            <input type="number" data-auto-thresh value="${escapeHtml(String(trigger.value ?? 22))}" step="0.5">
+            <select data-auto-event>${options}</select>
+            <input type="number" data-auto-thresh value="${escapeHtml(String(trigger.value ?? (isPower ? 100 : 22)))}" step="${isPower ? '1' : '0.5'}">
+            ${isPower ? 'W' : ''}
             <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
             ${homeAutoChipMetaHtml(d)}
         </div>`;
@@ -8553,6 +8625,28 @@ function homeAutoIfChipHtml(cond, index) {
             <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
+    if (cond.type === 'threshold' && cond.id && cond.id !== HOME_AUTO_POWERWALL_ID) {
+        const d = homeAutoDeviceById(cond.id) || { id: cond.id, kind: 'plug', name: cond.id };
+        const states = homeAutoIfStateOptions(d);
+        const selected = cond.metric === 'power'
+            ? (cond.op === 'below' ? 'power_below' : 'power_above')
+            : (cond.metric === 'humidity'
+                ? (cond.op === 'below' ? 'hum_below' : 'hum_above')
+                : (cond.op === 'below' ? 'temp_below' : 'temp_above'));
+        const isPower = cond.metric === 'power';
+        return `<div class="auto-chip auto-chip--if-device" data-auto-if-i="${index}">
+            ${homeAutoChipNameHtml(d)}
+            is
+            <select data-auto-if-state>
+                ${states.map(([v, label]) =>
+                    `<option value="${v}" ${v === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`
+                ).join('')}
+            </select>
+            <input type="number" data-auto-if-thresh value="${escapeHtml(String(cond.value ?? (isPower ? 100 : 22)))}" step="${isPower ? '1' : '0.5'}">
+            ${isPower ? 'W' : ''}
+            <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
     if (cond.type === 'sun_window') {
         const start = cond.start === 'sunrise' ? 'sunrise' : 'sunset';
         const end = cond.end === 'sunset' ? 'sunset' : 'sunrise';
@@ -8575,6 +8669,8 @@ function homeAutoIfChipHtml(cond, index) {
     const selected = homeAutoDeviceById(cond.id) || devices[0];
     const states = homeAutoIfStateOptions(selected);
     const state = states.some(([v]) => v === cond.state) ? cond.state : (states[0] ? states[0][0] : 'on');
+    const isPowerState = state === 'power_above' || state === 'power_below';
+    const powerThresh = `<input type="number" data-auto-if-thresh value="${escapeHtml(String(cond.value ?? 100))}" step="1" aria-label="Watts"> W`;
     const withinSec = Number(cond.within_sec || 0);
     const useWithin = state === 'motion' && withinSec > 0;
     const withinMode = state === 'motion'
@@ -8620,6 +8716,7 @@ function homeAutoIfChipHtml(cond, index) {
                 `<option value="${v}" ${v === state ? 'selected' : ''}>${escapeHtml(label)}</option>`
             ).join('')}
         </select>
+        ${isPowerState ? powerThresh : ''}
         ${withinMode}
         ${withinDur}
         ${forMode}
@@ -8705,6 +8802,9 @@ function homeAutoIfStateOptions(d) {
     }
     if (homeAutoCanMotion(d)) {
         states.push(['motion', 'motion'], ['no_motion', 'no motion']);
+    }
+    if (homeAutoHasPower(d) || String(d.kind || '') === 'plug') {
+        states.push(['power_above', 'watts above'], ['power_below', 'watts below']);
     }
     return states.length ? states : [['on', 'on'], ['off', 'off']];
 }
@@ -9403,13 +9503,16 @@ function homeAutoApplyEvent(raw, index = 0) {
     const list = homeAutoTriggers();
     const trigger = list[index];
     if (!trigger) return;
-    if (raw === 'temp_above' || raw === 'temp_below' || raw === 'hum_above' || raw === 'hum_below') {
+    if (raw === 'temp_above' || raw === 'temp_below' || raw === 'hum_above' || raw === 'hum_below'
+        || raw === 'power_above' || raw === 'power_below') {
+        const metric = raw.startsWith('hum') ? 'humidity' : (raw.startsWith('power') ? 'power' : 'temperature');
+        const fallback = metric === 'power' ? 100 : 22;
         list[index] = {
             type: 'threshold',
             id: trigger.id,
-            metric: raw.startsWith('hum') ? 'humidity' : 'temperature',
+            metric,
             op: raw.endsWith('below') ? 'below' : 'above',
-            value: Number(document.querySelector(`[data-auto-when-i="${index}"] [data-auto-thresh]`)?.value || 22),
+            value: Number(document.querySelector(`[data-auto-when-i="${index}"] [data-auto-thresh]`)?.value || fallback),
         };
         homeAutoSetTriggers(list);
         return;
@@ -9465,6 +9568,20 @@ async function homeAutoSave() {
         const chip = document.querySelector(`#home-automations-editor [data-auto-if-i="${i}"]`);
         homeAutoApplyIfWithin(cond, chip);
         homeAutoApplyIfFor(cond, chip);
+        if (cond?.type === 'threshold' && cond.id !== HOME_AUTO_POWERWALL_ID) {
+            const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
+            if (Number.isFinite(value)) cond.value = value;
+        }
+        if (cond?.type === 'device' && (cond.state === 'power_above' || cond.state === 'power_below')) {
+            const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
+            autoDraft.conditions[i] = {
+                type: 'threshold',
+                id: cond.id,
+                metric: 'power',
+                op: cond.state === 'power_below' ? 'below' : 'above',
+                value: Number.isFinite(value) ? value : 100,
+            };
+        }
     });
     autoDraft.hold_sec = Math.max(0, Number(document.getElementById('auto-hold-sec')?.value || autoDraft.hold_sec || 0));
     if (homeAutoUsesSun() && homeAutoSunNeedsCoords()) {
@@ -9893,12 +10010,33 @@ function bindHomeAutomations() {
         if (event.target.matches('[data-auto-if-state]')) {
             const i = Number(event.target.closest('[data-auto-if-i]')?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) {
-                autoDraft.conditions[i].state = event.target.value;
-                if (event.target.value !== 'motion') {
-                    delete autoDraft.conditions[i].within_sec;
-                }
-                if (event.target.value !== 'no_motion') {
-                    delete autoDraft.conditions[i].for_sec;
+                const raw = event.target.value;
+                const chip = event.target.closest('[data-auto-if-i]');
+                if (raw === 'power_above' || raw === 'power_below' || raw === 'temp_above' || raw === 'temp_below'
+                    || raw === 'hum_above' || raw === 'hum_below') {
+                    const metric = raw.startsWith('hum') ? 'humidity'
+                        : (raw.startsWith('power') ? 'power' : 'temperature');
+                    const fallback = metric === 'power' ? 100 : 22;
+                    const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
+                    autoDraft.conditions[i] = {
+                        type: 'threshold',
+                        id: autoDraft.conditions[i].id || '',
+                        metric,
+                        op: raw.endsWith('below') ? 'below' : 'above',
+                        value: Number.isFinite(value) ? value : fallback,
+                    };
+                } else {
+                    autoDraft.conditions[i] = {
+                        type: 'device',
+                        id: autoDraft.conditions[i].id || '',
+                        state: raw,
+                    };
+                    if (raw !== 'motion') {
+                        delete autoDraft.conditions[i].within_sec;
+                    }
+                    if (raw !== 'no_motion') {
+                        delete autoDraft.conditions[i].for_sec;
+                    }
                 }
             }
         }

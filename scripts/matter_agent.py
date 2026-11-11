@@ -195,6 +195,11 @@ _restore_lock = threading.Lock()
 _preferred_shared = False
 _live_lock = threading.Lock()
 _live_devices: list[dict[str, Any]] = []
+_motor_mode_cache: dict[str, int] = {}
+_motor_mode_mtime: float = 0.0
+_motor_high_until: dict[str, float] = {}
+_motor_reon_lock = threading.Lock()
+MOTOR_MODE_STICKY_S = 8.0
 _state_poll_started = False
 _scan_lock = threading.Lock()
 _scan_due_at = 0.0
@@ -898,6 +903,79 @@ def persist_remapped_node(old_node: int, new_node: int) -> int:
             cache.write_text(json.dumps(blob) + "\n", encoding="utf-8")
             changed += n
     return changed
+
+
+def motor_mode_map() -> dict[str, int]:
+    """id -> watts threshold from home.json motor_mode_w (0 / missing = off)."""
+    global _motor_mode_cache, _motor_mode_mtime
+    path = ROOT / "data" / "home.json"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {}
+    if mtime == _motor_mode_mtime and _motor_mode_cache is not None:
+        return dict(_motor_mode_cache)
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        _motor_mode_mtime = mtime
+        _motor_mode_cache = {}
+        return {}
+    out: dict[str, int] = {}
+    raw = store.get("motor_mode_w") if isinstance(store, dict) else None
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            device_id = str(key or "").strip()
+            if device_id == "":
+                continue
+            try:
+                watts = int(value)
+            except (TypeError, ValueError):
+                continue
+            if watts > 0:
+                out[device_id] = max(1, min(100000, watts))
+    _motor_mode_mtime = mtime
+    _motor_mode_cache = out
+    return dict(out)
+
+
+def note_motor_high_power(device_id: str, power_w: float | None) -> None:
+    limit = motor_mode_map().get(device_id)
+    if not limit or power_w is None:
+        return
+    try:
+        watts = float(power_w)
+    except (TypeError, ValueError):
+        return
+    if watts >= float(limit):
+        _motor_high_until[device_id] = time.time() + MOTOR_MODE_STICKY_S
+
+
+def maybe_motor_mode_reon(device_id: str, turned_on: bool) -> None:
+    """If Apple Home (or anything) turns a motor-mode plug off while loaded, turn it back on."""
+    if turned_on:
+        return
+    limit = motor_mode_map().get(device_id)
+    if not limit:
+        return
+    live = live_row(device_id) or {}
+    power = live.get("power_w")
+    try:
+        power_f = float(power) if power is not None else None
+    except (TypeError, ValueError):
+        power_f = None
+    sticky = float(_motor_high_until.get(device_id) or 0)
+    if not ((power_f is not None and power_f >= float(limit)) or time.time() < sticky):
+        return
+    if not _motor_reon_lock.acquire(blocking=False):
+        return
+    try:
+        log(f"motor mode: restoring On for {device_id} (limit {limit} W)")
+        dispatch({"op": "command", "id": device_id, "action": "on", "kind": "plug"})
+    except Exception as exc:  # noqa: BLE001
+        log(f"motor mode re-on failed for {device_id}: {exc}")
+    finally:
+        _motor_reon_lock.release()
 
 
 def names_for_node(node_id: int) -> list[str]:
@@ -2813,7 +2891,15 @@ def apply_attribute_event(data: Any) -> None:
                     pass
             if parts:
                 fields["status"] = " · ".join(parts)
+        if "power_w" in fields:
+            note_motor_high_power(device_id, fields.get("power_w"))
+        was_on = None
+        if "on" in fields:
+            live_before = live_row(device_id) or {}
+            was_on = bool(live_before.get("on"))
         patch_live_device(device_id, fields)
+        if "on" in fields and was_on is True and fields.get("on") is False:
+            maybe_motor_mode_reon(device_id, False)
 
 
 def merge_live_nodes(nodes: list[dict[str, Any]]) -> None:
