@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.247] - 2026-11-11
+
+### Added
+- **Climate history:** UniFi Protect sensors and Mill/Matter heaters (any device with temperature, humidity when present) sample every 30 minutes into size-capped files kept for **1 year**. Tap a sensor status or heater room temp to open charts with date range, 30‑min / daily views, and trends. Chart.js is vendored under `public/vendor/` and installed automatically on panel update.
+
 ## [4.0.246] - 2026-11-09
 
 ### Fixed

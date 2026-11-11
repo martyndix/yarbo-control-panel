@@ -152,6 +152,30 @@ mkdir -p "${ROOT}/data"
 ) &
 HOME_AUTOMATIONS_PID=$!
 
+echo "==> Starting sensor climate history sampler"
+mkdir -p "${ROOT}/data/sensor-history"
+# Keep the sampler log small.
+if [[ -f "${ROOT}/data/sensor-history.log" ]]; then
+  tail -n 200 "${ROOT}/data/sensor-history.log" > "${ROOT}/data/sensor-history.log.tmp" 2>/dev/null \
+    && mv -f "${ROOT}/data/sensor-history.log.tmp" "${ROOT}/data/sensor-history.log" \
+    || true
+fi
+(
+  while true; do
+    set +e
+    "$PHP_BIN" "${ROOT}/scripts/sensor_history.php" >> "${ROOT}/data/sensor-history.log" 2>&1
+    code=$?
+    set -e
+    if [[ "$code" -eq 0 ]]; then
+      echo "sensor_history: reloading"
+    else
+      echo "sensor_history: exited ${code}, restarting" >&2
+    fi
+    sleep 2
+  done
+) &
+SENSOR_HISTORY_PID=$!
+
 MATTER_PY="${ROOT}/.venv/bin/python"
 if [[ ! -x "$MATTER_PY" ]]; then
   MATTER_PY="$(command -v python3 || true)"

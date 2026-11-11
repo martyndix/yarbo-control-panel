@@ -2273,6 +2273,40 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </div>
 
+        <div id="sensor-history-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sensor-history-title">
+            <button type="button" class="modal-backdrop" data-sensor-history-close aria-label="Close climate history"></button>
+            <div class="modal-panel card sensor-history-panel">
+                <h2 id="sensor-history-title">Climate history</h2>
+                <p class="hint" id="sensor-history-summary">Temperature and humidity sampled every 30 minutes.</p>
+                <div class="sensor-history-toolbar">
+                    <div class="sensor-history-presets" role="group" aria-label="Date range">
+                        <button type="button" class="btn btn-secondary btn-compact" data-sensor-range="1d">24h</button>
+                        <button type="button" class="btn btn-secondary btn-compact" data-sensor-range="7d">7d</button>
+                        <button type="button" class="btn btn-secondary btn-compact is-active" data-sensor-range="30d">30d</button>
+                        <button type="button" class="btn btn-secondary btn-compact" data-sensor-range="90d">90d</button>
+                        <button type="button" class="btn btn-secondary btn-compact" data-sensor-range="365d">1y</button>
+                    </div>
+                    <div class="sensor-history-bucket" role="group" aria-label="Resolution">
+                        <button type="button" class="btn btn-secondary btn-compact is-active" data-sensor-bucket="30m">30 min</button>
+                        <button type="button" class="btn btn-secondary btn-compact" data-sensor-bucket="1d">Daily</button>
+                    </div>
+                </div>
+                <div class="sensor-history-custom">
+                    <label>From <input type="date" id="sensor-history-from"></label>
+                    <label>To <input type="date" id="sensor-history-to"></label>
+                    <button type="button" class="btn btn-secondary btn-compact" id="sensor-history-apply">Apply</button>
+                </div>
+                <div class="sensor-history-chart-wrap">
+                    <canvas id="sensor-history-chart" aria-label="Climate chart"></canvas>
+                </div>
+                <p class="hint" id="sensor-history-trends"></p>
+                <p class="hint hidden" id="sensor-history-error"></p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" data-sensor-history-close>Close</button>
+                </div>
+            </div>
+        </div>
+
         <section id="toast" class="toast hidden" role="status"></section>
     </main>
     <script
@@ -2280,6 +2314,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""
     ></script>
+    <script src="/vendor/chart.umd.min.js"></script>
     <script src="/assets/app.js?v=<?= htmlspecialchars($assetVersion, ENT_QUOTES, 'UTF-8') ?>"></script>
 </body>
 </html>

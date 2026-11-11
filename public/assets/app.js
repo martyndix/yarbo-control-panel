@@ -43,6 +43,15 @@ const els = {
     batteryCellsModal: document.getElementById('battery-cells-modal'),
     batteryCellsList: document.getElementById('battery-cells-list'),
     batteryCellsSummary: document.getElementById('battery-cells-summary'),
+    sensorHistoryModal: document.getElementById('sensor-history-modal'),
+    sensorHistoryTitle: document.getElementById('sensor-history-title'),
+    sensorHistorySummary: document.getElementById('sensor-history-summary'),
+    sensorHistoryTrends: document.getElementById('sensor-history-trends'),
+    sensorHistoryError: document.getElementById('sensor-history-error'),
+    sensorHistoryChart: document.getElementById('sensor-history-chart'),
+    sensorHistoryFrom: document.getElementById('sensor-history-from'),
+    sensorHistoryTo: document.getElementById('sensor-history-to'),
+    sensorHistoryApply: document.getElementById('sensor-history-apply'),
     wirelessCharge: document.getElementById('wireless-charge'),
     rtkStatus: document.getElementById('rtk-status'),
     rtcmAge: document.getElementById('rtcm-age'),
@@ -473,6 +482,7 @@ const SETTINGS_PANES = ['connection', 'modules', 'yarbo', 'lymow', 'powerwall', 
 function syncBodyModalClass() {
     const open = [
         els.batteryCellsModal,
+        els.sensorHistoryModal,
         els.updateConfirmModal,
         els.vestaboardRotateModal,
         els.unifiLiveModal,
@@ -2049,6 +2059,332 @@ function closeBatteryCellsModal() {
     syncBodyModalClass();
 }
 
+let sensorHistoryId = '';
+let sensorHistoryName = '';
+let sensorHistoryRange = '30d';
+let sensorHistoryBucket = '30m';
+let sensorHistoryChart = null;
+let sensorHistoryLoading = false;
+
+function homeDeviceHasClimate(d) {
+    if (!d || typeof d !== 'object') return false;
+    const temp = d.temperature ?? d.local_temperature;
+    const hum = d.humidity;
+    return (temp != null && temp !== '' && Number.isFinite(Number(temp)))
+        || (hum != null && hum !== '' && Number.isFinite(Number(hum)));
+}
+
+function sensorHistoryRangeSeconds(key) {
+    if (key === '1d') return 86400;
+    if (key === '7d') return 7 * 86400;
+    if (key === '90d') return 90 * 86400;
+    if (key === '365d') return 365 * 86400;
+    return 30 * 86400;
+}
+
+function sensorHistoryDateInputValue(ts) {
+    const d = new Date(ts * 1000);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function sensorHistoryParseDateInput(value, endOfDay) {
+    const raw = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return 0;
+    const d = new Date(`${raw}T${endOfDay ? '23:59:59' : '00:00:00'}`);
+    const ts = Math.floor(d.getTime() / 1000);
+    return Number.isFinite(ts) ? ts : 0;
+}
+
+function formatSensorTrendMetric(label, unit, trend) {
+    if (!trend) return '';
+    const slope = trend.slope === 'up' ? '↑' : (trend.slope === 'down' ? '↓' : '→');
+    const delta = trend.delta == null ? '—' : `${trend.delta > 0 ? '+' : ''}${trend.delta}${unit}`;
+    return `${label} ${slope} ${trend.latest ?? '—'}${unit} (avg ${trend.avg ?? '—'}${unit}, ${delta} over range)`;
+}
+
+async function openSensorHistoryModal(id, name) {
+    if (!els.sensorHistoryModal || !id) return;
+    sensorHistoryId = id;
+    sensorHistoryName = name || id;
+    if (els.sensorHistoryTitle) {
+        els.sensorHistoryTitle.textContent = sensorHistoryName;
+    }
+    if (els.sensorHistoryError) {
+        els.sensorHistoryError.textContent = '';
+        els.sensorHistoryError.classList.add('hidden');
+    }
+    const to = Math.floor(Date.now() / 1000);
+    const from = to - sensorHistoryRangeSeconds(sensorHistoryRange);
+    if (els.sensorHistoryFrom) els.sensorHistoryFrom.value = sensorHistoryDateInputValue(from);
+    if (els.sensorHistoryTo) els.sensorHistoryTo.value = sensorHistoryDateInputValue(to);
+    document.querySelectorAll('[data-sensor-range]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-sensor-range') === sensorHistoryRange);
+    });
+    document.querySelectorAll('[data-sensor-bucket]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-sensor-bucket') === sensorHistoryBucket);
+    });
+    els.sensorHistoryModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+    try {
+        await homeApi({ action: 'sensor_history_sample' }, 12000);
+    } catch {
+        // Chart can still show whatever is already stored.
+    }
+    await loadSensorHistoryChart();
+}
+
+function closeSensorHistoryModal() {
+    if (!els.sensorHistoryModal) return;
+    els.sensorHistoryModal.classList.add('hidden');
+    syncBodyModalClass();
+}
+
+function destroySensorHistoryChart() {
+    if (sensorHistoryChart) {
+        try {
+            sensorHistoryChart.destroy();
+        } catch {
+            // ignore
+        }
+        sensorHistoryChart = null;
+    }
+}
+
+async function loadSensorHistoryChart() {
+    if (!sensorHistoryId || sensorHistoryLoading) return;
+    sensorHistoryLoading = true;
+    if (els.sensorHistorySummary) {
+        els.sensorHistorySummary.textContent = 'Loading…';
+    }
+    if (els.sensorHistoryTrends) {
+        els.sensorHistoryTrends.textContent = '';
+    }
+    try {
+        const from = sensorHistoryParseDateInput(els.sensorHistoryFrom?.value, false)
+            || (Math.floor(Date.now() / 1000) - sensorHistoryRangeSeconds(sensorHistoryRange));
+        const to = sensorHistoryParseDateInput(els.sensorHistoryTo?.value, true)
+            || Math.floor(Date.now() / 1000);
+        const params = new URLSearchParams({
+            action: 'sensor_history',
+            id: sensorHistoryId,
+            from: String(from),
+            to: String(to),
+            bucket: sensorHistoryBucket,
+        });
+        const res = await fetch(`/api/home.php?${params.toString()}`, { credentials: 'same-origin' });
+        const data = await res.json();
+        if (!data?.ok) throw new Error(data?.error || 'Could not load history');
+        renderSensorHistoryChart(data);
+        if (els.sensorHistoryError) els.sensorHistoryError.classList.add('hidden');
+    } catch (err) {
+        destroySensorHistoryChart();
+        if (els.sensorHistorySummary) {
+            els.sensorHistorySummary.textContent = 'No climate history yet — samples are taken every 30 minutes.';
+        }
+        if (els.sensorHistoryError) {
+            els.sensorHistoryError.textContent = err.message || 'Could not load history';
+            els.sensorHistoryError.classList.remove('hidden');
+        }
+    } finally {
+        sensorHistoryLoading = false;
+    }
+}
+
+function renderSensorHistoryChart(data) {
+    const points = Array.isArray(data.points) ? data.points : [];
+    const hasHumidity = Boolean(data.has_humidity);
+    const labels = points.map((p) => {
+        const d = new Date(Number(p.t) * 1000);
+        if (data.bucket === '1d') {
+            return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+        }
+        return d.toLocaleString(undefined, {
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    });
+    const temps = points.map((p) => (p.temperature == null ? null : Number(p.temperature)));
+    const hums = points.map((p) => (p.humidity == null ? null : Number(p.humidity)));
+    const tempMins = points.map((p) => (p.temp_min == null ? null : Number(p.temp_min)));
+    const tempMaxs = points.map((p) => (p.temp_max == null ? null : Number(p.temp_max)));
+
+    if (els.sensorHistorySummary) {
+        const n = points.length;
+        const res = data.bucket === '1d' ? 'daily averages' : '30-minute samples';
+        els.sensorHistorySummary.textContent = n
+            ? `${n} ${res} · kept for up to 1 year`
+            : 'No samples in this range yet — history builds every 30 minutes.';
+    }
+    const trendBits = [];
+    const tTrend = formatSensorTrendMetric('Temp', '°', data.trends?.temperature);
+    if (tTrend) trendBits.push(tTrend);
+    if (hasHumidity) {
+        const hTrend = formatSensorTrendMetric('Humidity', '%', data.trends?.humidity);
+        if (hTrend) trendBits.push(hTrend);
+    }
+    if (els.sensorHistoryTrends) {
+        els.sensorHistoryTrends.textContent = trendBits.join(' · ');
+    }
+
+    if (typeof Chart === 'undefined' || !els.sensorHistoryChart) {
+        if (els.sensorHistoryError) {
+            els.sensorHistoryError.textContent = 'Chart.js is missing — run a panel update to install it.';
+            els.sensorHistoryError.classList.remove('hidden');
+        }
+        return;
+    }
+
+    destroySensorHistoryChart();
+    const datasets = [
+        {
+            label: 'Temperature °C',
+            data: temps,
+            borderColor: '#c45c26',
+            backgroundColor: 'rgba(196, 92, 38, 0.16)',
+            borderWidth: 2,
+            pointRadius: points.length > 80 ? 0 : 2,
+            tension: 0.25,
+            fill: true,
+            yAxisID: 'yTemp',
+            spanGaps: true,
+        },
+    ];
+    if (data.bucket === '1d' && tempMins.some((v) => v != null) && tempMaxs.some((v) => v != null)) {
+        datasets.push({
+            label: 'Temp max',
+            data: tempMaxs,
+            borderColor: 'rgba(196, 92, 38, 0.35)',
+            borderWidth: 1,
+            borderDash: [4, 4],
+            pointRadius: 0,
+            tension: 0.2,
+            fill: false,
+            yAxisID: 'yTemp',
+            spanGaps: true,
+        });
+        datasets.push({
+            label: 'Temp min',
+            data: tempMins,
+            borderColor: 'rgba(196, 92, 38, 0.35)',
+            borderWidth: 1,
+            borderDash: [4, 4],
+            pointRadius: 0,
+            tension: 0.2,
+            fill: false,
+            yAxisID: 'yTemp',
+            spanGaps: true,
+        });
+    }
+    if (hasHumidity) {
+        datasets.push({
+            label: 'Humidity %',
+            data: hums,
+            borderColor: '#1f7a8c',
+            backgroundColor: 'rgba(31, 122, 140, 0.12)',
+            borderWidth: 2,
+            pointRadius: points.length > 80 ? 0 : 2,
+            tension: 0.25,
+            fill: false,
+            yAxisID: 'yHum',
+            spanGaps: true,
+        });
+    }
+
+    const scales = {
+        x: {
+            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+            grid: { color: 'rgba(127,127,127,0.12)' },
+        },
+        yTemp: {
+            type: 'linear',
+            position: 'left',
+            title: { display: true, text: '°C', color: '#c45c26' },
+            ticks: { color: '#c45c26' },
+            grid: { color: 'rgba(127,127,127,0.12)' },
+        },
+    };
+    if (hasHumidity) {
+        scales.yHum = {
+            type: 'linear',
+            position: 'right',
+            min: 0,
+            max: 100,
+            title: { display: true, text: '% RH', color: '#1f7a8c' },
+            ticks: { color: '#1f7a8c' },
+            grid: { drawOnChartArea: false },
+        };
+    }
+
+    sensorHistoryChart = new Chart(els.sensorHistoryChart.getContext('2d'), {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 12, usePointStyle: true },
+                },
+                tooltip: {
+                    callbacks: {
+                        label(ctx) {
+                            const v = ctx.parsed.y;
+                            if (v == null || Number.isNaN(v)) return `${ctx.dataset.label}: —`;
+                            const unit = ctx.dataset.yAxisID === 'yHum' ? '%' : '°';
+                            return `${ctx.dataset.label}: ${v}${unit}`;
+                        },
+                    },
+                },
+            },
+            scales,
+        },
+    });
+}
+
+function setupSensorHistoryUi() {
+    document.querySelectorAll('[data-sensor-history-close]').forEach((el) => {
+        el.addEventListener('click', closeSensorHistoryModal);
+    });
+    document.querySelectorAll('[data-sensor-range]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            sensorHistoryRange = btn.getAttribute('data-sensor-range') || '30d';
+            const to = Math.floor(Date.now() / 1000);
+            const from = to - sensorHistoryRangeSeconds(sensorHistoryRange);
+            if (els.sensorHistoryFrom) els.sensorHistoryFrom.value = sensorHistoryDateInputValue(from);
+            if (els.sensorHistoryTo) els.sensorHistoryTo.value = sensorHistoryDateInputValue(to);
+            document.querySelectorAll('[data-sensor-range]').forEach((b) => {
+                b.classList.toggle('is-active', b.getAttribute('data-sensor-range') === sensorHistoryRange);
+            });
+            await loadSensorHistoryChart();
+        });
+    });
+    document.querySelectorAll('[data-sensor-bucket]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            sensorHistoryBucket = btn.getAttribute('data-sensor-bucket') || '30m';
+            document.querySelectorAll('[data-sensor-bucket]').forEach((b) => {
+                b.classList.toggle('is-active', b.getAttribute('data-sensor-bucket') === sensorHistoryBucket);
+            });
+            await loadSensorHistoryChart();
+        });
+    });
+    els.sensorHistoryApply?.addEventListener('click', async () => {
+        document.querySelectorAll('[data-sensor-range]').forEach((b) => b.classList.remove('is-active'));
+        await loadSensorHistoryChart();
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && els.sensorHistoryModal && !els.sensorHistoryModal.classList.contains('hidden')) {
+            closeSensorHistoryModal();
+        }
+    });
+}
+
 function setupBatteryTempClick() {
     const open = () => {
         if (!lastBatteryCells.length && lastBatteryTempC == null) return;
@@ -3343,13 +3679,17 @@ function unifiDeviceCardHtml(d) {
             <div class="home-device-actions">${dps}${unlock}${gate}</div>
         </article>`;
     }
+    const climate = homeDeviceHasClimate(d);
+    const meta = climate
+        ? `<button type="button" class="home-device-meta home-device-meta--history" data-unifi-dps data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(d.status || '—')}</button>`
+        : `<span class="home-device-meta" data-unifi-dps>${escapeHtml(d.status || '—')}</span>`;
     return `<article class="home-device${on ? ' is-on' : ''}" data-unifi-id="${escapeHtml(d.id)}">
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"></span>
             <p class="home-device-name">${escapeHtml(d.name || 'Sensor')}</p>
             <span class="home-device-kind">${escapeHtml(unifiKindLabel(d))}</span>
         </div>
-        <div class="home-device-actions"><span class="home-device-meta" data-unifi-dps>${escapeHtml(d.status || '—')}</span></div>
+        <div class="home-device-actions">${meta}</div>
     </article>`;
 }
 
@@ -5378,6 +5718,9 @@ function homeDeviceActionsHtml(d, bright, color) {
         if (kind === 'sensor') {
             const status = String(d.status || '');
             const open = d.open === true || /^Open\b/i.test(status);
+            if (homeDeviceHasClimate(d)) {
+                return `<div class="home-device-actions"><button type="button" class="home-device-meta home-device-meta--history${open ? ' is-open' : ''}" data-home-status data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(d.status || '—')}</button></div>`;
+            }
             return `<div class="home-device-actions"><span class="home-device-meta${open ? ' is-open' : ''}" data-home-status>${escapeHtml(d.status || '—')}</span></div>`;
         }
         if (kind === 'door' || kind === 'hub') {
@@ -5497,7 +5840,7 @@ function homeHeaterActionsHtml(d) {
         ? homeFormatTemp(d.local_temperature)
         : '';
     const roomHtml = room
-        ? `<span class="home-heater-room" data-home-room-temp title="Room temperature">${escapeHtml(room)}°</span>`
+        ? `<button type="button" class="home-heater-room" data-home-room-temp data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(room)}°</button>`
         : `<span class="home-heater-room is-empty" data-home-room-temp title="Room temperature">—°</span>`;
     return `<div class="home-device-actions home-device-actions--heater">
             <button type="button" class="btn btn-secondary btn-compact${on ? ' is-active' : ''}" data-home-power="on">On</button>
@@ -6547,6 +6890,15 @@ function bindHomeDashboard() {
             return;
         }
         if (await homeUnifiDoorClick(event)) return;
+        const historyBtn = event.target.closest('[data-sensor-history]');
+        if (historyBtn) {
+            event.preventDefault();
+            await openSensorHistoryModal(
+                historyBtn.getAttribute('data-sensor-history') || '',
+                historyBtn.getAttribute('data-sensor-history-name') || ''
+            );
+            return;
+        }
         const btn = event.target.closest('[data-home-toggle]');
         if (btn) {
             await sendHomeDeviceToggle(btn.getAttribute('data-home-toggle') || '', btn);
@@ -16286,6 +16638,18 @@ if (els.plansList || els.plansLoad) {
 }
 setupDrivePad();
 setupBatteryTempClick();
+setupSensorHistoryUi();
+document.body.addEventListener('click', async (event) => {
+    const historyBtn = event.target.closest('[data-sensor-history]');
+    if (!historyBtn) return;
+    // Home grid handles its own listener; this covers UniFi cards and other panels.
+    if (historyBtn.closest('#home-devices, #home-hidden-devices')) return;
+    event.preventDefault();
+    await openSensorHistoryModal(
+        historyBtn.getAttribute('data-sensor-history') || '',
+        historyBtn.getAttribute('data-sensor-history-name') || ''
+    );
+});
 initAppearance();
 initPaperMail();
 initUpdateConfirmModal();

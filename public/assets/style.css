@@ -3590,6 +3590,92 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     font-weight: 500;
 }
 
+button.home-heater-room,
+button.home-device-meta--history {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+
+button.home-heater-room:hover,
+button.home-device-meta--history:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+.sensor-history-panel {
+    width: min(52rem, 96vw);
+    max-height: min(92vh, 44rem);
+    overflow: auto;
+}
+
+.sensor-history-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem 1rem;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0.6rem 0 0.4rem;
+}
+
+.sensor-history-presets,
+.sensor-history-bucket {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.sensor-history-presets .btn.is-active,
+.sensor-history-bucket .btn.is-active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+}
+
+.sensor-history-custom {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem 0.85rem;
+    align-items: end;
+    margin: 0.35rem 0 0.75rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.sensor-history-custom label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.sensor-history-custom input[type="date"] {
+    font: inherit;
+    padding: 0.25rem 0.4rem;
+    border-radius: 0.35rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+}
+
+.sensor-history-chart-wrap {
+    position: relative;
+    width: 100%;
+    height: min(22rem, 48vh);
+    margin: 0.25rem 0 0.5rem;
+}
+
+#sensor-history-trends {
+    margin: 0.25rem 0 0;
+    line-height: 1.45;
+}
+
+#sensor-history-error:not(.hidden) {
+    color: #b42318;
+}
+
 .home-heater-set {
     display: inline-flex;
     align-items: center;

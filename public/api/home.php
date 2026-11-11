@@ -7,6 +7,7 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboHome;
 use Yarbo\YarboHomeAutomations;
 use Yarbo\YarboHub;
+use Yarbo\YarboSensorHistory;
 use Yarbo\YarboUnifi;
 
 $projectRoot = dirname(__DIR__, 2);
@@ -15,6 +16,21 @@ $home = new YarboHome($projectRoot);
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method === 'GET') {
+    $getAction = trim((string) ($_GET['action'] ?? ''));
+    if ($getAction === 'sensor_history') {
+        set_time_limit(12);
+        if (!$hub->enabled(YarboHub::MODULE_HOME) && !$hub->enabled(YarboHub::MODULE_UNIFI)) {
+            json_response(['ok' => false, 'error' => 'Turn on Home or UniFi in Settings.'], 403);
+        }
+        $id = trim((string) ($_GET['id'] ?? ''));
+        if ($id === '') {
+            json_response(['ok' => false, 'error' => 'Pick a sensor'], 400);
+        }
+        $to = isset($_GET['to']) && is_numeric($_GET['to']) ? (int) $_GET['to'] : time();
+        $from = isset($_GET['from']) && is_numeric($_GET['from']) ? (int) $_GET['from'] : ($to - 7 * 86400);
+        $bucket = trim((string) ($_GET['bucket'] ?? '30m'));
+        json_response((new YarboSensorHistory($projectRoot))->series($id, $from, $to, $bucket));
+    }
     set_time_limit(8);
     try {
         (new YarboHomeAutomations($projectRoot))->kickRunner();
@@ -42,7 +58,11 @@ if (!is_array($input)) {
 }
 
 $action = (string) ($input['action'] ?? '');
-if (!$hub->enabled(YarboHub::MODULE_HOME) && $action !== 'setup') {
+if ($action === 'sensor_history_sample') {
+    if (!$hub->enabled(YarboHub::MODULE_HOME) && !$hub->enabled(YarboHub::MODULE_UNIFI)) {
+        json_response(['ok' => false, 'error' => 'Turn on Home or UniFi in Settings.'], 403);
+    }
+} elseif (!$hub->enabled(YarboHub::MODULE_HOME) && $action !== 'setup') {
     json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
 }
 
@@ -100,6 +120,7 @@ try {
             (string) ($input['id'] ?? ''),
             (bool) ($input['enabled'] ?? false)
         ),
+        'sensor_history_sample' => (new YarboSensorHistory($projectRoot))->sampleOnce(),
         default => ['ok' => false, 'error' => 'Unknown action'],
     };
 } catch (Throwable $e) {

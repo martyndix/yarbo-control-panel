@@ -309,6 +309,21 @@ if ! run_owner "composer install --no-dev --optimize-autoloader"; then
   fail "composer install failed"
 fi
 
+step "Chart.js for sensor history"
+write_status "composer" "Installing Chart.js"
+# shellcheck source=scripts/lib/chart_js_ensure.sh
+source "${ROOT}/scripts/lib/chart_js_ensure.sh"
+chmod +x "${ROOT}/scripts/lib/chart_js_ensure.sh" "${ROOT}/scripts/sensor_history.php" 2>/dev/null || true
+if yarbo_ensure_chart_js "${ROOT}"; then
+  step "Chart.js $(yarbo_chart_js_version) ready"
+else
+  step "Chart.js download failed — sensor charts need network once (retry on next update)"
+fi
+# Catch up a climate sample after update without waiting for the 30-minute loop.
+if [[ -f "${ROOT}/scripts/sensor_history.php" ]]; then
+  run_owner "php ${ROOT}/scripts/sensor_history.php --once" >/dev/null 2>&1 || true
+fi
+
 PYTHON=""
 if command -v python3 >/dev/null 2>&1; then
   PYTHON=python3
