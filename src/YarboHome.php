@@ -616,6 +616,45 @@ final class YarboHome
                 $row['heating_min'] = self::optionalCelsius($device['heating_min'] ?? 5) ?? 5.0;
                 $row['heating_max'] = self::optionalCelsius($device['heating_max'] ?? 35) ?? 35.0;
             }
+            if (!$isUnifi && ($row['kind'] ?? '') === 'sensor') {
+                $temp = self::optionalCelsius($device['temperature'] ?? $device['local_temperature'] ?? null);
+                if ($temp !== null) {
+                    $row['temperature'] = $temp;
+                }
+                if (isset($device['humidity']) && is_numeric($device['humidity'])) {
+                    $row['humidity'] = round((float) $device['humidity'], 1);
+                }
+                if (array_key_exists('has_open', $device)) {
+                    $row['has_open'] = (bool) $device['has_open'];
+                }
+                if (array_key_exists('open', $device)) {
+                    $row['open'] = (bool) $device['open'];
+                    $row['on'] = (bool) $device['open'];
+                }
+                if (isset($device['status']) && is_string($device['status']) && $device['status'] !== '') {
+                    $row['status'] = $device['status'];
+                } else {
+                    $parts = [];
+                    if (($row['open'] ?? null) === true) {
+                        $parts[] = 'Open';
+                    } elseif (($row['open'] ?? null) === false) {
+                        $parts[] = 'Closed';
+                    }
+                    if (isset($row['temperature'])) {
+                        $parts[] = $row['temperature'] . '°';
+                    }
+                    if (isset($row['humidity'])) {
+                        $parts[] = round((float) $row['humidity']) . '% RH';
+                    }
+                    if ($parts !== []) {
+                        $row['status'] = implode(' · ', $parts);
+                    }
+                }
+            }
+            if (!$isUnifi && ($row['kind'] ?? '') === self::KIND_PLUG
+                && isset($device['power_w']) && is_numeric($device['power_w'])) {
+                $row['power_w'] = round((float) $device['power_w'], 1);
+            }
             if (($row['kind'] ?? '') === self::KIND_VACUUM) {
                 $row['vacuum_status'] = (string) ($device['vacuum_status'] ?? '');
                 $row['vacuum_clean'] = (string) ($device['vacuum_clean'] ?? 'vacuum');
@@ -2961,6 +3000,7 @@ final class YarboHome
             self::KIND_VACUUM => 'Vacuum',
             self::KIND_PLUG => 'Plug',
             self::KIND_SWITCH => 'Switch',
+            'sensor' => 'Sensor',
             default => '',
         };
     }
@@ -4254,6 +4294,48 @@ final class YarboHome
                 'available' => (bool) ($row['available'] ?? true),
             ];
             $kind = strtolower((string) ($row['kind'] ?? ''));
+            if ($kind === self::KIND_HEATER || YarboMatterFabric::nameLooksHeater((string) ($row['name'] ?? '') . ' ' . (string) ($row['product'] ?? ''))) {
+                $slim['has_thermostat'] = (bool) ($row['has_thermostat'] ?? false)
+                    || isset($row['local_temperature'])
+                    || isset($row['heating_setpoint']);
+                $temp = self::optionalCelsius($row['local_temperature'] ?? null);
+                if ($temp !== null) {
+                    $slim['local_temperature'] = $temp;
+                }
+                $set = self::optionalCelsius($row['heating_setpoint'] ?? null);
+                if ($set !== null) {
+                    $slim['heating_setpoint'] = $set;
+                }
+                $min = self::optionalCelsius($row['heating_min'] ?? null);
+                if ($min !== null) {
+                    $slim['heating_min'] = $min;
+                }
+                $max = self::optionalCelsius($row['heating_max'] ?? null);
+                if ($max !== null) {
+                    $slim['heating_max'] = $max;
+                }
+            }
+            if ($kind === 'sensor') {
+                $temp = self::optionalCelsius($row['temperature'] ?? $row['local_temperature'] ?? null);
+                if ($temp !== null) {
+                    $slim['temperature'] = $temp;
+                }
+                if (isset($row['humidity']) && is_numeric($row['humidity'])) {
+                    $slim['humidity'] = round((float) $row['humidity'], 1);
+                }
+                if (array_key_exists('has_open', $row)) {
+                    $slim['has_open'] = (bool) $row['has_open'];
+                }
+                if (array_key_exists('open', $row)) {
+                    $slim['open'] = (bool) $row['open'];
+                }
+                if (isset($row['status']) && is_string($row['status']) && $row['status'] !== '') {
+                    $slim['status'] = $row['status'];
+                }
+            }
+            if ($kind === self::KIND_PLUG && isset($row['power_w']) && is_numeric($row['power_w'])) {
+                $slim['power_w'] = round((float) $row['power_w'], 1);
+            }
             if ($kind === self::KIND_VACUUM || YarboMatterFabric::nameLooksVacuum((string) ($row['name'] ?? '') . ' ' . (string) ($row['product'] ?? ''))) {
                 $slim['vacuum_status'] = (string) ($row['vacuum_status'] ?? '');
                 $slim['vacuum_clean'] = (string) ($row['vacuum_clean'] ?? 'vacuum');

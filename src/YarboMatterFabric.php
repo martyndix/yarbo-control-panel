@@ -14,6 +14,10 @@ final class YarboMatterFabric
     private const COLOR_CONTROL = 0x0300;
     private const THERMOSTAT = 0x0201;
     private const TEMP_MEASUREMENT = 0x0402;
+    private const HUMIDITY_MEASUREMENT = 0x0405;
+    private const BOOLEAN_STATE = 0x0045;
+    private const ELECTRICAL_POWER = 0x0090;
+    private const ELECTRICAL_MEASUREMENT = 0x0B04;
     private const RVC_RUN = 0x0054;
     private const RVC_CLEAN = 0x0055;
     private const RVC_OPERATIONAL = 0x0061;
@@ -82,6 +86,10 @@ final class YarboMatterFabric
     private const ATTR_MAX_HEAT_SETPOINT = 0x0016;
     private const ATTR_SYSTEM_MODE = 0x001C;
     private const ATTR_MEASURED_TEMP = 0;
+    private const ATTR_MEASURED_HUMIDITY = 0;
+    private const ATTR_BOOL_STATE_VALUE = 0;
+    private const ATTR_ACTIVE_POWER = 8;
+    private const ATTR_LEGACY_ACTIVE_POWER = 0x050B;
     private const SYSTEM_MODE_OFF = 0;
     private const SYSTEM_MODE_FAN = 7;
     private const DEVTYPE_AGGREGATOR = 0x000E;
@@ -93,6 +101,9 @@ final class YarboMatterFabric
     private const DEVTYPE_EXTENDED_COLOR_LIGHT = 0x010D;
     private const DEVTYPE_THERMOSTAT = 0x0300;
     private const DEVTYPE_HEATING_COOLING = 0x0301;
+    private const DEVTYPE_TEMP_SENSOR = 0x0302;
+    private const DEVTYPE_HUMIDITY_SENSOR = 0x0303;
+    private const DEVTYPE_CONTACT_SENSOR = 0x0015;
     private const DEVTYPE_RVC = 0x0074;
 
     /**
@@ -301,6 +312,8 @@ final class YarboMatterFabric
                     $kind = 'heater';
                 } elseif (self::endpointLooksVacuum($attributes, $endpoint)) {
                     $kind = 'vacuum';
+                } elseif (self::endpointLooksSensor($attributes, $endpoint) && ($kind === 'other' || $kind === 'sensor')) {
+                    $kind = 'sensor';
                 } elseif ($kind === 'other') {
                     if (in_array(self::DEVTYPE_AGGREGATOR, $typeIds, true)
                         && !self::endpointHasCluster($attributes, $endpoint, self::ON_OFF)
@@ -313,7 +326,7 @@ final class YarboMatterFabric
                     continue;
                 }
                 $hasOnOff = $onVal !== null || self::endpointHasCluster($attributes, $endpoint, self::ON_OFF);
-                if (!$hasOnOff && $kind !== 'heater' && $kind !== 'vacuum') {
+                if (!$hasOnOff && $kind !== 'heater' && $kind !== 'vacuum' && $kind !== 'sensor') {
                     continue;
                 }
                 $isLight = $kind === 'light';
@@ -324,15 +337,20 @@ final class YarboMatterFabric
                 }
                 $thermo = $kind === 'heater' ? self::thermostatPayload($attributes, $endpoint) : [];
                 $vacuum = $kind === 'vacuum' ? self::vacuumPayload($attributes, $endpoint) : [];
+                $sensor = $kind === 'sensor' ? self::sensorPayload($attributes, $endpoint) : [];
+                $powerW = $kind === 'plug' ? self::plugPowerWatts($attributes, $endpoint) : null;
                 $on = self::attrBool($onVal);
                 if (array_key_exists('thermostat_on', $thermo) && $thermo['thermostat_on'] !== null) {
                     $on = (bool) $thermo['thermostat_on'];
                 } elseif ($vacuum !== [] && array_key_exists('on', $vacuum)) {
                     $on = (bool) $vacuum['on'];
+                } elseif ($sensor !== [] && array_key_exists('open', $sensor) && $sensor['open'] !== null) {
+                    $on = (bool) ($sensor['on'] ?? false);
                 }
                 unset($thermo['thermostat_on']);
                 unset($vacuum['on']);
-                $devices[] = [
+                unset($sensor['on']);
+                $row = [
                     'id' => $nodeId . ':' . $endpoint,
                     'node_id' => $nodeId,
                     'endpoint' => $endpoint,
@@ -355,7 +373,11 @@ final class YarboMatterFabric
                         'color_xy' => false,
                         'color_ct' => false,
                         'color_hex' => '',
-                    ]) + $thermo + $vacuum;
+                    ]) + $thermo + $vacuum + $sensor;
+                if ($powerW !== null) {
+                    $row['power_w'] = $powerW;
+                }
+                $devices[] = $row;
             }
             if (count($devices) === $before && $nodeId > 0 && $attributes !== []) {
                 $stubKind = self::classifyByName('light', $source, $vendor, $product);
@@ -502,6 +524,13 @@ final class YarboMatterFabric
             }
         }
         foreach ($ids as $id) {
+            if ($id === self::DEVTYPE_TEMP_SENSOR
+                || $id === self::DEVTYPE_HUMIDITY_SENSOR
+                || $id === self::DEVTYPE_CONTACT_SENSOR) {
+                return 'sensor';
+            }
+        }
+        foreach ($ids as $id) {
             if ($id === 0x010A || $id === 0x010B) {
                 return 'plug';
             }
@@ -606,8 +635,15 @@ final class YarboMatterFabric
             (string) ($row['vendor'] ?? ''),
             (string) ($row['source'] ?? '')
         );
+        $existing = strtolower(trim((string) ($row['kind'] ?? '')));
+        if ($existing === 'sensor'
+            || !empty($row['has_open'])
+            || isset($row['temperature'])
+            || isset($row['humidity'])) {
+            $kind = 'sensor';
+        }
         $row['kind'] = $kind;
-        if ($kind === 'heater' || $kind === 'vacuum' || $kind === 'switch') {
+        if ($kind === 'heater' || $kind === 'vacuum' || $kind === 'switch' || $kind === 'sensor') {
             $row['colorable'] = false;
             $row['dimmable'] = false;
             $row['color_hs'] = false;
@@ -630,6 +666,9 @@ final class YarboMatterFabric
         }
         if (self::endpointLooksVacuum($attributes, $endpoint)) {
             return 'vacuum';
+        }
+        if (self::endpointLooksSensor($attributes, $endpoint)) {
+            return 'sensor';
         }
         if (self::endpointHasCluster($attributes, $endpoint, self::COLOR_CONTROL)
             || self::endpointHasCluster($attributes, $endpoint, self::LEVEL_CONTROL)) {
@@ -1378,7 +1417,126 @@ final class YarboMatterFabric
     private static function endpointLooksAccessory(array $attributes, int $endpoint): bool
     {
         return self::endpointLooksHeater($attributes, $endpoint)
-            || self::endpointLooksVacuum($attributes, $endpoint);
+            || self::endpointLooksVacuum($attributes, $endpoint)
+            || self::endpointLooksSensor($attributes, $endpoint);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
+    private static function endpointLooksClimateSensor(array $attributes, int $endpoint): bool
+    {
+        return self::endpointHasCluster($attributes, $endpoint, self::TEMP_MEASUREMENT)
+            || self::endpointHasCluster($attributes, $endpoint, self::HUMIDITY_MEASUREMENT);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
+    private static function endpointLooksContactSensor(array $attributes, int $endpoint): bool
+    {
+        return self::endpointHasCluster($attributes, $endpoint, self::BOOLEAN_STATE);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
+    private static function endpointLooksSensor(array $attributes, int $endpoint): bool
+    {
+        return self::endpointLooksClimateSensor($attributes, $endpoint)
+            || self::endpointLooksContactSensor($attributes, $endpoint);
+    }
+
+    private static function matterHumidityPercent(mixed $raw): ?float
+    {
+        if (!is_numeric($raw)) {
+            return null;
+        }
+        $n = (int) round((float) $raw);
+        if ($n < 0 || $n > 10000) {
+            return null;
+        }
+
+        return round($n / 100.0, 1);
+    }
+
+    private static function matterPowerWatts(mixed $raw): ?float
+    {
+        if (!is_numeric($raw)) {
+            return null;
+        }
+        $number = (float) $raw;
+        if ($number < 0 || $number > 1_000_000_000) {
+            return null;
+        }
+
+        return round($number / 1000.0, 1);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array<string, mixed>
+     */
+    private static function sensorPayload(array $attributes, int $endpoint): array
+    {
+        $temp = self::matterCelsius(self::attrRaw($attributes, $endpoint, self::TEMP_MEASUREMENT, self::ATTR_MEASURED_TEMP));
+        $humidity = self::matterHumidityPercent(
+            self::attrRaw($attributes, $endpoint, self::HUMIDITY_MEASUREMENT, self::ATTR_MEASURED_HUMIDITY)
+        );
+        $hasOpen = self::endpointLooksContactSensor($attributes, $endpoint);
+        $open = null;
+        if ($hasOpen) {
+            $raw = self::attrRaw($attributes, $endpoint, self::BOOLEAN_STATE, self::ATTR_BOOL_STATE_VALUE);
+            if ($raw !== null) {
+                $open = self::attrBool($raw);
+            }
+        }
+        $parts = [];
+        if ($open === true) {
+            $parts[] = 'Open';
+        } elseif ($open === false) {
+            $parts[] = 'Closed';
+        }
+        if ($temp !== null) {
+            $parts[] = $temp . '°';
+        }
+        if ($humidity !== null) {
+            $parts[] = (string) (int) round($humidity) . '% RH';
+        }
+
+        return [
+            'temperature' => $temp,
+            'humidity' => $humidity,
+            'has_open' => $hasOpen,
+            'open' => $open,
+            'status' => $parts !== [] ? implode(' · ', $parts) : '',
+            'on' => $open !== null ? (bool) $open : false,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
+    private static function plugPowerWatts(array $attributes, int $endpoint): ?float
+    {
+        if (self::endpointHasCluster($attributes, $endpoint, self::ELECTRICAL_POWER)) {
+            $watts = self::matterPowerWatts(
+                self::attrRaw($attributes, $endpoint, self::ELECTRICAL_POWER, self::ATTR_ACTIVE_POWER)
+            );
+            if ($watts !== null) {
+                return $watts;
+            }
+        }
+        if (self::endpointHasCluster($attributes, $endpoint, self::ELECTRICAL_MEASUREMENT)) {
+            $raw = self::attrRaw($attributes, $endpoint, self::ELECTRICAL_MEASUREMENT, self::ATTR_LEGACY_ACTIVE_POWER);
+            if (!is_numeric($raw)) {
+                return null;
+            }
+
+            return round(((float) $raw) / 10.0, 1);
+        }
+
+        return null;
     }
 
     /**

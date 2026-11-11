@@ -111,45 +111,100 @@ final class YarboSensorHistory
      */
     private function homeClimateRows(): array
     {
-        $out = [];
-        $devices = [];
-        $path = rtrim($this->projectRoot, '/') . '/data/home.json';
-        if (is_file($path)) {
-            $decoded = json_decode((string) file_get_contents($path), true);
-            if (is_array($decoded) && is_array($decoded['last_devices'] ?? null)) {
-                $devices = $decoded['last_devices'];
+        $byId = [];
+        foreach ($this->deviceRowsFromJson('home.json', 'last_devices') as $row) {
+            $mapped = $this->mapClimateRow($row);
+            if ($mapped !== null) {
+                $byId[$mapped['id']] = $mapped;
             }
         }
-        foreach ($devices as $row) {
-            if (!is_array($row)) {
+        // Live Matter overlay (heaters + climate sensors) — last_devices used to strip temps.
+        foreach ($this->deviceRowsFromJson('home-nodes-cache.json', 'devices') as $row) {
+            $mapped = $this->mapClimateRow($row);
+            if ($mapped === null) {
                 continue;
             }
-            $id = trim((string) ($row['id'] ?? ''));
-            if ($id === '') {
-                continue;
+            $prev = $byId[$mapped['id']] ?? null;
+            if ($prev === null
+                || ($prev['temperature'] === null && $mapped['temperature'] !== null)
+                || ($prev['humidity'] === null && $mapped['humidity'] !== null)
+            ) {
+                $byId[$mapped['id']] = $mapped;
             }
-            $temp = self::optionalFloat($row['temperature'] ?? null);
-            if ($temp === null) {
-                $temp = self::optionalFloat($row['local_temperature'] ?? null);
+        }
+        try {
+            $fabric = YarboMatterFabric::devicesFromDirectory(
+                rtrim($this->projectRoot, '/') . '/data/matter-server'
+            );
+            foreach ($fabric as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $mapped = $this->mapClimateRow($row);
+                if ($mapped === null) {
+                    continue;
+                }
+                $prev = $byId[$mapped['id']] ?? null;
+                if ($prev === null
+                    || ($prev['temperature'] === null && $mapped['temperature'] !== null)
+                    || ($prev['humidity'] === null && $mapped['humidity'] !== null)
+                ) {
+                    $byId[$mapped['id']] = $mapped;
+                }
             }
-            $hum = self::optionalFloat($row['humidity'] ?? null);
-            if ($temp === null && $hum === null) {
-                continue;
-            }
-            $kind = strtolower(trim((string) ($row['kind'] ?? 'sensor')));
-            if ($kind === '') {
-                $kind = 'sensor';
-            }
-            $out[] = [
-                'id' => $id,
-                'name' => (string) ($row['name'] ?? $id),
-                'kind' => $kind,
-                'temperature' => $temp,
-                'humidity' => $hum,
-            ];
+        } catch (\Throwable) {
         }
 
-        return $out;
+        return array_values($byId);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function deviceRowsFromJson(string $file, string $key): array
+    {
+        $path = rtrim($this->projectRoot, '/') . '/data/' . $file;
+        if (!is_file($path)) {
+            return [];
+        }
+        $decoded = json_decode((string) file_get_contents($path), true);
+        if (!is_array($decoded) || !is_array($decoded[$key] ?? null)) {
+            return [];
+        }
+
+        return $decoded[$key];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}|null
+     */
+    private function mapClimateRow(array $row): ?array
+    {
+        $id = trim((string) ($row['id'] ?? ''));
+        if ($id === '') {
+            return null;
+        }
+        $temp = self::optionalFloat($row['temperature'] ?? null);
+        if ($temp === null) {
+            $temp = self::optionalFloat($row['local_temperature'] ?? null);
+        }
+        $hum = self::optionalFloat($row['humidity'] ?? null);
+        if ($temp === null && $hum === null) {
+            return null;
+        }
+        $kind = strtolower(trim((string) ($row['kind'] ?? 'sensor')));
+        if ($kind === '') {
+            $kind = 'sensor';
+        }
+
+        return [
+            'id' => $id,
+            'name' => (string) ($row['name'] ?? $id),
+            'kind' => $kind,
+            'temperature' => $temp,
+            'humidity' => $hum,
+        ];
     }
 
     /**

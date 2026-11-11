@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.249] - 2026-11-11
+
+### Added
+- **Matter climate + contact sensors:** Temperature / Humidity Measurement and Boolean State endpoints (e.g. IKEA VINDSTYRKA / PARASOLL) show on Home without needing On/Off. Climate samples join the 30‑minute / 1‑year history charts; contacts appear on PaperMono **ACCESS** with last-change times.
+- **Matter plug watts:** Electrical Power Measurement (and legacy ActivePower) surfaces as live **W** on plug tiles when the fabric reports it.
+- **Climate history sampling:** heater temps stay in `last_devices`; the sampler also reads Matter fabric / home-nodes-cache and wakes on a due timer so restarts do not skip a full 30 minutes.
+
+### Fixed
+- Empty heater history and sparse UniFi climate samples after sampler restarts.
+
 ## [4.0.248] - 2026-11-11
 
 ### Fixed

@@ -55,6 +55,10 @@ LEVEL_CONTROL = 8
 COLOR_CONTROL = 0x0300
 THERMOSTAT = 0x0201
 TEMP_MEASUREMENT = 0x0402
+HUMIDITY_MEASUREMENT = 0x0405
+BOOLEAN_STATE = 0x0045
+ELECTRICAL_POWER = 0x0090
+ELECTRICAL_MEASUREMENT = 0x0B04  # legacy ZCL; rare on Matter
 RVC_RUN = 0x0054
 RVC_CLEAN = 0x0055
 RVC_OPERATIONAL = 0x0061
@@ -62,6 +66,10 @@ SERVICE_AREA = 0x0150
 POWER_SOURCE = 0x002F
 ATTR_SUPPORTED_MODES = 0
 ATTR_CURRENT_MODE = 1
+ATTR_MEASURED_HUMIDITY = 0
+ATTR_BOOL_STATE_VALUE = 0
+ATTR_ACTIVE_POWER = 8  # Electrical Power Measurement — milliwatts
+ATTR_LEGACY_ACTIVE_POWER = 0x050B  # Electrical Measurement ActivePower (W*10 often)
 # Operational State cluster: PhaseList=0 … OperationalState=4, OperationalError=5.
 ATTR_OPERATIONAL_STATE = 4
 ATTR_OPERATIONAL_ERROR = 5
@@ -147,6 +155,9 @@ DEVTYPE_CT_LIGHT = 0x010C
 DEVTYPE_EXTENDED_COLOR_LIGHT = 0x010D
 DEVTYPE_THERMOSTAT = 0x0300
 DEVTYPE_HEATING_COOLING = 0x0301
+DEVTYPE_TEMP_SENSOR = 0x0302
+DEVTYPE_HUMIDITY_SENSOR = 0x0303
+DEVTYPE_CONTACT_SENSOR = 0x0015
 DEVTYPE_RVC = 0x0074
 COLOR_CAP_HS = 1 << 0
 COLOR_CAP_EHUE = 1 << 1
@@ -2695,7 +2706,22 @@ def apply_attribute_event(data: Any) -> None:
             fields["on"] = on_mode
             fields["system_mode"] = int(event_number(value) or 0)
     elif cluster == TEMP_MEASUREMENT and attr == ATTR_MEASURED_TEMP:
-        fields["local_temperature"] = matter_celsius(value)
+        celsius = matter_celsius(value)
+        fields["local_temperature"] = celsius
+        fields["temperature"] = celsius
+    elif cluster == HUMIDITY_MEASUREMENT and attr == ATTR_MEASURED_HUMIDITY:
+        fields["humidity"] = matter_humidity_percent(value)
+    elif cluster == BOOLEAN_STATE and attr == ATTR_BOOL_STATE_VALUE:
+        opened = attr_bool(value)
+        fields["has_open"] = True
+        fields["open"] = opened
+        fields["on"] = opened
+    elif cluster == ELECTRICAL_POWER and attr == ATTR_ACTIVE_POWER:
+        fields["power_w"] = matter_power_watts(value)
+    elif cluster == ELECTRICAL_MEASUREMENT and attr == ATTR_LEGACY_ACTIVE_POWER:
+        number = event_number(value)
+        if number is not None:
+            fields["power_w"] = round(float(number) / 10.0, 1)
     elif cluster == LEVEL_CONTROL and attr == ATTR_CURRENT_LEVEL:
         level = event_number(value)
         if level is None:
@@ -2765,6 +2791,28 @@ def apply_attribute_event(data: Any) -> None:
     elif cluster == SERVICE_AREA and attr == ATTR_SELECTED_AREAS:
         fields["selected_areas"] = parse_selected_areas(value)
     if fields:
+        if any(k in fields for k in ("temperature", "humidity", "open", "has_open", "local_temperature")):
+            live = live_row(device_id) or {}
+            merged = {**live, **fields}
+            open_val = merged.get("open")
+            parts: list[str] = []
+            if open_val is True:
+                parts.append("Open")
+            elif open_val is False:
+                parts.append("Closed")
+            temp = merged.get("temperature")
+            if temp is None:
+                temp = merged.get("local_temperature")
+            if temp is not None:
+                parts.append(f"{temp}°")
+            hum = merged.get("humidity")
+            if hum is not None:
+                try:
+                    parts.append(f"{int(round(float(hum)))}% RH")
+                except (TypeError, ValueError):
+                    pass
+            if parts:
+                fields["status"] = " · ".join(parts)
         patch_live_device(device_id, fields)
 
 
@@ -2928,6 +2976,8 @@ def device_kind(types: Any) -> str:
         return "vacuum"
     if any(i in (DEVTYPE_THERMOSTAT, DEVTYPE_HEATING_COOLING) for i in ids):
         return "heater"
+    if any(i in (DEVTYPE_TEMP_SENSOR, DEVTYPE_HUMIDITY_SENSOR, DEVTYPE_CONTACT_SENSOR) for i in ids):
+        return "sensor"
     if any(i in (0x010A, 0x010B) for i in ids):
         return "plug"
     if any(
@@ -3534,6 +3584,93 @@ def set_color_temp(node_id: int, endpoint: int, kelvin: int, body: dict[str, Any
 
 def endpoint_looks_heater(attributes: dict[str, Any], endpoint: int) -> bool:
     return endpoint_has_cluster(attributes, endpoint, THERMOSTAT)
+
+
+def endpoint_looks_climate_sensor(attributes: dict[str, Any], endpoint: int) -> bool:
+    return endpoint_has_cluster(attributes, endpoint, TEMP_MEASUREMENT) or endpoint_has_cluster(
+        attributes, endpoint, HUMIDITY_MEASUREMENT
+    )
+
+
+def endpoint_looks_contact_sensor(attributes: dict[str, Any], endpoint: int) -> bool:
+    return endpoint_has_cluster(attributes, endpoint, BOOLEAN_STATE)
+
+
+def endpoint_looks_sensor(attributes: dict[str, Any], endpoint: int) -> bool:
+    return endpoint_looks_climate_sensor(attributes, endpoint) or endpoint_looks_contact_sensor(
+        attributes, endpoint
+    )
+
+
+def matter_humidity_percent(raw: Any) -> float | None:
+    number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
+    if number is None:
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            return None
+    n = int(round(number))
+    if n < 0 or n > 10000:
+        return None
+    return round(n / 100.0, 1)
+
+
+def matter_power_watts(raw: Any) -> float | None:
+    """Electrical Power Measurement ActivePower is milliwatts."""
+    number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
+    if number is None:
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            return None
+    if number < 0 or number > 1_000_000_000:
+        return None
+    return round(number / 1000.0, 1)
+
+
+def sensor_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
+    temp = matter_celsius(attr_raw(attributes, endpoint, TEMP_MEASUREMENT, ATTR_MEASURED_TEMP))
+    humidity = matter_humidity_percent(
+        attr_raw(attributes, endpoint, HUMIDITY_MEASUREMENT, ATTR_MEASURED_HUMIDITY)
+    )
+    has_open = endpoint_looks_contact_sensor(attributes, endpoint)
+    open_val = None
+    if has_open:
+        raw = attr_raw(attributes, endpoint, BOOLEAN_STATE, ATTR_BOOL_STATE_VALUE)
+        if raw is not None:
+            open_val = attr_bool(raw)
+    parts: list[str] = []
+    if open_val is True:
+        parts.append("Open")
+    elif open_val is False:
+        parts.append("Closed")
+    if temp is not None:
+        parts.append(f"{temp}°")
+    if humidity is not None:
+        parts.append(f"{int(round(humidity))}% RH")
+    return {
+        "temperature": temp,
+        "humidity": humidity,
+        "has_open": has_open,
+        "open": open_val,
+        "status": " · ".join(parts) if parts else "",
+        "on": bool(open_val) if open_val is not None else False,
+    }
+
+
+def plug_power_watts(attributes: dict[str, Any], endpoint: int) -> float | None:
+    if endpoint_has_cluster(attributes, endpoint, ELECTRICAL_POWER):
+        watts = matter_power_watts(attr_raw(attributes, endpoint, ELECTRICAL_POWER, ATTR_ACTIVE_POWER))
+        if watts is not None:
+            return watts
+    if endpoint_has_cluster(attributes, endpoint, ELECTRICAL_MEASUREMENT):
+        raw = attr_raw(attributes, endpoint, ELECTRICAL_MEASUREMENT, ATTR_LEGACY_ACTIVE_POWER)
+        number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
+        if number is None:
+            return None
+        # Legacy ActivePower is often tenths of a watt.
+        return round(float(number) / 10.0, 1)
+    return None
 
 
 def matter_celsius(raw: Any) -> float | None:
@@ -5397,6 +5534,8 @@ def fallback_kind(attributes: dict[str, Any], endpoint: int) -> str:
         return "heater"
     if endpoint_looks_vacuum(attributes, endpoint):
         return "vacuum"
+    if endpoint_looks_sensor(attributes, endpoint):
+        return "sensor"
     if endpoint_has_cluster(attributes, endpoint, COLOR_CONTROL) or endpoint_has_cluster(
         attributes, endpoint, LEVEL_CONTROL
     ):
@@ -5444,18 +5583,20 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 kind = "heater"
             elif endpoint_looks_vacuum(attributes, endpoint):
                 kind = "vacuum"
+            elif endpoint_looks_sensor(attributes, endpoint) and kind in ("other", "sensor"):
+                kind = "sensor"
             elif kind == "other":
                 if DEVTYPE_AGGREGATOR in type_ids and not endpoint_has_cluster(
                     attributes, endpoint, ON_OFF
                 ) and not endpoint_looks_heater(attributes, endpoint) and not endpoint_looks_vacuum(
                     attributes, endpoint
-                ):
+                ) and not endpoint_looks_sensor(attributes, endpoint):
                     continue
                 kind = fallback_kind(attributes, endpoint)
             if kind == "heater" and node_has_thermo and not endpoint_looks_heater(attributes, endpoint):
                 continue
             has_on_off = on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF)
-            if not has_on_off and kind not in ("heater", "vacuum"):
+            if not has_on_off and kind not in ("heater", "vacuum", "sensor"):
                 continue
             is_light = kind == "light"
             thermo = thermostat_payload(attributes, endpoint) if kind == "heater" else {
@@ -5468,11 +5609,15 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 "thermostat_on": None,
             }
             vacuum = vacuum_payload(attributes, endpoint) if kind == "vacuum" else {}
+            sensor = sensor_payload(attributes, endpoint) if kind == "sensor" else {}
+            power_w = plug_power_watts(attributes, endpoint) if kind == "plug" else None
             on = attr_bool(on_val)
             if thermo.get("thermostat_on") is not None:
                 on = bool(thermo["thermostat_on"])
             elif vacuum:
                 on = bool(vacuum.get("on"))
+            elif sensor and sensor.get("open") is not None:
+                on = bool(sensor.get("on"))
             level = attr_num(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) if is_light else None
             brightness = None
             if level is not None and level >= 0:
@@ -5484,36 +5629,39 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 "color_ct": False,
                 "color_hex": "",
             }
-            devices.append(
-                {
-                    "id": f"{node_id}:{endpoint}",
-                    "node_id": node_id,
-                    "endpoint": endpoint,
-                    "name": label,
-                    "kind": kind,
-                    "vendor": vendor,
-                    "product": product,
-                    "source": source,
-                    "bridge": is_bridge or len(ep_ids) > 3,
-                    "on": on,
-                    "brightness": brightness,
-                    "dimmable": is_light
-                    and attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
-                    "has_on_off": bool(has_on_off),
-                    "available": available,
-                    **color,
-                    **({k: v for k, v in thermo.items() if k != "thermostat_on"} if kind == "heater" else {}),
-                    **(
-                        {
-                            k: v
-                            for k, v in vacuum.items()
-                            if k != "on"
-                        }
-                        if kind == "vacuum"
-                        else {}
-                    ),
-                }
-            )
+            row = {
+                "id": f"{node_id}:{endpoint}",
+                "node_id": node_id,
+                "endpoint": endpoint,
+                "name": label,
+                "kind": kind,
+                "vendor": vendor,
+                "product": product,
+                "source": source,
+                "bridge": is_bridge or len(ep_ids) > 3,
+                "on": on,
+                "brightness": brightness,
+                "dimmable": is_light
+                and attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
+                "has_on_off": bool(has_on_off),
+                "available": available,
+                **color,
+                **({k: v for k, v in thermo.items() if k != "thermostat_on"} if kind == "heater" else {}),
+                **(
+                    {
+                        k: v
+                        for k, v in vacuum.items()
+                        if k != "on"
+                    }
+                    if kind == "vacuum"
+                    else {}
+                ),
+            }
+            if kind == "sensor":
+                row.update({k: v for k, v in sensor.items() if k != "on"})
+            if power_w is not None:
+                row["power_w"] = power_w
+            devices.append(row)
         if len(devices) == before and node_id > 0 and attributes:
             stub_kind = classify_by_name("light", source, vendor, product)
             stub_light = stub_kind == "light"
@@ -5599,6 +5747,12 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                         "heating_max",
                         "has_thermostat",
                         "system_mode",
+                        "temperature",
+                        "humidity",
+                        "has_open",
+                        "open",
+                        "status",
+                        "power_w",
                         "vacuum_status",
                         "vacuum_clean",
                         "can_mop",

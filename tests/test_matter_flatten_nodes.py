@@ -759,6 +759,53 @@ def main() -> int:
     if not any((args or {}).get("endpoint_id") == 12 for command, args in cmd_calls if command == "device_command"):
         raise SystemExit(f"command did not retry the child endpoint {cmd_calls}")
 
+    climate = {
+        "node_id": 80,
+        "available": True,
+        "attributes": {
+            "0/40/1": "IKEA of Sweden",
+            "0/40/3": "VINDSTYRKA",
+            "1/29/0": [{"deviceType": 0x0302, "revision": 1}],
+            "1/1026/0": 2140,
+            "1/1029/0": 4750,
+        },
+    }
+    contact = {
+        "node_id": 81,
+        "available": True,
+        "attributes": {
+            "0/40/1": "IKEA of Sweden",
+            "0/40/3": "PARASOLL",
+            "1/29/0": [{"deviceType": 0x0015, "revision": 1}],
+            "1/69/0": True,
+        },
+    }
+    plug = {
+        "node_id": 82,
+        "available": True,
+        "attributes": {
+            "0/40/1": "IKEA of Sweden",
+            "0/40/3": "INSPELNING",
+            "1/29/0": [{"deviceType": 0x010A, "revision": 1}],
+            "1/6/0": True,
+            "1/144/8": 12500,
+        },
+    }
+    sensor_rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [climate, contact, plug]})}
+    clim = sensor_rows.get("80:1") or {}
+    if clim.get("kind") != "sensor" or clim.get("temperature") != 21.4 or clim.get("humidity") != 47.5:
+        raise SystemExit(f"climate sensor flatten {clim}")
+    if "°" not in str(clim.get("status") or "") or "RH" not in str(clim.get("status") or ""):
+        raise SystemExit(f"climate status {clim}")
+    cont = sensor_rows.get("81:1") or {}
+    if cont.get("kind") != "sensor" or cont.get("has_open") is not True or cont.get("open") is not True:
+        raise SystemExit(f"contact sensor flatten {cont}")
+    if cont.get("on") is not True or "Open" not in str(cont.get("status") or ""):
+        raise SystemExit(f"contact open status {cont}")
+    plug_row = sensor_rows.get("82:1") or {}
+    if plug_row.get("kind") != "plug" or plug_row.get("power_w") != 12.5:
+        raise SystemExit(f"plug power flatten {plug_row}")
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 
