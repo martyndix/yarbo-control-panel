@@ -791,7 +791,24 @@ def main() -> int:
             "1/144/8": 12500,
         },
     }
-    sensor_rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [climate, contact, plug]})}
+    grillplats = {
+        "node_id": 83,
+        "available": True,
+        "attributes": {
+            "0/40/1": "IKEA of Sweden",
+            "0/40/3": "GRILLPLATS",
+            "1/29/0": [{"deviceType": 0x010A, "revision": 1}],
+            "1/6/0": True,
+            # Electrical Sensor sibling (Matter Survey endpoint 2)
+            "2/29/0": [{"deviceType": 0x0510, "revision": 1}],
+            "2/144/4": 230500,  # Voltage mV
+            "2/144/5": 54,  # ActiveCurrent mA
+            "2/144/8": 12500,  # ActivePower mW
+            "2/144/11": 231000,  # RMSVoltage mV (prefer)
+            "2/144/12": 55,  # RMSCurrent mA (prefer)
+        },
+    }
+    sensor_rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [climate, contact, plug, grillplats]})}
     clim = sensor_rows.get("80:1") or {}
     if clim.get("kind") != "sensor" or clim.get("temperature") != 21.4 or clim.get("humidity") != 47.5:
         raise SystemExit(f"climate sensor flatten {clim}")
@@ -805,6 +822,13 @@ def main() -> int:
     plug_row = sensor_rows.get("82:1") or {}
     if plug_row.get("kind") != "plug" or plug_row.get("power_w") != 12.5:
         raise SystemExit(f"plug power flatten {plug_row}")
+    grill = sensor_rows.get("83:1") or {}
+    if grill.get("kind") != "plug" or grill.get("power_w") != 12.5:
+        raise SystemExit(f"grillplats power {grill}")
+    if grill.get("voltage_v") != 231.0 or grill.get("current_a") != 0.055:
+        raise SystemExit(f"grillplats V/A from sibling electrical endpoint {grill}")
+    if "83:2" in sensor_rows:
+        raise SystemExit(f"electrical sensor endpoint must not be its own Home row {sensor_rows.keys()}")
 
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0

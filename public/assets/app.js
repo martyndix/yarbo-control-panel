@@ -5744,7 +5744,7 @@ function homePlugMotorModeHtml(d) {
     const enabled = watts > 0;
     const value = enabled ? watts : 100;
     return `<div class="home-plug-auto-off home-plug-motor-mode" data-home-motor-mode-wrap="${escapeHtml(id)}">
-        <label class="home-plug-auto-off-toggle" title="Block Off while the plug draws at least this many watts. Also turns it back on if Apple Home or another app turns it off while running.">
+        <label class="home-plug-auto-off-toggle" title="Off waits until draw drops below this many watts (website, automations, auto-off). If Apple Home turns it off while loaded, it is turned back on until load is low enough for a queued Off.">
             <input type="checkbox" data-home-motor-mode-enabled="${escapeHtml(id)}" ${enabled ? 'checked' : ''}>
             <span>Motor mode above</span>
         </label>
@@ -5834,16 +5834,32 @@ function homeDeviceActionsHtml(d, bright, color) {
     const tod = homeCanAdaptive(d)
         ? `<label class="home-adaptive" title="Warm at night, cooler in the day"><input type="checkbox" data-home-adaptive="${escapeHtml(d.id)}" ${adaptive ? 'checked' : ''}> Time of day</label>`
         : '';
-    const power = (String(d.kind || '') === 'plug' && d.power_w != null && d.power_w !== '' && Number.isFinite(Number(d.power_w)))
-        ? `<span class="home-device-meta home-device-power" data-home-power-w title="Active power">${escapeHtml(String(Number(d.power_w)))} W</span>`
-        : '';
+    const electrical = String(d.kind || '') === 'plug' ? homePlugElectricalMetaHtml(d) : '';
+    const pendingOff = String(d.kind || '') === 'plug' && Boolean(d.motor_pending_off);
+    const toggleLabel = pendingOff ? 'Cancel off' : (on ? 'Off' : 'On');
     return `<div class="home-device-actions">
-            <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
-            ${power}
+            <button type="button" class="btn btn-secondary btn-compact${pendingOff ? ' is-active' : ''}" data-home-toggle="${escapeHtml(d.id)}" title="${pendingOff ? 'Off queued until load drops — tap to cancel' : ''}">${toggleLabel}</button>
+            ${electrical}
             ${bright}
             ${color}
             ${tod}
         </div>`;
+}
+
+function homePlugElectricalMetaHtml(d) {
+    const parts = [];
+    if (d.power_w != null && d.power_w !== '' && Number.isFinite(Number(d.power_w))) {
+        parts.push(`${Number(d.power_w)} W`);
+    }
+    if (d.voltage_v != null && d.voltage_v !== '' && Number.isFinite(Number(d.voltage_v))) {
+        parts.push(`${Number(d.voltage_v)} V`);
+    }
+    if (d.current_a != null && d.current_a !== '' && Number.isFinite(Number(d.current_a))) {
+        const amps = Number(d.current_a);
+        parts.push(`${amps < 1 ? amps.toFixed(3) : amps.toFixed(2)} A`);
+    }
+    if (!parts.length) return '';
+    return `<span class="home-device-meta home-device-power" data-home-power-w title="Live electrical readings">${escapeHtml(parts.join(' · '))}</span>`;
 }
 
 function homeVacuumStatusName(d) {
@@ -6440,6 +6456,10 @@ async function sendHomeDeviceToggle(id, button, forceOn) {
     }
     if (!homeDeviceCanToggle(device || { id })) return;
     const currentlyOn = card?.classList.contains('is-on') || Boolean(device?.on);
+    // Queued motor-mode Off: tap cancels (keeps On) instead of toggling Off again.
+    if (device?.motor_pending_off && typeof forceOn !== 'boolean') {
+        forceOn = true;
+    }
     const nextOn = typeof forceOn === 'boolean' ? forceOn : !currentlyOn;
     const heater = device?.kind === 'heater';
     if (!heater) {
@@ -6462,8 +6482,15 @@ async function sendHomeDeviceToggle(id, button, forceOn) {
                 : {}),
         }, heater ? HOME_HEATER_TIMEOUT_MS : 25000);
         if (!data.ok) throw new Error(data.error || 'Failed');
+        if (device) device.motor_pending_off = Boolean(data.motor_pending_off);
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
         else if (!heater) setHomeDeviceOn(id, nextOn);
+        if (data.motor_pending_off) {
+            showToast('Off queued until load drops', 'success');
+            renderHomeDashboard(homeDash);
+        } else if (device?.kind === 'plug') {
+            renderHomeDashboard(homeDash);
+        }
     } catch (err) {
         if (!heater) setHomeDeviceOn(id, currentlyOn);
         showToast(homeCommandErrorMessage(err, 'Home command failed', heater), 'error');
@@ -7324,6 +7351,25 @@ function homeAutoHasPower(d) {
     return power != null && power !== '' && Number.isFinite(Number(power));
 }
 
+function homeAutoHasVoltage(d) {
+    if (!d) return false;
+    const v = d.voltage ?? d.voltage_v;
+    return v != null && v !== '' && Number.isFinite(Number(v));
+}
+
+function homeAutoHasCurrent(d) {
+    if (!d) return false;
+    const a = d.current ?? d.current_a;
+    return a != null && a !== '' && Number.isFinite(Number(a));
+}
+
+function homeAutoIsElectricalPlug(d) {
+    return String(d?.kind || '') === 'plug'
+        || homeAutoHasPower(d)
+        || homeAutoHasVoltage(d)
+        || homeAutoHasCurrent(d);
+}
+
 function homeAutoWhenEvents(d) {
     if (!d) return [];
     const events = [];
@@ -7341,8 +7387,10 @@ function homeAutoWhenEvents(d) {
             events.push(['hum_above', 'humidity above'], ['hum_below', 'humidity below']);
         }
     }
-    if (homeAutoHasPower(d) || String(d.kind || '') === 'plug') {
+    if (homeAutoIsElectricalPlug(d)) {
         events.push(['power_above', 'watts above'], ['power_below', 'watts below']);
+        events.push(['voltage_above', 'volts above'], ['voltage_below', 'volts below']);
+        events.push(['current_above', 'amps above'], ['current_below', 'amps below']);
     }
     if (homeAutoCanOnOff(d) || events.length === 0) {
         events.push(['turns_on', 'turns on'], ['turns_off', 'turns off'], ['stays_on', 'is on for'], ['stays_off', 'is off for']);
@@ -7595,7 +7643,7 @@ function homeAutoWhenPhrase(trigger, names) {
     if (trigger.type === 'threshold') {
         const pw = trigger.id === HOME_AUTO_POWERWALL_ID;
         const name = pw ? 'Powerwall' : (names[trigger.id] || 'Sensor');
-        const metric = trigger.metric === 'power' ? 'watts' : trigger.metric;
+        const metric = homeAutoThresholdMetricLabel(trigger.metric);
         const unit = homeAutoThresholdUnit(trigger.metric);
         return `${name} ${metric} ${trigger.op} ${trigger.value}${unit}`;
     }
@@ -7735,7 +7783,58 @@ function homeAutoThenPhrase(action, names) {
 function homeAutoThresholdUnit(metric) {
     if (metric === 'humidity' || metric === 'battery') return '%';
     if (metric === 'export' || metric === 'solar' || metric === 'load' || metric === 'power') return 'W';
+    if (metric === 'voltage') return 'V';
+    if (metric === 'current') return 'A';
     return '°';
+}
+
+function homeAutoThresholdMetricLabel(metric) {
+    if (metric === 'power') return 'watts';
+    if (metric === 'voltage') return 'volts';
+    if (metric === 'current') return 'amps';
+    return metric;
+}
+
+function homeAutoThresholdFallback(metric) {
+    if (metric === 'power') return 100;
+    if (metric === 'voltage') return 230;
+    if (metric === 'current') return 1;
+    return 22;
+}
+
+function homeAutoThresholdStep(metric) {
+    if (metric === 'current') return '0.01';
+    if (metric === 'power' || metric === 'voltage') return '1';
+    return '0.5';
+}
+
+function homeAutoThresholdEventSelected(trigger) {
+    const metric = trigger.metric || 'temperature';
+    const op = trigger.op === 'below' ? 'below' : 'above';
+    if (metric === 'power') return op === 'below' ? 'power_below' : 'power_above';
+    if (metric === 'voltage') return op === 'below' ? 'voltage_below' : 'voltage_above';
+    if (metric === 'current') return op === 'below' ? 'current_below' : 'current_above';
+    if (metric === 'humidity') return op === 'below' ? 'hum_below' : 'hum_above';
+    return op === 'below' ? 'temp_below' : 'temp_above';
+}
+
+function homeAutoParseThresholdEvent(raw) {
+    if (raw === 'power_above' || raw === 'power_below') {
+        return { metric: 'power', op: raw.endsWith('below') ? 'below' : 'above' };
+    }
+    if (raw === 'voltage_above' || raw === 'voltage_below') {
+        return { metric: 'voltage', op: raw.endsWith('below') ? 'below' : 'above' };
+    }
+    if (raw === 'current_above' || raw === 'current_below') {
+        return { metric: 'current', op: raw.endsWith('below') ? 'below' : 'above' };
+    }
+    if (raw === 'hum_above' || raw === 'hum_below') {
+        return { metric: 'humidity', op: raw.endsWith('below') ? 'below' : 'above' };
+    }
+    if (raw === 'temp_above' || raw === 'temp_below') {
+        return { metric: 'temperature', op: raw.endsWith('below') ? 'below' : 'above' };
+    }
+    return null;
 }
 
 function homeAutoPowerwallOn() {
@@ -8472,17 +8571,13 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
             </div>`;
         }
         const d = homeAutoDeviceById(trigger.id);
-        const isPower = trigger.metric === 'power';
-        const events = homeAutoWhenEvents(d || { id: trigger.id, kind: isPower ? 'plug' : 'sensor' });
-        const selected = isPower
-            ? (trigger.op === 'below' ? 'power_below' : 'power_above')
-            : (trigger.metric === 'humidity'
-                ? (trigger.op === 'below' ? 'hum_below' : 'hum_above')
-                : (trigger.op === 'below' ? 'temp_below' : 'temp_above'));
-        const threshOpts = events.filter(([v]) =>
-            v === 'temp_above' || v === 'temp_below' || v === 'hum_above' || v === 'hum_below'
-            || v === 'power_above' || v === 'power_below'
-        );
+        const metric = trigger.metric || 'temperature';
+        const events = homeAutoWhenEvents(d || {
+            id: trigger.id,
+            kind: ['power', 'voltage', 'current'].includes(metric) ? 'plug' : 'sensor',
+        });
+        const selected = homeAutoThresholdEventSelected(trigger);
+        const threshOpts = events.filter(([v]) => homeAutoParseThresholdEvent(v));
         const options = (threshOpts.length ? threshOpts : [
             ['temp_above', 'temperature above'],
             ['temp_below', 'temperature below'],
@@ -8490,14 +8585,19 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
             ['hum_below', 'humidity below'],
             ['power_above', 'watts above'],
             ['power_below', 'watts below'],
+            ['voltage_above', 'volts above'],
+            ['voltage_below', 'volts below'],
+            ['current_above', 'amps above'],
+            ['current_below', 'amps below'],
         ]).map(([v, label]) =>
             `<option value="${v}" ${v === selected ? 'selected' : ''}>${label}</option>`
         ).join('');
+        const unit = homeAutoThresholdUnit(metric);
         return `<div class="auto-chip" data-auto-when ${iAttr}>
             ${homeAutoChipNameHtml(d || { name: trigger.id })}
             <select data-auto-event>${options}</select>
-            <input type="number" data-auto-thresh value="${escapeHtml(String(trigger.value ?? (isPower ? 100 : 22)))}" step="${isPower ? '1' : '0.5'}">
-            ${isPower ? 'W' : ''}
+            <input type="number" data-auto-thresh value="${escapeHtml(String(trigger.value ?? homeAutoThresholdFallback(metric)))}" step="${homeAutoThresholdStep(metric)}">
+            ${unit && unit !== '°' ? escapeHtml(unit) : ''}
             <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
             ${homeAutoChipMetaHtml(d)}
         </div>`;
@@ -8628,12 +8728,9 @@ function homeAutoIfChipHtml(cond, index) {
     if (cond.type === 'threshold' && cond.id && cond.id !== HOME_AUTO_POWERWALL_ID) {
         const d = homeAutoDeviceById(cond.id) || { id: cond.id, kind: 'plug', name: cond.id };
         const states = homeAutoIfStateOptions(d);
-        const selected = cond.metric === 'power'
-            ? (cond.op === 'below' ? 'power_below' : 'power_above')
-            : (cond.metric === 'humidity'
-                ? (cond.op === 'below' ? 'hum_below' : 'hum_above')
-                : (cond.op === 'below' ? 'temp_below' : 'temp_above'));
-        const isPower = cond.metric === 'power';
+        const selected = homeAutoThresholdEventSelected(cond);
+        const metric = cond.metric || 'power';
+        const unit = homeAutoThresholdUnit(metric);
         return `<div class="auto-chip auto-chip--if-device" data-auto-if-i="${index}">
             ${homeAutoChipNameHtml(d)}
             is
@@ -8642,8 +8739,8 @@ function homeAutoIfChipHtml(cond, index) {
                     `<option value="${v}" ${v === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`
                 ).join('')}
             </select>
-            <input type="number" data-auto-if-thresh value="${escapeHtml(String(cond.value ?? (isPower ? 100 : 22)))}" step="${isPower ? '1' : '0.5'}">
-            ${isPower ? 'W' : ''}
+            <input type="number" data-auto-if-thresh value="${escapeHtml(String(cond.value ?? homeAutoThresholdFallback(metric)))}" step="${homeAutoThresholdStep(metric)}">
+            ${unit && unit !== '°' ? escapeHtml(unit) : ''}
             <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
@@ -8669,8 +8766,12 @@ function homeAutoIfChipHtml(cond, index) {
     const selected = homeAutoDeviceById(cond.id) || devices[0];
     const states = homeAutoIfStateOptions(selected);
     const state = states.some(([v]) => v === cond.state) ? cond.state : (states[0] ? states[0][0] : 'on');
-    const isPowerState = state === 'power_above' || state === 'power_below';
-    const powerThresh = `<input type="number" data-auto-if-thresh value="${escapeHtml(String(cond.value ?? 100))}" step="1" aria-label="Watts"> W`;
+    const threshParsed = homeAutoParseThresholdEvent(state);
+    const threshMetric = threshParsed?.metric || 'power';
+    const threshUnit = homeAutoThresholdUnit(threshMetric);
+    const powerThresh = threshParsed
+        ? `<input type="number" data-auto-if-thresh value="${escapeHtml(String(cond.value ?? homeAutoThresholdFallback(threshMetric)))}" step="${homeAutoThresholdStep(threshMetric)}" aria-label="Threshold"> ${escapeHtml(threshUnit)}`
+        : '';
     const withinSec = Number(cond.within_sec || 0);
     const useWithin = state === 'motion' && withinSec > 0;
     const withinMode = state === 'motion'
@@ -8716,7 +8817,7 @@ function homeAutoIfChipHtml(cond, index) {
                 `<option value="${v}" ${v === state ? 'selected' : ''}>${escapeHtml(label)}</option>`
             ).join('')}
         </select>
-        ${isPowerState ? powerThresh : ''}
+        ${threshParsed ? powerThresh : ''}
         ${withinMode}
         ${withinDur}
         ${forMode}
@@ -8803,8 +8904,10 @@ function homeAutoIfStateOptions(d) {
     if (homeAutoCanMotion(d)) {
         states.push(['motion', 'motion'], ['no_motion', 'no motion']);
     }
-    if (homeAutoHasPower(d) || String(d.kind || '') === 'plug') {
+    if (homeAutoIsElectricalPlug(d)) {
         states.push(['power_above', 'watts above'], ['power_below', 'watts below']);
+        states.push(['voltage_above', 'volts above'], ['voltage_below', 'volts below']);
+        states.push(['current_above', 'amps above'], ['current_below', 'amps below']);
     }
     return states.length ? states : [['on', 'on'], ['off', 'off']];
 }
@@ -9503,15 +9606,14 @@ function homeAutoApplyEvent(raw, index = 0) {
     const list = homeAutoTriggers();
     const trigger = list[index];
     if (!trigger) return;
-    if (raw === 'temp_above' || raw === 'temp_below' || raw === 'hum_above' || raw === 'hum_below'
-        || raw === 'power_above' || raw === 'power_below') {
-        const metric = raw.startsWith('hum') ? 'humidity' : (raw.startsWith('power') ? 'power' : 'temperature');
-        const fallback = metric === 'power' ? 100 : 22;
+    const parsed = homeAutoParseThresholdEvent(raw);
+    if (parsed) {
+        const fallback = homeAutoThresholdFallback(parsed.metric);
         list[index] = {
             type: 'threshold',
             id: trigger.id,
-            metric,
-            op: raw.endsWith('below') ? 'below' : 'above',
+            metric: parsed.metric,
+            op: parsed.op,
             value: Number(document.querySelector(`[data-auto-when-i="${index}"] [data-auto-thresh]`)?.value || fallback),
         };
         homeAutoSetTriggers(list);
@@ -9572,15 +9674,18 @@ async function homeAutoSave() {
             const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
             if (Number.isFinite(value)) cond.value = value;
         }
-        if (cond?.type === 'device' && (cond.state === 'power_above' || cond.state === 'power_below')) {
-            const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
-            autoDraft.conditions[i] = {
-                type: 'threshold',
-                id: cond.id,
-                metric: 'power',
-                op: cond.state === 'power_below' ? 'below' : 'above',
-                value: Number.isFinite(value) ? value : 100,
-            };
+        if (cond?.type === 'device') {
+            const parsed = homeAutoParseThresholdEvent(cond.state);
+            if (parsed) {
+                const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
+                autoDraft.conditions[i] = {
+                    type: 'threshold',
+                    id: cond.id,
+                    metric: parsed.metric,
+                    op: parsed.op,
+                    value: Number.isFinite(value) ? value : homeAutoThresholdFallback(parsed.metric),
+                };
+            }
         }
     });
     autoDraft.hold_sec = Math.max(0, Number(document.getElementById('auto-hold-sec')?.value || autoDraft.hold_sec || 0));
@@ -10012,17 +10117,15 @@ function bindHomeAutomations() {
             if (autoDraft.conditions[i]) {
                 const raw = event.target.value;
                 const chip = event.target.closest('[data-auto-if-i]');
-                if (raw === 'power_above' || raw === 'power_below' || raw === 'temp_above' || raw === 'temp_below'
-                    || raw === 'hum_above' || raw === 'hum_below') {
-                    const metric = raw.startsWith('hum') ? 'humidity'
-                        : (raw.startsWith('power') ? 'power' : 'temperature');
-                    const fallback = metric === 'power' ? 100 : 22;
+                const parsed = homeAutoParseThresholdEvent(raw);
+                if (parsed) {
+                    const fallback = homeAutoThresholdFallback(parsed.metric);
                     const value = Number(chip?.querySelector('[data-auto-if-thresh]')?.value);
                     autoDraft.conditions[i] = {
                         type: 'threshold',
                         id: autoDraft.conditions[i].id || '',
-                        metric,
-                        op: raw.endsWith('below') ? 'below' : 'above',
+                        metric: parsed.metric,
+                        op: parsed.op,
                         value: Number.isFinite(value) ? value : fallback,
                     };
                 } else {

@@ -45,6 +45,7 @@ if ($method === 'GET') {
     try {
         if ($hub->enabled(YarboHub::MODULE_HOME)) {
             $home->flushAutoOff();
+            $home->flushMotorPendingOff();
         }
     } catch (Throwable) {
     }

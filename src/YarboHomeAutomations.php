@@ -1058,6 +1058,8 @@ final class YarboHomeAutomations
         return match ($metric) {
             'humidity', 'battery' => '%',
             'export', 'solar', 'load', 'power' => 'W',
+            'voltage' => 'V',
+            'current' => 'A',
             default => '°',
         };
     }
@@ -1084,11 +1086,17 @@ final class YarboHomeAutomations
         if ($metric === 'power_w' || $metric === 'watts') {
             $metric = 'power';
         }
+        if ($metric === 'voltage_v') {
+            $metric = 'voltage';
+        }
+        if ($metric === 'current_a' || $metric === 'amps') {
+            $metric = 'current';
+        }
         if ($id === self::POWERWALL_ID) {
             if (!in_array($metric, self::POWERWALL_METRICS, true)) {
                 $metric = 'battery';
             }
-        } elseif (!in_array($metric, ['temperature', 'humidity', 'power'], true)) {
+        } elseif (!in_array($metric, ['temperature', 'humidity', 'power', 'voltage', 'current'], true)) {
             $metric = 'temperature';
         }
         $op = strtolower(trim((string) ($row['op'] ?? 'above')));
@@ -1152,7 +1160,8 @@ final class YarboHomeAutomations
         $op = (string) ($trigger['op'] ?? 'above');
         $value = (float) ($trigger['value'] ?? 0);
         $metric = (string) ($trigger['metric'] ?? '');
-        $inclusive = in_array($metric, self::POWERWALL_METRICS, true) || $metric === 'power';
+        $inclusive = in_array($metric, self::POWERWALL_METRICS, true)
+            || in_array($metric, ['power', 'voltage', 'current'], true);
         if ($op === 'below') {
             return $inclusive ? $curr <= $value : $curr < $value;
         }
@@ -1458,7 +1467,12 @@ final class YarboHomeAutomations
             $unit = self::thresholdUnit($metric);
             $metricLabel = $id === self::POWERWALL_ID
                 ? self::powerwallMetricLabel($metric)
-                : ($metric === 'power' ? 'watts' : $metric);
+                : match ($metric) {
+                    'power' => 'watts',
+                    'voltage' => 'volts',
+                    'current' => 'amps',
+                    default => $metric,
+                };
 
             return $name . ' ' . $metricLabel . ' ' . $op . ' ' . $value . $unit;
         }
@@ -2042,6 +2056,12 @@ final class YarboHomeAutomations
                 'power' => isset($row['power']) && is_numeric($row['power'])
                     ? (float) $row['power']
                     : (isset($row['power_w']) && is_numeric($row['power_w']) ? (float) $row['power_w'] : null),
+                'voltage' => isset($row['voltage']) && is_numeric($row['voltage'])
+                    ? (float) $row['voltage']
+                    : (isset($row['voltage_v']) && is_numeric($row['voltage_v']) ? (float) $row['voltage_v'] : null),
+                'current' => isset($row['current']) && is_numeric($row['current'])
+                    ? (float) $row['current']
+                    : (isset($row['current_a']) && is_numeric($row['current_a']) ? (float) $row['current_a'] : null),
                 'error' => array_key_exists('error', $row) ? (bool) $row['error'] : null,
             ];
             foreach (self::POWERWALL_METRICS as $metric) {

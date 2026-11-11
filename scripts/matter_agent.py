@@ -68,8 +68,13 @@ ATTR_SUPPORTED_MODES = 0
 ATTR_CURRENT_MODE = 1
 ATTR_MEASURED_HUMIDITY = 0
 ATTR_BOOL_STATE_VALUE = 0
-ATTR_ACTIVE_POWER = 8  # Electrical Power Measurement — milliwatts
+ATTR_VOLTAGE = 4  # Electrical Power Measurement — millivolts
+ATTR_ACTIVE_CURRENT = 5  # milliamps
+ATTR_ACTIVE_POWER = 8  # milliwatts
+ATTR_RMS_VOLTAGE = 11  # millivolts (prefer for AC plugs)
+ATTR_RMS_CURRENT = 12  # milliamps
 ATTR_LEGACY_ACTIVE_POWER = 0x050B  # Electrical Measurement ActivePower (W*10 often)
+DEVTYPE_ELECTRICAL_SENSOR = 0x0510
 # Operational State cluster: PhaseList=0 … OperationalState=4, OperationalError=5.
 ATTR_OPERATIONAL_STATE = 4
 ATTR_OPERATIONAL_ERROR = 5
@@ -951,8 +956,78 @@ def note_motor_high_power(device_id: str, power_w: float | None) -> None:
         _motor_high_until[device_id] = time.time() + MOTOR_MODE_STICKY_S
 
 
+def motor_pending_off_map() -> dict[str, int]:
+    """Queued Off intents from Home (id -> watts limit) in data/home-motor-pending.json."""
+    path = ROOT / "data" / "home-motor-pending.json"
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    raw = store.get("pending") if isinstance(store, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, job in raw.items():
+        device_id = str(key or "").strip()
+        if device_id == "" or not isinstance(job, dict):
+            continue
+        try:
+            watts = int(job.get("watts") or 0)
+        except (TypeError, ValueError):
+            watts = 0
+        if watts <= 0:
+            watts = int(motor_mode_map().get(device_id) or 0)
+        if watts > 0:
+            out[device_id] = watts
+    return out
+
+
+def clear_motor_pending_off(device_id: str) -> None:
+    path = ROOT / "data" / "home-motor-pending.json"
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return
+    if not isinstance(store, dict):
+        return
+    pending = store.get("pending")
+    if not isinstance(pending, dict) or device_id not in pending:
+        return
+    pending = dict(pending)
+    pending.pop(device_id, None)
+    store["pending"] = pending
+    try:
+        path.write_text(json.dumps(store, separators=(",", ":")) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def maybe_motor_pending_off(device_id: str, power_w: float | None) -> None:
+    """Complete a queued Off once live watts drop below the motor-mode limit."""
+    pending = motor_pending_off_map()
+    limit = pending.get(device_id)
+    if not limit or power_w is None:
+        return
+    try:
+        watts = float(power_w)
+    except (TypeError, ValueError):
+        return
+    if watts >= float(limit):
+        return
+    if not _motor_reon_lock.acquire(blocking=False):
+        return
+    try:
+        log(f"motor mode: completing queued Off for {device_id} ({watts} W < {limit} W)")
+        clear_motor_pending_off(device_id)
+        dispatch({"op": "command", "id": device_id, "action": "off", "kind": "plug"})
+    except Exception as exc:  # noqa: BLE001
+        log(f"motor mode queued Off failed for {device_id}: {exc}")
+    finally:
+        _motor_reon_lock.release()
+
+
 def maybe_motor_mode_reon(device_id: str, turned_on: bool) -> None:
-    """If Apple Home (or anything) turns a motor-mode plug off while loaded, turn it back on."""
+    """If anything turns a motor-mode plug off while loaded, turn it back on (keep queued Off)."""
     if turned_on:
         return
     limit = motor_mode_map().get(device_id)
@@ -2794,8 +2869,20 @@ def apply_attribute_event(data: Any) -> None:
         fields["has_open"] = True
         fields["open"] = opened
         fields["on"] = opened
-    elif cluster == ELECTRICAL_POWER and attr == ATTR_ACTIVE_POWER:
-        fields["power_w"] = matter_power_watts(value)
+    elif cluster == ELECTRICAL_POWER and attr in (
+        ATTR_ACTIVE_POWER,
+        ATTR_VOLTAGE,
+        ATTR_ACTIVE_CURRENT,
+        ATTR_RMS_VOLTAGE,
+        ATTR_RMS_CURRENT,
+    ):
+        device_id = electrical_live_device_id(node_id, device_id)
+        if attr == ATTR_ACTIVE_POWER:
+            fields["power_w"] = matter_power_watts(value)
+        elif attr in (ATTR_RMS_VOLTAGE, ATTR_VOLTAGE):
+            fields["voltage_v"] = matter_millivolts_to_volts(value)
+        elif attr in (ATTR_RMS_CURRENT, ATTR_ACTIVE_CURRENT):
+            fields["current_a"] = matter_milliamps_to_amps(value)
     elif cluster == ELECTRICAL_MEASUREMENT and attr == ATTR_LEGACY_ACTIVE_POWER:
         number = event_number(value)
         if number is not None:
@@ -2893,6 +2980,7 @@ def apply_attribute_event(data: Any) -> None:
                 fields["status"] = " · ".join(parts)
         if "power_w" in fields:
             note_motor_high_power(device_id, fields.get("power_w"))
+            maybe_motor_pending_off(device_id, fields.get("power_w"))
         was_on = None
         if "on" in fields:
             live_before = live_row(device_id) or {}
@@ -3714,6 +3802,102 @@ def matter_power_watts(raw: Any) -> float | None:
     return round(number / 1000.0, 1)
 
 
+def matter_millivolts_to_volts(raw: Any) -> float | None:
+    number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
+    if number is None:
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            return None
+    if number < 0 or number > 1_000_000_000:
+        return None
+    return round(number / 1000.0, 1)
+
+
+def matter_milliamps_to_amps(raw: Any) -> float | None:
+    number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
+    if number is None:
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            return None
+    if number < 0 or number > 1_000_000_000:
+        return None
+    return round(number / 1000.0, 3)
+
+
+def electrical_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
+    """Read Electrical Power Measurement (IKEA GRILLPLATS puts this on a sibling endpoint)."""
+    out: dict[str, Any] = {}
+    if not endpoint_has_cluster(attributes, endpoint, ELECTRICAL_POWER):
+        return out
+    power = matter_power_watts(attr_raw(attributes, endpoint, ELECTRICAL_POWER, ATTR_ACTIVE_POWER))
+    if power is not None:
+        out["power_w"] = power
+    voltage = matter_millivolts_to_volts(
+        attr_raw(attributes, endpoint, ELECTRICAL_POWER, ATTR_RMS_VOLTAGE)
+    )
+    if voltage is None:
+        voltage = matter_millivolts_to_volts(
+            attr_raw(attributes, endpoint, ELECTRICAL_POWER, ATTR_VOLTAGE)
+        )
+    if voltage is not None:
+        out["voltage_v"] = voltage
+    current = matter_milliamps_to_amps(
+        attr_raw(attributes, endpoint, ELECTRICAL_POWER, ATTR_RMS_CURRENT)
+    )
+    if current is None:
+        current = matter_milliamps_to_amps(
+            attr_raw(attributes, endpoint, ELECTRICAL_POWER, ATTR_ACTIVE_CURRENT)
+        )
+    if current is not None:
+        out["current_a"] = current
+    return out
+
+
+def node_electrical_metrics(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Merge electrical metrics from any endpoint on the node (plug + Electrical Sensor)."""
+    merged: dict[str, Any] = {}
+    for endpoint in endpoint_ids(attributes):
+        payload = electrical_payload(attributes, endpoint)
+        for key, value in payload.items():
+            if value is not None:
+                merged[key] = value
+    if endpoint_has_cluster(attributes, 1, ELECTRICAL_MEASUREMENT) or any(
+        endpoint_has_cluster(attributes, ep, ELECTRICAL_MEASUREMENT) for ep in endpoint_ids(attributes)
+    ):
+        if "power_w" not in merged:
+            for endpoint in endpoint_ids(attributes):
+                if not endpoint_has_cluster(attributes, endpoint, ELECTRICAL_MEASUREMENT):
+                    continue
+                raw = attr_raw(attributes, endpoint, ELECTRICAL_MEASUREMENT, ATTR_LEGACY_ACTIVE_POWER)
+                number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
+                if number is None:
+                    continue
+                merged["power_w"] = round(float(number) / 10.0, 1)
+                break
+    return merged
+
+
+def electrical_live_device_id(node_id: int, device_id: str) -> str:
+    """Map Electrical Sensor endpoint updates onto the plug row on the same node."""
+    live = live_row(device_id)
+    if isinstance(live, dict) and str(live.get("kind") or "") == "plug":
+        return device_id
+    for row in current_live_devices():
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("kind") or "") != "plug":
+            continue
+        try:
+            nid = int(row.get("node_id") or 0)
+        except (TypeError, ValueError):
+            nid = 0
+        if nid == node_id or str(row.get("id") or "").startswith(f"{node_id}:"):
+            return str(row.get("id") or device_id)
+    return device_id
+
+
 def sensor_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     temp = matter_celsius(attr_raw(attributes, endpoint, TEMP_MEASUREMENT, ATTR_MEASURED_TEMP))
     humidity = matter_humidity_percent(
@@ -3742,21 +3926,6 @@ def sensor_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         "status": " · ".join(parts) if parts else "",
         "on": bool(open_val) if open_val is not None else False,
     }
-
-
-def plug_power_watts(attributes: dict[str, Any], endpoint: int) -> float | None:
-    if endpoint_has_cluster(attributes, endpoint, ELECTRICAL_POWER):
-        watts = matter_power_watts(attr_raw(attributes, endpoint, ELECTRICAL_POWER, ATTR_ACTIVE_POWER))
-        if watts is not None:
-            return watts
-    if endpoint_has_cluster(attributes, endpoint, ELECTRICAL_MEASUREMENT):
-        raw = attr_raw(attributes, endpoint, ELECTRICAL_MEASUREMENT, ATTR_LEGACY_ACTIVE_POWER)
-        number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
-        if number is None:
-            return None
-        # Legacy ActivePower is often tenths of a watt.
-        return round(float(number) / 10.0, 1)
-    return None
 
 
 def matter_celsius(raw: Any) -> float | None:
@@ -5643,6 +5812,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
         source = node_name or product or vendor or f"Matter node {node_id}"
         ep_ids = endpoint_ids(attributes)
         node_has_thermo = any(ep != 0 and endpoint_looks_heater(attributes, ep) for ep in ep_ids)
+        node_electrical = node_electrical_metrics(attributes)
         parent_names = bridged_parent_names(attributes, vendor, product, source)
         before = len(devices)
         for endpoint in sorted(ep_ids):
@@ -5696,7 +5866,9 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             }
             vacuum = vacuum_payload(attributes, endpoint) if kind == "vacuum" else {}
             sensor = sensor_payload(attributes, endpoint) if kind == "sensor" else {}
-            power_w = plug_power_watts(attributes, endpoint) if kind == "plug" else None
+            electrical = dict(node_electrical) if kind == "plug" and node_electrical else {}
+            if kind == "plug":
+                electrical.update(electrical_payload(attributes, endpoint))
             on = attr_bool(on_val)
             if thermo.get("thermostat_on") is not None:
                 on = bool(thermo["thermostat_on"])
@@ -5745,8 +5917,10 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             }
             if kind == "sensor":
                 row.update({k: v for k, v in sensor.items() if k != "on"})
-            if power_w is not None:
-                row["power_w"] = power_w
+            if kind == "plug" and electrical:
+                for key in ("power_w", "voltage_v", "current_a"):
+                    if key in electrical and electrical[key] is not None:
+                        row[key] = electrical[key]
             devices.append(row)
         if len(devices) == before and node_id > 0 and attributes:
             stub_kind = classify_by_name("light", source, vendor, product)
@@ -5839,6 +6013,8 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                         "open",
                         "status",
                         "power_w",
+                        "voltage_v",
+                        "current_a",
                         "vacuum_status",
                         "vacuum_clean",
                         "can_mop",
