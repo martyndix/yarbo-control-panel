@@ -105,7 +105,7 @@ In **Settings → Vestaboard Note**, enable **Night hours** when the UniFi modul
 
 Names are uppercased to Vestaboard characters and shortened to 15 flaps, preferring whole words (for example `Garage Side Entrance Door` → `GARAGE SIDE`). Use **Simulate open** under the night editor (or the Preview dropdown **Night hours: something open**) to see the alert with your watched contacts without writing the Note.
 
-Night hours only uses UniFi Access doors and door/window sensors known to this panel. It cannot see any other sensors and **cannot guarantee the security of the building**. If UniFi is off or no contacts exist, Night hours is hidden and cannot be enabled.
+Night hours only uses UniFi Access doors and door/window sensors known to this panel. It cannot see any other sensors and **cannot guarantee the security of the building**. If UniFi is off or no contacts exist, Night hours is hidden and cannot be newly enabled — but an already-on preference is kept across short UniFi gaps (for example right after a panel Update).
 
 While the window is active the watcher re-reads those contacts every tick (~8s) and rewrites the Note as soon as something opens, closes, or another contact joins the open set.
 

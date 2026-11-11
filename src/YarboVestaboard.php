@@ -293,7 +293,10 @@ final class YarboVestaboard
                 $quietEnabled = false;
             }
         }
-        if ($nightEnabled && !$this->nightHoursAvailable()) {
+        // UniFi inventory is often empty for a bit after panel update/restart.
+        // Keep an already-enabled Night hours preference across those blips;
+        // only block newly turning it on when no door/window contacts exist.
+        if ($nightEnabled && !$this->nightHoursAvailable() && !($current['night_hours_enabled'] ?? false)) {
             $nightEnabled = false;
         }
 

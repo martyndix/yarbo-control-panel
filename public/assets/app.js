@@ -13559,9 +13559,8 @@ function applyVestaboardNightHours(board) {
     if (board?.night_watch) lastVestaboardNightWatch = board.night_watch;
     els.settingsVestaboardNightWrap?.classList.toggle('hidden', !available);
     els.settingsVestaboardNightUnavailable?.classList.toggle('hidden', available);
-    if (!available && els.settingsVestaboardNight) {
-        els.settingsVestaboardNight.checked = false;
-    }
+    // Do not uncheck Night hours when UniFi contacts are briefly missing (common
+    // right after Updates). Clearing the box would save the preference off.
     const on = available && Boolean(els.settingsVestaboardNight?.checked);
     if (on && els.settingsVestaboardQuiet?.checked) {
         els.settingsVestaboardQuiet.checked = false;
