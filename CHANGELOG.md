@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.270] - 2026-11-12
+
+### Fixed
+- **Sluggish / blank dashboard after refresh:** the first status poll no longer waits for Settings to finish, browser telemetry uses a 1s prefer-cache budget, and the MQTT agent cools down after a cold miss so an offline Yarbo does not burn ~2.5s on every 5s poll. Status responses include a `timing` + Panel health strip (Settings → Updates) with server ms, client RTT, cache age, and Vestaboard watcher heartbeat.
+
 ## [4.0.269] - 2026-11-12
 
 ### Fixed

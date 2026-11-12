@@ -15,6 +15,16 @@ use Yarbo\YarboTelemetry;
 use Yarbo\YarboVestaboard;
 use Yarbo\YarboWifi;
 
+/** @var float */
+$statusStartedAt = microtime(true);
+/** @var array{ping_ms:?int,telemetry_ms:?int,extras_ms:?int,total_ms:int} */
+$statusTiming = [
+    'ping_ms' => null,
+    'telemetry_ms' => null,
+    'extras_ms' => null,
+    'total_ms' => 0,
+];
+
 function vestaboard_board(): YarboVestaboard
 {
     static $board = null;
@@ -28,6 +38,31 @@ function vestaboard_status_payload(?array $parsed, bool $online): array
     return vestaboard_board()->dashboardPayload($parsed, $online);
 }
 
+function status_ms_since(float $started): int
+{
+    return (int) max(0, round((microtime(true) - $started) * 1000));
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return array<string, mixed>
+ */
+function status_with_timing(array $payload): array
+{
+    global $statusStartedAt, $statusTiming;
+    $statusTiming['total_ms'] = status_ms_since($statusStartedAt);
+    $payload['timing'] = $statusTiming;
+    $board = vestaboard_board();
+    $payload['panel_health'] = [
+        'watcher_ok' => !$board->watcherStale(),
+        'watcher_age_s' => is_file($board->heartbeatPath())
+            ? max(0, time() - (int) filemtime($board->heartbeatPath()))
+            : null,
+    ];
+
+    return $payload;
+}
+
 vestaboard_board()->rememberClientTimezoneFromRequest();
 
 /**
@@ -37,6 +72,8 @@ vestaboard_board()->rememberClientTimezoneFromRequest();
  */
 function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVestaboard = false): array
 {
+    global $statusTiming;
+    $extrasStarted = microtime(true);
     $root = dirname(__DIR__, 2);
     $hub = new YarboHub($root);
     $powerwall = null;
@@ -95,6 +132,7 @@ function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVest
     if ($includeVestaboard) {
         $extras['vestaboard'] = $vestaboard;
     }
+    $statusTiming['extras_ms'] = status_ms_since($extrasStarted);
 
     return $extras;
 }
@@ -104,7 +142,7 @@ function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVest
  */
 function status_failure(string $error, string $stage, int $http = 500, array $extra = []): never
 {
-    json_response(array_merge(
+    json_response(status_with_timing(array_merge(
         [
             'ok' => false,
             'stage' => $stage,
@@ -112,7 +150,7 @@ function status_failure(string $error, string $stage, int $http = 500, array $ex
         ],
         hub_status_extras(false, true),
         $extra,
-    ), $http);
+    )), $http);
 }
 
 function attach_robot_name(array $parsed): array
@@ -134,6 +172,9 @@ function status_raw_usable(mixed $raw): bool
     );
 }
 
+/**
+ * @param array<string, mixed> $result
+ */
 function status_from_agent(array $result): void
 {
     $raw = $result['raw'] ?? null;
@@ -157,8 +198,13 @@ function status_from_agent(array $result): void
         $parsed['controller_acquired'] = (bool) $result['controller_acquired'];
     }
 
-    json_response(array_merge(
-        ['ok' => true, 'via' => 'agent', 'cached' => (bool) ($result['cached'] ?? false)],
+    json_response(status_with_timing(array_merge(
+        [
+            'ok' => true,
+            'via' => 'agent',
+            'cached' => (bool) ($result['cached'] ?? false),
+            'cache_age_s' => isset($result['cache_age_s']) ? (int) $result['cache_age_s'] : null,
+        ],
         attach_robot_name($parsed),
         [
             'wifi' => YarboWifi::parse($wifiEnvelope),
@@ -166,16 +212,16 @@ function status_from_agent(array $result): void
         ],
         // Cache-only companions — a Tesla/Lymow refresh here used to push Funnel past 504.
         hub_status_extras(false),
-    ));
+    )));
 }
 
 $projectRoot = dirname(__DIR__, 2);
 $hub = new YarboHub($projectRoot);
 if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
-    json_response(array_merge(
+    json_response(status_with_timing(array_merge(
         ['ok' => true, 'via' => 'modules', 'yarbo_enabled' => false],
         hub_status_extras(true, true),
-    ));
+    )));
 }
 
 // Cloud MQTT agent only — local LAN :1883 is no longer used for status/control.
@@ -183,7 +229,9 @@ if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
 // Powerwall/Lymow refresh (those run in the background watcher). Prefer cached
 // telemetry so a slow get_device_msg cannot turn into a proxy HTML 504.
 $agent = YarboMqttAgentClient::fromEnv();
+$pingStarted = microtime(true);
 $ping = $agent->ping(0.8);
+$statusTiming['ping_ms'] = status_ms_since($pingStarted);
 $engine = (string) ($ping['engine'] ?? '');
 $isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
 
@@ -195,6 +243,7 @@ if (!($ping['ok'] ?? false) || !$isCloudAgent) {
         [
             'via' => 'agent',
             'transient' => true,
+            'agent_connected' => false,
         ],
     );
 }
@@ -207,12 +256,17 @@ if (empty($ping['connected'])) {
         [
             'via' => 'agent',
             'transient' => true,
+            'agent_connected' => false,
         ],
     );
 }
 
 try {
-    $result = $agent->telemetry(2.5, true, true, false);
+    // Prefer-cache with a short live budget: offline robots fail fast; the agent
+    // also cools down after a miss so every 5s poll does not wait again.
+    $telemetryStarted = microtime(true);
+    $result = $agent->telemetry(1.0, true, true, false);
+    $statusTiming['telemetry_ms'] = status_ms_since($telemetryStarted);
     status_from_agent($result);
 
     $error = (string) ($result['error'] ?? 'telemetry timeout');
@@ -231,11 +285,16 @@ try {
         [
             'via' => 'agent',
             'transient' => $transient,
+            'agent_connected' => true,
+            'cached' => (bool) ($result['cached'] ?? false),
+            'cache_age_s' => isset($result['cache_age_s']) ? (int) $result['cache_age_s'] : null,
+            'cooldown' => !empty($result['cooldown']),
         ],
     );
 } catch (Throwable $e) {
     status_failure(friendly_error($e), 'telemetry', 200, [
         'via' => 'agent',
         'transient' => true,
+        'agent_connected' => true,
     ]);
 }

@@ -70,6 +70,9 @@ JOB_LATCH_KEYS = (
 )
 BATTERY_CELLS_CACHE_S = 30.0
 PLAN_FEEDBACK_POLL_S = 15.0
+# Browser status polls with prefer_cache: after a cold miss, skip live get_status
+# briefly so offline robots do not burn ~2.5s on every 5s refresh.
+TELEMETRY_MISS_COOLDOWN_S = 25.0
 
 
 def telemetry_raw_usable(raw: Any) -> bool:
@@ -82,10 +85,21 @@ def telemetry_raw_usable(raw: Any) -> bool:
     )
 
 
+def mark_telemetry_miss(state: dict[str, Any]) -> None:
+    state["last_telemetry_miss_at"] = time.time()
+
+
+def telemetry_miss_cooling(state: dict[str, Any]) -> bool:
+    miss_at = float(state.get("last_telemetry_miss_at") or 0.0)
+    return miss_at > 0.0 and (time.time() - miss_at) < TELEMETRY_MISS_COOLDOWN_S
+
+
 def store_last_raw(state: dict[str, Any], raw: Any) -> bool:
     if not telemetry_raw_usable(raw):
         return False
     state["last_raw"] = raw
+    state["last_raw_at"] = time.time()
+    state["last_telemetry_miss_at"] = 0.0
     return True
 
 
@@ -536,6 +550,12 @@ def state_flags(state: dict[str, Any], client: Any | None = None) -> dict[str, A
     }
     if client is not None:
         out["controller_acquired"] = bool(getattr(client, "controller_acquired", False))
+    raw_at = float(state.get("last_raw_at") or 0.0)
+    if raw_at > 0.0:
+        out["cache_age_s"] = max(0, int(time.time() - raw_at))
+    miss_at = float(state.get("last_telemetry_miss_at") or 0.0)
+    if miss_at > 0.0:
+        out["miss_age_s"] = max(0, int(time.time() - miss_at))
     if isinstance(state.get("last_raw"), dict):
         out.update(parse_controller_reality(state["last_raw"]))
     return out
@@ -700,6 +720,15 @@ async def handle_request(
                     "cached": True,
                     **state_flags(state, client),
                 }
+            # Offline robot + empty cache: do not re-wait get_status on every poll.
+            if prefer_cache and telemetry_miss_cooling(state):
+                return {
+                    "ok": False,
+                    "error": "telemetry timeout",
+                    "transient": True,
+                    "cooldown": True,
+                    **state_flags(state, client),
+                }
 
             try:
                 status = await client.get_status(timeout=timeout, acquire_controller=False)
@@ -717,6 +746,7 @@ async def handle_request(
                         "transient": True,
                         **state_flags(state, client),
                     }
+                mark_telemetry_miss(state)
                 return {
                     "ok": False,
                     "error": str(exc) or "telemetry timeout",
@@ -738,7 +768,13 @@ async def handle_request(
                         "transient": True,
                         **state_flags(state, client),
                     }
-                return {"ok": False, "error": "telemetry timeout", "transient": True}
+                mark_telemetry_miss(state)
+                return {
+                    "ok": False,
+                    "error": "telemetry timeout",
+                    "transient": True,
+                    **state_flags(state, client),
+                }
             if stale:
                 await maybe_request_plan_feedback(client, state)
                 return {
@@ -1366,6 +1402,8 @@ async def amain() -> int:
         "manual_drive": False,
         "pad_released": False,
         "last_raw": None,
+        "last_raw_at": 0.0,
+        "last_telemetry_miss_at": 0.0,
         "last_plan_feedback": None,
         "last_plan_feedback_at": 0.0,
         "last_plan_feedback_req_at": 0.0,

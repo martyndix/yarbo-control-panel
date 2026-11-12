@@ -319,9 +319,9 @@ final class YarboMqttAgentClient
         if ($preferCache) {
             $payload['prefer_cache'] = true;
         }
-        // Cached PaperMono polls should not wait out a full get_status window.
+        // Cached / browser polls should not wait out a full get_status window.
         $socketWait = $preferCache
-            ? max(3.0, $timeoutSeconds + 1.0)
+            ? max(2.0, $timeoutSeconds + 1.0)
             : max(12.0, $timeoutSeconds + 6.0);
 
         return $this->request($payload, $socketWait, $autoStart);
