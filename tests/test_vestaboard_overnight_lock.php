@@ -181,6 +181,9 @@ assert_true(str_contains($src, 'Browser/Funnel status must not re-scan UniFi'), 
 assert_true(str_contains($src, 'nightWatchInventoryCount'), 'night availability uses inventory file only');
 assert_true(str_contains($src, 'codesLookLikeOvernight'), 'night dashboard rejects leftover live boards');
 assert_true(str_contains($src, 'Do not call nightLayoutHash() here'), 'tick skips daytime UniFi nightLayoutHash');
+assert_true(str_contains($src, 'nightLayout(null, null, false)'), 'night tick uses inventory after sync refresh');
+assert_true(str_contains($src, 'requestTickNudge'), 'nudge API exists');
+assert_true(str_contains($src, 'maxAgeSeconds = 90'), 'watcher stale threshold allows long companion probes');
 
 // Sticky night_active with leftover Powerwall board_codes must not show Powerwall.
 $pwCodes = [

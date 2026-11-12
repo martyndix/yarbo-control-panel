@@ -30,8 +30,16 @@ function vestaboard_run_tick(YarboVestaboard $board): void
 {
     static $failStreak = 0;
     try {
-        $board->refreshCompanionModules();
+        // Heartbeat first — Powerwall/Lymow refresh can take tens of seconds and
+        // used to make the UI scream "background updater idle" mid-tick.
+        $board->touchHeartbeat();
+        // Overnight only needs door contacts + the Note; skip Tesla/Lymow probes.
+        if (!$board->isNightHours() && !$board->isQuietHours()) {
+            $board->refreshCompanionModules();
+            $board->touchHeartbeat();
+        }
         $result = $board->tick();
+        $board->touchHeartbeat();
         if (($result['ok'] ?? false)) {
             $failStreak = 0;
         } else {
@@ -43,6 +51,7 @@ function vestaboard_run_tick(YarboVestaboard $board): void
         }
     } catch (Throwable $e) {
         $failStreak++;
+        $board->touchHeartbeat();
         if ($failStreak === 1 || $failStreak % 15 === 0) {
             fwrite(STDERR, 'vestaboard_watch: ' . $e->getMessage() . "\n");
         }
@@ -87,6 +96,11 @@ while (true) {
     for ($i = 0; $i < 8; $i++) {
         if (vestaboard_watch_sources_changed($watchFiles, $startedAt)) {
             exit(0);
+        }
+        // PaperMono / status can nudge an immediate open/close write without
+        // spawning a second vestaboard_watch --once (that raced the loop).
+        if ($board->consumeTickNudge()) {
+            break;
         }
         sleep(1);
     }

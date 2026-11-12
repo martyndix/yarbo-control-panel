@@ -6,10 +6,15 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.268] - 2026-11-12
+
+### Fixed
+- **Vestaboard “background updater idle — restart the panel”:** the Note watcher heartbeated only after Powerwall/Lymow probes (Lymow can take ~40s), so the UI regularly looked dead overnight even while the loop was running — and extra `vestaboard_watch --once` spawns from PaperMono + the MQTT agent raced the main loop and starved tablet polls. Heartbeat now updates first (and overnight skips Tesla/Lymow), PaperMono open/close only nudges the existing loop, and the MQTT backup runs only when the heartbeat is actually stale.
+
 ## [4.0.267] - 2026-11-12
 
 ### Fixed
-- **Night door open stayed on HOUSE SECURE:** PaperMono could light the alert from inventory while the Vestaboard watcher had not yet written the open layout. Compact now composes the open-alert flaps for the tablet Note and kicks a background `vestaboard_watch --once` when inventory open state disagrees with the watcher sticky, so the physical Note updates without blocking Funnel.
+- **Night door open stayed on HOUSE SECURE:** PaperMono could light the alert from inventory while the Vestaboard watcher had not yet written the open layout. Compact now composes the open-alert flaps for the tablet Note and nudges the watcher loop when inventory open state disagrees with the watcher sticky, so the physical Note updates without blocking Funnel.
 - **PaperMono stayed unlocked after night alert cleared:** when a night/error alert navigated away from lock and the condition cleared (door closed), firmware now returns to the lock screen. Firmware **0.1.93**.
 
 ## [4.0.266] - 2026-11-12

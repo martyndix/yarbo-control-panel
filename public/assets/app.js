@@ -11053,7 +11053,7 @@ function updateVestaboardDashboard(data) {
         } else if (board.pending) {
             els.vestaboardUpdatedDetail.textContent = ' · sending…';
         } else if (board.watcher_ok === false) {
-            els.vestaboardUpdatedDetail.textContent = ' · background updater idle — restart the panel';
+            els.vestaboardUpdatedDetail.textContent = ' · background updater idle — if this stays, restart the panel';
         } else if (board.night_hours) {
             const until = board.night_until || '';
             els.vestaboardUpdatedDetail.textContent = board.night_open
