@@ -49,6 +49,7 @@ final class YarboPaperRemote
             'enabled' => false,
             'provider' => self::PROVIDER_TAILSCALE,
             'origin' => '',
+            'funnel_origin' => '',
         ];
         if (!is_file($this->configPath())) {
             return $defaults;
@@ -63,16 +64,23 @@ final class YarboPaperRemote
             $provider = self::PROVIDER_TAILSCALE;
         }
         $origin = $this->normalizeOrigin((string) ($decoded['origin'] ?? ''));
+        $funnelOrigin = $this->normalizeOrigin((string) ($decoded['funnel_origin'] ?? ''));
+        if ($funnelOrigin === '' && self::originLooksLikeFunnel($origin)) {
+            $funnelOrigin = $origin;
+        }
 
         return [
             'enabled' => !empty($decoded['enabled']),
             'provider' => $provider,
             'origin' => $origin,
+            'funnel_origin' => $funnelOrigin,
         ];
     }
 
     /**
      * HTTPS origin tablets should try after LAN, or empty when remote is off.
+     * Prefers Tailscale Funnel (.ts.net). Browser-only client-cert subdomains
+     * are not usable on ESP32 tablets (Let's Encrypt CA only, no client cert).
      */
     public function tabletOrigin(): string
     {
@@ -80,8 +88,24 @@ final class YarboPaperRemote
         if (!$cfg['enabled']) {
             return '';
         }
+        $funnel = $this->normalizeOrigin((string) ($cfg['funnel_origin'] ?? ''));
+        if ($funnel !== '' && self::originLooksLikeFunnel($funnel)) {
+            return $funnel;
+        }
+        $origin = $cfg['origin'];
+        if ($origin !== '' && self::originLooksLikeFunnel($origin)) {
+            return $origin;
+        }
+        // Custom HTTPS (Cloudflare etc.) only when it is not a Funnel host —
+        // still returned for tunnels that do not require a client certificate.
+        return $origin;
+    }
 
-        return $cfg['origin'];
+    public static function originLooksLikeFunnel(string $origin): bool
+    {
+        $host = strtolower((string) (parse_url($origin, PHP_URL_HOST) ?: ''));
+
+        return $host !== '' && str_ends_with($host, '.ts.net');
     }
 
     public function enabled(): bool
@@ -123,10 +147,15 @@ final class YarboPaperRemote
         if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
             return ['ok' => false, 'error' => 'Could not create the data folder.'];
         }
+        $funnelOrigin = $current['funnel_origin'];
+        if (self::originLooksLikeFunnel($origin)) {
+            $funnelOrigin = $origin;
+        }
         $payload = [
             'enabled' => $enabled,
             'provider' => $provider,
             'origin' => $origin,
+            'funnel_origin' => $funnelOrigin,
         ];
         $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if (!is_string($json) || @file_put_contents($this->configPath(), $json . "\n") === false) {
@@ -147,18 +176,25 @@ final class YarboPaperRemote
             'enabled' => $cfg['enabled'],
             'provider' => $cfg['provider'],
             'origin' => $cfg['origin'],
+            'funnel_origin' => $cfg['funnel_origin'],
             'tablet_url' => $this->tabletOrigin(),
             'gate_port' => self::GATE_PORT,
             'gate_listening' => $this->gateListening(),
+            'suggested_panel_url' => self::suggestLanPanelUrl(),
         ];
         if ($probe) {
             $view['tailscale'] = $this->tailscaleStatus();
-            if ($cfg['enabled'] && $cfg['provider'] === self::PROVIDER_TAILSCALE) {
+            if ($cfg['enabled']) {
                 $funnelOrigin = $this->originFromTailscale($view['tailscale']);
-                if ($funnelOrigin !== '' && $funnelOrigin !== $cfg['origin']) {
-                    $this->saveOriginQuiet($funnelOrigin);
-                    $view['origin'] = $funnelOrigin;
-                    $view['tablet_url'] = $cfg['enabled'] ? $funnelOrigin : '';
+                if ($funnelOrigin !== '') {
+                    $this->rememberFunnelOrigin($funnelOrigin);
+                    $view['funnel_origin'] = $funnelOrigin;
+                    // Tablets always use Funnel when it is up — not a cert-gated browser subdomain.
+                    $view['tablet_url'] = $funnelOrigin;
+                    if ($cfg['provider'] === self::PROVIDER_TAILSCALE && $funnelOrigin !== $cfg['origin']) {
+                        $this->saveOriginQuiet($funnelOrigin);
+                        $view['origin'] = $funnelOrigin;
+                    }
                 }
             }
         } else {
@@ -500,16 +536,115 @@ final class YarboPaperRemote
 
     private function syncSidecar(bool $enabled): void
     {
-        $cfg = $this->load();
-        if ($enabled && $cfg['provider'] === self::PROVIDER_TAILSCALE) {
-            $this->runScript('ensure');
+        if (!$enabled) {
+            $this->runScript('stop-gate');
+            $this->runScript('funnel-off');
 
             return;
         }
-        $this->runScript('stop-gate');
-        if (!$enabled || $cfg['provider'] !== self::PROVIDER_TAILSCALE) {
-            $this->runScript('funnel-off');
+        // Keep Funnel + the path-limited gate even when the form shows a custom
+        // HTTPS URL. Browser-only client-cert subdomains must not tear Funnel down —
+        // ESP32 tablets rely on the .ts.net Funnel origin.
+        $this->runScript('ensure');
+    }
+
+    private function rememberFunnelOrigin(string $origin): void
+    {
+        $origin = $this->normalizeOrigin($origin);
+        if ($origin === '' || !self::originLooksLikeFunnel($origin)) {
+            return;
         }
+        $cfg = $this->load();
+        if ($cfg['funnel_origin'] === $origin
+            && ($cfg['provider'] !== self::PROVIDER_TAILSCALE || $cfg['origin'] === $origin)) {
+            return;
+        }
+        $cfg['funnel_origin'] = $origin;
+        if ($cfg['provider'] === self::PROVIDER_TAILSCALE) {
+            $cfg['origin'] = $origin;
+        }
+        $json = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if (is_string($json)) {
+            @file_put_contents($this->configPath(), $json . "\n");
+        }
+    }
+
+    /**
+     * LAN Panel URL for USB flash / home Wi-Fi — never the public browser hostname.
+     */
+    public static function suggestLanPanelUrl(?int $port = null): string
+    {
+        $port = $port ?? (int) (getenv('YARBO_PANEL_PORT') ?: 8080);
+        if ($port <= 0) {
+            $port = 8080;
+        }
+        $out = trim((string) @shell_exec('hostname -I'));
+        $parts = preg_split('/\s+/', $out) ?: [];
+        $fallback = '';
+        foreach ($parts as $ip) {
+            $ip = trim((string) $ip);
+            if (preg_match('/^\d+\.\d+\.\d+\.\d+$/', $ip) !== 1) {
+                continue;
+            }
+            if ($fallback === '') {
+                $fallback = $ip;
+            }
+            if (self::ipv4IsPrivate($ip)) {
+                return 'http://' . $ip . ':' . $port;
+            }
+        }
+        if ($fallback !== '') {
+            return 'http://' . $fallback . ':' . $port;
+        }
+
+        return 'http://192.168.1.50:' . $port;
+    }
+
+    public static function ipv4IsPrivate(string $ip): bool
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            return false;
+        }
+        $long = ip2long($ip);
+        if ($long === false) {
+            return false;
+        }
+        $private = [
+            ['10.0.0.0', '10.255.255.255'],
+            ['172.16.0.0', '172.31.255.255'],
+            ['192.168.0.0', '192.168.255.255'],
+        ];
+        foreach ($private as [$lo, $hi]) {
+            if ($long >= ip2long($lo) && $long <= ip2long($hi)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * True when Panel URL is a LAN host the tablet can use on home Wi-Fi.
+     */
+    public static function panelUrlLooksLan(string $url): bool
+    {
+        $host = strtolower((string) (parse_url(trim($url), PHP_URL_HOST) ?: ''));
+        if ($host === '') {
+            return false;
+        }
+        if ($host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
+            return false;
+        }
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return self::ipv4IsPrivate($host);
+        }
+        foreach (['.local', '.lan', '.home.arpa', '.internal'] as $suffix) {
+            if (str_ends_with($host, $suffix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

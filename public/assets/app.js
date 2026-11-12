@@ -12552,10 +12552,12 @@ function applyPaperRemoteUi(remote, opts = {}) {
     const bits = [];
     if (!enabled) {
         bits.push('Remote access is off. Tablets only use the LAN Panel URL.');
-    } else if (remote.tablet_url || origin) {
-        bits.push(`Tablets will try ${remote.tablet_url || origin} after the LAN URL.`);
+    } else if (remote.tablet_url || remote.funnel_origin) {
+        bits.push(`Tablets use Funnel ${remote.tablet_url || remote.funnel_origin} after the LAN URL (not a browser client-certificate subdomain).`);
+    } else if (origin) {
+        bits.push(`Tablets will try ${origin} after the LAN URL.`);
     } else {
-        bits.push('Remote is on, but there is no HTTPS origin yet.');
+        bits.push('Remote is on, but there is no Funnel HTTPS origin yet — Start Funnel.');
     }
     if (provider === 'tailscale') {
         if (!ts.installed) bits.push('Tailscale is not installed on this host.');
@@ -13127,14 +13129,46 @@ function ensurePaperPowerPoll() {
     }, 15000);
 }
 
-function paperCompanionPanelUrlDefault() {
-    // Browser HTTPS :8443 is self-signed. Tablets use HTTP :8080 on the LAN
-    // (Funnel HTTPS is separate and learned later via remote_url).
-    const host = location.hostname;
-    if (host && (location.protocol === 'https:' || location.port === '8443')) {
-        return `http://${host}:8080`;
+function paperIpv4IsPrivate(host) {
+    const m = String(host || '').match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (!m) return false;
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 10) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    return false;
+}
+
+function paperPanelUrlLooksLan(url) {
+    try {
+        const hostname = new URL(url).hostname.toLowerCase();
+        if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+            return false;
+        }
+        if (paperIpv4IsPrivate(hostname)) return true;
+        return hostname.endsWith('.local')
+            || hostname.endsWith('.lan')
+            || hostname.endsWith('.home.arpa')
+            || hostname.endsWith('.internal');
+    } catch {
+        return false;
     }
-    return window.location.origin;
+}
+
+function paperCompanionPanelUrlDefault(suggested) {
+    // Prefer the Pi LAN IP from the server. Never copy a public browser hostname
+    // (cert-gated subdomain) into the tablet Panel URL field.
+    const fromServer = String(suggested || '').trim();
+    if (fromServer && paperPanelUrlLooksLan(fromServer)) {
+        return fromServer;
+    }
+    const host = location.hostname;
+    if (paperIpv4IsPrivate(host)) {
+        const port = (location.protocol === 'https:' || location.port === '8443') ? '8080' : (location.port || '8080');
+        return `http://${host}:${port}`;
+    }
+    return fromServer || 'http://192.168.1.50:8080';
 }
 
 async function ensurePaperFirmwareAutoBuild(dashboard) {
@@ -13160,14 +13194,21 @@ async function ensurePaperFirmwareAutoBuild(dashboard) {
 }
 
 async function loadPaperMonoDashboard(opts = {}) {
-    if (els.papermonoPanelUrl && !els.papermonoPanelUrl.value) {
-        els.papermonoPanelUrl.value = paperCompanionPanelUrlDefault();
-    }
     try {
         const res = await fetch('/api/device.php?action=dashboard');
         let data = await parseJsonResponse(res);
         data = await ensurePaperFirmwareAutoBuild(data) || data;
         paperMonoDashboardCache = data;
+        const suggested = data.suggested_panel_url
+            || data.paper_remote?.suggested_panel_url
+            || '';
+        if (els.papermonoPanelUrl) {
+            const current = els.papermonoPanelUrl.value.trim();
+            if (!current || !paperPanelUrlLooksLan(current)) {
+                els.papermonoPanelUrl.value = paperCompanionPanelUrlDefault(suggested);
+            }
+            updatePaperPanelUrlHint(suggested || els.papermonoPanelUrl.value);
+        }
         applyPaperMonoKindUi(data);
         applyPaperLogoPreview(data.logo_url || null);
         applyPaperMonoPrefs(data.prefs);
@@ -13359,6 +13400,20 @@ function paperPanelUrlLooksLocal(url) {
     }
 }
 
+function updatePaperPanelUrlHint(suggested) {
+    const hint = document.getElementById('papermono-panel-url-hint');
+    const value = (els.papermonoPanelUrl?.value || '').trim();
+    const lan = suggested || paperCompanionPanelUrlDefault() || 'http://192.168.1.50:8080';
+    if (!hint) return;
+    if (value && !paperPanelUrlLooksLocal(value) && !paperPanelUrlLooksLan(value)) {
+        hint.innerHTML = `This looks like a public hostname — it will not help tablets on travel Wi‑Fi, and PaperMono cannot use a client-certificate site. Change it to the Pi LAN address (for example <code>${escapeHtml(lan)}</code>). Remote access is Tailscale Funnel below.`;
+        hint.classList.add('is-warning');
+        return;
+    }
+    hint.innerHTML = `Use the Pi’s home Wi‑Fi IP, for example <code>${escapeHtml(lan)}</code>. A public hostname (even on port 8080) is for browsers only and will not help tablets on travel Wi‑Fi — and if that hostname needs a client certificate, PaperMono cannot use it.`;
+    hint.classList.remove('is-warning');
+}
+
 async function downloadPaperSetupKit() {
     const payload = paperMonoFormPayload();
     const label = paperMonoLabel(payload.kind);
@@ -13372,6 +13427,13 @@ async function downloadPaperSetupKit() {
     }
     if (paperPanelUrlLooksLocal(payload.panel_url)) {
         setPaperMonoResult('Use the URL the tablet will use at the site (not localhost).', 'error');
+        return;
+    }
+    if (!paperPanelUrlLooksLan(payload.panel_url)) {
+        setPaperMonoResult(
+            `Panel URL must be this Pi on the home LAN (for example ${paperCompanionPanelUrlDefault()}), not a public subdomain. Travel Wi‑Fi uses Tailscale Funnel under Remote access.`,
+            'error'
+        );
         return;
     }
     setPaperMonoUsbBusy(true);
@@ -17081,6 +17143,11 @@ els.papermonoInstallTools?.addEventListener('click', (e) => installPaperMonoUsbT
 els.papermonoBuild?.addEventListener('click', (e) => buildPaperMonoFirmware(e.currentTarget));
 els.papermonoFlash?.addEventListener('click', (e) => runPaperMonoUsb('flash', e.currentTarget));
 els.papermonoConfig?.addEventListener('click', (e) => runPaperMonoUsb('configure_usb', e.currentTarget));
+els.papermonoPanelUrl?.addEventListener('input', () => {
+    updatePaperPanelUrlHint(paperMonoDashboardCache?.suggested_panel_url
+        || paperMonoDashboardCache?.paper_remote?.suggested_panel_url
+        || '');
+});
 els.papermonoRemoteSave?.addEventListener('click', () => savePaperRemote());
 els.papermonoRemoteInstall?.addEventListener('click', (e) => runPaperRemoteStep('install', e.currentTarget));
 els.papermonoRemoteLogin?.addEventListener('click', (e) => runPaperRemoteStep('up', e.currentTarget));
