@@ -2646,6 +2646,12 @@ void drawPlansPage(bool forceFull)
     finishEpdFrame();
 }
 
+bool noteViewsOvernightLocked()
+{
+    return vestaboardNight || vestaboardQuiet
+        || vestaboardMode == "night" || vestaboardMode == "quiet";
+}
+
 void drawNotePage(bool forceFull)
 {
     beginEpdFrame(forceFull);
@@ -2663,12 +2669,13 @@ void drawNotePage(bool forceFull)
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextSize(2);
     String live;
-    if (vestaboardNight || vestaboardMode == "night") {
+    bool overnight = noteViewsOvernightLocked();
+    if (vestaboardMode == "hold") {
+        live = "APP HOLD";
+    } else if (vestaboardNight || vestaboardMode == "night") {
         live = "NIGHT MODE";
     } else if (vestaboardQuiet || vestaboardMode == "quiet") {
         live = "QUIET MODE";
-    } else if (vestaboardMode == "hold") {
-        live = "APP HOLD";
     } else {
         live = vestaboardLive.length() ? vestaboardLive : String("yarbo");
         live.toUpperCase();
@@ -2680,13 +2687,17 @@ void drawNotePage(bool forceFull)
         M5.Display.setTextSize(2);
         M5.Display.drawString("Note off: lock screen still previews.", 16, noteHintY);
         noteHintY += 28;
-    } else if (vestaboardNight || vestaboardMode == "night") {
+    } else if (overnight) {
         M5.Display.setTextSize(2);
-        M5.Display.drawString("Showing night hours on the Note.", 16, noteHintY);
+        if (vestaboardMode == "hold") {
+            M5.Display.drawString("App message showing. Views locked.", 16, noteHintY);
+        } else if (vestaboardNight || vestaboardMode == "night") {
+            M5.Display.drawString("Night hours — views locked.", 16, noteHintY);
+        } else {
+            M5.Display.drawString("Quiet hours — views locked.", 16, noteHintY);
+        }
         noteHintY += 28;
-    } else if (vestaboardQuiet || vestaboardMode == "quiet") {
-        M5.Display.setTextSize(2);
-        M5.Display.drawString("Showing quiet hours on the Note.", 16, noteHintY);
+        M5.Display.drawString("App messages still show on the Note.", 16, noteHintY);
         noteHintY += 28;
     }
     if (lastError.length()) {
@@ -2701,7 +2712,9 @@ void drawNotePage(bool forceFull)
         int row = i / 2;
         int x = left ? 16 : 16 + bw + btnGap;
         int y = y0 + row * (bh + btnGap);
-        drawButton(x, y, bw, bh, noteChoiceLabel(i), vestaboardLive == noteChoiceId(i));
+        /* Overnight: draw inactive (never invert) so views look locked. */
+        bool active = !overnight && vestaboardLive == noteChoiceId(i);
+        drawButton(x, y, bw, bh, noteChoiceLabel(i), active);
     }
     drawPager();
     finishEpdFrame();
@@ -5828,6 +5841,9 @@ void inputTask(void *arg)
 
 void handleNoteTouch(int x, int y)
 {
+    if (noteViewsOvernightLocked()) {
+        return;
+    }
     int bw, bh, gap, y0;
     layoutButtons(bw, bh, gap, y0);
     if (y >= y0) {

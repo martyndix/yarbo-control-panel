@@ -15,6 +15,7 @@ const els = {
     battery: document.getElementById('battery'),
     robotName: document.getElementById('device-name'),
     vestaboardLiveSwitch: document.getElementById('vestaboard-live-switch'),
+    vestaboardOvernightHint: document.getElementById('vestaboard-overnight-hint'),
     state: document.getElementById('state'),
     charging: document.getElementById('charging'),
     heading: document.getElementById('heading'),
@@ -11014,12 +11015,32 @@ function updateVestaboardDashboard(data) {
     }
 }
 
+function vestaboardOvernightLocked(board) {
+    return Boolean(board?.night_hours || board?.quiet_hours);
+}
+
+function applyVestaboardOvernightLock(board) {
+    const locked = vestaboardOvernightLocked(board);
+    els.vestaboardLiveSwitch?.classList.toggle('is-overnight-locked', locked);
+    els.vestaboardOvernightHint?.classList.toggle('hidden', !locked || !Boolean(board?.enabled));
+    els.vestaboardLiveSwitch?.querySelectorAll('button').forEach((btn) => {
+        btn.disabled = locked;
+        btn.setAttribute('aria-disabled', locked ? 'true' : 'false');
+        if (locked) {
+            btn.title = 'Locked during night or quiet hours';
+        } else {
+            btn.removeAttribute('title');
+        }
+    });
+}
+
 function applyVestaboardLiveSwitch(data) {
     if (!els.vestaboardLiveSwitch) return;
     const enabled = Boolean(data?.vestaboard?.enabled);
     els.vestaboardLiveSwitch.classList.toggle('hidden', !enabled);
     const extras = vestaboardExtraModules(data?.hub);
     applyVestaboardLiveChoices(extras, data?.hub?.vestaboard_live || data?.vestaboard_live || '');
+    applyVestaboardOvernightLock(enabled ? (data?.vestaboard || null) : null);
 }
 
 function applyVestaboardRotateState(board) {
@@ -11083,6 +11104,10 @@ function updateVestaboardRotateHint() {
 
 function openVestaboardRotateModal() {
     if (!els.vestaboardRotateModal) return;
+    if (els.vestaboardLiveSwitch?.classList.contains('is-overnight-locked')) {
+        showToast('Rotation is locked during night or quiet hours', 'error');
+        return;
+    }
     fillVestaboardRotateForm();
     els.vestaboardRotateModal.classList.remove('hidden');
     document.body.classList.add('modal-open');
@@ -11194,6 +11219,10 @@ function applyVestaboardLiveChoices(extras, live) {
 }
 
 async function setVestaboardLiveView(id, button) {
+    if (els.vestaboardLiveSwitch?.classList.contains('is-overnight-locked')) {
+        showToast('Live views are locked during night or quiet hours', 'error');
+        return;
+    }
     if (button) button.disabled = true;
     els.vestaboardLiveSwitch?.querySelectorAll('[data-vestaboard-live]').forEach((btn) => {
         btn.classList.toggle('is-active', btn.getAttribute('data-vestaboard-live') === id);
@@ -11221,7 +11250,9 @@ async function setVestaboardLiveView(id, button) {
         showToast(err.message || 'Could not change Vestaboard view', 'error');
         fetchStatus().catch(() => {});
     } finally {
-        if (button) button.disabled = false;
+        if (button && !els.vestaboardLiveSwitch?.classList.contains('is-overnight-locked')) {
+            button.disabled = false;
+        }
     }
 }
 
