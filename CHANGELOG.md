@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.264] - 2026-11-12
+
+### Fixed
+- **PaperMono remote / Panel URL subdomain:** opening Settings from a cert-gated public hostname no longer fills Panel URL with that subdomain (`http://….ch:8080`). Panel URL must be the Pi’s LAN IP for home Wi‑Fi. Travel Wi‑Fi keeps using Tailscale Funnel (`*.ts.net`); choosing a custom HTTPS URL no longer turns Funnel off, and tablets prefer the Funnel origin so they are not sent a browser client-certificate site they cannot use.
+
 ## [4.0.263] - 2026-11-12
 
 ### Fixed

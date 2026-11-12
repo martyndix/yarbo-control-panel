@@ -297,4 +297,68 @@ foreach (['auth_url', 'funnel_enable_url', 'needs_funnel_acl', 'backend'] as $ke
     }
 }
 
+if (!Yarbo\YarboPaperRemote::originLooksLikeFunnel('https://pi.tail1234.ts.net')) {
+    fwrite(STDERR, "ts.net should look like Funnel\n");
+    exit(1);
+}
+if (Yarbo\YarboPaperRemote::originLooksLikeFunnel('https://28lpc.mjdix.ch')) {
+    fwrite(STDERR, "public subdomain must not look like Funnel\n");
+    exit(1);
+}
+if (!Yarbo\YarboPaperRemote::panelUrlLooksLan('http://192.168.1.50:8080')) {
+    fwrite(STDERR, "private IP panel URL should look LAN\n");
+    exit(1);
+}
+if (Yarbo\YarboPaperRemote::panelUrlLooksLan('http://28lpc.mjdix.ch:8080')) {
+    fwrite(STDERR, "public subdomain panel URL must not look LAN\n");
+    exit(1);
+}
+
+file_put_contents($root . '/data/paper-remote.json', json_encode([
+    'enabled' => true,
+    'provider' => 'custom',
+    'origin' => 'https://28lpc.mjdix.ch',
+    'funnel_origin' => 'https://pi.tail1234.ts.net',
+], JSON_UNESCAPED_SLASHES));
+$prefer = new Yarbo\YarboPaperRemote($root);
+if ($prefer->tabletOrigin() !== 'https://pi.tail1234.ts.net') {
+    fwrite(STDERR, 'tabletOrigin must prefer Funnel over cert subdomain got ' . $prefer->tabletOrigin() . "\n");
+    exit(1);
+}
+
+$phpSrc = (string) file_get_contents(__DIR__ . '/../src/YarboPaperRemote.php');
+if (!str_contains($phpSrc, 'Keep Funnel + the path-limited gate even when the form shows a custom')) {
+    fwrite(STDERR, "custom provider must not tear Funnel down\n");
+    exit(1);
+}
+if (!str_contains($js, 'paperPanelUrlLooksLan') || !str_contains($js, 'suggested_panel_url')) {
+    fwrite(STDERR, "JS must prefer LAN suggested panel URL\n");
+    exit(1);
+}
+if (!str_contains($html, 'not your public subdomain')) {
+    fwrite(STDERR, "settings panel URL label must warn against public subdomain\n");
+    exit(1);
+}
+if (!str_contains($change, '## [4.0.264]')) {
+    fwrite(STDERR, "changelog 4.0.264 missing\n");
+    exit(1);
+}
+
+$devicesBad = new Yarbo\YarboPaperDevice($root);
+$kitBad = $devicesBad->setupKit([
+    'kind' => 'papermono',
+    'wifi_ssid' => 'Home',
+    'wifi_password' => 'x',
+    'panel_url' => 'http://28lpc.mjdix.ch:8080',
+    'name' => 'Kitchen',
+]);
+if (($kitBad['ok'] ?? true) === true) {
+    fwrite(STDERR, "setup kit must reject public subdomain panel URL\n");
+    exit(1);
+}
+if (!str_contains((string) ($kitBad['error'] ?? ''), 'LAN')) {
+    fwrite(STDERR, 'setup kit error should mention LAN: ' . json_encode($kitBad) . "\n");
+    exit(1);
+}
+
 echo "ok\n";

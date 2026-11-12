@@ -1419,11 +1419,12 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <input type="password" id="papermono-wifi-password" name="papermono_wifi_password" autocomplete="new-password" placeholder="2.4 GHz only — these tablets have no 5 GHz">
                             </label>
                             <label class="settings-field">
-                                <span class="label">Panel URL (this server, as the tablet will reach it on the LAN)</span>
+                                <span class="label">Panel URL (this Pi’s LAN address — not your public subdomain)</span>
                                 <input type="url" id="papermono-panel-url" name="papermono_panel_url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:8080">
                             </label>
+                            <p class="hint" id="papermono-panel-url-hint">Use the Pi’s home Wi‑Fi IP, for example <code>http://192.168.1.50:8080</code>. A public hostname (even on port 8080) is for browsers only and will not help tablets on travel Wi‑Fi — and if that hostname needs a client certificate, PaperMono cannot use it.</p>
                             <h4 class="settings-subtitle">Remote access</h4>
-                            <p class="hint">Turn this on if you take a tablet to another Wi-Fi. On the home LAN it still uses the Panel URL above first. Away, it falls back to HTTPS. The tunnel only exposes the tablet API (<code>/api/device.php</code>), not Settings. Tablets show a small <strong>R</strong> when they are on that remote URL. After an update, queue a Wi-Fi firmware update so existing tablets learn the new URL.</p>
+                            <p class="hint">Turn this on if you take a tablet to another Wi-Fi. Home Wi‑Fi still uses the Panel URL above first. Away, tablets use <strong>Tailscale Funnel</strong> (HTTPS <code>*.ts.net</code>) — not a browser subdomain that requires a client certificate. The tunnel only exposes the tablet API (<code>/api/device.php</code>), not Settings. Tablets show a small <strong>R</strong> when they are on Funnel. After changing Funnel, queue a Wi-Fi firmware update so existing tablets learn the URL.</p>
                             <label class="settings-checkbox"><input type="checkbox" id="papermono-remote-enabled"><span>Allow tablets to reach this panel from another network</span></label>
                             <div class="papermono-kind-switch paper-remote-provider" role="radiogroup" aria-label="Remote access method">
                                 <label class="papermono-kind-card is-active">

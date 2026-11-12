@@ -128,6 +128,7 @@ final class YarboPaperDevice
             'web_client' => $this->publicDevice($this->webClient()),
             'prefs' => $this->publicPrefs(),
             'paper_remote' => (new YarboPaperRemote($this->projectRoot))->publicView(),
+            'suggested_panel_url' => YarboPaperRemote::suggestLanPanelUrl(),
         ] + $this->logoPublicView();
     }
 
@@ -2709,9 +2710,11 @@ final class YarboPaperDevice
         if ($ssid === '') {
             return ['ok' => false, 'error' => 'Wi-Fi name (SSID) is required.'];
         }
-        if ($panelUrl === '' || !preg_match('#^https?://#i', $panelUrl)) {
-            return ['ok' => false, 'error' => 'Panel URL must start with http:// or https://'];
+        $panelCheck = $this->normalizeCompanionPanelUrl($panelUrl);
+        if (!($panelCheck['ok'] ?? false)) {
+            return $panelCheck;
         }
+        $panelUrl = (string) $panelCheck['panel_url'];
 
         $builtNow = false;
         if ($this->firmwareNeedsBuild($kind)) {
@@ -2762,6 +2765,11 @@ final class YarboPaperDevice
         if ($port === '' || $ssid === '' || $panelUrl === '') {
             return ['ok' => false, 'error' => 'USB port, Wi-Fi name, and panel URL are required.'];
         }
+        $panelCheck = $this->normalizeCompanionPanelUrl($panelUrl);
+        if (!($panelCheck['ok'] ?? false)) {
+            return $panelCheck;
+        }
+        $panelUrl = (string) $panelCheck['panel_url'];
 
         if ($token === '') {
             $device = $this->register(['name' => $name, 'kind' => $kind]);
@@ -2810,19 +2818,11 @@ final class YarboPaperDevice
         if ($ssid === '') {
             return ['ok' => false, 'error' => 'Wi-Fi name (SSID) is required.'];
         }
-        if ($panelUrl === '' || !preg_match('#^https?://#i', $panelUrl)) {
-            return ['ok' => false, 'error' => 'Panel URL must start with http:// or https://'];
+        $panelCheck = $this->normalizeCompanionPanelUrl($panelUrl);
+        if (!($panelCheck['ok'] ?? false)) {
+            return $panelCheck;
         }
-        if (preg_match('#^https?://(localhost|127\.0\.0\.1)(:|/|$)#i', $panelUrl)) {
-            return [
-                'ok' => false,
-                'error' => 'Panel URL must be how the tablet will reach this server at the site, not localhost.',
-            ];
-        }
-        // Browser HTTPS :8443 is self-signed. Tablets need HTTP :8080 on the LAN.
-        if (preg_match('#^https://([^/:]+):8443$#i', $panelUrl, $httpsMatch) === 1) {
-            $panelUrl = 'http://' . $httpsMatch[1] . ':8080';
-        }
+        $panelUrl = (string) $panelCheck['panel_url'];
 
         $builtNow = false;
         if ($this->firmwareNeedsBuild($kind)) {
@@ -2927,6 +2927,41 @@ final class YarboPaperDevice
             'kind' => $kind,
             'label' => $label,
         ];
+    }
+
+    /**
+     * Panel URL for USB flash / home Wi-Fi — LAN only (not a public browser subdomain).
+     *
+     * @return array{ok: bool, panel_url?: string, error?: string}
+     */
+    private function normalizeCompanionPanelUrl(string $panelUrl): array
+    {
+        $panelUrl = rtrim(trim($panelUrl), '/');
+        if ($panelUrl === '' || !preg_match('#^https?://#i', $panelUrl)) {
+            return ['ok' => false, 'error' => 'Panel URL must start with http:// or https://'];
+        }
+        if (preg_match('#^https?://(localhost|127\.0\.0\.1)(:|/|$)#i', $panelUrl)) {
+            return [
+                'ok' => false,
+                'error' => 'Panel URL must be how the tablet will reach this server at the site, not localhost.',
+            ];
+        }
+        // Browser HTTPS :8443 is self-signed. Tablets need HTTP :8080 on the LAN.
+        if (preg_match('#^https://([^/:]+):8443$#i', $panelUrl, $httpsMatch) === 1) {
+            $panelUrl = 'http://' . $httpsMatch[1] . ':8080';
+        }
+        if (!YarboPaperRemote::panelUrlLooksLan($panelUrl)) {
+            $suggest = YarboPaperRemote::suggestLanPanelUrl();
+
+            return [
+                'ok' => false,
+                'error' => 'Panel URL must be this Pi on the home LAN (for example '
+                    . $suggest
+                    . '), not a public subdomain. Remote travel Wi-Fi uses Tailscale Funnel under Remote access — tablets cannot use a browser client-certificate hostname.',
+            ];
+        }
+
+        return ['ok' => true, 'panel_url' => $panelUrl];
     }
 
     /**

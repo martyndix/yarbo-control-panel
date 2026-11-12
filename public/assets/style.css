@@ -885,6 +885,10 @@ body.modal-open {
     color: var(--muted);
 }
 
+.hint.is-warning {
+    color: #b45309;
+}
+
 .settings-page-pane .hint {
     margin: 0;
 }

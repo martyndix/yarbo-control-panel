@@ -87,7 +87,7 @@ On the **same machine that runs the panel**:
 4. Refresh USB ports and select the PaperMono serial device. If the list fails because `pyserial` / `esptool` are missing, click **Install USB tools**.
 5. Enter:
    - Wi-Fi SSID and password (**2.4 GHz only**)
-   - Panel URL as the tablet will reach it (for example `http://192.168.1.50:8080`, not `localhost`)
+   - Panel URL as the tablet will reach it on the **home LAN** (for example `http://192.168.1.50:8080`, not `localhost` and not a public subdomain / client-certificate hostname)
    - A device name
    - Optional lock-screen logo (PNG/JPEG). Preview shows on the mocks; the tablet fetches it on the next Wi-Fi poll (no reflash).
 6. Click **Flash firmware & send Wi-Fi**. Leave Settings open. Flash will build first if the binary is missing or stale.
@@ -103,7 +103,7 @@ The kit is a **factory flash image** at `0x0` (bootloader, partitions, and app) 
 **On the panel (any browser that can reach Settings):**
 
 1. Open **Settings → E-paper companions** and leave **PaperMono** selected.
-2. Enter the **site** 2.4 GHz SSID and password, the panel URL as the tablet will reach the Pi (for example `http://192.168.1.50:8080`, not `localhost`), and a device name.
+2. Enter the **site** 2.4 GHz SSID and password, the panel URL as the tablet will reach the Pi on the home LAN (for example `http://192.168.1.50:8080`, not `localhost`, not a public subdomain), and a device name.
 3. Click **Download PaperMono USB setup kit**. The panel builds firmware if needed and registers a pairing token. Treat the zip as a secret (Wi-Fi password + token).
 4. If you never flash that zip, revoke the new row in the paired list.
 
