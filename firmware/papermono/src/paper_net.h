@@ -109,7 +109,7 @@ inline void paperNetAddIdentityHeaders(HTTPClient &http)
     http.addHeader("X-Yarbo-Paper-Net", paperNetLanReachable() ? "home" : "travel");
 }
 
-inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs = 8000)
+inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs = 12000)
 {
     // Do not clear usingRemote here — a failed poll would hide the R badge
     // between successful Funnel hits.
@@ -138,7 +138,7 @@ inline int paperNetGet(HTTPClient &http, const String &pathQuery, int remoteMs =
     return -1;
 }
 
-inline int paperNetPost(HTTPClient &http, const String &pathQuery, const String &payload, int remoteMs = 8000)
+inline int paperNetPost(HTTPClient &http, const String &pathQuery, const String &payload, int remoteMs = 12000)
 {
     int lanMs = remoteMs;
     if (paperNetLanReachable() && paperNetBeginBase(http, panelUrl, pathQuery, lanMs)) {

@@ -305,8 +305,12 @@ final class YarboMqttAgentClient
      *
      * @return array<string, mixed>
      */
-    public function telemetry(float $timeoutSeconds = 4.0, bool $wifi = true, bool $preferCache = false): array
-    {
+    public function telemetry(
+        float $timeoutSeconds = 4.0,
+        bool $wifi = true,
+        bool $preferCache = false,
+        bool $autoStart = true,
+    ): array {
         $payload = [
             'op' => 'telemetry',
             'timeout' => $timeoutSeconds,
@@ -320,7 +324,7 @@ final class YarboMqttAgentClient
             ? max(3.0, $timeoutSeconds + 1.0)
             : max(12.0, $timeoutSeconds + 6.0);
 
-        return $this->request($payload, $socketWait);
+        return $this->request($payload, $socketWait, $autoStart);
     }
 
     /**

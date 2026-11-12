@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.262] - 2026-11-12
+
+### Fixed
+- **Remote 504 / PaperMono no R / blank Vestaboard overnight:** companion compact no longer blocks on MQTT agent spawn (Funnel tablets only wait ~8–12s), and night-hours compact no longer re-scans UniFi doors on every poll. That hang left tablets Offline without an **R**, wiped the Note preview, and queued the browser into gateway 504s. Firmware **0.1.91** also gives Funnel a slightly longer HTTP budget (Wi-Fi Update after this panel version).
+
 ## [4.0.261] - 2026-11-12
 
 ### Fixed

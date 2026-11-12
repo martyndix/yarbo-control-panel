@@ -2846,7 +2846,9 @@ final class YarboVestaboard
      */
     public function nightLayout(?bool $forceOpen = null, ?string $forceKind = null): array
     {
-        $opens = $this->nightOpenContacts();
+        // When the caller already knows secure vs open (PaperMono compact), skip the
+        // UniFi door scan — lockableDoors() on every poll was tipping Funnel past 8s.
+        $opens = $forceOpen === false ? [] : $this->nightOpenContacts();
         $open = $forceOpen ?? ($opens !== []);
         if ($open) {
             if ($opens === []) {

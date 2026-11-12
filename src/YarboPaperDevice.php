@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.90';
+    public const FIRMWARE_VERSION = '0.1.91';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.28-colour';
     public const OTA_ONLINE_MONO_S = 120;
@@ -1252,7 +1252,13 @@ final class YarboPaperDevice
         }
         $agent = YarboMqttAgentClient::fromEnv();
         // Prefer cached last_raw so companion + Vestaboard fit the tablet HTTP budget.
-        $result = $agent->telemetry(2.0, false, true);
+        // Never spawn/restart the MQTT agent here — Funnel tablets only wait ~8s, and a
+        // hung ensureStarted() left them with no R, a blank Vestaboard, and Offline.
+        try {
+            $result = $agent->telemetry(2.0, false, true, false);
+        } catch (\Throwable $e) {
+            $result = ['ok' => false, 'error' => $e->getMessage()];
+        }
         $raw = $result['raw'] ?? null;
         if (!($result['ok'] ?? false) || !is_array($raw) || $raw === []) {
             $mqttError = trim((string) ($result['error'] ?? 'MQTT not connected'));
@@ -1622,7 +1628,8 @@ final class YarboPaperDevice
                 $codes = $onBoard;
                 $lines = YarboVestaboard::linesFromCodes($onBoard);
             } elseif ($night) {
-                $layout = $vbObj->nightLayout();
+                // Secure preview until the watcher posts — do not scan UniFi here.
+                $layout = $vbObj->nightLayout(false);
                 $codes = YarboVestaboard::normalizeLiveCodes($layout['codes'] ?? null);
                 $lines = is_array($layout['lines'] ?? null) ? array_values($layout['lines']) : null;
             } elseif ($quiet) {
@@ -1665,12 +1672,15 @@ final class YarboPaperDevice
         } elseif ($quiet) {
             $mode = 'quiet';
         }
+        // Prefer the watcher sticky / already-composed layout — do not re-scan UniFi
+        // doors on every compact (that blocked Funnel tablets overnight).
         $nightOpen = false;
         if ($night) {
-            try {
-                $nightOpen = $vbObj->nightOpenContacts() !== [];
-            } catch (\Throwable) {
-                $nightOpen = false;
+            if (array_key_exists('night_open', $vb)) {
+                $nightOpen = !empty($vb['night_open']);
+            } elseif (is_array($lines) && isset($lines[2]) && is_string($lines[2])) {
+                $row2 = strtoupper($lines[2]);
+                $nightOpen = str_contains($row2, 'OPEN') || str_contains($row2, 'DOOR') || str_contains($row2, 'WINDOW');
             }
         }
 

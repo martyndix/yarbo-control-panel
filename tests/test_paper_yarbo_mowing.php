@@ -65,8 +65,8 @@ $agent = (string) file_get_contents(dirname(__DIR__) . '/scripts/mqtt_agent.py')
 $mqtt = (string) file_get_contents(dirname(__DIR__) . '/src/YarboMqttAgentClient.php');
 $home = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.90"'), 'firmware 0.1.90');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.90';"), 'panel pin 0.1.90');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.91"'), 'firmware 0.1.91');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.91';"), 'panel pin 0.1.91');
 assert_true(str_contains($fw, 'PAPERMONO_PAGE_HOME || page == PAPERMONO_PAGE_STATUS'), 'HOME is a Yarbo page');
 assert_true(str_contains($fw, 'if (pageEnabled(PAPERMONO_PAGE_HOME)) return PAPERMONO_PAGE_HOME;'), 'Yarbo opens HOME with DOCK');
 assert_true(str_contains($fw, 'drawButton(16 + bw + gap, y0 + bh + gap, bw, bh, "PLANS", false);'), 'HOME shows PLANS');
@@ -77,7 +77,7 @@ assert_true(str_contains($fw, "if (x >= 16 && x <= 136 && y >= 108 && y <= 150) 
 assert_true(str_contains($fw, 'return 160;'), 'Plans list leaves room under BACK');
 assert_true(str_contains($fw, 'paperNetGet(http, url, 20000)'), 'compact allows 20s');
 assert_true(str_contains($net, 'int lanMs = remoteMs;'), 'LAN uses full HTTP budget');
-assert_true(str_contains($php, 'telemetry(2.0, false, true)'), 'compact prefers cached telemetry');
+assert_true(str_contains($php, 'telemetry(2.0, false, true, false)'), 'compact prefers cached telemetry');
 assert_true(str_contains($php, 'dashboardPayload(false)'), 'compact does not refresh Powerwall');
 assert_true(str_contains($mqtt, 'preferCache'), 'MQTT client prefer_cache');
 assert_true(str_contains($agent, 'prefer_cache'), 'MQTT agent prefer_cache');
