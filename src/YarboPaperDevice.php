@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.89';
+    public const FIRMWARE_VERSION = '0.1.90';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.28-colour';
     public const OTA_ONLINE_MONO_S = 120;
@@ -2002,18 +2002,33 @@ final class YarboPaperDevice
             'alert_message' => true,
             'alert_message_color' => 'cyan',
             'alert_message_flash' => false,
+            'alert_message_light' => true,
+            'alert_message_brightness' => 100,
+            'alert_message_page' => 'mail',
             'alert_yarbo' => true,
             'alert_yarbo_color' => 'red',
             'alert_yarbo_flash' => true,
+            'alert_yarbo_light' => true,
+            'alert_yarbo_brightness' => 100,
+            'alert_yarbo_page' => 'yarbo',
             'alert_lymow' => true,
             'alert_lymow_color' => 'red',
             'alert_lymow_flash' => true,
+            'alert_lymow_light' => true,
+            'alert_lymow_brightness' => 100,
+            'alert_lymow_page' => 'lymow',
             'alert_powerwall' => true,
             'alert_powerwall_color' => 'red',
             'alert_powerwall_flash' => true,
+            'alert_powerwall_light' => true,
+            'alert_powerwall_brightness' => 100,
+            'alert_powerwall_page' => 'powerwall',
             'alert_night_open' => true,
             'alert_night_open_color' => 'red',
             'alert_night_open_flash' => true,
+            'alert_night_open_light' => true,
+            'alert_night_open_brightness' => 100,
+            'alert_night_open_page' => 'note',
             'vestaboard_viewer' => false,
         ];
     }
@@ -2028,6 +2043,29 @@ final class YarboPaperDevice
         return ['red', 'green', 'blue', 'yellow', 'cyan', 'magenta', 'white'];
     }
 
+    /**
+     * Screens an alert can open (plus stay / lock).
+     *
+     * @return list<string>
+     */
+    public static function alertPages(): array
+    {
+        return [
+            'none',
+            'lock',
+            'mail',
+            'note',
+            'yarbo',
+            'lymow',
+            'powerwall',
+            'robots',
+            'access',
+            'house',
+            'heat',
+            'device',
+        ];
+    }
+
     public static function normalizeAlertColor(mixed $value, string $fallback = 'red'): string
     {
         $color = strtolower(trim((string) $value));
@@ -2039,6 +2077,34 @@ final class YarboPaperDevice
         }
 
         return $color;
+    }
+
+    public static function normalizeAlertPage(mixed $value, string $fallback = 'none'): string
+    {
+        $page = strtolower(trim((string) $value));
+        if ($page === 'radio') {
+            $page = 'mail';
+        }
+        if ($page === 'home' || $page === 'status' || $page === 'health' || $page === 'plans') {
+            $page = 'yarbo';
+        }
+        if ($page === 'board') {
+            $page = 'note';
+        }
+        if (!in_array($page, self::alertPages(), true)) {
+            return $fallback;
+        }
+
+        return $page;
+    }
+
+    public static function normalizeAlertBrightness(mixed $value, int $fallback = 100): int
+    {
+        if ($value === null || $value === '') {
+            return max(0, min(100, $fallback));
+        }
+
+        return max(0, min(100, (int) $value));
     }
 
     /**
@@ -2224,18 +2290,45 @@ final class YarboPaperDevice
                 (string) $defaults['alert_message_color']
             ),
             'alert_message_flash' => $bool($input['alert_message_flash'] ?? null, $defaults['alert_message_flash']),
+            'alert_message_light' => $bool($input['alert_message_light'] ?? null, $defaults['alert_message_light']),
+            'alert_message_brightness' => self::normalizeAlertBrightness(
+                $input['alert_message_brightness'] ?? null,
+                (int) $defaults['alert_message_brightness']
+            ),
+            'alert_message_page' => self::normalizeAlertPage(
+                $input['alert_message_page'] ?? null,
+                (string) $defaults['alert_message_page']
+            ),
             'alert_yarbo' => $bool($input['alert_yarbo'] ?? null, $defaults['alert_yarbo']),
             'alert_yarbo_color' => self::normalizeAlertColor(
                 $input['alert_yarbo_color'] ?? null,
                 (string) $defaults['alert_yarbo_color']
             ),
             'alert_yarbo_flash' => $bool($input['alert_yarbo_flash'] ?? null, $defaults['alert_yarbo_flash']),
+            'alert_yarbo_light' => $bool($input['alert_yarbo_light'] ?? null, $defaults['alert_yarbo_light']),
+            'alert_yarbo_brightness' => self::normalizeAlertBrightness(
+                $input['alert_yarbo_brightness'] ?? null,
+                (int) $defaults['alert_yarbo_brightness']
+            ),
+            'alert_yarbo_page' => self::normalizeAlertPage(
+                $input['alert_yarbo_page'] ?? null,
+                (string) $defaults['alert_yarbo_page']
+            ),
             'alert_lymow' => $bool($input['alert_lymow'] ?? null, $defaults['alert_lymow']),
             'alert_lymow_color' => self::normalizeAlertColor(
                 $input['alert_lymow_color'] ?? null,
                 (string) $defaults['alert_lymow_color']
             ),
             'alert_lymow_flash' => $bool($input['alert_lymow_flash'] ?? null, $defaults['alert_lymow_flash']),
+            'alert_lymow_light' => $bool($input['alert_lymow_light'] ?? null, $defaults['alert_lymow_light']),
+            'alert_lymow_brightness' => self::normalizeAlertBrightness(
+                $input['alert_lymow_brightness'] ?? null,
+                (int) $defaults['alert_lymow_brightness']
+            ),
+            'alert_lymow_page' => self::normalizeAlertPage(
+                $input['alert_lymow_page'] ?? null,
+                (string) $defaults['alert_lymow_page']
+            ),
             'alert_powerwall' => $bool($input['alert_powerwall'] ?? null, $defaults['alert_powerwall']),
             'alert_powerwall_color' => self::normalizeAlertColor(
                 $input['alert_powerwall_color'] ?? null,
@@ -2245,6 +2338,18 @@ final class YarboPaperDevice
                 $input['alert_powerwall_flash'] ?? null,
                 $defaults['alert_powerwall_flash']
             ),
+            'alert_powerwall_light' => $bool(
+                $input['alert_powerwall_light'] ?? null,
+                $defaults['alert_powerwall_light']
+            ),
+            'alert_powerwall_brightness' => self::normalizeAlertBrightness(
+                $input['alert_powerwall_brightness'] ?? null,
+                (int) $defaults['alert_powerwall_brightness']
+            ),
+            'alert_powerwall_page' => self::normalizeAlertPage(
+                $input['alert_powerwall_page'] ?? null,
+                (string) $defaults['alert_powerwall_page']
+            ),
             'alert_night_open' => $bool($input['alert_night_open'] ?? null, $defaults['alert_night_open']),
             'alert_night_open_color' => self::normalizeAlertColor(
                 $input['alert_night_open_color'] ?? null,
@@ -2253,6 +2358,18 @@ final class YarboPaperDevice
             'alert_night_open_flash' => $bool(
                 $input['alert_night_open_flash'] ?? null,
                 $defaults['alert_night_open_flash']
+            ),
+            'alert_night_open_light' => $bool(
+                $input['alert_night_open_light'] ?? null,
+                $defaults['alert_night_open_light']
+            ),
+            'alert_night_open_brightness' => self::normalizeAlertBrightness(
+                $input['alert_night_open_brightness'] ?? null,
+                (int) $defaults['alert_night_open_brightness']
+            ),
+            'alert_night_open_page' => self::normalizeAlertPage(
+                $input['alert_night_open_page'] ?? null,
+                (string) $defaults['alert_night_open_page']
             ),
             'vestaboard_viewer' => $bool($input['vestaboard_viewer'] ?? null, $defaults['vestaboard_viewer']),
         ];
