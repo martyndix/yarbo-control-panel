@@ -174,7 +174,7 @@ foreach ([
     'Do not clear usingRemote here',
     'X-Yarbo-Paper-Net',
     'paperNetAddIdentityHeaders',
-    '#define PAPERMONO_FW_VERSION "0.1.92"',
+    '#define PAPERMONO_FW_VERSION "0.1.93"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {

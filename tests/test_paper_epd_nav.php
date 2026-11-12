@@ -17,8 +17,8 @@ function assert_true(bool $ok, string $message): void
     }
 }
 
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.92"'), 'firmware 0.1.92');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.92';"), 'panel firmware pin 0.1.92');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.93"'), 'firmware 0.1.93');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.93';"), 'panel firmware pin 0.1.93');
 assert_true(str_contains($fw, 'void waitEpdReady()'), 'wait for e-paper BUSY');
 assert_true(str_contains($fw, 'void serviceTouchQueue()'), 'touch handled as a queue');
 if (!preg_match('/void waitEpdReady\(\)\n\{\n(?:.*\n)*?\}\n\n/', $fw, $wait)) {
@@ -60,7 +60,7 @@ assert_true(str_contains($fw, 'never start background HTTP while the user is tap
 assert_true(str_contains($fw, 'PAPERMONO_EPD_MIN_GAP_MS'), 'beginEpdFrame enforces refresh gap');
 assert_true(str_contains($ver, '#define PAPERMONO_EPD_MIN_GAP_MS'), 'gap define in version.h');
 assert_true(str_contains($docs, 'A/B is taken while the panel is still refreshing'), 'docs mention A/B during refresh');
-assert_true(str_contains($docs, '0.1.92'), 'docs mention current firmware');
+assert_true(str_contains($docs, '0.1.93'), 'docs mention current firmware');
 assert_true(str_contains($docs, 'NIGHT MODE'), 'docs mention night mode on NOTE');
 assert_true(str_contains($change, '## [4.0.208]'), 'changelog 4.0.208');
 assert_true(str_contains($change, '## [4.0.207]'), 'changelog 4.0.207');

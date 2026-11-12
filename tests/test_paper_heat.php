@@ -213,8 +213,8 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_HEAT 13'), 'heat page id');
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_COUNT 14'), 'page count includes HEAT');
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.92"'), 'firmware 0.1.92');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.92';"), 'panel pin 0.1.92');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.93"'), 'firmware 0.1.93');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.93';"), 'panel pin 0.1.93');
 assert_true(str_contains($homePhp, 'function paperHeatItems'), 'paper HEAT helper');
 assert_true(str_contains($homePhp, 'public const PAPER_HEAT_MAX = 12;'), 'panel sends up to 12 HEAT items');
 assert_true(str_contains($fw, 'void drawHeatPage(bool forceFull)'), 'firmware HEAT page');

@@ -3237,9 +3237,13 @@ void updateAlertPresentation(bool forceNav)
 
     if (key.length() == 0) {
         bool hadHold = alertHoldBrightness >= 0;
+        bool hadNav = lastAlertNavKey.length() > 0;
         alertHoldBrightness = -1;
-        if (lastAlertNavKey.length()) {
+        if (hadNav) {
             lastAlertNavKey = "";
+            // Night/error alerts navigate to a destination screen — return to lock
+            // when the condition clears (door closed, error gone, message read).
+            enterLock();
         }
         if (hadHold && lightOn) {
             applyFrontlight(true);
