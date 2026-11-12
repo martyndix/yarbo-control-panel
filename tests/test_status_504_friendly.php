@@ -21,7 +21,7 @@ assert_true(str_contains($js, 'isGatewayTimeoutError'), 'soft gateway timeout he
 assert_true(str_contains($js, 'Home is taking longer than usual'), 'home keeps retrying without diagnostic nag');
 
 $status = (string) file_get_contents(__DIR__ . '/../public/api/status.php');
-assert_true(str_contains($status, 'telemetry(2.5, true, true)'), 'status prefers cached telemetry');
+assert_true(str_contains($status, 'telemetry(2.5, true, true, false)'), 'status prefers cached telemetry');
 assert_true(!str_contains($status, 'requireRunning'), 'status does not block on agent spawn');
 assert_true(str_contains($status, 'hub_status_extras(false)'), 'status skips live Powerwall refresh');
 
@@ -31,5 +31,10 @@ assert_true(str_contains($vb, 'vestaboardLayout(false)'), 'Powerwall Vestaboard 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.256]'), 'changelog 4.0.256');
 assert_true(str_contains($change, '## [4.0.261]'), 'changelog 4.0.261');
+assert_true(str_contains($change, '## [4.0.262]'), 'changelog 4.0.262');
+
+$paper = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
+assert_true(str_contains($paper, 'telemetry(2.0, false, true, false)'), 'compact never spawns MQTT agent');
+assert_true(str_contains($paper, 'nightLayout(false)'), 'compact night preview skips UniFi door scan');
 
 echo "ok\n";

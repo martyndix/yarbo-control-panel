@@ -1,13 +1,13 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.1.90"
+#define PAPERMONO_FW_VERSION "0.1.91"
 /* Status poll. Do not go much faster: SSD1677 must not stream partial refreshes. */
 #define PAPERMONO_LOGO_PX 160
 #define PAPERMONO_POLL_MS 15000
 /* Lock screen polls slower than unlocked pages; keep short enough for night/quiet. */
 #define PAPERMONO_LOCK_POLL_MS 20000UL
-/* Compact while locked uses a short budget so a slow Pi cannot brick touch. */
-#define PAPERMONO_LOCK_HTTP_MS 8000
+/* Compact while locked — enough headroom for Funnel without freezing touch. */
+#define PAPERMONO_LOCK_HTTP_MS 12000
 /* Minimum gap between e-paper waveforms (partial stacking mottles the panel). */
 #define PAPERMONO_EPD_MIN_GAP_MS 900UL
 /* Full quality refresh after this many fast partials. */

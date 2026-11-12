@@ -212,7 +212,7 @@ if (empty($ping['connected'])) {
 }
 
 try {
-    $result = $agent->telemetry(2.5, true, true);
+    $result = $agent->telemetry(2.5, true, true, false);
     status_from_agent($result);
 
     $error = (string) ($result['error'] ?? 'telemetry timeout');
