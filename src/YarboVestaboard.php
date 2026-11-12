@@ -512,9 +512,11 @@ final class YarboVestaboard
         if ($this->isNightHours()) {
             // Browser/Funnel status must not re-scan UniFi doors here — that blocked
             // overnight polls (HTML 504). The watcher already refreshes contacts + Note.
+            // Only mirror board_codes when they already look overnight — if the watcher
+            // is idle, board_codes can still be leftover Powerwall/Yarbo live.
             $onBoard = self::normalizeLiveCodes($config['board_codes'] ?? null);
             $nightPosted = !empty($config['night_active']);
-            if ($nightPosted && $onBoard !== null) {
+            if ($nightPosted && $onBoard !== null && $this->codesLookLikeOvernight($onBoard)) {
                 $codes = $onBoard;
                 $lines = self::linesFromCodes($codes);
                 $verb = 'NIGHT';
@@ -675,11 +677,11 @@ final class YarboVestaboard
 
         $wasQuiet = !empty($config['quiet_active']);
         $wasNight = !empty($config['night_active']);
+        // Do not call nightLayoutHash() here — that scanned UniFi on every tick
+        // (including daytime) and stalled the watcher into "background updater idle".
         $quietHash = $this->quietLayoutHash();
-        $nightHash = $this->nightLayoutHash();
         $forceResume = $wasQuiet || $wasNight
             || ((string) $config['last_hash'] === $quietHash)
-            || ((string) $config['last_hash'] === $nightHash)
             || $this->isExternalHoldExpired($config);
 
         if ($this->isNightHours()) {
@@ -718,6 +720,11 @@ final class YarboVestaboard
             $this->save(['quiet_active' => true, 'night_active' => false]);
 
             return $result;
+        }
+
+        // Leaving overnight: also force-resume when the last write was a night layout.
+        if ($wasNight || ((string) $config['last_hash'] !== '' && (string) $config['last_hash'] === $this->nightLayoutHash())) {
+            $forceResume = true;
         }
 
         $this->refreshCompanionModules();
@@ -2442,6 +2449,43 @@ final class YarboVestaboard
             : false;
 
         return $then !== false && (time() - $then) < self::EXTERNAL_HOLD_SETTLE_SECONDS;
+    }
+
+    /**
+     * True when flaps look like Night/Quiet (not a leftover live Powerwall/Yarbo page).
+     *
+     * @param list<list<int>> $codes
+     */
+    public function codesLookLikeOvernight(array $codes): bool
+    {
+        if ($this->codesLookLikeLiveStatus($codes)) {
+            return false;
+        }
+        $lines = self::linesFromCodes($codes);
+        $joined = strtoupper(trim(implode(' ', [
+            (string) ($lines[0] ?? ''),
+            (string) ($lines[1] ?? ''),
+            (string) ($lines[2] ?? ''),
+        ])));
+        foreach (['NIGHT', 'SLEEP', 'SECURE', 'QUIET', 'DOOR', 'WINDOW', 'OPEN', 'HOUSE'] as $needle) {
+            if (str_contains($joined, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * True when flaps look like this panel's live Yarbo/Powerwall/Lymow pages.
+     *
+     * @param list<list<int>> $codes
+     */
+    public function codesLookLikeLiveStatus(array $codes): bool
+    {
+        return $this->codesLookLikeOwnPowerwall($codes)
+            || $this->codesLookLikeOwnLymow($codes)
+            || $this->codesLookLikeOwnBatteries($codes);
     }
 
     /**

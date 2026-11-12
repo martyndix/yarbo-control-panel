@@ -33,6 +33,7 @@ assert_true(str_contains($change, '## [4.0.256]'), 'changelog 4.0.256');
 assert_true(str_contains($change, '## [4.0.261]'), 'changelog 4.0.261');
 assert_true(str_contains($change, '## [4.0.262]'), 'changelog 4.0.262');
 assert_true(str_contains($change, '## [4.0.263]'), 'changelog 4.0.263');
+assert_true(str_contains($change, '## [4.0.265]'), 'changelog 4.0.265');
 
 $paper = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
 assert_true(str_contains($paper, 'telemetry(2.0, false, true, false)'), 'compact never spawns MQTT agent');

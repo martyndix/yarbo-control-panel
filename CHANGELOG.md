@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.265] - 2026-11-12
+
+### Fixed
+- **PaperMono remote online then offline:** compact no longer pushes a browser client-certificate subdomain as `remote_url` (that overwrote the tablet’s stored Funnel URL after one successful poll). Tablets only receive Tailscale Funnel (`*.ts.net`); firmware **0.1.92** also refuses to replace a stored Funnel remurl with a non-Funnel host.
+- **Night hours still showing Powerwall:** when the Vestaboard watcher was idle, sticky `night_active` could mirror leftover live Powerwall flaps while the UI said night mode. Preview/compact now keep the overnight layout unless the board already looks like night/quiet, and the watcher no longer runs a daytime UniFi `nightLayoutHash()` scan that stalled it into “background updater idle”.
+
 ## [4.0.264] - 2026-11-12
 
 ### Fixed

@@ -79,8 +79,9 @@ final class YarboPaperRemote
 
     /**
      * HTTPS origin tablets should try after LAN, or empty when remote is off.
-     * Prefers Tailscale Funnel (.ts.net). Browser-only client-cert subdomains
-     * are not usable on ESP32 tablets (Let's Encrypt CA only, no client cert).
+     * Only Tailscale Funnel (*.ts.net). Never push a browser client-certificate
+     * subdomain — that briefly worked for nothing, then overwrote remurl and
+     * left the tablet offline on the next poll.
      */
     public function tabletOrigin(): string
     {
@@ -96,9 +97,8 @@ final class YarboPaperRemote
         if ($origin !== '' && self::originLooksLikeFunnel($origin)) {
             return $origin;
         }
-        // Custom HTTPS (Cloudflare etc.) only when it is not a Funnel host —
-        // still returned for tunnels that do not require a client certificate.
-        return $origin;
+        // Omit remote_url from compact so the tablet keeps its stored Funnel URL.
+        return '';
     }
 
     public static function originLooksLikeFunnel(string $origin): bool
