@@ -758,6 +758,7 @@ final class YarboHomeAutomations
         }
         $state = $this->loadState();
         $unifi = new YarboUnifi($this->projectRoot);
+        $unifi->kickProtectEventsSubscriber();
         $errors = [];
         $sensorsAt = (int) ($state['sensors_at'] ?? 0);
         $doorsAt = (int) ($state['doors_at'] ?? 0);

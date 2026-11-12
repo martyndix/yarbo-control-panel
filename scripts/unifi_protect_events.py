@@ -4,12 +4,15 @@
 Official path: wss://{host}/proxy/protect/integration/v1/subscribe/events
 with X-API-KEY from data/unifi-config.json. Writes detection stamps for
 Home automations — no private Protect API.
+
+Protect sends {type: add|update, item: {...}} frames. Updates are often
+partial (smartDetectTypes or end only) and must be merged by event id
+before stamping cameras — otherwise person detections never land.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import os
 import socket
@@ -39,10 +42,12 @@ DETECT_TYPES = {
 LINE_TYPES = {"smartDetectLine", "smartDetectLoiterZone"}
 ZONE_TYPES = {"smartDetectZone", "smartAudioDetect"}
 MOTION_TYPES = {"motion"}
+ENVELOPE_ACTIONS = {"add", "update", "remove"}
 ACTIVE_HOLD_S = 90.0
 CONFIG_RELOAD_S = 15.0
 RECONNECT_S = 3.0
 MAX_RECONNECT_S = 60.0
+EVENT_CACHE_MAX = 400
 
 
 def log(msg: str) -> None:
@@ -84,9 +89,12 @@ def empty_cam() -> dict[str, Any]:
 class State:
     def __init__(self) -> None:
         self.cameras: dict[str, dict[str, Any]] = {}
+        self.events: dict[str, dict[str, Any]] = {}
         self.subscriber_ok = False
         self.last_error = ""
         self.dirty = True
+        self.event_hits = 0
+        self.last_event_at = 0
 
     def cam(self, native_id: str) -> dict[str, Any]:
         row = self.cameras.get(native_id)
@@ -110,6 +118,18 @@ class State:
             if changed:
                 self.dirty = True
 
+    def prune_events(self) -> None:
+        if len(self.events) <= EVENT_CACHE_MAX:
+            return
+        # Drop oldest by start time (unknown start → 0).
+        ranked = sorted(
+            self.events.items(),
+            key=lambda kv: to_epoch_s(kv[1].get("start") or kv[1].get("timestamp") or 0),
+        )
+        drop = len(self.events) - EVENT_CACHE_MAX
+        for eid, _ in ranked[:drop]:
+            self.events.pop(eid, None)
+
     def write(self, force: bool = False) -> None:
         if not self.dirty and not force:
             return
@@ -117,6 +137,8 @@ class State:
             "updated_at": int(time.time()),
             "subscriber_ok": self.subscriber_ok,
             "last_error": self.last_error,
+            "event_hits": self.event_hits,
+            "last_event_at": self.last_event_at,
             "cameras": self.cameras,
         }
         OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -124,6 +146,37 @@ class State:
         tmp.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         os.replace(tmp, OUT_PATH)
         self.dirty = False
+
+
+def load_prior_cameras(state: State) -> None:
+    """Keep last stamps across process restarts so Automations stay warm."""
+    if not OUT_PATH.is_file():
+        return
+    try:
+        decoded = json.loads(OUT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    cameras = decoded.get("cameras") if isinstance(decoded, dict) else None
+    if not isinstance(cameras, dict):
+        return
+    for native, row in cameras.items():
+        if not isinstance(row, dict):
+            continue
+        nid = str(native).strip()
+        if nid == "":
+            continue
+        merged = empty_cam()
+        merged.update({k: row.get(k, merged.get(k)) for k in merged})
+        for key in list(merged):
+            if key.endswith("_at") or key == "motion_at":
+                try:
+                    merged[key] = int(row.get(key) or 0)
+                except (TypeError, ValueError):
+                    merged[key] = 0
+            elif key in ("person", "vehicle", "animal", "package", "line_crossing", "motion"):
+                merged[key] = bool(row.get(key))
+        state.cameras[nid] = merged
+    state.dirty = True
 
 
 class ProtectWs:
@@ -278,9 +331,10 @@ def connect(host: str, api_key: str, verify_tls: bool) -> ProtectWs:
     sock = ctx.wrap_socket(raw, server_hostname=hostname)
 
     key = base64.b64encode(os.urandom(16)).decode()
+    host_header = hostname if port in (443, 80) else f"{hostname}:{port}"
     req = (
         f"GET {WS_PATH} HTTP/1.1\r\n"
-        f"Host: {hostname}\r\n"
+        f"Host: {host_header}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         f"Sec-WebSocket-Key: {key}\r\n"
@@ -325,12 +379,30 @@ def event_ended(event: dict[str, Any]) -> bool:
     return to_epoch_s(end) > 0
 
 
+def map_detect_types(raw_types: Any) -> set[str]:
+    if not isinstance(raw_types, list):
+        raw_types = [raw_types] if raw_types not in (None, "", False) else []
+    mapped: set[str] = set()
+    for item in raw_types:
+        key = DETECT_TYPES.get(str(item).strip().lower())
+        if key:
+            mapped.add(key)
+    return mapped
+
+
 def extract_events(message: Any) -> list[dict[str, Any]]:
+    """Unwrap Integration WS envelopes; keep partial update items."""
     events: list[dict[str, Any]] = []
     known = ZONE_TYPES | LINE_TYPES | MOTION_TYPES
 
     def consider(obj: Any) -> None:
         if not isinstance(obj, dict):
+            return
+        action = obj.get("type")
+        item = obj.get("item")
+        # Official envelope: { "type": "add"|"update"|"remove", "item": {…} }
+        if isinstance(action, str) and action.lower() in ENVELOPE_ACTIONS and isinstance(item, dict):
+            events.append(item)
             return
         etype = obj.get("type")
         if obj.get("modelKey") == "event" or (
@@ -340,7 +412,7 @@ def extract_events(message: Any) -> list[dict[str, Any]]:
         ):
             events.append(obj)
             return
-        for key in ("item", "event", "data", "payload", "body"):
+        for key in ("event", "data", "payload", "body"):
             if key in obj:
                 consider(obj[key])
         items = obj.get("items")
@@ -356,20 +428,68 @@ def extract_events(message: Any) -> list[dict[str, Any]]:
     return events
 
 
+def merge_event_fragment(state: State, fragment: dict[str, Any]) -> dict[str, Any]:
+    """Merge partial update frames onto the cached event by id."""
+    eid = str(fragment.get("id") or "").strip()
+    if eid == "":
+        return fragment
+    prev = state.events.get(eid)
+    if not isinstance(prev, dict):
+        merged = dict(fragment)
+        state.events[eid] = merged
+        state.prune_events()
+        return merged
+
+    merged = dict(prev)
+    for key, value in fragment.items():
+        if value is None:
+            continue
+        if key in ("smartDetectTypes", "smart_detect_types"):
+            # Prefer non-empty type lists from later frames.
+            if isinstance(value, list) and value:
+                merged["smartDetectTypes"] = value
+            elif key not in merged and "smartDetectTypes" not in merged:
+                merged[key] = value
+            continue
+        if key in ("start", "timestamp"):
+            # Keep the earliest positive start.
+            new_s = to_epoch_s(value)
+            old_s = to_epoch_s(merged.get("start") or merged.get("timestamp") or 0)
+            if new_s > 0 and (old_s <= 0 or new_s < old_s):
+                merged["start"] = new_s
+            elif old_s <= 0 and new_s > 0:
+                merged["start"] = new_s
+            continue
+        if key == "end":
+            merged["end"] = value
+            continue
+        if key in ("device", "camera", "type", "modelKey") and value not in ("", None):
+            merged[key] = value
+            continue
+        merged[key] = value
+    # Normalize alias onto smartDetectTypes.
+    if "smartDetectTypes" not in merged and isinstance(merged.get("smart_detect_types"), list):
+        merged["smartDetectTypes"] = merged["smart_detect_types"]
+    state.events[eid] = merged
+    return merged
+
+
 def apply_event(state: State, event: dict[str, Any]) -> None:
     native = str(event.get("device") or event.get("camera") or "").strip()
     if native == "":
         return
     etype = str(event.get("type") or "").strip()
-    start = to_epoch_s(event.get("start") or event.get("timestamp") or time.time())
+    start = to_epoch_s(event.get("start") or event.get("timestamp") or 0)
     ended = event_ended(event)
     row = state.cam(native)
     changed = False
+    had_detection = False
 
     if etype in MOTION_TYPES:
         if start > int(row.get("motion_at") or 0):
             row["motion_at"] = start
             changed = True
+            had_detection = True
         want = not ended
         if bool(row.get("motion")) != want:
             row["motion"] = want
@@ -379,6 +499,7 @@ def apply_event(state: State, event: dict[str, Any]) -> None:
         if start > int(row.get("detect_line_crossing_at") or 0):
             row["detect_line_crossing_at"] = start
             changed = True
+            had_detection = True
         want = not ended
         if bool(row.get("line_crossing")) != want:
             row["line_crossing"] = want
@@ -391,14 +512,7 @@ def apply_event(state: State, event: dict[str, Any]) -> None:
             changed = True
 
     if etype in ZONE_TYPES or etype in LINE_TYPES:
-        raw_types = event.get("smartDetectTypes") or event.get("smart_detect_types") or []
-        if not isinstance(raw_types, list):
-            raw_types = [raw_types] if raw_types else []
-        mapped: set[str] = set()
-        for item in raw_types:
-            key = DETECT_TYPES.get(str(item).strip())
-            if key:
-                mapped.add(key)
+        mapped = map_detect_types(event.get("smartDetectTypes") or event.get("smart_detect_types"))
         if etype in LINE_TYPES and not mapped:
             mapped.add("line_crossing")
         for key in mapped:
@@ -406,6 +520,7 @@ def apply_event(state: State, event: dict[str, Any]) -> None:
             if start > int(row.get(stamp_key) or 0):
                 row[stamp_key] = start
                 changed = True
+                had_detection = True
             want = not ended
             if bool(row.get(key)) != want:
                 row[key] = want
@@ -416,9 +531,29 @@ def apply_event(state: State, event: dict[str, Any]) -> None:
             if want:
                 row["motion"] = True
                 changed = True
+        # Zone with no types yet (common on the first add frame): still mark motion
+        # so the camera is "alive", then a later update fills person/vehicle/…
+        if etype in ZONE_TYPES and not mapped and start > 0:
+            if start > int(row.get("motion_at") or 0):
+                row["motion_at"] = start
+                changed = True
+                had_detection = True
+            if not ended and not bool(row.get("motion")):
+                row["motion"] = True
+                changed = True
 
     if changed:
         state.dirty = True
+    if had_detection or (changed and not ended):
+        state.event_hits = int(state.event_hits or 0) + 1
+        state.last_event_at = int(time.time())
+        state.dirty = True
+
+
+def ingest_message(state: State, message: Any) -> None:
+    for fragment in extract_events(message):
+        merged = merge_event_fragment(state, fragment)
+        apply_event(state, merged)
 
 
 def write_pid() -> None:
@@ -437,6 +572,9 @@ def clear_pid() -> None:
 def main() -> int:
     write_pid()
     state = State()
+    load_prior_cameras(state)
+    state.subscriber_ok = False
+    state.last_error = "starting"
     state.write(force=True)
     backoff = RECONNECT_S
     last_cfg_check = 0.0
@@ -476,8 +614,7 @@ def main() -> int:
                 while True:
                     msgs = ws.recv_messages(5.0)
                     for msg in msgs:
-                        for event in extract_events(msg):
-                            apply_event(state, event)
+                        ingest_message(state, msg)
                     state.expire_active(time.time())
                     state.write()
                     if time.time() - last_ping > 25:

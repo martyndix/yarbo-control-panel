@@ -151,9 +151,29 @@ assert_true(str_contains($index, 'data-auto-if="copy-when"'), 'Copy from When bu
 assert_true(str_contains($index, 'data-auto-if="copy-then"'), 'Copy from Then button');
 assert_true(str_contains($py, 'subscribe/events'), 'subscriber uses Integration subscribe/events');
 assert_true(str_contains($py, 'X-API-KEY'), 'subscriber uses API key');
+assert_true(str_contains($py, 'merge_event_fragment'), 'subscriber merges partial updates');
 assert_true(!str_contains($py, '/proxy/protect/api/events'), 'no private events API');
 assert_true(str_contains($panel, 'unifi_protect_events.py'), 'panel starts subscriber');
-assert_true(str_contains($change, '## [4.0.273]'), 'changelog 4.0.273');
+assert_true(str_contains($panel, 'unifi_protect_events: exited'), 'panel restarts subscriber');
+assert_true(str_contains($change, '## [4.0.276]'), 'changelog 4.0.276');
+
+$tmpPe = sys_get_temp_dir() . '/yarbo-pe-status-' . bin2hex(random_bytes(3));
+mkdir($tmpPe . '/data', 0775, true);
+file_put_contents($tmpPe . '/data/unifi-config.json', json_encode([
+    'host' => '192.168.1.1',
+    'protect_api_key' => 'test-key',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($tmpPe . '/data/unifi-protect-events.json', json_encode([
+    'updated_at' => time(),
+    'subscriber_ok' => true,
+    'last_error' => '',
+    'event_hits' => 3,
+    'last_event_at' => time() - 10,
+    'cameras' => [],
+], JSON_UNESCAPED_SLASHES));
+$pe = (new YarboUnifi($tmpPe))->protectEventsStatus();
+assert_true(!empty($pe['ok']), 'protectEventsStatus ok when subscribed: ' . json_encode($pe));
+assert_true((int) ($pe['event_hits'] ?? 0) === 3, 'event_hits surfaced');
 
 $phrase = YarboHomeAutomations::whenPhrase(
     ['type' => 'device', 'id' => 'unifi:camera:drive', 'event' => 'person'],

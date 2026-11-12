@@ -3958,8 +3958,23 @@ function renderUnifiDashboard(data, { replace = false } = {}) {
     if (status) {
         const err = data?.error || data?.config?.last_error;
         const n = (data?.devices || []).length;
+        const pe = data?.protect_events || {};
+        let peBit = '';
+        if (data?.config?.protect_api_key_set) {
+            if (pe.ok || pe.subscriber_ok) {
+                const hits = Number(pe.event_hits || 0);
+                peBit = hits > 0
+                    ? ` · detections live (${hits})`
+                    : ' · detections listening';
+            } else {
+                const peErr = String(pe.last_error || '').trim();
+                peBit = peErr
+                    ? ` · detections offline (${peErr})`
+                    : ' · detections offline';
+            }
+        }
         status.textContent = data?.ok
-            ? `UniFi: connected · ${n} device${n === 1 ? '' : 's'}`
+            ? `UniFi: connected · ${n} device${n === 1 ? '' : 's'}${peBit}`
             : `UniFi: ${err || 'not configured'}`;
     }
     const cameras = data?.cameras || [];

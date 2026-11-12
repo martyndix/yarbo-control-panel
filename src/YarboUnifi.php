@@ -44,18 +44,7 @@ final class YarboUnifi
      */
     public function protectCameraDetections(): array
     {
-        $path = $this->protectEventsPath();
-        if (!is_file($path)) {
-            return [];
-        }
-        $raw = @file_get_contents($path);
-        if ($raw === false || $raw === '') {
-            return [];
-        }
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            return [];
-        }
+        $decoded = $this->readProtectEventsFile();
         $cameras = $decoded['cameras'] ?? null;
         if (!is_array($cameras)) {
             return [];
@@ -73,6 +62,99 @@ final class YarboUnifi
         }
 
         return $out;
+    }
+
+    /**
+     * Health of the Protect Integration subscribe/events sidecar.
+     *
+     * @return array{ok: bool, subscriber_ok: bool, last_error: string, updated_at: int, last_event_at: int, event_hits: int, age_sec: int|null}
+     */
+    public function protectEventsStatus(): array
+    {
+        $decoded = $this->readProtectEventsFile();
+        $updated = (int) ($decoded['updated_at'] ?? 0);
+        $age = $updated > 0 ? max(0, time() - $updated) : null;
+        $ok = !empty($decoded['subscriber_ok']) && ($age === null || $age < 120);
+
+        return [
+            'ok' => $ok,
+            'subscriber_ok' => !empty($decoded['subscriber_ok']),
+            'last_error' => trim((string) ($decoded['last_error'] ?? '')),
+            'updated_at' => $updated,
+            'last_event_at' => (int) ($decoded['last_event_at'] ?? 0),
+            'event_hits' => (int) ($decoded['event_hits'] ?? 0),
+            'age_sec' => $age,
+        ];
+    }
+
+    /**
+     * Start the Protect events subscriber if it is not already running.
+     */
+    public function kickProtectEventsSubscriber(): void
+    {
+        if ($this->transport !== null) {
+            return;
+        }
+        $config = $this->load();
+        if ($config['host'] === '' || $config['protect_api_key'] === '') {
+            return;
+        }
+        $status = $this->protectEventsStatus();
+        if (!empty($status['subscriber_ok']) && ($status['age_sec'] === null || (int) $status['age_sec'] < 90)) {
+            return;
+        }
+        $lock = $this->projectRoot . '/data/unifi-protect-events-kick.lock';
+        if (is_file($lock) && (time() - (int) @filemtime($lock)) < 20) {
+            return;
+        }
+        @file_put_contents($lock, (string) time());
+        $helper = $this->projectRoot . '/scripts/lib/unifi_protect_events.sh';
+        if (!is_file($helper)) {
+            return;
+        }
+        $log = $this->projectRoot . '/data/unifi-protect-events.log';
+        $command = sprintf(
+            'cd %s && source %s && yarbo_ensure_unifi_protect_events %s >> %s 2>&1 < /dev/null &',
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($helper),
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($log)
+        );
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['file', $log, 'a'],
+            2 => ['file', $log, 'a'],
+        ];
+        $process = @proc_open(
+            ['bash', '-c', $command],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot
+        );
+        if (is_resource($process)) {
+            if (isset($pipes[0]) && is_resource($pipes[0])) {
+                fclose($pipes[0]);
+            }
+            proc_close($process);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function readProtectEventsFile(): array
+    {
+        $path = $this->protectEventsPath();
+        if (!is_file($path)) {
+            return [];
+        }
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     /**
@@ -992,12 +1074,15 @@ final class YarboUnifi
         }
         $show = $config['show_on_home'];
 
+        $this->kickProtectEventsSubscriber();
+        $protectEvents = $this->protectEventsStatus();
         $payload = [
             'ok' => $config['last_ok'] || $this->inventoryCount($inventory) > 0,
             'online' => $config['last_ok'],
             'error' => $config['last_error'] !== '' ? $config['last_error'] : null,
             'last_check' => $config['last_check'],
             'config' => $this->publicView(),
+            'protect_events' => $protectEvents,
             'cameras' => $inventory['cameras'],
             'lights' => $inventory['lights'],
             'sensors' => $inventory['sensors'],
@@ -1136,6 +1221,7 @@ final class YarboUnifi
      */
     public function kickInventoryRefresh(): void
     {
+        $this->kickProtectEventsSubscriber();
         $this->kickAccessDoorRefresh();
     }
 
@@ -2550,8 +2636,20 @@ final class YarboUnifi
                         $parsed = self::parseHomeId($id);
                         $native = is_array($parsed) ? (string) ($parsed['native_id'] ?? '') : '';
                     }
+                    $detect = null;
                     if ($native !== '' && isset($detections[$native])) {
-                        $row = self::applyCameraDetections($row, $detections[$native]);
+                        $detect = $detections[$native];
+                    } elseif ($native !== '') {
+                        // Protect sometimes varies id casing across inventory vs events.
+                        foreach ($detections as $detectId => $detectRow) {
+                            if (strcasecmp((string) $detectId, $native) === 0) {
+                                $detect = $detectRow;
+                                break;
+                            }
+                        }
+                    }
+                    if (is_array($detect)) {
+                        $row = self::applyCameraDetections($row, $detect);
                     }
                 }
                 $extra = ['show_on_home' => isset($show[$id])];

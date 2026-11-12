@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.276] - 2026-11-12
+
+### Fixed
+- **Camera person (and other smart) detections not firing Automations:** Protect’s Integration event stream often sends person/vehicle on a later partial `update` frame (device/type omitted). The subscriber now merges those updates by event id before stamping cameras, lowercases detect types, keeps listening across restarts, and the UniFi status line shows detections live/offline so a dead WebSocket is obvious.
+
 ## [4.0.275] - 2026-11-12
 
 ### Added

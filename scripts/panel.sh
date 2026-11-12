@@ -216,8 +216,23 @@ if [[ -n "$PROTECT_PY" && -f "${ROOT}/scripts/unifi_protect_events.py" ]]; then
   echo "==> Starting UniFi Protect events subscriber"
   mkdir -p "${ROOT}/data"
   yarbo_stop_unifi_protect_events
-  "$PROTECT_PY" "${ROOT}/scripts/unifi_protect_events.py" >> "${ROOT}/data/unifi-protect-events.log" 2>&1 &
+  (
+    while true; do
+      set +e
+      "$PROTECT_PY" "${ROOT}/scripts/unifi_protect_events.py" >> "${ROOT}/data/unifi-protect-events.log" 2>&1
+      code=$?
+      set -e
+      if [[ "$code" -eq 0 ]]; then
+        echo "unifi_protect_events: exited, restarting"
+      else
+        echo "unifi_protect_events: exited ${code}, restarting" >&2
+      fi
+      sleep 2
+    done
+  ) &
   PROTECT_EVENTS_PID=$!
+else
+  echo "==> UniFi Protect events subscriber skipped (no python3)" >&2
 fi
 
 HOMEPOD_PID=""
