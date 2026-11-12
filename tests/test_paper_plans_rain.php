@@ -32,7 +32,7 @@ assert_true(str_contains($mono, 'drawButton(cx, cmdY, cw, cmdH, "STOP"'), 'Paper
 assert_true(str_contains($mono, 'NEXT "'), 'PaperMono PREV/NEXT');
 assert_true(str_contains($mono, 'if (rainDetected)'), 'PaperMono blocks Start when raining');
 
-assert_true(str_contains($colourVer, '0.2.30-colour'), 'Paper Colour firmware 0.2.29');
+assert_true(str_contains($colourVer, '0.2.30-colour'), 'Paper Colour firmware 0.2.30');
 assert_true(str_contains($colour, 'Rain detected — cannot start a plan'), 'Paper Colour rain note');
 assert_true(str_contains($colour, 'rainDetected'), 'Paper Colour rainDetected');
 
