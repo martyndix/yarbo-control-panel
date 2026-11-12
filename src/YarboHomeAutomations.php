@@ -34,7 +34,9 @@ final class YarboHomeAutomations
     public const POWERWALL_METRICS = ['battery', 'export', 'solar', 'load'];
     public const YARBO_ID = 'yarbo';
     public const LYMOW_ID = 'lymow';
-    public const ROBOT_EVENTS = ['error', 'ok'];
+    public const ROBOT_EVENTS = ['error', 'ok', 'rain', 'dry'];
+    /** Yarbo-only rain / dry (Lymow has no rain sensor). */
+    public const YARBO_RAIN_EVENTS = ['rain', 'dry'];
     public const YARBO_COMMANDS = ['start_plan', 'return_to_dock', 'stop'];
     public const LYMOW_COMMANDS = ['start', 'pause', 'resume', 'dock', 'cancel'];
     public const HOLD_MIN_SEC = 60;
@@ -829,11 +831,13 @@ final class YarboHomeAutomations
             $result = YarboMqttAgentClient::fromEnv()->telemetry(2.0, false);
             $raw = is_array($result['raw'] ?? null) ? $result['raw'] : [];
             $online = !empty($result['ok']) && $raw !== [];
-            $parsed = $online ? YarboTelemetry::parse($raw) : [];
+            $rainSens = (new YarboRainSettings($this->projectRoot . '/data'))->sensitivity();
+            $parsed = $online ? YarboTelemetry::parse($raw, null, $rainSens) : [];
             $this->writeYarboCache([
                 'online' => $online,
                 'error_code' => $parsed['error_code'] ?? 0,
                 'power_fault' => $parsed['power_fault'] ?? 0,
+                'rain_detected' => !empty($parsed['rain_detected']),
                 'name' => trim((string) ($parsed['mqtt_robot_name'] ?? $parsed['robot_name'] ?? '')) ?: 'Yarbo',
             ]);
         } catch (\Throwable) {
@@ -956,6 +960,7 @@ final class YarboHomeAutomations
             'kind' => 'robot',
             'name' => $name,
             'error' => self::yarboErrorFromData($data),
+            'rain' => self::yarboRainFromData($data),
         ];
     }
 
@@ -993,6 +998,20 @@ final class YarboHomeAutomations
         $powerFault = (int) ($data['power_fault'] ?? 0);
 
         return $online && ($errorCode !== 0 || $powerFault > 0);
+    }
+
+    /**
+     * Same rain_detected flag as Status / Vestaboard (sensor vs Settings threshold).
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function yarboRainFromData(array $data): bool
+    {
+        if (array_key_exists('rain', $data) && is_bool($data['rain'])) {
+            return $data['rain'];
+        }
+
+        return self::truthy($data['rain_detected'] ?? false);
     }
 
     /**
@@ -1141,7 +1160,10 @@ final class YarboHomeAutomations
         if ($id !== self::YARBO_ID && $id !== self::LYMOW_ID) {
             return null;
         }
-        $event = strtolower(trim((string) ($row['event'] ?? 'error')));
+        $event = strtolower(trim((string) ($row['event'] ?? $row['state'] ?? 'error')));
+        if (in_array($event, self::YARBO_RAIN_EVENTS, true) && $id !== self::YARBO_ID) {
+            $event = 'error';
+        }
         if (!in_array($event, self::ROBOT_EVENTS, true)) {
             $event = 'error';
         }
@@ -1197,9 +1219,16 @@ final class YarboHomeAutomations
         if (!isset($prev[$id]) || !isset($curr[$id])) {
             return false;
         }
+        $event = (string) ($trigger['event'] ?? 'error');
+        if (in_array($event, self::YARBO_RAIN_EVENTS, true)) {
+            $was = !empty($prev[$id]['rain']);
+            $is = !empty($curr[$id]['rain']);
+
+            return $event === 'dry' ? ($was && !$is) : (!$was && $is);
+        }
         $was = !empty($prev[$id]['error']);
         $is = !empty($curr[$id]['error']);
-        if ((string) ($trigger['event'] ?? 'error') === 'ok') {
+        if ($event === 'ok') {
             return $was && !$is;
         }
 
@@ -1214,11 +1243,23 @@ final class YarboHomeAutomations
     {
         $id = (string) ($row['id'] ?? '');
         $snap = $curr[$id] ?? null;
-        if ($snap === null || !array_key_exists('error', $snap) || $snap['error'] === null) {
+        if ($snap === null) {
+            return false;
+        }
+        $event = (string) ($row['event'] ?? $row['state'] ?? 'error');
+        if (in_array($event, self::YARBO_RAIN_EVENTS, true)) {
+            if (!array_key_exists('rain', $snap) || $snap['rain'] === null) {
+                return false;
+            }
+            $is = !empty($snap['rain']);
+
+            return $event === 'dry' ? !$is : $is;
+        }
+        if (!array_key_exists('error', $snap) || $snap['error'] === null) {
             return false;
         }
         $is = !empty($snap['error']);
-        if ((string) ($row['event'] ?? $row['state'] ?? 'error') === 'ok') {
+        if ($event === 'ok') {
             return !$is;
         }
 
@@ -1505,9 +1546,15 @@ final class YarboHomeAutomations
         if ($type === 'robot') {
             $id = (string) ($trigger['id'] ?? '');
             $name = $names[$id] ?? ($id === self::LYMOW_ID ? 'Lymow' : 'Yarbo');
-            $event = (string) ($trigger['event'] ?? 'error') === 'ok' ? 'OK' : 'Error';
+            $event = (string) ($trigger['event'] ?? 'error');
+            $label = match ($event) {
+                'ok' => 'OK',
+                'rain' => 'Rain',
+                'dry' => 'Dry',
+                default => 'Error',
+            };
 
-            return $name . ' ' . $event;
+            return $name . ' ' . $label;
         }
         $name = $names[(string) ($trigger['id'] ?? '')] ?? 'Device';
         $event = (string) ($trigger['event'] ?? 'turns_on');
@@ -2118,6 +2165,9 @@ final class YarboHomeAutomations
                     ? (float) $row['current']
                     : (isset($row['current_a']) && is_numeric($row['current_a']) ? (float) $row['current_a'] : null),
                 'error' => array_key_exists('error', $row) ? (bool) $row['error'] : null,
+                'rain' => array_key_exists('rain', $row)
+                    ? (bool) $row['rain']
+                    : (array_key_exists('rain_detected', $row) ? (bool) $row['rain_detected'] : null),
             ];
             foreach (self::POWERWALL_METRICS as $metric) {
                 $out[$id][$metric] = isset($row[$metric]) && is_numeric($row[$metric]) ? (float) $row[$metric] : null;
@@ -3421,6 +3471,11 @@ final class YarboHomeAutomations
             $planId = $action['plan_id'] ?? '';
             if ($planId === null || $planId === '') {
                 return ['ok' => false, 'error' => 'Pick a work plan'];
+            }
+            // Match Status rain: do not kick off a plan while wet.
+            $live = $this->yarboLiveRow();
+            if ($live !== null && !empty($live['rain'])) {
+                return ['ok' => false, 'error' => 'Yarbo rain detected — start plan blocked'];
             }
         }
         if ($this->commandHandler !== null) {

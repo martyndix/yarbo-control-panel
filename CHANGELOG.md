@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.277] - 2026-11-12
+
+### Added
+- **Yarbo Rain / Dry in Automations:** When and Only if can use Yarbo **Rain** (sensor wet at/above Settings → Rain sensitivity) and **Dry** (rain cleared). Example: When Rain → Dock. Automation **Start plan** is refused while rain is detected (the robot also blocks rain starts itself).
+
 ## [4.0.276] - 2026-11-12
 
 ### Fixed

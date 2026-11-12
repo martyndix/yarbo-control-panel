@@ -7903,7 +7903,8 @@ function homeAutoWhenPhrase(trigger, names) {
     }
     if (trigger.type === 'robot') {
         const name = names[trigger.id] || (trigger.id === HOME_AUTO_LYMOW_ID ? 'Lymow' : 'Yarbo');
-        return `${name} ${trigger.event === 'ok' ? 'OK' : 'Error'}`;
+        const labels = { ok: 'OK', rain: 'Rain', dry: 'Dry', error: 'Error' };
+        return `${name} ${labels[trigger.event] || 'Error'}`;
     }
     const name = names[trigger.id] || 'Device';
     const event = trigger.event || 'turns_on';
@@ -8117,7 +8118,28 @@ function homeAutoRobotName(id) {
 
 function homeAutoRobotTrigger(id, event = 'error') {
     const robot = id === HOME_AUTO_LYMOW_ID ? HOME_AUTO_LYMOW_ID : HOME_AUTO_YARBO_ID;
-    return { type: 'robot', id: robot, event: event === 'ok' ? 'ok' : 'error' };
+    let ev = String(event || 'error');
+    if (robot === HOME_AUTO_YARBO_ID && (ev === 'rain' || ev === 'dry')) {
+        // keep
+    } else if (ev === 'ok') {
+        ev = 'ok';
+    } else {
+        ev = 'error';
+    }
+    return { type: 'robot', id: robot, event: ev };
+}
+
+function homeAutoRobotEventOptions(id, selected) {
+    const opts = [
+        ['error', 'Error'],
+        ['ok', 'OK'],
+    ];
+    if (id === HOME_AUTO_YARBO_ID) {
+        opts.push(['rain', 'Rain'], ['dry', 'Dry']);
+    }
+    return opts.map(([value, label]) =>
+        `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`
+    ).join('');
 }
 
 function homeAutoIsRobot(row) {
@@ -8830,12 +8852,11 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
     }
     if (homeAutoIsRobot(trigger)) {
         const name = homeAutoRobotName(trigger.id);
-        const event = trigger.event === 'ok' ? 'ok' : 'error';
+        const event = ['ok', 'rain', 'dry'].includes(trigger.event) ? trigger.event : 'error';
         return `<div class="auto-chip auto-chip--robot" data-auto-when ${iAttr}>
             ${escapeHtml(name)}
             <select data-auto-robot-event aria-label="${escapeHtml(name)} when">
-                <option value="error" ${event === 'error' ? 'selected' : ''}>Error</option>
-                <option value="ok" ${event === 'ok' ? 'selected' : ''}>OK</option>
+                ${homeAutoRobotEventOptions(trigger.id, event)}
             </select>
             <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
         </div>`;
@@ -8979,12 +9000,11 @@ function homeAutoThenChipHtml(action, index) {
 function homeAutoIfChipHtml(cond, index) {
     if (homeAutoIsRobot(cond)) {
         const name = homeAutoRobotName(cond.id);
-        const event = cond.event === 'ok' ? 'ok' : 'error';
+        const event = ['ok', 'rain', 'dry'].includes(cond.event) ? cond.event : 'error';
         return `<div class="auto-chip auto-chip--robot" data-auto-if-i="${index}">
             ${escapeHtml(name)}
             <select data-auto-if-robot-event aria-label="${escapeHtml(name)} only if">
-                <option value="error" ${event === 'error' ? 'selected' : ''}>Error</option>
-                <option value="ok" ${event === 'ok' ? 'selected' : ''}>OK</option>
+                ${homeAutoRobotEventOptions(cond.id, event)}
             </select>
             <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
         </div>`;
@@ -9233,7 +9253,7 @@ function homeAutoCopyWhenToIf() {
             return;
         }
         if (trigger.type === 'robot') {
-            const cond = { type: 'robot', id: trigger.id, event: trigger.event === 'ok' ? 'ok' : 'error' };
+            const cond = homeAutoRobotTrigger(trigger.id, trigger.event);
             if (homeAutoPushIfUnique(autoDraft.conditions, cond)) added += 1;
             return;
         }
@@ -9702,6 +9722,8 @@ function homeAutoTrayGroups(devices, scenes) {
         buckets.yarbo.push(
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:error`, 'Error', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:ok`, 'OK', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:rain`, 'Rain', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:dry`, 'Dry', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('yarbo', 'start_plan', 'Start plan', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('yarbo', 'return_to_dock', 'Dock', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('yarbo', 'stop', 'Stop', 'auto-chip--robot', '', 'then'),
@@ -9800,7 +9822,7 @@ function homeAutoApplyTray(kind, id, zone) {
             showToast(
                 robot === HOME_AUTO_LYMOW_ID
                     ? 'Lymow Error and OK go in When or Only if. Use Start, Pause, Resume, Dock, or Cancel in Then'
-                    : 'Yarbo Error goes in When or Only if',
+                    : 'Yarbo Error, OK, Rain, and Dry go in When or Only if',
                 'error',
             );
             return;
