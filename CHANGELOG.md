@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.282] - 2026-11-12
+
+### Changed
+- **PaperMono Plans / Lymow (firmware 0.1.95):** more chips per page — **14** plans (7×2) and **12** Lymow zones (6×2), with row height stretched to fill the panel instead of leaving a blank band under PREV/NEXT.
+
 ## [4.0.281] - 2026-11-12
 
 ### Changed

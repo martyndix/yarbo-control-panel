@@ -1969,14 +1969,27 @@ void plansClampPage()
 void plansGeom(int &cmdY, int &cmdH, int &listY, int &cellH, int &cellGap, int &cellW, int &navY)
 {
     int W = M5.Display.width();
-    // Match Lymow: commands under status, then dense two-column chips.
+    int H = M5.Display.height();
+    // Commands under status, then stretch the two-column grid to fill the panel.
     cmdY = 168;
     cmdH = 52;
-    cellH = 48;
-    cellGap = 10;
-    listY = cmdY + cmdH + 12;
-    cellW = (W - 32 - cellGap) / 2;
+    cellGap = 6;
+    listY = cmdY + cmdH + 10;
     int rows = (PAPERMONO_PLAN_VISIBLE + 1) / 2;
+    int navH = 44;
+    int bottom = H - 64; // leave strip for lastError
+    int avail = bottom - listY - navH - cellGap;
+    if (avail < rows * 40) {
+        avail = rows * 40;
+    }
+    cellH = (avail - (rows - 1) * cellGap) / rows;
+    if (cellH < 40) {
+        cellH = 40;
+    }
+    if (cellH > 56) {
+        cellH = 56;
+    }
+    cellW = (W - 32 - cellGap) / 2;
     navY = listY + rows * (cellH + cellGap);
 }
 
@@ -2822,14 +2835,29 @@ void lymowClampZonePage()
 void lymowGeom(int &cmdY, int &cmdH, int &zoneY, int &zoneH, int &zoneGap, int &zoneW, int &allY, int &navY)
 {
     int W = M5.Display.width();
+    int H = M5.Display.height();
     cmdY = 168;
     cmdH = 52;
-    allY = cmdY + cmdH + 12;
-    zoneH = 48;
-    zoneGap = 10;
+    zoneGap = 6;
+    allY = cmdY + cmdH + 10;
+    int rows = (PAPERMONO_LYMOW_ZONE_VISIBLE + 1) / 2;
+    int navH = 44;
+    int bottom = H - 64;
+    // ALL ZONES + zone rows + PREV/NEXT share the remaining height.
+    int bandRows = 1 + rows;
+    int avail = bottom - allY - navH - zoneGap;
+    if (avail < bandRows * 40) {
+        avail = bandRows * 40;
+    }
+    zoneH = (avail - (bandRows - 1) * zoneGap) / bandRows;
+    if (zoneH < 40) {
+        zoneH = 40;
+    }
+    if (zoneH > 56) {
+        zoneH = 56;
+    }
     zoneY = allY + zoneH + zoneGap;
     zoneW = (W - 32 - zoneGap) / 2;
-    int rows = (PAPERMONO_LYMOW_ZONE_VISIBLE + 1) / 2;
     navY = zoneY + rows * (zoneH + zoneGap);
 }
 
