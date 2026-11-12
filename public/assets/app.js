@@ -13482,6 +13482,20 @@ function applyPaperMenuLabels(labels) {
         const id = el.getAttribute('data-menu-label') || '';
         el.value = String(map[id] || el.getAttribute('placeholder') || '');
     });
+    applyPaperAlertPageOptionLabels(map);
+}
+
+function applyPaperAlertPageOptionLabels(labels) {
+    const map = labels && typeof labels === 'object' ? labels : paperMenuLabelsPayload();
+    document.querySelectorAll('select[data-alert-page] option[data-menu-label-for]').forEach((opt) => {
+        const menuKey = opt.getAttribute('data-menu-label-for') || '';
+        if (!menuKey) return;
+        const input = document.querySelector(`[data-menu-label="${menuKey}"]`);
+        const fromInput = input ? String(input.value || '').trim() : '';
+        const fromMap = String(map[menuKey] || '').trim();
+        const fallback = opt.getAttribute('data-default-label') || opt.textContent || menuKey;
+        opt.textContent = fromInput || fromMap || fallback;
+    });
 }
 
 function paperMenuLabelsPayload() {
@@ -17041,6 +17055,10 @@ document.getElementById('paper-menu-list')?.addEventListener('click', (event) =>
     if (!btn) return;
     const row = btn.closest('[data-menu-id]');
     movePaperMenuRow(row, btn.getAttribute('data-menu-move') || '0');
+});
+document.getElementById('paper-menu-list')?.addEventListener('input', (event) => {
+    if (!event.target?.closest?.('[data-menu-label]')) return;
+    applyPaperAlertPageOptionLabels();
 });
 document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
     input.addEventListener('change', () => {

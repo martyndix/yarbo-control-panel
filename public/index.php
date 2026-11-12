@@ -46,26 +46,32 @@ $credentialBannerSafe = htmlspecialchars($credentialBannerText, ENT_QUOTES | ENT
  */
 function papermono_alert_goto_controls(string $key, string $defaultPage, bool $lightDefault = true): string
 {
+    // value => [fallback label, menu_labels key or '' for fixed names]
     $pages = [
-        'none' => 'Stay put',
-        'lock' => 'Lock screen',
-        'mail' => 'MAIL',
-        'note' => 'NOTE',
-        'yarbo' => 'Yarbo',
-        'lymow' => 'Lymow',
-        'powerwall' => 'POWER',
-        'robots' => 'ROBOTS',
-        'access' => 'ACCESS',
-        'house' => 'HOUSE',
-        'heat' => 'HEAT',
-        'device' => 'DEVICE',
+        'none' => ['Stay put', ''],
+        'lock' => ['Lock screen', ''],
+        'mail' => ['MAIL', 'radio'],
+        'note' => ['NOTE', 'note'],
+        'yarbo' => ['Yarbo', ''],
+        'lymow' => ['Lymow', ''],
+        'powerwall' => ['POWER', 'powerwall'],
+        'robots' => ['ROBOTS', 'robots'],
+        'access' => ['ACCESS', 'access'],
+        'house' => ['HOUSE', 'house'],
+        'heat' => ['HEAT', 'heat'],
+        'device' => ['DEVICE', 'device'],
     ];
     $keySafe = htmlspecialchars($key, ENT_QUOTES, 'UTF-8');
     $lightChecked = $lightDefault ? ' checked' : '';
     $opts = '';
-    foreach ($pages as $value => $label) {
+    foreach ($pages as $value => [$label, $menuKey]) {
         $sel = $value === $defaultPage ? ' selected' : '';
-        $opts .= '<option value="' . htmlspecialchars($value, ENT_QUOTES, 'UTF-8') . '"' . $sel . '>'
+        $menuAttr = $menuKey !== ''
+            ? ' data-menu-label-for="' . htmlspecialchars($menuKey, ENT_QUOTES, 'UTF-8') . '"'
+            : '';
+        $opts .= '<option value="' . htmlspecialchars($value, ENT_QUOTES, 'UTF-8') . '"'
+            . ' data-default-label="' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '"'
+            . $menuAttr . $sel . '>'
             . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</option>';
     }
 

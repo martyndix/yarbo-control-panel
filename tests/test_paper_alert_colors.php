@@ -159,11 +159,16 @@ assert_true(str_contains($index, "papermono_alert_goto_controls('night_open'"), 
 assert_true(str_contains($index, "papermono_alert_goto_controls('message'"), 'settings has message backlight/page');
 assert_true(str_contains($index, "papermono_alert_goto_controls('yarbo'"), 'settings has yarbo backlight/page');
 assert_true(str_contains($index, 'data-alert-page='), 'settings renders page select attrs');
+assert_true(str_contains($index, 'data-menu-label-for='), 'Screen options carry menu label hooks');
+assert_true(str_contains($index, "'mail' => ['MAIL', 'radio']"), 'mail Screen uses MAIL menu label');
+assert_true(str_contains($index, "'note' => ['NOTE', 'note']"), 'note Screen uses NOTE menu label');
+assert_true(str_contains($index, "'house' => ['HOUSE', 'house']"), 'house Screen uses HOUSE menu label');
 
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 assert_true(str_contains($js, 'alert_night_open_color'), 'JS saves night colour');
 assert_true(str_contains($js, 'alert_message_flash'), 'JS saves message flash');
 assert_true(str_contains($js, 'paperAlertGotoPayload'), 'JS saves backlight/page prefs');
+assert_true(str_contains($js, 'applyPaperAlertPageOptionLabels'), 'JS applies menu names to Screen dropdown');
 
 $fw = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/main.cpp');
 assert_true(str_contains($fw, 'alert_night_open'), 'firmware reads night open pref');
@@ -182,5 +187,6 @@ assert_true(str_contains($ver, '0.1.90'), 'firmware bumped to 0.1.90');
 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.258]'), 'changelog 4.0.258');
+assert_true(str_contains($change, '## [4.0.260]'), 'changelog 4.0.260');
 
 echo "ok\n";

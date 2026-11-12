@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.260] - 2026-11-12
+
+### Changed
+- **PaperMono alert Screen names:** the Alerts “Screen” dropdown uses the same page titles you set under Menu (for example MESSAGES / VESTABOARD / HOME CONTROL), not the fixed MAIL / NOTE / HOUSE labels. Yarbo, Lymow, Stay put, and Lock screen stay as they are.
+
 ## [4.0.259] - 2026-11-12
 
 ### Fixed
