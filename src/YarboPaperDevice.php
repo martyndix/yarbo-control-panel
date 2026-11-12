@@ -16,9 +16,9 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.95';
+    public const FIRMWARE_VERSION = '0.1.96';
     public const MENU_LABEL_MAX = 20;
-    public const FIRMWARE_VERSION_COLOR = '0.2.29-colour';
+    public const FIRMWARE_VERSION_COLOR = '0.2.30-colour';
     public const OTA_ONLINE_MONO_S = 120;
     public const OTA_ONLINE_COLOR_S = 180;
     public const OTA_PENDING_TTL_S = 900;
@@ -1298,14 +1298,13 @@ final class YarboPaperDevice
             $errorLabel .= ' (power ' . $powerFault . ')';
         }
         $planName = trim((string) ($planStatus['plan_name'] ?? ''));
-        $planActivity = 'idle';
-        if (!empty($parsed['plan_running'])) {
-            $planActivity = $planName !== '' ? 'running: ' . $planName : 'running';
-        } elseif (!empty($parsed['planning_paused'])) {
-            $planActivity = 'paused';
-        } elseif (!empty($parsed['returning_to_dock'])) {
-            $planActivity = 'docking';
-        }
+        $statusLabel = self::yarboCompanionStatus($parsed, $planName);
+        $planActivity = match (true) {
+            str_starts_with($statusLabel, 'Mowing') => $statusLabel,
+            $statusLabel === 'Paused' => 'paused',
+            $statusLabel === 'Heading home' => 'docking',
+            default => strtolower($statusLabel),
+        };
 
         return [
             'ok' => true,
@@ -1313,6 +1312,7 @@ final class YarboPaperDevice
             'battery' => $parsed['battery'] ?? null,
             'charging_label' => $parsed['charging_label'] ?? 'No',
             'state' => $parsed['state'] ?? 'idle',
+            'status_label' => $statusLabel,
             'head_type_name' => $parsed['head_type_name'] ?? 'Unknown',
             'robot_name' => $parsed['robot_name'] ?? null,
             'error_code' => $errorCode,
@@ -1487,17 +1487,83 @@ final class YarboPaperDevice
     }
 
     /**
+     * Human status for PaperMono / Paper Colour (Mowing, Heading home, On dock…).
+     *
+     * @param array<string, mixed> $parsed
+     */
+    private static function yarboCompanionStatus(array $parsed, string $planName = ''): string
+    {
+        if (!empty($parsed['rain_detected'])) {
+            return 'Rain';
+        }
+        if (!empty($parsed['planning_paused'])) {
+            return 'Paused';
+        }
+        if (!empty($parsed['returning_to_dock'])) {
+            return 'Heading home';
+        }
+        if ($planName === '') {
+            $planStatus = is_array($parsed['plan_status'] ?? null) ? $parsed['plan_status'] : [];
+            $planName = trim((string) ($planStatus['plan_name'] ?? ''));
+        }
+        if (!empty($parsed['plan_running'])) {
+            return $planName !== '' ? 'Mowing · ' . self::clip($planName, 18) : 'Mowing';
+        }
+        $chg = (string) ($parsed['charging_label'] ?? 'No');
+        if ($chg === 'Full') {
+            return 'On dock · Full';
+        }
+        if ($chg === 'Yes') {
+            return 'On dock · Charging';
+        }
+        if (($parsed['state'] ?? '') === 'active') {
+            return 'Active';
+        }
+
+        return 'Idle';
+    }
+
+    /**
      * @param array<string, mixed> $ly
      */
     private function lymowCompanionState(array $ly): string
     {
-        $state = (string) ($ly['work_label'] ?? '—');
+        $base = strtoupper(trim((string) ($ly['work_label_base'] ?? '')));
+        if ($base === '') {
+            $raw = (string) ($ly['work_label'] ?? '—');
+            $base = strtoupper(trim(explode('·', $raw, 2)[0]));
+        }
+        $friendly = match ($base) {
+            'MOWING' => 'Mowing',
+            'DOCKING' => 'Heading home',
+            'CHARGE' => 'Charging',
+            'FULL' => 'On dock · Full',
+            'IDLE' => 'Idle',
+            'PAUSE' => 'Paused',
+            'WAIT' => 'Waiting',
+            'ERROR' => 'Error',
+            'REMOTE' => 'Remote',
+            'UPDATE' => 'Updating',
+            'STOP' => 'Stopped',
+            'ESCAPE' => 'Escaping',
+            default => ($base !== '' && $base !== '—')
+                ? ucwords(strtolower($base))
+                : '—',
+        };
+        $zones = '';
+        $wl = (string) ($ly['work_label'] ?? '');
+        if (str_contains($wl, '·')) {
+            $zones = trim((string) (explode('·', $wl, 2)[1] ?? ''));
+        }
         $progress = (string) ($ly['mow_progress_label'] ?? '—');
-        if ($progress !== '' && $progress !== '—') {
-            return trim($state . ' ' . $progress);
+        $out = $friendly;
+        if ($zones !== '') {
+            $out .= ' · ' . $zones;
+        } elseif ($progress !== '' && $progress !== '—' && in_array($base, ['MOWING', 'PAUSE'], true)) {
+            $out .= ' ' . $progress;
         }
 
-        return $state !== '' ? $state : '—';
+        return self::clip($out, 36);
     }
 
     /**

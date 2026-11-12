@@ -45,6 +45,7 @@ String lastError;
 int battery = -1;
 String charging = "—";
 String state = "—";
+String statusLabel = "Idle";
 String head = "—";
 int errorCode = 0;
 String errorLabel = "0";
@@ -887,7 +888,7 @@ String pageName(int page)
 
 String screenKey()
 {
-    String key = String(currentPage) + "|" + String(battery) + "|" + charging + "|" + state + "|" + head + "|"
+    String key = String(currentPage) + "|" + String(battery) + "|" + charging + "|" + state + "|" + statusLabel + "|" + head + "|"
         + errorLabel + "|" + heading + "|" + rainLabel + "|" + connectionType + "|" + connectionStatus + "|"
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
         + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planPage) + "|"
@@ -896,7 +897,7 @@ String screenKey()
         + vestaboardMode + "|" + (vestaboardNight ? "1" : "0") + "|" + (vestaboardQuiet ? "1" : "0") + "|"
         + (vestaboardOn ? "1" : "0") + "|" + (yarboOn ? "1" : "0") + "|" + (powerwallOn ? "1" : "0") + "|"
         + (lymowOn ? "1" : "0") + "|" + lymowName + "|" + String(lymowBattery) + "|" + lymowState + "|"
-        + String(lymowWorkStatus) + "|" + String(lymowZoneN) + "|" + String(lymowZonePage) + "|"
+        + lymowCharging + "|" + String(lymowWorkStatus) + "|" + String(lymowZoneN) + "|" + String(lymowZonePage) + "|"
         + String(powerwallPct) + "|" + powerwallSolar + "|" + powerwallLoad + "|"
         + powerwallGrid + "|" + powerwallBattery + "|"
         + String((int) WiFi.status()) + "|" + logoHash + "|" + String(screenLocked ? 1 : 0) + "|"
@@ -1886,8 +1887,9 @@ void drawHome(bool forceFull)
     M5.Display.drawString(bat, 16, 110);
 
     M5.Display.setTextSize(3);
-    M5.Display.drawString("Charging  " + charging, 16, 210);
-    M5.Display.drawString("State     " + state, 16, 258);
+    String st = statusLabel.length() ? statusLabel : state;
+    M5.Display.drawString(st.substring(0, 22), 16, 210);
+    M5.Display.drawString("Charge    " + charging, 16, 258);
     M5.Display.drawString("Head      " + head, 16, 306);
     M5.Display.drawString("Error     " + String(errorCode), 16, 354);
     if (lastError.length()) {
@@ -1915,8 +1917,8 @@ void drawStatusPage(bool forceFull)
     M5.Display.setTextSize(5);
     String bat = battery >= 0 ? (String(battery) + "%") : String("--");
     M5.Display.drawString(bat, 16, 108);
-    drawKv("State", state, 220);
-    drawKv("Charging", charging, 260);
+    drawKv("Status", statusLabel.length() ? statusLabel : state, 220);
+    drawKv("Charge", charging, 260);
     drawKv("Heading", heading, 300);
     drawKv("Head", head, 340);
     drawKv("Error", errorLabel, 380);
@@ -1970,8 +1972,8 @@ void plansGeom(int &cmdY, int &cmdH, int &listY, int &cellH, int &cellGap, int &
 {
     int W = M5.Display.width();
     int H = M5.Display.height();
-    // Commands under status, then stretch the two-column grid to fill the panel.
-    cmdY = 168;
+    // Commands under battery/status band, then stretch the grid to fill the panel.
+    cmdY = 192;
     cmdH = 52;
     cellGap = 6;
     listY = cmdY + cmdH + 10;
@@ -2643,17 +2645,21 @@ void drawPlansPage(bool forceFull)
     plansClampPage();
     plansGeom(cmdY, cmdH, listY, cellH, cellGap, cellW, navY);
 
+    M5.Display.setTextSize(4);
+    String bat = battery >= 0 ? (String(battery) + "%") : String("--");
+    M5.Display.drawString(bat, 16, 100);
     M5.Display.setTextSize(2);
-    String activity = planActivity.length() ? planActivity : String("idle");
+    String activity = statusLabel.length() ? statusLabel : (planActivity.length() ? planActivity : String("Idle"));
     if (activity.length() > 28) {
         activity = activity.substring(0, 28);
     }
-    M5.Display.drawString(activity, 16, 100);
+    M5.Display.drawString(activity, 16, 140);
     if (rainDetected) {
-        M5.Display.drawString("Rain detected — cannot start", 16, 128);
-        M5.Display.drawString("a plan while raining", 16, 148);
+        M5.Display.drawString("Rain detected — cannot start", 16, 164);
     } else if (plansNote.length() && planCount == 0) {
-        M5.Display.drawString(plansNote.substring(0, 28), 16, 128);
+        M5.Display.drawString(plansNote.substring(0, 28), 16, 164);
+    } else if (charging.length() && charging != "—") {
+        M5.Display.drawString("Charge  " + charging.substring(0, 18), 16, 164);
     }
 
     bool canStart = selectedPlan >= 0 && selectedPlan < planCount && !rainDetected;
@@ -2836,7 +2842,7 @@ void lymowGeom(int &cmdY, int &cmdH, int &zoneY, int &zoneH, int &zoneGap, int &
 {
     int W = M5.Display.width();
     int H = M5.Display.height();
-    cmdY = 168;
+    cmdY = 192;
     cmdH = 52;
     zoneGap = 6;
     allY = cmdY + cmdH + 10;
@@ -2882,6 +2888,17 @@ void drawLymowPage(bool forceFull)
         st = "—";
     }
     M5.Display.drawString(st.substring(0, 28), 16, 140);
+    if (lymowCharging.length() && lymowCharging != "—") {
+        String chg = lymowCharging;
+        if (chg == "Yes") {
+            chg = "Charging";
+        } else if (chg == "No") {
+            chg = "Not charging";
+        } else if (chg == "Returning") {
+            chg = "Heading home";
+        }
+        M5.Display.drawString("Charge  " + chg.substring(0, 18), 16, 164);
+    }
     drawButton(W - 16 - 110, 100, 110, 42, "REFRESH", false);
 
     bool paused = lymowPaused();
@@ -5643,6 +5660,10 @@ bool httpGetStatus()
     battery = doc["battery"] | battery;
     charging = doc["charging_label"] | charging;
     state = doc["state"] | state;
+    statusLabel = doc["status_label"] | statusLabel;
+    if (!statusLabel.length()) {
+        statusLabel = state == "active" ? String("Active") : (state.length() ? state : String("Idle"));
+    }
     head = doc["head_type_name"] | head;
     robotName = doc["robot_name"] | "";
     errorCode = doc["error_code"] | 0;

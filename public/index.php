@@ -1402,7 +1402,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <span class="papermono-kind-card-meta">Spectra 6 · no touch · buttons A / B / C</span>
                                 </label>
                             </div>
-                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.29-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B skip modules that are turned off. Tick <strong>Vestaboard viewer only</strong> (Note must be on) to boot a landscape board that fills the 600×400 panel, with the time above, larger flap letters, and the PaperMono-style battery badge (charging bolt when plugged in) at the bottom-left. If the tablet has an IMU it picks landscape left or right; otherwise A/B (or C) flips it. The two RGB LEDs go <strong>red</strong> when a device on the live Vestaboard is in error, and <strong>blue</strong> for Yarbo rain (red wins). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
+                            <p class="hint hidden" id="papermono-color-extra">Paper Colour firmware is <code>0.2.30-colour</code> in <code>firmware/papercolor/</code>. The top line follows the module: <strong>YARBO · COLOUR</strong>, <strong>POWERWALL</strong>, <strong>LYMOW</strong>, or <strong>VESTABOARD</strong>. A/B skip modules that are turned off. Tick <strong>Vestaboard viewer only</strong> (Note must be on) to boot a landscape board that fills the 600×400 panel, with the time above, larger flap letters, and the PaperMono-style battery badge (charging bolt when plugged in) at the bottom-left. If the tablet has an IMU it picks landscape left or right; otherwise A/B (or C) flips it. The two RGB LEDs go <strong>red</strong> when a device on the live Vestaboard is in error, and <strong>blue</strong> for Yarbo rain (red wins). Click <strong>Build firmware</strong> on this page before the first flash (or after a panel update).</p>
                             <p id="papermono-fw-status" class="hint">Firmware: checking…</p>
                             <label class="settings-field">
                                 <span class="label">USB serial port</span>
@@ -1636,7 +1636,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">PaperMono frontlight. Needs firmware 0.1.28 (earlier builds ignored this because LoRa init reset the light PWM).</p>
                             <fieldset class="settings-theme-fieldset">
                                 <legend class="label">Alerts</legend>
-                                <p class="hint">Colour, flash, backlight, brightness, and screen need firmware 0.1.95. Night door/window lights only while Vestaboard Night hours is active. Backlight stays at the chosen % until the error clears or the message is read.</p>
+                                <p class="hint">Colour, flash, backlight, brightness, and screen need firmware 0.1.96. Night door/window lights only while Vestaboard Night hours is active. Backlight stays at the chosen % until the error clears or the message is read.</p>
                                 <div class="papermono-alert-row" data-alert-row="message">
                                     <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer)</span></label>
                                     <div class="papermono-alert-opts">
@@ -2029,7 +2029,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="398" y="449" width="36" height="6" fill="#f4f1e8"/>
                                         <rect x="414" y="431" width="6" height="42" fill="#f4f1e8"/>
                                     </svg>
-                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.95.</figcaption>
+                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.96.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">
@@ -2196,7 +2196,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.95 / 0.2.29-colour. Missing or stale firmware builds automatically in the background after a panel update — wait until the E-paper status says built, then press <strong>Update</strong>. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the tablet is on travel Wi-Fi (not the flashed home SSID) — even if home polls sometimes use Funnel or a public subdomain. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.96 / 0.2.30-colour. Missing or stale firmware builds automatically in the background after a panel update — wait until the E-paper status says built, then press <strong>Update</strong>. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the tablet is on travel Wi-Fi (not the flashed home SSID) — even if home polls sometimes use Funnel or a public subdomain. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

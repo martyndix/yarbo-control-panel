@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.283] - 2026-11-12
+
+### Changed
+- **PaperMono / Paper Colour Yarbo + Lymow status (firmware 0.1.96 / 0.2.30-colour):** Plans and robot pages show **battery %** plus a clear status — Mowing, Heading home, On dock · Charging/Full, Idle, Paused, Rain — and a charge line. Lymow uses the same wording (was ALL-CAPS MOWING/DOCKING).
+
 ## [4.0.282] - 2026-11-12
 
 ### Changed
