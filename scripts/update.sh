@@ -388,7 +388,7 @@ fi
 
 step "Installing AirPlay packages (shairport-sync, avahi-daemon)"
 write_status "composer" "Installing AirPlay packages"
-chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" "${ROOT}/scripts/panel_airplay_watch.sh" "${ROOT}/scripts/homepod_agent.py" "${ROOT}/scripts/lib/homepod_agent.sh" "${ROOT}/scripts/lib/homepod_deps.sh" "${ROOT}/scripts/panel_homepod_ensure.sh" 2>/dev/null || true
+chmod +x "${ROOT}/scripts/lib/panel_airplay.sh" "${ROOT}/scripts/panel_airplay_ensure.sh" "${ROOT}/scripts/panel_airplay_stop.sh" "${ROOT}/scripts/panel_airplay_hook.sh" "${ROOT}/scripts/panel_airplay_bridge.php" "${ROOT}/scripts/panel_airplay_metadata.php" "${ROOT}/scripts/panel_airplay_watch.sh" "${ROOT}/scripts/homepod_agent.py" "${ROOT}/scripts/lib/homepod_agent.sh" "${ROOT}/scripts/lib/homepod_deps.sh" "${ROOT}/scripts/panel_homepod_ensure.sh" "${ROOT}/scripts/unifi_protect_events.py" "${ROOT}/scripts/lib/unifi_protect_events.sh" 2>/dev/null || true
 # shellcheck source=scripts/lib/panel_airplay.sh
 source "${ROOT}/scripts/lib/panel_airplay.sh"
 AIRPLAY_LOG="${ROOT}/data/panel-airplay.log"
@@ -465,12 +465,15 @@ source "${ROOT}/scripts/lib/mqtt_agent.sh"
 source "${ROOT}/scripts/lib/matter_agent.sh"
 # shellcheck source=scripts/lib/homepod_agent.sh
 source "${ROOT}/scripts/lib/homepod_agent.sh"
-step "Stopping MQTT, Matter, and HomePod agents so the new code can load"
-write_status "restarting" "Restarting MQTT, Matter, and HomePod agents"
+# shellcheck source=scripts/lib/unifi_protect_events.sh
+source "${ROOT}/scripts/lib/unifi_protect_events.sh"
+step "Stopping MQTT, Matter, HomePod, and Protect events agents so the new code can load"
+write_status "restarting" "Restarting MQTT, Matter, HomePod, and Protect events agents"
 yarbo_stop_mqtt_agent
 yarbo_stop_matter_agent
 yarbo_stop_homepod_agent
-step "MQTT, Matter, and HomePod agents stopped"
+yarbo_stop_unifi_protect_events
+step "MQTT, Matter, HomePod, and Protect events agents stopped"
 
 ensure_panel_sh_unit() {
   local unit_path="/etc/systemd/system/${SERVICE_NAME}.service"

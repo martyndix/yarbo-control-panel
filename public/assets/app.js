@@ -7539,6 +7539,28 @@ function homeAutoCanMotion(d) {
     return kind === 'sensor' && !homeAutoCanOpen(d);
 }
 
+function homeAutoIsCamera(d) {
+    return homeAutoKind(d) === 'camera';
+}
+
+function homeAutoCanSmartDetect(d) {
+    return homeAutoIsCamera(d);
+}
+
+function homeAutoDetectEvents() {
+    return [
+        ['person', 'person detected'],
+        ['vehicle', 'vehicle detected'],
+        ['animal', 'animal detected'],
+        ['package', 'package detected'],
+        ['line_crossing', 'line crossing'],
+    ];
+}
+
+function homeAutoIsDetectEvent(event) {
+    return ['person', 'vehicle', 'animal', 'package', 'line_crossing'].includes(String(event || ''));
+}
+
 function homeAutoCanOnOff(d) {
     return ['light', 'plug', 'switch', 'heater', 'relay', 'vacuum'].includes(homeAutoKind(d));
 }
@@ -7571,6 +7593,9 @@ function homeAutoIsElectricalPlug(d) {
 function homeAutoWhenEvents(d) {
     if (!d) return [];
     const events = [];
+    if (homeAutoCanSmartDetect(d)) {
+        events.push(...homeAutoDetectEvents());
+    }
     if (homeAutoCanMotion(d)) {
         events.push(['motion', 'motion'], ['no_motion', 'no motion for']);
     }
@@ -7750,6 +7775,9 @@ function homeAutoThenParamsHtml(d, action, cmd) {
 
 function homeAutoDefaultWhen(d) {
     if (!d) return null;
+    if (homeAutoCanSmartDetect(d)) {
+        return { type: 'device', id: d.id, event: 'person' };
+    }
     if (homeAutoCanMotion(d)) {
         return { type: 'device', id: d.id, event: 'motion' };
     }
@@ -7857,6 +7885,11 @@ function homeAutoWhenPhrase(trigger, names) {
         opens: 'opens',
         closes: 'closes',
         motion: 'motion',
+        person: 'person detected',
+        vehicle: 'vehicle detected',
+        animal: 'animal detected',
+        package: 'package detected',
+        line_crossing: 'line crossing',
         stays_on: 'on',
         stays_off: 'off',
         stays_open: 'open',
@@ -8971,15 +9004,16 @@ function homeAutoIfChipHtml(cond, index) {
         ? `<input type="number" data-auto-if-thresh value="${escapeHtml(String(cond.value ?? homeAutoThresholdFallback(threshMetric)))}" step="${homeAutoThresholdStep(threshMetric)}" aria-label="Threshold"> ${escapeHtml(threshUnit)}`
         : '';
     const withinSec = Number(cond.within_sec || 0);
-    const useWithin = state === 'motion' && withinSec > 0;
-    const withinMode = state === 'motion'
-        ? `<select data-auto-if-within-mode aria-label="Motion when">
+    const canWithin = state === 'motion' || homeAutoIsDetectEvent(state);
+    const useWithin = canWithin && withinSec > 0;
+    const withinMode = canWithin
+        ? `<select data-auto-if-within-mode aria-label="Detection when">
             <option value="now" ${!useWithin ? 'selected' : ''}>now</option>
             <option value="within" ${useWithin ? 'selected' : ''}>within last</option>
         </select>`
         : '';
     const withinParts = homeAutoDurationParts(useWithin ? withinSec : 3600);
-    const withinDur = state === 'motion'
+    const withinDur = canWithin
         ? `<span class="auto-if-within" ${useWithin ? '' : 'hidden'}>
             <input type="number" min="1" data-auto-if-within value="${withinParts.value}" aria-label="Within amount">
             <select data-auto-if-within-unit aria-label="Within unit">
@@ -9034,7 +9068,7 @@ function homeAutoReadIfWithin(chip) {
 
 function homeAutoApplyIfWithin(cond, chip) {
     if (!cond || cond.type !== 'device') return;
-    if (cond.state !== 'motion') {
+    if (cond.state !== 'motion' && !homeAutoIsDetectEvent(cond.state)) {
         delete cond.within_sec;
         return;
     }
@@ -9060,6 +9094,113 @@ function homeAutoApplyIfFor(cond, chip) {
     const forSec = homeAutoReadIfFor(chip);
     if (forSec > 0) cond.for_sec = forSec;
     else delete cond.for_sec;
+}
+
+function homeAutoWhenEventToIfState(event) {
+    const map = {
+        turns_on: 'on',
+        stays_on: 'on',
+        turns_off: 'off',
+        stays_off: 'off',
+        opens: 'open',
+        stays_open: 'open',
+        closes: 'closed',
+        stays_closed: 'closed',
+        motion: 'motion',
+        no_motion: 'no_motion',
+        person: 'person',
+        vehicle: 'vehicle',
+        animal: 'animal',
+        package: 'package',
+        line_crossing: 'line_crossing',
+    };
+    return map[String(event || '')] || '';
+}
+
+function homeAutoThenCommandToIfState(command) {
+    const cmd = String(command || '').toLowerCase();
+    if (cmd === 'on' || cmd === 'start' || cmd === 'resume' || cmd === 'mop' || cmd === 'vacuum') return 'on';
+    if (cmd === 'off' || cmd === 'stop' || cmd === 'pause' || cmd === 'dock') return 'off';
+    if (cmd === 'open') return 'open';
+    if (cmd === 'close') return 'closed';
+    return '';
+}
+
+function homeAutoConditionKey(cond) {
+    if (!cond || typeof cond !== 'object') return '';
+    if (cond.type === 'device') return `device:${cond.id}:${cond.state || ''}`;
+    if (cond.type === 'threshold') return `threshold:${cond.id}:${cond.metric}:${cond.op}:${cond.value}`;
+    if (cond.type === 'robot') return `robot:${cond.id}:${cond.event || 'error'}`;
+    if (cond.type === 'time_window') return `time_window:${cond.start}:${cond.end}`;
+    if (cond.type === 'sun_window') return `sun_window:${cond.start}:${cond.end}`;
+    return JSON.stringify(cond);
+}
+
+function homeAutoPushIfUnique(list, cond) {
+    if (!cond) return false;
+    const key = homeAutoConditionKey(cond);
+    if (!key) return false;
+    if (list.some((row) => homeAutoConditionKey(row) === key)) return false;
+    list.push(cond);
+    return true;
+}
+
+function homeAutoCopyWhenToIf() {
+    if (!autoDraft) return 0;
+    if (!Array.isArray(autoDraft.conditions)) autoDraft.conditions = [];
+    let added = 0;
+    homeAutoTriggers().forEach((trigger) => {
+        if (!trigger) return;
+        if (trigger.type === 'device' && trigger.id) {
+            const state = homeAutoWhenEventToIfState(trigger.event);
+            if (!state) return;
+            const cond = { type: 'device', id: trigger.id, state };
+            if (state === 'no_motion' && Number(trigger.for_sec || 0) > 0) {
+                cond.for_sec = Number(trigger.for_sec);
+            }
+            if (homeAutoPushIfUnique(autoDraft.conditions, cond)) added += 1;
+            return;
+        }
+        if (trigger.type === 'threshold') {
+            const cond = {
+                type: 'threshold',
+                id: trigger.id,
+                metric: trigger.metric,
+                op: trigger.op === 'below' ? 'below' : 'above',
+                value: trigger.value,
+            };
+            if (homeAutoPushIfUnique(autoDraft.conditions, cond)) added += 1;
+            return;
+        }
+        if (trigger.type === 'robot') {
+            const cond = { type: 'robot', id: trigger.id, event: trigger.event === 'ok' ? 'ok' : 'error' };
+            if (homeAutoPushIfUnique(autoDraft.conditions, cond)) added += 1;
+            return;
+        }
+        if (trigger.type === 'sun') {
+            const start = trigger.event === 'sunrise' ? 'sunrise' : 'sunset';
+            const end = start === 'sunrise' ? 'sunset' : 'sunrise';
+            if (homeAutoPushIfUnique(autoDraft.conditions, { type: 'sun_window', start, end })) added += 1;
+        }
+    });
+    return added;
+}
+
+function homeAutoCopyThenToIf() {
+    if (!autoDraft) return 0;
+    if (!Array.isArray(autoDraft.conditions)) autoDraft.conditions = [];
+    let added = 0;
+    (autoDraft.actions || []).forEach((action) => {
+        if (!action || action.kind !== 'device' || !action.id) return;
+        const state = homeAutoThenCommandToIfState(action.command);
+        if (!state) return;
+        const d = homeAutoDeviceById(action.id);
+        const states = homeAutoIfStateOptions(d || { id: action.id, kind: action.device_kind || 'light' });
+        const ok = states.some(([v]) => v === state);
+        if (!ok) return;
+        if (homeAutoPushIfUnique(autoDraft.conditions, { type: 'device', id: action.id, state })) added += 1;
+    });
+    return added;
 }
 
 function homeAutoIfDeviceSelectGroupsFiltered(devices, selectedId, query) {
@@ -9098,6 +9239,9 @@ function homeAutoIfStateOptions(d) {
     }
     if (homeAutoCanOpen(d)) {
         states.push(['open', 'open'], ['closed', 'closed']);
+    }
+    if (homeAutoCanSmartDetect(d)) {
+        states.push(...homeAutoDetectEvents());
     }
     if (homeAutoCanMotion(d)) {
         states.push(['motion', 'motion'], ['no_motion', 'no motion']);
@@ -10048,6 +10192,26 @@ function bindHomeAutomations() {
         const ifAdd = event.target.closest('[data-auto-if]');
         if (ifAdd && autoDraft) {
             const which = ifAdd.getAttribute('data-auto-if');
+            if (which === 'copy-when') {
+                const n = homeAutoCopyWhenToIf();
+                if (!n) {
+                    showToast('Nothing new to copy from When', 'error');
+                    return;
+                }
+                renderHomeAutoEditor();
+                showToast(n === 1 ? 'Copied 1 item from When' : `Copied ${n} items from When`);
+                return;
+            }
+            if (which === 'copy-then') {
+                const n = homeAutoCopyThenToIf();
+                if (!n) {
+                    showToast('Nothing new to copy from Then', 'error');
+                    return;
+                }
+                renderHomeAutoEditor();
+                showToast(n === 1 ? 'Copied 1 item from Then' : `Copied ${n} items from Then`);
+                return;
+            }
             if (which === 'window') autoDraft.conditions.push({ type: 'time_window', start: '08:00', end: '22:00' });
             else if (which === 'sun') autoDraft.conditions.push({ type: 'sun_window', start: 'sunset', end: 'sunrise' });
             else if (which === 'powerwall') {

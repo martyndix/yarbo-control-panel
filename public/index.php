@@ -804,9 +804,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </section>
                     <details class="auto-if auto-drop" id="auto-if" data-auto-zone="if">
                         <summary>Only if…</summary>
-                        <p class="hint">Optional. All of these must be true when the When fires. Motion can be <strong>now</strong> or <strong>within last</strong> N minutes/hours. No motion can be <strong>now</strong> or <strong>for</strong> N minutes/hours (quiet since last motion).</p>
+                        <p class="hint">Optional. All of these must be true when the When fires. Motion and camera detections can be <strong>now</strong> or <strong>within last</strong> N minutes/hours. No motion can be <strong>now</strong> or <strong>for</strong> N minutes/hours (quiet since last motion). Copy from When or Then to start from those devices, then edit here.</p>
                         <div id="auto-if-chips" class="auto-drop-chips"></div>
                         <div class="auto-if-add">
+                            <button type="button" class="btn btn-secondary btn-compact" data-auto-if="copy-when">Copy from When</button>
+                            <button type="button" class="btn btn-secondary btn-compact" data-auto-if="copy-then">Copy from Then</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="window">Time window</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="sun">Sunset / sunrise</button>
                             <button type="button" class="btn btn-secondary btn-compact" data-auto-if="powerwall">Powerwall</button>

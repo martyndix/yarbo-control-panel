@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.273] - 2026-11-12
+
+### Added
+- **Camera smart detections as automation triggers:** UniFi Protect Integration `subscribe/events` feeds person / vehicle / animal / package / line crossing (and camera motion) into Home Automations When / Only if. Uses the official Protect API key WebSocket only — no private events API.
+- **Only if “Copy from When” / “Copy from Then”:** one tap copies those devices into Only if as editable chips.
+
 ## [4.0.272] - 2026-11-12
 
 ### Fixed

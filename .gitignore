@@ -45,6 +45,10 @@
 /data/lymow-listen.log
 /data/unifi-config.json
 /data/unifi-inventory.json
+/data/unifi-protect-events.json
+/data/unifi-protect-events.json.tmp
+/data/unifi-protect-events.log
+/data/unifi-protect-events.pid
 /data/unifi-dps.log
 /data/unifi-snap-*.jpg
 /data/unifi-announce/

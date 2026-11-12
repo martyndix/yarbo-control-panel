@@ -32,6 +32,89 @@ final class YarboUnifi
         return $this->projectRoot . '/data/unifi-inventory.json';
     }
 
+    public function protectEventsPath(): string
+    {
+        return $this->projectRoot . '/data/unifi-protect-events.json';
+    }
+
+    /**
+     * Live camera smart-detection stamps from the Integration events subscriber.
+     *
+     * @return array<string, array<string, mixed>> keyed by native camera id
+     */
+    public function protectCameraDetections(): array
+    {
+        $path = $this->protectEventsPath();
+        if (!is_file($path)) {
+            return [];
+        }
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+        $cameras = $decoded['cameras'] ?? null;
+        if (!is_array($cameras)) {
+            return [];
+        }
+        $out = [];
+        foreach ($cameras as $nativeId => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) $nativeId);
+            if ($id === '') {
+                continue;
+            }
+            $out[$id] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Overlay Protect event stamps onto a camera inventory row.
+     *
+     * @param array<string, mixed> $camera
+     * @param array<string, mixed>|null $detect
+     * @return array<string, mixed>
+     */
+    public static function applyCameraDetections(array $camera, ?array $detect): array
+    {
+        if ($detect === null) {
+            return $camera;
+        }
+        $keys = ['person', 'vehicle', 'animal', 'package', 'line_crossing'];
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $detect)) {
+                $camera[$key] = (bool) $detect[$key];
+            }
+            $stamp = 'detect_' . $key . '_at';
+            if (isset($detect[$stamp]) && is_numeric($detect[$stamp])) {
+                $camera[$stamp] = (int) $detect[$stamp];
+            }
+        }
+        if (array_key_exists('motion', $detect)) {
+            $camera['motion'] = (bool) $detect['motion'];
+            $camera['has_motion'] = true;
+        }
+        if (isset($detect['motion_at']) && is_numeric($detect['motion_at'])) {
+            $at = (int) $detect['motion_at'];
+            if ($at > 0) {
+                $camera['motion_at'] = $at;
+                $camera['has_motion'] = true;
+            }
+        }
+        if (!empty($camera['has_motion']) || !empty($camera['motion']) || !empty($camera['motion_at'])) {
+            $camera['has_motion'] = true;
+        }
+
+        return $camera;
+    }
+
     /**
      * @param callable(string,string,array<string,string>,?string,float,bool): array{status:int,body:string,content_type:string,error?:string} $handler
      */
@@ -2409,6 +2492,7 @@ final class YarboUnifi
     {
         $show = array_fill_keys($showOnHome, true);
         $autoOff = $this->autoOffMap();
+        $detections = $this->protectCameraDetections();
         $out = [];
         foreach (['cameras', 'lights', 'sensors', 'relays', 'doors', 'hubs'] as $group) {
             foreach ($inventory[$group] ?? [] as $row) {
@@ -2421,6 +2505,14 @@ final class YarboUnifi
                 }
                 if ($group === 'cameras' || ($row['kind'] ?? '') === self::KIND_CAMERA) {
                     $row['on'] = false;
+                    $native = trim((string) ($row['native_id'] ?? ''));
+                    if ($native === '') {
+                        $parsed = self::parseHomeId($id);
+                        $native = is_array($parsed) ? (string) ($parsed['native_id'] ?? '') : '';
+                    }
+                    if ($native !== '' && isset($detections[$native])) {
+                        $row = self::applyCameraDetections($row, $detections[$native]);
+                    }
                 }
                 $extra = ['show_on_home' => isset($show[$id])];
                 if (($row['kind'] ?? '') === self::KIND_RELAY || $group === 'relays') {

@@ -3252,11 +3252,27 @@ final class YarboHome
                 'motion' => array_key_exists('motion', $device) && $device['motion'] !== null ? (bool) $device['motion'] : null,
                 'has_open' => !empty($device['has_open']) || $hasDps || ((string) ($device['kind'] ?? '') === 'door')
                     || ((string) ($device['kind'] ?? '') === 'hub'),
-                'has_motion' => !empty($device['has_motion']),
+                'has_motion' => !empty($device['has_motion'])
+                    || ((string) ($device['kind'] ?? '') === 'camera' && (string) ($device['source'] ?? '') === 'unifi'),
                 'has_dps' => $hasDps,
                 'motion_at' => isset($device['motion_at']) && is_numeric($device['motion_at'])
                     ? (int) $device['motion_at']
                     : 0,
+                'person' => !empty($device['person']),
+                'vehicle' => !empty($device['vehicle']),
+                'animal' => !empty($device['animal']),
+                'package' => !empty($device['package']),
+                'line_crossing' => !empty($device['line_crossing']),
+                'detect_person_at' => isset($device['detect_person_at']) && is_numeric($device['detect_person_at'])
+                    ? (int) $device['detect_person_at'] : 0,
+                'detect_vehicle_at' => isset($device['detect_vehicle_at']) && is_numeric($device['detect_vehicle_at'])
+                    ? (int) $device['detect_vehicle_at'] : 0,
+                'detect_animal_at' => isset($device['detect_animal_at']) && is_numeric($device['detect_animal_at'])
+                    ? (int) $device['detect_animal_at'] : 0,
+                'detect_package_at' => isset($device['detect_package_at']) && is_numeric($device['detect_package_at'])
+                    ? (int) $device['detect_package_at'] : 0,
+                'detect_line_crossing_at' => isset($device['detect_line_crossing_at']) && is_numeric($device['detect_line_crossing_at'])
+                    ? (int) $device['detect_line_crossing_at'] : 0,
                 'temperature' => isset($device['temperature']) && is_numeric($device['temperature'])
                     ? (float) $device['temperature']
                     : (isset($device['local_temperature']) && is_numeric($device['local_temperature'])

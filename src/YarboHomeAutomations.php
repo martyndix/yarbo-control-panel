@@ -11,10 +11,19 @@ namespace Yarbo;
 final class YarboHomeAutomations
 {
     private const DURATION_EVENTS = ['stays_on', 'stays_off', 'stays_open', 'stays_closed', 'no_motion'];
-    private const EDGE_EVENTS = ['turns_on', 'turns_off', 'opens', 'closes', 'motion'];
+    private const DETECT_EVENTS = ['person', 'vehicle', 'animal', 'package', 'line_crossing'];
+    private const EDGE_EVENTS = [
+        'turns_on', 'turns_off', 'opens', 'closes', 'motion',
+        'person', 'vehicle', 'animal', 'package', 'line_crossing',
+    ];
     private const DEVICE_EVENTS = [
         'turns_on', 'turns_off', 'opens', 'closes', 'motion',
+        'person', 'vehicle', 'animal', 'package', 'line_crossing',
         'stays_on', 'stays_off', 'stays_open', 'stays_closed', 'no_motion',
+    ];
+    private const DEVICE_STATES = [
+        'on', 'off', 'open', 'closed', 'motion', 'no_motion',
+        'person', 'vehicle', 'animal', 'package', 'line_crossing',
     ];
     private const DEVICE_COMMANDS = [
         'on', 'off', 'toggle', 'unlock', 'lock', 'open', 'close', 'stop',
@@ -1492,6 +1501,11 @@ final class YarboHomeAutomations
             'opens' => 'opens',
             'closes' => 'closes',
             'motion' => 'motion',
+            'person' => 'person detected',
+            'vehicle' => 'vehicle detected',
+            'animal' => 'animal detected',
+            'package' => 'package detected',
+            'line_crossing' => 'line crossing',
             'stays_on' => 'on',
             'stays_off' => 'off',
             'stays_open' => 'open',
@@ -2007,13 +2021,16 @@ final class YarboHomeAutomations
         }
         $id = trim((string) ($cond['id'] ?? ''));
         $state = strtolower(trim((string) ($cond['state'] ?? '')));
-        if ($id === '' || !in_array($state, ['on', 'off', 'open', 'closed', 'motion', 'no_motion'], true)) {
+        if ($id === '' || !in_array($state, self::DEVICE_STATES, true)) {
             return null;
         }
         $out = ['type' => 'device', 'id' => $id, 'state' => $state];
-        // Optional look-back for motion: true if currently detecting or last
-        // motion_at was within within_sec. 0 / omitted = live state only.
-        if ($state === 'motion' && isset($cond['within_sec'])) {
+        // Optional look-back for motion / smart detections: true if currently
+        // detecting or last stamp was within within_sec. 0 / omitted = live only.
+        if (
+            ($state === 'motion' || in_array($state, self::DETECT_EVENTS, true))
+            && isset($cond['within_sec'])
+        ) {
             $within = (int) $cond['within_sec'];
             if ($within > 0) {
                 $out['within_sec'] = max(1, min(604800, $within));
@@ -2051,6 +2068,21 @@ final class YarboHomeAutomations
                 'open' => array_key_exists('open', $row) ? ($row['open'] === null ? null : (bool) $row['open']) : null,
                 'motion' => array_key_exists('motion', $row) ? ($row['motion'] === null ? null : (bool) $row['motion']) : null,
                 'motion_at' => isset($row['motion_at']) && is_numeric($row['motion_at']) ? (int) $row['motion_at'] : 0,
+                'person' => !empty($row['person']),
+                'vehicle' => !empty($row['vehicle']),
+                'animal' => !empty($row['animal']),
+                'package' => !empty($row['package']),
+                'line_crossing' => !empty($row['line_crossing']),
+                'detect_person_at' => isset($row['detect_person_at']) && is_numeric($row['detect_person_at'])
+                    ? (int) $row['detect_person_at'] : 0,
+                'detect_vehicle_at' => isset($row['detect_vehicle_at']) && is_numeric($row['detect_vehicle_at'])
+                    ? (int) $row['detect_vehicle_at'] : 0,
+                'detect_animal_at' => isset($row['detect_animal_at']) && is_numeric($row['detect_animal_at'])
+                    ? (int) $row['detect_animal_at'] : 0,
+                'detect_package_at' => isset($row['detect_package_at']) && is_numeric($row['detect_package_at'])
+                    ? (int) $row['detect_package_at'] : 0,
+                'detect_line_crossing_at' => isset($row['detect_line_crossing_at']) && is_numeric($row['detect_line_crossing_at'])
+                    ? (int) $row['detect_line_crossing_at'] : 0,
                 'temperature' => isset($row['temperature']) && is_numeric($row['temperature']) ? (float) $row['temperature'] : null,
                 'humidity' => isset($row['humidity']) && is_numeric($row['humidity']) ? (float) $row['humidity'] : null,
                 'power' => isset($row['power']) && is_numeric($row['power'])
@@ -2282,6 +2314,9 @@ final class YarboHomeAutomations
             'closes' => $row['open'] === false,
             'motion' => $row['motion'] === true
                 || ((int) ($row['motion_at'] ?? 0) > 0 && (int) ($row['motion_at'] ?? 0) > (int) ($prev[$deviceId]['motion_at'] ?? 0)),
+            'person', 'vehicle', 'animal', 'package', 'line_crossing' => ($row[$event] ?? false) === true
+                || ((int) ($row['detect_' . $event . '_at'] ?? 0) > 0
+                    && (int) ($row['detect_' . $event . '_at'] ?? 0) > (int) ($prev[$deviceId]['detect_' . $event . '_at'] ?? 0)),
             default => false,
         };
     }
@@ -2541,8 +2576,26 @@ final class YarboHomeAutomations
             'closes' => $prev['open'] === true && $curr['open'] === false,
             'motion' => ($prev['motion'] === false && $curr['motion'] === true)
                 || ((int) ($curr['motion_at'] ?? 0) > 0 && (int) ($curr['motion_at'] ?? 0) > (int) ($prev['motion_at'] ?? 0)),
+            'person', 'vehicle', 'animal', 'package', 'line_crossing' => $this->detectEdgeFired($event, $prev, $curr),
             default => false,
         };
+    }
+
+    /**
+     * @param array<string, mixed> $prev
+     * @param array<string, mixed> $curr
+     */
+    private function detectEdgeFired(string $event, array $prev, array $curr): bool
+    {
+        if (!in_array($event, self::DETECT_EVENTS, true)) {
+            return false;
+        }
+        $stamp = 'detect_' . $event . '_at';
+        if ((int) ($curr[$stamp] ?? 0) > 0 && (int) ($curr[$stamp] ?? 0) > (int) ($prev[$stamp] ?? 0)) {
+            return true;
+        }
+
+        return ($prev[$event] ?? false) === false && ($curr[$event] ?? false) === true;
     }
 
     /**
@@ -2627,6 +2680,7 @@ final class YarboHomeAutomations
                     'closed' => $row['open'] === false,
                     'motion' => $this->deviceMotionWithin($row, $within, $now),
                     'no_motion' => $this->deviceNoMotionFor($row, $for, $now),
+                    'person', 'vehicle', 'animal', 'package', 'line_crossing' => $this->deviceDetectWithin($row, $want, $within, $now),
                     default => false,
                 };
                 if (!$ok) {
@@ -2652,6 +2706,30 @@ final class YarboHomeAutomations
             return false;
         }
         $at = (int) ($row['motion_at'] ?? 0);
+        if ($at <= 0) {
+            return false;
+        }
+
+        return ($now - $at) <= $withinSec;
+    }
+
+    /**
+     * Live smart detection, or last detect_*_at still inside the look-back window.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function deviceDetectWithin(array $row, string $kind, int $withinSec, int $now): bool
+    {
+        if (!in_array($kind, self::DETECT_EVENTS, true)) {
+            return false;
+        }
+        if (($row[$kind] ?? false) === true) {
+            return true;
+        }
+        if ($withinSec <= 0) {
+            return false;
+        }
+        $at = (int) ($row['detect_' . $kind . '_at'] ?? 0);
         if ($at <= 0) {
             return false;
         }

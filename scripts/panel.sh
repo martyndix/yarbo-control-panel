@@ -16,6 +16,8 @@ source "${ROOT}/scripts/lib/mqtt_agent.sh"
 source "${ROOT}/scripts/lib/matter_agent.sh"
 # shellcheck source=scripts/lib/homepod_agent.sh
 source "${ROOT}/scripts/lib/homepod_agent.sh"
+# shellcheck source=scripts/lib/unifi_protect_events.sh
+source "${ROOT}/scripts/lib/unifi_protect_events.sh"
 # shellcheck source=scripts/lib/panel_https.sh
 source "${ROOT}/scripts/lib/panel_https.sh"
 
@@ -66,11 +68,16 @@ cleanup() {
   if [[ -n "${HOMEPOD_PID:-}" ]]; then
     kill "${HOMEPOD_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${PROTECT_EVENTS_PID:-}" ]]; then
+    kill "${PROTECT_EVENTS_PID}" 2>/dev/null || true
+  fi
   pkill -f '[s]cripts/matter_agent.py' 2>/dev/null || true
   pkill -f '[s]cripts/homepod_agent.py' 2>/dev/null || true
+  pkill -f '[s]cripts/unifi_protect_events.py' 2>/dev/null || true
   pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
   yarbo_stop_matter_agent 2>/dev/null || true
   yarbo_stop_homepod_agent 2>/dev/null || true
+  yarbo_stop_unifi_protect_events 2>/dev/null || true
   pkill -f '[p]aper_remote_router.php' 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -198,6 +205,19 @@ if [[ -n "$MATTER_PY" && -f "${ROOT}/scripts/matter_agent.py" ]]; then
   yarbo_stop_matter_agent
   "$MATTER_PY" "${ROOT}/scripts/matter_agent.py" >> "${ROOT}/data/matter-agent.log" 2>&1 &
   MATTER_PID=$!
+fi
+
+PROTECT_EVENTS_PID=""
+PROTECT_PY="${ROOT}/.venv/bin/python"
+if [[ ! -x "$PROTECT_PY" ]]; then
+  PROTECT_PY="$(command -v python3 || true)"
+fi
+if [[ -n "$PROTECT_PY" && -f "${ROOT}/scripts/unifi_protect_events.py" ]]; then
+  echo "==> Starting UniFi Protect events subscriber"
+  mkdir -p "${ROOT}/data"
+  yarbo_stop_unifi_protect_events
+  "$PROTECT_PY" "${ROOT}/scripts/unifi_protect_events.py" >> "${ROOT}/data/unifi-protect-events.log" 2>&1 &
+  PROTECT_EVENTS_PID=$!
 fi
 
 HOMEPOD_PID=""
