@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.275] - 2026-11-12
+
+### Added
+- **Automations After Then → Resume previous state:** optional timer / when-When-stops / sunset / sunrise follow-up that restores each light’s prior on/off, brightness, and colour (instead of only turning off). Pick **Resume previous state after a timer** for camera detection → blue for N minutes → back to white.
+
 ## [4.0.274] - 2026-11-12
 
 ### Fixed

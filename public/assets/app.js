@@ -8205,7 +8205,11 @@ function homeAutoSentence(rule, names) {
     const actionOff = (rule.actions || []).some((action) => Number(action.off_after_sec || 0) > 0);
     const off = Number(rule.off_after_sec || 0);
     const sunOff = homeAutoOffAtSunEvent(rule);
-    if (rule.off_when_false) text += ', then off when no longer true';
+    const resume = Boolean(rule.resume_previous);
+    if (resume && rule.off_when_false) text += ', then resume previous state when no longer true';
+    else if (resume && sunOff) text += `, resume previous state at ${sunOff}`;
+    else if (resume && !actionOff && off > 0) text += `, resume previous state after ${homeAutoFormatDuration(off)}`;
+    else if (rule.off_when_false) text += ', then off when no longer true';
     else if (sunOff) text += `, off at ${sunOff}`;
     else if (!actionOff && off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
     return text;
@@ -8238,6 +8242,7 @@ function homeAutoDraftFromRule(rule, asCopy = false) {
         off_after_sec: Number(rule.off_after_sec || 0),
         off_when_false: Boolean(rule.off_when_false),
         off_at_sun: homeAutoNormalizeOffAtSun(rule.off_at_sun),
+        resume_previous: Boolean(rule.resume_previous),
         cooldown_sec: Number(rule.cooldown_sec || 30),
         hold_sec: Number(rule.hold_sec || 0),
     };
@@ -8279,6 +8284,7 @@ function homeAutoBlankDraft() {
         off_after_sec: 0,
         off_when_false: false,
         off_at_sun: null,
+        resume_previous: false,
         cooldown_sec: 30,
         hold_sec: 0,
     };
@@ -8674,25 +8680,39 @@ function homeAutoOffAfterParts(sec) {
     return { value: 5, unit: 60 };
 }
 
+function homeAutoReadOffAfterMode() {
+    return document.getElementById('auto-off-after-enabled')?.value || '0';
+}
+
 function homeAutoReadOffAfter() {
-    if (document.getElementById('auto-off-after-enabled')?.value !== '1') return 0;
+    const mode = homeAutoReadOffAfterMode();
+    if (mode !== '1' && mode !== 'resume-1') return 0;
     const value = Number(document.getElementById('auto-off-after-value')?.value || 5);
     const unit = Number(document.getElementById('auto-off-after-unit')?.value || 60);
     return Math.max(1, Math.round(value * unit));
 }
 
 function homeAutoReadOffWhenFalse() {
-    return document.getElementById('auto-off-after-enabled')?.value === 'false';
+    const mode = homeAutoReadOffAfterMode();
+    return mode === 'false' || mode === 'resume';
 }
 
 function homeAutoReadOffAtSun() {
-    const mode = document.getElementById('auto-off-after-enabled')?.value || '0';
-    if (mode !== 'sunset' && mode !== 'sunrise') return null;
-    return { event: mode, offset_min: 0 };
+    const mode = homeAutoReadOffAfterMode();
+    if (mode === 'sunset' || mode === 'sunrise') return { event: mode, offset_min: 0 };
+    if (mode === 'resume-sunset') return { event: 'sunset', offset_min: 0 };
+    if (mode === 'resume-sunrise') return { event: 'sunrise', offset_min: 0 };
+    return null;
+}
+
+function homeAutoReadResumePrevious() {
+    const mode = homeAutoReadOffAfterMode();
+    return mode === 'resume' || mode === 'resume-1' || mode === 'resume-sunset' || mode === 'resume-sunrise';
 }
 
 function homeAutoApplyOffAfterMode() {
     if (!autoDraft) return;
+    autoDraft.resume_previous = homeAutoReadResumePrevious();
     autoDraft.off_when_false = homeAutoReadOffWhenFalse();
     autoDraft.off_at_sun = homeAutoReadOffAtSun();
     if (autoDraft.off_when_false || autoDraft.off_at_sun) {
@@ -8715,16 +8735,28 @@ function homeAutoSyncOffAfterFields() {
     const show = homeAutoThenHasOffAfter();
     row?.classList.toggle('hidden', !show);
     if (!show) return;
+    const resume = Boolean(autoDraft.resume_previous);
     const whenFalse = Boolean(autoDraft.off_when_false);
     const sunOff = homeAutoOffAtSunEvent(autoDraft);
     const sec = Number(autoDraft.off_after_sec || 0);
     const timerOn = !whenFalse && !sunOff && sec > 0;
     if (enabled && document.activeElement !== enabled) {
-        enabled.value = whenFalse ? 'false' : (sunOff || (timerOn ? '1' : '0'));
+        if (resume && whenFalse) enabled.value = 'resume';
+        else if (resume && sunOff) enabled.value = `resume-${sunOff}`;
+        else if (resume && timerOn) enabled.value = 'resume-1';
+        else if (whenFalse) enabled.value = 'false';
+        else if (sunOff) enabled.value = sunOff;
+        else enabled.value = timerOn ? '1' : '0';
     }
     fields?.classList.toggle('hidden', !timerOn);
     if (hint) {
-        if (whenFalse) {
+        if (resume && whenFalse) {
+            hint.textContent = 'Saves on/off, brightness, and colour before Then runs, then puts each light back once When (and Only if) is no longer true. Trigger delay applies both ways.';
+        } else if (resume && sunOff) {
+            hint.textContent = `Saves each light’s look before Then, then restores it at the next ${sunOff}. Needs a location below.`;
+        } else if (resume && timerOn) {
+            hint.textContent = 'Saves each light’s look before Then, then restores it after the timer. If this fires again, the timer restarts.';
+        } else if (whenFalse) {
             hint.textContent = 'Turns off what Then turned on once When (and Only if) is no longer true. Trigger delay applies both ways, so a brief dip does not chatter.';
         } else if (sunOff) {
             hint.textContent = `After Then runs, turn those lights or the scene off at the next ${sunOff}. Needs a location below. If this fires again, it reschedules to the next ${sunOff}.`;
@@ -10069,6 +10101,7 @@ async function homeAutoSave() {
         off_after_sec: autoDraft.off_after_sec || 0,
         off_when_false: Boolean(autoDraft.off_when_false),
         off_at_sun: autoDraft.off_at_sun || null,
+        resume_previous: Boolean(autoDraft.resume_previous),
         cooldown_sec: autoDraft.cooldown_sec || 30,
         hold_sec: Number(autoDraft.hold_sec || 0),
         names: homeAutoNames(),

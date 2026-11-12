@@ -513,7 +513,7 @@ final class YarboHomeAutomations
             return ['ok' => false, 'error' => 'Could not save'];
         }
         $state = $this->loadState();
-        unset($state['held'][$id], $state['hold'][$id], $state['last_fire'][$id], $state['day_slot'][$id], $state['delayed'][$id], $state['then_error'][$id], $state['latched'][$id], $state['release'][$id]);
+        unset($state['held'][$id], $state['hold'][$id], $state['last_fire'][$id], $state['day_slot'][$id], $state['delayed'][$id], $state['then_error'][$id], $state['latched'][$id], $state['release'][$id], $state['resume'][$id]);
         $this->writeState($state);
 
         return ['ok' => true, 'automations' => $store['automations']];
@@ -542,7 +542,7 @@ final class YarboHomeAutomations
         }
         if (!$enabled) {
             $state = $this->loadState();
-            unset($state['delayed'][$id]);
+            unset($state['delayed'][$id], $state['latched'][$id], $state['release'][$id], $state['resume'][$id]);
             $this->writeState($state);
         }
 
@@ -633,10 +633,15 @@ final class YarboHomeAutomations
                 continue;
             }
             if ($inCooldown) {
-                if ($this->offAfterJobs($rule, $now) !== []) {
+                if ($this->offFollowJobs($rule, $now, $state) !== []) {
                     $this->queueOffAfter($state, $rule, $now);
                 }
                 continue;
+            }
+            if (!empty($rule['resume_previous']) && $this->followUpTargets($rule['actions'] ?? []) !== []) {
+                $this->storeResumeSnapshot($state, $id, $rule['actions'] ?? []);
+            } else {
+                unset($state['resume'][$id]);
             }
             $result = $this->runActions($rule['actions'] ?? [], [
                 'via' => 'automation',
@@ -657,7 +662,7 @@ final class YarboHomeAutomations
                 $this->markFiredSlots($state, $id, $rule, $matched, $today, $hm);
                 $this->markDurationFired($state, $id, $rule, $matched);
                 $curr = $this->applyActionSnapshot($curr, $rule['actions'] ?? []);
-                if (!empty($rule['off_when_false']) && $this->offActions($rule['actions'] ?? []) !== []) {
+                if (!empty($rule['off_when_false']) && $this->followUpActions($rule, $rule['actions'] ?? [], $state) !== []) {
                     $state['latched'][$id] = true;
                     unset($state['release'][$id]);
                 }
@@ -1362,7 +1367,18 @@ final class YarboHomeAutomations
         }
         $offAfter = (int) ($rule['off_after_sec'] ?? 0);
         $offAtSun = self::normalizeOffAtSun($rule['off_at_sun'] ?? null);
-        if (!empty($rule['off_when_false'])) {
+        $resume = !empty($rule['resume_previous']);
+        if ($resume && !empty($rule['off_when_false'])) {
+            $text .= ', then resume previous state when no longer true';
+        } elseif ($resume && $offAtSun !== null) {
+            $text .= ', resume previous state at ' . $offAtSun['event'];
+            if (($offAtSun['offset_min'] ?? 0) !== 0) {
+                $mins = (int) $offAtSun['offset_min'];
+                $text .= ($mins > 0 ? ' +' : ' ') . $mins . ' min';
+            }
+        } elseif ($resume && !$actionOff && $offAfter > 0) {
+            $text .= ', resume previous state after ' . self::formatDuration($offAfter);
+        } elseif (!empty($rule['off_when_false'])) {
             $text .= ', then off when no longer true';
         } elseif ($offAtSun !== null) {
             $text .= ', off at ' . $offAtSun['event'];
@@ -1699,6 +1715,7 @@ final class YarboHomeAutomations
         }
         $offWhenFalse = self::truthy($row['off_when_false'] ?? false);
         $offAtSun = self::normalizeOffAtSun($row['off_at_sun'] ?? null);
+        $resumePrevious = self::truthy($row['resume_previous'] ?? false);
         if ($offWhenFalse || $offAtSun !== null) {
             $offAfter = 0;
             foreach ($actions as $i => $action) {
@@ -1711,6 +1728,9 @@ final class YarboHomeAutomations
         if ($offAtSun !== null) {
             $offWhenFalse = false;
         }
+        if (!$offWhenFalse && $offAtSun === null && $offAfter <= 0) {
+            $resumePrevious = false;
+        }
         $name = YarboHub::normalizeDisplayName((string) ($row['name'] ?? ''), 64);
         if ($name === '' && $trigger !== null) {
             $name = YarboHub::normalizeDisplayName(self::sentence([
@@ -1721,6 +1741,7 @@ final class YarboHomeAutomations
                 'off_after_sec' => $offAfter,
                 'off_when_false' => $offWhenFalse,
                 'off_at_sun' => $offAtSun,
+                'resume_previous' => $resumePrevious,
                 'hold_sec' => $hold,
             ], $names), 64);
         }
@@ -1740,6 +1761,7 @@ final class YarboHomeAutomations
             'off_after_sec' => $offAfter,
             'off_when_false' => $offWhenFalse,
             'off_at_sun' => $offAtSun,
+            'resume_previous' => $resumePrevious,
             'cooldown_sec' => $cooldown,
             'hold_sec' => $hold,
         ];
@@ -2831,7 +2853,7 @@ final class YarboHomeAutomations
             return;
         }
         $now = time();
-        $jobs = $this->offFollowJobs($rule, $now);
+        $jobs = $this->offFollowJobs($rule, $now, $state);
         if (empty($rule['enabled']) || $jobs === []) {
             unset($state['delayed'][$id]);
             $this->writeState($state);
@@ -2863,7 +2885,7 @@ final class YarboHomeAutomations
     private function queueOffAfter(array &$state, array $rule, int $now): void
     {
         $id = (string) ($rule['id'] ?? '');
-        $jobs = $this->offFollowJobs($rule, $now);
+        $jobs = $this->offFollowJobs($rule, $now, $state);
         if ($id === '' || $jobs === []) {
             unset($state['delayed'][$id]);
 
@@ -2876,26 +2898,28 @@ final class YarboHomeAutomations
     }
 
     /**
-     * Timer or next sunset/sunrise offs (mutually exclusive with off_when_false).
+     * Timer or next sunset/sunrise follow-ups (mutually exclusive with off_when_false).
      *
      * @param array<string, mixed> $rule
+     * @param array<string, mixed> $state
      * @return list<array{at: int, actions: list<array<string, mixed>>}>
      */
-    private function offFollowJobs(array $rule, int $now): array
+    private function offFollowJobs(array $rule, int $now, array $state = []): array
     {
-        $timer = $this->offAfterJobs($rule, $now);
+        $timer = $this->offAfterJobs($rule, $now, $state);
         if ($timer !== []) {
             return $timer;
         }
 
-        return $this->offAtSunJobs($rule, $now);
+        return $this->offAtSunJobs($rule, $now, $state);
     }
 
     /**
      * @param array<string, mixed> $rule
+     * @param array<string, mixed> $state
      * @return list<array{at: int, actions: list<array<string, mixed>>}>
      */
-    private function offAfterJobs(array $rule, int $now): array
+    private function offAfterJobs(array $rule, int $now, array $state = []): array
     {
         if (self::normalizeOffAtSun($rule['off_at_sun'] ?? null) !== null) {
             return [];
@@ -2910,11 +2934,11 @@ final class YarboHomeAutomations
             if ($sec <= 0) {
                 $sec = $ruleSec;
             }
-            $offs = $this->offActions([$action]);
-            if ($sec <= 0 || $offs === []) {
+            $follow = $this->followUpActions($rule, [$action], $state);
+            if ($sec <= 0 || $follow === []) {
                 continue;
             }
-            $jobs[] = ['at' => $now + $sec, 'actions' => $offs];
+            $jobs[] = ['at' => $now + $sec, 'actions' => $follow];
         }
 
         return $jobs;
@@ -2922,16 +2946,21 @@ final class YarboHomeAutomations
 
     /**
      * @param array<string, mixed> $rule
+     * @param array<string, mixed> $state
      * @return list<array{at: int, actions: list<array<string, mixed>>}>
      */
-    private function offAtSunJobs(array $rule, int $now): array
+    private function offAtSunJobs(array $rule, int $now, array $state = []): array
     {
         $sun = self::normalizeOffAtSun($rule['off_at_sun'] ?? null);
         if ($sun === null) {
             return [];
         }
-        $offs = $this->offActions(is_array($rule['actions'] ?? null) ? $rule['actions'] : []);
-        if ($offs === []) {
+        $follow = $this->followUpActions(
+            $rule,
+            is_array($rule['actions'] ?? null) ? $rule['actions'] : [],
+            $state
+        );
+        if ($follow === []) {
             return [];
         }
         $at = $this->nextSunUnix($sun['event'], (int) $sun['offset_min'], $now);
@@ -2939,7 +2968,7 @@ final class YarboHomeAutomations
             return [];
         }
 
-        return [['at' => $at, 'actions' => $offs]];
+        return [['at' => $at, 'actions' => $follow]];
     }
 
     public function nextSunUnix(string $event, int $offsetMin, int $now): ?int
@@ -3011,6 +3040,164 @@ final class YarboHomeAutomations
     }
 
     /**
+     * Device / scene targets that After Then can turn off or restore.
+     *
+     * @param list<array<string, mixed>> $actions
+     * @return list<string>
+     */
+    private function followUpTargets(array $actions): array
+    {
+        $ids = [];
+        foreach ($this->offActions($actions) as $action) {
+            $id = trim((string) ($action['id'] ?? ''));
+            if ($id !== '') {
+                $ids[$id] = true;
+            }
+        }
+
+        return array_keys($ids);
+    }
+
+    /**
+     * Off or restore-previous follow-up actions for a rule.
+     *
+     * @param array<string, mixed> $rule
+     * @param list<array<string, mixed>> $actions
+     * @param array<string, mixed> $state
+     * @return list<array<string, mixed>>
+     */
+    private function followUpActions(array $rule, array $actions, array $state = []): array
+    {
+        if (empty($rule['resume_previous'])) {
+            return $this->offActions($actions);
+        }
+        $ruleId = (string) ($rule['id'] ?? '');
+        $looks = [];
+        if ($ruleId !== '' && isset($state['resume'][$ruleId]) && is_array($state['resume'][$ruleId])) {
+            $looks = is_array($state['resume'][$ruleId]['looks'] ?? null)
+                ? $state['resume'][$ruleId]['looks']
+                : [];
+        }
+        $out = [];
+        foreach ($this->expandThenDeviceIds($actions) as $deviceId) {
+            $look = is_array($looks[$deviceId] ?? null) ? $looks[$deviceId] : ['on' => false];
+            foreach ($this->restoreActionsFromLook($deviceId, $look) as $action) {
+                $out[] = $action;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $actions
+     * @return list<string>
+     */
+    private function expandThenDeviceIds(array $actions): array
+    {
+        $home = new YarboHome($this->projectRoot);
+        $ids = [];
+        foreach ($actions as $action) {
+            if (!is_array($action)) {
+                continue;
+            }
+            $kind = (string) ($action['kind'] ?? 'device');
+            if ($kind === 'yarbo' || $kind === 'lymow') {
+                continue;
+            }
+            $cmd = (string) ($action['command'] ?? ($kind === 'scene' ? 'run' : 'on'));
+            if (in_array($cmd, ['off', 'stop', 'unlock', 'lock', 'open', 'close', 'pulse'], true)) {
+                continue;
+            }
+            if ($kind === 'scene') {
+                $sceneId = trim((string) ($action['id'] ?? ''));
+                if ($sceneId === '') {
+                    continue;
+                }
+                foreach ($home->load()['scenes'] ?? [] as $scene) {
+                    if (!is_array($scene) || (string) ($scene['id'] ?? '') !== $sceneId) {
+                        continue;
+                    }
+                    foreach (is_array($scene['actions'] ?? null) ? $scene['actions'] : [] as $member) {
+                        if (!is_array($member)) {
+                            continue;
+                        }
+                        $memberId = trim((string) ($member['id'] ?? ''));
+                        if ($memberId !== '') {
+                            $ids[$memberId] = true;
+                        }
+                    }
+                }
+                continue;
+            }
+            $id = trim((string) ($action['id'] ?? ''));
+            if ($id !== '') {
+                $ids[$id] = true;
+            }
+        }
+
+        return array_keys($ids);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $actions
+     * @param array<string, mixed> $state
+     */
+    private function storeResumeSnapshot(array &$state, string $ruleId, array $actions): void
+    {
+        if ($ruleId === '') {
+            return;
+        }
+        $home = new YarboHome($this->projectRoot);
+        $adaptive = array_fill_keys($home->adaptiveDeviceIds(), true);
+        $looks = [];
+        foreach ($this->expandThenDeviceIds($actions) as $deviceId) {
+            $look = $home->capturePulseLook($deviceId);
+            if (isset($adaptive[$deviceId])) {
+                $look['adaptive'] = true;
+            }
+            $looks[$deviceId] = $look;
+        }
+        if (!isset($state['resume']) || !is_array($state['resume'])) {
+            $state['resume'] = [];
+        }
+        $state['resume'][$ruleId] = [
+            'at' => time(),
+            'looks' => $looks,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $look
+     * @return list<array<string, mixed>>
+     */
+    private function restoreActionsFromLook(string $id, array $look): array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return [];
+        }
+        if (empty($look['on'])) {
+            return [['kind' => 'device', 'id' => $id, 'command' => 'off']];
+        }
+        $action = ['kind' => 'device', 'id' => $id, 'command' => 'on'];
+        if (isset($look['brightness']) && is_numeric($look['brightness'])) {
+            $action['brightness'] = max(1, min(100, (int) $look['brightness']));
+        }
+        $hex = isset($look['hex']) ? YarboHome::normalizeHexValue((string) $look['hex']) : null;
+        if ($hex !== null) {
+            $action['hex'] = $hex;
+        } elseif (isset($look['kelvin']) && is_numeric($look['kelvin'])) {
+            $action['kelvin'] = max(1500, min(8000, (int) $look['kelvin']));
+        }
+        if (!empty($look['adaptive'])) {
+            $action['adaptive'] = true;
+        }
+
+        return [$action];
+    }
+
+    /**
      * @param array<string, mixed> $state
      * @param array<string, array<string, mixed>> $enabledById
      * @param array<string, array<string, mixed>> $curr
@@ -3075,19 +3262,19 @@ final class YarboHomeAutomations
             if (!$this->releaseShouldFire($state, $id, $holdSec, $now)) {
                 continue;
             }
-            $offs = $this->offActions($rule['actions'] ?? []);
-            unset($state['latched'][$id], $state['release'][$id], $state['delayed'][$id]);
-            if ($offs === []) {
+            $follow = $this->followUpActions($rule, $rule['actions'] ?? [], $state);
+            unset($state['latched'][$id], $state['release'][$id], $state['delayed'][$id], $state['resume'][$id]);
+            if ($follow === []) {
                 continue;
             }
-            $result = $this->runActions($offs, [
+            $result = $this->runActions($follow, [
                 'via' => 'automation',
                 'name' => (string) ($rule['name'] ?? ''),
             ]);
             if (!($result['ok'] ?? false)) {
                 $errors[] = (string) ($result['error'] ?? 'failed');
             }
-            $curr = $this->applyActionSnapshot($curr, $offs);
+            $curr = $this->applyActionSnapshot($curr, $follow);
             $turnedOff[] = $id;
         }
 
@@ -3158,6 +3345,9 @@ final class YarboHomeAutomations
             }
             if ($did) {
                 $turnedOff[] = $id;
+                if ($keep === []) {
+                    unset($state['resume'][$id]);
+                }
             }
             if ($keep === []) {
                 unset($state['delayed'][$id]);
@@ -3718,6 +3908,7 @@ final class YarboHomeAutomations
             'hold' => [],
             'latched' => [],
             'release' => [],
+            'resume' => [],
             'last_fire' => [],
             'then_error' => [],
             'day_slot' => [],
@@ -3746,6 +3937,7 @@ final class YarboHomeAutomations
             'hold' => is_array($decoded['hold'] ?? null) ? $decoded['hold'] : [],
             'latched' => is_array($decoded['latched'] ?? null) ? $decoded['latched'] : [],
             'release' => is_array($decoded['release'] ?? null) ? $decoded['release'] : [],
+            'resume' => is_array($decoded['resume'] ?? null) ? $decoded['resume'] : [],
             'last_fire' => is_array($decoded['last_fire'] ?? null) ? $decoded['last_fire'] : [],
             'then_error' => is_array($decoded['then_error'] ?? null) ? $decoded['then_error'] : [],
             'day_slot' => is_array($decoded['day_slot'] ?? null) ? $decoded['day_slot'] : [],
