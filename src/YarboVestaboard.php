@@ -108,12 +108,40 @@ final class YarboVestaboard
 
     public function watcherStale(int $maxAgeSeconds = 90): bool
     {
+        return !$this->watcherOk($maxAgeSeconds);
+    }
+
+    /**
+     * True when the Note updater is alive: recent heartbeat, or a recent successful
+     * write (browser send / --once can update flaps without the loop heartbeat).
+     */
+    public function watcherOk(int $maxAgeSeconds = 90): bool
+    {
+        $now = time();
         $path = $this->heartbeatPath();
-        if (!is_file($path)) {
+        if (is_file($path) && ($now - (int) filemtime($path)) <= $maxAgeSeconds) {
             return true;
         }
+        $sent = $this->load()['last_sent_at'] ?? null;
+        if (is_string($sent) && $sent !== '') {
+            $then = strtotime($sent);
+            if ($then !== false && ($now - $then) <= $maxAgeSeconds) {
+                return true;
+            }
+        }
 
-        return (time() - (int) filemtime($path)) > $maxAgeSeconds;
+        return false;
+    }
+
+    /**
+     * Soft nudge when the loop looks idle — do not tell the user to restart yet.
+     */
+    public function ensureWatcherAwake(): void
+    {
+        if ($this->watcherOk(60)) {
+            return;
+        }
+        $this->requestTickNudge();
     }
 
     /**
@@ -460,7 +488,7 @@ final class YarboVestaboard
             'cloud_token_set' => $config['cloud_token'] !== '',
             'last_sent_at' => $config['last_sent_at'],
             'last_error' => $config['last_error'],
-            'watcher_ok' => !$this->watcherStale(),
+            'watcher_ok' => $this->watcherOk(),
             'quiet_hours_enabled' => $config['quiet_hours_enabled'],
             'quiet_start' => $config['quiet_start'],
             'quiet_end' => $config['quiet_end'],
@@ -514,6 +542,9 @@ final class YarboVestaboard
         if (!$config['enabled']) {
             return ['enabled' => false] + $this->rotatePublicFields($config);
         }
+        // Quietly wake the loop when heartbeat/write look idle — no user restart nag.
+        $this->ensureWatcherAwake();
+        $config = $this->load();
         $held = $this->isExternalHoldActive($config);
         $holdMeta = $this->externalHoldPublicView($config);
         if ($held) {
@@ -534,7 +565,7 @@ final class YarboVestaboard
                     'last_sent_at' => $config['last_sent_at'],
                     'pending' => false,
                     'last_error' => $this->publicLastError($config['last_error']),
-                    'watcher_ok' => !$this->watcherStale(),
+                    'watcher_ok' => $this->watcherOk(),
                 ] + $this->rotatePublicFields($config);
             }
         }
@@ -571,7 +602,7 @@ final class YarboVestaboard
                 'last_sent_at' => $config['last_sent_at'],
                 'pending' => !$held && $hash !== (string) $config['last_hash'],
                 'last_error' => $this->publicLastError($config['last_error']),
-                'watcher_ok' => !$this->watcherStale(),
+                'watcher_ok' => $this->watcherOk(),
             ] + $this->rotatePublicFields($config);
         }
         if ($this->isQuietHours()) {
@@ -591,7 +622,7 @@ final class YarboVestaboard
                 'last_sent_at' => $config['last_sent_at'],
                 'pending' => !$held && $hash !== (string) $config['last_hash'],
                 'last_error' => $this->publicLastError($config['last_error']),
-                'watcher_ok' => !$this->watcherStale(),
+                'watcher_ok' => $this->watcherOk(),
             ] + $this->rotatePublicFields($config);
         }
         $usable = $online && is_array($parsed);
@@ -606,7 +637,7 @@ final class YarboVestaboard
             'last_sent_at' => $config['last_sent_at'],
             'pending' => !$held && $hash !== (string) $config['last_hash'],
             'last_error' => $this->publicLastError($config['last_error']),
-            'watcher_ok' => !$this->watcherStale(),
+            'watcher_ok' => $this->watcherOk(),
         ] + $this->rotatePublicFields($config);
     }
 
@@ -1575,6 +1606,8 @@ final class YarboVestaboard
 
             return $posted;
         }
+        // Any successful write counts as updater activity (sendNow / --once / tick).
+        $this->touchHeartbeat();
         $saved = [
             'last_hash' => $hash,
             'last_sent_at' => gmdate('c'),

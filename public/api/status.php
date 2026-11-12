@@ -54,7 +54,7 @@ function status_with_timing(array $payload): array
     $payload['timing'] = $statusTiming;
     $board = vestaboard_board();
     $payload['panel_health'] = [
-        'watcher_ok' => !$board->watcherStale(),
+        'watcher_ok' => $board->watcherOk(),
         'watcher_age_s' => is_file($board->heartbeatPath())
             ? max(0, time() - (int) filemtime($board->heartbeatPath()))
             : null,
