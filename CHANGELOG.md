@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.271] - 2026-11-12
+
+### Fixed
+- **“Panel gateway timed out (504)” stuck for ages:** offline/transient status JSON was still raising the red banner, any client “Retrying…” text was rewritten as a Funnel 504, and opening Settings aborted status polls so the banner could not clear. Transient robot-offline responses now clear the banner (Offline hint only), gateway rewriting is limited to real proxy failures, and status keeps polling while Settings is open so Panel health stays live.
+
 ## [4.0.270] - 2026-11-12
 
 ### Fixed

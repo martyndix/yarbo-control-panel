@@ -2623,11 +2623,9 @@ function gatewayHtmlError(status, text) {
 
 function isGatewayTimeoutError(message) {
     const lower = String(message || '').toLowerCase();
-    return lower.includes('gateway timed out')
+    return lower.includes('panel gateway timed out')
         || lower.includes('gateway time-out')
         || lower.includes('gateway timeout')
-        || lower.includes('retrying…')
-        || lower.includes('retrying...')
         || (lower.includes('504') && (lower.includes('gateway') || lower.includes('non-json') || lower.includes('<!doctype')))
         || (lower.includes('502') && lower.includes('gateway'))
         || (lower.includes('503') && lower.includes('unavailable'));
@@ -2731,13 +2729,14 @@ function formatDiagnosticsSteps(steps) {
 function formatConnectionError(message) {
     if (!message) return message;
     const lower = message.toLowerCase();
+    // Only rewrite real gateway/proxy failures — do not treat every "Retrying…"
+    // client timeout as a Funnel 504 (that made offline Yarbo look like a gateway outage).
     if (
-        lower.includes('gateway timed out')
+        lower.includes('panel gateway timed out')
         || lower.includes('non-json (504)')
         || lower.includes('gateway time-out')
-        || lower.includes('retrying…')
-        || lower.includes('retrying...')
-        || (lower.includes('504') && (lower.includes('<!doctype') || lower.includes('ie6 oldie')))
+        || lower.includes('gateway timeout')
+        || (lower.includes('504') && (lower.includes('gateway') || lower.includes('<!doctype') || lower.includes('ie6 oldie')))
     ) {
         return 'Panel gateway timed out (504). Retrying…';
     }
@@ -12006,11 +12005,8 @@ function openSettingsModal(pane) {
     if (autoPageOpen) closeHomeAutomations({ updateHash: false });
     const alreadyOpen = settingsModalOpen;
     settingsModalOpen = true;
-    if (statusAbort) {
-        statusAbort.abort();
-        statusAbort = null;
-        polling = false;
-    }
+    // Do not abort status here — Panel health needs live polls, and aborting left
+    // a gateway 504 banner stuck until Settings closed.
     els.settingsModal.classList.remove('hidden');
     document.body.classList.add('settings-page-open');
     if (els.settingsOpen) {
@@ -15309,7 +15305,9 @@ async function runPanelRestart(button) {
 }
 
 async function fetchStatus() {
-    if (polling || settingsModalOpen || mailPageOpen || driveActive) return;
+    // Keep polling while Settings is open so Panel health updates and a stale
+    // gateway banner can clear. Skip only for mail/drive focus.
+    if (polling || mailPageOpen || driveActive) return;
     if (Date.now() < commandQuietUntil) return;
     polling = true;
     if (statusAbort) {
@@ -15327,7 +15325,7 @@ async function fetchStatus() {
         const res = await fetch('/api/status.php', { signal, headers: clientTimezoneHeaders() });
         const data = await parseJsonResponse(res);
         const clientRttMs = Math.round(performance.now() - started);
-        if (settingsModalOpen || mailPageOpen || driveActive) return;
+        if (mailPageOpen || driveActive) return;
         if (data.ok) {
             hasStatusSnapshot = true;
             setError(null);
@@ -15339,12 +15337,16 @@ async function fetchStatus() {
             applyPanelHealth(data, clientRttMs);
             applyYarboOfflineHint(data);
             updateVestaboardDashboard(data);
-            if (!(data.transient && hasStatusSnapshot)) {
+            // Valid JSON from the panel — clear sticky Funnel 504 banners.
+            // Transient robot offline / miss cooldown is expected; do not nag forever.
+            if (data.transient) {
+                setError(null);
+            } else {
                 setError(data.error || 'Failed to fetch status');
             }
         }
     } catch (err) {
-        if (settingsModalOpen || mailPageOpen || driveActive) return;
+        if (mailPageOpen || driveActive) return;
         if (err?.name === 'AbortError') {
             if (timedOut) {
                 if (hasStatusSnapshot) {
