@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.269] - 2026-11-12
+
+### Fixed
+- **Night mode stayed on the Note until the web page opened:** writing the overnight layout also overwrote the saved live snapshot, so after night ended — especially with Powerwall/Lymow still offline from the overnight probe skip — the watcher could not restore live flaps and waited until a browser `send` did it. Night/quiet writes no longer replace `last_live_codes`, corrupted overnight snapshots are ignored, and leave-night will post the composed live/offline page without needing the UI open.
+
 ## [4.0.268] - 2026-11-12
 
 ### Fixed

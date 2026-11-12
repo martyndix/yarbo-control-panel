@@ -782,6 +782,22 @@ final class YarboVestaboard
 
                     return $result;
                 }
+                // Still leave overnight flaps even when companions are offline
+                // (e.g. Powerwall OFFLINE) — do not wait for a browser poll.
+                if (($layout['ok'] ?? false)
+                    && !$this->isOvernightLayoutVerb((string) ($layout['verb'] ?? ''))
+                ) {
+                    $leaveCodes = self::normalizeLiveCodes($layout['codes'] ?? null);
+                    if ($leaveCodes !== null && !$this->codesLookLikeOvernight($leaveCodes)) {
+                        $result = $this->sendLayout($layout, true);
+                        if (!empty($result['ok'])) {
+                            $this->save(['quiet_active' => false, 'night_active' => false]);
+                        }
+
+                        return $result;
+                    }
+                }
+                // Keep night_active/quiet_active so the next tick still force-resumes.
             }
 
             return [
@@ -837,8 +853,12 @@ final class YarboVestaboard
         if (!($layout['ok'] ?? false)) {
             return $layout;
         }
+        $result = $this->sendLayout($layout, true, $override);
+        if (!empty($result['ok'])) {
+            $this->save(['quiet_active' => false, 'night_active' => false]);
+        }
 
-        return $this->sendLayout($layout, true, $override);
+        return $result;
     }
 
     /**
@@ -1534,12 +1554,9 @@ final class YarboVestaboard
             return ['ok' => false, 'error' => 'Cloud API does not accept a blank board.'];
         }
         $hash = hash('sha256', json_encode($layout['codes']));
-        $isQuiet = ($layout['verb'] ?? '') === 'QUIET';
+        $overnight = $this->isOvernightLayoutVerb((string) ($layout['verb'] ?? ''));
         if (!$force && $hash === $config['last_hash']) {
-            if (!$isQuiet) {
-                $this->save(['last_live_codes' => $layout['codes']]);
-            }
-
+            // Never store night/quiet flaps as the resume snapshot.
             return ['ok' => true, 'skipped' => true, 'lines' => $layout['lines']];
         }
         if (!$force && $this->isProgressOnlyRateLimited($layout, $hash, $config)) {
@@ -1548,10 +1565,6 @@ final class YarboVestaboard
         if (!$force && $config['last_sent_at'] !== null) {
             $then = strtotime($config['last_sent_at']);
             if ($then !== false && (microtime(true) - $then) < self::MIN_SEND_GAP_SECONDS) {
-                if (!$isQuiet) {
-                    $this->save(['last_live_codes' => $layout['codes']]);
-                }
-
                 return ['ok' => true, 'skipped' => true, 'lines' => $layout['lines']];
             }
         }
@@ -1574,7 +1587,9 @@ final class YarboVestaboard
             'external_hold_until' => null,
             'recent_hashes' => $this->pushRecentHash($config['recent_hashes'] ?? [], $hash),
         ];
-        if (!$isQuiet) {
+        // Preserve the pre-overnight live snapshot so morning resume can restore it
+        // even when Powerwall/Lymow are still offline after skipping overnight probes.
+        if (!$overnight) {
             $saved['last_live_codes'] = $layout['codes'];
         }
         $this->save($saved);
@@ -2633,7 +2648,14 @@ final class YarboVestaboard
         if (!($layout['ok'] ?? false) || !($layout['online'] ?? false)) {
             return;
         }
-        $this->save(['last_live_codes' => $layout['codes']]);
+        if ($this->isOvernightLayoutVerb((string) ($layout['verb'] ?? ''))) {
+            return;
+        }
+        $codes = self::normalizeLiveCodes($layout['codes'] ?? null);
+        if ($codes === null || $this->codesLookLikeOvernight($codes)) {
+            return;
+        }
+        $this->save(['last_live_codes' => $codes]);
     }
 
     /**
@@ -2643,7 +2665,8 @@ final class YarboVestaboard
     private function lastLiveLayout(array $config): ?array
     {
         $codes = self::normalizeLiveCodes($config['last_live_codes'] ?? null);
-        if ($codes === null) {
+        // Night/quiet flaps used to overwrite this snapshot; never resume those.
+        if ($codes === null || $this->codesLookLikeOvernight($codes)) {
             return null;
         }
 
@@ -2652,6 +2675,11 @@ final class YarboVestaboard
             'codes' => $codes,
             'verb' => 'LIVE',
         ];
+    }
+
+    private function isOvernightLayoutVerb(string $verb): bool
+    {
+        return $verb === 'QUIET' || $verb === 'NIGHT' || $verb === 'NIGHT_OPEN';
     }
 
     /**
