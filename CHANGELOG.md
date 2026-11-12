@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.272] - 2026-11-12
+
+### Fixed
+- **“background updater idle — restart the panel” while Last written was just now:** successful Note writes and recent `last_sent_at` now count as updater activity (heartbeat alone was missing after browser/`--once` sends), status quietly nudges the watcher when it looks idle, and the UI no longer tells you to restart the panel for a brief catch-up.
+
 ## [4.0.271] - 2026-11-12
 
 ### Fixed

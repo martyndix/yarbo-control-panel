@@ -11138,7 +11138,8 @@ function updateVestaboardDashboard(data) {
         } else if (board.pending) {
             els.vestaboardUpdatedDetail.textContent = ' · sending…';
         } else if (board.watcher_ok === false) {
-            els.vestaboardUpdatedDetail.textContent = ' · background updater idle — if this stays, restart the panel';
+            // Do not nag "restart the panel" — status already nudges the watcher.
+            els.vestaboardUpdatedDetail.textContent = ' · background updater catching up…';
         } else if (board.night_hours) {
             const until = board.night_until || '';
             els.vestaboardUpdatedDetail.textContent = board.night_open
