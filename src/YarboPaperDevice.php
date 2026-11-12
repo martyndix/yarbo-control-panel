@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.92';
+    public const FIRMWARE_VERSION = '0.1.93';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.28-colour';
     public const OTA_ONLINE_MONO_S = 120;
@@ -1675,32 +1675,47 @@ final class YarboPaperDevice
         } elseif ($quiet) {
             $mode = 'quiet';
         }
-        // Night-open alert LED: prefer watcher sticky, then overnight flaps, then a
-        // cheap inventory-only contact read (no Access kick — that blocked Funnel).
-        $nightOpen = false;
+        // Night-open alert: sticky + flaps + inventory-only contacts (no Access kick).
+        $stickyOpen = !empty($vb['night_last_open']);
+        $linesOpen = false;
+        if (is_array($lines)) {
+            foreach ($lines as $line) {
+                if (!is_string($line)) {
+                    continue;
+                }
+                $row = strtoupper($line);
+                if (str_contains($row, 'OPEN') || str_contains($row, 'DOOR') || str_contains($row, 'WINDOW')) {
+                    $linesOpen = true;
+                    break;
+                }
+            }
+        }
+        $invOpens = [];
         if ($night) {
-            if (!empty($vb['night_last_open'])) {
-                $nightOpen = true;
+            try {
+                $invOpens = $vbObj->nightOpenContacts(false);
+            } catch (\Throwable) {
+                $invOpens = [];
             }
-            if (!$nightOpen && is_array($lines)) {
-                foreach ($lines as $line) {
-                    if (!is_string($line)) {
-                        continue;
-                    }
-                    $row = strtoupper($line);
-                    if (str_contains($row, 'OPEN') || str_contains($row, 'DOOR') || str_contains($row, 'WINDOW')) {
-                        $nightOpen = true;
-                        break;
-                    }
-                }
+        }
+        $invOpen = $invOpens !== [];
+        $nightOpen = $night && ($stickyOpen || $linesOpen || $invOpen);
+
+        // Inventory says open but preview/board still secure — show the open alert
+        // on the tablet Note and nudge the watcher to write the physical Note.
+        if ($night && $invOpen && !$linesOpen) {
+            try {
+                $openLayout = $vbObj->nightOpenAlertLayout($invOpens);
+                $codes = YarboVestaboard::normalizeLiveCodes($openLayout['codes'] ?? null) ?? $codes;
+                $lines = is_array($openLayout['lines'] ?? null)
+                    ? array_values($openLayout['lines'])
+                    : YarboVestaboard::linesFromCodes($codes);
+            } catch (\Throwable) {
+                // Keep secure preview.
             }
-            if (!$nightOpen) {
-                try {
-                    $nightOpen = $vbObj->nightOpenContacts(false) !== [];
-                } catch (\Throwable) {
-                    $nightOpen = false;
-                }
-            }
+        }
+        if ($night && $invOpen !== $stickyOpen) {
+            $this->kickVestaboardNightTick();
         }
 
         return [
@@ -1712,6 +1727,52 @@ final class YarboPaperDevice
             'vestaboard_quiet' => $quiet,
             'vestaboard_night_open' => $nightOpen,
         ];
+    }
+
+    /**
+     * Background vestaboard_watch --once so open/close edges write the Note
+     * without blocking PaperMono Funnel polls.
+     */
+    private function kickVestaboardNightTick(): void
+    {
+        $lock = $this->projectRoot . '/data/vestaboard-night-kick.lock';
+        if (is_file($lock) && (time() - (int) @filemtime($lock)) < 8) {
+            return;
+        }
+        $script = $this->projectRoot . '/scripts/vestaboard_watch.php';
+        if (!is_file($script)) {
+            return;
+        }
+        if (!is_dir($this->projectRoot . '/data')) {
+            @mkdir($this->projectRoot . '/data', 0775, true);
+        }
+        @file_put_contents($lock, (string) time());
+        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $log = $this->projectRoot . '/data/vestaboard-night-kick.log';
+        $command = sprintf(
+            'cd %s && %s %s --once >> %s 2>&1 < /dev/null &',
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($php),
+            escapeshellarg($script),
+            escapeshellarg($log)
+        );
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['file', $log, 'a'],
+            2 => ['file', $log, 'a'],
+        ];
+        $process = @proc_open(
+            ['bash', '-c', $command],
+            $descriptorSpec,
+            $pipes,
+            $this->projectRoot
+        );
+        if (is_resource($process)) {
+            if (isset($pipes[0]) && is_resource($pipes[0])) {
+                fclose($pipes[0]);
+            }
+            proc_close($process);
+        }
     }
 
     /**

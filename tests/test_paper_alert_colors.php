@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use Yarbo\YarboPaperDevice;
+use Yarbo\YarboVestaboard;
 
 function assert_true(bool $ok, string $message): void
 {
@@ -151,6 +152,44 @@ $closed = $compactMethod->invoke(
 assert_true(($closed['vestaboard_night'] ?? false) === true, 'still night when closed');
 assert_true(($closed['vestaboard_night_open'] ?? true) === false, 'night open clears when closed');
 
+// Open inventory while board_codes still secure → compact shows open alert lines + kick.
+$vbHelper = new YarboVestaboard($root);
+$secureCodes = [
+    $vbHelper->encodeLine('NIGHT      MODE'),
+    $vbHelper->encodeLine('SLEEP      WELL'),
+    $vbHelper->encodeLine('HOUSE    SECURE'),
+];
+$inv['doors'][0]['open'] = true;
+$inv['doors'][0]['dps'] = 'open';
+$inv['doors'][0]['dps_label'] = 'Open';
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+file_put_contents($root . '/data/vestaboard-config.json', json_encode([
+    'enabled' => true,
+    'night_hours_enabled' => true,
+    'night_start' => '00:00',
+    'night_end' => '23:59',
+    'night_active' => true,
+    'night_last_open' => false,
+    'quiet_timezone' => 'UTC',
+    'board_codes' => $secureCodes,
+], JSON_UNESCAPED_SLASHES));
+@mkdir($root . '/scripts', 0775, true);
+file_put_contents($root . '/scripts/vestaboard_watch.php', "<?php\n// test stub\n");
+$openPreview = $compactMethod->invoke(
+    new YarboPaperDevice($root),
+    ['error_code' => 0],
+    true,
+    ['id' => 'tab1', 'name' => 'Kitchen', 'kind' => 'papermono']
+);
+assert_true(($openPreview['vestaboard_night_open'] ?? false) === true, 'inventory open sets night_open');
+$openLines = strtoupper(implode(' ', is_array($openPreview['vestaboard_lines'] ?? null) ? $openPreview['vestaboard_lines'] : []));
+assert_true(
+    str_contains($openLines, 'OPEN') || str_contains($openLines, 'DOOR') || str_contains($openLines, 'GARAGE'),
+    'open preview replaces HOUSE SECURE: ' . $openLines
+);
+assert_true(!str_contains($openLines, 'SECURE'), 'open preview must not keep HOUSE SECURE: ' . $openLines);
+assert_true(is_file($root . '/data/vestaboard-night-kick.lock'), 'open edge kicks vestaboard watcher');
+
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'papermono-alert-message-color'), 'settings has message colour');
 assert_true(str_contains($index, 'papermono-alert-night-open'), 'settings has night open alert');
@@ -176,20 +215,24 @@ assert_true(str_contains($fw, 'vestaboard_night_open'), 'firmware reads night op
 $paperSrc = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
 assert_true(str_contains($paperSrc, "night_last_open"), 'compact uses night_last_open sticky');
 assert_true(str_contains($paperSrc, 'nightOpenContacts(false)'), 'compact inventory-only open check');
+assert_true(str_contains($paperSrc, 'kickVestaboardNightTick'), 'compact kicks watcher on open edge');
+assert_true(str_contains($paperSrc, 'nightOpenAlertLayout'), 'compact composes open alert flaps');
 assert_true(str_contains($fw, 'alertSetMessageFlash'), 'firmware applies message flash');
 assert_true(str_contains($fw, 'updateAlertPresentation'), 'firmware updates alert presentation');
 assert_true(str_contains($fw, 'applyAlertPage'), 'firmware navigates alert page');
 assert_true(str_contains($fw, 'alertHoldBrightness'), 'firmware holds alert backlight');
+assert_true(str_contains($fw, 'return to lock'), 'firmware returns to lock when alert clears');
 
 $hw = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/paper_hw.cpp');
 assert_true(str_contains($hw, 'parseAlertColor'), 'firmware parses colours');
 assert_true(str_contains($hw, 'msgFlash'), 'firmware message flash state');
 
 $ver = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
-assert_true(str_contains($ver, '0.1.92'), 'firmware bumped to 0.1.92');
+assert_true(str_contains($ver, '0.1.93'), 'firmware bumped to 0.1.93');
 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.258]'), 'changelog 4.0.258');
 assert_true(str_contains($change, '## [4.0.260]'), 'changelog 4.0.260');
+assert_true(str_contains($change, '## [4.0.267]'), 'changelog 4.0.267');
 
 echo "ok\n";
