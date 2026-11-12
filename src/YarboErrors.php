@@ -42,6 +42,7 @@ final class YarboErrors
         if (
             str_contains($lower, 'no telemetry received')
             || str_contains($lower, 'telemetry_timeout')
+            || str_contains($lower, 'telemetry timeout')
             || str_contains($lower, 'no data_feedback response')
             || str_contains($lower, 'get_device_msg')
         ) {
