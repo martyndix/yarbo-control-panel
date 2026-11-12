@@ -4373,7 +4373,7 @@ function collectUnifiStationsFromEditor() {
 
 async function loadUnifiDashboard(opts = {}) {
     try {
-        const data = await unifiApi(null, 12000);
+        const data = await unifiApi(null, 20000);
         if (data && data.ok !== false) renderUnifiDashboard(data, { replace: Boolean(opts.replace) });
         else if (data?.error && !opts.silent) {
             const status = document.getElementById('unifi-status');
@@ -4382,7 +4382,20 @@ async function loadUnifiDashboard(opts = {}) {
     } catch (err) {
         if (opts.silent) return;
         const status = document.getElementById('unifi-status');
-        if (status) status.textContent = `UniFi: ${err.message || 'unavailable'}`;
+        if (!status) return;
+        if (isAbortError(err)) {
+            const n = (unifiDash?.devices || []).length;
+            status.textContent = n > 0
+                ? `UniFi: refreshing… · ${n} device${n === 1 ? '' : 's'} cached`
+                : 'UniFi: still loading devices…';
+            window.setTimeout(() => {
+                if (activeModuleId === 'unifi' && !settingsModalOpen) {
+                    loadUnifiDashboard({ silent: true, replace: false });
+                }
+            }, 2500);
+            return;
+        }
+        status.textContent = `UniFi: ${err.message || 'unavailable'}`;
     }
 }
 

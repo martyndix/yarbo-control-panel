@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.274] - 2026-11-12
+
+### Fixed
+- **UniFi “Fetch is aborted” and empty Show on Home / no cameras in Automations:** the UniFi page no longer blocks on a live Protect inventory pull (that often exceeded the browser abort timeout). It serves the last inventory immediately and refreshes cameras in the same background job as sensors/lights/doors so Automations can list them without opening UniFi first.
+
 ## [4.0.273] - 2026-11-12
 
 ### Added

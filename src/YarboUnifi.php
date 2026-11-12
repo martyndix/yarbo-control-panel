@@ -1109,13 +1109,14 @@ final class YarboUnifi
     }
 
     /**
-     * Re-read Access doors, Protect sensors, lights, and relays so Home stays live.
-     * Called from a background PHP process — never from Home GET.
+     * Re-read Access doors, Protect cameras/sensors/lights/relays so Home stays live.
+     * Called from a background PHP process — never from Home/UniFi GET.
      */
     public function refreshAccessDoors(): void
     {
         try {
             $this->refreshAccessDoorStatusInner(2.5, true);
+            $this->refreshProtectCameras(2.5);
             $this->refreshProtectSensors(2.5);
             $this->refreshProtectLights(2.5);
             $this->refreshProtectRelays(2.5);
@@ -1128,6 +1129,14 @@ final class YarboUnifi
                 @unlink($lock);
             }
         }
+    }
+
+    /**
+     * Kick a background inventory refresh (cameras included) without blocking.
+     */
+    public function kickInventoryRefresh(): void
+    {
+        $this->kickAccessDoorRefresh();
     }
 
     public function refreshProtectSensorsNow(float $timeout = 1.5): void
@@ -1146,8 +1155,8 @@ final class YarboUnifi
     }
 
     /**
-     * Start a background GET /doors, /sensors, /lights, and /relays so Home can follow
-     * Protect and Access without occupying the single-threaded panel.
+     * Start a background GET /cameras, /doors, /sensors, /lights, and /relays so
+     * Home / UniFi / Automations can follow Protect without occupying the panel.
      */
     private function kickAccessDoorRefresh(): void
     {
@@ -1162,11 +1171,16 @@ final class YarboUnifi
         $at = max(
             (int) ($inventory['home_live_at'] ?? 0),
             (int) ($inventory['access_status_at'] ?? 0),
+            (int) ($inventory['protect_cameras_at'] ?? 0),
             (int) ($inventory['protect_sensors_at'] ?? 0),
             (int) ($inventory['protect_lights_at'] ?? 0),
             (int) ($inventory['protect_relays_at'] ?? 0)
         );
-        if ($at > 0 && (time() - $at) < 4) {
+        // Empty camera list with a Protect key: refresh soon so Automations can
+        // list cameras even when the UniFi page is not open.
+        $needCameras = $config['protect_api_key'] !== ''
+            && (!is_array($inventory['cameras'] ?? null) || ($inventory['cameras'] ?? []) === []);
+        if (!$needCameras && $at > 0 && (time() - $at) < 4) {
             return;
         }
         $lock = $this->projectRoot . '/data/unifi-dps.lock';
@@ -1277,6 +1291,32 @@ final class YarboUnifi
     /**
      * Re-read Protect UP Sense so Open/Closed, temperature, and humidity stay live.
      */
+    private function refreshProtectCameras(float $timeout): void
+    {
+        $config = $this->load();
+        if ($config['host'] === '' || $config['protect_api_key'] === '') {
+            return;
+        }
+        $res = $this->protectJson($config, '/cameras', $timeout);
+        if (!($res['ok'] ?? false)) {
+            return;
+        }
+        $mapped = [];
+        foreach ($res['items'] as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $row = $this->mapCamera($item);
+            if ($row !== null) {
+                $mapped[] = $row;
+            }
+        }
+        $inventory = $this->readInventory();
+        $inventory['cameras'] = $mapped;
+        $inventory['protect_cameras_at'] = time();
+        $this->writeInventory($inventory);
+    }
+
     private function refreshProtectSensors(float $timeout): void
     {
         $config = $this->load();

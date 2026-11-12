@@ -51,7 +51,11 @@ if ($method === 'GET' && $action === 'stream') {
 
 if ($method === 'GET' && ($action === '' || $action === 'status')) {
     try {
-        json_response(['ok' => true] + $unifi->dashboardPayload());
+        // Serve the last inventory immediately. A live Protect refresh here used to
+        // exceed the browser abort timeout ("Fetch is aborted") and blank Show on Home
+        // / Automations cameras. Cameras refresh in the background with sensors/lights.
+        $unifi->kickInventoryRefresh();
+        json_response(['ok' => true] + $unifi->dashboardPayload(false));
     } catch (Throwable $e) {
         json_response(['ok' => false, 'error' => $e->getMessage()], 500);
     }

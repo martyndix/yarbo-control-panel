@@ -74,7 +74,7 @@ Protect lights: the panel PATCHes the public Integration API `{ "isLightForceEna
 
 Protect sensors: `GET /proxy/protect/integration/v1/sensors` (`isOpened`, `stats.temperature.value`, `stats.humidity.value`). Home does not poll this on the request that serves the grid; a background process updates `data/unifi-inventory.json` so the next 3-second Home refresh can show Open and new readings. Access `GET /doors` (controller Open/Closed) is a separate poll in that same job.
 
-Protect cameras: stills are `GET /cameras/{id}/snapshot`. Live view prefers `GET /cameras/{id}/rtsps-stream` (medium, then low) piped through ffmpeg as MJPEG (`/api/unifi.php?action=stream`). If ffmpeg or RTSPS is missing, that same URL sends a snapshot MJPEG loop (`fresh` snapshots). Thumbnails skip the 4-second JPEG cache only when `fresh=1`.
+Protect cameras: stills are `GET /cameras/{id}/snapshot`. Live view prefers `GET /cameras/{id}/rtsps-stream` (medium, then low) piped through ffmpeg as MJPEG (`/api/unifi.php?action=stream`). If ffmpeg or RTSPS is missing, that same URL sends a snapshot MJPEG loop (`fresh` snapshots). Thumbnails skip the 4-second JPEG cache only when `fresh=1`. The UniFi page and Home serve the last inventory from disk and refresh cameras/sensors/lights/doors/relays in a background job (same as Access DPS) so the browser does not abort a long Protect pull. Camera list updates also feed Automations (person/vehicle/… When) even when a camera is not ticked Show on Home.
 
 ## Home
 

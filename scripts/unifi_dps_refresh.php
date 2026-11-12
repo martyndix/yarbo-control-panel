@@ -4,9 +4,9 @@
 declare(strict_types=1);
 
 /**
- * Background Access door-position, Protect sensor, and Protect light refresh
- * so Home Open/Closed, temp/RH, and floodlight On/Off can follow other apps
- * without blocking the single-threaded panel.
+ * Background Access door-position plus Protect camera / sensor / light / relay
+ * refresh so Home, UniFi Show on Home, and Automations stay live without
+ * blocking the single-threaded panel.
  */
 
 require dirname(__DIR__) . '/vendor/autoload.php';
