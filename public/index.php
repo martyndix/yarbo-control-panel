@@ -1636,7 +1636,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">PaperMono frontlight. Needs firmware 0.1.28 (earlier builds ignored this because LoRa init reset the light PWM).</p>
                             <fieldset class="settings-theme-fieldset">
                                 <legend class="label">Alerts</legend>
-                                <p class="hint">Colour, flash, backlight, brightness, and screen need firmware 0.1.93. Night door/window lights only while Vestaboard Night hours is active. Backlight stays at the chosen % until the error clears or the message is read.</p>
+                                <p class="hint">Colour, flash, backlight, brightness, and screen need firmware 0.1.94. Night door/window lights only while Vestaboard Night hours is active. Backlight stays at the chosen % until the error clears or the message is read.</p>
                                 <div class="papermono-alert-row" data-alert-row="message">
                                     <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer)</span></label>
                                     <div class="papermono-alert-opts">
@@ -2029,7 +2029,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="398" y="449" width="36" height="6" fill="#f4f1e8"/>
                                         <rect x="414" y="431" width="6" height="42" fill="#f4f1e8"/>
                                     </svg>
-                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.93.</figcaption>
+                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.94.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">

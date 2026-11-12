@@ -230,7 +230,7 @@ assert_true(str_contains($hw, 'parseAlertColor'), 'firmware parses colours');
 assert_true(str_contains($hw, 'msgFlash'), 'firmware message flash state');
 
 $ver = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
-assert_true(str_contains($ver, '0.1.93'), 'firmware bumped to 0.1.93');
+assert_true(str_contains($ver, '0.1.94'), 'firmware bumped to 0.1.94');
 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.258]'), 'changelog 4.0.258');

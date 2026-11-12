@@ -174,7 +174,7 @@ foreach ([
     'Do not clear usingRemote here',
     'X-Yarbo-Paper-Net',
     'paperNetAddIdentityHeaders',
-    '#define PAPERMONO_FW_VERSION "0.1.93"',
+    '#define PAPERMONO_FW_VERSION "0.1.94"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {
@@ -207,7 +207,7 @@ foreach ([
     'Do not clear usingRemote here',
     'X-Yarbo-Paper-Net',
     'paperNetAddIdentityHeaders',
-    '#define PAPERMONO_FW_VERSION "0.2.28-colour"',
+    '#define PAPERMONO_FW_VERSION "0.2.29-colour"',
     'void finishEpdFrame()',
     'M5.Display.startWrite();',
 ] as $needle) {

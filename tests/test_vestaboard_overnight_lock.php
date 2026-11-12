@@ -126,7 +126,7 @@ assert_true(str_contains($fw, 'Views locked'), 'firmware overnight note');
 assert_true(str_contains($fw, 'App messages still show'), 'firmware app-message note');
 
 $ver = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
-assert_true(str_contains($ver, '0.1.93'), 'firmware 0.1.93');
+assert_true(str_contains($ver, '0.1.94'), 'firmware 0.1.94');
 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.257]'), 'changelog 4.0.257');
