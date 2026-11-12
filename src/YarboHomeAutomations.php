@@ -34,6 +34,9 @@ final class YarboHomeAutomations
     public const POWERWALL_METRICS = ['battery', 'export', 'solar', 'load'];
     public const YARBO_ID = 'yarbo';
     public const LYMOW_ID = 'lymow';
+    /** Synthetic When for Vestaboard night-hours door/window open alert. */
+    public const VESTABOARD_NIGHT_ID = 'vestaboard_night';
+    public const VESTABOARD_NIGHT_EVENTS = ['open'];
     public const ROBOT_EVENTS = ['error', 'ok', 'rain', 'dry'];
     /** Yarbo-only rain / dry (Lymow has no rain sensor). */
     public const YARBO_RAIN_EVENTS = ['rain', 'dry'];
@@ -791,6 +794,29 @@ final class YarboHomeAutomations
         }
         $state['unifi_at'] = $now;
         $state['unifi_error'] = $errors !== [] ? $errors[0] : '';
+        // Night hours: nudge the Vestaboard watcher as soon as the open set changes
+        // so the Note does not wait for the next idle sleep.
+        try {
+            $vb = new YarboVestaboard($this->projectRoot);
+            if ($vb->isNightHours()) {
+                $ids = [];
+                foreach ($vb->nightOpenContacts(false) as $row) {
+                    $id = trim((string) ($row['id'] ?? ''));
+                    if ($id !== '') {
+                        $ids[] = $id;
+                    }
+                }
+                sort($ids);
+                $openKey = implode('|', $ids);
+                $prevKey = (string) ($state['night_open_key'] ?? '');
+                $state['night_open_key'] = $openKey;
+                if ($openKey !== $prevKey) {
+                    $vb->requestTickNudge();
+                }
+            }
+        } catch (\Throwable) {
+            // UniFi / Vestaboard optional for this nudge.
+        }
         $this->writeState($state);
     }
 
@@ -864,8 +890,54 @@ final class YarboHomeAutomations
         if ($lymow !== null) {
             $rows[] = $lymow;
         }
+        $night = $this->vestaboardNightLiveRow();
+        if ($night !== null) {
+            $rows[] = $night;
+        }
 
         return $rows;
+    }
+
+    /**
+     * Aggregate night-hours open alert for When / Only-if.
+     * Null when Night hours is not enabled — existing rules stay dormant.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function vestaboardNightLiveRow(): ?array
+    {
+        try {
+            $vb = new YarboVestaboard($this->projectRoot);
+            $config = $vb->load();
+        } catch (\Throwable) {
+            return null;
+        }
+        if (empty($config['night_hours_enabled'])) {
+            return null;
+        }
+        $open = false;
+        $openKey = '';
+        if ($vb->isNightHours()) {
+            $opens = $vb->nightOpenContacts(false);
+            $ids = [];
+            foreach ($opens as $row) {
+                $id = trim((string) ($row['id'] ?? ''));
+                if ($id !== '') {
+                    $ids[] = $id;
+                }
+            }
+            sort($ids);
+            $openKey = implode('|', $ids);
+            $open = $ids !== [];
+        }
+
+        return [
+            'id' => self::VESTABOARD_NIGHT_ID,
+            'kind' => 'vestaboard_night',
+            'name' => 'Night door/window',
+            'open' => $open,
+            'open_key' => $openKey,
+        ];
     }
 
     /**
@@ -1203,6 +1275,59 @@ final class YarboHomeAutomations
         }
 
         return ['type' => 'robot', 'id' => $id, 'event' => $event];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private function normalizeVestaboardNight(array $row): ?array
+    {
+        $event = strtolower(trim((string) ($row['event'] ?? $row['state'] ?? 'open')));
+        if (!in_array($event, self::VESTABOARD_NIGHT_EVENTS, true)) {
+            $event = 'open';
+        }
+
+        return ['type' => 'vestaboard_night', 'event' => $event];
+    }
+
+    /**
+     * Rising edge: night open alert becomes active (Vestaboard displaying open).
+     *
+     * @param array<string, mixed> $trigger
+     * @param array<string, array<string, mixed>> $prev
+     * @param array<string, array<string, mixed>> $curr
+     */
+    private function vestaboardNightEdgeFired(array $trigger, array $prev, array $curr): bool
+    {
+        $id = self::VESTABOARD_NIGHT_ID;
+        if (!isset($prev[$id]) || !isset($curr[$id])) {
+            return false;
+        }
+        $event = (string) ($trigger['event'] ?? 'open');
+        if ($event !== 'open') {
+            return false;
+        }
+        $was = !empty($prev[$id]['open']);
+        $is = !empty($curr[$id]['open']);
+
+        return !$was && $is;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<string, array<string, mixed>> $curr
+     */
+    private function vestaboardNightCurrentlyTrue(array $row, array $curr): bool
+    {
+        $id = self::VESTABOARD_NIGHT_ID;
+        $snap = $curr[$id] ?? null;
+        if ($snap === null) {
+            return false;
+        }
+        $event = (string) ($row['event'] ?? $row['state'] ?? 'open');
+
+        return $event === 'open' && !empty($snap['open']);
     }
 
     /**
@@ -1590,6 +1715,9 @@ final class YarboHomeAutomations
 
             return $name . ' ' . $label;
         }
+        if ($type === 'vestaboard_night') {
+            return 'Night door/window open';
+        }
         $name = $names[(string) ($trigger['id'] ?? '')] ?? 'Device';
         $event = (string) ($trigger['event'] ?? 'turns_on');
         $for = (int) ($trigger['for_sec'] ?? 0);
@@ -1915,6 +2043,9 @@ final class YarboHomeAutomations
         if ($type === 'robot') {
             return $this->normalizeRobot($trigger);
         }
+        if ($type === 'vestaboard_night') {
+            return $this->normalizeVestaboardNight($trigger);
+        }
         if ($type !== 'device') {
             return null;
         }
@@ -2119,6 +2250,9 @@ final class YarboHomeAutomations
         }
         if ($type === 'robot') {
             return $this->normalizeRobot($cond);
+        }
+        if ($type === 'vestaboard_night') {
+            return $this->normalizeVestaboardNight($cond);
         }
         if ($type !== 'device') {
             return null;
@@ -2327,6 +2461,9 @@ final class YarboHomeAutomations
         if ($type === 'robot') {
             return $this->robotEdgeFired($trigger, $prev, $curr);
         }
+        if ($type === 'vestaboard_night') {
+            return $this->vestaboardNightEdgeFired($trigger, $prev, $curr);
+        }
         $deviceId = (string) ($trigger['id'] ?? '');
         $event = (string) ($trigger['event'] ?? '');
         if (in_array($event, self::DURATION_EVENTS, true)) {
@@ -2403,6 +2540,9 @@ final class YarboHomeAutomations
         }
         if ($type === 'robot') {
             return $this->robotCurrentlyTrue($trigger, $curr);
+        }
+        if ($type === 'vestaboard_night') {
+            return $this->vestaboardNightCurrentlyTrue($trigger, $curr);
         }
         $deviceId = (string) ($trigger['id'] ?? '');
         $event = (string) ($trigger['event'] ?? '');
@@ -2768,6 +2908,12 @@ final class YarboHomeAutomations
             }
             if ($type === 'robot') {
                 if (!$this->robotCurrentlyTrue($cond, $curr)) {
+                    return false;
+                }
+                continue;
+            }
+            if ($type === 'vestaboard_night') {
+                if (!$this->vestaboardNightCurrentlyTrue($cond, $curr)) {
                     return false;
                 }
                 continue;

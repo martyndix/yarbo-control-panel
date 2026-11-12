@@ -93,12 +93,15 @@ while (true) {
 
     vestaboard_run_tick($board);
 
-    for ($i = 0; $i < 8; $i++) {
+    // Night hours: poll contacts every ~2s so open/close hits the Note faster.
+    // Daytime stays at ~8s (companion modules are heavier).
+    $idleSec = $board->isNightHours() ? 2 : 8;
+    for ($i = 0; $i < $idleSec; $i++) {
         if (vestaboard_watch_sources_changed($watchFiles, $startedAt)) {
             exit(0);
         }
-        // PaperMono / status can nudge an immediate open/close write without
-        // spawning a second vestaboard_watch --once (that raced the loop).
+        // PaperMono / status / automations can nudge an immediate open/close write
+        // without spawning a second vestaboard_watch --once (that raced the loop).
         if ($board->consumeTickNudge()) {
             break;
         }

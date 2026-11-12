@@ -4451,6 +4451,7 @@ let autoPageOpen = false;
 let autoDraft = null;
 const HOME_AUTO_POWERWALL_ID = 'powerwall';
 const HOME_AUTO_YARBO_ID = 'yarbo';
+const HOME_AUTO_VESTABOARD_NIGHT_ID = 'vestaboard_night';
 const HOME_AUTO_LYMOW_ID = 'lymow';
 const HOME_AUTO_PW_METRICS = {
     battery: { label: 'Battery', unit: '%', step: 1, value: 50 },
@@ -7906,6 +7907,9 @@ function homeAutoWhenPhrase(trigger, names) {
         const labels = { ok: 'OK', rain: 'Rain', dry: 'Dry', error: 'Error' };
         return `${name} ${labels[trigger.event] || 'Error'}`;
     }
+    if (trigger.type === 'vestaboard_night') {
+        return 'Night door/window open';
+    }
     const name = names[trigger.id] || 'Device';
     const event = trigger.event || 'turns_on';
     const labels = {
@@ -8100,6 +8104,18 @@ function homeAutoParseThresholdEvent(raw) {
 function homeAutoPowerwallOn() {
     if (!lastHub?.modules) return true;
     return Boolean(lastHub.modules.powerwall);
+}
+
+function homeAutoNightHoursOn() {
+    return Boolean(lastVestaboardNightHoursEnabled);
+}
+
+function homeAutoVestaboardNightTrigger() {
+    return { type: 'vestaboard_night', event: 'open' };
+}
+
+function homeAutoIsVestaboardNight(row) {
+    return row?.type === 'vestaboard_night';
 }
 
 function homeAutoYarboOn() {
@@ -8861,6 +8877,12 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
             <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
+    if (homeAutoIsVestaboardNight(trigger)) {
+        return `<div class="auto-chip auto-chip--note" data-auto-when ${iAttr}>
+            Night door/window open
+            <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
     if (trigger.type === 'threshold') {
         if (homeAutoIsPowerwallThreshold(trigger)) {
             const metric = HOME_AUTO_PW_METRICS[trigger.metric] ? trigger.metric : 'battery';
@@ -9006,6 +9028,12 @@ function homeAutoIfChipHtml(cond, index) {
             <select data-auto-if-robot-event aria-label="${escapeHtml(name)} only if">
                 ${homeAutoRobotEventOptions(cond.id, event)}
             </select>
+            <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
+        </div>`;
+    }
+    if (homeAutoIsVestaboardNight(cond)) {
+        return `<div class="auto-chip auto-chip--note" data-auto-if-i="${index}">
+            Night door/window open
             <button type="button" class="auto-chip-x" data-auto-if-x="${index}" aria-label="Remove">✕</button>
         </div>`;
     }
@@ -9257,6 +9285,10 @@ function homeAutoCopyWhenToIf() {
             if (homeAutoPushIfUnique(autoDraft.conditions, cond)) added += 1;
             return;
         }
+        if (trigger.type === 'vestaboard_night') {
+            if (homeAutoPushIfUnique(autoDraft.conditions, homeAutoVestaboardNightTrigger())) added += 1;
+            return;
+        }
         if (trigger.type === 'sun') {
             const start = trigger.event === 'sunrise' ? 'sunrise' : 'sunset';
             const end = start === 'sunrise' ? 'sunset' : 'sunrise';
@@ -9386,6 +9418,8 @@ function homeAutoTrayUsedKeys() {
             keys.add(`powerwall:${trigger.metric || 'battery'}`);
         } else if (trigger.type === 'robot') {
             keys.add(`robot:${trigger.id}:${trigger.event || 'error'}`);
+        } else if (trigger.type === 'vestaboard_night') {
+            keys.add('vestaboard_night:open');
         } else if (trigger.id) keys.add(`device:${trigger.id}`);
     });
     (autoDraft.actions || []).forEach((action) => {
@@ -9405,6 +9439,8 @@ function homeAutoTrayUsedKeys() {
             keys.add(`powerwall:${cond.metric || 'battery'}`);
         } else if (cond.type === 'robot') {
             keys.add(`robot:${cond.id}:${cond.event || 'error'}`);
+        } else if (cond.type === 'vestaboard_night') {
+            keys.add('vestaboard_night:open');
         } else if (cond.id) keys.add(`device:${cond.id}`);
     });
     return keys;
@@ -9688,6 +9724,7 @@ function homeAutoTrayDeviceRooms(devices) {
 function homeAutoTrayGroups(devices, scenes) {
     const order = [
         ['time', 'Time'],
+        ['note', 'Note'],
         ['powerwall', 'Powerwall'],
         ['yarbo', 'Yarbo'],
         ['lymow', 'Lymow'],
@@ -9713,6 +9750,11 @@ function homeAutoTrayGroups(devices, scenes) {
         homeAutoTrayChipSpec('sunset', '', 'Sunset', 'auto-chip--clock', '', 'when'),
         homeAutoTrayChipSpec('sunrise', '', 'Sunrise', 'auto-chip--clock', '', 'when')
     );
+    if (homeAutoNightHoursOn()) {
+        buckets.note.push(
+            homeAutoTrayChipSpec('vestaboard_night', 'open', 'Night door/window open', 'auto-chip--note', '', 'when')
+        );
+    }
     if (homeAutoPowerwallOn()) {
         Object.entries(HOME_AUTO_PW_METRICS).forEach(([id, row]) => {
             buckets.powerwall.push(homeAutoTrayChipSpec('powerwall', id, row.label, 'auto-chip--powerwall', '', 'when'));
@@ -9802,6 +9844,22 @@ function homeAutoApplyTray(kind, id, zone) {
             return;
         }
         const trigger = homeAutoPowerwallTrigger(id || 'battery');
+        if (zone === 'if') autoDraft.conditions.push(trigger);
+        else homeAutoApplyWhen(trigger);
+        homeAutoFollowName();
+        renderHomeAutoEditor();
+        return;
+    }
+    if (kind === 'vestaboard_night') {
+        if (zone === 'then') {
+            showToast('Night door/window open goes in When or Only if', 'error');
+            return;
+        }
+        if (!homeAutoNightHoursOn()) {
+            showToast('Turn on Vestaboard Night hours first', 'error');
+            return;
+        }
+        const trigger = homeAutoVestaboardNightTrigger();
         if (zone === 'if') autoDraft.conditions.push(trigger);
         else homeAutoApplyWhen(trigger);
         homeAutoFollowName();
@@ -11348,6 +11406,9 @@ function updateVestaboardDashboard(data) {
     const board = data.vestaboard;
     const enabled = Boolean(board?.enabled);
     els.vestaboardCard.classList.toggle('hidden', !enabled);
+    if (board && 'night_hours_enabled' in board) {
+        lastVestaboardNightHoursEnabled = Boolean(board.night_hours_enabled);
+    }
     applyVestaboardLiveSwitch(data);
     applyVestaboardRotateState(board);
     if (!enabled) return;
@@ -14191,6 +14252,11 @@ function applyVestaboardNightHours(board) {
     if (board && 'night_hours_available' in board) {
         lastVestaboardNightAvailable = available;
     }
+    if (board && 'night_hours_enabled' in board) {
+        lastVestaboardNightHoursEnabled = Boolean(board.night_hours_enabled);
+    } else if (els.settingsVestaboardNight) {
+        lastVestaboardNightHoursEnabled = Boolean(els.settingsVestaboardNight.checked);
+    }
     const watch = board?.night_watch || lastVestaboardNightWatch;
     if (board?.night_watch) lastVestaboardNightWatch = board.night_watch;
     els.settingsVestaboardNightWrap?.classList.toggle('hidden', !available);
@@ -14236,6 +14302,7 @@ function applyVestaboardNightHours(board) {
 }
 
 let lastVestaboardNightAvailable = false;
+let lastVestaboardNightHoursEnabled = false;
 let lastVestaboardNightWatch = { count: 0, open: 0 };
 
 const DEFAULT_QUIET_CODES = [

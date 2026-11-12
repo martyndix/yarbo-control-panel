@@ -219,7 +219,7 @@ assert_true(
     'open layout hash differs from secure'
 );
 
-// Three opens → header count + first name + +N MORE.
+// Three opens → header count + first two names (not +N MORE).
 $inv['doors'][0]['name'] = 'Garage Side Entrance Door';
 $inv['sensors'][0]['open'] = true;
 $inv['sensors'][] = [
@@ -243,7 +243,26 @@ $multi = $vb->nightLayout();
 assert_true(($multi['open'] ?? false) === true, 'multi open');
 assert_true(str_contains((string) ($multi['lines'][0] ?? ''), '3 OPEN'), 'multi header: ' . ($multi['lines'][0] ?? ''));
 assert_true(str_contains((string) ($multi['lines'][1] ?? ''), 'GARAGE'), 'multi first name');
-assert_true(str_contains((string) ($multi['lines'][2] ?? ''), '+2 MORE'), 'multi remainder: ' . ($multi['lines'][2] ?? ''));
+assert_true(
+    str_contains((string) ($multi['lines'][2] ?? ''), 'KITCHEN')
+        || str_contains((string) ($multi['lines'][2] ?? ''), 'OFFICE'),
+    'multi second name on row 3: ' . ($multi['lines'][2] ?? '')
+);
+assert_true(!str_contains((string) ($multi['lines'][2] ?? ''), 'MORE'), 'no +N MORE on row 3');
+
+// Closing the first open contact slides the next name onto the board.
+$inv['doors'][0]['open'] = false;
+$inv['doors'][0]['dps'] = 'close';
+$inv['doors'][0]['dps_label'] = 'Closed';
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+$afterClose = $vb->nightLayout();
+assert_true(($afterClose['open'] ?? false) === true, 'still open after first closes');
+assert_true(str_contains((string) ($afterClose['lines'][0] ?? ''), 'WINS OPEN')
+    || str_contains((string) ($afterClose['lines'][0] ?? ''), '2 OPEN')
+    || str_contains((string) ($afterClose['lines'][0] ?? ''), 'OPEN'),
+    'two windows header: ' . ($afterClose['lines'][0] ?? ''));
+assert_true(str_contains((string) ($afterClose['lines'][1] ?? ''), 'KITCHEN'), 'kitchen on row 2: ' . ($afterClose['lines'][1] ?? ''));
+assert_true(str_contains((string) ($afterClose['lines'][2] ?? ''), 'OFFICE'), 'office on row 3: ' . ($afterClose['lines'][2] ?? ''));
 
 $phpSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboVestaboard.php');
 assert_true(str_contains($phpSrc, 'refreshNightContacts'), 'tick refreshes UniFi during night hours');
@@ -251,12 +270,16 @@ assert_true(str_contains($phpSrc, 'openChanged'), 'tick forces write when open s
 assert_true(str_contains($phpSrc, 'night_last_open_key'), 'tick tracks which contacts are open');
 assert_true(str_contains($phpSrc, 'nightOpenAlertLayout'), 'open alert uses full board');
 
+$watchSrc = (string) file_get_contents(dirname(__DIR__) . '/scripts/vestaboard_watch.php');
+assert_true(str_contains($watchSrc, 'isNightHours() ? 2 : 8'), 'night watcher idle is 2s');
+
 $change = (string) file_get_contents(dirname(__DIR__) . '/CHANGELOG.md');
 $docs = (string) file_get_contents(dirname(__DIR__) . '/docs/vestaboard.md');
 $html = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(str_contains($change, '## [4.0.236]'), 'changelog 4.0.236');
 assert_true(str_contains($docs, 'Simulate open'), 'docs Simulate open');
+assert_true(str_contains($docs, 'first two names'), 'docs two names');
 assert_true(str_contains($html, 'settings-vestaboard-night'), 'settings night checkbox');
 assert_true(str_contains($html, 'settings-vestaboard-night-simulate'), 'settings simulate button');
 assert_true(str_contains($html, 'HOUSE SECURE'), 'settings HOUSE SECURE');
@@ -268,5 +291,6 @@ assert_true(str_contains($js, 'function applyVestaboardNightHours'), 'JS night h
 assert_true(str_contains($js, 'function toggleNightOpenSimulate'), 'JS simulate open');
 assert_true(str_contains($js, 'HOUSE SECURE'), 'JS night preview HOUSE SECURE');
 assert_true(str_contains($change, '## [4.0.253]'), 'changelog 4.0.253');
+assert_true(str_contains($change, '## [4.0.281]'), 'changelog 4.0.281');
 
 fwrite(STDOUT, "test_vestaboard_night.php ok\n");

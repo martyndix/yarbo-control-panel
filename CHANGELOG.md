@@ -6,6 +6,14 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.281] - 2026-11-12
+
+### Changed
+- **Vestaboard Night open alerts:** when two or more doors/windows are open, rows 2 and 3 always show the first two names (no more `+N MORE`). As contacts close, the next open name slides onto the board. The overnight watcher polls about every **2 seconds**, and Home Automations nudges it when the open set changes.
+
+### Added
+- **Automations When / Only if — Night door/window open:** fires when the Vestaboard night open alert becomes active. The tray chip appears only while Night hours is enabled; existing rules stay saved and sit dormant until Night hours is on again.
+
 ## [4.0.280] - 2026-11-12
 
 ### Changed

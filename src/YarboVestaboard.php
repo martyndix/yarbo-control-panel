@@ -3172,13 +3172,11 @@ final class YarboVestaboard
         if ($n === 1) {
             [$line2, $codes2] = $this->packCenteredStatus($clean[0]['label'], self::COLOR_RED);
             [$line3, $codes3] = $this->packCenteredStatus('', self::COLOR_RED);
-        } elseif ($n === 2) {
+        } else {
+            // Always show two names when two or more are open; as contacts close,
+            // the next open name slides onto row 3 (open_key change force-writes).
             [$line2, $codes2] = $this->packCenteredStatus($clean[0]['label'], self::COLOR_RED);
             [$line3, $codes3] = $this->packCenteredStatus($clean[1]['label'], self::COLOR_RED);
-        } else {
-            [$line2, $codes2] = $this->packCenteredStatus($clean[0]['label'], self::COLOR_RED);
-            $more = '+' . min(9, $n - 1) . ' MORE';
-            [$line3, $codes3] = $this->packCenteredStatus($more, self::COLOR_RED);
         }
 
         $ids = array_map(static fn(array $row): string => (string) $row['id'], $clean);
