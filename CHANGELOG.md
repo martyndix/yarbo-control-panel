@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.279] - 2026-11-12
+
+### Fixed
+- **PaperMono / Paper Colour Start plan while raining:** tablet Plans Start posts to `/api/device.php`, which now uses the same rain gate as the website Plans page and Automations (was previously unguarded).
+
 ## [4.0.278] - 2026-11-12
 
 ### Fixed

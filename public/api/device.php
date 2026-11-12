@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboCommands;
+use Yarbo\YarboHomeAutomations;
 use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboPaperDevice;
 
@@ -478,6 +479,15 @@ if ($action === 'command') {
         $planId = $input['plan_id'] ?? $input['planId'] ?? null;
         if ($planId === null || $planId === '') {
             json_response(['ok' => false, 'error' => 'plan_id is required'], 400);
+        }
+        // PaperMono / Paper Colour Plans Start — same rain gate as website Plans.
+        $rainBlock = YarboHomeAutomations::startPlanRainBlockMessage(dirname(__DIR__, 2), $agent);
+        if ($rainBlock !== null) {
+            json_response([
+                'ok' => false,
+                'error' => $rainBlock,
+                'rain_detected' => true,
+            ], 409);
         }
         $result = $agent->startPlan(is_numeric($planId) ? (int) $planId : (string) $planId, 0);
     } else {

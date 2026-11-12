@@ -11,8 +11,6 @@ use Yarbo\YarboHomeAutomations;
 use Yarbo\YarboMap;
 use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboPlans;
-use Yarbo\YarboRainSettings;
-use Yarbo\YarboTelemetry;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $projectRoot = dirname(__DIR__, 2);
@@ -106,23 +104,13 @@ try {
             json_response(['ok' => false, 'error' => 'plan_id is required'], 400);
         }
 
-        // Same rain gate as Automations Start plan (Status rain_detected).
-        try {
-            $tel = $agent->telemetry(2.0, false);
-            $raw = is_array($tel['raw'] ?? null) ? $tel['raw'] : [];
-            if ($raw !== []) {
-                $rainSens = (new YarboRainSettings($projectRoot . '/data'))->sensitivity();
-                $parsed = YarboTelemetry::parse($raw, null, $rainSens);
-                if (YarboHomeAutomations::yarboRainFromData($parsed)) {
-                    json_response([
-                        'ok' => false,
-                        'error' => 'Yarbo rain detected — start plan blocked',
-                        'rain_detected' => true,
-                    ], 409);
-                }
-            }
-        } catch (\Throwable) {
-            // If telemetry is down, still attempt start (robot firmware may refuse).
+        $rainBlock = YarboHomeAutomations::startPlanRainBlockMessage($projectRoot, $agent);
+        if ($rainBlock !== null) {
+            json_response([
+                'ok' => false,
+                'error' => $rainBlock,
+                'rain_detected' => true,
+            ], 409);
         }
 
         $percent = isset($input['percent']) ? (int) $input['percent'] : 0;

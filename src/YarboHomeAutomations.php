@@ -1015,6 +1015,40 @@ final class YarboHomeAutomations
     }
 
     /**
+     * Shared gate for Plans / PaperMono / Automations Start plan.
+     * Prefers live MQTT telemetry; falls back to the automations rain cache.
+     *
+     * @return string|null Error when start should be refused, else null
+     */
+    public static function startPlanRainBlockMessage(string $projectRoot, ?YarboMqttAgentClient $agent = null): ?string
+    {
+        $msg = 'Yarbo rain detected — start plan blocked';
+        if ($agent !== null) {
+            try {
+                $tel = $agent->telemetry(2.0, false);
+                $raw = is_array($tel['raw'] ?? null) ? $tel['raw'] : [];
+                if ($raw !== []) {
+                    $rainSens = (new YarboRainSettings($projectRoot . '/data'))->sensitivity();
+                    $parsed = YarboTelemetry::parse($raw, null, $rainSens);
+                    if (self::yarboRainFromData($parsed)) {
+                        return $msg;
+                    }
+
+                    return null;
+                }
+            } catch (\Throwable) {
+                // Fall through to disk cache.
+            }
+        }
+        $live = (new self($projectRoot))->yarboLiveRow();
+        if ($live !== null && !empty($live['rain'])) {
+            return $msg;
+        }
+
+        return null;
+    }
+
+    /**
      * Live robot_state / work_status in {7, 13} (E77 keeps work_status MOWING).
      *
      * @param array<string, mixed> $data
@@ -3472,10 +3506,9 @@ final class YarboHomeAutomations
             if ($planId === null || $planId === '') {
                 return ['ok' => false, 'error' => 'Pick a work plan'];
             }
-            // Match Status rain: do not kick off a plan while wet.
-            $live = $this->yarboLiveRow();
-            if ($live !== null && !empty($live['rain'])) {
-                return ['ok' => false, 'error' => 'Yarbo rain detected — start plan blocked'];
+            $rainBlock = self::startPlanRainBlockMessage($this->projectRoot);
+            if ($rainBlock !== null) {
+                return ['ok' => false, 'error' => $rainBlock];
             }
         }
         if ($this->commandHandler !== null) {
