@@ -174,7 +174,7 @@ foreach ([
     'Do not clear usingRemote here',
     'X-Yarbo-Paper-Net',
     'paperNetAddIdentityHeaders',
-    '#define PAPERMONO_FW_VERSION "0.1.91"',
+    '#define PAPERMONO_FW_VERSION "0.1.92"',
 ] as $needle) {
     $hay = $fw . "\n" . $net . "\n" . $ver;
     if (!str_contains($hay, $needle)) {
@@ -323,6 +323,22 @@ file_put_contents($root . '/data/paper-remote.json', json_encode([
 $prefer = new Yarbo\YarboPaperRemote($root);
 if ($prefer->tabletOrigin() !== 'https://pi.tail1234.ts.net') {
     fwrite(STDERR, 'tabletOrigin must prefer Funnel over cert subdomain got ' . $prefer->tabletOrigin() . "\n");
+    exit(1);
+}
+file_put_contents($root . '/data/paper-remote.json', json_encode([
+    'enabled' => true,
+    'provider' => 'custom',
+    'origin' => 'https://28lpc.mjdix.ch',
+    'funnel_origin' => '',
+], JSON_UNESCAPED_SLASHES));
+$certOnly = new Yarbo\YarboPaperRemote($root);
+if ($certOnly->tabletOrigin() !== '') {
+    fwrite(STDERR, 'tabletOrigin must omit cert subdomain so remurl is not overwritten, got ' . $certOnly->tabletOrigin() . "\n");
+    exit(1);
+}
+$monoMain = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/main.cpp');
+if (!str_contains($monoMain, 'haveFunnel && !newFunnel')) {
+    fwrite(STDERR, "papermono must refuse replacing Funnel remurl with a non-Funnel host\n");
     exit(1);
 }
 

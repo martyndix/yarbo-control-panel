@@ -16,7 +16,7 @@ final class YarboPaperDevice
     public const KIND_COLOR = 'papercolor';
     public const KIND_WEB = 'web';
     public const WEB_CLIENT_ID = 'web';
-    public const FIRMWARE_VERSION = '0.1.91';
+    public const FIRMWARE_VERSION = '0.1.92';
     public const MENU_LABEL_MAX = 20;
     public const FIRMWARE_VERSION_COLOR = '0.2.28-colour';
     public const OTA_ONLINE_MONO_S = 120;
@@ -1621,10 +1621,12 @@ final class YarboPaperDevice
         // Do not recompose Powerwall/Yarbo live over NIGHT MODE / SLEEP WELL.
         if ($hold || $night || $quiet) {
             $onBoard = YarboVestaboard::normalizeLiveCodes($vb['board_codes'] ?? null);
-            // Before the watcher posts overnight, board_codes are still live —
-            // prefer the composed night/quiet layout so the tablet is not stuck
-            // on Powerwall with a NIGHT MODE label.
-            $mirrorBoard = $hold || ($night && $nightPosted) || ($quiet && $quietPosted);
+            // Before the watcher posts overnight — or when it is idle and board_codes
+            // are still leftover live Powerwall — prefer the composed night/quiet layout.
+            $overnightBoard = is_array($onBoard) && $vbObj->codesLookLikeOvernight($onBoard);
+            $mirrorBoard = $hold
+                || ($night && $nightPosted && $overnightBoard)
+                || ($quiet && $quietPosted && $overnightBoard);
             if ($mirrorBoard && !$this->vestaboardCodesBlank($onBoard)) {
                 $codes = $onBoard;
                 $lines = YarboVestaboard::linesFromCodes($onBoard);

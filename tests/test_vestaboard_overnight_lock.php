@@ -126,7 +126,7 @@ assert_true(str_contains($fw, 'Views locked'), 'firmware overnight note');
 assert_true(str_contains($fw, 'App messages still show'), 'firmware app-message note');
 
 $ver = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
-assert_true(str_contains($ver, '0.1.91'), 'firmware 0.1.91');
+assert_true(str_contains($ver, '0.1.92'), 'firmware 0.1.92');
 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.257]'), 'changelog 4.0.257');
@@ -179,5 +179,33 @@ assert_true(($payload['lines'][2] ?? '') === 'HOUSE    SECURE', 'night dashboard
 $src = (string) file_get_contents(__DIR__ . '/../src/YarboVestaboard.php');
 assert_true(str_contains($src, 'Browser/Funnel status must not re-scan UniFi'), 'dashboard night path documents no UniFi scan');
 assert_true(str_contains($src, 'nightWatchInventoryCount'), 'night availability uses inventory file only');
+assert_true(str_contains($src, 'codesLookLikeOvernight'), 'night dashboard rejects leftover live boards');
+assert_true(str_contains($src, 'Do not call nightLayoutHash() here'), 'tick skips daytime UniFi nightLayoutHash');
+
+// Sticky night_active with leftover Powerwall board_codes must not show Powerwall.
+$pwCodes = [
+    $quiet->encodeLine('POWERWALL  53%'),
+    $quiet->encodeLine('GRID     570W'),
+    $quiet->encodeLine('DRAW     571W'),
+];
+file_put_contents($root . '/data/vestaboard-config.json', json_encode([
+    'enabled' => true,
+    'quiet_timezone' => 'UTC',
+    'night_hours_enabled' => true,
+    'night_start' => '00:00',
+    'night_end' => '23:59',
+    'night_active' => true,
+    'night_last_open' => false,
+    'board_codes' => $pwCodes,
+    'last_hash' => hash('sha256', json_encode($pwCodes)),
+    'last_sent_at' => gmdate('c'),
+], JSON_UNESCAPED_SLASHES));
+$staleNight = new YarboVestaboard($root);
+assert_true($staleNight->codesLookLikeLiveStatus($pwCodes), 'powerwall codes look live');
+assert_true(!$staleNight->codesLookLikeOvernight($pwCodes), 'powerwall codes are not overnight');
+$stalePayload = $staleNight->dashboardPayload(null, false);
+assert_true(!empty($stalePayload['night_hours']), 'stale night still flags night hours');
+assert_true(!str_contains(strtoupper((string) ($stalePayload['lines'][0] ?? '')), 'POWERWALL'), 'stale night must not mirror Powerwall: ' . json_encode($stalePayload['lines'] ?? null));
+assert_true(str_contains(strtoupper((string) ($stalePayload['lines'][2] ?? '')), 'SECURE'), 'stale night falls back to secure layout');
 
 echo "ok\n";

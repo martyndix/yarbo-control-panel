@@ -1271,12 +1271,17 @@ bool httpGetStatus()
         saveConfig();
     }
     // Only adopt a non-empty Funnel URL — empty compact must not wipe remurl.
+    // Never replace a stored *.ts.net Funnel URL with a browser client-cert host.
     if (!doc["remote_url"].isNull()) {
         String ru = doc["remote_url"] | "";
         paperNetNormalize(ru);
         if (ru.length() && ru != remoteUrl) {
-            remoteUrl = ru;
-            saveConfig();
+            bool haveFunnel = remoteUrl.indexOf(".ts.net") >= 0;
+            bool newFunnel = ru.indexOf(".ts.net") >= 0;
+            if (!(haveFunnel && !newFunnel)) {
+                remoteUrl = ru;
+                saveConfig();
+            }
         }
     }
     clockLocal = doc["clock_local"] | clockLocal;
