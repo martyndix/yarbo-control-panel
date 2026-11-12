@@ -14,9 +14,22 @@ $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 assert_true(str_contains($js, 'function gatewayHtmlError'), 'gatewayHtmlError helper');
 assert_true(str_contains($js, 'Panel gateway timed out (504)'), 'friendly 504 copy');
 assert_true(str_contains($js, 'no-js ie6 oldie'), 'detects Cloudflare HTML');
-assert_true(str_contains($js, 'Open the panel on the home network'), 'home-network hint');
+assert_true(str_contains($js, 'Retrying…') || str_contains($js, 'Retrying...'), 'retries instead of forcing LAN');
+assert_true(!str_contains($js, 'Open the panel on the home network and refresh'), 'no LAN-only refresh nag');
+assert_true(str_contains($js, 'restoreVestaboardPreviewCache'), 'restores Vestaboard from session cache');
+assert_true(str_contains($js, 'isGatewayTimeoutError'), 'soft gateway timeout helper');
+assert_true(str_contains($js, 'Home is taking longer than usual'), 'home keeps retrying without diagnostic nag');
+
+$status = (string) file_get_contents(__DIR__ . '/../public/api/status.php');
+assert_true(str_contains($status, 'telemetry(2.5, true, true)'), 'status prefers cached telemetry');
+assert_true(!str_contains($status, 'requireRunning'), 'status does not block on agent spawn');
+assert_true(str_contains($status, 'hub_status_extras(false)'), 'status skips live Powerwall refresh');
+
+$vb = (string) file_get_contents(__DIR__ . '/../src/YarboVestaboard.php');
+assert_true(str_contains($vb, 'vestaboardLayout(false)'), 'Powerwall Vestaboard layout uses cache on dashboard');
 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.256]'), 'changelog 4.0.256');
+assert_true(str_contains($change, '## [4.0.261]'), 'changelog 4.0.261');
 
 echo "ok\n";

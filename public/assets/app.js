@@ -2598,18 +2598,69 @@ function gatewayHtmlError(status, text) {
     }
     if (status === 504 || lower.includes('504') || lower.includes('gateway time-out')
         || lower.includes('gateway timeout')) {
-        return 'Panel gateway timed out (504). Open the panel on the home network and refresh — Vestaboard and status should come back.';
+        return 'Panel gateway timed out (504). Retrying…';
     }
     if (status === 502 || lower.includes('bad gateway')) {
-        return 'Panel gateway error (502). Wait a few seconds and refresh, preferably on the home network.';
+        return 'Panel gateway error (502). Retrying…';
     }
     if (status === 503 || lower.includes('service unavailable')) {
-        return 'Panel temporarily unavailable (503). Wait a few seconds and refresh.';
+        return 'Panel temporarily unavailable (503). Retrying…';
     }
     if (looksHtml && status >= 500) {
-        return `Panel gateway error (${status}). Try again on the home network.`;
+        return `Panel gateway error (${status}). Retrying…`;
     }
     return null;
+}
+
+function isGatewayTimeoutError(message) {
+    const lower = String(message || '').toLowerCase();
+    return lower.includes('gateway timed out')
+        || lower.includes('gateway time-out')
+        || lower.includes('gateway timeout')
+        || lower.includes('retrying…')
+        || lower.includes('retrying...')
+        || (lower.includes('504') && (lower.includes('gateway') || lower.includes('non-json') || lower.includes('<!doctype')))
+        || (lower.includes('502') && lower.includes('gateway'))
+        || (lower.includes('503') && lower.includes('unavailable'));
+}
+
+const VESTABOARD_CACHE_KEY = 'yarbo_vestaboard_preview_v1';
+
+function cacheVestaboardPreview(board) {
+    if (!board || board.enabled === false) return;
+    if (!Array.isArray(board.lines) && !Array.isArray(board.codes)) return;
+    try {
+        sessionStorage.setItem(VESTABOARD_CACHE_KEY, JSON.stringify({
+            lines: board.lines || [],
+            codes: board.codes || [],
+            last_sent_at: board.last_sent_at || null,
+            at: Date.now(),
+        }));
+    } catch {
+        // ignore quota / private mode
+    }
+}
+
+function restoreVestaboardPreviewCache() {
+    if (!els.vestaboardBoard) return false;
+    try {
+        const raw = sessionStorage.getItem(VESTABOARD_CACHE_KEY);
+        if (!raw) return false;
+        const cached = JSON.parse(raw);
+        if (!cached || (!Array.isArray(cached.lines) && !Array.isArray(cached.codes))) return false;
+        const hasContent = (cached.lines || []).some((line) => String(line || '').trim() !== '')
+            || (cached.codes || []).some((row) => Array.isArray(row) && row.some((c) => Number(c) > 0));
+        if (!hasContent) return false;
+        renderVestaboardPreview(cached.lines, els.vestaboardBoard, cached.codes);
+        if (els.vestaboardUpdatedAt && cached.last_sent_at) {
+            const rel = formatTimeAgo(cached.last_sent_at);
+            els.vestaboardUpdatedAt.textContent = rel.text;
+            els.vestaboardUpdatedAt.title = rel.title;
+        }
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 async function parseJsonResponse(res) {
@@ -2675,9 +2726,11 @@ function formatConnectionError(message) {
         lower.includes('gateway timed out')
         || lower.includes('non-json (504)')
         || lower.includes('gateway time-out')
+        || lower.includes('retrying…')
+        || lower.includes('retrying...')
         || (lower.includes('504') && (lower.includes('<!doctype') || lower.includes('ie6 oldie')))
     ) {
-        return 'Panel gateway timed out (504). Open the panel on the home network and refresh — Vestaboard and status should come back.';
+        return 'Panel gateway timed out (504). Retrying…';
     }
     if (lower.includes('connection refused') || message.includes('[111]')) {
         return 'Cannot reach Yarbo cloud MQTT. Check internet on this panel and the account email/password under Settings → Yarbo.';
@@ -4930,16 +4983,13 @@ async function loadHomeDashboard(opts = {}) {
             if (status) {
                 status.textContent = homeLoadAborts < 3
                     ? 'Loading Home…'
-                    : 'Home is still starting. Refresh after a minute, or run the Pi diagnostic from the update notes.';
+                    : 'Home is taking longer than usual — still trying…';
             }
-            if (homeLoadAborts < 3) {
-                window.setTimeout(() => {
-                    homeLoadBusy = false;
-                    loadHomeDashboard();
-                }, 2500);
-            } else {
+            const delay = Math.min(12000, 2000 + homeLoadAborts * 1500);
+            window.setTimeout(() => {
                 homeLoadBusy = false;
-            }
+                loadHomeDashboard();
+            }, delay);
             return;
         }
         const status = document.getElementById('home-server-status');
@@ -10969,7 +11019,14 @@ function updateVestaboardDashboard(data) {
     applyVestaboardLiveSwitch(data);
     applyVestaboardRotateState(board);
     if (!enabled) return;
-    renderVestaboardPreview(board.lines, els.vestaboardBoard, board.codes);
+    const hasLines = Array.isArray(board.lines) && board.lines.some((line) => String(line || '').trim() !== '');
+    const hasCodes = Array.isArray(board.codes) && board.codes.some((row) => Array.isArray(row) && row.some((c) => Number(c) > 0));
+    if (hasLines || hasCodes) {
+        renderVestaboardPreview(board.lines, els.vestaboardBoard, board.codes);
+        cacheVestaboardPreview(board);
+    } else if (!restoreVestaboardPreviewCache()) {
+        renderVestaboardPreview(board.lines, els.vestaboardBoard, board.codes);
+    }
     if (els.vestaboardUpdatedAt) {
         const rel = formatTimeAgo(board.last_sent_at);
         els.vestaboardUpdatedAt.textContent = rel.text;
@@ -15137,12 +15194,23 @@ async function fetchStatus() {
         if (settingsModalOpen || mailPageOpen || driveActive) return;
         if (err?.name === 'AbortError') {
             if (timedOut) {
-                setError('Yarbo status timed out. Other modules should still work.');
+                if (hasStatusSnapshot) {
+                    setError(null);
+                } else {
+                    setError('Yarbo status timed out. Retrying…');
+                    restoreVestaboardPreviewCache();
+                }
             }
             return;
         }
         // Keep the last Vestaboard/grid snapshot — a gateway HTML 504 has no board payload.
-        setError(err.message || 'Network error');
+        const msg = err.message || 'Network error';
+        restoreVestaboardPreviewCache();
+        if (isGatewayTimeoutError(msg) && hasStatusSnapshot) {
+            setError(null);
+            return;
+        }
+        setError(msg);
     } finally {
         clearTimeout(timer);
         polling = false;
@@ -17147,6 +17215,7 @@ initUpdateConfirmModal();
 loadSettings()
     .catch(() => {})
     .finally(() => {
+        restoreVestaboardPreviewCache();
         fetchStatus();
         setInterval(fetchStatus, POLL_INTERVAL_MS);
     });

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.261] - 2026-11-12
+
+### Fixed
+- **Slow remote panel / blank Vestaboard / “open on LAN”:** status polls no longer wait on MQTT agent spawn or a live Powerwall refresh (those were tipping Funnel into HTML 504s). They prefer cached robot telemetry, keep the last Vestaboard preview across timeouts, retry quietly instead of asking you to open the home network, and Home keeps retrying instead of stopping on “still starting”.
+
 ## [4.0.260] - 2026-11-12
 
 ### Changed

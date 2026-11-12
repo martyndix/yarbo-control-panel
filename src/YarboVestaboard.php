@@ -1336,12 +1336,13 @@ final class YarboVestaboard
     {
         $hub = new YarboHub($this->projectRoot);
         $live = $hub->vestaboardLive();
-        $allowRefresh = $online !== false;
+        // Dashboard / status must never block on Tesla or Lymow cloud — use cache only.
+        // The Vestaboard watcher calls refreshIfStale() on its own schedule.
         if ($live === YarboHub::LIVE_BATTERIES) {
             return $this->batteriesLayout($parsed, $online);
         }
         if ($live === YarboHub::MODULE_POWERWALL) {
-            return (new YarboPowerwall($this->projectRoot))->vestaboardLayout($allowRefresh);
+            return (new YarboPowerwall($this->projectRoot))->vestaboardLayout(false);
         }
         if ($live === YarboHub::MODULE_LYMOW) {
             return (new YarboLymow($this->projectRoot))->vestaboardLayout();
@@ -1387,7 +1388,7 @@ final class YarboVestaboard
         $yarboOnline = $yarboOn && (bool) $online && is_array($parsed);
         $yarboPct = $this->batteryPercentValue($yarboOnline ? $parsed : null);
 
-        $pw = $pwOn ? (new YarboPowerwall($this->projectRoot))->dashboardPayload($online !== false) : [];
+        $pw = $pwOn ? (new YarboPowerwall($this->projectRoot))->dashboardPayload(false) : [];
         $pwPct = YarboPowerwall::normalizeBatteryPercent($pw['battery_percent'] ?? null);
         $pwOnline = $pwOn && ($pwPct !== null || !empty($pw['online']));
 

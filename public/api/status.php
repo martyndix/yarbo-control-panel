@@ -164,7 +164,8 @@ function status_from_agent(array $result): void
             'wifi' => YarboWifi::parse($wifiEnvelope),
             'vestaboard' => vestaboard_status_payload($parsed, true),
         ],
-        hub_status_extras(),
+        // Cache-only companions — a Tesla/Lymow refresh here used to push Funnel past 504.
+        hub_status_extras(false),
     ));
 }
 
@@ -178,29 +179,23 @@ if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
 }
 
 // Cloud MQTT agent only — local LAN :1883 is no longer used for status/control.
+// Browser/Funnel polls must stay fast: never block on agent spawn or a live
+// Powerwall/Lymow refresh (those run in the background watcher). Prefer cached
+// telemetry so a slow get_device_msg cannot turn into a proxy HTML 504.
 $agent = YarboMqttAgentClient::fromEnv();
-$ping = $agent->ping();
+$ping = $agent->ping(0.8);
 $engine = (string) ($ping['engine'] ?? '');
 $isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
-if (!$isCloudAgent || !($ping['ok'] ?? false)) {
-    try {
-        $agent = YarboMqttAgentClient::requireRunning();
-        $ping = $agent->ping();
-        $engine = (string) ($ping['engine'] ?? '');
-        $isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
-    } catch (Throwable $e) {
-        status_failure(YarboErrors::friendly($e->getMessage()), 'agent', 503, [
-            'via' => 'agent',
-        ]);
-    }
-}
 
 if (!($ping['ok'] ?? false) || !$isCloudAgent) {
     status_failure(
         'Yarbo cloud agent is not running. Set account email/password in Settings → Yarbo, then Save.',
         'agent',
         503,
-        ['via' => 'agent'],
+        [
+            'via' => 'agent',
+            'transient' => true,
+        ],
     );
 }
 
@@ -217,7 +212,7 @@ if (empty($ping['connected'])) {
 }
 
 try {
-    $result = $agent->telemetry(4.0, true);
+    $result = $agent->telemetry(2.5, true, true);
     status_from_agent($result);
 
     $error = (string) ($result['error'] ?? 'telemetry timeout');
@@ -239,6 +234,6 @@ try {
 } catch (Throwable $e) {
     status_failure(friendly_error($e), 'telemetry', 504, [
         'via' => 'agent',
-        'transient' => false,
+        'transient' => true,
     ]);
 }
