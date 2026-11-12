@@ -47,7 +47,7 @@ if (($after['tab2']['presence_label'] ?? '') !== 'Online — remote' || empty($a
 }
 
 // Home Wi-Fi + Funnel/subdomain transport must still show as home network.
-$devices->touch('tab1', '0.1.89', 100, false, true, true);
+$devices->touch('tab1', '0.1.90', 100, false, true, true);
 $homeViaFunnel = null;
 foreach ($devices->publicTablets() as $row) {
     if ($row['id'] === 'tab1') {

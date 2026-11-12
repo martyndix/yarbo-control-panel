@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.258] - 2026-11-12
+
+### Added
+- **PaperMono alert backlight and screen:** each Alerts row can enable backlight, set brightness %, and choose which screen to open (including lock screen, or stay put). Holds until the error clears or the message is read. Firmware **0.1.90**.
+
 ## [4.0.257] - 2026-11-12
 
 ### Changed

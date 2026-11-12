@@ -142,6 +142,23 @@ bool alertYarboFlash = true;
 bool alertLymowFlash = true;
 bool alertPowerwallFlash = true;
 bool alertNightOpenFlash = true;
+bool alertMessageLight = true;
+bool alertYarboLight = true;
+bool alertLymowLight = true;
+bool alertPowerwallLight = true;
+bool alertNightOpenLight = true;
+int alertMessageBrightness = 100;
+int alertYarboBrightness = 100;
+int alertLymowBrightness = 100;
+int alertPowerwallBrightness = 100;
+int alertNightOpenBrightness = 100;
+String alertMessagePage = "mail";
+String alertYarboPage = "yarbo";
+String alertLymowPage = "lymow";
+String alertPowerwallPage = "powerwall";
+String alertNightOpenPage = "note";
+String lastAlertNavKey = "";
+int alertHoldBrightness = -1; /* -1 = no alert backlight hold */
 bool yarboError = false;
 bool lymowError = false;
 bool powerwallError = false;
@@ -292,6 +309,9 @@ void refreshTabletPower(bool force);
 bool takeTouchPress(int &x, int &y);
 void applyFrontlight(bool on, bool force = false);
 bool unreadFrontlightHold();
+bool alertFrontlightHold();
+void applyAlertPage(const String &page);
+void updateAlertPresentation(bool forceNav);
 void ensureNtp();
 void refreshLocalClock();
 bool tapOnPadlock(int x, int y);
@@ -3110,22 +3130,138 @@ void drawVestaboardGrid(int x, int y, int cell, int gap)
 
 bool unreadFrontlightHold()
 {
-    return unreadCount > 0 && alertMessageOn;
+    return unreadCount > 0 && alertMessageOn && alertMessageLight;
+}
+
+bool alertFrontlightHold()
+{
+    return alertHoldBrightness >= 0;
 }
 
 int brightnessValue()
 {
-    int pct = unreadFrontlightHold() ? 100 : brightnessPct;
+    int pct = alertFrontlightHold() ? alertHoldBrightness : brightnessPct;
     return map(constrain(pct, 0, 100), 0, 100, 0, 255);
 }
 
 void applyFrontlight(bool on, bool force)
 {
-    if (unreadFrontlightHold() && !force) {
+    if (alertFrontlightHold() && !force) {
         on = true;
     }
     lightOn = on;
     paperSetFrontlight(on ? (uint8_t) brightnessValue() : 0);
+}
+
+void applyAlertPage(const String &page)
+{
+    String p = page;
+    p.toLowerCase();
+    p.trim();
+    if (p.length() == 0 || p == "none") {
+        return;
+    }
+    if (p == "lock") {
+        enterLock();
+        applyFrontlight(true);
+        return;
+    }
+    screenLocked = false;
+    menuOpen = false;
+    int target = -1;
+    if (p == "mail" || p == "radio") {
+        radioUi = PAPERMONO_RADIO_INBOX;
+        radioViewIndex = -1;
+        target = PAPERMONO_PAGE_RADIO;
+    } else if (p == "note" || p == "board") {
+        target = PAPERMONO_PAGE_NOTE;
+    } else if (p == "yarbo" || p == "home" || p == "status" || p == "health" || p == "plans") {
+        target = firstYarboPage();
+    } else if (p == "lymow") {
+        target = PAPERMONO_PAGE_LYMOW;
+    } else if (p == "powerwall") {
+        target = PAPERMONO_PAGE_POWERWALL;
+    } else if (p == "robots") {
+        robotsUi = PAPERMONO_ROBOT_LIST;
+        robotSel = -1;
+        target = PAPERMONO_PAGE_ROBOTS;
+    } else if (p == "access") {
+        target = PAPERMONO_PAGE_ACCESS;
+    } else if (p == "house") {
+        target = PAPERMONO_PAGE_HOUSE;
+    } else if (p == "heat") {
+        target = PAPERMONO_PAGE_HEAT;
+    } else if (p == "device") {
+        target = PAPERMONO_PAGE_DEVICE;
+    }
+    if (target < 0 || !pageEnabled(target)) {
+        return;
+    }
+    showPage(target, true);
+    applyFrontlight(true);
+}
+
+void updateAlertPresentation(bool forceNav)
+{
+    String key = "";
+    bool light = false;
+    int bright = 100;
+    String page = "none";
+
+    if (yarboOn && yarboError && alertYarboOn) {
+        key = "yarbo";
+        light = alertYarboLight;
+        bright = alertYarboBrightness;
+        page = alertYarboPage;
+    } else if (lymowOn && lymowError && alertLymowOn) {
+        key = "lymow";
+        light = alertLymowLight;
+        bright = alertLymowBrightness;
+        page = alertLymowPage;
+    } else if (powerwallOn && powerwallError && alertPowerwallOn) {
+        key = "powerwall";
+        light = alertPowerwallLight;
+        bright = alertPowerwallBrightness;
+        page = alertPowerwallPage;
+    } else if (vestaboardNight && vestaboardNightOpen && alertNightOpenOn) {
+        key = "night";
+        light = alertNightOpenLight;
+        bright = alertNightOpenBrightness;
+        page = alertNightOpenPage;
+    } else if (unreadCount > 0 && alertMessageOn) {
+        key = "message";
+        light = alertMessageLight;
+        bright = alertMessageBrightness;
+        page = alertMessagePage;
+    }
+
+    if (key.length() == 0) {
+        bool hadHold = alertHoldBrightness >= 0;
+        alertHoldBrightness = -1;
+        if (lastAlertNavKey.length()) {
+            lastAlertNavKey = "";
+        }
+        if (hadHold && lightOn) {
+            applyFrontlight(true);
+        }
+        return;
+    }
+
+    if (light) {
+        alertHoldBrightness = constrain(bright, 0, 100);
+        applyFrontlight(true);
+    } else {
+        bool hadHold = alertHoldBrightness >= 0;
+        alertHoldBrightness = -1;
+        if (hadHold && lightOn) {
+            applyFrontlight(true);
+        }
+    }
+
+    if (forceNav || key != lastAlertNavKey) {
+        lastAlertNavKey = key;
+        applyAlertPage(page);
+    }
 }
 
 void powerOffTablet()
@@ -4251,15 +4387,12 @@ void refreshUnreadLed()
         }
     }
     unreadCount = n;
-    if (unreadFrontlightHold()) {
+    if (unreadCount > 0 && alertMessageOn) {
         rgbHoldMessage(true);
-        applyFrontlight(true);
     } else {
         rgbHoldMessage(false);
-        if (lightOn) {
-            applyFrontlight(true);
-        }
     }
+    updateAlertPresentation(false);
 }
 
 void openInboxFromLock()
@@ -4470,6 +4603,31 @@ void applyCompactExtras(JsonDocument &doc)
     alertLymowFlash = doc["alert_lymow_flash"] | alertLymowFlash;
     alertPowerwallFlash = doc["alert_powerwall_flash"] | alertPowerwallFlash;
     alertNightOpenFlash = doc["alert_night_open_flash"] | alertNightOpenFlash;
+    alertMessageLight = doc["alert_message_light"] | alertMessageLight;
+    alertYarboLight = doc["alert_yarbo_light"] | alertYarboLight;
+    alertLymowLight = doc["alert_lymow_light"] | alertLymowLight;
+    alertPowerwallLight = doc["alert_powerwall_light"] | alertPowerwallLight;
+    alertNightOpenLight = doc["alert_night_open_light"] | alertNightOpenLight;
+    alertMessageBrightness = constrain((int) (doc["alert_message_brightness"] | alertMessageBrightness), 0, 100);
+    alertYarboBrightness = constrain((int) (doc["alert_yarbo_brightness"] | alertYarboBrightness), 0, 100);
+    alertLymowBrightness = constrain((int) (doc["alert_lymow_brightness"] | alertLymowBrightness), 0, 100);
+    alertPowerwallBrightness = constrain((int) (doc["alert_powerwall_brightness"] | alertPowerwallBrightness), 0, 100);
+    alertNightOpenBrightness = constrain((int) (doc["alert_night_open_brightness"] | alertNightOpenBrightness), 0, 100);
+    if (!doc["alert_message_page"].isNull()) {
+        alertMessagePage = String((const char *) (doc["alert_message_page"] | "mail"));
+    }
+    if (!doc["alert_yarbo_page"].isNull()) {
+        alertYarboPage = String((const char *) (doc["alert_yarbo_page"] | "yarbo"));
+    }
+    if (!doc["alert_lymow_page"].isNull()) {
+        alertLymowPage = String((const char *) (doc["alert_lymow_page"] | "lymow"));
+    }
+    if (!doc["alert_powerwall_page"].isNull()) {
+        alertPowerwallPage = String((const char *) (doc["alert_powerwall_page"] | "powerwall"));
+    }
+    if (!doc["alert_night_open_page"].isNull()) {
+        alertNightOpenPage = String((const char *) (doc["alert_night_open_page"] | "note"));
+    }
     alertSetMessageColor(alertMessageColor.c_str());
     alertSetMessageFlash(alertMessageFlash);
     yarboError = doc["yarbo_error"] | false;
@@ -4602,6 +4760,7 @@ void applyCompactExtras(JsonDocument &doc)
         refreshUnreadLed();
         if (anyNewUnread && alertMessageOn) {
             alertMessage();
+            updateAlertPresentation(true);
         }
     }
     bool anyError = (yarboOn && yarboError && alertYarboOn)
@@ -4632,6 +4791,7 @@ void applyCompactExtras(JsonDocument &doc)
         lastErrorAlert = millis();
         alertError();
     }
+    updateAlertPresentation(false);
 }
 
 bool postPaperMessage(const String &to, const String &text)
@@ -5828,7 +5988,7 @@ void inputTask(void *arg)
             lastLight = millis();
             if (!lightOn) {
                 applyFrontlight(true);
-            } else if (unreadFrontlightHold()) {
+            } else if (alertFrontlightHold()) {
                 applyFrontlight(true);
             }
             touchQX = tx;
@@ -6172,7 +6332,7 @@ void loop()
         && now - lastActivity > (uint32_t) lockAfterS * 1000) {
         enterLock();
     }
-    if (screenLocked && lightOn && !unreadFrontlightHold()
+    if (screenLocked && lightOn && !alertFrontlightHold()
         && now - lastLight > (uint32_t) lightOffS * 1000) {
         applyFrontlight(false);
     }

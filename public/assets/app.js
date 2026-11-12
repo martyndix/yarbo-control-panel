@@ -13427,7 +13427,53 @@ function applyPaperMonoPrefs(prefs) {
     if (els.papermonoAlertNightOpenFlash) {
         els.papermonoAlertNightOpenFlash.checked = prefs.alert_night_open_flash !== false;
     }
+    applyPaperAlertGotoPrefs(prefs);
     applyPaperPreviewModules();
+}
+
+const PAPER_ALERT_GOTO_KEYS = ['message', 'yarbo', 'lymow', 'powerwall', 'night_open'];
+const PAPER_ALERT_GOTO_DEFAULTS = {
+    message: { light: true, brightness: 100, page: 'mail' },
+    yarbo: { light: true, brightness: 100, page: 'yarbo' },
+    lymow: { light: true, brightness: 100, page: 'lymow' },
+    powerwall: { light: true, brightness: 100, page: 'powerwall' },
+    night_open: { light: true, brightness: 100, page: 'note' },
+};
+
+function applyPaperAlertGotoPrefs(prefs) {
+    PAPER_ALERT_GOTO_KEYS.forEach((key) => {
+        const defaults = PAPER_ALERT_GOTO_DEFAULTS[key] || { light: true, brightness: 100, page: 'none' };
+        const lightEl = document.querySelector(`[data-alert-light="${key}"]`);
+        const brightEl = document.querySelector(`[data-alert-brightness="${key}"]`);
+        const pageEl = document.querySelector(`[data-alert-page="${key}"]`);
+        if (lightEl) {
+            lightEl.checked = prefs[`alert_${key}_light`] !== false;
+        }
+        if (brightEl) {
+            const n = Number(prefs[`alert_${key}_brightness`]);
+            brightEl.value = String(Number.isFinite(n) ? n : defaults.brightness);
+        }
+        if (pageEl) {
+            pageEl.value = prefs[`alert_${key}_page`] || defaults.page;
+        }
+    });
+}
+
+function paperAlertGotoPayload() {
+    const out = {};
+    PAPER_ALERT_GOTO_KEYS.forEach((key) => {
+        const defaults = PAPER_ALERT_GOTO_DEFAULTS[key] || { light: true, brightness: 100, page: 'none' };
+        const lightEl = document.querySelector(`[data-alert-light="${key}"]`);
+        const brightEl = document.querySelector(`[data-alert-brightness="${key}"]`);
+        const pageEl = document.querySelector(`[data-alert-page="${key}"]`);
+        out[`alert_${key}_light`] = lightEl ? !!lightEl.checked : defaults.light;
+        const bright = Number(brightEl?.value ?? defaults.brightness);
+        out[`alert_${key}_brightness`] = Number.isFinite(bright)
+            ? Math.max(0, Math.min(100, bright))
+            : defaults.brightness;
+        out[`alert_${key}_page`] = pageEl?.value || defaults.page;
+    });
+    return out;
 }
 
 function applyPaperMenuLabels(labels) {
@@ -13534,6 +13580,7 @@ function paperMonoPrefsPayload() {
         lock_after_s: Number(els.papermonoLockAfter?.value || 60),
         light_off_s: Number(els.papermonoLightOff?.value || 15),
         brightness: Number(els.papermonoBrightness?.value || 80),
+        ...paperAlertGotoPayload(),
         alert_message: !!els.papermonoAlertMessage?.checked,
         alert_message_color: els.papermonoAlertMessageColor?.value || 'cyan',
         alert_message_flash: !!els.papermonoAlertMessageFlash?.checked,
