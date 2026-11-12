@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.280] - 2026-11-12
+
+### Changed
+- **PaperMono Plans page (firmware 0.1.94):** Lymow-style layout — **START / DOCK / STOP** on one row, denser two-column plan chips (8 per page) with **PREV / NEXT**, less empty space. When rain is detected the page shows **Rain detected — cannot start a plan while raining** and START stays inactive (server still blocks). Paper Colour **0.2.29-colour** gets the same layout.
+
 ## [4.0.279] - 2026-11-12
 
 ### Fixed

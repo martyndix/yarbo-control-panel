@@ -46,6 +46,7 @@ int errorCode = 0;
 String errorLabel = "0";
 String heading = "—";
 String rainLabel = "—";
+bool rainDetected = false;
 String connectionType = "—";
 String connectionStatus = "—";
 String wifiNetwork = "—";
@@ -99,7 +100,7 @@ void drawBatteryBadge(int right, int cy, int pct, bool compact);
 String planIds[PAPERMONO_PLAN_MAX];
 String planNames[PAPERMONO_PLAN_MAX];
 int planCount = 0;
-int planOffset = 0;
+int planPage = 0;
 int selectedPlan = -1;
 String plansNote = "";
 bool plansLoaded = false;
@@ -349,7 +350,8 @@ String screenKey()
     String key = String(currentPage) + "|" + String(battery) + "|" + charging + "|" + state + "|" + head + "|"
         + errorLabel + "|" + heading + "|" + rainLabel + "|" + connectionType + "|" + connectionStatus + "|"
         + wifiNetwork + "|" + wifiSignal + "|" + batteryTemp + "|" + wirelessCharge + "|" + rtkStatus + "|"
-        + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planOffset) + "|"
+        + planActivity + "|" + String(planCount) + "|" + String(selectedPlan) + "|" + String(planPage) + "|"
+        + (rainDetected ? "1" : "0") + "|"
         + lastError + "|" + (lightsOn ? "1" : "0") + "|" + robotName + "|" + lymowName + "|"
         + String(lymowBattery) + "|" + lymowState + "|" + (yarboOn ? "1" : "0") + "|"
         + (powerwallOn ? "1" : "0") + "|"
@@ -606,19 +608,31 @@ void drawHealthPage(bool forceFull)
     finishEpdFrame();
 }
 
-int plansRowY0()
+void plansClampPage()
 {
-    return 150;
+    int pages = 1;
+    if (planCount > PAPERMONO_PLAN_VISIBLE) {
+        pages = (planCount + PAPERMONO_PLAN_VISIBLE - 1) / PAPERMONO_PLAN_VISIBLE;
+    }
+    if (planPage < 0) {
+        planPage = 0;
+    }
+    if (planPage >= pages) {
+        planPage = pages - 1;
+    }
 }
 
-int plansRowH()
+void plansGeom(int &cmdY, int &cmdH, int &listY, int &cellH, int &cellGap, int &cellW, int &navY)
 {
-    return 52;
-}
-
-int plansStartY()
-{
-    return plansRowY0() + PAPERMONO_PLAN_VISIBLE * plansRowH() + 16;
+    int W = M5.Display.width();
+    cmdY = 148;
+    cmdH = 44;
+    cellH = 40;
+    cellGap = 8;
+    listY = cmdY + cmdH + 10;
+    cellW = (W - 32 - cellGap) / 2;
+    int rows = (PAPERMONO_PLAN_VISIBLE + 1) / 2;
+    navY = listY + rows * (cellH + cellGap);
 }
 
 void drawPlansPage(bool forceFull)
@@ -628,48 +642,61 @@ void drawPlansPage(bool forceFull)
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(1);
-    M5.Display.drawString(planActivity.length() ? planActivity : "idle", 16, 108);
-    if (plansNote.length() && planCount == 0) {
-        M5.Display.setTextSize(2);
-        M5.Display.drawString(plansNote.substring(0, 22), 16, 180);
-        M5.Display.setTextSize(1);
-        if (plansNote.length() > 22) {
-            M5.Display.drawString(plansNote.substring(22, 48), 16, 214);
-        }
-    }
-
-    int y0 = plansRowY0();
-    int rh = plansRowH();
     int W = M5.Display.width();
-    for (int i = 0; i < PAPERMONO_PLAN_VISIBLE; i++) {
-        int idx = planOffset + i;
-        if (idx >= planCount) {
-            break;
-        }
-        bool sel = idx == selectedPlan;
-        int y = y0 + i * rh;
-        uint16_t bg = sel ? TFT_BLACK : TFT_WHITE;
-        uint16_t fg = sel ? TFT_WHITE : TFT_BLACK;
-        M5.Display.fillRoundRect(16, y, W - 32, rh - 8, 10, bg);
-        M5.Display.drawRoundRect(16, y, W - 32, rh - 8, 10, TFT_BLACK);
-        M5.Display.setTextColor(fg, bg);
-        M5.Display.setTextDatum(ML_DATUM);
+    int gap = 8;
+    int cmdY, cmdH, listY, cellH, cellGap, cellW, navY;
+    plansClampPage();
+    plansGeom(cmdY, cmdH, listY, cellH, cellGap, cellW, navY);
+
+    M5.Display.setTextSize(1);
+    String activity = planActivity.length() ? planActivity : String("idle");
+    if (activity.length() > 36) {
+        activity = activity.substring(0, 36);
+    }
+    M5.Display.drawString(activity, 16, 100);
+    if (rainDetected) {
         M5.Display.setTextSize(2);
-        String label = planNames[idx];
-        if (label.length() > 18) {
-            label = label.substring(0, 18);
-        }
-        M5.Display.drawString(label, 32, y + (rh - 8) / 2);
+        M5.Display.drawString("Rain detected — cannot start a plan", 16, 118);
+        M5.Display.setTextSize(1);
+    } else if (plansNote.length() && planCount == 0) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString(plansNote.substring(0, 36), 16, 118);
+        M5.Display.setTextSize(1);
     }
 
-    int bw, bh, gap, ignoreY;
-    layoutButtons(bw, bh, gap, ignoreY);
-    int startY = plansStartY();
-    bool canStart = selectedPlan >= 0 && selectedPlan < planCount;
-    drawButton(16, startY, bw, 72, "START", canStart);
-    if (planCount > PAPERMONO_PLAN_VISIBLE) {
-        drawButton(16 + bw + gap, startY, bw, 72, "MORE", false);
+    bool canStart = selectedPlan >= 0 && selectedPlan < planCount && !rainDetected;
+    int cw = (W - 32 - gap * 2) / 3;
+    int cx = 16;
+    drawButton(cx, cmdY, cw, cmdH, "START", canStart);
+    cx += cw + gap;
+    drawButton(cx, cmdY, cw, cmdH, "DOCK", false);
+    cx += cw + gap;
+    drawButton(cx, cmdY, cw, cmdH, "STOP", false);
+
+    if (planCount < 1) {
+        M5.Display.setTextSize(2);
+        M5.Display.drawString("No plans yet.", 16, listY + 8);
+    } else {
+        int start = planPage * PAPERMONO_PLAN_VISIBLE;
+        int shown = planCount - start;
+        if (shown > PAPERMONO_PLAN_VISIBLE) {
+            shown = PAPERMONO_PLAN_VISIBLE;
+        }
+        for (int i = 0; i < shown; i++) {
+            int idx = start + i;
+            int col = i % 2;
+            int row = i / 2;
+            int bx = 16 + col * (cellW + gap);
+            int by = listY + row * (cellH + cellGap);
+            drawButton(bx, by, cellW, cellH, planNames[idx], idx == selectedPlan);
+        }
+        int pages = (planCount + PAPERMONO_PLAN_VISIBLE - 1) / PAPERMONO_PLAN_VISIBLE;
+        if (pages > 1) {
+            int nw = (W - 32 - gap) / 2;
+            drawButton(16, navY, nw, cellH, "PREV", false);
+            drawButton(16 + nw + gap, navY, nw, cellH,
+                "NEXT " + String(planPage + 1) + "/" + String(pages), false);
+        }
     }
     drawPager();
     finishEpdFrame();
@@ -1218,6 +1245,12 @@ bool httpGetStatus()
         heading = String((const char *) (doc["heading"] | "—"));
     }
     rainLabel = doc["rain_label"] | rainLabel;
+    rainDetected = doc["rain_detected"] | false;
+    if (!rainDetected && rainLabel.length()) {
+        String rl = rainLabel;
+        rl.toLowerCase();
+        rainDetected = rl.startsWith("wet");
+    }
     connectionType = doc["connection_type"] | connectionType;
     connectionStatus = doc["connection_status"] | connectionStatus;
     wifiNetwork = doc["wifi_network"] | wifiNetwork;
@@ -1356,9 +1389,7 @@ bool httpGetPlans(bool refresh)
     if (selectedPlan >= planCount) {
         selectedPlan = planCount ? 0 : -1;
     }
-    if (planOffset >= planCount) {
-        planOffset = 0;
-    }
+    plansClampPage();
     plansLoaded = true;
     return true;
 }
@@ -1432,14 +1463,27 @@ void handlePlansTouch(int x, int y)
         nextPage();
         return;
     }
-    int y0 = plansRowY0();
-    int rh = plansRowH();
-    int startY = plansStartY();
-    int bw, bh, gap, ignoreY;
-    layoutButtons(bw, bh, gap, ignoreY);
-    if (y >= startY && y <= startY + 72) {
-        bool left = x < 16 + bw + gap / 2;
-        if (left) {
+    int W = M5.Display.width();
+    int gap = 8;
+    int cmdY, cmdH, listY, cellH, cellGap, cellW, navY;
+    plansClampPage();
+    plansGeom(cmdY, cmdH, listY, cellH, cellGap, cellW, navY);
+
+    if (y >= cmdY && y <= cmdY + cmdH) {
+        int cw = (W - 32 - gap * 2) / 3;
+        int which = (x - 16) / (cw + gap);
+        if (which < 0) {
+            which = 0;
+        }
+        if (which > 2) {
+            which = 2;
+        }
+        if (which == 0) {
+            if (rainDetected) {
+                lastError = "Rain — cannot start plan";
+                drawScreen(true);
+                return;
+            }
             if (selectedPlan >= 0 && selectedPlan < planCount) {
                 httpCommand("start_plan", planIds[selectedPlan].c_str());
                 httpGetStatus();
@@ -1447,22 +1491,52 @@ void handlePlansTouch(int x, int y)
             }
             return;
         }
-        if (planCount > PAPERMONO_PLAN_VISIBLE) {
-            planOffset += PAPERMONO_PLAN_VISIBLE;
-            if (planOffset >= planCount) {
-                planOffset = 0;
-            }
+        if (which == 1) {
+            httpCommand("return_to_dock");
+            httpGetStatus();
             drawScreen(true);
+            return;
+        }
+        httpCommand("stop");
+        httpGetStatus();
+        drawScreen(true);
+        return;
+    }
+
+    if (planCount < 1) {
+        if (y < 110) {
+            nextPage();
         }
         return;
     }
-    if (y >= y0 && y < startY) {
-        int row = (y - y0) / rh;
-        int idx = planOffset + row;
-        if (idx >= 0 && idx < planCount && row < PAPERMONO_PLAN_VISIBLE) {
+
+    int start = planPage * PAPERMONO_PLAN_VISIBLE;
+    int shown = planCount - start;
+    if (shown > PAPERMONO_PLAN_VISIBLE) {
+        shown = PAPERMONO_PLAN_VISIBLE;
+    }
+    for (int i = 0; i < shown; i++) {
+        int idx = start + i;
+        int col = i % 2;
+        int row = i / 2;
+        int bx = 16 + col * (cellW + gap);
+        int by = listY + row * (cellH + cellGap);
+        if (x >= bx && x <= bx + cellW && y >= by && y <= by + cellH) {
             selectedPlan = idx;
             drawScreen(true);
+            return;
         }
+    }
+
+    int pages = (planCount + PAPERMONO_PLAN_VISIBLE - 1) / PAPERMONO_PLAN_VISIBLE;
+    if (pages > 1 && y >= navY && y <= navY + cellH) {
+        int nw = (W - 32 - gap) / 2;
+        if (x < 16 + nw + gap / 2) {
+            planPage = planPage > 0 ? planPage - 1 : pages - 1;
+        } else {
+            planPage = (planPage + 1) % pages;
+        }
+        drawScreen(true);
         return;
     }
     if (y < 110) {

@@ -1,6 +1,6 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.2.28-colour"
+#define PAPERMONO_FW_VERSION "0.2.29-colour"
 #define PAPERMONO_POLL_MS 60000
 #define PAPERMONO_PAGE_HOME 0
 #define PAPERMONO_PAGE_STATUS 1
@@ -11,4 +11,5 @@
 #define PAPERMONO_PAGE_BOARD 6
 #define PAPERMONO_PAGE_COUNT 7
 #define PAPERMONO_PLAN_MAX 20
+/* Two-column grid (3 rows × 2) — landscape Colour has less height. */
 #define PAPERMONO_PLAN_VISIBLE 6

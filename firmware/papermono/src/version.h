@@ -1,6 +1,6 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.1.93"
+#define PAPERMONO_FW_VERSION "0.1.94"
 /* Status poll. Do not go much faster: SSD1677 must not stream partial refreshes. */
 #define PAPERMONO_LOGO_PX 160
 #define PAPERMONO_POLL_MS 15000
@@ -30,7 +30,8 @@
 #define PAPERMONO_PAGE_HEAT 13
 #define PAPERMONO_PAGE_COUNT 14
 #define PAPERMONO_PLAN_MAX 20
-#define PAPERMONO_PLAN_VISIBLE 6
+/* Two-column grid like Lymow zones (4 rows × 2). */
+#define PAPERMONO_PLAN_VISIBLE 8
 #define PAPERMONO_HOME_MAX 12
 #define PAPERMONO_HOME_VISIBLE 12
 #define PAPERMONO_ROBOT_MAX 12

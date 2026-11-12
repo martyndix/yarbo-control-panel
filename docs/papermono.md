@@ -37,7 +37,7 @@ Home and extra-page mocks (not photos of a flashed unit):
 
 ## What it shows
 
-- **Home / Status / Health / Plans:** Yarbo robot tiles. Tapping Yarbo opens **Home** (Stop / Dock / Pause / **PLANS**). **PLANS** lists saved work plans with **START**; **BACK** returns to Home status (top, and bottom-right when MORE is not shown). Firmware **0.1.93**. Hidden when the Yarbo module is off in Settings.
+- **Home / Status / Health / Plans:** Yarbo robot tiles. Tapping Yarbo opens **Home** (Stop / Dock / Pause / **PLANS**). **PLANS** uses a Lymow-style layout: **START / DOCK / STOP**, eight plan chips per page (two columns) with **PREV / NEXT**. When rain is detected it shows a note and START is inactive. Firmware **0.1.94**. Hidden when the Yarbo module is off in Settings.
 - Optional **lock-screen logo** (Settings → E-paper companions). Same image on Paper Colour. A PNG or JPEG is flattened onto white and the tablet downloads it on the next poll.
 - Top line is the current module. Unlocked pages use the **same name as the menu button** (so a renamed NOTE is the title on that page). Device name and firmware stay on the lock screen and the powered-off card. A **MENU** chip under the brand opens the page grid; a black blob on that chip means unread mail.
 - **Note:** live 3×15 Vestaboard plus **YARBO / POWER / LYMOW / ALL** view buttons on the same page. Writes the Note when it is enabled; the lock screen still previews the same grid if you chose Vestaboard there. During night or quiet hours the grid matches the physical Note, the page says **NIGHT MODE** or **QUIET MODE**, and the view buttons stay locked (app messages from the Vestaboard phone app still take over). Firmware **0.1.93**.

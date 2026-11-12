@@ -1319,6 +1319,7 @@ final class YarboPaperDevice
             'error_label' => $errorLabel,
             'heading' => $parsed['heading'] ?? null,
             'rain_label' => self::formatRainLabel($parsed),
+            'rain_detected' => !empty($parsed['rain_detected']),
             'connection_type' => self::clip((string) ($parsed['connection_type'] ?? ''), 28) ?: '—',
             'connection_status' => self::clip((string) ($parsed['connection_status'] ?? ''), 28) ?: '—',
             'wifi_network' => self::formatWifiNetwork($wifi),
