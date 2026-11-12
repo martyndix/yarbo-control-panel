@@ -281,6 +281,19 @@ header h1 {
     gap: 0.4rem;
 }
 
+.vestaboard-live-switch.is-overnight-locked .module-switcher-btn {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.vestaboard-overnight-hint {
+    margin: 0.35rem 0 0.65rem;
+}
+
+.vestaboard-overnight-hint.hidden {
+    display: none;
+}
+
 .vestaboard-rotate-panel {
     max-width: 22rem;
 }

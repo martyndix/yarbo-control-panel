@@ -118,6 +118,8 @@ assert_true(str_contains($php, 'isQuietHours()'), 'compact uses quiet clock');
 $fw = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/main.cpp');
 assert_true(str_contains($fw, 'NIGHT MODE'), 'Note page labels night mode');
 assert_true(str_contains($fw, 'QUIET MODE'), 'Note page labels quiet mode');
+assert_true(str_contains($fw, 'noteViewsOvernightLocked'), 'Note locks view buttons overnight');
+assert_true(str_contains($fw, 'App messages still show'), 'Note explains app messages still work');
 assert_true(str_contains($fw, 'PAPERMONO_EPD_MIN_GAP_MS'), 'e-paper min gap');
 $ver = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/version.h');
 assert_true(str_contains($ver, 'PAPERMONO_EPD_MIN_GAP_MS'), 'version.h defines EPD gap');

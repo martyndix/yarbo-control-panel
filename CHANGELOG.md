@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.257] - 2026-11-12
+
+### Changed
+- **Vestaboard night/quiet view lock:** on the web Note card and PaperMono NOTE page, Yarbo / Powerwall / Lymow / ALL / Rotate stay disabled during night or quiet hours, with a short note. Messages from the Vestaboard app still take over the board, and **Resume** remains available. Firmware **0.1.89**.
+
 ## [4.0.256] - 2026-11-12
 
 ### Fixed

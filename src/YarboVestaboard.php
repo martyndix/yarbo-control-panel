@@ -792,8 +792,23 @@ final class YarboVestaboard
     /**
      * @return array<string, mixed>
      */
+    /**
+     * Live view / rotate buttons stay locked while night or quiet hours are active.
+     * Vestaboard app messages (external hold) and Resume still work.
+     */
+    public function liveViewsLockedByOvernight(): bool
+    {
+        return $this->isNightHours() || $this->isQuietHours();
+    }
+
     public function setLiveModule(string $id): array
     {
+        if ($this->liveViewsLockedByOvernight()) {
+            return [
+                'ok' => false,
+                'error' => 'Live views are locked during night or quiet hours. Messages from the Vestaboard app still appear — use Resume when one is showing.',
+            ];
+        }
         $hub = new YarboHub($this->projectRoot);
         if (!$hub->save(['vestaboard_live' => $id])) {
             return ['ok' => false, 'error' => 'Could not save the Vestaboard live view.'];
@@ -823,6 +838,13 @@ final class YarboVestaboard
      */
     public function saveRotate(array $input): array
     {
+        if ($this->liveViewsLockedByOvernight()) {
+            return [
+                'ok' => false,
+                'error' => 'Rotation is locked during night or quiet hours. Messages from the Vestaboard app still appear — use Resume when one is showing.',
+                'config' => $this->publicView(),
+            ] + $this->rotatePublicFields();
+        }
         $views = $this->normalizeRotateViews($input['rotate_views'] ?? $input['views'] ?? []);
         $minutes = $this->normalizeRotateMinutes($input['rotate_minutes'] ?? $input['minutes'] ?? self::ROTATE_DEFAULT_MINUTES);
         $enabled = (bool) ($input['rotate_enabled'] ?? $input['enabled'] ?? false);
