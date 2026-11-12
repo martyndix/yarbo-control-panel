@@ -2585,6 +2585,32 @@ function showToast(message, type = 'success') {
     toastTimer = setTimeout(() => els.toast.classList.add('hidden'), 3000);
 }
 
+function gatewayHtmlError(status, text) {
+    const body = String(text || '');
+    const lower = body.toLowerCase();
+    const looksHtml = body.trimStart().startsWith('<')
+        || lower.includes('<!doctype')
+        || lower.includes('no-js ie6 oldie')
+        || lower.includes('cloudflare');
+    if (!looksHtml && status < 500) {
+        return null;
+    }
+    if (status === 504 || lower.includes('504') || lower.includes('gateway time-out')
+        || lower.includes('gateway timeout')) {
+        return 'Panel gateway timed out (504). Open the panel on the home network and refresh — Vestaboard and status should come back.';
+    }
+    if (status === 502 || lower.includes('bad gateway')) {
+        return 'Panel gateway error (502). Wait a few seconds and refresh, preferably on the home network.';
+    }
+    if (status === 503 || lower.includes('service unavailable')) {
+        return 'Panel temporarily unavailable (503). Wait a few seconds and refresh.';
+    }
+    if (looksHtml && status >= 500) {
+        return `Panel gateway error (${status}). Try again on the home network.`;
+    }
+    return null;
+}
+
 async function parseJsonResponse(res) {
     const text = await res.text();
     if (!text) {
@@ -2593,6 +2619,10 @@ async function parseJsonResponse(res) {
     try {
         return JSON.parse(text);
     } catch {
+        const gateway = gatewayHtmlError(res.status, text);
+        if (gateway) {
+            throw new Error(gateway);
+        }
         const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 140);
         throw new Error(`Server returned non-JSON (${res.status}): ${snippet || 'no body'}`);
     }
@@ -2640,6 +2670,14 @@ function formatDiagnosticsSteps(steps) {
 function formatConnectionError(message) {
     if (!message) return message;
     const lower = message.toLowerCase();
+    if (
+        lower.includes('gateway timed out')
+        || lower.includes('non-json (504)')
+        || lower.includes('gateway time-out')
+        || (lower.includes('504') && (lower.includes('<!doctype') || lower.includes('ie6 oldie')))
+    ) {
+        return 'Panel gateway timed out (504). Open the panel on the home network and refresh — Vestaboard and status should come back.';
+    }
     if (lower.includes('connection refused') || message.includes('[111]')) {
         return 'Cannot reach Yarbo cloud MQTT. Check internet on this panel and the account email/password under Settings → Yarbo.';
     }
@@ -15011,6 +15049,7 @@ async function fetchStatus() {
             }
             return;
         }
+        // Keep the last Vestaboard/grid snapshot — a gateway HTML 504 has no board payload.
         setError(err.message || 'Network error');
     } finally {
         clearTimeout(timer);

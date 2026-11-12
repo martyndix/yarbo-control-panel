@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.256] - 2026-11-12
+
+### Fixed
+- **Gateway 504 banner:** when Cloudflare (or another proxy) returns an HTML timeout page instead of JSON, the red banner now says to refresh on the home network instead of dumping `<!DOCTYPE html>…`. The last Vestaboard preview is kept until status succeeds again.
+
 ## [4.0.255] - 2026-11-12
 
 ### Added
