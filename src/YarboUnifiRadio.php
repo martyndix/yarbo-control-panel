@@ -12,6 +12,12 @@ final class YarboUnifiRadio
     /** Prevent status() → play() → stop() → status() from re-entering resume. */
     private bool $resumingRadio = false;
 
+    /** Same-request nesting for withRadioLock (flock is not re-entrant). */
+    private int $radioLockDepth = 0;
+
+    /** @var resource|null */
+    private $radioLockFh = null;
+
     public function __construct(
         private readonly string $projectRoot,
         private readonly YarboUnifi $unifi,
@@ -213,6 +219,12 @@ final class YarboUnifiRadio
         // Re-read after possible writes above.
         $homepodAlive = is_array($state['homepod_targets'] ?? null) && $state['homepod_targets'] !== [];
 
+        // Idle only: reap nohup talkback orphans left when state was cleared/lost.
+        // Skip while starting a new stream (radio lock held) so we do not kill a fresh pid.
+        if ($alive === [] && !$homepodAlive && empty($state['playing'])) {
+            $this->tryKillOrphanRadioFfmpeg([]);
+        }
+
         $aliveIds = array_values(array_map(
             static fn (array $r): string => (string) ($r['camera_id'] ?? ''),
             $alive
@@ -413,11 +425,26 @@ final class YarboUnifiRadio
         $airplay->markSessionActive(false);
 
         // Stop any current station/fanout; receiver restart is handled by ensure().
-        $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
-        $this->stop(false);
-        if ($prevClip !== '' && is_file($prevClip)) {
-            @unlink($prevClip);
-        }
+        $this->withRadioLock(function () use ($targets, $volume): void {
+            $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
+            $this->stopLocked(false);
+            if ($prevClip !== '' && is_file($prevClip)) {
+                @unlink($prevClip);
+            }
+            // Idle until a device connects (session play-begins hook and/or TCP watcher).
+            $state = $this->loadState();
+            $state['playing'] = false;
+            $state['station_id'] = null;
+            $state['station_name'] = null;
+            $state['station_url'] = null;
+            $state['streams'] = [];
+            $state['targets'] = $targets;
+            $state['volume'] = $volume;
+            $state['ends_at'] = null;
+            $state['resume_after'] = null;
+            $state['error'] = null;
+            $this->writeState($state);
+        });
 
         $ensured = $airplay->ensure();
         if (!($ensured['ok'] ?? false) || empty($ensured['running'])) {
@@ -430,20 +457,6 @@ final class YarboUnifiRadio
                 'airplay' => $airplay->status(),
             ];
         }
-
-        // Idle until a device connects (session play-begins hook and/or TCP watcher).
-        $state = $this->loadState();
-        $state['playing'] = false;
-        $state['station_id'] = null;
-        $state['station_name'] = null;
-        $state['station_url'] = null;
-        $state['streams'] = [];
-        $state['targets'] = $targets;
-        $state['volume'] = $volume;
-        $state['ends_at'] = null;
-        $state['resume_after'] = null;
-        $state['error'] = null;
-        $this->writeState($state);
 
         return [
             'ok' => true,
@@ -521,12 +534,6 @@ final class YarboUnifiRadio
             return ['ok' => false, 'error' => 'AirPlay audio FIFO missing', 'airplay' => $airplay->status()];
         }
 
-        $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
-        $this->stop(false);
-        if ($prevClip !== '' && is_file($prevClip)) {
-            @unlink($prevClip);
-        }
-
         $protectIds = YarboHomepod::filterProtectIds($targets);
         $homepodIds = YarboHomepod::filterHomepodIds($targets);
 
@@ -561,81 +568,104 @@ final class YarboUnifiRadio
         $client = trim((string) ($sessionMeta['client_name'] ?? ''));
         $displayName = $client !== '' ? $client : 'AirPlay';
         $homepodCount = count($homepodIds);
-        $pid = $this->spawnAirplayFanout($ffmpeg, $fifo, $sessions, $volume, $homepodCount);
-        if ($pid <= 0) {
-            return [
-                'ok' => false,
-                'error' => 'Could not start AirPlay → speaker bridge (see data/unifi-radio-airplay.log)',
-                'airplay' => $airplay->status(),
-            ];
-        }
 
-        $streams = [];
-        foreach ($sessions as $row) {
-            $streams[] = [
-                'camera_id' => $row['camera_id'],
-                'pid' => $pid,
-                'talkback_url' => $row['talkback_url'],
-                'codec' => $row['codec'],
-            ];
-        }
-        // HomePod-only bridge still tracks the shared ffmpeg pid so Stop/status can reap it.
-        if ($sessions === [] && $homepodCount > 0) {
-            $streams[] = [
-                'camera_id' => 'homepod-bridge',
-                'pid' => $pid,
-                'talkback_url' => '',
-                'codec' => 'mp3',
-            ];
-        }
+        // Hold the radio lock across stop → spawn → writeState so status() cannot
+        // reap the new fan-out pid as an "orphan" before it is tracked.
+        return $this->withRadioLock(function () use (
+            $airplay,
+            $ffmpeg,
+            $fifo,
+            $sessions,
+            $volume,
+            $homepodCount,
+            $homepodIds,
+            $errors,
+            $displayName,
+            $targets,
+        ): array {
+            $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
+            $this->stopLocked(false);
+            if ($prevClip !== '' && is_file($prevClip)) {
+                @unlink($prevClip);
+            }
 
-        $homepodTargets = [];
-        if ($homepodCount > 0) {
-            // Each HomePod gets its own loopback PCM UDP port; start them together.
-            usleep(300000);
-            $hp = YarboHomepod::fromEnv($this->projectRoot);
-            $items = [];
-            foreach ($homepodIds as $i => $nativeId) {
-                $items[] = [
-                    'id' => $nativeId,
-                    'source' => $this->homepodBridgeUrl((int) $i),
-                    'volume' => $volume,
+            $pid = $this->spawnAirplayFanout($ffmpeg, $fifo, $sessions, $volume, $homepodCount);
+            if ($pid <= 0) {
+                return [
+                    'ok' => false,
+                    'error' => 'Could not start AirPlay → speaker bridge (see data/unifi-radio-airplay.log)',
+                    'airplay' => $airplay->status(),
                 ];
             }
-            $hpResult = $hp->streamManyItems($items);
-            foreach ($hpResult['errors'] as $err) {
-                $errors[] = $err;
-            }
-            foreach ($hpResult['started'] as $id) {
-                $homepodTargets[] = $id;
-            }
-        }
 
-        $state = [
-            'playing' => true,
-            'station_id' => 'airplay',
-            'station_name' => $displayName,
-            'station_url' => $fifo,
-            'clip_path' => null,
-            'volume' => $volume,
-            'streams' => $streams,
-            'homepod_targets' => $homepodTargets,
-            'targets' => $targets,
-            'started_at' => time(),
-            'ends_at' => null,
-            'resume_after' => null,
-            'error' => $errors !== [] ? implode('; ', $errors) : null,
-        ];
-        $this->writeState($state);
-        // Session active flag is owned by play-begins / TCP watcher — do not set it here.
+            $streams = [];
+            foreach ($sessions as $row) {
+                $streams[] = [
+                    'camera_id' => $row['camera_id'],
+                    'pid' => $pid,
+                    'talkback_url' => $row['talkback_url'],
+                    'codec' => $row['codec'],
+                ];
+            }
+            // HomePod-only bridge still tracks the shared ffmpeg pid so Stop/status can reap it.
+            if ($sessions === [] && $homepodCount > 0) {
+                $streams[] = [
+                    'camera_id' => 'homepod-bridge',
+                    'pid' => $pid,
+                    'talkback_url' => '',
+                    'codec' => 'mp3',
+                ];
+            }
 
-        return [
-            'ok' => true,
-            'error' => null,
-            'warning' => $errors !== [] ? implode('; ', $errors) : null,
-            'radio' => $this->status(),
-            'airplay' => $airplay->status(),
-        ];
+            $localErrors = $errors;
+            $homepodTargets = [];
+            if ($homepodCount > 0) {
+                // Each HomePod gets its own loopback PCM UDP port; start them together.
+                usleep(300000);
+                $hp = YarboHomepod::fromEnv($this->projectRoot);
+                $items = [];
+                foreach ($homepodIds as $i => $nativeId) {
+                    $items[] = [
+                        'id' => $nativeId,
+                        'source' => $this->homepodBridgeUrl((int) $i),
+                        'volume' => $volume,
+                    ];
+                }
+                $hpResult = $hp->streamManyItems($items);
+                foreach ($hpResult['errors'] as $err) {
+                    $localErrors[] = $err;
+                }
+                foreach ($hpResult['started'] as $id) {
+                    $homepodTargets[] = $id;
+                }
+            }
+
+            $state = [
+                'playing' => true,
+                'station_id' => 'airplay',
+                'station_name' => $displayName,
+                'station_url' => $fifo,
+                'clip_path' => null,
+                'volume' => $volume,
+                'streams' => $streams,
+                'homepod_targets' => $homepodTargets,
+                'targets' => $targets,
+                'started_at' => time(),
+                'ends_at' => null,
+                'resume_after' => null,
+                'error' => $localErrors !== [] ? implode('; ', $localErrors) : null,
+            ];
+            $this->writeState($state);
+            // Session active flag is owned by play-begins / TCP watcher — do not set it here.
+
+            return [
+                'ok' => true,
+                'error' => null,
+                'warning' => $localErrors !== [] ? implode('; ', $localErrors) : null,
+                'radio' => $this->status(),
+                'airplay' => $airplay->status(),
+            ];
+        });
     }
 
     /**
@@ -1043,8 +1073,49 @@ final class YarboUnifiRadio
         ?string $clipPath,
         ?array $resumeAfter = null,
     ): array {
+        return $this->withRadioLock(function () use (
+            $ffmpeg,
+            $contentUrl,
+            $localFile,
+            $stationId,
+            $stationName,
+            $targets,
+            $volume,
+            $clipPath,
+            $resumeAfter,
+        ): array {
+            return $this->startStreamsLocked(
+                $ffmpeg,
+                $contentUrl,
+                $localFile,
+                $stationId,
+                $stationName,
+                $targets,
+                $volume,
+                $clipPath,
+                $resumeAfter,
+            );
+        });
+    }
+
+    /**
+     * @param list<string> $targets
+     * @param array<string, mixed>|null $resumeAfter
+     * @return array<string, mixed>
+     */
+    private function startStreamsLocked(
+        string $ffmpeg,
+        string $contentUrl,
+        bool $localFile,
+        string $stationId,
+        string $stationName,
+        array $targets,
+        int $volume,
+        ?string $clipPath,
+        ?array $resumeAfter = null,
+    ): array {
         $prevClip = (string) ($this->loadState()['clip_path'] ?? '');
-        $this->stop(false);
+        $this->stopLocked(false);
         if ($prevClip !== '' && is_file($prevClip) && ($clipPath === null || $prevClip !== $clipPath)) {
             @unlink($prevClip);
         }
@@ -1246,16 +1317,31 @@ final class YarboUnifiRadio
      */
     public function stop(bool $clearError = true): array
     {
+        return $this->withRadioLock(function () use ($clearError): array {
+            return $this->stopLocked($clearError);
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function stopLocked(bool $clearError = true): array
+    {
         $state = $this->loadState();
+        $tracked = [];
         foreach ($state['streams'] as $row) {
             if (!is_array($row)) {
                 continue;
             }
             $pid = (int) ($row['pid'] ?? 0);
             if ($pid > 1) {
+                $tracked[] = $pid;
                 $this->killPidTree($pid);
             }
         }
+        // Concurrent Play/volume/announce can leave nohup ffmpeg orphans that are
+        // no longer in state — reap every Protect talkback / AirPlay fan-out.
+        $this->killOrphanRadioFfmpeg($tracked);
         $homepodIds = [];
         if (is_array($state['homepod_targets'] ?? null)) {
             $homepodIds = $state['homepod_targets'];
@@ -1930,6 +2016,147 @@ final class YarboUnifiRadio
         if ($this->pidAlive($pid)) {
             @shell_exec('kill -KILL ' . $pid . ' 2>/dev/null');
         }
+    }
+
+    /**
+     * Kill panel radio/AirPlay ffmpeg processes that are no longer tracked.
+     * Orphans (PPID 1 after nohup) burn CPU/network and stall the Pi — recover_speed
+     * used to miss Classic FM talkback because argv has udp://…:7004, not "unifi-radio".
+     *
+     * @param list<int> $keepPids
+     */
+    public function killOrphanRadioFfmpeg(array $keepPids = []): void
+    {
+        $keep = [];
+        foreach ($keepPids as $pid) {
+            $pid = (int) $pid;
+            if ($pid > 1) {
+                $keep[$pid] = true;
+            }
+        }
+        $out = (string) @shell_exec('ps -eo pid=,args= 2>/dev/null');
+        if ($out === '') {
+            return;
+        }
+        foreach (preg_split('/\R/', $out) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || !preg_match('/^(\d+)\s+(.+)$/s', $line, $m)) {
+                continue;
+            }
+            $pid = (int) $m[1];
+            if ($pid <= 1 || isset($keep[$pid])) {
+                continue;
+            }
+            if (!$this->isPanelRadioFfmpegArgs((string) $m[2])) {
+                continue;
+            }
+            $this->killPidTree($pid);
+        }
+    }
+
+    /**
+     * Non-blocking orphan sweep for status() — skips when Play/Stop holds the lock.
+     *
+     * @param list<int> $keepPids
+     */
+    private function tryKillOrphanRadioFfmpeg(array $keepPids = []): void
+    {
+        if ($this->radioLockDepth > 0) {
+            return;
+        }
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        $path = $dir . '/unifi-radio.lock';
+        $fh = @fopen($path, 'c+');
+        if ($fh === false) {
+            return;
+        }
+        try {
+            if (!flock($fh, LOCK_EX | LOCK_NB)) {
+                return;
+            }
+            $this->killOrphanRadioFfmpeg($keepPids);
+            flock($fh, LOCK_UN);
+        } finally {
+            fclose($fh);
+        }
+    }
+
+    /**
+     * Serialize Play/Stop so concurrent requests cannot orphan nohup ffmpeg.
+     * Re-entrant in-process so announce → resumeAfterPlayback → play cannot deadlock.
+     *
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private function withRadioLock(callable $fn): mixed
+    {
+        if ($this->radioLockDepth > 0) {
+            $this->radioLockDepth++;
+            try {
+                return $fn();
+            } finally {
+                $this->radioLockDepth--;
+            }
+        }
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return $fn();
+        }
+        $path = $dir . '/unifi-radio.lock';
+        $fh = @fopen($path, 'c+');
+        if ($fh === false) {
+            return $fn();
+        }
+        $this->radioLockFh = $fh;
+        $this->radioLockDepth = 1;
+        try {
+            flock($fh, LOCK_EX);
+
+            return $fn();
+        } finally {
+            $this->radioLockDepth = 0;
+            $this->radioLockFh = null;
+            flock($fh, LOCK_UN);
+            fclose($fh);
+        }
+    }
+
+    private function isPanelRadioFfmpegArgs(string $args): bool
+    {
+        if (!preg_match('/(^|[\s\/])ffmpeg(\s|$)/', $args)) {
+            return false;
+        }
+        // Protect talkback (ADTS/RTP UDP) and AirPlay→HomePod PCM UDP fan-out.
+        if (
+            str_contains($args, 'udp://')
+            && (
+                str_contains($args, '-f adts')
+                || str_contains($args, '-f rtp')
+                || str_contains($args, 'pcm_s16le')
+                || str_contains($args, '-f s16le')
+            )
+        ) {
+            return true;
+        }
+        // Named AirPlay / bridge helpers.
+        if (
+            str_contains($args, 'airplay')
+            || str_contains($args, 'live.mp3')
+            || str_contains($args, 'unifi-radio')
+            || str_contains($args, 'homepod')
+        ) {
+            return true;
+        }
+        // Stuck remux FIFOs from older HomePod paths.
+        if (str_contains($args, '.fifo') && (str_contains($args, '-f mp3') || str_contains($args, 'out.mp3'))) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

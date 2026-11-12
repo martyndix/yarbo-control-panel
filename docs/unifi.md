@@ -115,7 +115,7 @@ find data -type f -name '*.log' -size +64k -exec truncate -s 0 {} \;
 sudo systemctl restart yarbo-panel
 ```
 
-From **4.0.196**, the same path is `bash scripts/panel_recover_speed.sh` (or `--update` to pull + restart). It runs automatically on panel start and at the beginning of Updates. It only trims `*.log`, stops AirPlay/ffmpeg helpers, and clears stuck Playing — `data/home.json`, Matter, UniFi, HomePod pairing, scenes, and automations stay on disk.
+From **4.0.196**, the same path is `bash scripts/panel_recover_speed.sh` (or `--update` to pull + restart). It runs automatically on panel start and at the beginning of Updates. It only trims `*.log`, stops AirPlay/ffmpeg helpers (including orphan Classic FM / talkback `udp://…:7004` encoders from **4.0.259**), and clears stuck Playing — `data/home.json`, Matter, UniFi, HomePod pairing, scenes, and automations stay on disk.
 
 ## Rollback
 
