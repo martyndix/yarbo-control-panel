@@ -154,8 +154,8 @@ assert_true(
 
 $js = (string) file_get_contents($rootFs . '/public/assets/app.js');
 $change = (string) file_get_contents($rootFs . '/CHANGELOG.md');
-assert_true(str_contains($js, 'yarbo:rain'), 'UI Rain tray chip');
-assert_true(str_contains($js, 'yarbo:dry'), 'UI Dry tray chip');
+assert_true(str_contains($js, 'HOME_AUTO_YARBO_ID}:rain'), 'UI Rain tray chip');
+assert_true(str_contains($js, 'HOME_AUTO_YARBO_ID}:dry'), 'UI Dry tray chip');
 assert_true(str_contains($js, "['rain', 'Rain']"), 'UI rain option');
 assert_true(str_contains($change, '## [4.0.277]'), 'changelog 4.0.277');
 
