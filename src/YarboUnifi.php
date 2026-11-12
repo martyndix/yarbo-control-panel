@@ -425,9 +425,11 @@ final class YarboUnifi
      *
      * @return list<array<string, mixed>>
      */
-    public function lockableDoors(): array
+    public function lockableDoors(bool $kickRefresh = true): array
     {
-        $this->kickAccessDoorRefresh();
+        if ($kickRefresh) {
+            $this->kickAccessDoorRefresh();
+        }
         $payload = $this->dashboardPayload(false);
         $out = [];
         $doorNative = [];
@@ -506,9 +508,11 @@ final class YarboUnifi
      *
      * @return list<array<string, mixed>>
      */
-    public function doorSensorRows(): array
+    public function doorSensorRows(bool $kickRefresh = true): array
     {
-        $this->kickAccessDoorRefresh();
+        if ($kickRefresh) {
+            $this->kickAccessDoorRefresh();
+        }
         $out = [];
         foreach ($this->dashboardPayload(false)['sensors'] ?? [] as $row) {
             if (!is_array($row) || !self::isDoorSensor($row)) {

@@ -510,18 +510,31 @@ final class YarboVestaboard
             }
         }
         if ($this->isNightHours()) {
-            $layout = $this->nightLayout();
-            $hash = hash('sha256', json_encode($layout['codes']));
+            // Browser/Funnel status must not re-scan UniFi doors here — that blocked
+            // overnight polls (HTML 504). The watcher already refreshes contacts + Note.
+            $onBoard = self::normalizeLiveCodes($config['board_codes'] ?? null);
+            $nightPosted = !empty($config['night_active']);
+            if ($nightPosted && $onBoard !== null) {
+                $codes = $onBoard;
+                $lines = self::linesFromCodes($codes);
+                $verb = 'NIGHT';
+            } else {
+                $layout = $this->nightLayout(false);
+                $codes = $layout['codes'];
+                $lines = $layout['lines'];
+                $verb = $layout['verb'];
+            }
+            $hash = hash('sha256', json_encode($codes));
 
             return $holdMeta + [
                 'enabled' => true,
-                'lines' => $layout['lines'],
-                'codes' => $layout['codes'],
-                'verb' => $layout['verb'],
+                'lines' => $lines,
+                'codes' => $codes,
+                'verb' => $verb,
                 'quiet_hours' => false,
                 'night_hours' => true,
                 'night_until' => $config['night_end'] ?? '07:00',
-                'night_open' => !empty($layout['open']),
+                'night_open' => !empty($config['night_last_open']),
                 'quiet_timezone' => $this->resolveQuietTimezone($config),
                 'quiet_clock_now' => $this->quietNowHm($config),
                 'last_sent_at' => $config['last_sent_at'],
@@ -2641,7 +2654,8 @@ final class YarboVestaboard
         if (!($config['night_hours_enabled'] ?? false)) {
             return false;
         }
-        if (!$this->nightHoursAvailable()) {
+        // Sticky overnight: clock only — do not touch UniFi on every status poll.
+        if (empty($config['night_active']) && !$this->nightHoursAvailable()) {
             return false;
         }
         $start = (string) ($config['night_start'] ?? '');
@@ -2659,7 +2673,54 @@ final class YarboVestaboard
 
     public function nightHoursAvailable(): bool
     {
-        return !empty($this->nightWatchSummary()['available']);
+        // Inventory file only — never kick Access refresh or build UniFi dashboard.
+        // Status polls call isNightHours() often; a live scan here caused Funnel 504s.
+        return $this->nightWatchInventoryCount() > 0;
+    }
+
+    /**
+     * Cheap count of UniFi doors/sensors night hours can watch (cached inventory JSON).
+     */
+    private function nightWatchInventoryCount(): int
+    {
+        try {
+            $hub = new YarboHub($this->projectRoot);
+            if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
+                return 0;
+            }
+        } catch (\Throwable) {
+            return 0;
+        }
+        $path = $this->projectRoot . '/data/unifi-inventory.json';
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            return 0;
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return 0;
+        }
+        $count = 0;
+        foreach (['doors', 'hubs', 'sensors'] as $key) {
+            $rows = $decoded[$key] ?? null;
+            if (!is_array($rows)) {
+                continue;
+            }
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                if ($key === 'sensors' && !YarboUnifi::isDoorSensor($row)) {
+                    continue;
+                }
+                if ($key === 'hubs' && trim((string) ($row['door_id'] ?? '')) === '') {
+                    continue;
+                }
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
     /**
@@ -2676,7 +2737,7 @@ final class YarboVestaboard
      *   open_names: list<string>
      * }
      */
-    public function nightWatchSummary(): array
+    public function nightWatchSummary(bool $kickRefresh = false): array
     {
         $empty = [
             'available' => false,
@@ -2696,11 +2757,11 @@ final class YarboVestaboard
         } catch (\Throwable) {
             return $empty;
         }
-        $rows = $this->nightWatchRows();
+        $rows = $this->nightWatchRows($kickRefresh);
         if ($rows === []) {
             return $empty + ['unifi' => true];
         }
-        $opens = $this->nightOpenContacts();
+        $opens = $this->nightOpenContacts($kickRefresh);
         $doorsOpen = 0;
         $windowsOpen = 0;
         $names = [];
@@ -2738,7 +2799,7 @@ final class YarboVestaboard
      *
      * @return list<array{id: string, label: string, role: string}>
      */
-    public function nightOpenContacts(): array
+    public function nightOpenContacts(bool $kickRefresh = true): array
     {
         $out = [];
         try {
@@ -2747,7 +2808,7 @@ final class YarboVestaboard
         } catch (\Throwable) {
             return [];
         }
-        foreach ($this->nightWatchRows() as $row) {
+        foreach ($this->nightWatchRows($kickRefresh) as $row) {
             if (!is_array($row) || !YarboHome::contactIsOpen($row)) {
                 continue;
             }
@@ -2771,7 +2832,7 @@ final class YarboVestaboard
     /**
      * @return list<array<string, mixed>>
      */
-    public function nightWatchRows(): array
+    public function nightWatchRows(bool $kickRefresh = true): array
     {
         try {
             $hub = new YarboHub($this->projectRoot);
@@ -2784,7 +2845,7 @@ final class YarboVestaboard
         }
         $out = [];
         $covered = [];
-        foreach ($unifi->lockableDoors() as $row) {
+        foreach ($unifi->lockableDoors($kickRefresh) as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -2808,7 +2869,7 @@ final class YarboVestaboard
                 $covered[$doorId] = true;
             }
         }
-        foreach ($unifi->doorSensorRows() as $row) {
+        foreach ($unifi->doorSensorRows($kickRefresh) as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -2846,9 +2907,9 @@ final class YarboVestaboard
      */
     public function nightLayout(?bool $forceOpen = null, ?string $forceKind = null): array
     {
-        // When the caller already knows secure vs open (PaperMono compact), skip the
-        // UniFi door scan — lockableDoors() on every poll was tipping Funnel past 8s.
-        $opens = $forceOpen === false ? [] : $this->nightOpenContacts();
+        // When the caller already knows secure vs open (PaperMono compact / web status),
+        // skip the UniFi door scan — lockableDoors() on every poll tipped Funnel past 8s.
+        $opens = $forceOpen === false ? [] : $this->nightOpenContacts(true);
         $open = $forceOpen ?? ($opens !== []);
         if ($open) {
             if ($opens === []) {

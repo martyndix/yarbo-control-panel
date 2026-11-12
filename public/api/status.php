@@ -222,17 +222,19 @@ try {
         || str_contains($lower, 'get_device_msg')
         || str_contains($lower, 'telemetry timeout')
         || str_contains($lower, 'timeout');
+    // Prefer HTTP 200 for transient robot timeouts so Funnel/proxies do not
+    // replace a slow JSON body with an HTML gateway 504 page.
     status_failure(
         YarboErrors::friendly($error),
         'telemetry',
-        504,
+        $transient ? 200 : 504,
         [
             'via' => 'agent',
             'transient' => $transient,
         ],
     );
 } catch (Throwable $e) {
-    status_failure(friendly_error($e), 'telemetry', 504, [
+    status_failure(friendly_error($e), 'telemetry', 200, [
         'via' => 'agent',
         'transient' => true,
     ]);
