@@ -32,9 +32,13 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.256]'), 'changelog 4.0.256');
 assert_true(str_contains($change, '## [4.0.261]'), 'changelog 4.0.261');
 assert_true(str_contains($change, '## [4.0.262]'), 'changelog 4.0.262');
+assert_true(str_contains($change, '## [4.0.263]'), 'changelog 4.0.263');
 
 $paper = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
 assert_true(str_contains($paper, 'telemetry(2.0, false, true, false)'), 'compact never spawns MQTT agent');
 assert_true(str_contains($paper, 'nightLayout(false)'), 'compact night preview skips UniFi door scan');
+
+assert_true(str_contains($vb, 'nightLayout(false)'), 'web night dashboard skips UniFi door scan');
+assert_true(str_contains($status, '$transient ? 200 : 504'), 'transient telemetry returns JSON 200');
 
 echo "ok\n";

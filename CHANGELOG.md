@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.263] - 2026-11-12
+
+### Fixed
+- **Remote 504 during night hours (browser):** Vestaboard status no longer re-scans UniFi doors on every panel poll overnight — `isNightHours()` / the web Note preview were still kicking Access refreshes and rebuilding door lists, which tipped Funnel into HTML **504 Retrying…** even after 4.0.262 fixed PaperMono compact. The watcher keeps updating open/secure on the Note; the web preview uses the last board / secure night layout. Transient robot timeouts also return JSON 200 so proxies do not swap in a gateway error page.
+
 ## [4.0.262] - 2026-11-12
 
 ### Fixed
