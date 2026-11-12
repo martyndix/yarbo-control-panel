@@ -1715,7 +1715,13 @@ final class YarboPaperDevice
             }
         }
         if ($night && $invOpen !== $stickyOpen) {
-            $this->kickVestaboardNightTick();
+            // Nudge the existing watcher loop — do not spawn vestaboard_watch --once
+            // from Funnel compact (that raced the loop and starved tablet polls).
+            try {
+                $vbObj->requestTickNudge();
+            } catch (\Throwable) {
+                // Preview still shows the open alert above.
+            }
         }
 
         return [
@@ -1727,52 +1733,6 @@ final class YarboPaperDevice
             'vestaboard_quiet' => $quiet,
             'vestaboard_night_open' => $nightOpen,
         ];
-    }
-
-    /**
-     * Background vestaboard_watch --once so open/close edges write the Note
-     * without blocking PaperMono Funnel polls.
-     */
-    private function kickVestaboardNightTick(): void
-    {
-        $lock = $this->projectRoot . '/data/vestaboard-night-kick.lock';
-        if (is_file($lock) && (time() - (int) @filemtime($lock)) < 8) {
-            return;
-        }
-        $script = $this->projectRoot . '/scripts/vestaboard_watch.php';
-        if (!is_file($script)) {
-            return;
-        }
-        if (!is_dir($this->projectRoot . '/data')) {
-            @mkdir($this->projectRoot . '/data', 0775, true);
-        }
-        @file_put_contents($lock, (string) time());
-        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
-        $log = $this->projectRoot . '/data/vestaboard-night-kick.log';
-        $command = sprintf(
-            'cd %s && %s %s --once >> %s 2>&1 < /dev/null &',
-            escapeshellarg($this->projectRoot),
-            escapeshellarg($php),
-            escapeshellarg($script),
-            escapeshellarg($log)
-        );
-        $descriptorSpec = [
-            0 => ['pipe', 'r'],
-            1 => ['file', $log, 'a'],
-            2 => ['file', $log, 'a'],
-        ];
-        $process = @proc_open(
-            ['bash', '-c', $command],
-            $descriptorSpec,
-            $pipes,
-            $this->projectRoot
-        );
-        if (is_resource($process)) {
-            if (isset($pipes[0]) && is_resource($pipes[0])) {
-                fclose($pipes[0]);
-            }
-            proc_close($process);
-        }
     }
 
     /**

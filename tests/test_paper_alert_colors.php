@@ -173,8 +173,6 @@ file_put_contents($root . '/data/vestaboard-config.json', json_encode([
     'quiet_timezone' => 'UTC',
     'board_codes' => $secureCodes,
 ], JSON_UNESCAPED_SLASHES));
-@mkdir($root . '/scripts', 0775, true);
-file_put_contents($root . '/scripts/vestaboard_watch.php', "<?php\n// test stub\n");
 $openPreview = $compactMethod->invoke(
     new YarboPaperDevice($root),
     ['error_code' => 0],
@@ -188,7 +186,10 @@ assert_true(
     'open preview replaces HOUSE SECURE: ' . $openLines
 );
 assert_true(!str_contains($openLines, 'SECURE'), 'open preview must not keep HOUSE SECURE: ' . $openLines);
-assert_true(is_file($root . '/data/vestaboard-night-kick.lock'), 'open edge kicks vestaboard watcher');
+assert_true(is_file($root . '/data/vestaboard-watch.nudge'), 'open edge nudges vestaboard watcher');
+$vbNudge = new YarboVestaboard($root);
+assert_true($vbNudge->consumeTickNudge() === true, 'nudge is consumable');
+assert_true($vbNudge->consumeTickNudge() === false, 'nudge clears after consume');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'papermono-alert-message-color'), 'settings has message colour');
@@ -215,7 +216,8 @@ assert_true(str_contains($fw, 'vestaboard_night_open'), 'firmware reads night op
 $paperSrc = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
 assert_true(str_contains($paperSrc, "night_last_open"), 'compact uses night_last_open sticky');
 assert_true(str_contains($paperSrc, 'nightOpenContacts(false)'), 'compact inventory-only open check');
-assert_true(str_contains($paperSrc, 'kickVestaboardNightTick'), 'compact kicks watcher on open edge');
+assert_true(str_contains($paperSrc, 'requestTickNudge'), 'compact nudges watcher on open edge');
+assert_true(!str_contains($paperSrc, 'kickVestaboardNightTick'), 'compact no longer spawns vestaboard_watch --once');
 assert_true(str_contains($paperSrc, 'nightOpenAlertLayout'), 'compact composes open alert flaps');
 assert_true(str_contains($fw, 'alertSetMessageFlash'), 'firmware applies message flash');
 assert_true(str_contains($fw, 'updateAlertPresentation'), 'firmware updates alert presentation');
@@ -234,5 +236,15 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.258]'), 'changelog 4.0.258');
 assert_true(str_contains($change, '## [4.0.260]'), 'changelog 4.0.260');
 assert_true(str_contains($change, '## [4.0.267]'), 'changelog 4.0.267');
+assert_true(str_contains($change, '## [4.0.268]'), 'changelog 4.0.268');
+
+$watchSrc = (string) file_get_contents(__DIR__ . '/../scripts/vestaboard_watch.php');
+assert_true(str_contains($watchSrc, 'touchHeartbeat()'), 'watch heartbeats before companion refresh');
+assert_true(str_contains($watchSrc, 'isNightHours()'), 'watch skips companion refresh overnight');
+assert_true(str_contains($watchSrc, 'consumeTickNudge'), 'watch loop honors nudge');
+
+$agentSrc = (string) file_get_contents(__DIR__ . '/../scripts/mqtt_agent.py');
+assert_true(str_contains($agentSrc, 'vestaboard-watch.heartbeat'), 'mqtt backup checks heartbeat');
+assert_true(str_contains($agentSrc, 'stale_after_s'), 'mqtt backup only when stale');
 
 echo "ok\n";

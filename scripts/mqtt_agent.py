@@ -1277,11 +1277,22 @@ async def connect_mqtt(client: Any) -> None:
 
 
 async def vestaboard_tick_loop() -> None:
-    """Backup Note push if panel.sh is not running vestaboard_watch."""
+    """Backup Note push only when vestaboard_watch heartbeat is stale."""
     php = os.environ.get("YARBO_PHP_BIN") or "php"
     script = str(ROOT / "scripts" / "vestaboard_watch.php")
+    heartbeat = ROOT / "data" / "vestaboard-watch.heartbeat"
+    # Match PHP watcherStale default (90s) with a little slack so we do not
+    # double-run beside a healthy panel.sh loop.
+    stale_after_s = 75.0
     while True:
         await asyncio.sleep(VESTABOARD_TICK_S)
+        try:
+            if heartbeat.is_file():
+                age = time.time() - heartbeat.stat().st_mtime
+                if age < stale_after_s:
+                    continue
+        except OSError:
+            pass
         try:
             proc = await asyncio.create_subprocess_exec(
                 php,

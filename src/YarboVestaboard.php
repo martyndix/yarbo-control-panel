@@ -68,6 +68,11 @@ final class YarboVestaboard
         return $this->dataDir() . '/vestaboard-watch.heartbeat';
     }
 
+    public function nudgePath(): string
+    {
+        return $this->dataDir() . '/vestaboard-watch.nudge';
+    }
+
     public function touchHeartbeat(): void
     {
         $dir = $this->dataDir();
@@ -77,7 +82,31 @@ final class YarboVestaboard
         @file_put_contents($this->heartbeatPath(), gmdate('c') . "\n", LOCK_EX);
     }
 
-    public function watcherStale(int $maxAgeSeconds = 45): bool
+    /**
+     * Ask the long-running vestaboard_watch loop to tick soon (open/close edge).
+     * Prefer this over spawning vestaboard_watch --once from web/PaperMono.
+     */
+    public function requestTickNudge(): void
+    {
+        $dir = $this->dataDir();
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        @file_put_contents($this->nudgePath(), (string) time() . "\n", LOCK_EX);
+    }
+
+    public function consumeTickNudge(): bool
+    {
+        $path = $this->nudgePath();
+        if (!is_file($path)) {
+            return false;
+        }
+        @unlink($path);
+
+        return true;
+    }
+
+    public function watcherStale(int $maxAgeSeconds = 90): bool
     {
         $path = $this->heartbeatPath();
         if (!is_file($path)) {
@@ -687,10 +716,12 @@ final class YarboVestaboard
         if ($this->isNightHours()) {
             // Re-read Access DPS + Protect contacts every tick so open/close updates the Note.
             $this->refreshNightContacts();
+            $this->touchHeartbeat();
             if (!$wasNight || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
                 $this->snapshotLiveLayout();
             }
-            $layout = $this->nightLayout();
+            // Inventory was just refreshed — do not kick another async UniFi scan.
+            $layout = $this->nightLayout(null, null, false);
             $openNow = !empty($layout['open']);
             $kindNow = (string) ($layout['open_kind'] ?? '');
             $openKey = (string) ($layout['open_key'] ?? '');
@@ -708,6 +739,7 @@ final class YarboVestaboard
                 'night_last_kind' => $kindNow,
                 'night_last_open_key' => $openKey,
             ]);
+            $this->touchHeartbeat();
 
             return $result;
         }
@@ -2689,7 +2721,8 @@ final class YarboVestaboard
 
     private function nightLayoutHash(): string
     {
-        return hash('sha256', json_encode($this->nightLayout()['codes']));
+        // Inventory only — a live UniFi kick here stalled the watcher on leave-night.
+        return hash('sha256', json_encode($this->nightLayout(null, null, false)['codes']));
     }
 
     public function isNightHours(?string $nowHm = null): bool
@@ -2949,11 +2982,12 @@ final class YarboVestaboard
      *   open_names: list<string>
      * }
      */
-    public function nightLayout(?bool $forceOpen = null, ?string $forceKind = null): array
+    public function nightLayout(?bool $forceOpen = null, ?string $forceKind = null, bool $refreshContacts = true): array
     {
         // When the caller already knows secure vs open (PaperMono compact / web status),
         // skip the UniFi door scan — lockableDoors() on every poll tipped Funnel past 8s.
-        $opens = $forceOpen === false ? [] : $this->nightOpenContacts(true);
+        // Watcher ticks pass refreshContacts=false after refreshNightContacts().
+        $opens = $forceOpen === false ? [] : $this->nightOpenContacts($refreshContacts);
         $open = $forceOpen ?? ($opens !== []);
         if ($open) {
             if ($opens === []) {
