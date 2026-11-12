@@ -260,6 +260,14 @@ const els = {
     settingsUpdateViewNotes: document.getElementById('settings-update-view-notes'),
     settingsUpdateRun: document.getElementById('settings-update-run'),
     settingsPanelRestart: document.getElementById('settings-panel-restart'),
+    panelHealthTotal: document.getElementById('panel-health-total'),
+    panelHealthRtt: document.getElementById('panel-health-rtt'),
+    panelHealthPing: document.getElementById('panel-health-ping'),
+    panelHealthTelemetry: document.getElementById('panel-health-telemetry'),
+    panelHealthExtras: document.getElementById('panel-health-extras'),
+    panelHealthCache: document.getElementById('panel-health-cache'),
+    panelHealthWatcher: document.getElementById('panel-health-watcher'),
+    panelHealthStage: document.getElementById('panel-health-stage'),
     settingsHttpsEnsure: document.getElementById('settings-https-ensure'),
     settingsHttpsStatus: document.getElementById('settings-https-status'),
     settingsHttpsLog: document.getElementById('settings-https-log'),
@@ -443,6 +451,7 @@ let manualModeEntered = false;
 let toastTimer = null;
 let polling = false;
 let hasStatusSnapshot = false;
+let lastStatusClientRttMs = null;
 let commandQuietUntil = 0;
 let settingsModalOpen = false;
 let mailPageOpen = false;
@@ -2933,7 +2942,84 @@ function applyModuleSwitcher(hub) {
     return ids;
 }
 
+function formatHealthMs(value) {
+    if (value == null || Number.isNaN(Number(value))) return '—';
+    return `${Math.max(0, Math.round(Number(value)))} ms`;
+}
+
+function applyPanelHealth(data, clientRttMs = null) {
+    if (clientRttMs != null) {
+        lastStatusClientRttMs = clientRttMs;
+    }
+    const timing = data?.timing || {};
+    const health = data?.panel_health || {};
+    if (els.panelHealthTotal) {
+        els.panelHealthTotal.textContent = formatHealthMs(timing.total_ms);
+    }
+    if (els.panelHealthRtt) {
+        els.panelHealthRtt.textContent = formatHealthMs(lastStatusClientRttMs);
+    }
+    if (els.panelHealthPing) {
+        els.panelHealthPing.textContent = formatHealthMs(timing.ping_ms);
+    }
+    if (els.panelHealthTelemetry) {
+        els.panelHealthTelemetry.textContent = formatHealthMs(timing.telemetry_ms);
+    }
+    if (els.panelHealthExtras) {
+        els.panelHealthExtras.textContent = formatHealthMs(timing.extras_ms);
+    }
+    if (els.panelHealthCache) {
+        if (data?.ok && data?.cached) {
+            const age = data.cache_age_s;
+            els.panelHealthCache.textContent = age == null ? 'cached' : `cached · ${age}s`;
+        } else if (data?.cooldown) {
+            els.panelHealthCache.textContent = 'miss cooldown';
+        } else if (data?.ok === false && (data?.stage === 'telemetry' || data?.stage === 'mqtt' || data?.stage === 'agent')) {
+            els.panelHealthCache.textContent = 'empty / offline';
+        } else if (data?.ok) {
+            els.panelHealthCache.textContent = 'live';
+        } else {
+            els.panelHealthCache.textContent = '—';
+        }
+    }
+    if (els.panelHealthWatcher) {
+        if (health.watcher_ok === true) {
+            const age = health.watcher_age_s;
+            els.panelHealthWatcher.textContent = age == null ? 'ok' : `ok · ${age}s`;
+        } else if (health.watcher_ok === false) {
+            const age = health.watcher_age_s;
+            els.panelHealthWatcher.textContent = age == null ? 'idle' : `idle · ${age}s`;
+        } else if (data?.vestaboard?.watcher_ok === true) {
+            els.panelHealthWatcher.textContent = 'ok';
+        } else if (data?.vestaboard?.watcher_ok === false) {
+            els.panelHealthWatcher.textContent = 'idle';
+        } else {
+            els.panelHealthWatcher.textContent = '—';
+        }
+    }
+    if (els.panelHealthStage) {
+        if (data?.ok) {
+            els.panelHealthStage.textContent = data.cached ? 'ok · cache' : 'ok';
+        } else {
+            els.panelHealthStage.textContent = data?.stage || '—';
+        }
+    }
+}
+
+function applyYarboOfflineHint(data) {
+    if (hasStatusSnapshot || data?.ok || !els.state) return;
+    const stage = String(data?.stage || '');
+    if (stage === 'telemetry' || stage === 'mqtt' || stage === 'agent') {
+        els.state.textContent = 'Offline';
+        els.state.className = 'value badge';
+        if (els.updatedAt) {
+            els.updatedAt.textContent = 'waiting for Yarbo…';
+        }
+    }
+}
+
 function applyHubFromStatus(data) {
+    applyPanelHealth(data);
     const hub = data?.hub;
     if (!hub) {
         applyConnectionWarnings(data);
@@ -15236,17 +15322,22 @@ async function fetchStatus() {
         timedOut = true;
         statusAbort.abort();
     }, 15000);
+    const started = performance.now();
     try {
         const res = await fetch('/api/status.php', { signal, headers: clientTimezoneHeaders() });
         const data = await parseJsonResponse(res);
+        const clientRttMs = Math.round(performance.now() - started);
         if (settingsModalOpen || mailPageOpen || driveActive) return;
         if (data.ok) {
             hasStatusSnapshot = true;
             setError(null);
             updateStatus(data);
+            applyPanelHealth(data, clientRttMs);
             updateCameraStatus(data.camera_state);
         } else {
             applyHubFromStatus(data);
+            applyPanelHealth(data, clientRttMs);
+            applyYarboOfflineHint(data);
             updateVestaboardDashboard(data);
             if (!(data.transient && hasStatusSnapshot)) {
                 setError(data.error || 'Failed to fetch status');
@@ -17279,13 +17370,12 @@ document.body.addEventListener('click', async (event) => {
 initAppearance();
 initPaperMail();
 initUpdateConfirmModal();
-loadSettings()
-    .catch(() => {})
-    .finally(() => {
-        restoreVestaboardPreviewCache();
-        fetchStatus();
-        setInterval(fetchStatus, POLL_INTERVAL_MS);
-    });
+// Do not wait on settings before the first status poll — that left the dashboard
+// on dashes while /api/settings.php finished, even when companions were ready.
+restoreVestaboardPreviewCache();
+fetchStatus().catch(() => {});
+setInterval(fetchStatus, POLL_INTERVAL_MS);
+loadSettings().catch(() => {});
 bindHomeDashboard();
 document.getElementById('home-setup')?.addEventListener('click', (event) => {
     startHomeSetup(event.currentTarget);

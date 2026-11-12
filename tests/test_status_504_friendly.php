@@ -21,7 +21,8 @@ assert_true(str_contains($js, 'isGatewayTimeoutError'), 'soft gateway timeout he
 assert_true(str_contains($js, 'Home is taking longer than usual'), 'home keeps retrying without diagnostic nag');
 
 $status = (string) file_get_contents(__DIR__ . '/../public/api/status.php');
-assert_true(str_contains($status, 'telemetry(2.5, true, true, false)'), 'status prefers cached telemetry');
+assert_true(str_contains($status, 'telemetry(1.0, true, true, false)'), 'status prefers cached telemetry with short miss budget');
+assert_true(str_contains($status, 'status_with_timing'), 'status includes timing breakdown');
 assert_true(!str_contains($status, 'requireRunning'), 'status does not block on agent spawn');
 assert_true(str_contains($status, 'hub_status_extras(false)'), 'status skips live Powerwall refresh');
 

@@ -2238,6 +2238,42 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <strong>Panel update available</strong>
                                 <span id="settings-update-callout-text"></span>
                             </div>
+                            <h3 class="settings-subtitle">Panel health</h3>
+                            <p class="hint">Live timings from the last dashboard status poll. Use this when the page feels sluggish — offline Yarbo should fail fast; companions stay cache-only.</p>
+                            <div class="diagnostics-grid" id="settings-panel-health" aria-live="polite">
+                                <div class="stat">
+                                    <span class="label">Status total</span>
+                                    <span id="panel-health-total" class="value">—</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Client RTT</span>
+                                    <span id="panel-health-rtt" class="value">—</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Agent ping</span>
+                                    <span id="panel-health-ping" class="value">—</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Telemetry</span>
+                                    <span id="panel-health-telemetry" class="value">—</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Companions</span>
+                                    <span id="panel-health-extras" class="value">—</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Telemetry cache</span>
+                                    <span id="panel-health-cache" class="value">—</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Vestaboard watcher</span>
+                                    <span id="panel-health-watcher" class="value">—</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Last stage</span>
+                                    <span id="panel-health-stage" class="value">—</span>
+                                </div>
+                            </div>
                             <h3 class="settings-subtitle">Panel updates</h3>
                             <p class="hint">Pull the latest code from GitHub. <code>config.php</code> and logins in <code>data/</code> (Powerwall, Lymow, UniFi, Vestaboard) are copied aside and restored after the pull.</p>
                             <p id="settings-update-status" class="hint">Checking for updates…</p>
