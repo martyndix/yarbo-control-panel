@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.278] - 2026-11-12
+
+### Fixed
+- **Plans Start while raining:** the Plans page Start button (and `/api/plans.php` start) now refuse when Status shows rain — same gate as Automations Start plan. Use Automations **When Rain → Dock** to send Yarbo home; the panel does not auto-dock on its own.
+
 ## [4.0.277] - 2026-11-12
 
 ### Added

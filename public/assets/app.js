@@ -11890,6 +11890,10 @@ async function loadPlans(button, options = {}) {
 
 async function startPlan(planId, button) {
     if (!planId) return;
+    if (lastStatusData?.rain_detected) {
+        showToast('Yarbo rain detected — start plan blocked', 'error');
+        return;
+    }
     const plan = loadedPlans.find((item) => String(item.id) === String(planId));
     const label = planDisplayName(plan || { id: planId });
     if (!confirm(`Start ${label} at ${planStartPercent()}%?`)) return;
