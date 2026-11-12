@@ -29,7 +29,9 @@ assert_true(str_contains($body, '--update'), 'supports --update');
 assert_true(str_contains($body, 'update.sh'), '--update runs update.sh');
 assert_true(!str_contains($body, 'rm -rf "${ROOT}/data"') && !str_contains($body, 'rm -f "${ROOT}/data/home.json"'), 'never deletes home.json / data tree');
 assert_true(str_contains($body, 'pkill') && str_contains($body, 'shairport-sync'), 'stops shairport helpers');
+assert_true(str_contains($body, '-f adts') && str_contains($body, 'udp://'), 'reaps Classic FM / talkback udp ffmpeg orphans');
 assert_true(str_contains($body, 'playing') && str_contains($body, 'false'), 'clears stuck playing');
+assert_true(str_contains((string) file_get_contents($root . '/CHANGELOG.md'), '## [4.0.259]'), 'changelog 4.0.259');
 
 assert_true(str_contains($panelSh, 'panel_recover_speed.sh'), 'panel.sh runs recover on start');
 assert_true(str_contains($updateSh, 'panel_recover_speed.sh'), 'update.sh runs recover before git');

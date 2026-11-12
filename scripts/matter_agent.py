@@ -217,6 +217,8 @@ _command_busy = 0
 _command_busy_lock = threading.Lock()
 _listen_starting = False
 _listen_start_lock = threading.Lock()
+_listen_fail_streak = 0
+_listen_backoff_until = 0.0
 
 
 def attr_key(endpoint: int, cluster: int, attr: int) -> str:
@@ -2560,6 +2562,10 @@ def kick_listening() -> None:
     global _listen_starting
     if _listening and _ws_slots.get(LISTEN_CHANNEL) is not None:
         return
+    # When Matter Docker is missing/down, avoid hammering every state-poll tick
+    # (was flooding matter-agent.log and burning CPU on "not ready").
+    if time.time() < _listen_backoff_until:
+        return
     with _listen_start_lock:
         if _listening and _ws_slots.get(LISTEN_CHANNEL) is not None:
             return
@@ -2570,12 +2576,17 @@ def kick_listening() -> None:
 
 
 def _listen_worker() -> None:
-    global _listen_starting
+    global _listen_starting, _listen_fail_streak, _listen_backoff_until
     try:
         ensure_listening()
+        _listen_fail_streak = 0
+        _listen_backoff_until = 0.0
     except Exception as exc:  # noqa: BLE001
         print(f"matter listen failed: {exc}", flush=True)
         reset_ws(LISTEN_CHANNEL)
+        _listen_fail_streak = min(8, _listen_fail_streak + 1)
+        delay = min(60.0, float(2 ** _listen_fail_streak))
+        _listen_backoff_until = time.time() + delay
     finally:
         with _listen_start_lock:
             _listen_starting = False

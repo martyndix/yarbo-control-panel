@@ -48,7 +48,12 @@ pkill -f '[p]anel_airplay_metadata.php' 2>/dev/null || true
 pkill -f '[p]anel_airplay_bridge.php' 2>/dev/null || true
 pkill -f 'yarbo-airplay-fifo-holder' 2>/dev/null || true
 # Fan-out / remux ffmpeg left from radio or AirPlay bridge.
+# Talkback radio argv is typically: ffmpeg … -f adts udp://SPEAKER:7004 (Classic FM etc.)
+# — older patterns missed those and left dozens of nohup orphans burning the Pi.
 pkill -f '[f]fmpeg.*(airplay|live\.mp3|unifi-radio|homepod)' 2>/dev/null || true
+pkill -f '[f]fmpeg.*udp://.*(-f adts|-f rtp|pcm_s16le|-f s16le)' 2>/dev/null || true
+pkill -f '[f]fmpeg.*-f adts.*udp://' 2>/dev/null || true
+pkill -f '[f]fmpeg.*\.fifo' 2>/dev/null || true
 # Do NOT kill the Homepod agent itself here if the panel is up — panel.sh owns it.
 # Kill orphaned agent only when we are about to update/restart.
 if [[ "$DO_UPDATE" -eq 1 ]]; then

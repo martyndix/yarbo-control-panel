@@ -453,4 +453,19 @@ $talkbacks = array_values(array_filter(
 ));
 assert_true($talkbacks !== [], 'resume after announce starts talkback');
 
+$radioSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php');
+assert_true(str_contains($radioSrc, 'killOrphanRadioFfmpeg'), 'reaps orphan talkback ffmpeg');
+assert_true(str_contains($radioSrc, 'withRadioLock'), 'serializes play/stop under radio lock');
+assert_true(str_contains($radioSrc, '-f adts'), 'matches ADTS talkback argv');
+assert_true(
+    (new ReflectionClass(YarboUnifiRadio::class))->hasMethod('killOrphanRadioFfmpeg'),
+    'killOrphanRadioFfmpeg is public for recovery/tests'
+);
+$matcher = new ReflectionMethod(YarboUnifiRadio::class, 'isPanelRadioFfmpegArgs');
+$matcher->setAccessible(true);
+$classic = '/usr/bin/ffmpeg -nostdin -f adts udp://192.168.1.50:7004';
+assert_true((bool) $matcher->invoke($radio, $classic), 'detects Classic FM talkback argv');
+$lymow = '/usr/bin/ffmpeg -i rtsp://192.168.1.9:10022/h264ESVideoTest -frames:v 1 out.jpg';
+assert_true(!(bool) $matcher->invoke($radio, $lymow), 'ignores Lymow RTSP snapshot ffmpeg');
+
 echo "test_unifi_radio.php ok\n";
