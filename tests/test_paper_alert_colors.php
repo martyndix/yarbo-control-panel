@@ -173,6 +173,9 @@ assert_true(str_contains($js, 'applyPaperAlertPageOptionLabels'), 'JS applies me
 $fw = (string) file_get_contents(__DIR__ . '/../firmware/papermono/src/main.cpp');
 assert_true(str_contains($fw, 'alert_night_open'), 'firmware reads night open pref');
 assert_true(str_contains($fw, 'vestaboard_night_open'), 'firmware reads night open flag');
+$paperSrc = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
+assert_true(str_contains($paperSrc, "night_last_open"), 'compact uses night_last_open sticky');
+assert_true(str_contains($paperSrc, 'nightOpenContacts(false)'), 'compact inventory-only open check');
 assert_true(str_contains($fw, 'alertSetMessageFlash'), 'firmware applies message flash');
 assert_true(str_contains($fw, 'updateAlertPresentation'), 'firmware updates alert presentation');
 assert_true(str_contains($fw, 'applyAlertPage'), 'firmware navigates alert page');

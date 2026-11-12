@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.266] - 2026-11-12
+
+### Fixed
+- **PaperMono night door light:** compact looked for the wrong sticky flag (`night_open` instead of `night_last_open`) and, after the Funnel hang fix, always treated the overnight preview as secure — so the alert LED stayed off when a door/window opened. It now uses the watcher sticky, overnight flap text, or a cheap inventory-only contact read (no Access refresh) for `vestaboard_night_open`.
+
 ## [4.0.265] - 2026-11-12
 
 ### Fixed

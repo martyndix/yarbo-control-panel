@@ -1675,15 +1675,31 @@ final class YarboPaperDevice
         } elseif ($quiet) {
             $mode = 'quiet';
         }
-        // Prefer the watcher sticky / already-composed layout — do not re-scan UniFi
-        // doors on every compact (that blocked Funnel tablets overnight).
+        // Night-open alert LED: prefer watcher sticky, then overnight flaps, then a
+        // cheap inventory-only contact read (no Access kick — that blocked Funnel).
         $nightOpen = false;
         if ($night) {
-            if (array_key_exists('night_open', $vb)) {
-                $nightOpen = !empty($vb['night_open']);
-            } elseif (is_array($lines) && isset($lines[2]) && is_string($lines[2])) {
-                $row2 = strtoupper($lines[2]);
-                $nightOpen = str_contains($row2, 'OPEN') || str_contains($row2, 'DOOR') || str_contains($row2, 'WINDOW');
+            if (!empty($vb['night_last_open'])) {
+                $nightOpen = true;
+            }
+            if (!$nightOpen && is_array($lines)) {
+                foreach ($lines as $line) {
+                    if (!is_string($line)) {
+                        continue;
+                    }
+                    $row = strtoupper($line);
+                    if (str_contains($row, 'OPEN') || str_contains($row, 'DOOR') || str_contains($row, 'WINDOW')) {
+                        $nightOpen = true;
+                        break;
+                    }
+                }
+            }
+            if (!$nightOpen) {
+                try {
+                    $nightOpen = $vbObj->nightOpenContacts(false) !== [];
+                } catch (\Throwable) {
+                    $nightOpen = false;
+                }
             }
         }
 
