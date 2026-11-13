@@ -1185,8 +1185,17 @@ def merge_state(
             task_zones = []
     else:
         task_zones = previous.get("task_zones") if isinstance(previous.get("task_zones"), list) else []
-    # Idle / finished / on charge / cancelled — drop the remembered Start zones.
-    if work is not None and not task_zones_active(work):
+    # Idle / finished / cancelled — drop the remembered Start zones.
+    # Also clear when sitting on the pad charging unless work is still MOWING
+    # (mid-mow top-up keeps 2/8/9). Otherwise WAIT/PAUSE/DOCKING + isCharging
+    # left "CHARGE · Orchard" on the card after the job finished.
+    on_pad = bool(charging)
+    try:
+        work_code = int(work) if work is not None else None
+    except (TypeError, ValueError):
+        work_code = None
+    on_pad_charge = on_pad and work_code not in {2, 8, 9}
+    if (work_code is not None and not task_zones_active(work_code)) or on_pad_charge:
         task_zones = []
     return {
         "ok": True,

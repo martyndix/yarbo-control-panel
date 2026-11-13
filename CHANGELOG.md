@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.290] - 2026-11-13
+
+### Fixed
+- **Lymow still showed `CHARGE · Orchard` after 4.0.289:** on the pad, State becomes **CHARGE** even when `work_status` is still WAIT/PAUSE/DOCKING, so the zone name stayed. Zone labels now clear whenever the mower is on-pad charging unless work is still **MOWING** (mid-mow top-up).
+
 ## [4.0.289] - 2026-11-13
 
 ### Fixed

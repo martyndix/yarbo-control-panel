@@ -150,7 +150,7 @@ def test_bridge_wires_maps() -> None:
 
 def test_resolve_task_zones() -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
-    from lymow_bridge import resolve_task_zones, task_zones_active  # noqa: WPS433
+    from lymow_bridge import merge_state, resolve_task_zones, task_zones_active  # noqa: WPS433
 
     rows = resolve_task_zones(
         ["a1", "b2"],
@@ -163,6 +163,38 @@ def test_resolve_task_zones() -> None:
         fail(f"resolve_task_zones: {rows}")
     if not task_zones_active(2) or task_zones_active(0) or task_zones_active(5):
         fail("task_zones_active drift (mow/idle/charge)")
+
+    prev = {
+        "task_zones": [{"hash_id": "orch", "name": "Orchard"}],
+        "zones": [{"hash_id": "orch", "name": "Orchard"}],
+        "battery": 55,
+    }
+    # DOCKING + on pad → clear zone (finished job sitting on charger).
+    cleared = merge_state(
+        {"info": {}, "device": {}, "thing": "x"},
+        {
+            "workStatus": 4,
+            "isCharging": True,
+            "battery": 55,
+            "task_zones": [{"hash_id": "orch", "name": "Orchard"}],
+        },
+        prev,
+    )
+    if cleared.get("task_zones"):
+        fail(f"merge_state should clear task_zones on pad charge: {cleared.get('task_zones')}")
+    # Mid-mow top-up keeps MOWING + zone.
+    kept = merge_state(
+        {"info": {}, "device": {}, "thing": "x"},
+        {
+            "workStatus": 2,
+            "isCharging": True,
+            "battery": 40,
+            "task_zones": [{"hash_id": "orch", "name": "Orchard"}],
+        },
+        prev,
+    )
+    if not kept.get("task_zones"):
+        fail("merge_state should keep task_zones during mid-mow top-up")
 
 
 def main() -> None:

@@ -208,12 +208,18 @@ final class YarboLymow
         $robotState = isset($cloud['robot_state']) && is_numeric($cloud['robot_state'])
             ? (int) $cloud['robot_state']
             : null;
-        $charging = !empty($cloud['is_charging']) || !empty($cloud['is_recharging']);
+        $onPad = !empty($cloud['is_charging']);
+        $charging = $onPad || !empty($cloud['is_recharging']);
         $taskZones = self::taskZonesFromData($cloud);
-        if ($taskZones !== [] && !self::taskZonesActive($work, !empty($cloud['is_charging']))) {
+        $baseLabel = $hasError ? 'ERROR' : self::workLabel($work, $onPad);
+        // workLabel becomes CHARGE whenever is_charging and work is not MOWING —
+        // even if work_status is still WAIT/PAUSE/DOCKING. Clear the zone name in
+        // that case so we never show "CHARGE · Orchard" after a finished mow.
+        // Mid-mow top-ups keep work_status in MOWING (2/8/9) and keep the name.
+        $onPadCharge = $onPad && !in_array($work, [2, 8, 9], true);
+        if ($taskZones !== [] && (!self::taskZonesActive($work, $onPad) || $onPadCharge || $baseLabel === 'CHARGE')) {
             $taskZones = [];
         }
-        $baseLabel = $hasError ? 'ERROR' : self::workLabel($work, !empty($cloud['is_charging']));
         $taskLabel = self::taskZonesLabel($taskZones);
         $workLabel = $taskLabel !== '' && $baseLabel !== '—'
             ? ($baseLabel . ' · ' . $taskLabel)
