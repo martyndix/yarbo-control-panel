@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.284] - 2026-11-13
+
+### Fixed
+- **Vestaboard Night hours dropping to Yarbo overnight:** the background watcher could leave night and write the daytime Yarbo page (or treat that Yarbo page as an app hold until morning). Opening the website forced night back via `sendNow`. Night hours now follow the **clock alone** once enabled (no UniFi inventory gate), leftover **UTC** timezone stamps upgrade to the OS zone, and Yarbo/Powerwall/Lymow live pages are recognized as ours so they clear overnight hold and get force-replaced with the night layout.
+
 ## [4.0.283] - 2026-11-12
 
 ### Changed

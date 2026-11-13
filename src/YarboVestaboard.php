@@ -698,9 +698,12 @@ final class YarboVestaboard
         if (!$config['enabled']) {
             return ['ok' => true, 'skipped' => true];
         }
-        if (self::normalizeTimezone((string) ($config['quiet_timezone'] ?? '')) === '') {
+        // Prefer OS zone over a leftover UTC stamp (UTC is the PHP default, not
+        // a real "I live in UTC" choice). Browser TZ still wins when the UI opens.
+        $storedTz = self::normalizeTimezone((string) ($config['quiet_timezone'] ?? ''));
+        if ($storedTz === '' || self::isUtcTimezone($storedTz)) {
             $os = self::osTimezone();
-            if ($os !== '') {
+            if ($os !== '' && $os !== $storedTz) {
                 $this->save(['quiet_timezone' => $os]);
                 $config = $this->load();
             }
@@ -714,22 +717,33 @@ final class YarboVestaboard
         $config = $this->load();
         $overnightHold = ($this->isNightHours() || $this->isQuietHours()) && $this->isExternalHoldActive($config);
         if ($overnightHold) {
-            $this->extendHoldThroughQuietHours($config);
-            $wasOvernight = !empty($config['quiet_active']) || !empty($config['night_active']);
-            if (!$wasOvernight || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
-                $this->snapshotLiveLayout();
-            }
-            $patch = [];
-            if ($this->isNightHours()) {
-                $patch['night_active'] = true;
-                $patch['quiet_active'] = false;
+            // Our own live Yarbo/Powerwall/Lymow pages must not arm overnight hold —
+            // that left the Note stuck on YARBO IDLE until a browser sendNow.
+            $onBoard = self::normalizeLiveCodes($config['board_codes'] ?? null);
+            if ($onBoard !== null && $this->codesLookLikeLiveStatus($onBoard)) {
+                $this->save([
+                    'external_hold' => false,
+                    'external_hold_until' => null,
+                ]);
+                $config = $this->load();
             } else {
-                $patch['quiet_active'] = true;
-                $patch['night_active'] = false;
-            }
-            $this->save($patch);
+                $this->extendHoldThroughQuietHours($config);
+                $wasOvernight = !empty($config['quiet_active']) || !empty($config['night_active']);
+                if (!$wasOvernight || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
+                    $this->snapshotLiveLayout();
+                }
+                $patch = [];
+                if ($this->isNightHours()) {
+                    $patch['night_active'] = true;
+                    $patch['quiet_active'] = false;
+                } else {
+                    $patch['quiet_active'] = true;
+                    $patch['night_active'] = false;
+                }
+                $this->save($patch);
 
-            return ['ok' => true, 'skipped' => true, 'reason' => 'external_hold'];
+                return ['ok' => true, 'skipped' => true, 'reason' => 'external_hold'];
+            }
         }
         if ($this->isExternalHoldActive($config)) {
             return ['ok' => true, 'skipped' => true, 'reason' => 'external_hold'];
@@ -761,7 +775,11 @@ final class YarboVestaboard
                 || ((string) ($config['night_last_open_key'] ?? '')) !== $openKey;
             // Entering night, or a door/window edge: write immediately (bypass 15s gap).
             // Unchanged status relies on hash skip so flaps stay still.
-            $force = !$wasNight || $openChanged;
+            // If flaps still show a leftover live page, force the night write even
+            // when the open set did not change (watcher was idle / hold cleared).
+            $onBoard = self::normalizeLiveCodes($config['board_codes'] ?? null);
+            $liveStuck = $onBoard !== null && $this->codesLookLikeLiveStatus($onBoard);
+            $force = !$wasNight || $openChanged || $liveStuck;
             $result = $this->sendLayout($layout, $force);
             $this->save([
                 'night_active' => true,
@@ -2156,16 +2174,27 @@ final class YarboVestaboard
     {
         $config ??= $this->load();
         $stored = self::normalizeTimezone((string) ($config['quiet_timezone'] ?? ''));
-        if ($stored !== '') {
+        // UTC in config is usually the empty default, not an intentional local zone.
+        if ($stored !== '' && !self::isUtcTimezone($stored)) {
             return $stored;
         }
         $os = self::osTimezone();
         if ($os !== '') {
             return $os;
         }
+        if ($stored !== '') {
+            return $stored;
+        }
         $php = self::normalizeTimezone((string) date_default_timezone_get());
 
         return $php !== '' ? $php : 'UTC';
+    }
+
+    public static function isUtcTimezone(string $zone): bool
+    {
+        $zone = self::normalizeTimezone($zone);
+
+        return $zone !== '' && (strcasecmp($zone, 'UTC') === 0 || strcasecmp($zone, 'Etc/UTC') === 0);
     }
 
     public static function osTimezone(): string
@@ -2450,6 +2479,7 @@ final class YarboVestaboard
             || in_array($hash, $this->normalizeRecentHashes($config['recent_hashes'] ?? null, $lastHash), true)
             || $this->codesLookLikeOwnPowerwall($codes)
             || $this->codesLookLikeOwnLymow($codes)
+            || $this->codesLookLikeOwnYarbo($codes)
             || $this->codesLookLikeOwnBatteries($codes);
         if ($ours) {
             if (!empty($config['external_hold'])) {
@@ -2565,6 +2595,7 @@ final class YarboVestaboard
     {
         return $this->codesLookLikeOwnPowerwall($codes)
             || $this->codesLookLikeOwnLymow($codes)
+            || $this->codesLookLikeOwnYarbo($codes)
             || $this->codesLookLikeOwnBatteries($codes);
     }
 
@@ -2604,6 +2635,33 @@ final class YarboVestaboard
         return str_starts_with($row1, 'BATTERY')
             || str_starts_with($row2, 'CHARGING')
             || str_starts_with($row2, 'CAM');
+    }
+
+    /**
+     * YARBO IDLE/MOWING + BATTERY is this panel's Yarbo page (not an app scribble).
+     *
+     * @param list<list<int>> $codes
+     */
+    private function codesLookLikeOwnYarbo(array $codes): bool
+    {
+        if ($this->codesLookLikeOwnBatteries($codes)) {
+            return false;
+        }
+        $lines = self::linesFromCodes($codes);
+        $row0 = strtoupper(trim($lines[0] ?? ''));
+        $row1 = strtoupper(trim($lines[1] ?? ''));
+
+        if (!str_starts_with($row0, 'YARBO') && !str_starts_with($row0, 'OFFLINE')) {
+            return false;
+        }
+
+        return str_starts_with($row1, 'BATTERY')
+            || str_contains($row0, 'IDLE')
+            || str_contains($row0, 'MOWING')
+            || str_contains($row0, 'DOCKING')
+            || str_contains($row0, 'CHARGING')
+            || str_contains($row0, 'PAUSED')
+            || str_contains($row0, 'ERROR');
     }
 
     /**
@@ -2792,10 +2850,9 @@ final class YarboVestaboard
         if (!($config['night_hours_enabled'] ?? false)) {
             return false;
         }
-        // Sticky overnight: clock only — do not touch UniFi on every status poll.
-        if (empty($config['night_active']) && !$this->nightHoursAvailable()) {
-            return false;
-        }
+        // Clock only once Night hours is enabled. Do not gate on UniFi inventory —
+        // a brief empty inventory used to drop overnight and let the watcher write
+        // daytime Yarbo until a browser poll force-sent night again.
         $start = (string) ($config['night_start'] ?? '');
         $end = (string) ($config['night_end'] ?? '');
         if ($start === '' || $end === '' || $start === $end) {
