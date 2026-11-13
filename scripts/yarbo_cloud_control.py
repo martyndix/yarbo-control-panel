@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,6 +42,9 @@ class YarboCloudControlClient:
         self._controller_acquired = False
         self._last_raw: dict[str, Any] | None = None
         self._last_raw_at = 0.0
+        self._last_plan_feedback: dict[str, Any] | None = None
+        self._last_plan_feedback_at = 0.0
+        self._plan_feedback_event = threading.Event()
         self._lock = asyncio.Lock()
 
     @property
@@ -85,9 +89,15 @@ class YarboCloudControlClient:
         client.mqtt_connect()
         client.subscribe_device_message(self.sn, self.type_id, self._on_device_message)
         try:
-            client.subscribe_data_feedback(self.sn, self.type_id, lambda _t, _d: None)
+            # Must keep a real callback — plan progress arrives on data_feedback
+            # for get_plan_feedback (there is no local telemetry_stream on cloud).
+            client.subscribe_data_feedback(self.sn, self.type_id, self._on_data_feedback)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("subscribe_data_feedback failed: %s", exc)
+        try:
+            self._subscribe_plan_feedback_topic(client)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("subscribe plan_feedback topic failed: %s", exc)
 
         self._sdk = client
         self._connected = True
@@ -97,6 +107,71 @@ class YarboCloudControlClient:
         if isinstance(data, dict) and data:
             self._last_raw = data
             self._last_raw_at = time.time()
+
+    def _on_data_feedback(self, _topic: str, data: Any) -> None:
+        if not isinstance(data, dict) or not data:
+            return
+        response_topic = str(data.get("topic") or "")
+        payload = data.get("data") if isinstance(data.get("data"), (dict, str)) else data
+        if response_topic in ("get_plan_feedback", "plan_feedback") or _looks_like_plan_feedback(payload):
+            fb = _unwrap_plan_feedback(payload if isinstance(payload, dict) else data)
+            if fb:
+                self._store_plan_feedback(fb)
+
+    def _subscribe_plan_feedback_topic(self, client: Any) -> None:
+        """Legacy device push topic (still published by some firmware over cloud)."""
+        from yarbo_robot_sdk.codec import decode_mqtt_payload
+
+        mqtt = client._ensure_mqtt_for(self.sn)
+        topic = f"snowbot/{self.sn}/device/plan_feedback"
+
+        def _wrapper(_topic_str: str, payload: bytes) -> None:
+            try:
+                data = decode_mqtt_payload(payload)
+            except Exception:  # noqa: BLE001
+                try:
+                    data = json.loads(payload.decode(errors="replace"))
+                except Exception:  # noqa: BLE001
+                    return
+            fb = _unwrap_plan_feedback(data)
+            if fb:
+                self._store_plan_feedback(fb)
+
+        mqtt.subscribe(topic, _wrapper)
+
+    def _store_plan_feedback(self, feedback: dict[str, Any]) -> None:
+        self._last_plan_feedback = feedback
+        self._last_plan_feedback_at = time.time()
+        self._plan_feedback_event.set()
+
+    def take_cached_plan_feedback(self) -> dict[str, Any] | None:
+        """Return last plan_feedback without clearing (agent attaches a copy)."""
+        fb = self._last_plan_feedback
+        return dict(fb) if isinstance(fb, dict) and fb else None
+
+    async def fetch_plan_feedback(self, timeout: float = 4.0) -> dict[str, Any] | None:
+        """Ask for plan progress and wait for data_feedback / plan_feedback."""
+        try:
+            return await asyncio.to_thread(self._fetch_plan_feedback_sync, timeout)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("fetch_plan_feedback failed: %s", exc)
+            return self.take_cached_plan_feedback()
+
+    def _fetch_plan_feedback_sync(self, timeout: float) -> dict[str, Any] | None:
+        self._plan_feedback_event.clear()
+        before = self._last_plan_feedback_at
+        # get_plan_feedback is not in the SDK control_topics registry — raw publish.
+        self._publish_sync("get_plan_feedback", {})
+        deadline = time.time() + max(0.5, timeout)
+        while time.time() < deadline:
+            if self._last_plan_feedback_at > before and isinstance(self._last_plan_feedback, dict):
+                return dict(self._last_plan_feedback)
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            self._plan_feedback_event.wait(timeout=min(0.5, remaining))
+            self._plan_feedback_event.clear()
+        return self.take_cached_plan_feedback()
 
     async def disconnect(self) -> None:
         async with self._lock:
@@ -224,6 +299,59 @@ class YarboCloudControlClient:
         if self._sdk is None or not self._connected:
             raise RuntimeError("Cloud MQTT is not connected")
         return self._sdk
+
+
+def _looks_like_plan_feedback(payload: Any) -> bool:
+    if not isinstance(payload, dict) or not payload:
+        return False
+    keys = {
+        "actualCleanArea",
+        "actual_clean_area",
+        "finish_clean_area",
+        "total_clean_area",
+        "finishCleanArea",
+        "totalCleanArea",
+        "areaCovered",
+        "area_covered",
+        "area_ids",
+        "areaIds",
+        "finish_ids",
+        "finishIds",
+        "left_time",
+        "leftTime",
+        "total_time",
+        "totalTime",
+        "plan_id",
+        "planId",
+        "duration",
+    }
+    return any(key in payload for key in keys)
+
+
+def _unwrap_plan_feedback(payload: Any) -> dict[str, Any] | None:
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return None
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict) or not payload:
+        return None
+    data = payload.get("data")
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            data = None
+    if isinstance(data, dict) and _looks_like_plan_feedback(data):
+        return data
+    if _looks_like_plan_feedback(payload):
+        return payload
+    if isinstance(data, dict) and data:
+        return data
+    return payload if _looks_like_plan_feedback(payload) else None
 
 
 def _device_serial(device: Any) -> str:

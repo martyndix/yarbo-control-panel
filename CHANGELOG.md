@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.288] - 2026-11-13
+
+### Fixed
+- **Vestaboard WORK DONE n% missing while mowing:** after cloud-only MQTT, `plan_feedback` was never cached because the cloud client had no `telemetry_stream` and ignored `data_feedback`. The agent now subscribes to plan progress (data_feedback + `device/plan_feedback`) and polls `get_plan_feedback` while a plan is running so the Note again shows **WORK DONE** percent instead of only the head name.
+
 ## [4.0.287] - 2026-11-13
 
 ### Fixed

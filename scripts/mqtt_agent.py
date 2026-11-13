@@ -249,15 +249,39 @@ async def maybe_request_plan_feedback(client: Any, state: dict[str, Any]) -> Non
         log(f"get_plan_feedback failed: {e}")
 
 
+def _store_plan_feedback_state(state: dict[str, Any], payload: dict[str, Any]) -> None:
+    state["last_plan_feedback"] = payload
+    state["last_plan_feedback_at"] = time.time()
+    summary = ",".join(sorted(payload.keys())[:8])
+    if summary != state.get("last_plan_feedback_log"):
+        state["last_plan_feedback_log"] = summary
+        log(f"plan_feedback cached keys={summary}")
+
+
 async def plan_feedback_loop(client: Any, state: dict[str, Any]) -> None:
-    """Cache snowbot/.../device/plan_feedback (area done vs total, not DeviceMSG)."""
+    """Cache plan progress (area done vs total) for Vestaboard WORK DONE n%."""
     while True:
         if not getattr(client, "is_connected", False):
             await asyncio.sleep(1.0)
             continue
         transport = getattr(client, "_transport", None)
+        # Cloud MQTT has no local telemetry_stream — poll/cache via the cloud client.
         if transport is None or not hasattr(transport, "telemetry_stream"):
-            await asyncio.sleep(2.0)
+            try:
+                take = getattr(client, "take_cached_plan_feedback", None)
+                if callable(take):
+                    pushed = take()
+                    if isinstance(pushed, dict) and pushed:
+                        _store_plan_feedback_state(state, pushed)
+                if plan_is_active(state.get("last_raw")):
+                    fetch = getattr(client, "fetch_plan_feedback", None)
+                    if callable(fetch):
+                        fb = await fetch(timeout=4.0)
+                        if isinstance(fb, dict) and fb:
+                            _store_plan_feedback_state(state, fb)
+            except Exception as e:
+                log(f"plan_feedback cloud poll: {e}")
+            await asyncio.sleep(PLAN_FEEDBACK_POLL_S)
             continue
         try:
             async for envelope in transport.telemetry_stream():
@@ -266,12 +290,7 @@ async def plan_feedback_loop(client: Any, state: dict[str, Any]) -> None:
                 payload = unwrap_plan_feedback(getattr(envelope, "payload", None))
                 if not payload:
                     continue
-                state["last_plan_feedback"] = payload
-                state["last_plan_feedback_at"] = time.time()
-                summary = ",".join(sorted(payload.keys())[:8])
-                if summary != state.get("last_plan_feedback_log"):
-                    state["last_plan_feedback_log"] = summary
-                    log(f"plan_feedback cached keys={summary}")
+                _store_plan_feedback_state(state, payload)
         except Exception as e:
             log(f"plan_feedback listener: {e}")
             await asyncio.sleep(2.0)

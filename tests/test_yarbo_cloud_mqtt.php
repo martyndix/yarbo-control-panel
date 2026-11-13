@@ -36,6 +36,9 @@ $cloudPy = (string) file_get_contents($root . '/scripts/yarbo_cloud_control.py')
 assert_true(str_contains($cloudPy, 'class YarboCloudControlClient'), 'cloud control client module exists');
 assert_true(str_contains($cloudPy, 'mqtt_publish_command'), 'cloud client publishes via SDK');
 assert_true(str_contains($cloudPy, 'snowbot/'), 'cloud client can raw-publish app topics');
+assert_true(str_contains($cloudPy, 'fetch_plan_feedback'), 'cloud client fetches plan progress');
+assert_true(str_contains($cloudPy, '_on_data_feedback'), 'cloud client caches data_feedback progress');
+assert_true(str_contains($agentPy, 'plan_feedback cloud poll'), 'agent polls cloud plan feedback');
 
 $agentPhp = (string) file_get_contents($root . '/src/YarboMqttAgentClient.php');
 assert_true(str_contains($agentPhp, 'import yarbo_robot_sdk'), 'PHP spawn requires official SDK');
