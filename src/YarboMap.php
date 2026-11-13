@@ -56,7 +56,9 @@ final class YarboMap
                 if ($ref === null) {
                     $ref = YarboGeo::extractGpsRefFromMapData($data);
                 }
-                $mapFeatures = self::extractAppMapFeatures($data);
+                // Pass read_gps_ref / map-level origin so app zones without per-zone
+                // ref still convert to WGS84 instead of falling through to walkNode.
+                $mapFeatures = self::extractAppMapFeatures($data, $ref);
                 if ($mapFeatures === [] && $ref !== null) {
                     $mapFeatures = self::extractOfficialMapFeatures($data, $ref);
                 }
@@ -1132,9 +1134,10 @@ final class YarboMap
      * Yarbo app map format: areas/pathways with per-zone ref + range points (x/y meters).
      *
      * @param array<string, mixed> $mapData
+     * @param array{latitude: float, longitude: float}|null $fallbackRef read_gps_ref / map origin
      * @return array<int, array<string, mixed>>
      */
-    private static function extractAppMapFeatures(array $mapData): array
+    private static function extractAppMapFeatures(array $mapData, ?array $fallbackRef = null): array
     {
         $polygonTypes = [
             'areas' => 'clean',
@@ -1152,19 +1155,25 @@ final class YarboMap
         foreach ($polygonTypes as $canonical => $zoneType) {
             $key = self::presentListKey($mapData, $canonical);
             if ($key !== null) {
-                $features = array_merge($features, self::extractAppZones($mapData, $key, $zoneType, 'polygon'));
+                $features = array_merge(
+                    $features,
+                    self::extractAppZones($mapData, $key, $zoneType, 'polygon', $fallbackRef),
+                );
             }
         }
         foreach ($lineTypes as $canonical => $zoneType) {
             $key = self::presentListKey($mapData, $canonical);
             if ($key !== null) {
-                $features = array_merge($features, self::extractAppZones($mapData, $key, $zoneType, 'line'));
+                $features = array_merge(
+                    $features,
+                    self::extractAppZones($mapData, $key, $zoneType, 'line', $fallbackRef),
+                );
             }
         }
 
         $charging = $mapData['chargingData'] ?? null;
         if (is_array($charging)) {
-            $point = self::chargingPointFeature($charging, 'chargingData');
+            $point = self::chargingPointFeature($charging, 'chargingData', $fallbackRef);
             if ($point !== null) {
                 $features[] = $point;
             }
@@ -1172,7 +1181,7 @@ final class YarboMap
             $station = isset($mapData['chargingPoint']['x']) || isset($mapData['chargingPoint']['X'])
                 ? $mapData
                 : $mapData['chargingPoint'];
-            $point = self::chargingPointFeature($station, 'chargingPoint');
+            $point = self::chargingPointFeature($station, 'chargingPoint', $fallbackRef);
             if ($point !== null) {
                 $features[] = $point;
             }
@@ -1184,7 +1193,11 @@ final class YarboMap
                 if (!is_array($station)) {
                     continue;
                 }
-                $point = self::chargingPointFeature($station, sprintf('%s[%d]', $allKey, (int) $index));
+                $point = self::chargingPointFeature(
+                    $station,
+                    sprintf('%s[%d]', $allKey, (int) $index),
+                    $fallbackRef,
+                );
                 if ($point !== null) {
                     $features[] = $point;
                 }
@@ -1197,10 +1210,16 @@ final class YarboMap
     /**
      * @param array<string, mixed> $mapData
      * @param 'polygon'|'line' $geometry
+     * @param array{latitude: float, longitude: float}|null $fallbackRef
      * @return array<int, array<string, mixed>>
      */
-    private static function extractAppZones(array $mapData, string $key, string $zoneType, string $geometry): array
-    {
+    private static function extractAppZones(
+        array $mapData,
+        string $key,
+        string $zoneType,
+        string $geometry,
+        ?array $fallbackRef = null,
+    ): array {
         $zones = $mapData[$key] ?? null;
         if (!is_array($zones)) {
             return [];
@@ -1210,7 +1229,7 @@ final class YarboMap
         }
 
         $minPoints = $geometry === 'line' ? 2 : 3;
-        $mapRef = YarboGeo::extractGpsRef($mapData);
+        $mapRef = YarboGeo::extractGpsRef($mapData) ?? $fallbackRef;
         $features = [];
         foreach ($zones as $index => $zone) {
             if (!is_array($zone)) {
@@ -1253,11 +1272,15 @@ final class YarboMap
 
     /**
      * @param array<string, mixed> $charging
+     * @param array{latitude: float, longitude: float}|null $fallbackRef
      * @return array<string, mixed>|null
      */
-    private static function chargingPointFeature(array $charging, string $path): ?array
-    {
-        $zoneRef = YarboGeo::extractGpsRef($charging);
+    private static function chargingPointFeature(
+        array $charging,
+        string $path,
+        ?array $fallbackRef = null,
+    ): ?array {
+        $zoneRef = YarboGeo::extractGpsRef($charging) ?? $fallbackRef;
         if ($zoneRef === null) {
             return null;
         }
@@ -1493,8 +1516,12 @@ final class YarboMap
      */
     private static function extractLatLon(array $point): ?array
     {
-        $latCandidates = ['lat', 'latitude', 'y'];
-        $lonCandidates = ['lon', 'lng', 'longitude', 'x'];
+        // Only explicit GPS keys — never treat local {x,y} metres as lon/lat.
+        // Yard meters are usually |x|,|y| < 90, so the old x/y candidates produced
+        // false polygons near the equator when read_gps_ref / zone refs were missing
+        // (cloud map load), which the Leaflet view then never fitBounds to.
+        $latCandidates = ['lat', 'latitude'];
+        $lonCandidates = ['lon', 'lng', 'longitude'];
 
         $lat = null;
         $lon = null;
@@ -1516,7 +1543,6 @@ final class YarboMap
             return null;
         }
 
-        // Avoid treating local x/y meters as lat/lon.
         if (abs($lat) > 90 || abs($lon) > 180) {
             return null;
         }

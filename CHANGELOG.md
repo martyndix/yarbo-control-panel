@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.286] - 2026-11-13
+
+### Fixed
+- **Location Map zones listed but invisible on the satellite map:** after cloud-only MQTT, `get_map` often arrived without `read_gps_ref` / per-zone origins. The fallback walker treated local `{x,y}` metres as lon/lat, so GeoJSON landed near the equator while GPS lock kept the view on the yard (and skipped `fitBounds`). Cloud map load now also fetches `read_gps_ref`, app-zone extract uses that origin, `{x,y}` is never treated as GPS, and loading zones always re-adds the overlay layer and fits bounds.
+
 ## [4.0.285] - 2026-11-13
 
 ### Fixed

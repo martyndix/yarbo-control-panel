@@ -48,7 +48,12 @@ final class YarboGeo
      */
     public static function extractGpsRefFromMapData(array $mapData): ?array
     {
-        foreach (['areas', 'pathways', 'clean_area_list', 'path_area_list'] as $key) {
+        $top = self::extractGpsRef($mapData);
+        if ($top !== null) {
+            return $top;
+        }
+
+        foreach (['areas', 'pathways', 'area', 'pathway', 'clean_area_list', 'path_area_list'] as $key) {
             $zones = $mapData[$key] ?? null;
             if (!is_array($zones)) {
                 continue;

@@ -1504,6 +1504,9 @@ function applyLoadedMapFeatures(features, context = {}) {
     if (!map || !areasLayer) return;
     const unique = dedupeMapFeatures(features);
     clearMapZones();
+    // Edit mode (or a prior hide) may have removed the GeoJSON group — inspector
+    // checkboxes would still populate via onEachFeature while nothing paints.
+    setAreasLayerVisible(true);
     const featureCollection = { type: 'FeatureCollection', features: unique };
     areasLayer.addData(featureCollection);
     loadedMapFeatures = unique;
@@ -1523,11 +1526,19 @@ function applyLoadedMapFeatures(features, context = {}) {
         if (els.mapListenStatus) els.mapListenStatus.textContent = collisionText;
         showToast(collisionText, 'error');
     }
-    if (!mapHasCentered && !context.skipFit) {
+    // GPS lock often sets mapHasCentered before zones arrive. Always fit to the
+    // loaded yard unless the caller opts out (draft apply), so overlays are not
+    // left off-screen when coordinates were corrected or the robot marker won.
+    if (!context.skipFit) {
         const bounds = areasLayer.getBounds?.();
         if (bounds?.isValid?.()) {
             map.fitBounds(bounds.pad(0.15));
             mapHasCentered = true;
+            try {
+                areasLayer.bringToFront();
+            } catch {
+                // ignore
+            }
         }
     }
 }

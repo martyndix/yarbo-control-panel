@@ -56,6 +56,21 @@ function load_map_cloud(YarboCloud $cloud, string $serial): array
         $responses['get_map'] = wrap_cloud_feedback('get_map', is_array($payload) ? $payload : null);
     }
 
+    // Origin for local x/y → WGS84 when zones omit per-zone ref (common on some firmwares).
+    // Without this, walkNode used to treat metre {x,y} as lon/lat and draw zones off-yard.
+    try {
+        $gpsRef = $cloud->fetch('read_gps_ref', $serial, 5.0);
+        if (is_array($gpsRef) && ($gpsRef['ok'] ?? true) !== false) {
+            $gpsPayload = is_array($gpsRef['data'] ?? null) ? $gpsRef['data'] : $gpsRef;
+            $wrapped = wrap_cloud_feedback('read_gps_ref', is_array($gpsPayload) ? $gpsPayload : null);
+            if ($wrapped !== null) {
+                $responses['read_gps_ref'] = $wrapped;
+            }
+        }
+    } catch (Throwable) {
+        // get_map alone still works when zones carry their own ref.
+    }
+
     return ['responses' => $responses, 'via' => 'cloud'];
 }
 
