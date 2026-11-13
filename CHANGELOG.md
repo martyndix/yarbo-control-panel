@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.287] - 2026-11-13
+
+### Fixed
+- **Location Map spurious dock markers:** Yarbo `allchargingData` often includes zone-linked recharge approach points (ids like `5` / `1` / `3`, `hasChargingStation: 0`) that were drawn as green docks. The map now keeps the primary `chargingData` pose and only draws `allchargingData` entries that look like a real charging pad.
+
 ## [4.0.286] - 2026-11-13
 
 ### Fixed

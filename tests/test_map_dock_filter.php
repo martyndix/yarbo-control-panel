@@ -138,4 +138,7 @@ $sampleCharge = array_values(array_filter(
 assert_true(count($sampleCharge) === 1, 'sample fixture must keep one dock');
 assert_true(($sampleCharge[0]['properties']['name'] ?? '') === 'Dock', 'sample dock name');
 
+$change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.287]'), 'changelog 4.0.287');
+
 echo "map dock filter ok\n";
