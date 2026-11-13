@@ -713,9 +713,15 @@ final class YarboVestaboard
             return ['ok' => false, 'error' => $missing];
         }
 
-        $this->refreshBoardFromDevice($config);
-        $config = $this->load();
-        $overnightHold = ($this->isNightHours() || $this->isQuietHours()) && $this->isExternalHoldActive($config);
+        // Overnight: avoid a blocking Vestaboard GET on every tick — that delayed
+        // door/window open writes by tens of seconds. Still probe occasionally for
+        // app hold, or immediately when a hold is already armed.
+        $overnightClock = $this->isNightHours() || $this->isQuietHours();
+        if (!$overnightClock || $this->isExternalHoldActive($config) || $this->boardFetchStale($config, 60)) {
+            $this->refreshBoardFromDevice($config);
+            $config = $this->load();
+        }
+        $overnightHold = $overnightClock && $this->isExternalHoldActive($config);
         if ($overnightHold) {
             // Our own live Yarbo/Powerwall/Lymow pages must not arm overnight hold —
             // that left the Note stuck on YARBO IDLE until a browser sendNow.
@@ -3399,6 +3405,7 @@ final class YarboVestaboard
 
     /**
      * Synchronous UniFi door/window refresh for Night hours (not the async Home kick).
+     * Skips work when automations already refreshed inventory in the last couple seconds.
      */
     private function refreshNightContacts(): void
     {
@@ -3408,11 +3415,24 @@ final class YarboVestaboard
                 return;
             }
             $unifi = new YarboUnifi($this->projectRoot);
-            $unifi->refreshProtectSensorsNow(1.5);
-            $unifi->refreshAccessDoorsNow(1.5);
+            $unifi->refreshNightContactsIfStale(1.2, 2);
         } catch (\Throwable) {
             // Keep last inventory; next tick retries.
         }
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function boardFetchStale(array $config, int $maxAgeSeconds): bool
+    {
+        $fetchedAt = $config['board_fetched_at'] ?? null;
+        if (!is_string($fetchedAt) || $fetchedAt === '') {
+            return true;
+        }
+        $then = strtotime($fetchedAt);
+
+        return $then === false || (time() - $then) >= $maxAgeSeconds;
     }
 
     /**

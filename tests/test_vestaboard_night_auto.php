@@ -136,7 +136,7 @@ assert_true(str_contains($js, 'Night door/window open'), 'UI chip label');
 assert_true(str_contains($js, "kind === 'vestaboard_night'"), 'tray apply');
 assert_true(str_contains($php, 'VESTABOARD_NIGHT_ID'), 'PHP constant');
 assert_true(str_contains($php, 'requestTickNudge'), 'automations nudge watcher');
-assert_true(str_contains($watch, 'isNightHours() ? 2 : 8'), 'faster night poll');
+assert_true(str_contains($watch, 'isNightHours() ? 1 : 8'), 'faster night poll');
 
 $change = (string) file_get_contents(dirname(__DIR__) . '/CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.281]'), 'changelog 4.0.281');

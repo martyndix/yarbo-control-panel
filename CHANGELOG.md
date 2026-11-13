@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.285] - 2026-11-13
+
+### Fixed
+- **Vestaboard Night open/close lag (~45s):** overnight ticks no longer stack a Vestaboard GET plus full Protect sensors+/lights+Access refreshes on every loop. Night reuses inventory the automations runner just wrote (or refreshes only stale Access/Protect contacts, skipping lights), probes the Note for app-hold about once a minute, and idles ~1s so open/close reaches the flaps in a few seconds without extra UniFi load.
+
 ## [4.0.284] - 2026-11-13
 
 ### Fixed

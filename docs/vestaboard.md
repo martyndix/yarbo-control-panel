@@ -101,7 +101,7 @@ This is separate from Quiet Hours in the Vestaboard **app**. The app setting can
 In **Settings → Vestaboard Note**, enable **Night hours** when the UniFi module is on and at least one Access door controller or door/window contact is present. Edit the **top two rows** of a custom message for the secure state:
 
 - **Closed:** your custom top two rows + **HOUSE SECURE** on the bottom row (green colour flaps)
-- **Open:** the Note uses **all three rows** with red colour flaps — a short header (**DOOR OPEN**, **WIN OPEN**, **DOORS OPEN**, **OPEN**, or **N OPEN**) plus truncated UniFi contact name(s). When two or more are open, rows 2 and 3 show the first two names; as contacts close, the next open name slides onto the board so two stay visible until only one remains. The watcher polls about every **2 seconds** overnight so open/close updates reach the Note quickly
+- **Open:** the Note uses **all three rows** with red colour flaps — a short header (**DOOR OPEN**, **WIN OPEN**, **DOORS OPEN**, **OPEN**, or **N OPEN**) plus truncated UniFi contact name(s). When two or more are open, rows 2 and 3 show the first two names; as contacts close, the next open name slides onto the board so two stay visible until only one remains. The watcher polls about every **1 second** overnight (and reuses a fresh UniFi inventory from the automations runner) so open/close updates reach the Note quickly without hammering the console
 
 Names are uppercased to Vestaboard characters and shortened to 15 flaps, preferring whole words (for example `Garage Side Entrance Door` → `GARAGE SIDE`). Use **Simulate open** under the night editor (or the Preview dropdown **Night hours: something open**) to see the alert with your watched contacts without writing the Note.
 

@@ -271,7 +271,7 @@ assert_true(str_contains($phpSrc, 'night_last_open_key'), 'tick tracks which con
 assert_true(str_contains($phpSrc, 'nightOpenAlertLayout'), 'open alert uses full board');
 
 $watchSrc = (string) file_get_contents(dirname(__DIR__) . '/scripts/vestaboard_watch.php');
-assert_true(str_contains($watchSrc, 'isNightHours() ? 2 : 8'), 'night watcher idle is 2s');
+assert_true(str_contains($watchSrc, 'isNightHours() ? 1 : 8'), 'night watcher idle is 1s');
 
 $change = (string) file_get_contents(dirname(__DIR__) . '/CHANGELOG.md');
 $docs = (string) file_get_contents(dirname(__DIR__) . '/docs/vestaboard.md');

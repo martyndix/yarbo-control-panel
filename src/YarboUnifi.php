@@ -1227,12 +1227,36 @@ final class YarboUnifi
 
     public function refreshProtectSensorsNow(float $timeout = 1.5): void
     {
-        $this->refreshProtectSensors($timeout);
+        $this->refreshProtectSensors($timeout, true);
     }
 
     public function refreshAccessDoorsNow(float $timeout = 1.5): void
     {
         $this->refreshAccessDoorStatusInner($timeout, true);
+    }
+
+    /**
+     * Overnight Vestaboard: refresh Access DPS + Protect contacts only when inventory
+     * is stale. Skips /lights so night ticks stay light and do not fight the
+     * automations runner (which already refreshes sensors every ~2s).
+     */
+    public function refreshNightContactsIfStale(float $timeout = 1.2, int $maxAgeSec = 2): void
+    {
+        $inventory = $this->readInventory();
+        $now = time();
+        $sensorsAt = (int) ($inventory['protect_sensors_at'] ?? 0);
+        $doorsAt = (int) ($inventory['access_status_at'] ?? 0);
+        $needSensors = $sensorsAt <= 0 || ($now - $sensorsAt) >= $maxAgeSec;
+        $needDoors = $doorsAt <= 0 || ($now - $doorsAt) >= $maxAgeSec;
+        if (!$needSensors && !$needDoors) {
+            return;
+        }
+        if ($needSensors) {
+            $this->refreshProtectSensors($timeout, false);
+        }
+        if ($needDoors) {
+            $this->refreshAccessDoorStatusInner($timeout, true);
+        }
     }
 
     public function refreshProtectLightsNow(float $timeout = 1.5): void
@@ -1403,7 +1427,7 @@ final class YarboUnifi
         $this->writeInventory($inventory);
     }
 
-    private function refreshProtectSensors(float $timeout): void
+    private function refreshProtectSensors(float $timeout, bool $includeLights = true): void
     {
         $config = $this->load();
         if ($config['host'] === '' || $config['protect_api_key'] === '') {
@@ -1437,11 +1461,13 @@ final class YarboUnifi
             }
         }
         $pir = $keptPir;
-        $lights = $this->protectJson($config, '/lights', $timeout);
-        if (($lights['ok'] ?? false) && is_array($lights['items'] ?? null)) {
-            $freshPir = $this->mapLightPirSensors($lights['items']);
-            if ($freshPir !== [] || ($inventory['lights'] ?? []) === []) {
-                $pir = $freshPir;
+        if ($includeLights) {
+            $lights = $this->protectJson($config, '/lights', $timeout);
+            if (($lights['ok'] ?? false) && is_array($lights['items'] ?? null)) {
+                $freshPir = $this->mapLightPirSensors($lights['items']);
+                if ($freshPir !== [] || ($inventory['lights'] ?? []) === []) {
+                    $pir = $freshPir;
+                }
             }
         }
         $inventory['sensors'] = array_merge($mapped, $dps, $pir);
@@ -4783,7 +4809,6 @@ final class YarboUnifi
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_CONNECTTIMEOUT => max(1, (int) floor($timeout)),
-            CURLOPT_TIMEOUT => max(2, (int) ceil($timeout)),
             CURLOPT_HTTPHEADER => $headerLines,
             CURLOPT_SSL_VERIFYPEER => $verify,
             CURLOPT_SSL_VERIFYHOST => $verify ? 2 : 0,
@@ -4798,6 +4823,14 @@ final class YarboUnifi
                 return $len;
             },
         ]);
+        // Night contact polls use ~1.2s; CURLOPT_TIMEOUT alone rounds up and used to
+        // floor at 2s, stacking Access+Protect into multi-second blocked ticks.
+        $timeoutMs = max(500, (int) round($timeout * 1000));
+        if (defined('CURLOPT_TIMEOUT_MS')) {
+            curl_setopt($ch, CURLOPT_TIMEOUT_MS, $timeoutMs);
+        } else {
+            curl_setopt($ch, CURLOPT_TIMEOUT, max(1, (int) ceil($timeout)));
+        }
         if ($body !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
         }

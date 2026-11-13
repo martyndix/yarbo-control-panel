@@ -93,9 +93,10 @@ while (true) {
 
     vestaboard_run_tick($board);
 
-    // Night hours: poll contacts every ~2s so open/close hits the Note faster.
-    // Daytime stays at ~8s (companion modules are heavier).
-    $idleSec = $board->isNightHours() ? 2 : 8;
+    // Night hours: poll contacts every ~1s so open/close hits the Note faster.
+    // Daytime stays at ~8s (companion modules are heavier). Automations also nudge
+    // on open-set changes so we do not wait out a full idle when UniFi already moved.
+    $idleSec = $board->isNightHours() ? 1 : 8;
     for ($i = 0; $i < $idleSec; $i++) {
         if (vestaboard_watch_sources_changed($watchFiles, $startedAt)) {
             exit(0);
