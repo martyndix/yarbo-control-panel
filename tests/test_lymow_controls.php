@@ -129,7 +129,51 @@ assert_true(count($task) === 2, 'taskZonesFromData count');
 assert_true($task[0]['name'] === 'South Lawn', 'taskZonesFromData resolves name');
 assert_true(YarboLymow::taskZonesLabel($task) === 'South Lawn + Orchard', 'taskZonesLabel two');
 assert_true(YarboLymow::taskZonesActive(2), 'task active while mowing');
+assert_true(YarboLymow::taskZonesActive(3), 'task active while paused');
+assert_true(YarboLymow::taskZonesActive(4), 'task active while docking');
 assert_true(!YarboLymow::taskZonesActive(0), 'task inactive when idle');
+assert_true(!YarboLymow::taskZonesActive(5), 'task inactive when charging after finish');
+assert_true(!YarboLymow::taskZonesActive(5, true), 'CHARGE + is_charging still clears zone name');
+assert_true(!YarboLymow::taskZonesActive(11), 'task inactive when update');
+assert_true(!YarboLymow::taskZonesActive(12), 'task inactive when full');
+assert_true(!YarboLymow::taskZonesActive(13), 'task inactive when stop/cancel');
+
+$chargeDashRoot = sys_get_temp_dir() . '/yarbo-lymow-charge-zone-' . bin2hex(random_bytes(3));
+mkdir($chargeDashRoot . '/data', 0775, true);
+file_put_contents($chargeDashRoot . '/data/lymow-config.json', json_encode([
+    'host' => '127.0.0.1',
+    'rtsp_url' => '',
+    'display_name' => '',
+    'last_ok' => false,
+    'last_check' => null,
+    'last_error' => '',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($chargeDashRoot . '/data/lymow-state.json', json_encode([
+    'ok' => true,
+    'online' => true,
+    'battery' => 52,
+    'work_status' => 5,
+    'is_charging' => true,
+    'task_zones' => [['hash_id' => 'orch', 'name' => 'Orchard']],
+    'zones' => [['hash_id' => 'orch', 'name' => 'Orchard', 'area' => 504]],
+], JSON_UNESCAPED_SLASHES));
+$chargeDash = (new YarboLymow($chargeDashRoot))->dashboardPayload();
+assert_true(($chargeDash['work_label'] ?? '') === 'CHARGE', 'dashboard CHARGE without Orchard: ' . ($chargeDash['work_label'] ?? ''));
+assert_true(($chargeDash['task_zones'] ?? []) === [], 'dashboard task_zones cleared on charge');
+assert_true(($chargeDash['task_zones_label'] ?? null) === null || ($chargeDash['task_zones_label'] ?? '') === '',
+    'dashboard task_zones_label cleared on charge');
+
+file_put_contents($chargeDashRoot . '/data/lymow-state.json', json_encode([
+    'ok' => true,
+    'online' => true,
+    'battery' => 52,
+    'work_status' => 2,
+    'is_charging' => false,
+    'task_zones' => [['hash_id' => 'orch', 'name' => 'Orchard']],
+    'zones' => [['hash_id' => 'orch', 'name' => 'Orchard', 'area' => 504]],
+], JSON_UNESCAPED_SLASHES));
+$mowDash = (new YarboLymow($chargeDashRoot))->dashboardPayload();
+assert_true(($mowDash['work_label'] ?? '') === 'MOWING · Orchard', 'mowing still shows zone: ' . ($mowDash['work_label'] ?? ''));
 
 $docs = (string) file_get_contents($root . '/docs/lymow.md');
 assert_true(str_contains($docs, 'Refresh'), 'docs mention Refresh zones');
@@ -139,6 +183,7 @@ assert_true(str_contains($docs, 'does not return to dock'), 'docs say Cancel doe
 assert_true(str_contains($docs, 'MOWING ·'), 'docs mention active zone in State');
 
 $change = (string) file_get_contents($root . '/CHANGELOG.md');
+assert_true(str_contains($change, '## [4.0.289]'), 'changelog 4.0.289');
 assert_true(str_contains($change, '## [4.0.228]'), 'changelog 4.0.228');
 assert_true(str_contains($change, 'Dock after Cancel'), 'changelog mentions Dock after Cancel');
 assert_true(str_contains($change, '## [4.0.227]'), 'changelog 4.0.227');

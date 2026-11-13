@@ -1135,13 +1135,18 @@ def resolve_task_zones(
 
 
 def task_zones_active(work: Any) -> bool:
-    """Keep the last Start zone list while a task can still resume."""
+    """Keep the last Start zone list while a task can still resume.
+
+    CHARGE (5) after a finished mow is not active — drop the zone name so the
+    card does not stick on ``CHARGE · Orchard``. Mid-mow top-ups usually keep
+    MOWING (2/8/9).
+    """
     try:
         code = int(work)
     except (TypeError, ValueError):
         return False
-    # WAIT / MOWING / PAUSE / DOCKING / CHARGE / ESCAPE (and zone variants)
-    return code in {1, 2, 3, 4, 5, 8, 9, 10, 14}
+    # WAIT / MOWING / PAUSE / DOCKING / ESCAPE (and zone variants)
+    return code in {1, 2, 3, 4, 8, 9, 10, 14}
 
 
 def merge_state(
@@ -1180,8 +1185,8 @@ def merge_state(
             task_zones = []
     else:
         task_zones = previous.get("task_zones") if isinstance(previous.get("task_zones"), list) else []
-    # Idle / finished / cancelled — drop the remembered Start zones.
-    if work is not None and not task_zones_active(work) and int(work) in {0, 11, 12, 13}:
+    # Idle / finished / on charge / cancelled — drop the remembered Start zones.
+    if work is not None and not task_zones_active(work):
         task_zones = []
     return {
         "ok": True,

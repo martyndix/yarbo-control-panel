@@ -365,11 +365,15 @@ final class YarboLymow
 
     public static function taskZonesActive(?int $work, bool $charging = false): bool
     {
-        if ($work !== null && in_array($work, [1, 2, 3, 4, 5, 8, 9, 10, 14], true)) {
-            return true;
+        // Zone name follows the active job only (WAIT / MOWING / PAUSE / DOCKING /
+        // ESCAPE). CHARGE (5) after a finished mow must not keep "CHARGE · Orchard".
+        // Mid-mow top-ups usually keep work_status in MOWING (2/8/9).
+        // $charging kept for call-site compatibility; pad charge alone is not active.
+        if ($charging && ($work === null || $work === 5)) {
+            return false;
         }
 
-        return $charging && $work !== null && !in_array($work, [0, 11, 12, 13], true);
+        return $work !== null && in_array($work, [1, 2, 3, 4, 8, 9, 10, 14], true);
     }
 
     /**

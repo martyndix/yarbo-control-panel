@@ -161,8 +161,8 @@ def test_resolve_task_zones() -> None:
         {"hash_id": "b2", "name": "Orchard"},
     ]:
         fail(f"resolve_task_zones: {rows}")
-    if not task_zones_active(2) or task_zones_active(0):
-        fail("task_zones_active drift")
+    if not task_zones_active(2) or task_zones_active(0) or task_zones_active(5):
+        fail("task_zones_active drift (mow/idle/charge)")
 
 
 def main() -> None:

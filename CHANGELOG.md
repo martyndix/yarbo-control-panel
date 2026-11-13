@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.289] - 2026-11-13
+
+### Fixed
+- **Lymow State kept the last zone after docking** (for example `CHARGE · Orchard` and “Mowing Orchard…” while on charge). Zone names now clear when the mower is charging/idle after the job — only WAIT / MOWING / PAUSE / DOCKING / ESCAPE keep the active zone label.
+
 ## [4.0.288] - 2026-11-13
 
 ### Fixed
