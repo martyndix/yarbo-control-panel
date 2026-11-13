@@ -1173,6 +1173,8 @@ final class YarboMap
 
         $charging = $mapData['chargingData'] ?? null;
         if (is_array($charging)) {
+            // Active dock pose from get_map — always draw, even when
+            // hasChargingStation is 0 (recharge pose at the pad).
             $point = self::chargingPointFeature($charging, 'chargingData', $fallbackRef);
             if ($point !== null) {
                 $features[] = $point;
@@ -1193,11 +1195,18 @@ final class YarboMap
                 if (!is_array($station)) {
                     continue;
                 }
-                $point = self::chargingPointFeature(
-                    $station,
-                    sprintf('%s[%d]', $allKey, (int) $index),
-                    $fallbackRef,
-                );
+                // allchargingData often holds per-zone recharge approach points
+                // (ids matching areas/pathways, no pad). Only draw real docks.
+                if (!self::isMapDockStation($station)) {
+                    continue;
+                }
+                $sourceKey = is_int($index) || ctype_digit((string) $index)
+                    ? (int) $index
+                    : (string) $index;
+                $path = is_int($sourceKey)
+                    ? sprintf('%s[%d]', $allKey, $sourceKey)
+                    : sprintf('%s[%s]', $allKey, $sourceKey);
+                $point = self::chargingPointFeature($station, $path, $fallbackRef);
                 if ($point !== null) {
                     $features[] = $point;
                 }
@@ -1205,6 +1214,25 @@ final class YarboMap
         }
 
         return $features;
+    }
+
+    /**
+     * True for a physical dock / charging pad in allchargingData.
+     * Zone-linked recharge approach points share the global feature-id space
+     * (often named only by id "1"/"3"/"5") and set hasChargingStation to 0.
+     *
+     * @param array<string, mixed> $station
+     */
+    public static function isMapDockStation(array $station): bool
+    {
+        $flag = $station['hasChargingStation'] ?? $station['has_charging_station'] ?? null;
+        if ($flag !== null) {
+            return $flag === true || $flag === 1 || $flag === '1';
+        }
+
+        $name = trim((string) ($station['name'] ?? ''));
+        // Legacy entries without the flag: keep named docks, drop numeric-only ids.
+        return $name !== '' && !ctype_digit($name);
     }
 
     /**
@@ -1301,6 +1329,17 @@ final class YarboMap
             return null;
         }
 
+        $name = trim((string) ($charging['name'] ?? ''));
+        if ($name === '' || ctype_digit($name)) {
+            $name = 'Dock';
+        }
+        $list = 'chargingData';
+        if (str_starts_with($path, 'allchargingData')) {
+            $list = 'allchargingData';
+        } elseif (str_starts_with($path, 'chargingPoints')) {
+            $list = 'chargingPoints';
+        }
+
         return self::pointFeature(
             [$lon, $lat],
             'get_map',
@@ -1308,8 +1347,11 @@ final class YarboMap
             [
                 'zone_type' => 'charging',
                 'zone_id' => $charging['id'] ?? null,
-                'name' => $charging['name'] ?? 'Charging Station',
-                'map_list' => str_starts_with($path, 'allchargingData') ? 'allchargingData' : 'chargingData',
+                'name' => $name,
+                'map_list' => $list,
+                'has_charging_station' => $charging['hasChargingStation']
+                    ?? $charging['has_charging_station']
+                    ?? null,
             ],
         );
     }
