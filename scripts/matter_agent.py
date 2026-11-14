@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 65
+AGENT_VERSION = 66
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -4550,12 +4550,20 @@ def pick_mode(options: list[dict[str, Any]], tags: tuple[int, ...], words: tuple
     return None
 
 
-def mode_is_mapping(option: dict[str, Any] | None) -> bool:
+def mode_is_mapping(option: dict[str, Any] | None, *, run_mode: bool = True) -> bool:
+    """True for RVC *Run* Mapping modes.
+
+    Clean Mode uses the same numeric tag 0x4002 for DeepClean suction — never
+    treat Clean Mode Deep as Mapping (that blocked vacuum Start on v65).
+    """
     if not option:
         return False
-    if mode_has_tag(option, RUN_MAPPING):
+    label = str(option.get("label") or "").lower()
+    if "map" in label:
         return True
-    return "map" in str(option.get("label") or "").lower()
+    if run_mode and mode_has_tag(option, RUN_MAPPING):
+        return True
+    return False
 
 
 def pick_cleaning_run_mode(options: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -5091,16 +5099,43 @@ def vacuum_clean_kind(option: dict[str, Any] | None) -> str:
     label = str(option.get("label") or "").lower().replace("&", " ").replace("+", " ")
     has_vac_tag = mode_has_tag(option, CLEAN_VACUUM)
     has_mop_tag = mode_has_tag(option, CLEAN_MOP)
-    has_combo_tag = mode_has_tag(option, CLEAN_VACUUM_THEN_MOP) or mode_has_tag(option, CLEAN_DEEP)
+    # CLEAN_DEEP (0x4002) is suction intensity, not Vac+mop. Only VacuumThenMop
+    # (0x4003) or vacuum+mop tags/words mean a mopping clean mode.
+    has_combo_tag = mode_has_tag(option, CLEAN_VACUUM_THEN_MOP)
+    has_deep_tag = mode_has_tag(option, CLEAN_DEEP)
     has_vac_word = any(word in label for word in ("vac", "sweep"))
     has_mop_word = "mop" in label
     if has_combo_tag or (has_vac_tag and has_mop_tag) or (has_vac_word and has_mop_word):
         return "vacuum_mop"
     if (has_mop_tag and not has_vac_tag) or (has_mop_word and not has_vac_word):
         return "mop"
-    if has_vac_tag or has_vac_word:
+    if has_vac_tag or has_vac_word or has_deep_tag:
+        return "vacuum"
+    if any(word in label for word in ("quiet", "auto", "standard", "normal", "quick", "strong", "turbo", "deep")):
         return "vacuum"
     return ""
+
+
+def pick_vacuum_clean_option(clean_modes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Best Clean Mode for a vacuum-only Start — never mop / Vac+mop."""
+    only = pick_clean_kind(clean_modes, "vacuum")
+    if only and not mode_is_mapping(only, run_mode=False):
+        return only
+    for item in clean_modes:
+        if mode_is_mapping(item, run_mode=False):
+            continue
+        if vacuum_clean_kind(item) == "vacuum":
+            return item
+    for item in clean_modes:
+        if mode_is_mapping(item, run_mode=False):
+            continue
+        label = str(item.get("label") or "").lower()
+        if "mop" in label:
+            continue
+        if mode_has_tag(item, CLEAN_MOP) or mode_has_tag(item, CLEAN_VACUUM_THEN_MOP):
+            continue
+        return item
+    return None
 
 
 def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
@@ -5850,7 +5885,8 @@ def set_vacuum_command(
 
         Vac/Mop chips are preference-only, so Matter may still be in mop/Vac+mop.
         Starting while mop-mode is active → "Refuse to start mopping" without a
-        mop rack. Never fall back to a mop/combo mode when the user wants vacuum.
+        mop rack. Never select mop/combo when the user wants vacuum. CLEAN_DEEP is
+        suction intensity, not Vac+mop.
         """
         if not clean_modes:
             return None
@@ -5865,39 +5901,13 @@ def set_vacuum_command(
         elif kind == "vacuum_mop":
             option = pick_clean_kind(clean_modes, "vacuum_mop") or pick_clean_kind(clean_modes, "mop")
         else:
-            # Vacuum only — never pick Vac+mop via CLEAN_VACUUM tag fallback.
-            option = pick_clean_kind(clean_modes, "vacuum")
-            if option is None:
-                for item in clean_modes:
-                    if vacuum_clean_kind(item) == "vacuum" and not mode_is_mapping(item):
-                        option = item
-                        break
-            if option is None:
-                # Suction-only labels (Quiet/Auto/…) with no mop tag.
-                option = next(
-                    (
-                        item
-                        for item in clean_modes
-                        if vacuum_clean_kind(item) == ""
-                        and not mode_has_tag(item, CLEAN_MOP)
-                        and not mode_has_tag(item, CLEAN_VACUUM_THEN_MOP)
-                        and not mode_is_mapping(item)
-                        and "mop" not in str(item.get("label") or "").lower()
-                    ),
-                    None,
-                )
-        if option is None or mode_is_mapping(option):
-            if kind == "vacuum" and live_clean_kind() in ("mop", "vacuum_mop"):
-                return {
-                    "ok": False,
-                    "error": "Robot is in mop mode and has no vacuum-only Clean Mode to switch to",
-                }
+            option = pick_vacuum_clean_option(clean_modes)
+        if option is None or mode_is_mapping(option, run_mode=False):
+            # No vacuum/suction mode to select — still try Run Cleaning (Apple path)
+            # rather than hard-abort; device StatusText will explain mop-rack cases.
             return None
         if kind == "vacuum" and vacuum_clean_kind(option) in ("mop", "vacuum_mop"):
-            return {
-                "ok": False,
-                "error": "Refusing to start mopping without a mop rack — pick Vacuum",
-            }
+            return None
         try:
             current = int(row["vacuum_clean_mode"]) if row.get("vacuum_clean_mode") is not None else None
         except (TypeError, ValueError):
@@ -5922,12 +5932,15 @@ def set_vacuum_command(
         now = live_clean_kind()
         if kind == "vacuum" and now in ("mop", "vacuum_mop"):
             detail = str(rpc.get("error") or "").strip()
-            return {
-                "ok": False,
-                "error": detail
-                or "Could not switch to vacuum-only mode (robot still set to mop)",
-                "status": rpc.get("status"),
-            }
+            # Still attempt Run Cleaning after a soft failure — mop rack StatusText
+            # on Cleaning is clearer than blocking here when modes are mis-tagged.
+            if detail and "mop" in detail.lower():
+                return {
+                    "ok": False,
+                    "error": detail,
+                    "status": rpc.get("status"),
+                }
+            return None
         if kind in ("mop", "vacuum_mop") and not rpc.get("ok"):
             # Surface mop-rack StatusText instead of a vague Run Cleaning failure.
             return rpc

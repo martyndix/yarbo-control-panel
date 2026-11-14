@@ -177,7 +177,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 65, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 66, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -877,7 +877,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
-    assert "matter v65" in str(aborted.get("error") or ""), aborted
+    assert "matter v66" in str(aborted.get("error") or ""), aborted
 
     calls.clear()
     # Alejandro (K11+): actively Charging. Cleaning GenericFailure — retry (already Idle).
@@ -1248,7 +1248,15 @@ def main() -> int:
     assert select_areas_payloads(full_fail_cmds, agent) == [
         [1, 2, 3], [1, 2, 3],
     ], full_fail_cmds
-    assert "matter v65" in str(full_fail.get("error") or ""), full_fail
+    assert "matter v66" in str(full_fail.get("error") or ""), full_fail
+
+    # CLEAN_DEEP is suction intensity, not Vac+mop.
+    deep_opt = {"mode": 2, "label": "Deep", "tags": [agent.CLEAN_DEEP]}
+    assert agent.vacuum_clean_kind(deep_opt) == "vacuum", deep_opt
+    assert agent.pick_vacuum_clean_option([
+        {"mode": 3, "label": "Vac & mop", "tags": [agent.CLEAN_VACUUM, agent.CLEAN_MOP]},
+        deep_opt,
+    ]) == deep_opt
 
     calls.clear()
     # Matter still in Mop while UI wants Vacuum — switch Clean Mode before Run Cleaning.
@@ -1340,9 +1348,54 @@ def main() -> int:
     assert no_rack.get("ok") is False, no_rack
     err = str(no_rack.get("error") or "")
     assert "mop rack" in err.lower(), no_rack
-    assert "matter v65" in err, no_rack
+    assert "matter v66" in err, no_rack
     rack_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("cluster_id") == agent.RVC_RUN for c in rack_cmds), rack_cmds
+
+    calls.clear()
+    # CurrentMode Deep (CLEAN_DEEP) must not hard-abort as "mop mode".
+    deep_attrs = dict(vacuum_node()["attributes"])
+    deep_attrs["1/85/0"] = [
+        {"label": "Quiet", "mode": 0, "modeTags": [{"value": 0x4000}]},
+        {"label": "Deep", "mode": 2, "modeTags": [{"value": 0x4002}]},
+        {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
+    ]
+    deep_attrs["1/85/1"] = 2
+    deep_attrs["1/84/1"] = 0
+    deep_attrs["1/97/4"] = 0
+
+    def deep_start_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": deep_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": deep_attrs}
+        if command == "device_command":
+            apply_change_to_mode(agent, deep_attrs, args)
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    deep_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [{
+        "node_id": 40,
+        "available": True,
+        "attributes": deep_attrs,
+    }]})}.get("40:1") or {}
+    assert agent.vacuum_clean_kind(next(
+        m for m in (deep_row.get("clean_modes") or []) if int(m.get("mode") or -1) == 2
+    )) == "vacuum"
+    agent.matter_rpc = deep_start_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in deep_row.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    from_deep = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "clean_mode": "vacuum",
+        "areas": "all",
+    })
+    assert from_deep.get("ok") is True, from_deep
+    assert "mop mode" not in str(from_deep.get("error") or "").lower(), from_deep
 
     agent._live_devices = [{
         "id": "40:1",

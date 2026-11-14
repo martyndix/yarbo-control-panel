@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.309] - 2026-11-14
+
+### Fixed
+- **Vacuum Start blocked with `no vacuum-only Clean Mode` on v65:** `CLEAN_DEEP` (suction intensity) was misclassified as Vac+mop, so Idle on Deep looked like mop mode and Start aborted. Deep/Quiet/Auto count as vacuum; Start picks a non-mop Clean Mode and no longer hard-aborts when vacuum-only is missing. Matter agent **v66**.
+
 ## [4.0.308] - 2026-11-14
 
 ### Fixed
