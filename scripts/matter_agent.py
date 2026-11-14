@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 68
+AGENT_VERSION = 69
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -4838,24 +4838,46 @@ def service_area_from_node(attributes: dict[str, Any], preferred: int) -> tuple[
     return [], [], preferred
 
 
+def normalize_vacuum_error_text(text: Any) -> str:
+    """Lowercase, split camelCase, collapse punctuation — for service matching."""
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
+    spaced = spaced.replace("_", " ").replace("-", " ")
+    return " ".join(spaced.lower().split())
+
+
 def vacuum_error_is_service(text: Any) -> bool:
-    s = str(text or "").strip().lower().replace("_", " ").replace("-", " ")
+    s = normalize_vacuum_error_text(text)
     if not s:
         return False
+    compact = s.replace(" ", "")
     needles = (
         "dust bin full",
         "dustbin full",
         "water tank empty",
         "watertank empty",
+        "water tank missing",
         "dirty water tank full",
+        "dirty water tank missing",
+        "dirty water",
         "emptying",
         "filling",
         "refill",
         "washing",
         "wash mop",
         "cleaning mop",
+        "mop cleaning",
+        "water station",
+        "water dock",
+        "collecting water",
+        "draining",
     )
-    return any(n in s for n in needles)
+    for n in needles:
+        if n in s or n.replace(" ", "") in compact:
+            return True
+    return False
 
 
 def vacuum_error_is_real(text: Any) -> bool:
@@ -4885,12 +4907,37 @@ def vacuum_service_status(op: int | None, error_text: Any = None) -> str | None:
         return "Washing"
     if op == OP_FILLING:
         return "Refilling"
-    s = str(error_text or "").strip().lower().replace("_", " ").replace("-", " ")
-    if any(n in s for n in ("dust bin full", "dustbin full", "dirty water", "emptying")):
+    s = normalize_vacuum_error_text(error_text)
+    compact = s.replace(" ", "")
+    if any(
+        n in s or n.replace(" ", "") in compact
+        for n in (
+            "dust bin full",
+            "dustbin full",
+            "dirty water",
+            "emptying",
+            "draining",
+        )
+    ):
         return "Emptying"
-    if any(n in s for n in ("water tank empty", "watertank empty", "filling", "refill")):
+    if any(
+        n in s or n.replace(" ", "") in compact
+        for n in (
+            "water tank empty",
+            "watertank empty",
+            "water tank missing",
+            "filling",
+            "refill",
+            "collecting water",
+            "water station",
+            "water dock",
+        )
+    ):
         return "Refilling"
-    if any(n in s for n in ("washing", "wash mop", "cleaning mop")):
+    if any(
+        n in s or n.replace(" ", "") in compact
+        for n in ("washing", "wash mop", "cleaning mop", "mop cleaning")
+    ):
         return "Washing"
     return None
 
@@ -4941,11 +4988,13 @@ def vacuum_status_label(
     error_text: str | None = None,
 ) -> str:
     act = str(activity or "").strip().lower() or None
-    if op == OP_ERROR and vacuum_error_is_real(error_text):
-        return "Error"
+    # Water-dock service (empty/wash/refill) before Error — S10 often sets
+    # OperationalState=Error with a tank/mop StatusText while vac+mop services.
     service = vacuum_service_status(op, error_text)
     if service:
         return service
+    if op == OP_ERROR and vacuum_error_is_real(error_text):
+        return "Error"
     if op == OP_UPDATING_MAPS:
         return "Mapping"
     if op == OP_PAUSED or act == "paused":
@@ -5438,6 +5487,8 @@ def parse_operational_error(raw: Any) -> str:
         return ""
     # Matter ErrorStateStruct is often a list/tuple: [errorStateID, label, details].
     # SwitchBot leaves the dock with OperationalState=Error and [0] (NoError).
+    label = ""
+    code = 0
     if isinstance(current, (list, tuple)):
         if not current:
             return ""
@@ -5445,13 +5496,8 @@ def parse_operational_error(raw: Any) -> str:
             code = int(current[0]) if current[0] is not None else 0
         except (TypeError, ValueError):
             code = 0
-        label = ""
         if len(current) > 1 and current[1] is not None:
             label = str(current[1]).strip()
-        if code == 0:
-            return ""
-        if label:
-            return label
     elif isinstance(current, (int, float)):
         code = int(current)
     elif isinstance(current, dict):
@@ -5471,10 +5517,10 @@ def parse_operational_error(raw: Any) -> str:
             dict_field(current, "errorStateLabel", "error_state_label", "ErrorStateLabel", "1", 1)
             or ""
         ).strip()
-        if label:
-            return label
     else:
         return str(current).strip()
+    if code == 0 and not label:
+        return ""
     names = {
         1: "Unable to start",
         2: "Unable to complete",
@@ -5495,7 +5541,12 @@ def parse_operational_error(raw: Any) -> str:
         0x4D: "Brush jammed",
         0x4E: "Navigation sensor obscured",
     }
-    return names.get(code, f"Error {code}") if code else ""
+    # Prefer canonical names so camelCase device labels still match service heuristics.
+    if code and code in names:
+        return names[code]
+    if label:
+        return label
+    return f"Error {code}" if code else ""
 
 
 def read_result_attributes(result: Any) -> dict[str, Any]:

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.312] - 2026-11-14
+
+### Fixed
+- **S10 (Martynas) Vac+mop tile shows Error on the water collection dock:** Service stops (empty / wash / refill) often arrive as OperationalState Error with camelCase labels like `WaterTankEmpty`. Those now normalize to Emptying / Washing / Refilling (service before Error), not a hard fault. Matter agent **v69**.
+
 ## [4.0.311] - 2026-11-14
 
 ### Fixed

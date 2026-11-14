@@ -177,7 +177,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 68, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 69, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -930,7 +930,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
-    assert "matter v68" in str(aborted.get("error") or ""), aborted
+    assert "matter v69" in str(aborted.get("error") or ""), aborted
 
     calls.clear()
     # Alejandro (K11+): actively Charging. Cleaning GenericFailure — retry (already Idle).
@@ -1301,7 +1301,7 @@ def main() -> int:
     assert select_areas_payloads(full_fail_cmds, agent) == [
         [1, 2, 3], [1, 2, 3],
     ], full_fail_cmds
-    assert "matter v68" in str(full_fail.get("error") or ""), full_fail
+    assert "matter v69" in str(full_fail.get("error") or ""), full_fail
 
     # Spec tags: DeepClean=0x4000, Vacuum=0x4001, Mop=0x4002.
     assert agent.CLEAN_DEEP == 0x4000 and agent.CLEAN_VACUUM == 0x4001 and agent.CLEAN_MOP == 0x4002
@@ -1458,7 +1458,7 @@ def main() -> int:
     assert no_rack.get("ok") is False, no_rack
     err = str(no_rack.get("error") or "")
     assert "mop rack" in err.lower(), no_rack
-    assert "matter v68" in err, no_rack
+    assert "matter v69" in err, no_rack
     rack_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("cluster_id") == agent.RVC_RUN for c in rack_cmds), rack_cmds
 
@@ -1629,6 +1629,33 @@ def main() -> int:
         raise SystemExit(f"water tank empty must not be Error {refill_row}")
     if refill_row.get("vacuum_status") != "Refilling":
         raise SystemExit(f"water tank empty should be Refilling {refill_row}")
+    # CamelCase device labels on the water dock must not show Error (S10 vac+mop).
+    camel = vacuum_node()
+    camel["attributes"]["1/84/1"] = 1
+    camel["attributes"]["1/97/4"] = 3
+    camel["attributes"]["1/97/5"] = {
+        "errorStateID": 0x44,
+        "errorStateLabel": "WaterTankEmpty",
+    }
+    camel_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [camel]})}.get("40:1") or {}
+    assert camel_row.get("vacuum_status") == "Refilling", camel_row
+    assert agent.vacuum_error_is_service("WaterTankEmpty") is True
+    assert agent.vacuum_error_is_service("DirtyWaterTankFull") is True
+    dirty = vacuum_node()
+    dirty["attributes"]["1/84/1"] = 1
+    dirty["attributes"]["1/97/4"] = 3
+    dirty["attributes"]["1/97/5"] = {
+        "errorStateID": 0x4A,
+        "errorStateLabel": "DirtyWaterTankFull",
+    }
+    dirty_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [dirty]})}.get("40:1") or {}
+    assert dirty_row.get("vacuum_status") == "Emptying", dirty_row
+    wash_lbl = vacuum_node()
+    wash_lbl["attributes"]["1/84/1"] = 1
+    wash_lbl["attributes"]["1/97/4"] = 3
+    wash_lbl["attributes"]["1/97/5"] = {"errorStateID": 0, "errorStateLabel": "CleaningMop"}
+    wash_lbl_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [wash_lbl]})}.get("40:1") or {}
+    assert wash_lbl_row.get("vacuum_status") == "Washing", wash_lbl_row
     if refill_row.get("vacuum_clean") != "vacuum_mop":
         raise SystemExit(f"refill should count as vac+mop {refill_row}")
     if refill_row.get("on") is not True:
