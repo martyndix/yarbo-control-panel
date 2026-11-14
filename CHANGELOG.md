@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.298] - 2026-11-14
+
+### Fixed
+- **Yarbo auto lights stayed off while mowing at night:** leftover `charging_status` during a running plan made the robot look docked, so sunset→sunrise dock lights never turned on. An active (non-paused) plan or return-to-dock now counts as off the pad, and the loop re-applies when the MQTT agent’s lights hold does not match.
+
 ## [4.0.297] - 2026-11-14
 
 ### Fixed

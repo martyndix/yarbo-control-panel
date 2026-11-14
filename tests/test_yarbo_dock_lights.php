@@ -21,6 +21,49 @@ assert_true(YarboDockLights::desiredOn(true, true) === false, 'on pad + dark →
 assert_true(YarboDockLights::desiredOn(false, false) === false, 'off pad + day → off');
 assert_true(YarboDockLights::desiredOn(true, false) === false, 'on pad + day → off');
 
+// Leftover charging_status while mowing must not keep lights off at night.
+assert_true(
+    YarboDockLights::effectivelyOnPad([
+        'on_charge_pad' => true,
+        'plan_running' => true,
+        'planning_paused' => false,
+    ]) === false,
+    'mowing + leftover pad flag → off pad'
+);
+assert_true(
+    YarboDockLights::effectivelyOnPad([
+        'on_charge_pad' => true,
+        'plan_running' => false,
+        'planning_paused' => false,
+    ]) === true,
+    'idle on pad stays on pad'
+);
+assert_true(
+    YarboDockLights::effectivelyOnPad([
+        'on_charge_pad' => true,
+        'plan_running' => true,
+        'planning_paused' => true,
+    ]) === true,
+    'paused on pad stays on pad'
+);
+assert_true(
+    YarboDockLights::effectivelyOnPad([
+        'on_charge_pad' => true,
+        'returning_to_dock' => true,
+    ]) === false,
+    'returning to dock → off pad'
+);
+assert_true(
+    YarboDockLights::desiredOn(
+        YarboDockLights::effectivelyOnPad([
+            'on_charge_pad' => true,
+            'plan_running' => true,
+        ]),
+        true
+    ) === true,
+    'mowing at night → lights on'
+);
+
 $root = sys_get_temp_dir() . '/yarbo-dock-lights-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);
 $settings = new YarboDockLightsSettings($root . '/data');
@@ -44,6 +87,8 @@ assert_true(str_contains($api, 'dock_lights'), 'settings API exposes dock_lights
 assert_true(str_contains($runner, 'YarboDockLights'), 'background runner hooks dock lights');
 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
-assert_true(str_contains($change, '## [4.0.295]'), 'changelog 4.0.295');
+assert_true(str_contains($change, '## [4.0.298]'), 'changelog 4.0.298');
+assert_true(str_contains($src = (string) file_get_contents(__DIR__ . '/../src/YarboDockLights.php'), 'effectivelyOnPad'), 'effectivelyOnPad helper');
+assert_true(str_contains($src, 'agentLights'), 're-apply when agent lights hold mismatches');
 
 echo "test_yarbo_dock_lights.php ok\n";

@@ -22,6 +22,29 @@ final class YarboDockLights
     }
 
     /**
+     * Firmware often leaves charging_status > 0 while a plan is running.
+     * Treat an active (non-paused) plan or return-to-dock as off the pad.
+     *
+     * @param array<string, mixed> $parsed
+     */
+    public static function effectivelyOnPad(array $parsed): bool
+    {
+        $onPad = !empty($parsed['on_charge_pad']);
+        if (!$onPad) {
+            return false;
+        }
+        $planRunning = !empty($parsed['plan_running']) && empty($parsed['planning_paused']);
+        if ($planRunning) {
+            return false;
+        }
+        if (!empty($parsed['returning_to_dock'])) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * @return array{ok: bool, skipped?: bool, reason?: string, desired?: bool, applied?: bool, error?: string}
      */
     public function tick(): array
@@ -73,13 +96,14 @@ final class YarboDockLights
         }
         $rainSens = (new YarboRainSettings($this->projectRoot . '/data'))->sensitivity();
         $parsed = YarboTelemetry::parse($raw, null, $rainSens);
-        $onPad = !empty($parsed['on_charge_pad']);
-        if (array_key_exists('lights_on', $result) && is_bool($result['lights_on'])) {
-            // Prefer agent hold flag when present.
-        }
+        $onPad = self::effectivelyOnPad($parsed);
         $desired = self::desiredOn($onPad, $isDark);
+        $agentLights = array_key_exists('lights_on', $result) && is_bool($result['lights_on'])
+            ? $result['lights_on']
+            : null;
         $last = $cfg['last_applied'];
-        if ($last !== null && $last === $desired) {
+        // Re-apply when the agent hold does not match (mow start can drop light_ctrl).
+        if ($last !== null && $last === $desired && ($agentLights === null || $agentLights === $desired)) {
             return ['ok' => true, 'skipped' => true, 'reason' => 'unchanged', 'desired' => $desired];
         }
 
