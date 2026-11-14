@@ -177,7 +177,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 69, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 70, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -930,7 +930,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
-    assert "matter v69" in str(aborted.get("error") or ""), aborted
+    assert "matter v70" in str(aborted.get("error") or ""), aborted
 
     calls.clear()
     # Alejandro (K11+): actively Charging. Cleaning GenericFailure — retry (already Idle).
@@ -1301,7 +1301,7 @@ def main() -> int:
     assert select_areas_payloads(full_fail_cmds, agent) == [
         [1, 2, 3], [1, 2, 3],
     ], full_fail_cmds
-    assert "matter v69" in str(full_fail.get("error") or ""), full_fail
+    assert "matter v70" in str(full_fail.get("error") or ""), full_fail
 
     # Spec tags: DeepClean=0x4000, Vacuum=0x4001, Mop=0x4002.
     assert agent.CLEAN_DEEP == 0x4000 and agent.CLEAN_VACUUM == 0x4001 and agent.CLEAN_MOP == 0x4002
@@ -1458,7 +1458,7 @@ def main() -> int:
     assert no_rack.get("ok") is False, no_rack
     err = str(no_rack.get("error") or "")
     assert "mop rack" in err.lower(), no_rack
-    assert "matter v69" in err, no_rack
+    assert "matter v70" in err, no_rack
     rack_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("cluster_id") == agent.RVC_RUN for c in rack_cmds), rack_cmds
 

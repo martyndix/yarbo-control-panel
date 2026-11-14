@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.314] - 2026-11-14
+
+### Fixed
+- **Automation Pulse left lights stuck on / on the pulse colour:** After the flash, lights now resume the look from before the pulse (brightness + colour, or Time of day white) instead of staying on the pulse colour or needing a manual Off. Lights that were off stay off. Matter agent **v70** also clears leftover RGB sticky when restoring colour temperature so the web tile matches.
+
 ## [4.0.313] - 2026-11-14
 
 ### Changed

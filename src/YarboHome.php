@@ -4282,7 +4282,10 @@ final class YarboHome
                 }
             }
             if (($action === 'color_temp' || $action === 'kelvin') && isset($body['kelvin'])) {
-                $patch['color_temp'] = (int) $body['kelvin'];
+                $kelvin = (int) $body['kelvin'];
+                $patch['color_temp'] = $kelvin;
+                // Drop any prior RGB sticky (e.g. pulse red) so the web tile matches CT.
+                $patch['color_hex'] = self::kelvinToHex($kelvin);
             }
         }
         if (in_array($action, ['setpoint', 'temperature', 'heating_setpoint'], true)) {
@@ -5906,12 +5909,15 @@ final class YarboHome
      * Snapshot on/brightness/colour so a pulse can restore a scene look.
      *
      * @param array<string, mixed> $row
-     * @return array{on: bool, brightness?: int, hex?: string, kelvin?: int}
+     * @return array{on: bool, brightness?: int, hex?: string, kelvin?: int, adaptive?: bool}
      */
     public static function pulseLookFromDevice(array $row): array
     {
         $on = !empty($row['on']);
         $look = ['on' => $on];
+        if (!empty($row['adaptive'])) {
+            $look['adaptive'] = true;
+        }
         if (!$on) {
             return $look;
         }
@@ -5948,8 +5954,10 @@ final class YarboHome
 
     /**
      * On-colour / off steps, then restore. Used by automations Pulse.
+     * When restore.adaptive is set, only brightness/on is planned — executePulse
+     * re-applies Time of day after the flash so the pulse colour does not stick.
      *
-     * @param array{on: bool, brightness?: int, hex?: string, kelvin?: int} $restore
+     * @param array{on: bool, brightness?: int, hex?: string, kelvin?: int, adaptive?: bool} $restore
      * @return list<array<string, mixed>>
      */
     public static function pulsePlan(
@@ -5985,6 +5993,14 @@ final class YarboHome
                 'brightness' => max(1, min(100, (int) $restore['brightness'])),
             ];
             $sent = true;
+        }
+        // Time of day resume is applied after the plan in finalizePulseRestore.
+        if (!empty($restore['adaptive'])) {
+            if (!$sent) {
+                $steps[] = ['id' => $id, 'command' => 'on'];
+            }
+
+            return $steps;
         }
         $restoreHex = isset($restore['hex']) ? self::normalizeHexValue((string) $restore['hex']) : null;
         if ($restoreHex !== null) {
@@ -6038,26 +6054,167 @@ final class YarboHome
                 }
             }
         }
+        $final = $this->finalizePulseRestore($id, $restore);
+        if (!($final['ok'] ?? false)) {
+            return $final;
+        }
         if ($errors !== []) {
             return ['ok' => false, 'error' => $errors[0]];
         }
 
-        return $last;
+        return $final;
     }
 
     /**
-     * @return array{on: bool, brightness?: int, hex?: string, kelvin?: int}
+     * After the flash: leave off if it was off; otherwise resume prior look / Time of day.
+     * Pulse colour pauses adaptive — always unpause when the light was following TOD.
+     *
+     * @param array{on?: bool, brightness?: int, hex?: string, kelvin?: int, adaptive?: bool} $restore
+     * @return array<string, mixed>
+     */
+    public function finalizePulseRestore(string $id, array $restore): array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return ['ok' => false, 'error' => 'Pick a light'];
+        }
+        $resumeAdaptive = !empty($restore['adaptive']);
+        if ($resumeAdaptive) {
+            $this->unpauseAdaptiveDevice($id);
+        }
+
+        if (empty($restore['on'])) {
+            $result = $this->command(['id' => $id, 'command' => 'off']);
+            if (!($result['ok'] ?? false)) {
+                return $result;
+            }
+            $this->patchCachedDeviceState($id, ['on' => false]);
+
+            return ['ok' => true, 'on' => false];
+        }
+
+        $last = ['ok' => true, 'on' => true];
+        if (isset($restore['brightness']) && is_numeric($restore['brightness'])) {
+            $bright = max(1, min(100, (int) $restore['brightness']));
+            $last = $this->command([
+                'id' => $id,
+                'command' => 'brightness',
+                'brightness' => $bright,
+            ]);
+            if (!($last['ok'] ?? false)) {
+                return $last;
+            }
+        }
+
+        if ($resumeAdaptive) {
+            $follow = $this->followAdaptiveAfterOn($id);
+            if ($follow !== []) {
+                $kelvin = isset($follow['color_temp']) && is_numeric($follow['color_temp'])
+                    ? (int) $follow['color_temp']
+                    : $this->adaptiveKelvinForDevice($id);
+                $this->patchCachedDeviceState($id, [
+                    'on' => true,
+                    'color_temp' => $kelvin,
+                    'color_hex' => self::kelvinToHex($kelvin),
+                ]);
+
+                return ['ok' => true, 'on' => true, 'adaptive' => true] + $follow;
+            }
+        }
+
+        $restoreHex = isset($restore['hex']) ? self::normalizeHexValue((string) $restore['hex']) : null;
+        if ($restoreHex !== null) {
+            $last = $this->command(['id' => $id, 'command' => 'color', 'hex' => $restoreHex]);
+            if (!($last['ok'] ?? false)) {
+                return $last;
+            }
+            $this->patchCachedDeviceState($id, [
+                'on' => true,
+                'color_hex' => $restoreHex,
+            ]);
+
+            return ['ok' => true, 'on' => true, 'color_hex' => $restoreHex] + $last;
+        }
+
+        if (isset($restore['kelvin']) && is_numeric($restore['kelvin'])) {
+            $kelvin = max(1500, min(8000, (int) $restore['kelvin']));
+            $payload = [
+                'id' => $id,
+                'command' => 'color_temp',
+                'kelvin' => $kelvin,
+            ];
+            if ($resumeAdaptive) {
+                $payload['adaptive'] = true;
+            }
+            $last = $this->command($payload);
+            if (!($last['ok'] ?? false)) {
+                return $last;
+            }
+            $warmHex = self::kelvinToHex($kelvin);
+            $this->patchCachedDeviceState($id, [
+                'on' => true,
+                'color_temp' => $kelvin,
+                'color_hex' => $warmHex,
+            ]);
+
+            return ['ok' => true, 'on' => true, 'color_temp' => $kelvin, 'color_hex' => $warmHex] + $last;
+        }
+
+        if (!isset($restore['brightness'])) {
+            $last = $this->command(['id' => $id, 'command' => 'on']);
+            if (!($last['ok'] ?? false)) {
+                return $last;
+            }
+        }
+        $this->patchCachedDeviceState($id, ['on' => true]);
+
+        return ['ok' => true, 'on' => true] + $last;
+    }
+
+    /**
+     * @return array{on: bool, brightness?: int, hex?: string, kelvin?: int, adaptive?: bool}
      */
     public function capturePulseLook(string $id): array
     {
         $id = trim($id);
-        foreach ($this->automationDevices() as $row) {
-            if (trim((string) ($row['id'] ?? '')) === $id) {
-                return self::pulseLookFromDevice($row);
+        $row = null;
+        foreach ($this->automationDevices() as $one) {
+            if (trim((string) ($one['id'] ?? '')) === $id) {
+                $row = $one;
+                break;
+            }
+        }
+        if ($row === null) {
+            $cached = $this->cachedDeviceRow($id);
+            if (!is_array($cached)) {
+                return ['on' => false];
+            }
+            $row = $cached;
+        }
+
+        $look = self::pulseLookFromDevice($row);
+        if (!empty($look['on']) && empty($look['hex']) && empty($look['kelvin'])) {
+            $cached = $this->cachedDeviceRow($id);
+            if (is_array($cached)) {
+                $extra = self::pulseLookFromDevice($cached);
+                if (!empty($extra['hex'])) {
+                    $look['hex'] = $extra['hex'];
+                }
+                if (!empty($extra['kelvin'])) {
+                    $look['kelvin'] = $extra['kelvin'];
+                }
             }
         }
 
-        return ['on' => false];
+        // Pulse colour pauses Time of day — remember so we can resume after the flash.
+        if (in_array($id, $this->adaptiveDeviceIds(), true)) {
+            $look['adaptive'] = true;
+            if (!empty($look['on']) && empty($look['hex']) && empty($look['kelvin'])) {
+                $look['kelvin'] = $this->adaptiveKelvinForDevice($id);
+            }
+        }
+
+        return $look;
     }
 
     private function normalizeHex(string $value): ?string
