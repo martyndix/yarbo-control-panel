@@ -22,6 +22,7 @@ if (!is_file($autoload)) {
 
 require $autoload;
 
+use Yarbo\YarboDockLights;
 use Yarbo\YarboHomeAutomations;
 
 $once = in_array('--once', $argv, true);
@@ -38,7 +39,7 @@ foreach ($argv as $arg) {
 
 $engine = new YarboHomeAutomations($root);
 
-function home_automations_tick(YarboHomeAutomations $engine): void
+function home_automations_tick(YarboHomeAutomations $engine, string $root): void
 {
     static $failStreak = 0;
     try {
@@ -46,6 +47,17 @@ function home_automations_tick(YarboHomeAutomations $engine): void
         $engine->refreshUnifiIfDue(time(), 5);
         $engine->refreshPowerwallIfDue(time(), 12);
         $engine->refreshYarboIfDue(time(), 5);
+        // Dock lights runs even when the Home module is off (outside tick()).
+        try {
+            (new YarboDockLights($root))->tick();
+        } catch (Throwable $e) {
+            // Keep automations ticking if lights fail.
+            static $dockFail = 0;
+            $dockFail++;
+            if ($dockFail === 1 || $dockFail % 30 === 0) {
+                fwrite(STDERR, 'home_automations: dock lights ' . $e->getMessage() . "\n");
+            }
+        }
         if (($result['ok'] ?? false) && ($result['fired'] ?? []) !== []) {
             $failStreak = 0;
             fwrite(STDERR, 'home_automations: fired ' . implode(',', $result['fired'])
@@ -68,7 +80,7 @@ function home_automations_tick(YarboHomeAutomations $engine): void
 }
 
 if ($once) {
-    home_automations_tick($engine);
+    home_automations_tick($engine, $root);
     exit(0);
 }
 
@@ -91,6 +103,8 @@ $watchFiles = [
     $root . '/src/YarboTelemetry.php',
     $root . '/src/YarboHub.php',
     $root . '/src/YarboVestaboard.php',
+    $root . '/src/YarboDockLights.php',
+    $root . '/src/YarboDockLightsSettings.php',
 ];
 
 function home_automations_sources_changed(array $paths, int $startedAt): bool
@@ -109,7 +123,7 @@ while (true) {
         exit(0);
     }
 
-    home_automations_tick($engine);
+    home_automations_tick($engine, $root);
 
     if (home_automations_sources_changed($watchFiles, $startedAt)) {
         exit(0);

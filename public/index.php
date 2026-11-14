@@ -1010,6 +1010,13 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <span class="label">App slider value</span>
                                 <input type="number" id="settings-rain-sensitivity" name="rain_sensitivity" min="20" max="1000" step="1" placeholder="20" inputmode="numeric">
                             </label>
+
+                            <h3 class="settings-subtitle">Dock lights</h3>
+                            <p class="hint">When enabled, Yarbo lights turn <strong>on</strong> while the robot is off the charge pad between sunset and sunrise, and <strong>off</strong> when it is on the pad or in daylight. Uses the same sun location as Home Automations. A manual Lights tap is left alone until the next dock or sun change.</p>
+                            <label class="settings-field settings-checkbox">
+                                <input type="checkbox" id="settings-yarbo-dock-lights" name="yarbo_dock_lights">
+                                <span class="label">Auto lights off dock (sunset → sunrise)</span>
+                            </label>
                         </section>
 
                         <section class="settings-section" id="settings-modules-section" data-settings-pane="modules">

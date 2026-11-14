@@ -584,7 +584,7 @@ Controls and manual drive talk through a **persistent MQTT agent** (`scripts/mqt
 
 | UI control | MQTT command | Notes |
 |------------|--------------|-------|
-| Lights On / Off | `light_ctrl` | All 7 LED channels (ints 0–255) |
+| Lights On / Off | `light_ctrl` | All 7 LED channels (ints 0–255). Optional **Settings → Yarbo → Auto lights off dock** turns them on off-pad between sunset and sunrise (background loop; uses Home Automations sun location). |
 | Buzzer | `cmd_buzzer` | `state` + millisecond `timeStamp` |
 | Pause | `planning_paused` | |
 | Resume | `resume` | |

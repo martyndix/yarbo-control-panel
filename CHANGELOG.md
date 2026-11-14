@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.295] - 2026-11-14
+
+### Added
+- **Yarbo dock lights (sunset → sunrise):** Settings → Yarbo opt-in turns robot lights **on** while off the charge pad between sunset and sunrise, and **off** on the pad or in daylight. Runs in the background automations loop (no browser needed). Uses Home Automations sun coordinates; a manual Lights tap is left alone until the next dock or sun change.
+
 ## [4.0.294] - 2026-11-14
 
 ### Fixed

@@ -11,6 +11,7 @@ use Yarbo\YarboHub;
 use Yarbo\YarboLymow;
 use Yarbo\YarboMqttAgentClient;
 use Yarbo\YarboPowerwall;
+use Yarbo\YarboDockLightsSettings;
 use Yarbo\YarboRainSettings;
 use Yarbo\YarboUnifi;
 use Yarbo\YarboRobotName;
@@ -27,6 +28,7 @@ $powerwall = new YarboPowerwall($projectRoot);
 $lymow = new YarboLymow($projectRoot);
 $unifi = new YarboUnifi($projectRoot);
 $rainSettings = new YarboRainSettings($dataDir);
+$dockLightsSettings = new YarboDockLightsSettings($dataDir);
 $robotName = new YarboRobotName($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
@@ -46,6 +48,7 @@ if ($method === 'GET') {
         'lymow' => $lymow->publicView(),
         'unifi' => $unifi->publicView(),
         'rain' => $rainSettings->publicView(),
+        'dock_lights' => $dockLightsSettings->publicView(),
         // Skip Python SDK probe by default — it can block the single-threaded php -S server.
         'cloud_status' => $includeCloudStatus ? $cloud->status() : null,
     ]);
@@ -202,6 +205,13 @@ if (!$rainSettings->save($input)) {
     ], 500);
 }
 
+if (!$dockLightsSettings->save($input)) {
+    json_response([
+        'ok' => false,
+        'error' => 'Could not write dock lights settings. Check permissions on the data/ directory.',
+    ], 500);
+}
+
 if ($serial !== '' && !$robotName->saveFromInput($input, $serial)) {
     json_response([
         'ok' => false,
@@ -234,4 +244,5 @@ json_response([
     'lymow' => $lymow->publicView(),
     'unifi' => $unifi->publicView(),
     'rain' => $rainSettings->publicView(),
+    'dock_lights' => $dockLightsSettings->publicView(),
 ]);

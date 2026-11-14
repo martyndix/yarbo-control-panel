@@ -137,6 +137,7 @@ const els = {
     settingsVestaboardSmart: document.getElementById('settings-vestaboard-smart'),
     settingsVestaboardSmartHint: document.getElementById('settings-vestaboard-smart-hint'),
     settingsRainSensitivity: document.getElementById('settings-rain-sensitivity'),
+    settingsYarboDockLights: document.getElementById('settings-yarbo-dock-lights'),
     vestaboardCard: document.getElementById('vestaboard-card'),
     homeDoorsCard: document.getElementById('home-doors-card'),
     vestaboardBoard: document.getElementById('vestaboard-board'),
@@ -12585,6 +12586,9 @@ async function loadSettings() {
             const n = data.rain?.sensitivity;
             els.settingsRainSensitivity.value = n != null ? String(n) : '';
         }
+        if (els.settingsYarboDockLights) {
+            els.settingsYarboDockLights.checked = Boolean(data.dock_lights?.enabled);
+        }
         if (els.settingsModuleYarbo) {
             els.settingsModuleYarbo.checked = data.hub?.modules?.yarbo !== false;
         }
@@ -14897,6 +14901,7 @@ async function saveSettings(event) {
         };
         const rainRaw = els.settingsRainSensitivity?.value.trim() ?? '';
         payload.rain_sensitivity = rainRaw === '' ? '' : rainRaw;
+        payload.yarbo_dock_lights = Boolean(els.settingsYarboDockLights?.checked);
         if (document.querySelectorAll('input[data-unifi-home]').length) {
             payload.unifi_show_on_home = unifiShowOnHomeSnapshot();
         }
