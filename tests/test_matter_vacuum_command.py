@@ -177,7 +177,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 63, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 64, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -378,13 +378,14 @@ def main() -> int:
     cmds = [args for command, args in calls if command == "device_command"]
     clusters = [c.get("cluster_id") for c in cmds]
     assert select_areas_payloads(cmds, agent) == [[2]], cmds
-    assert agent.RVC_CLEAN not in clusters, cmds
+    # Pad Start sets Clean Mode (mop) before Run Cleaning (K11+ suction/mode).
+    assert agent.RVC_CLEAN in clusters, cmds
     assert agent.RVC_RUN in clusters, cmds
     assert agent.ON_OFF not in clusters, cmds
     assert not any(c.get("command_name") == "Start" for c in cmds), cmds
     run_cmd = next(c for c in cmds if c.get("cluster_id") == agent.RVC_RUN)
     assert (run_cmd.get("payload") or {}).get("newMode") == 1, run_cmd
-    assert "timed_request_timeout_ms" not in run_cmd, run_cmd
+    assert run_cmd.get("timed_request_timeout_ms") == 3000, run_cmd
     assert not any(
         ((c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode")) == 2)
         for c in cmds
@@ -876,7 +877,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
-    assert "matter v63" in str(aborted.get("error") or ""), aborted
+    assert "matter v64" in str(aborted.get("error") or ""), aborted
 
     calls.clear()
     # Alejandro (K11+): actively Charging. Cleaning GenericFailure — retry (already Idle).
@@ -936,7 +937,7 @@ def main() -> int:
     assert 2 not in k11_modes, k11_modes
     assert not any(c.get("command_name") == "Start" for c in k11_cmds), k11_cmds
     assert all(
-        "timed_request_timeout_ms" not in c
+        c.get("timed_request_timeout_ms") == 3000
         for c in k11_cmds
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
     ), k11_cmds
@@ -997,8 +998,8 @@ def main() -> int:
     assert recovered.get("vacuum_status") == "Cleaning", recovered
     recover_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("command_name") == "Start" for c in recover_cmds), recover_cmds
-    # On-pad All rooms: all ids first (fails Cleaning), then HA empty (succeeds).
-    assert select_areas_payloads(recover_cmds, agent) == [[1, 2, 3], []], recover_cmds
+    # On-pad All rooms: all ids then Cleaning-only (empty SelectAreas is "no rooms" on SwitchBot).
+    assert select_areas_payloads(recover_cmds, agent) == [[1, 2, 3]], recover_cmds
     recover_modes = change_to_mode_values(recover_cmds, agent)
     assert recover_modes == [1, 1], recover_modes
     assert 2 not in recover_modes, recover_modes
@@ -1056,8 +1057,8 @@ def main() -> int:
     assert s10_recovered.get("vacuum_status") == "Cleaning", s10_recovered
     s10_rec_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("command_name") == "Start" for c in s10_rec_cmds), s10_rec_cmds
-    # S10 has one room id — all-ids then empty on the pad.
-    assert select_areas_payloads(s10_rec_cmds, agent) == [[1], []], s10_rec_cmds
+    # S10 has one room id — all-ids then Cleaning-only on the pad.
+    assert select_areas_payloads(s10_rec_cmds, agent) == [[1]], s10_rec_cmds
     s10_rec_modes = change_to_mode_values(s10_rec_cmds, agent)
     assert s10_rec_modes == [2, 2], s10_rec_modes
     assert 1 not in s10_rec_modes, s10_rec_modes
@@ -1241,12 +1242,13 @@ def main() -> int:
     full_fail_modes = change_to_mode_values(full_fail_cmds, agent)
     assert not any(c.get("command_name") == "Start" for c in full_fail_cmds), full_fail_cmds
     # Two strategy passes × (all ids, empty, skip) = 6 Cleaning attempts.
-    assert full_fail_modes == [1, 1, 1, 1, 1, 1], full_fail_modes
+    # Two passes × (all ids, Cleaning-only) = 4 Run Cleaning attempts.
+    assert full_fail_modes == [1, 1, 1, 1], full_fail_modes
     assert 2 not in full_fail_modes, full_fail_modes
     assert select_areas_payloads(full_fail_cmds, agent) == [
-        [1, 2, 3], [], [1, 2, 3], [],
+        [1, 2, 3], [1, 2, 3],
     ], full_fail_cmds
-    assert "matter v63" in str(full_fail.get("error") or ""), full_fail
+    assert "matter v64" in str(full_fail.get("error") or ""), full_fail
 
     agent._live_devices = [{
         "id": "40:1",

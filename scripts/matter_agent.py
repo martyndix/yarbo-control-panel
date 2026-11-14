@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 63
+AGENT_VERSION = 64
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -5223,6 +5223,28 @@ def vacuum_command_status_label(name: str, status: int) -> str:
     return labels.get(code) or str(code)
 
 
+def vacuum_response_status_text(result: Any) -> str:
+    """Optional StatusText from ChangeToModeResponse / SelectAreasResponse."""
+    if not isinstance(result, dict):
+        return ""
+    if "result" in result and not any(key in result for key in ("statusText", "StatusText", "1", 1)):
+        return vacuum_response_status_text(result.get("result"))
+    for key in ("statusText", "StatusText", "1", 1):
+        if key not in result:
+            continue
+        val = result[key]
+        if isinstance(val, dict):
+            inner = dict_field(val, "value", "Value", "statusText", "StatusText", "1", 1)
+            text = str(inner or "").strip()
+            if text:
+                return text
+            continue
+        text = str(val or "").strip()
+        if text and text.lower() not in ("genericfailure", "2", "0"):
+            return text
+    return ""
+
+
 def vacuum_rpc_command(
     node_id: int,
     endpoint: int,
@@ -5250,10 +5272,17 @@ def vacuum_rpc_command(
         )
         if not rpc.get("ok"):
             return rpc
-        status = vacuum_response_status(rpc.get("result"))
+        raw = rpc.get("result")
+        status = vacuum_response_status(raw)
         if status:
             label = vacuum_command_status_label(name, status)
-            return {"ok": False, "error": f"Vacuum rejected {name} ({label})", "status": status}
+            detail = vacuum_response_status_text(raw)
+            suffix = f": {detail}" if detail else ""
+            return {
+                "ok": False,
+                "error": f"Vacuum rejected {name} ({label}{suffix})",
+                "status": status,
+            }
         return {"ok": True}
 
     return command_with_reconnect(node_id, send)
@@ -5778,6 +5807,8 @@ def set_vacuum_command(
     idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "dock", "stop"))
 
     def try_cleaning(*, verify: bool = True) -> dict[str, Any]:
+        # Timed invoke while on the pad — untimed ChangeToMode often GenericFailure
+        # on K11+ Charging/Idle dock (4.0.93 era).
         return vacuum_change_mode(
             node_id,
             rvc_ep,
@@ -5786,6 +5817,7 @@ def set_vacuum_command(
             device_id=device_id,
             row=row,
             verify=verify,
+            timed_ms=3000 if at_charger() else None,
         )
 
     def try_idle() -> dict[str, Any] | None:
@@ -5802,6 +5834,53 @@ def set_vacuum_command(
         )
         attempts.append(rpc)
         return rpc
+
+    def prepare_clean_mode() -> None:
+        """Set RVC Clean Mode before Run Cleaning on the pad.
+
+        K11+ Run Cleaning GenericFailure if Clean Mode/suction is unset (Hubitat
+        / pre-Apple path). Vac/Mop chips stay preference-only for the tile;
+        Start applies the matching Clean Mode here and ignores soft refusals.
+        """
+        if not at_charger() or not clean_modes:
+            return
+        kind = (want_clean or "vacuum").strip().lower()
+        if kind in ("vac",):
+            kind = "vacuum"
+        option = None
+        if kind == "mop":
+            option = pick_clean_kind(clean_modes, "mop")
+        elif kind in ("vacuum_mop", "both"):
+            option = pick_clean_kind(clean_modes, "vacuum_mop") or pick_clean_kind(clean_modes, "mop")
+        else:
+            option = pick_clean_kind(clean_modes, "vacuum") or pick_mode(
+                clean_modes,
+                (CLEAN_VACUUM,),
+                ("auto", "quick", "vacuum", "standard", "normal"),
+            )
+        if option is None or mode_is_mapping(option):
+            return
+        try:
+            current = int(row["vacuum_clean_mode"]) if row.get("vacuum_clean_mode") is not None else None
+        except (TypeError, ValueError):
+            current = None
+        if current is not None and current == int(option["mode"]):
+            return
+        rpc = vacuum_change_mode(
+            node_id,
+            rvc_ep,
+            RVC_CLEAN,
+            int(option["mode"]),
+            device_id=device_id,
+            row=row,
+            verify=False,
+        )
+        attempts.append(rpc)
+        if is_transport_error(rpc):
+            return
+        if rpc.get("ok"):
+            settle_mode()
+            sync_row()
 
     def started_ok(rpc: dict[str, Any]) -> dict[str, Any] | None:
         if not rpc.get("ok"):
@@ -5835,20 +5914,16 @@ def set_vacuum_command(
     def area_strategies() -> list[list[int] | None]:
         """SelectAreas payloads to try before/with Cleaning. None = skip SelectAreas.
 
-        Actively Charging: Cleaning only (4.0.93).
-        All rooms on the pad: all room IDs first (K11+ often refuses empty
-        unconstrained from Idle), then HA empty [], then Cleaning-only.
-        Room subset: those IDs, then Cleaning-only fallback.
+        SwitchBot treats SelectAreas([]) as "no rooms" — Cleaning stays Idle.
+        Always send real room IDs (all rooms = every ID; subset = those IDs).
+        Actively Charging: skip SelectAreas (4.0.93).
         """
         if actively_charging():
             return [None]
         if not areas and not all_ids:
             return [None]
         if all_rooms:
-            if at_charger() and all_ids:
-                return [list(all_ids), [], None]
-            # Off pad: Apple Cleaning-only first, then HA empty, then all IDs.
-            return [None, [], list(all_ids)] if all_ids else [None]
+            return [list(all_ids), None] if all_ids else [None]
         ids = list(requested_ids or [])
         return [ids, None] if ids else [None]
 
@@ -5873,6 +5948,14 @@ def set_vacuum_command(
             # SelectAreas may fail — still try Cleaning with that strategy.
             if areas_prep.get("ok"):
                 settle_mode()
+                sync_row()
+                # Re-select if SelectedAreas did not stick (K11+ Maps quirk).
+                if set(selected_area_ids(row)) != set(select):
+                    again = vacuum_select_areas(node_id, area_endpoint, select)
+                    attempts.append(again)
+                    if again.get("ok"):
+                        settle_mode()
+                        sync_row()
         started_rpc = try_cleaning(verify=True)
         attempts.append(started_rpc)
         if is_transport_error(started_rpc):
@@ -5894,7 +5977,9 @@ def set_vacuum_command(
                 break
         return None, last
 
+    # Clean Mode first on the pad, then room IDs, then timed Cleaning.
     # Never Mapping. No Operational Start (K11+ only Pause/Resume/GoHome).
+    prepare_clean_mode()
     done, started = try_strategies()
     if done is not None:
         return done
@@ -5905,12 +5990,14 @@ def set_vacuum_command(
         try_idle()
         settle_mode()
         sync_row()
+        prepare_clean_mode()
         done, started = try_strategies()
         if done is not None:
             return done
     elif status_code in (2, 3) or still_docked():
         # Already Idle: one more pass (no no-op Idle ChangeToMode).
         settle_mode()
+        prepare_clean_mode()
         done, started = try_strategies()
         if done is not None:
             return done
@@ -5926,14 +6013,16 @@ def set_vacuum_command(
                 return done
 
     if int(started.get("status") or 0) == 2 and at_charger():
+        detail = str(started.get("error") or "generic failure")
         started = {
             **started,
-            "error": f"Vacuum refused Matter start from the dock (generic failure) [matter v{AGENT_VERSION}]",
+            "error": f"Vacuum refused Matter start from the dock ({detail}) [matter v{AGENT_VERSION}]",
         }
     elif int(started.get("status") or 0) == 2:
+        detail = str(started.get("error") or "generic failure")
         started = {
             **started,
-            "error": f"Vacuum rejected ChangeToMode (generic failure) [matter v{AGENT_VERSION}]",
+            "error": f"{detail} [matter v{AGENT_VERSION}]",
         }
     return finish(started)
 

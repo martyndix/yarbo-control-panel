@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.307] - 2026-11-14
+
+### Fixed
+- **Vacuum Start still fails with `[matter v63]` from the dock:** SwitchBot treats empty `SelectAreas([])` as *no rooms* (Cleaning stays Idle). Pad Start now sets **Clean Mode** first, selects **real room IDs** (all rooms = every ID; subset = those rooms — never `[]`), then **timed** ChangeToMode Cleaning (3s). Actively Charging still skips SelectAreas. Matter agent **v64**; errors include `[matter v64]` and any device StatusText.
+
 ## [4.0.306] - 2026-11-14
 
 ### Fixed
