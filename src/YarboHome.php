@@ -11,7 +11,8 @@ final class YarboHome
     public const PULSE_COUNT_MAX = 10;
     public const PULSE_COUNT_DEFAULT = 3;
     public const PULSE_HEX_DEFAULT = '#ff3b30';
-    public const PULSE_DWELL_US = 400000;
+    /** On and off each hold this long so the flash is visible on Hue. */
+    public const PULSE_DWELL_US = 650000;
     public const KIND_PLUG = 'plug';
     public const KIND_SWITCH = 'switch';
     public const KIND_HEATER = 'heater';
@@ -5961,9 +5962,8 @@ final class YarboHome
     }
 
     /**
-     * On-colour / off steps, then restore. Used by automations Pulse.
-     * When restore.adaptive is set, only brightness/on is planned — executePulse
-     * re-applies Time of day after the flash so the pulse colour does not stick.
+     * Flash steps only (colour/on → off). Restore is always done in finalizePulseRestore
+     * so a mid-plan brightness restore cannot leave Hue stuck on.
      *
      * @param array{on: bool, brightness?: int, hex?: string, kelvin?: int, adaptive?: bool} $restore
      * @return list<array<string, mixed>>
@@ -5980,51 +5980,16 @@ final class YarboHome
         $hex = $hex !== null ? self::normalizeHexValue($hex) : null;
         $steps = [];
         for ($i = 0; $i < $count; $i++) {
-            if ($dimmable) {
-                $steps[] = ['id' => $id, 'command' => 'brightness', 'brightness' => 100];
-            }
+            // Colour already sends On — skip brightness 100 (extra Hue traffic drops Off).
             if ($hex !== null) {
                 $steps[] = ['id' => $id, 'command' => 'color', 'hex' => $hex];
-            } elseif (!$dimmable) {
+            } else {
                 $steps[] = ['id' => $id, 'command' => 'on'];
             }
             $steps[] = ['id' => $id, 'command' => 'off'];
         }
-        if (empty($restore['on'])) {
-            return $steps;
-        }
-        $sent = false;
-        if (isset($restore['brightness']) && is_numeric($restore['brightness'])) {
-            $steps[] = [
-                'id' => $id,
-                'command' => 'brightness',
-                'brightness' => max(1, min(100, (int) $restore['brightness'])),
-            ];
-            $sent = true;
-        }
-        // Time of day resume is applied after the plan in finalizePulseRestore.
-        if (!empty($restore['adaptive'])) {
-            if (!$sent) {
-                $steps[] = ['id' => $id, 'command' => 'on'];
-            }
-
-            return $steps;
-        }
-        $restoreHex = isset($restore['hex']) ? self::normalizeHexValue((string) $restore['hex']) : null;
-        if ($restoreHex !== null) {
-            $steps[] = ['id' => $id, 'command' => 'color', 'hex' => $restoreHex];
-            $sent = true;
-        } elseif (isset($restore['kelvin']) && is_numeric($restore['kelvin'])) {
-            $steps[] = [
-                'id' => $id,
-                'command' => 'color_temp',
-                'kelvin' => max(1500, min(8000, (int) $restore['kelvin'])),
-            ];
-            $sent = true;
-        }
-        if (!$sent) {
-            $steps[] = ['id' => $id, 'command' => 'on'];
-        }
+        // $restore / $dimmable kept for callers; restore runs after the flash.
+        unset($restore, $dimmable);
 
         return $steps;
     }
@@ -6058,19 +6023,31 @@ final class YarboHome
         }
         $hex = self::normalizeHexValue((string) ($job['hex'] ?? $job['color_hex'] ?? self::PULSE_HEX_DEFAULT));
         $count = self::normalizePulseCount($job['pulse_count'] ?? $job['count'] ?? self::PULSE_COUNT_DEFAULT);
-        // Prefer a live look right before the flash — tick cache is often sticky/wrong.
-        $restore = $this->capturePulseLook($id, true);
-        if (is_array($job['restore'] ?? null) && empty($restore['on']) && !empty($job['restore']['on'])) {
-            // Live said off; trust live so we do not turn a dark room back on.
-            $restore = self::scrubPulseRestoreLook($restore, $hex);
-        } elseif (is_array($job['restore'] ?? null) && empty($job['restore']['on']) && !empty($restore['on'])) {
-            // Tick said off — keep that even if sticky live still shows on from a prior flash.
-            $restore = self::scrubPulseRestoreLook($job['restore'], $hex);
-        } else {
-            $restore = self::scrubPulseRestoreLook($restore, $hex);
-        }
-        if (!empty($restore['on']) && empty($restore['hex']) && empty($restore['kelvin'])) {
-            $restore['kelvin'] = $this->adaptiveKelvinForDevice($id);
+        // Tick snapshot is authoritative for on/off — live sticky must not upgrade off→on.
+        $restore = is_array($job['restore'] ?? null)
+            ? $job['restore']
+            : $this->capturePulseLook($id, true);
+        $restore = self::scrubPulseRestoreLook($restore, $hex);
+        if (empty($restore['on'])) {
+            $keepAdaptive = !empty($restore['adaptive']);
+            $restore = ['on' => false];
+            if ($keepAdaptive) {
+                $restore['adaptive'] = true;
+            }
+        } elseif (empty($restore['hex']) && empty($restore['kelvin'])) {
+            $live = $this->capturePulseLook($id, true);
+            if (!empty($live['hex']) && ($hex === null || strcasecmp((string) $live['hex'], $hex) !== 0)) {
+                $restore['hex'] = $live['hex'];
+            }
+            if (!empty($live['kelvin'])) {
+                $restore['kelvin'] = $live['kelvin'];
+            }
+            if (!empty($live['adaptive'])) {
+                $restore['adaptive'] = true;
+            }
+            if (empty($restore['hex']) && empty($restore['kelvin'])) {
+                $restore['kelvin'] = $this->adaptiveKelvinForDevice($id);
+            }
         }
         $caps = $this->deviceControlCaps($id);
         $steps = self::pulsePlan($id, $hex, $count, $restore, !empty($caps['dimmable']));
@@ -6082,13 +6059,18 @@ final class YarboHome
                 $errors[] = (string) ($last['error'] ?? 'failed');
             }
             $cmd = (string) ($step['command'] ?? '');
-            if ($dwellUs > 0 && ($cmd === 'color' || $cmd === 'on' || $cmd === 'brightness' || $cmd === 'off')) {
-                $next = $steps[$i + 1] ?? null;
-                $nextCmd = is_array($next) ? (string) ($next['command'] ?? '') : '';
-                if ($nextCmd === 'off' || $cmd === 'off') {
-                    usleep($dwellUs);
-                }
+            // Hold after on-flash and after off so the pulse is visible and Off settles.
+            if ($dwellUs > 0 && ($cmd === 'color' || $cmd === 'on' || $cmd === 'off')) {
+                usleep($dwellUs);
             }
+        }
+        // Always end with an explicit off beat before restore, so Hue is not mid-colour.
+        if ($dwellUs > 0) {
+            usleep((int) ($dwellUs / 2));
+        }
+        $this->command(['id' => $id, 'command' => 'off']);
+        if ($dwellUs > 0) {
+            usleep((int) ($dwellUs / 2));
         }
         $final = $this->finalizePulseRestore($id, $restore, $dwellUs);
         if (!($final['ok'] ?? false)) {
@@ -6265,6 +6247,10 @@ final class YarboHome
         }
 
         $look = self::pulseLookFromDevice($row);
+        // Inconsistent sticky: on + brightness 0 means off.
+        if (!empty($look['on']) && isset($look['brightness']) && (int) $look['brightness'] <= 0) {
+            $look = ['on' => false];
+        }
         if (!empty($look['on']) && empty($look['hex']) && empty($look['kelvin'])) {
             $cached = $this->cachedDeviceRow($id);
             if (is_array($cached)) {

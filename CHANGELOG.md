@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.316] - 2026-11-15
+
+### Fixed
+- **Pulse barely flashed and lights stayed on:** Hue was flooded (brightness 100 + colour + off) so Off was dropped and sticky “on” restored the room. Pulse is now colour→off only with a longer visible dwell, always ends with a settling Off before restore, and the tick’s was-off wins so sticky live state cannot turn lights back on.
+
 ## [4.0.315] - 2026-11-14
 
 ### Fixed

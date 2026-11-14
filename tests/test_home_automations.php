@@ -1641,7 +1641,7 @@ assert_true(($onLook['brightness'] ?? 0) === 40, 'on look brightness');
 assert_true(($onLook['hex'] ?? '') === '#aabbcc', 'on look hex');
 $planOff = YarboHome::pulsePlan('1:2', '#ff0000', 2, ['on' => false], false);
 $cmdsOff = array_column($planOff, 'command');
-assert_true($cmdsOff === ['color', 'off', 'color', 'off'], 'pulse 2× then stay off: ' . json_encode($cmdsOff));
+assert_true($cmdsOff === ['color', 'off', 'color', 'off'], 'pulse 2× flash only: ' . json_encode($cmdsOff));
 assert_true(($planOff[0]['hex'] ?? '') === '#ff0000', 'pulse colour');
 $planOn = YarboHome::pulsePlan('1:2', '#ff3b30', 1, [
     'on' => true,
@@ -1649,9 +1649,7 @@ $planOn = YarboHome::pulsePlan('1:2', '#ff3b30', 1, [
     'hex' => '#aabbcc',
 ], true);
 $cmdsOn = array_column($planOn, 'command');
-assert_true($cmdsOn === ['brightness', 'color', 'off', 'brightness', 'color'], 'pulse restores scene look: ' . json_encode($cmdsOn));
-assert_true(($planOn[3]['brightness'] ?? 0) === 40, 'restore brightness');
-assert_true(($planOn[4]['hex'] ?? '') === '#aabbcc', 'restore colour');
+assert_true($cmdsOn === ['color', 'off'], 'pulse flash only; restore is finalize: ' . json_encode($cmdsOn));
 $planAdaptive = YarboHome::pulsePlan('1:2', '#ff0000', 1, [
     'on' => true,
     'brightness' => 55,
@@ -1660,9 +1658,15 @@ $planAdaptive = YarboHome::pulsePlan('1:2', '#ff0000', 1, [
 ], true);
 $cmdsAdaptive = array_column($planAdaptive, 'command');
 assert_true(
-    $cmdsAdaptive === ['brightness', 'color', 'off', 'brightness'],
-    'adaptive pulse restores brightness only in plan (TOD after): ' . json_encode($cmdsAdaptive)
+    $cmdsAdaptive === ['color', 'off'],
+    'adaptive pulse flash only in plan: ' . json_encode($cmdsAdaptive)
 );
+$planNoColor = YarboHome::pulsePlan('1:2', null, 2, ['on' => false], true);
+assert_true(
+    array_column($planNoColor, 'command') === ['on', 'off', 'on', 'off'],
+    'pulse without colour still flashes on/off: ' . json_encode($planNoColor)
+);
+assert_true(YarboHome::PULSE_DWELL_US >= 600000, 'pulse dwell long enough to see the flash');
 $adaptiveLook = YarboHome::pulseLookFromDevice([
     'on' => true,
     'brightness' => 40,
