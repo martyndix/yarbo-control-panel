@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.306] - 2026-11-14
+
+### Fixed
+- **Vacuum Start still fails with `[matter v62]` while Idle:** K11+ has no Matter battery, so Idle/Stopped was treated as off-pad and All-rooms only tried empty `SelectAreas([])`. Start from the pad now cascades **all room IDs → `[]` → Cleaning-only**; actively Charging stays Cleaning-only. Room chips are preference-only until Start (no Matter SelectAreas on every tap). Matter agent **v63**; errors include `[matter v63]`.
+
 ## [4.0.305] - 2026-11-14
 
 ### Fixed

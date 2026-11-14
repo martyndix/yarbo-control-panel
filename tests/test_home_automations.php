@@ -1878,7 +1878,8 @@ assert_true(str_contains($js, 'homeVacuumActionsHtml'), 'vacuum Start/Mop/rooms'
 assert_true(str_contains($js, 'home-device--vacuum'), 'vacuum cards stack name above rooms');
 assert_true(str_contains($js, 'data-home-vac-area'), 'vacuum room chips');
 assert_true(str_contains($js, 'data-home-vac-cmd'), 'vacuum start/dock');
-assert_true(str_contains($js, "await sendHomeVacuumCommand(id, 'select_areas')"), 'room chips send SelectAreas');
+assert_true(str_contains($js, 'Preference only — Matter SelectAreas runs on Start'), 'room chips are preference-only until Start');
+assert_true(!str_contains($js, "await sendHomeVacuumCommand(id, 'select_areas')"), 'room chips do not Matter SelectAreas on tap');
 assert_true(str_contains($js, "await sendHomeVacuumCommand(id, mode, vacMode)"), 'Vacuum/Mop chips send clean mode');
 assert_true(!str_contains($js, "if (cmd === 'start' || cmd === 'mop')"), 'Start does not bundle rooms');
 assert_true(str_contains($js, "['start', 'Start']"), 'vacuum Then Start');
@@ -1968,7 +1969,7 @@ assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');
 assert_true(str_contains($js, 'if (!heater) {'), 'heater On is not optimistic');
-assert_true(str_contains($matterPhp, 'MIN_VERSION = 62'), 'Matter agent min version 62');
+assert_true(str_contains($matterPhp, 'MIN_VERSION = 63'), 'Matter agent min version 63');
 assert_true(str_contains($js, "action: 'scan'"), 'Look for devices scans paired bridges');
 assert_true(str_contains($js, 'id="home-scene-filter"') || str_contains($js, "getElementById('home-scene-filter')"), 'scene editor search field');
 assert_true(str_contains($index, 'id="home-scan"'), 'Look for devices button');

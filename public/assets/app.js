@@ -6691,7 +6691,8 @@ async function homeVacuumToggleArea(id, which) {
         const on = key === 'all' ? allOn : selected.includes(Number(key));
         el.classList.toggle('is-on', on);
     });
-    await sendHomeVacuumCommand(id, 'select_areas');
+    // Preference only — Matter SelectAreas runs on Start (empty / ids cascade).
+    // Sending SelectAreas on every chip tap left K11+ Idle after "All rooms".
 }
 
 async function sendHomeVacuumCommand(id, command, button) {
