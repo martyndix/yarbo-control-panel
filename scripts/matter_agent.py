@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 57
+AGENT_VERSION = 58
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -4938,6 +4938,10 @@ def vacuum_status_label(
         return "Cleaning"
     if op == OP_DOCKED or op == OP_CHARGING:
         return "Docked"
+    # SwitchBot often reports Stopped/Idle (op 0) while still on the pad after
+    # charge completes. Treat plugged-in Stopped as Docked so Start can recover.
+    if plugged_in and op in (None, OP_STOPPED):
+        return "Docked"
     if RUN_MAPPING in run_tags:
         return "Mapping"
     if RUN_CLEANING in run_tags:
@@ -5107,8 +5111,13 @@ def vacuum_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     clean_option = next((row for row in clean_modes if row["mode"] == int(clean_current or -1)), None)
     run_tags = [int(t) for t in (run_option.get("tags") if run_option else []) if isinstance(t, (int, float))]
     bat_percent, bat_state, charge_complete = battery_from_node(attributes, endpoint)
+    plugged_in = bat_state in (BAT_CHARGE_IS_CHARGING, BAT_CHARGE_IS_AT_FULL_CHARGE)
     status = vacuum_status_label(
-        op, run_tags, charge_complete=charge_complete, error_text=error_text
+        op,
+        run_tags,
+        charge_complete=charge_complete,
+        plugged_in=plugged_in,
+        error_text=error_text,
     )
     areas, selected, area_endpoint = service_area_from_node(attributes, endpoint)
     if status in ("Emptying", "Refilling", "Washing") and (
@@ -5615,9 +5624,23 @@ def set_vacuum_command(
     def charge_complete() -> bool:
         return bool(row.get("vacuum_charge_complete"))
 
+    def plugged_in() -> bool:
+        try:
+            state = int(row["vacuum_charge_state"]) if row.get("vacuum_charge_state") is not None else None
+        except (TypeError, ValueError):
+            state = None
+        return state in (BAT_CHARGE_IS_CHARGING, BAT_CHARGE_IS_AT_FULL_CHARGE) or charge_complete()
+
     def at_charger() -> bool:
         status = str(row.get("vacuum_status") or "")
-        return run_op() in (OP_DOCKED, OP_CHARGING) or status in ("Docked", "Charging")
+        if run_op() in (OP_DOCKED, OP_CHARGING) or status in ("Docked", "Charging"):
+            return True
+        # Stopped/Idle on the pad (common after charge complete on K11+ / S10).
+        if status == "Idle" and plugged_in():
+            return True
+        if run_op() in (None, OP_STOPPED) and plugged_in():
+            return True
+        return False
 
     def actively_charging() -> bool:
         if charge_complete():
@@ -5625,7 +5648,10 @@ def set_vacuum_command(
         return run_op() == OP_CHARGING or str(row.get("vacuum_status") or "") == "Charging"
 
     def stuck_on_dock() -> bool:
-        return run_op() == OP_DOCKED or str(row.get("vacuum_status") or "") == "Docked"
+        status = str(row.get("vacuum_status") or "")
+        if run_op() == OP_DOCKED or status == "Docked":
+            return True
+        return status == "Idle" and plugged_in()
 
     def still_docked() -> bool:
         return at_charger()
@@ -5744,41 +5770,49 @@ def set_vacuum_command(
         rpc = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
         if rpc.get("ok"):
             rpc = {**rpc, "vacuum_clean": kind}
+            return rpc
+        # SwitchBot refuses Clean Mode ChangeToMode on the pad (GenericFailure).
+        # Keep the tile preference; Start still uses Run Mode Cleaning.
+        if int(rpc.get("status") or 0) == 2:
+            return {"ok": True, "vacuum_clean": kind}
         return rpc
 
     cleaning = pick_cleaning_run_mode(run_modes)
     if cleaning is None:
         return {"ok": False, "error": "This vacuum has no Cleaning mode"}
 
-    # Apple Home Start is ChangeToMode Cleaning only. Rooms and Vacuum/Mop
-    # are separate taps. Mapping remaps; Idle is standby/dock; Operational
-    # Start and SelectAreas GenericFailure on the charger.
-    started = vacuum_change_mode(
-        node_id,
-        rvc_ep,
-        RVC_RUN,
-        int(cleaning["mode"]),
-        device_id=device_id,
-        row=row,
-        verify=True,
-    )
-    attempts.append(started)
-    if is_transport_error(started):
-        return started
-    settle_start()
-    sync_row()
-    if started.get("ok"):
+    def try_cleaning(*, verify: bool = True) -> dict[str, Any]:
+        return vacuum_change_mode(
+            node_id,
+            rvc_ep,
+            RVC_RUN,
+            int(cleaning["mode"]),
+            device_id=device_id,
+            row=row,
+            verify=verify,
+        )
+
+    def started_ok(rpc: dict[str, Any]) -> dict[str, Any] | None:
+        if not rpc.get("ok"):
+            return None
         status = str(row.get("vacuum_status") or "")
         op = run_op()
         if status == "Mapping":
-            return finish(started)
+            return finish(rpc)
         if vacuum_error_is_real(row.get("vacuum_error")):
-            return finish(started)
+            return finish(rpc)
         if op == OP_DOCKED:
-            return finish(started)
+            return finish(rpc)
+        # SwitchBot often keeps OperationalState=Charging briefly after it
+        # accepts Cleaning — treat that as started (same as pre-58).
+        if op == OP_CHARGING:
+            pass
+        elif at_charger() and status not in ("Cleaning", "Paused"):
+            # Idle/Stopped on the pad after a no-op — try Operational Start.
+            return None
         battery = row.get("vacuum_battery")
         return {
-            **started,
+            **rpc,
             "ok": True,
             "on": True,
             "vacuum_status": "Cleaning",
@@ -5787,10 +5821,63 @@ def set_vacuum_command(
             "selected_areas": requested_ids or all_ids,
             **({"vacuum_battery": battery} if battery is not None else {}),
         }
+
+    # Apple Home Start is ChangeToMode Cleaning. Rooms and Vacuum/Mop are
+    # separate taps. Mapping remaps — never send it (S10 Mapping is mode 1).
+    started = try_cleaning(verify=True)
+    attempts.append(started)
+    if is_transport_error(started):
+        return started
+    settle_start()
+    sync_row()
+    done = started_ok(started)
+    if done is not None:
+        return done
+
+    status_code = int(started.get("status") or 0)
+    # K11+/S10 on the pad: Cleaning GenericFailure while Idle/Docked/Charging.
+    # Operational Start can undock without Mapping; then retry Cleaning.
+    if status_code == 2 or at_charger():
+        op_start = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Start", {})
+        attempts.append(op_start)
+        if op_start.get("ok") and not is_transport_error(op_start):
+            settle_start()
+            sync_row()
+            started = try_cleaning(verify=True)
+            attempts.append(started)
+            settle_start()
+            sync_row()
+            done = started_ok(started)
+            if done is not None:
+                return done
+        # S10 Idle off-pad sometimes needs SelectAreas before Cleaning (InvalidInMode).
+        if (
+            status_code in (2, 3)
+            and not actively_charging()
+            and requested_ids
+            and not all_rooms
+        ):
+            areas_rpc = vacuum_select_areas(node_id, area_endpoint, requested_ids)
+            attempts.append(areas_rpc)
+            if areas_rpc.get("ok"):
+                settle_mode()
+                started = try_cleaning(verify=True)
+                attempts.append(started)
+                settle_start()
+                sync_row()
+                done = started_ok(started)
+                if done is not None:
+                    return done
+
     if int(started.get("status") or 0) == 2 and at_charger():
         started = {
             **started,
             "error": "Vacuum refused Matter start from the dock (generic failure)",
+        }
+    elif int(started.get("status") or 0) == 2:
+        started = {
+            **started,
+            "error": "Vacuum rejected ChangeToMode (generic failure)",
         }
     return finish(started)
 
