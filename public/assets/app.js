@@ -8204,6 +8204,8 @@ function homeAutoRobotTrigger(id, event = 'error') {
     let ev = String(event || 'error');
     if (robot === HOME_AUTO_YARBO_ID && (ev === 'rain' || ev === 'dry' || ev === 'plan_hold' || ev === 'plan_resume')) {
         // keep
+    } else if (ev === 'heading_home') {
+        ev = 'heading_home';
     } else if (ev === 'ok') {
         ev = 'ok';
     } else {
@@ -8225,6 +8227,7 @@ function homeAutoRobotEventOptions(id, selected) {
             ['plan_resume', 'Plan resume'],
         );
     }
+    opts.push(['heading_home', 'Heading home']);
     return opts.map(([value, label]) =>
         `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`
     ).join('');
@@ -8940,7 +8943,7 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
     }
     if (homeAutoIsRobot(trigger)) {
         const name = homeAutoRobotName(trigger.id);
-        const event = ['ok', 'rain', 'dry', 'plan_hold', 'plan_resume'].includes(trigger.event) ? trigger.event : 'error';
+        const event = ['ok', 'rain', 'dry', 'plan_hold', 'plan_resume', 'heading_home'].includes(trigger.event) ? trigger.event : 'error';
         return `<div class="auto-chip auto-chip--robot" data-auto-when ${iAttr}>
             ${escapeHtml(name)}
             <select data-auto-robot-event aria-label="${escapeHtml(name)} when">
@@ -9094,7 +9097,7 @@ function homeAutoThenChipHtml(action, index) {
 function homeAutoIfChipHtml(cond, index) {
     if (homeAutoIsRobot(cond)) {
         const name = homeAutoRobotName(cond.id);
-        const event = ['ok', 'rain', 'dry', 'plan_hold', 'plan_resume'].includes(cond.event) ? cond.event : 'error';
+        const event = ['ok', 'rain', 'dry', 'plan_hold', 'plan_resume', 'heading_home'].includes(cond.event) ? cond.event : 'error';
         return `<div class="auto-chip auto-chip--robot" data-auto-if-i="${index}">
             ${escapeHtml(name)}
             <select data-auto-if-robot-event aria-label="${escapeHtml(name)} only if">
@@ -9840,6 +9843,7 @@ function homeAutoTrayGroups(devices, scenes) {
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:dry`, 'Dry', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:plan_hold`, 'Plan hold', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:plan_resume`, 'Plan resume', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:heading_home`, 'Heading home', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('yarbo', 'start_plan', 'Start plan', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('yarbo', 'return_to_dock', 'Dock', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('yarbo', 'stop', 'Stop', 'auto-chip--robot', '', 'then'),
@@ -9849,6 +9853,7 @@ function homeAutoTrayGroups(devices, scenes) {
         buckets.lymow.push(
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:error`, 'Error', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:ok`, 'OK', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:heading_home`, 'Heading home', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('lymow', 'start', 'Start', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('lymow', 'pause', 'Pause', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('lymow', 'resume', 'Resume', 'auto-chip--robot', '', 'then'),

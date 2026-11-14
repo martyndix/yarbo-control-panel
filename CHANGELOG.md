@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.302] - 2026-11-14
+
+### Added
+- **Yarbo / Lymow Heading home in Automations:** When and Only if can use Vestaboard **HEADING HOME** / **DOCKING** — Yarbo `returning_to_dock`, Lymow docking / pause-docking / Returning. Example: When Heading home → turn on a gate light.
+
 ## [4.0.301] - 2026-11-14
 
 ### Added

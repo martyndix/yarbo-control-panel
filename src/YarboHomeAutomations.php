@@ -37,11 +37,13 @@ final class YarboHomeAutomations
     /** Synthetic When for Vestaboard night-hours door/window open alert. */
     public const VESTABOARD_NIGHT_ID = 'vestaboard_night';
     public const VESTABOARD_NIGHT_EVENTS = ['open'];
-    public const ROBOT_EVENTS = ['error', 'ok', 'rain', 'dry', 'plan_hold', 'plan_resume'];
+    public const ROBOT_EVENTS = ['error', 'ok', 'rain', 'dry', 'plan_hold', 'plan_resume', 'heading_home'];
     /** Yarbo-only rain / dry (Lymow has no rain sensor). */
     public const YARBO_RAIN_EVENTS = ['rain', 'dry'];
     /** Yarbo-only plan pause (Vestaboard PLAN HOLD) / resume. */
     public const YARBO_PLAN_HOLD_EVENTS = ['plan_hold', 'plan_resume'];
+    /** Yarbo + Lymow: Vestaboard HEADING HOME / DOCKING. */
+    public const ROBOT_HEADING_HOME_EVENTS = ['heading_home'];
     public const YARBO_COMMANDS = ['start_plan', 'return_to_dock', 'stop'];
     public const LYMOW_COMMANDS = ['start', 'pause', 'resume', 'dock', 'cancel'];
     public const HOLD_MIN_SEC = 60;
@@ -908,6 +910,7 @@ final class YarboHomeAutomations
                 'power_fault' => $parsed['power_fault'] ?? 0,
                 'rain_detected' => !empty($parsed['rain_detected']),
                 'planning_paused' => !empty($parsed['planning_paused']),
+                'returning_to_dock' => !empty($parsed['returning_to_dock']),
                 'name' => trim((string) ($parsed['mqtt_robot_name'] ?? $parsed['robot_name'] ?? '')) ?: 'Yarbo',
             ]);
         } catch (\Throwable) {
@@ -1078,6 +1081,7 @@ final class YarboHomeAutomations
             'error' => self::yarboErrorFromData($data),
             'rain' => self::yarboRainFromData($data),
             'plan_hold' => self::yarboPlanHoldFromData($data),
+            'heading_home' => self::yarboHeadingHomeFromData($data),
         ];
     }
 
@@ -1097,6 +1101,7 @@ final class YarboHomeAutomations
             'kind' => 'robot',
             'name' => $name,
             'error' => self::lymowErrorFromData($data),
+            'heading_home' => self::lymowHeadingHomeFromData($data),
         ];
     }
 
@@ -1143,6 +1148,43 @@ final class YarboHomeAutomations
         }
 
         return self::truthy($data['planning_paused'] ?? false);
+    }
+
+    /**
+     * Same returning_to_dock flag as Vestaboard HEADING HOME / DOCKING.
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function yarboHeadingHomeFromData(array $data): bool
+    {
+        if (array_key_exists('heading_home', $data) && is_bool($data['heading_home'])) {
+            return $data['heading_home'];
+        }
+
+        return self::truthy($data['returning_to_dock'] ?? false);
+    }
+
+    /**
+     * Same as Vestaboard Lymow HEADING HOME: docking / pause-docking / Returning, not on pad charge.
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function lymowHeadingHomeFromData(array $data): bool
+    {
+        if (array_key_exists('heading_home', $data) && is_bool($data['heading_home'])) {
+            return $data['heading_home'];
+        }
+        $label = (string) ($data['charging_label'] ?? '');
+        $charging = $label === 'Yes';
+        if ($charging) {
+            return false;
+        }
+        $returning = $label === 'Returning';
+        $work = isset($data['work_status']) && is_numeric($data['work_status'])
+            ? (int) $data['work_status']
+            : null;
+
+        return $returning || in_array($work, [4, 10], true);
     }
 
     /**
@@ -1453,6 +1495,12 @@ final class YarboHomeAutomations
 
             return $event === 'plan_resume' ? ($was && !$is) : (!$was && $is);
         }
+        if (in_array($event, self::ROBOT_HEADING_HOME_EVENTS, true)) {
+            $was = !empty($prev[$id]['heading_home']);
+            $is = !empty($curr[$id]['heading_home']);
+
+            return !$was && $is;
+        }
         $was = !empty($prev[$id]['error']);
         $is = !empty($curr[$id]['error']);
         if ($event === 'ok') {
@@ -1489,6 +1537,13 @@ final class YarboHomeAutomations
             $is = !empty($snap['plan_hold']);
 
             return $event === 'plan_resume' ? !$is : $is;
+        }
+        if (in_array($event, self::ROBOT_HEADING_HOME_EVENTS, true)) {
+            if (!array_key_exists('heading_home', $snap) || $snap['heading_home'] === null) {
+                return false;
+            }
+
+            return !empty($snap['heading_home']);
         }
         if (!array_key_exists('error', $snap) || $snap['error'] === null) {
             return false;
@@ -1788,6 +1843,7 @@ final class YarboHomeAutomations
                 'dry' => 'Dry',
                 'plan_hold' => 'Plan hold',
                 'plan_resume' => 'Plan resume',
+                'heading_home' => 'Heading home',
                 default => 'Error',
             };
 
@@ -2417,6 +2473,9 @@ final class YarboHomeAutomations
                 'plan_hold' => array_key_exists('plan_hold', $row)
                     ? (bool) $row['plan_hold']
                     : (array_key_exists('planning_paused', $row) ? (bool) $row['planning_paused'] : null),
+                'heading_home' => array_key_exists('heading_home', $row)
+                    ? (bool) $row['heading_home']
+                    : (array_key_exists('returning_to_dock', $row) ? (bool) $row['returning_to_dock'] : null),
             ];
             foreach (self::POWERWALL_METRICS as $metric) {
                 $out[$id][$metric] = isset($row[$metric]) && is_numeric($row[$metric]) ? (float) $row[$metric] : null;
