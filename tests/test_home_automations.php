@@ -1667,6 +1667,13 @@ assert_true(
     'pulse without colour still flashes on/off: ' . json_encode($planNoColor)
 );
 assert_true(YarboHome::PULSE_DWELL_US >= 600000, 'pulse dwell long enough to see the flash');
+assert_true(YarboHome::PULSE_CONCURRENCY >= 8, 'pulse concurrency caps bridge stampede');
+assert_true(str_contains($homeSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php'), 'function executePulseBatch'), 'batch pulse for many lights');
+assert_true(str_contains($homeSrc, 'function capturePulseLooks'), 'batch capture one states()');
+assert_true(str_contains($homeSrc, 'function pulseWaveFlashOn'), 'wave on flash');
+$autoSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHomeAutomations.php');
+assert_true(str_contains($autoSrc, 'function runPulseBatch'), 'automations batch Pulse Then');
+assert_true(str_contains($autoSrc, 'One wave job for every Pulse'), 'runActions batches pulses');
 $adaptiveLook = YarboHome::pulseLookFromDevice([
     'on' => true,
     'brightness' => 40,
@@ -1688,7 +1695,7 @@ $scrubKeep = YarboHome::scrubPulseRestoreLook([
     'hex' => '#aabbcc',
 ], '#ff0000');
 assert_true(($scrubKeep['hex'] ?? '') === '#aabbcc', 'scrub keeps a real prior colour');
-assert_true(str_contains($homeSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php'), 'ensurePulseEndedOff'), 'hard off after pulse when prior was off');
+assert_true(str_contains($homeSrc, 'ensurePulseEndedOff'), 'hard off after pulse when prior was off');
 assert_true(str_contains($homeSrc, 'scrubPulseRestoreLook'), 'pulse scrub helper present');
 
 $pulseRoot = sys_get_temp_dir() . '/yarbo-pulse-restore-' . bin2hex(random_bytes(3));
@@ -1810,6 +1817,31 @@ assert_true(($commands[0]['command'] ?? '') === 'pulse', 'handler sees pulse: ' 
 assert_true(($commands[0]['hex'] ?? '') === '#ff0000', 'handler sees colour');
 assert_true(($commands[0]['restore']['on'] ?? true) === false, 'restore captured off: ' . json_encode($commands[0]['restore'] ?? []));
 $auto->delete('a-pulse');
+
+$commands = [];
+@unlink($auto->statePath());
+$pulseMany = $auto->save([
+    'id' => 'a-pulse-many',
+    'enabled' => true,
+    'trigger' => ['type' => 'device', 'id' => 'unifi:sensor:s1', 'event' => 'motion'],
+    'actions' => [
+        ['kind' => 'device', 'id' => '1:2', 'command' => 'pulse', 'hex' => '#ff0000', 'pulse_count' => 2, 'device_kind' => 'light'],
+        ['kind' => 'device', 'id' => '12:3', 'command' => 'pulse', 'hex' => '#ff0000', 'pulse_count' => 2, 'device_kind' => 'light'],
+        ['kind' => 'device', 'id' => '31:1', 'command' => 'pulse', 'hex' => '#00ff00', 'pulse_count' => 1, 'device_kind' => 'light'],
+    ],
+    'cooldown_sec' => 0,
+    'names' => ['unifi:sensor:s1' => 'Kitchen Sensor', '1:2' => 'Lamp', '12:3' => 'Garage', '31:1' => 'Boiler'],
+]);
+assert_true(!empty($pulseMany['ok']), 'save many pulses: ' . json_encode($pulseMany));
+$auto->tick($pulseSense(false), $tPulse + 10);
+$r = $auto->tick($pulseSense(true), $tPulse + 11);
+assert_true($r['fired'] === ['a-pulse-many'], 'many pulses fire: ' . json_encode($r));
+assert_true(count($commands) === 3, 'batch still notifies handler per light: ' . count($commands));
+assert_true(($commands[0]['command'] ?? '') === 'pulse' && ($commands[2]['command'] ?? '') === 'pulse', 'all pulse cmds');
+$auto->delete('a-pulse-many');
+$looks = (new YarboHome($root))->capturePulseLooks(['1:2', 'missing:9']);
+assert_true(isset($looks['1:2']) && isset($looks['missing:9']), 'capturePulseLooks returns every id');
+assert_true(($looks['missing:9']['on'] ?? true) === false, 'missing id is off');
 
 $homeStore = json_decode((string) file_get_contents($root . '/data/home.json'), true);
 $homeStore['last_devices'] = [[

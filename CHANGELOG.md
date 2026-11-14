@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.317] - 2026-11-15
+
+### Fixed
+- **Pulsing ~100 lights at once flooded Hue and stuck them on:** Each Pulse Then spawned its own process and hammered the bridge. All Pulse actions in one Then now share a single wave worker: one state snapshot, colour→off in chunks of 12 with gaps, then restore. Far fewer dropped Offs and a clearer room-wide flash.
+
 ## [4.0.316] - 2026-11-15
 
 ### Fixed

@@ -13,6 +13,10 @@ final class YarboHome
     public const PULSE_HEX_DEFAULT = '#ff3b30';
     /** On and off each hold this long so the flash is visible on Hue. */
     public const PULSE_DWELL_US = 650000;
+    /** Max Matter/Hue commands in flight per wave chunk (≈100 lights must not stampede). */
+    public const PULSE_CONCURRENCY = 12;
+    /** Pause between chunks so the bridge can breathe. */
+    public const PULSE_CHUNK_GAP_US = 30000;
     public const KIND_PLUG = 'plug';
     public const KIND_SWITCH = 'switch';
     public const KIND_HEATER = 'heater';
@@ -6012,75 +6016,247 @@ final class YarboHome
     }
 
     /**
-     * @param array<string, mixed> $job
+     * @param array<string, mixed> $job Single light ({id,...}) or batch ({lights:[...]}).
      * @return array<string, mixed>
      */
     public function executePulse(array $job, int $dwellUs = self::PULSE_DWELL_US): array
     {
+        if (isset($job['lights']) && is_array($job['lights'])) {
+            return $this->executePulseBatch($job['lights'], $dwellUs);
+        }
         $id = trim((string) ($job['id'] ?? ''));
         if ($id === '') {
             return ['ok' => false, 'error' => 'Pick a light'];
         }
-        $hex = self::normalizeHexValue((string) ($job['hex'] ?? $job['color_hex'] ?? self::PULSE_HEX_DEFAULT));
-        $count = self::normalizePulseCount($job['pulse_count'] ?? $job['count'] ?? self::PULSE_COUNT_DEFAULT);
-        // Tick snapshot is authoritative for on/off — live sticky must not upgrade off→on.
-        $restore = is_array($job['restore'] ?? null)
-            ? $job['restore']
-            : $this->capturePulseLook($id, true);
-        $restore = self::scrubPulseRestoreLook($restore, $hex);
-        if (empty($restore['on'])) {
-            $keepAdaptive = !empty($restore['adaptive']);
-            $restore = ['on' => false];
-            if ($keepAdaptive) {
-                $restore['adaptive'] = true;
+
+        return $this->executePulseBatch([[
+            'id' => $id,
+            'hex' => $job['hex'] ?? $job['color_hex'] ?? self::PULSE_HEX_DEFAULT,
+            'pulse_count' => $job['pulse_count'] ?? $job['count'] ?? self::PULSE_COUNT_DEFAULT,
+            'restore' => is_array($job['restore'] ?? null) ? $job['restore'] : null,
+            'kind' => (string) ($job['kind'] ?? $job['device_kind'] ?? 'light'),
+        ]], $dwellUs);
+    }
+
+    /**
+     * Synchronized colour→off waves for many lights without spawning one process each.
+     *
+     * @param list<array<string, mixed>> $rawLights
+     * @return array<string, mixed>
+     */
+    public function executePulseBatch(array $rawLights, int $dwellUs = self::PULSE_DWELL_US): array
+    {
+        $lights = [];
+        foreach ($rawLights as $row) {
+            if (!is_array($row)) {
+                continue;
             }
-        } elseif (empty($restore['hex']) && empty($restore['kelvin'])) {
-            $live = $this->capturePulseLook($id, true);
-            if (!empty($live['hex']) && ($hex === null || strcasecmp((string) $live['hex'], $hex) !== 0)) {
-                $restore['hex'] = $live['hex'];
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
             }
-            if (!empty($live['kelvin'])) {
-                $restore['kelvin'] = $live['kelvin'];
-            }
-            if (!empty($live['adaptive'])) {
-                $restore['adaptive'] = true;
-            }
-            if (empty($restore['hex']) && empty($restore['kelvin'])) {
+            $hex = self::normalizeHexValue((string) ($row['hex'] ?? $row['color_hex'] ?? self::PULSE_HEX_DEFAULT))
+                ?? self::PULSE_HEX_DEFAULT;
+            $count = self::normalizePulseCount($row['pulse_count'] ?? $row['count'] ?? self::PULSE_COUNT_DEFAULT);
+            $restore = is_array($row['restore'] ?? null) ? $row['restore'] : ['on' => false];
+            $restore = self::scrubPulseRestoreLook($restore, $hex);
+            if (empty($restore['on'])) {
+                $keepAdaptive = !empty($restore['adaptive']);
+                $restore = ['on' => false];
+                if ($keepAdaptive) {
+                    $restore['adaptive'] = true;
+                }
+            } elseif (empty($restore['hex']) && empty($restore['kelvin'])) {
                 $restore['kelvin'] = $this->adaptiveKelvinForDevice($id);
             }
+            $lights[] = [
+                'id' => $id,
+                'hex' => $hex,
+                'pulse_count' => $count,
+                'restore' => $restore,
+                'kind' => (string) ($row['kind'] ?? $row['device_kind'] ?? 'light'),
+            ];
         }
-        $caps = $this->deviceControlCaps($id);
-        $steps = self::pulsePlan($id, $hex, $count, $restore, !empty($caps['dimmable']));
+        if ($lights === []) {
+            return ['ok' => false, 'error' => 'Pick a light'];
+        }
+
+        $maxCount = 1;
+        foreach ($lights as $one) {
+            $maxCount = max($maxCount, (int) $one['pulse_count']);
+        }
         $errors = [];
-        $last = ['ok' => true];
-        foreach ($steps as $i => $step) {
-            $last = $this->command($step);
-            if (!($last['ok'] ?? false)) {
-                $errors[] = (string) ($last['error'] ?? 'failed');
+        for ($beat = 0; $beat < $maxCount; $beat++) {
+            $flash = [];
+            foreach ($lights as $one) {
+                if ($beat < (int) $one['pulse_count']) {
+                    $flash[] = $one;
+                }
             }
-            $cmd = (string) ($step['command'] ?? '');
-            // Hold after on-flash and after off so the pulse is visible and Off settles.
-            if ($dwellUs > 0 && ($cmd === 'color' || $cmd === 'on' || $cmd === 'off')) {
+            $onErrors = $this->pulseWaveFlashOn($flash);
+            if ($onErrors !== []) {
+                $errors[] = $onErrors[0];
+            }
+            if ($dwellUs > 0) {
+                usleep($dwellUs);
+            }
+            $offErrors = $this->pulseWaveOff($flash);
+            if ($offErrors !== []) {
+                $errors[] = $offErrors[0];
+            }
+            if ($dwellUs > 0) {
                 usleep($dwellUs);
             }
         }
-        // Always end with an explicit off beat before restore, so Hue is not mid-colour.
+
+        // Settle every light off before restore so Hue is not mid-colour.
+        $this->pulseWaveOff($lights);
         if ($dwellUs > 0) {
-            usleep((int) ($dwellUs / 2));
-        }
-        $this->command(['id' => $id, 'command' => 'off']);
-        if ($dwellUs > 0) {
-            usleep((int) ($dwellUs / 2));
-        }
-        $final = $this->finalizePulseRestore($id, $restore, $dwellUs);
-        if (!($final['ok'] ?? false)) {
-            return $final;
-        }
-        if ($errors !== []) {
-            return ['ok' => false, 'error' => $errors[0]];
+            usleep((int) max(100000, $dwellUs / 2));
         }
 
-        return $final;
+        foreach (array_chunk($lights, self::PULSE_CONCURRENCY) as $chunk) {
+            foreach ($chunk as $one) {
+                $final = $this->finalizePulseRestore($one['id'], $one['restore'], $dwellUs);
+                if (!($final['ok'] ?? false)) {
+                    $errors[] = (string) ($final['error'] ?? 'restore failed');
+                }
+            }
+            if (count($lights) > self::PULSE_CONCURRENCY) {
+                usleep(self::PULSE_CHUNK_GAP_US);
+            }
+        }
+
+        if ($errors !== []) {
+            return ['ok' => false, 'error' => $errors[0], 'pulsed' => count($lights)];
+        }
+
+        return ['ok' => true, 'pulsed' => count($lights)];
+    }
+
+    /**
+     * @param list<array{id: string, hex: string, kind?: string}> $lights
+     * @return list<string>
+     */
+    private function pulseWaveFlashOn(array $lights): array
+    {
+        $errors = [];
+        foreach (array_chunk($lights, self::PULSE_CONCURRENCY) as $i => $chunk) {
+            if ($i > 0) {
+                usleep(self::PULSE_CHUNK_GAP_US);
+            }
+            foreach ($chunk as $one) {
+                $hex = self::normalizeHexValue((string) ($one['hex'] ?? ''));
+                $payload = [
+                    'id' => $one['id'],
+                    'kind' => (string) ($one['kind'] ?? 'light'),
+                ];
+                if ($hex !== null) {
+                    $payload['command'] = 'color';
+                    $payload['hex'] = $hex;
+                } else {
+                    $payload['command'] = 'on';
+                }
+                $result = $this->command($payload);
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param list<array{id: string, kind?: string}> $lights
+     * @return list<string>
+     */
+    private function pulseWaveOff(array $lights): array
+    {
+        $errors = [];
+        foreach (array_chunk($lights, self::PULSE_CONCURRENCY) as $i => $chunk) {
+            if ($i > 0) {
+                usleep(self::PULSE_CHUNK_GAP_US);
+            }
+            foreach ($chunk as $one) {
+                $result = $this->command([
+                    'id' => $one['id'],
+                    'command' => 'off',
+                    'kind' => (string) ($one['kind'] ?? 'light'),
+                ]);
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'failed');
+                }
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * One live/cache snapshot for many lights (do not call capturePulseLook×N).
+     *
+     * @param list<string> $ids
+     * @return array<string, array{on: bool, brightness?: int, hex?: string, kelvin?: int, adaptive?: bool}>
+     */
+    public function capturePulseLooks(array $ids): array
+    {
+        $want = [];
+        foreach ($ids as $id) {
+            $id = trim((string) $id);
+            if ($id !== '') {
+                $want[$id] = true;
+            }
+        }
+        if ($want === []) {
+            return [];
+        }
+        $byId = [];
+        foreach ($this->agentDeviceStates() as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '' && isset($want[$id])) {
+                $byId[$id] = $row;
+            }
+        }
+        foreach ($this->automationDevices() as $row) {
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '' || !isset($want[$id]) || isset($byId[$id])) {
+                continue;
+            }
+            $byId[$id] = $row;
+        }
+        $adaptive = array_fill_keys($this->adaptiveDeviceIds(), true);
+        $out = [];
+        foreach (array_keys($want) as $id) {
+            $row = $byId[$id] ?? null;
+            if (!is_array($row)) {
+                $out[$id] = ['on' => false];
+                continue;
+            }
+            $look = self::pulseLookFromDevice($row);
+            if (!empty($look['on']) && isset($look['brightness']) && (int) $look['brightness'] <= 0) {
+                $look = ['on' => false];
+            }
+            if (isset($adaptive[$id])) {
+                $look['adaptive'] = true;
+                if (!empty($look['on']) && empty($look['hex']) && empty($look['kelvin'])) {
+                    $look['kelvin'] = $this->adaptiveKelvinForDevice($id);
+                }
+            }
+            if (empty($look['on'])) {
+                $keepAdaptive = !empty($look['adaptive']);
+                $look = ['on' => false];
+                if ($keepAdaptive) {
+                    $look['adaptive'] = true;
+                }
+            }
+            $out[$id] = $look;
+        }
+
+        return $out;
     }
 
     /**

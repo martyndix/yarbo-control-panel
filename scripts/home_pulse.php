@@ -2,13 +2,14 @@
 <?php
 
 /**
- * Flash a Home light for automations Pulse, then restore the previous look.
+ * Flash one or many Home lights for automations Pulse, then restore.
+ * Batch jobs use {lights:[...]} so ~100 lights share one process / wave.
  * Started by YarboHomeAutomations; does not run inside the 1 Hz tick.
  */
 
 declare(strict_types=1);
 
-set_time_limit(120);
+set_time_limit(600);
 
 $root = dirname(__DIR__);
 $jobPath = '';

@@ -3178,10 +3178,32 @@ final class YarboHomeAutomations
             $store = $home->load();
             $names = is_array($store['names'] ?? null) ? $store['names'] : [];
             $errors = [];
+            $pulses = [];
+            $rest = [];
             foreach ($actions as $action) {
+                if (!is_array($action)) {
+                    continue;
+                }
+                if ((string) ($action['command'] ?? '') === 'pulse'
+                    && ($action['kind'] ?? '') !== 'scene'
+                    && ($action['kind'] ?? '') !== 'yarbo'
+                    && ($action['kind'] ?? '') !== 'lymow') {
+                    $pulses[] = $action;
+                } else {
+                    $rest[] = $action;
+                }
+            }
+            foreach ($rest as $action) {
                 $result = $this->runOneAction($home, $action);
                 if (!($result['ok'] ?? false)) {
                     $errors[] = $this->namedActionError($action, (string) ($result['error'] ?? 'failed'), $names);
+                }
+            }
+            if ($pulses !== []) {
+                // One wave job for every Pulse Then — never spawn N processes for N lights.
+                $result = $this->runPulseBatch($home, $pulses);
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = (string) ($result['error'] ?? 'pulse failed');
                 }
             }
             if ($errors !== []) {
@@ -3865,34 +3887,68 @@ final class YarboHomeAutomations
      */
     private function runPulseAction(YarboHome $home, array $action): array
     {
-        $id = trim((string) ($action['id'] ?? ''));
-        if ($id === '') {
-            return ['ok' => false, 'error' => 'Pick a light'];
-        }
-        $hex = YarboHome::normalizeHexValue((string) ($action['hex'] ?? $action['color_hex'] ?? YarboHome::PULSE_HEX_DEFAULT))
-            ?? YarboHome::PULSE_HEX_DEFAULT;
-        $count = YarboHome::normalizePulseCount($action['pulse_count'] ?? YarboHome::PULSE_COUNT_DEFAULT);
-        // Live look once at fire time so sticky cache cannot invent “was on”.
-        $restore = $home->capturePulseLook($id, true);
-        if (empty($restore['on'])) {
-            $keepAdaptive = !empty($restore['adaptive']);
-            $restore = ['on' => false];
-            if ($keepAdaptive) {
-                $restore['adaptive'] = true;
+        return $this->runPulseBatch($home, [$action]);
+    }
+
+    /**
+     * Batch every Pulse Then into one wave worker (safe for ~100 lights).
+     *
+     * @param list<array<string, mixed>> $actions
+     * @return array<string, mixed>
+     */
+    private function runPulseBatch(YarboHome $home, array $actions): array
+    {
+        $ids = [];
+        foreach ($actions as $action) {
+            $id = trim((string) ($action['id'] ?? ''));
+            if ($id !== '') {
+                $ids[] = $id;
             }
         }
-        $job = [
-            'id' => $id,
-            'hex' => $hex,
-            'pulse_count' => $count,
-            'restore' => $restore,
-            'kind' => (string) ($action['device_kind'] ?? 'light'),
-        ];
-        if ($this->commandHandler !== null) {
-            return ($this->commandHandler)($action + ['restore' => $restore, 'command' => 'pulse']);
+        if ($ids === []) {
+            return ['ok' => false, 'error' => 'Pick a light'];
         }
+        // One states() for the whole batch — never capturePulseLook×N.
+        $looks = $home->capturePulseLooks($ids);
+        $lights = [];
+        foreach ($actions as $action) {
+            $id = trim((string) ($action['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $hex = YarboHome::normalizeHexValue((string) ($action['hex'] ?? $action['color_hex'] ?? YarboHome::PULSE_HEX_DEFAULT))
+                ?? YarboHome::PULSE_HEX_DEFAULT;
+            $restore = $looks[$id] ?? ['on' => false];
+            $restore = YarboHome::scrubPulseRestoreLook($restore, $hex);
+            if (empty($restore['on'])) {
+                $keepAdaptive = !empty($restore['adaptive']);
+                $restore = ['on' => false];
+                if ($keepAdaptive) {
+                    $restore['adaptive'] = true;
+                }
+            }
+            $lights[] = [
+                'id' => $id,
+                'hex' => $hex,
+                'pulse_count' => YarboHome::normalizePulseCount(
+                    $action['pulse_count'] ?? YarboHome::PULSE_COUNT_DEFAULT
+                ),
+                'restore' => $restore,
+                'kind' => (string) ($action['device_kind'] ?? 'light'),
+            ];
+            if ($this->commandHandler !== null) {
+                ($this->commandHandler)($action + ['restore' => $restore, 'command' => 'pulse']);
+            }
+        }
+        if ($lights === []) {
+            return ['ok' => false, 'error' => 'Pick a light'];
+        }
+        if ($this->commandHandler !== null) {
+            return ['ok' => true, 'pulsing' => true, 'pulsed' => count($lights)];
+        }
+        $job = ['lights' => $lights];
         if ($this->spawnPulseJob($job)) {
-            return ['ok' => true, 'pulsing' => true];
+            return ['ok' => true, 'pulsing' => true, 'pulsed' => count($lights)];
         }
 
         return $home->executePulse($job);
