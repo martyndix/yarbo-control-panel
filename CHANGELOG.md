@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.300] - 2026-11-14
+
+### Fixed
+- **Alejandro (K11+) still toasting `ChangeToMode (generic failure)`:** K11+ does **not** accept Operational **Start** (only Pause/Resume/GoHome). Start now does SelectAreas → Cleaning, and on failure **Idle reset** → SelectAreas → Cleaning again (never Mapping). Vacuum/Mop chips are preference-only so they no longer toast Clean Mode refusals on the pad. Matter agent **v60**; vacuum commands force-restart a stale agent; errors include `[matter v60]` so you can confirm the update stuck.
+
 ## [4.0.299] - 2026-11-14
 
 ### Fixed

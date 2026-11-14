@@ -6708,11 +6708,14 @@ async function sendHomeVacuumCommand(id, command, button) {
     const selected = (device.selected_areas || []).map((n) => Number(n));
     const allIds = areas.map((area) => Number(area.id));
     const allOn = !selected.length || allIds.every((aid) => selected.includes(aid));
-    if (cmd === 'select_areas' || cmd === 'rooms') {
+    if (cmd === 'select_areas' || cmd === 'rooms' || cmd === 'start' || cmd === 'on') {
         payload.areas = (!areas.length || allOn) ? 'all' : selected;
     }
     if (cmd === 'mop' || cmd === 'vacuum' || cmd === 'vacuum_mop') {
         payload.clean_mode = cmd === 'vacuum_mop' ? 'vacuum_mop' : cmd;
+    }
+    if ((cmd === 'start' || cmd === 'on') && device.vacuum_clean) {
+        payload.clean_mode = device.vacuum_clean;
     }
     if (button) button.disabled = true;
     try {

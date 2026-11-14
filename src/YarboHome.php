@@ -1207,6 +1207,14 @@ final class YarboHome
             }
         }
         $timeout = $kind === self::KIND_HEATER ? 80.0 : 60.0;
+        // Vacuum Start needs the current agent binary after Settings update.
+        if ($kind === self::KIND_VACUUM) {
+            $probe = $agent->ping();
+            $version = (int) ($probe['version'] ?? 0);
+            if ($version > 0 && $version < YarboMatterAgentClient::MIN_VERSION) {
+                $agent->forceRestart();
+            }
+        }
         $result = $agent->request($body, $timeout);
         if (!($result['ok'] ?? false) && YarboMatterAgentClient::isUnknownCommandError($result)) {
             $agent->forceRestart();

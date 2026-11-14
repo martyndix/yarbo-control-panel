@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 59
+AGENT_VERSION = 60
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -5747,39 +5747,24 @@ def set_vacuum_command(
         return rpc
 
     if action in ("mop", "vacuum", "vac", "vacuum_mop"):
+        # Preference only — SwitchBot K11+/S10 refuse Clean Mode ChangeToMode on
+        # the pad (GenericFailure toast). Apple Home also keeps Vacuum/Mop as a
+        # tile preference; Start uses Run Mode Cleaning.
         kind = want_clean or action
         if kind in ("vac",):
             kind = "vacuum"
         if kind == "mop":
-            option = pick_clean_kind(clean_modes, "mop")
-            if option is None:
+            if pick_clean_kind(clean_modes, "mop") is None and clean_modes:
                 return {"ok": False, "error": "This vacuum cannot mop"}
-        elif kind in ("vacuum_mop", "both"):
-            option = pick_clean_kind(clean_modes, "vacuum_mop")
-            if option is None:
-                # SwitchBot S10/K11+ often only expose Vacuum and Mop over Matter.
-                # Remember Vac + mop on the tile; the robot app owns the combined job.
-                return {"ok": True, "vacuum_clean": "vacuum_mop"}
-            kind = "vacuum_mop"
-        else:
-            option = pick_clean_kind(clean_modes, "vacuum") or pick_mode(
-                clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac", "auto", "quick")
-            )
-            if option is None:
-                return {"ok": True, "vacuum_clean": "vacuum"}
-        rpc = vacuum_change_mode(node_id, rvc_ep, RVC_CLEAN, int(option["mode"]))
-        if rpc.get("ok"):
-            rpc = {**rpc, "vacuum_clean": kind}
-            return rpc
-        # SwitchBot refuses Clean Mode ChangeToMode on the pad (GenericFailure).
-        # Keep the tile preference; Start still uses Run Mode Cleaning.
-        if int(rpc.get("status") or 0) == 2:
-            return {"ok": True, "vacuum_clean": kind}
-        return rpc
+            return {"ok": True, "vacuum_clean": "mop"}
+        if kind in ("vacuum_mop", "both"):
+            return {"ok": True, "vacuum_clean": "vacuum_mop"}
+        return {"ok": True, "vacuum_clean": "vacuum"}
 
     cleaning = pick_cleaning_run_mode(run_modes)
     if cleaning is None:
         return {"ok": False, "error": "This vacuum has no Cleaning mode"}
+    idle = pick_mode(run_modes, (RUN_IDLE,), ("idle", "dock", "stop"))
 
     def try_cleaning(*, verify: bool = True) -> dict[str, Any]:
         return vacuum_change_mode(
@@ -5791,6 +5776,21 @@ def set_vacuum_command(
             row=row,
             verify=verify,
         )
+
+    def try_idle() -> dict[str, Any] | None:
+        if idle is None:
+            return None
+        rpc = vacuum_change_mode(
+            node_id,
+            rvc_ep,
+            RVC_RUN,
+            int(idle["mode"]),
+            device_id=device_id,
+            row=row,
+            verify=False,
+        )
+        attempts.append(rpc)
+        return rpc
 
     def started_ok(rpc: dict[str, Any]) -> dict[str, Any] | None:
         if not rpc.get("ok"):
@@ -5808,7 +5808,6 @@ def set_vacuum_command(
         if op == OP_CHARGING:
             pass
         elif at_charger() and status not in ("Cleaning", "Paused"):
-            # Idle/Stopped on the pad after a no-op — try Operational Start.
             return None
         battery = row.get("vacuum_battery")
         return {
@@ -5835,64 +5834,57 @@ def set_vacuum_command(
         attempts.append(rpc)
         return rpc
 
+    def run_clean_pass() -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        areas_prep = prepare_areas()
+        if areas_prep is not None and is_transport_error(areas_prep):
+            return areas_prep, areas_prep
+        if areas_prep is not None and areas_prep.get("ok"):
+            settle_mode()
+        started_rpc = try_cleaning(verify=True)
+        attempts.append(started_rpc)
+        if is_transport_error(started_rpc):
+            return started_rpc, started_rpc
+        settle_start()
+        sync_row()
+        return started_ok(started_rpc), started_rpc
+
     # Match Home Assistant: SelectAreas then ChangeToMode Cleaning.
+    # K11+ does not accept Operational Start (only Pause/Resume/GoHome).
     # Mapping remaps — never send it (S10 Mapping is mode 1).
-    areas_prep = prepare_areas()
-    if areas_prep is not None and is_transport_error(areas_prep):
-        return areas_prep
-    if areas_prep is not None and areas_prep.get("ok"):
-        settle_mode()
-    started = try_cleaning(verify=True)
-    attempts.append(started)
-    if is_transport_error(started):
-        return started
-    settle_start()
-    sync_row()
-    done = started_ok(started)
+    done, started = run_clean_pass()
     if done is not None:
         return done
 
     status_code = int(started.get("status") or 0)
-    # K11+/S10 on the pad: Cleaning GenericFailure while Idle/Docked/Charging.
-    # Operational Start can undock without Mapping; then retry areas + Cleaning.
-    if status_code == 2 or at_charger():
-        op_start = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Start", {})
-        attempts.append(op_start)
-        if op_start.get("ok") and not is_transport_error(op_start):
-            settle_start()
-            sync_row()
-            areas_prep = prepare_areas()
-            if areas_prep is not None and areas_prep.get("ok"):
-                settle_mode()
-            started = try_cleaning(verify=True)
-            attempts.append(started)
-            settle_start()
-            sync_row()
-            done = started_ok(started)
-            if done is not None:
-                return done
-        # Retry areas + Cleaning once more (InvalidInMode / leftover room pick).
-        if status_code in (2, 3):
-            areas_prep = prepare_areas()
-            if areas_prep is not None and areas_prep.get("ok"):
-                settle_mode()
-            started = try_cleaning(verify=True)
-            attempts.append(started)
-            settle_start()
-            sync_row()
-            done = started_ok(started)
-            if done is not None:
-                return done
+    # Leftover Cleaning/Mapping CurrentMode while Idle on the pad → reset to Idle,
+    # then SelectAreas + Cleaning again (no unsupported Operational Start).
+    if status_code in (2, 3) or at_charger():
+        try_idle()
+        settle_mode()
+        sync_row()
+        done, started = run_clean_pass()
+        if done is not None:
+            return done
+        # Resume only when paused — K11 accepts Resume but Charging+Resume → Error.
+        if str(row.get("vacuum_status") or "") == "Paused" or run_op() == OP_PAUSED:
+            resumed = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Resume", {})
+            attempts.append(resumed)
+            if resumed.get("ok") and not is_transport_error(resumed):
+                settle_start()
+                sync_row()
+                done = started_ok({**resumed, "ok": True})
+                if done is not None:
+                    return done
 
     if int(started.get("status") or 0) == 2 and at_charger():
         started = {
             **started,
-            "error": "Vacuum refused Matter start from the dock (generic failure)",
+            "error": f"Vacuum refused Matter start from the dock (generic failure) [matter v{AGENT_VERSION}]",
         }
     elif int(started.get("status") or 0) == 2:
         started = {
             **started,
-            "error": "Vacuum rejected ChangeToMode (generic failure)",
+            "error": f"Vacuum rejected ChangeToMode (generic failure) [matter v{AGENT_VERSION}]",
         }
     return finish(started)
 
