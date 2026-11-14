@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 70
+AGENT_VERSION = 71
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -6595,6 +6595,10 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 return rpc
             if on is not None:
                 patch = {"on": bool(rpc.get("on", on))}
+                if not patch["on"]:
+                    # Drop pulse RGB / level so UI cannot stay lit after Off.
+                    patch["brightness"] = 0
+                    patch["color_hex"] = ""
                 if rpc.get("system_mode") is not None:
                     patch["system_mode"] = rpc["system_mode"]
                 if rpc.get("heating_setpoint") is not None:
@@ -6650,7 +6654,10 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 level_payload,
             )
             if rpc.get("ok"):
-                patch_live_device(device_id, {"on": on, "brightness": pct}, sticky=True)
+                bright_patch: dict[str, Any] = {"on": on, "brightness": pct}
+                if not on or pct <= 0:
+                    bright_patch["color_hex"] = ""
+                patch_live_device(device_id, bright_patch, sticky=True)
                 rpc = {**rpc, "id": device_id, "on": on, "brightness": pct}
                 return rpc
             if is_unsupported_cluster(rpc):
@@ -6664,7 +6671,10 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     on=on,
                 )
                 if rpc.get("ok"):
-                    patch_live_device(device_id, {"on": on, "brightness": pct}, sticky=True)
+                    bright_patch = {"on": on, "brightness": pct}
+                    if not on or pct <= 0:
+                        bright_patch["color_hex"] = ""
+                    patch_live_device(device_id, bright_patch, sticky=True)
                     return {**rpc, "id": device_id, "on": on, "brightness": pct}
                 name = "On" if on else "Off"
                 onoff = device_command(node_id, endpoint, ON_OFF, name, {})

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.315] - 2026-11-14
+
+### Fixed
+- **Pulse still left lights green / yellow after the flash:** Sticky cache often treated the pulse RGB as the prior look, and a single Off after colour was ignored on Hue. Pulse now prefers a live look (and trusts “was off”), ignores restore colours that match the pulse hex, clears pulse chroma with colour-temp when resuming, and hard-offs with Level 0 retries when the light started off. Matter agent **v71** clears RGB sticky on Off.
+
 ## [4.0.314] - 2026-11-14
 
 ### Fixed
