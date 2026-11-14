@@ -425,6 +425,7 @@ The panel now includes a **Location Map** card (Leaflet) showing live robot GPS 
 
 - Base layers: **OpenStreetMap (Street)** and **Esri World Imagery (Satellite)**
 - Marker updates from `/api/status.php` every 5 seconds
+- While a plan is running (and on the way home), a shared lime **mow trail** paints where the robot has been — every open browser sees the same path; it clears when the mower is back on the charge pad
 - **Center on Yarbo** button (bottom-right on the map) recenters on the live GPS fix
 - Map shows a clear message when no valid fix is available
 
