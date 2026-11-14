@@ -43,8 +43,10 @@ function home_automations_tick(YarboHomeAutomations $engine, string $root): void
 {
     static $failStreak = 0;
     try {
-        $result = $engine->tick();
-        $engine->refreshUnifiIfDue(time(), 5);
+        // Powerwall/Yarbo keepalive first — a slow Home tick must not starve Tesla.
+        if ($engine->consumeRunnerNudge()) {
+            $engine->forcePowerwallDue();
+        }
         $engine->refreshPowerwallIfDue(time(), 12);
         $engine->refreshYarboIfDue(time(), 5);
         // Dock lights runs even when the Home module is off (outside tick()).
@@ -58,6 +60,8 @@ function home_automations_tick(YarboHomeAutomations $engine, string $root): void
                 fwrite(STDERR, 'home_automations: dock lights ' . $e->getMessage() . "\n");
             }
         }
+        $result = $engine->tick();
+        $engine->refreshUnifiIfDue(time(), 5);
         if (($result['ok'] ?? false) && ($result['fired'] ?? []) !== []) {
             $failStreak = 0;
             fwrite(STDERR, 'home_automations: fired ' . implode(',', $result['fired'])
@@ -128,5 +132,15 @@ while (true) {
     if (home_automations_sources_changed($watchFiles, $startedAt)) {
         exit(0);
     }
-    sleep(1);
+    // Status can nudge when Powerwall cache is stale — wake early instead of sleeping full second.
+    for ($i = 0; $i < 10; $i++) {
+        if (home_automations_sources_changed($watchFiles, $startedAt)) {
+            exit(0);
+        }
+        if ($engine->consumeRunnerNudge()) {
+            $engine->forcePowerwallDue();
+            break;
+        }
+        usleep(100000);
+    }
 }

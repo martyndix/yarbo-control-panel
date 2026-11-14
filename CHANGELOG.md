@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.296] - 2026-11-14
+
+### Fixed
+- **Powerwall stayed offline until the web UI reloaded:** status is cache-only (by design), so recovery must be in the background. The automations loop now refreshes Powerwall **before** Home `tick()`, retries transient Tesla HTTP errors, serializes token refresh with `powerwall-api.lock`, backs off 45s after a failed fetch (instead of pretending it succeeded), and a stale/offline cache from status nudges the runner to retry without calling Tesla in the browser request.
+
 ## [4.0.295] - 2026-11-14
 
 ### Added

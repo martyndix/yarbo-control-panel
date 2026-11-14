@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboErrors;
+use Yarbo\YarboHomeAutomations;
 use Yarbo\YarboHub;
 use Yarbo\YarboLymow;
 use Yarbo\YarboUnifi;
@@ -88,6 +89,18 @@ function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVest
             : null;
     } catch (Throwable $e) {
         $powerwall = ['ok' => false, 'online' => false, 'error' => $e->getMessage()];
+    }
+    // Cache-only status never calls Tesla — nudge the automations loop to recover.
+    if (
+        !$allowPowerwallRefresh
+        && is_array($powerwall)
+        && $hub->enabled(YarboHub::MODULE_POWERWALL)
+        && (empty($powerwall['online']) || !empty($powerwall['stale']))
+    ) {
+        try {
+            (new YarboHomeAutomations($root))->requestRunnerNudge();
+        } catch (Throwable) {
+        }
     }
 
     try {

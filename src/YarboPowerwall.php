@@ -323,48 +323,107 @@ final class YarboPowerwall
     /**
      * @return array<string, mixed>
      */
-    public function refresh(): array
+    public function apiLockPath(): string
     {
-        $config = $this->load();
+        return $this->projectRoot . '/data/powerwall-api.lock';
+    }
+
+    /**
+     * Serialize Tesla token refresh + live_status across vestaboard + automations.
+     *
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private function withApiLock(callable $fn): mixed
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return $fn();
+        }
+        $lock = fopen($this->apiLockPath(), 'c');
+        if ($lock === false) {
+            return $fn();
+        }
+        if (!flock($lock, LOCK_EX)) {
+            fclose($lock);
+
+            return $fn();
+        }
         try {
-            $payload = $config['transport'] === self::TRANSPORT_LOCAL
-                ? $this->fetchLocal($config)
-                : $this->fetchCloud($config);
-            $payload['ok'] = true;
-            $payload['online'] = true;
-            $payload['fetched_at'] = gmdate('c');
-            $this->writeCache($payload);
-            $this->save(['last_error' => '']);
-
-            return $payload;
-        } catch (\Throwable $e) {
-            $message = $e->getMessage();
-            $this->save(['last_error' => $message]);
-            $stale = $this->readCache(false);
-            if ($stale !== null && $this->readingStillUsable($stale)) {
-                $stale['ok'] = false;
-                $stale['online'] = true;
-                $stale['error'] = $message;
-
-                return $stale;
-            }
-
-            return [
-                'ok' => false,
-                'online' => false,
-                'source' => $config['transport'],
-                'error' => $message,
-            ];
+            return $fn();
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
         }
     }
 
-    public function refreshIfStale(): void
+    public function refresh(): array
+    {
+        return $this->withApiLock(function (): array {
+            $config = $this->load();
+            try {
+                $payload = $config['transport'] === self::TRANSPORT_LOCAL
+                    ? $this->fetchLocal($config)
+                    : $this->fetchCloud($config);
+                $payload['ok'] = true;
+                $payload['online'] = true;
+                $payload['fetched_at'] = gmdate('c');
+                $this->writeCache($payload);
+                $this->save(['last_error' => '']);
+
+                return $payload;
+            } catch (\Throwable $e) {
+                $message = $e->getMessage();
+                $this->save(['last_error' => $message]);
+                $stale = $this->readCache(false);
+                if ($stale !== null && $this->readingStillUsable($stale)) {
+                    $stale['ok'] = false;
+                    $stale['online'] = true;
+                    $stale['error'] = $message;
+
+                    return $stale;
+                }
+
+                return [
+                    'ok' => false,
+                    'online' => false,
+                    'source' => $config['transport'],
+                    'error' => $message,
+                ];
+            }
+        });
+    }
+
+    /**
+     * Refresh when cache is past TTL. Returns true when the reading is still online.
+     */
+    public function refreshIfStale(): bool
     {
         $hub = new YarboHub($this->projectRoot);
         if (!$hub->enabled(YarboHub::MODULE_POWERWALL)) {
-            return;
+            return true;
         }
-        $this->dashboardPayload();
+        $payload = $this->dashboardPayload(true);
+
+        return !empty($payload['online']);
+    }
+
+    /** True when HTTP errors should be retried (timeouts, 429, 5xx). */
+    public static function isTransientHttpError(string $message): bool
+    {
+        $m = strtolower($message);
+        if (str_contains($m, 'invalid_grant') || str_contains($m, 'refresh token')) {
+            return false;
+        }
+        if (str_contains($m, 'could not reach') || str_contains($m, 'timed out') || str_contains($m, 'timeout')) {
+            return true;
+        }
+        if (preg_match('/\bHTTP\s+(429|5\d\d)\b/i', $message) === 1) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -865,6 +924,29 @@ final class YarboPowerwall
      * @return array<string, mixed>
      */
     private function httpJson(string $method, string $url, ?array $body, ?array $headers, bool $insecure = false): array
+    {
+        $attempts = 3;
+        $last = null;
+        for ($i = 0; $i < $attempts; $i++) {
+            try {
+                return $this->httpJsonOnce($method, $url, $body, $headers, $insecure);
+            } catch (\Throwable $e) {
+                $last = $e;
+                if ($i >= $attempts - 1 || !self::isTransientHttpError($e->getMessage())) {
+                    throw $e;
+                }
+                usleep((200000 * ($i + 1))); // 0.2s, 0.4s
+            }
+        }
+        throw $last ?? new \RuntimeException('Could not reach Tesla / Powerwall.');
+    }
+
+    /**
+     * @param array<string, mixed>|null $body
+     * @param list<string>|null $headers
+     * @return array<string, mixed>
+     */
+    private function httpJsonOnce(string $method, string $url, ?array $body, ?array $headers, bool $insecure = false): array
     {
         $payload = $body !== null ? json_encode($body) : null;
         $headerList = ['Accept: application/json'];

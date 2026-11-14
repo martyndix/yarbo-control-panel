@@ -820,6 +820,41 @@ final class YarboHomeAutomations
         $this->writeState($state);
     }
 
+    public function runnerNudgePath(): string
+    {
+        return rtrim($this->projectRoot, '/') . '/data/home-automations.nudge';
+    }
+
+    /** Soft wake from status.php when Powerwall cache looks dead — no Tesla call in the request. */
+    public function requestRunnerNudge(): void
+    {
+        $dir = rtrim($this->projectRoot, '/') . '/data';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+        @file_put_contents($this->runnerNudgePath(), (string) time() . "\n", LOCK_EX);
+    }
+
+    public function consumeRunnerNudge(): bool
+    {
+        $path = $this->runnerNudgePath();
+        if (!is_file($path)) {
+            return false;
+        }
+        @unlink($path);
+
+        return true;
+    }
+
+    /** Clear the Powerwall due stamp so the next refreshPowerwallIfDue runs immediately. */
+    public function forcePowerwallDue(): void
+    {
+        $state = $this->loadState();
+        $state['powerwall_at'] = 0;
+        $state['powerwall_ok'] = false;
+        $this->writeState($state);
+    }
+
     public function refreshPowerwallIfDue(int $now, int $everySec = 12): void
     {
         $hub = new YarboHub($this->projectRoot);
@@ -828,14 +863,20 @@ final class YarboHomeAutomations
         }
         $state = $this->loadState();
         $at = (int) ($state['powerwall_at'] ?? 0);
-        if ($at > 0 && ($now - $at) < $everySec) {
+        $lastOk = !empty($state['powerwall_ok']);
+        // After a failed fetch, retry sooner than the normal 12s cadence (45s backoff).
+        $interval = $lastOk || $at === 0 ? $everySec : 45;
+        if ($at > 0 && ($now - $at) < $interval) {
             return;
         }
+        $ok = false;
         try {
-            (new YarboPowerwall($this->projectRoot))->refreshIfStale();
+            $ok = (new YarboPowerwall($this->projectRoot))->refreshIfStale();
         } catch (\Throwable) {
+            $ok = false;
         }
         $state['powerwall_at'] = $now;
+        $state['powerwall_ok'] = $ok;
         $this->writeState($state);
     }
 
