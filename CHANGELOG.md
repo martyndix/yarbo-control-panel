@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.310] - 2026-11-14
+
+### Fixed
+- **Vacuum Start still `Refuse to start mopping` / no mop rack with Vacuum selected (v66):** RvcCleanMode tags were wrong (`Vacuum` was `0x4000`, `Mop` was `0x4001`). Matter/CHIP defines **DeepClean=`0x4000`, Vacuum=`0x4001`, Mop=`0x4002`**. Start was treating Vacuum as mop and switching to DeepClean (or leaving mop CurrentMode), so Run Cleaning refused without a mop rack. Matter agent **v67**.
+
 ## [4.0.309] - 2026-11-14
 
 ### Fixed

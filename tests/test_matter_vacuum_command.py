@@ -34,8 +34,8 @@ def vacuum_node() -> dict:
             ],
             "1/84/1": 0,
             "1/85/0": [
-                {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4000}]},
-                {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
+                {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4001}]},
+                {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4002}]},
             ],
             "1/85/1": 0,
             "1/97/0": ["Cleaning"],
@@ -74,8 +74,8 @@ def s10_node() -> dict:
             ],
             "1/84/1": 2,
             "1/85/0": [
-                {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4000}]},
-                {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
+                {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4001}]},
+                {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4002}]},
             ],
             "1/85/1": 0,
             "1/97/0": ["Cleaning"],
@@ -177,7 +177,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 66, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 67, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -418,8 +418,8 @@ def main() -> int:
                 {"label": "Cleaning", "mode": 1, "modeTags": [{"value": 0x4001}]},
             ]},
             "1/85/0": {"value": [
-                {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4000}]},
-                {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
+                {"label": "Vacuum", "mode": 0, "modeTags": [{"value": 0x4001}]},
+                {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4002}]},
             ]},
             "1/97/4": 0,
             "2/336/0": {"value": [
@@ -877,7 +877,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
-    assert "matter v66" in str(aborted.get("error") or ""), aborted
+    assert "matter v67" in str(aborted.get("error") or ""), aborted
 
     calls.clear()
     # Alejandro (K11+): actively Charging. Cleaning GenericFailure — retry (already Idle).
@@ -1248,11 +1248,18 @@ def main() -> int:
     assert select_areas_payloads(full_fail_cmds, agent) == [
         [1, 2, 3], [1, 2, 3],
     ], full_fail_cmds
-    assert "matter v66" in str(full_fail.get("error") or ""), full_fail
+    assert "matter v67" in str(full_fail.get("error") or ""), full_fail
 
-    # CLEAN_DEEP is suction intensity, not Vac+mop.
+    # Spec tags: DeepClean=0x4000, Vacuum=0x4001, Mop=0x4002.
+    assert agent.CLEAN_DEEP == 0x4000 and agent.CLEAN_VACUUM == 0x4001 and agent.CLEAN_MOP == 0x4002
     deep_opt = {"mode": 2, "label": "Deep", "tags": [agent.CLEAN_DEEP]}
+    vac_opt = {"mode": 0, "label": "Vacuum", "tags": [agent.CLEAN_VACUUM]}
+    mop_opt = {"mode": 1, "label": "Mop", "tags": [agent.CLEAN_MOP]}
     assert agent.vacuum_clean_kind(deep_opt) == "vacuum", deep_opt
+    assert agent.vacuum_clean_kind(vac_opt) == "vacuum", vac_opt
+    assert agent.vacuum_clean_kind(mop_opt) == "mop", mop_opt
+    # Prefer Vacuum tag over DeepClean when both exist (swapped-constant regression).
+    assert agent.pick_vacuum_clean_option([deep_opt, vac_opt, mop_opt]) == vac_opt
     assert agent.pick_vacuum_clean_option([
         {"mode": 3, "label": "Vac & mop", "tags": [agent.CLEAN_VACUUM, agent.CLEAN_MOP]},
         deep_opt,
@@ -1304,6 +1311,56 @@ def main() -> int:
     assert mop_pad_attrs["1/85/1"] == 0, mop_pad_attrs
 
     calls.clear()
+    # Spec order DeepClean/Vacuum/Mop — leave mop for Vacuum tag, never DeepClean.
+    spec_attrs = dict(vacuum_node()["attributes"])
+    spec_attrs["1/85/0"] = [
+        {"label": "Deep Clean", "mode": 0, "modeTags": [{"value": 0x4000}]},
+        {"label": "Vacuum Only", "mode": 1, "modeTags": [{"value": 0x4001}]},
+        {"label": "Mop Only", "mode": 2, "modeTags": [{"value": 0x4002}]},
+    ]
+    spec_attrs["1/85/1"] = 2
+    spec_attrs["1/84/1"] = 0
+    spec_attrs["1/97/4"] = 0
+
+    def spec_tags_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": spec_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": spec_attrs}
+        if command == "device_command":
+            apply_change_to_mode(agent, spec_attrs, args)
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    spec_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [{
+        "node_id": 40,
+        "available": True,
+        "attributes": spec_attrs,
+    }]})}.get("40:1") or {}
+    agent.matter_rpc = spec_tags_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in spec_row.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    from_spec = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "clean_mode": "vacuum",
+        "areas": [3],
+    })
+    assert from_spec.get("ok") is True, from_spec
+    spec_cmds = [args for command, args in calls if command == "device_command"]
+    spec_clean = [
+        (c.get("payload") or {}).get("newMode")
+        for c in spec_cmds
+        if c.get("cluster_id") == agent.RVC_CLEAN
+    ]
+    assert spec_clean == [1], (spec_clean, spec_cmds)
+    assert spec_attrs["1/85/1"] == 1, spec_attrs
+    assert "mop" not in str(from_spec.get("error") or "").lower(), from_spec
+
+    calls.clear()
     # Vac+mop / mop without a mop rack must surface StatusText, not Run Cleaning.
     rack_attrs = dict(vacuum_node()["attributes"])
     rack_attrs["1/85/1"] = 0
@@ -1348,7 +1405,7 @@ def main() -> int:
     assert no_rack.get("ok") is False, no_rack
     err = str(no_rack.get("error") or "")
     assert "mop rack" in err.lower(), no_rack
-    assert "matter v66" in err, no_rack
+    assert "matter v67" in err, no_rack
     rack_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("cluster_id") == agent.RVC_RUN for c in rack_cmds), rack_cmds
 
@@ -1356,9 +1413,9 @@ def main() -> int:
     # CurrentMode Deep (CLEAN_DEEP) must not hard-abort as "mop mode".
     deep_attrs = dict(vacuum_node()["attributes"])
     deep_attrs["1/85/0"] = [
-        {"label": "Quiet", "mode": 0, "modeTags": [{"value": 0x4000}]},
-        {"label": "Deep", "mode": 2, "modeTags": [{"value": 0x4002}]},
-        {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4001}]},
+        {"label": "Quiet", "mode": 0, "modeTags": [{"value": 0x4001}]},
+        {"label": "Deep", "mode": 2, "modeTags": [{"value": 0x4000}]},
+        {"label": "Mop", "mode": 1, "modeTags": [{"value": 0x4002}]},
     ]
     deep_attrs["1/85/1"] = 2
     deep_attrs["1/84/1"] = 0
@@ -1501,7 +1558,7 @@ def main() -> int:
 
     combo = vacuum_node()
     combo["attributes"]["1/85/0"].append(
-        {"label": "Vac + mop", "mode": 2, "modeTags": [{"value": 0x4000}, {"value": 0x4001}]}
+        {"label": "Vac + mop", "mode": 2, "modeTags": [{"value": 0x4001}, {"value": 0x4002}]}
     )
     combo["attributes"]["1/85/1"] = 2
     combo["attributes"]["1/84/1"] = 1
@@ -1559,9 +1616,9 @@ def main() -> int:
             {"label": "Cleaning", "mode": 1, "tags": [0x4001]},
         ],
         "clean_modes": [
-            {"label": "Vacuum", "mode": 0, "tags": [0x4000]},
-            {"label": "Mop", "mode": 1, "tags": [0x4001]},
-            {"label": "Vac + mop", "mode": 2, "tags": [0x4000, 0x4001]},
+            {"label": "Vacuum", "mode": 0, "tags": [0x4001]},
+            {"label": "Mop", "mode": 1, "tags": [0x4002]},
+            {"label": "Vac + mop", "mode": 2, "tags": [0x4001, 0x4002]},
         ],
     }]
     agent.apply_attribute_event([40, "1/97/5", {"errorStateID": 0x44}])

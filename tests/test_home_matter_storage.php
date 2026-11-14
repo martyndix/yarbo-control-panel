@@ -328,8 +328,8 @@ $vacuumNode = [
         ],
         '1/84/1' => 0,
         '1/85/0' => [
-            ['label' => 'Vacuum', 'mode' => 0, 'modeTags' => [['value' => 0x4000]]],
-            ['label' => 'Mop', 'mode' => 1, 'modeTags' => [['value' => 0x4001]]],
+            ['label' => 'Vacuum', 'mode' => 0, 'modeTags' => [['value' => 0x4001]]],
+            ['label' => 'Mop', 'mode' => 1, 'modeTags' => [['value' => 0x4002]]],
         ],
         '1/85/1' => 0,
         '1/97/0' => ['Cleaning'],
@@ -381,7 +381,7 @@ $comboNode['node_id'] = 27;
 $comboNode['attributes']['1/85/0'][] = [
     'label' => 'Vac + mop',
     'mode' => 2,
-    'modeTags' => [['value' => 0x4000], ['value' => 0x4001]],
+    'modeTags' => [['value' => 0x4001], ['value' => 0x4002]],
 ];
 $comboNode['attributes']['1/85/1'] = 2;
 $comboRow = null;

@@ -37,9 +37,10 @@ final class YarboMatterFabric
     private const RUN_IDLE = 0x4000;
     private const RUN_CLEANING = 0x4001;
     private const RUN_MAPPING = 0x4002;
-    private const CLEAN_VACUUM = 0x4000;
-    private const CLEAN_MOP = 0x4001;
-    private const CLEAN_DEEP = 0x4002;
+    // RvcCleanMode ModeTag (Matter / CHIP XML) — not the same as RvcRunMode tags.
+    private const CLEAN_DEEP = 0x4000;
+    private const CLEAN_VACUUM = 0x4001;
+    private const CLEAN_MOP = 0x4002;
     private const CLEAN_VACUUM_THEN_MOP = 0x4003;
     private const OP_STOPPED = 0;
     private const OP_RUNNING = 1;
@@ -1056,7 +1057,8 @@ final class YarboMatterFabric
         $label = strtolower(str_replace(['&', '+'], ' ', (string) ($option['label'] ?? '')));
         $hasVacTag = in_array(self::CLEAN_VACUUM, $tags, true);
         $hasMopTag = in_array(self::CLEAN_MOP, $tags, true);
-        $hasComboTag = in_array(self::CLEAN_VACUUM_THEN_MOP, $tags, true) || in_array(self::CLEAN_DEEP, $tags, true);
+        $hasComboTag = in_array(self::CLEAN_VACUUM_THEN_MOP, $tags, true);
+        $hasDeepTag = in_array(self::CLEAN_DEEP, $tags, true);
         $hasVacWord = str_contains($label, 'vac') || str_contains($label, 'sweep');
         $hasMopWord = str_contains($label, 'mop');
         if ($hasComboTag || ($hasVacTag && $hasMopTag) || ($hasVacWord && $hasMopWord)) {
@@ -1064,6 +1066,9 @@ final class YarboMatterFabric
         }
         if (($hasMopTag && !$hasVacTag) || ($hasMopWord && !$hasVacWord)) {
             return 'mop';
+        }
+        if ($hasVacTag || $hasVacWord || $hasDeepTag) {
+            return 'vacuum';
         }
 
         return 'vacuum';

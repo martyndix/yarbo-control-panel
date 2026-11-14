@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 66
+AGENT_VERSION = 67
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -89,9 +89,10 @@ BAT_CHARGE_IS_NOT_CHARGING = 3
 RUN_IDLE = 0x4000
 RUN_CLEANING = 0x4001
 RUN_MAPPING = 0x4002
-CLEAN_VACUUM = 0x4000
-CLEAN_MOP = 0x4001
-CLEAN_DEEP = 0x4002
+# RvcCleanMode ModeTag (Matter / CHIP XML) — not the same as RvcRunMode tags.
+CLEAN_DEEP = 0x4000
+CLEAN_VACUUM = 0x4001
+CLEAN_MOP = 0x4002
 CLEAN_VACUUM_THEN_MOP = 0x4003
 OP_STOPPED = 0
 OP_RUNNING = 1
@@ -4553,8 +4554,8 @@ def pick_mode(options: list[dict[str, Any]], tags: tuple[int, ...], words: tuple
 def mode_is_mapping(option: dict[str, Any] | None, *, run_mode: bool = True) -> bool:
     """True for RVC *Run* Mapping modes.
 
-    Clean Mode uses the same numeric tag 0x4002 for DeepClean suction — never
-    treat Clean Mode Deep as Mapping (that blocked vacuum Start on v65).
+    Clean Mode Mop is also 0x4002 (same number as Run Mapping) — never treat
+    Clean Mode options via the Run Mapping tag.
     """
     if not option:
         return False
@@ -5099,8 +5100,7 @@ def vacuum_clean_kind(option: dict[str, Any] | None) -> str:
     label = str(option.get("label") or "").lower().replace("&", " ").replace("+", " ")
     has_vac_tag = mode_has_tag(option, CLEAN_VACUUM)
     has_mop_tag = mode_has_tag(option, CLEAN_MOP)
-    # CLEAN_DEEP (0x4002) is suction intensity, not Vac+mop. Only VacuumThenMop
-    # (0x4003) or vacuum+mop tags/words mean a mopping clean mode.
+    # Spec: DeepClean=0x4000, Vacuum=0x4001, Mop=0x4002, VacuumThenMop=0x4003.
     has_combo_tag = mode_has_tag(option, CLEAN_VACUUM_THEN_MOP)
     has_deep_tag = mode_has_tag(option, CLEAN_DEEP)
     has_vac_word = any(word in label for word in ("vac", "sweep"))
@@ -5109,7 +5109,10 @@ def vacuum_clean_kind(option: dict[str, Any] | None) -> str:
         return "vacuum_mop"
     if (has_mop_tag and not has_vac_tag) or (has_mop_word and not has_vac_word):
         return "mop"
-    if has_vac_tag or has_vac_word or has_deep_tag:
+    if has_vac_tag or has_vac_word:
+        return "vacuum"
+    # DeepClean alone is intensity (suction), not mopping.
+    if has_deep_tag:
         return "vacuum"
     if any(word in label for word in ("quiet", "auto", "standard", "normal", "quick", "strong", "turbo", "deep")):
         return "vacuum"
@@ -5117,10 +5120,24 @@ def vacuum_clean_kind(option: dict[str, Any] | None) -> str:
 
 
 def pick_vacuum_clean_option(clean_modes: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Best Clean Mode for a vacuum-only Start — never mop / Vac+mop."""
+    """Best Clean Mode for a vacuum-only Start — prefer Vacuum tag, never mop."""
+    # Prefer the Vacuum ModeTag (0x4001). Never DeepClean-first — that used to
+    # steal Vacuum's old wrong constant and trigger mop-rack refusals.
+    tagged = pick_mode(clean_modes, (CLEAN_VACUUM,), ("vacuum", "vac", "sweep"))
+    if (
+        tagged
+        and not mode_is_mapping(tagged, run_mode=False)
+        and vacuum_clean_kind(tagged) == "vacuum"
+    ):
+        return tagged
     only = pick_clean_kind(clean_modes, "vacuum")
     if only and not mode_is_mapping(only, run_mode=False):
         return only
+    for item in clean_modes:
+        if mode_is_mapping(item, run_mode=False):
+            continue
+        if vacuum_clean_kind(item) == "vacuum" and mode_has_tag(item, CLEAN_VACUUM):
+            return item
     for item in clean_modes:
         if mode_is_mapping(item, run_mode=False):
             continue
@@ -5885,8 +5902,9 @@ def set_vacuum_command(
 
         Vac/Mop chips are preference-only, so Matter may still be in mop/Vac+mop.
         Starting while mop-mode is active → "Refuse to start mopping" without a
-        mop rack. Never select mop/combo when the user wants vacuum. CLEAN_DEEP is
-        suction intensity, not Vac+mop.
+        mop rack. Prefer Vacuum tag 0x4001 (never DeepClean 0x4000 first — that
+        was the swapped-constant bug that left mop CurrentMode and mop-rack
+        refusals).
         """
         if not clean_modes:
             return None
