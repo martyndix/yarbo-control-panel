@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 64
+AGENT_VERSION = 65
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -5835,37 +5835,75 @@ def set_vacuum_command(
         attempts.append(rpc)
         return rpc
 
-    def prepare_clean_mode() -> None:
-        """Set RVC Clean Mode before Run Cleaning on the pad.
+    def live_clean_kind() -> str:
+        try:
+            current = int(row["vacuum_clean_mode"]) if row.get("vacuum_clean_mode") is not None else None
+        except (TypeError, ValueError):
+            current = None
+        if current is None:
+            return str(row.get("vacuum_clean") or "")
+        option = next((item for item in clean_modes if int(item.get("mode") or -1) == current), None)
+        return vacuum_clean_kind(option) or str(row.get("vacuum_clean") or "")
 
-        K11+ Run Cleaning GenericFailure if Clean Mode/suction is unset (Hubitat
-        / pre-Apple path). Vac/Mop chips stay preference-only for the tile;
-        Start applies the matching Clean Mode here and ignores soft refusals.
+    def prepare_clean_mode() -> dict[str, Any] | None:
+        """Set RVC Clean Mode before Run Cleaning. Returns an error to abort Start.
+
+        Vac/Mop chips are preference-only, so Matter may still be in mop/Vac+mop.
+        Starting while mop-mode is active → "Refuse to start mopping" without a
+        mop rack. Never fall back to a mop/combo mode when the user wants vacuum.
         """
-        if not at_charger() or not clean_modes:
-            return
+        if not clean_modes:
+            return None
         kind = (want_clean or "vacuum").strip().lower()
         if kind in ("vac",):
             kind = "vacuum"
+        if kind in ("both",):
+            kind = "vacuum_mop"
         option = None
         if kind == "mop":
             option = pick_clean_kind(clean_modes, "mop")
-        elif kind in ("vacuum_mop", "both"):
+        elif kind == "vacuum_mop":
             option = pick_clean_kind(clean_modes, "vacuum_mop") or pick_clean_kind(clean_modes, "mop")
         else:
-            option = pick_clean_kind(clean_modes, "vacuum") or pick_mode(
-                clean_modes,
-                (CLEAN_VACUUM,),
-                ("auto", "quick", "vacuum", "standard", "normal"),
-            )
+            # Vacuum only — never pick Vac+mop via CLEAN_VACUUM tag fallback.
+            option = pick_clean_kind(clean_modes, "vacuum")
+            if option is None:
+                for item in clean_modes:
+                    if vacuum_clean_kind(item) == "vacuum" and not mode_is_mapping(item):
+                        option = item
+                        break
+            if option is None:
+                # Suction-only labels (Quiet/Auto/…) with no mop tag.
+                option = next(
+                    (
+                        item
+                        for item in clean_modes
+                        if vacuum_clean_kind(item) == ""
+                        and not mode_has_tag(item, CLEAN_MOP)
+                        and not mode_has_tag(item, CLEAN_VACUUM_THEN_MOP)
+                        and not mode_is_mapping(item)
+                        and "mop" not in str(item.get("label") or "").lower()
+                    ),
+                    None,
+                )
         if option is None or mode_is_mapping(option):
-            return
+            if kind == "vacuum" and live_clean_kind() in ("mop", "vacuum_mop"):
+                return {
+                    "ok": False,
+                    "error": "Robot is in mop mode and has no vacuum-only Clean Mode to switch to",
+                }
+            return None
+        if kind == "vacuum" and vacuum_clean_kind(option) in ("mop", "vacuum_mop"):
+            return {
+                "ok": False,
+                "error": "Refusing to start mopping without a mop rack — pick Vacuum",
+            }
         try:
             current = int(row["vacuum_clean_mode"]) if row.get("vacuum_clean_mode") is not None else None
         except (TypeError, ValueError):
             current = None
         if current is not None and current == int(option["mode"]):
-            return
+            return None
         rpc = vacuum_change_mode(
             node_id,
             rvc_ep,
@@ -5873,14 +5911,27 @@ def set_vacuum_command(
             int(option["mode"]),
             device_id=device_id,
             row=row,
-            verify=False,
+            verify=True,
+            timed_ms=3000 if at_charger() else None,
         )
         attempts.append(rpc)
         if is_transport_error(rpc):
-            return
-        if rpc.get("ok"):
-            settle_mode()
-            sync_row()
+            return rpc
+        settle_mode()
+        sync_row()
+        now = live_clean_kind()
+        if kind == "vacuum" and now in ("mop", "vacuum_mop"):
+            detail = str(rpc.get("error") or "").strip()
+            return {
+                "ok": False,
+                "error": detail
+                or "Could not switch to vacuum-only mode (robot still set to mop)",
+                "status": rpc.get("status"),
+            }
+        if kind in ("mop", "vacuum_mop") and not rpc.get("ok"):
+            # Surface mop-rack StatusText instead of a vague Run Cleaning failure.
+            return rpc
+        return None
 
     def started_ok(rpc: dict[str, Any]) -> dict[str, Any] | None:
         if not rpc.get("ok"):
@@ -5977,9 +6028,14 @@ def set_vacuum_command(
                 break
         return None, last
 
-    # Clean Mode first on the pad, then room IDs, then timed Cleaning.
-    # Never Mapping. No Operational Start (K11+ only Pause/Resume/GoHome).
-    prepare_clean_mode()
+    # Clean Mode first (leave mop/Vac+mop when user wants Vacuum), then room
+    # IDs, then timed Cleaning. Never Mapping. No Operational Start (K11+).
+    clean_err = prepare_clean_mode()
+    if clean_err is not None:
+        if is_transport_error(clean_err):
+            return clean_err
+        detail = str(clean_err.get("error") or "Could not set clean mode")
+        return finish({**clean_err, "ok": False, "error": f"{detail} [matter v{AGENT_VERSION}]"})
     done, started = try_strategies()
     if done is not None:
         return done
@@ -5990,14 +6046,24 @@ def set_vacuum_command(
         try_idle()
         settle_mode()
         sync_row()
-        prepare_clean_mode()
+        clean_err = prepare_clean_mode()
+        if clean_err is not None:
+            if is_transport_error(clean_err):
+                return clean_err
+            detail = str(clean_err.get("error") or "Could not set clean mode")
+            return finish({**clean_err, "ok": False, "error": f"{detail} [matter v{AGENT_VERSION}]"})
         done, started = try_strategies()
         if done is not None:
             return done
     elif status_code in (2, 3) or still_docked():
         # Already Idle: one more pass (no no-op Idle ChangeToMode).
         settle_mode()
-        prepare_clean_mode()
+        clean_err = prepare_clean_mode()
+        if clean_err is not None:
+            if is_transport_error(clean_err):
+                return clean_err
+            detail = str(clean_err.get("error") or "Could not set clean mode")
+            return finish({**clean_err, "ok": False, "error": f"{detail} [matter v{AGENT_VERSION}]"})
         done, started = try_strategies()
         if done is not None:
             return done

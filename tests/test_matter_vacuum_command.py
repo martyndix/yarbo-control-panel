@@ -177,7 +177,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 64, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 65, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -877,7 +877,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
-    assert "matter v64" in str(aborted.get("error") or ""), aborted
+    assert "matter v65" in str(aborted.get("error") or ""), aborted
 
     calls.clear()
     # Alejandro (K11+): actively Charging. Cleaning GenericFailure — retry (already Idle).
@@ -1248,7 +1248,101 @@ def main() -> int:
     assert select_areas_payloads(full_fail_cmds, agent) == [
         [1, 2, 3], [1, 2, 3],
     ], full_fail_cmds
-    assert "matter v64" in str(full_fail.get("error") or ""), full_fail
+    assert "matter v65" in str(full_fail.get("error") or ""), full_fail
+
+    calls.clear()
+    # Matter still in Mop while UI wants Vacuum — switch Clean Mode before Run Cleaning.
+    mop_pad_attrs = dict(vacuum_node()["attributes"])
+    mop_pad_attrs["1/85/1"] = 1
+    mop_pad_attrs["1/84/1"] = 0
+    mop_pad_attrs["1/97/4"] = 0
+
+    def mop_to_vac_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": mop_pad_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": mop_pad_attrs}
+        if command == "device_command":
+            apply_change_to_mode(agent, mop_pad_attrs, args)
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    mop_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [{
+        "node_id": 40,
+        "available": True,
+        "attributes": mop_pad_attrs,
+    }]})}.get("40:1") or {}
+    agent.matter_rpc = mop_to_vac_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in mop_row.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    from_mop = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "clean_mode": "vacuum",
+        "areas": [3],
+    })
+    assert from_mop.get("ok") is True, from_mop
+    mop_cmds = [args for command, args in calls if command == "device_command"]
+    clean_modes_sent = [
+        (c.get("payload") or {}).get("newMode")
+        for c in mop_cmds
+        if c.get("cluster_id") == agent.RVC_CLEAN
+    ]
+    assert clean_modes_sent == [0], mop_cmds
+    assert select_areas_payloads(mop_cmds, agent) == [[3]], mop_cmds
+    assert mop_pad_attrs["1/85/1"] == 0, mop_pad_attrs
+
+    calls.clear()
+    # Vac+mop / mop without a mop rack must surface StatusText, not Run Cleaning.
+    rack_attrs = dict(vacuum_node()["attributes"])
+    rack_attrs["1/85/1"] = 0
+    rack_attrs["1/84/1"] = 0
+    rack_attrs["1/97/4"] = 0
+
+    def mop_rack_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": rack_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": rack_attrs}
+        if command == "device_command":
+            if args.get("cluster_id") == agent.RVC_CLEAN:
+                return {
+                    "ok": True,
+                    "result": {
+                        "0": 2,
+                        "1": "Refuse to start mopping. The robot is not equipped with a mop rack.",
+                    },
+                }
+            apply_change_to_mode(agent, rack_attrs, args)
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    rack_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [{
+        "node_id": 40,
+        "available": True,
+        "attributes": rack_attrs,
+    }]})}.get("40:1") or {}
+    agent.matter_rpc = mop_rack_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in rack_row.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    no_rack = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "clean_mode": "mop",
+        "areas": "all",
+    })
+    assert no_rack.get("ok") is False, no_rack
+    err = str(no_rack.get("error") or "")
+    assert "mop rack" in err.lower(), no_rack
+    assert "matter v65" in err, no_rack
+    rack_cmds = [args for command, args in calls if command == "device_command"]
+    assert not any(c.get("cluster_id") == agent.RVC_RUN for c in rack_cmds), rack_cmds
 
     agent._live_devices = [{
         "id": "40:1",

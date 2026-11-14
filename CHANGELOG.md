@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.308] - 2026-11-14
+
+### Fixed
+- **Vacuum Start `Refuse to start mopping` / no mop rack with Vacuum selected:** Vac/Mop chips are preference-only, so Matter could still be in mop/Vac+mop. Start now forces a **verified vacuum-only** Clean Mode before Run Cleaning (never falls back to Vac+mop via the Vacuum tag), and surfaces mop-rack StatusText without attempting Run Cleaning when mop is requested. Matter agent **v65**.
+
 ## [4.0.307] - 2026-11-14
 
 ### Fixed
