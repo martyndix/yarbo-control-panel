@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 67
+AGENT_VERSION = 68
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -4860,7 +4860,18 @@ def vacuum_error_is_service(text: Any) -> bool:
 
 def vacuum_error_is_real(text: Any) -> bool:
     s = str(text or "").strip().lower()
-    if s in ("", "0", "error 0", "error (0)", "noerror", "no error", "none"):
+    if s in (
+        "",
+        "0",
+        "error 0",
+        "error (0)",
+        "[0]",
+        "[]",
+        "error ([0])",
+        "noerror",
+        "no error",
+        "none",
+    ):
         return False
     if vacuum_error_is_service(text):
         return False
@@ -5425,7 +5436,23 @@ def parse_operational_error(raw: Any) -> str:
     current = unwrap_attr(raw)
     if current in (None, 0, "0"):
         return ""
-    if isinstance(current, (int, float)):
+    # Matter ErrorStateStruct is often a list/tuple: [errorStateID, label, details].
+    # SwitchBot leaves the dock with OperationalState=Error and [0] (NoError).
+    if isinstance(current, (list, tuple)):
+        if not current:
+            return ""
+        try:
+            code = int(current[0]) if current[0] is not None else 0
+        except (TypeError, ValueError):
+            code = 0
+        label = ""
+        if len(current) > 1 and current[1] is not None:
+            label = str(current[1]).strip()
+        if code == 0:
+            return ""
+        if label:
+            return label
+    elif isinstance(current, (int, float)):
         code = int(current)
     elif isinstance(current, dict):
         val = dict_field(

@@ -177,7 +177,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 67, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 68, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -286,6 +286,59 @@ def main() -> int:
     noerr = {d["id"]: d for d in agent.flatten_nodes({"nodes": [noerror_node]})}.get("40:1") or {}
     if noerr.get("vacuum_status") == "Error":
         raise SystemExit(f"NoError should not show Error, got {noerr}")
+    # List-form ErrorStateStruct [0] is NoError (SwitchBot leaving the dock).
+    assert agent.parse_operational_error([0]) == "", agent.parse_operational_error([0])
+    assert agent.parse_operational_error({"value": [0]}) == ""
+    assert agent.vacuum_error_is_real("[0]") is False
+    assert agent.vacuum_error_is_real("error ([0])") is False
+    list_noerr_node = vacuum_node()
+    list_noerr_node["attributes"]["1/97/4"] = 3
+    list_noerr_node["attributes"]["1/97/5"] = [0]
+    list_noerr_node["attributes"]["1/84/1"] = 1
+    list_noerr = {d["id"]: d for d in agent.flatten_nodes({"nodes": [list_noerr_node]})}.get("40:1") or {}
+    if list_noerr.get("vacuum_status") == "Error":
+        raise SystemExit(f"list NoError [0] should not show Error, got {list_noerr}")
+    if list_noerr.get("vacuum_error"):
+        raise SystemExit(f"list NoError should clear vacuum_error, got {list_noerr.get('vacuum_error')}")
+    # Start settle: leaving dock with Error+[0] must still return ok (no Vacuum error ([0]) toast).
+    leave_attrs = dict(vacuum_node()["attributes"])
+    leave_attrs["1/84/1"] = 0
+    leave_attrs["1/97/4"] = 0
+    leave_attrs["1/97/5"] = [0]
+
+    def leave_dock_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": leave_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": leave_attrs}
+        if command == "device_command":
+            apply_change_to_mode(agent, leave_attrs, args)
+            if args.get("cluster_id") == agent.RVC_RUN:
+                leave_attrs["1/97/4"] = 3
+                leave_attrs["1/97/5"] = [0]
+                leave_attrs["1/84/1"] = 1
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    leave_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [{
+        "node_id": 40,
+        "available": True,
+        "attributes": leave_attrs,
+    }]})}.get("40:1") or {}
+    agent.matter_rpc = leave_dock_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in leave_row.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    left = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "clean_mode": "vacuum",
+        "areas": "all",
+    })
+    assert left.get("ok") is True, left
+    assert "Vacuum error" not in str(left.get("error") or ""), left
+    assert "[0]" not in str(left.get("error") or ""), left
     returning_node = vacuum_node()
     returning_node["attributes"]["1/97/4"] = 0x40
     returning_node["attributes"]["1/84/1"] = 0
@@ -877,7 +930,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
-    assert "matter v67" in str(aborted.get("error") or ""), aborted
+    assert "matter v68" in str(aborted.get("error") or ""), aborted
 
     calls.clear()
     # Alejandro (K11+): actively Charging. Cleaning GenericFailure — retry (already Idle).
@@ -1248,7 +1301,7 @@ def main() -> int:
     assert select_areas_payloads(full_fail_cmds, agent) == [
         [1, 2, 3], [1, 2, 3],
     ], full_fail_cmds
-    assert "matter v67" in str(full_fail.get("error") or ""), full_fail
+    assert "matter v68" in str(full_fail.get("error") or ""), full_fail
 
     # Spec tags: DeepClean=0x4000, Vacuum=0x4001, Mop=0x4002.
     assert agent.CLEAN_DEEP == 0x4000 and agent.CLEAN_VACUUM == 0x4001 and agent.CLEAN_MOP == 0x4002
@@ -1405,7 +1458,7 @@ def main() -> int:
     assert no_rack.get("ok") is False, no_rack
     err = str(no_rack.get("error") or "")
     assert "mop rack" in err.lower(), no_rack
-    assert "matter v67" in err, no_rack
+    assert "matter v68" in err, no_rack
     rack_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("cluster_id") == agent.RVC_RUN for c in rack_cmds), rack_cmds
 

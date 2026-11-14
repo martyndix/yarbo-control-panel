@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.311] - 2026-11-14
+
+### Fixed
+- **Vacuum Start toast `Vacuum error ([0])` after the robot already left the dock:** SwitchBot briefly reports OperationalState Error with OperationalError list `[0]` (NoError). That string was treated as a real fault and the Start response failed even though Cleaning had begun. List-form NoError is ignored again. Matter agent **v68**.
+
 ## [4.0.310] - 2026-11-14
 
 ### Fixed
