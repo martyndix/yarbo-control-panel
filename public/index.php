@@ -121,10 +121,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 ?>
     <main class="container">
         <header class="app-header">
+            <div class="app-header-top">
             <div>
                 <h1 id="panel-title"><?= $panelTitleSafe ?></h1>
                 <p class="robot-name hidden" id="device-name"></p>
-                <nav class="module-switcher hidden" id="module-switcher" aria-label="Modules"></nav>
             </div>
             <div class="header-actions">
                 <div id="radio-open-wrap" class="header-action-wrap hidden">
@@ -174,6 +174,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     ></span>
                 </div>
             </div>
+            </div>
+            <nav class="module-switcher hidden" id="module-switcher" aria-label="Modules"></nav>
         </header>
 
         <section id="error-banner" class="banner error hidden" role="alert"></section>
@@ -784,6 +786,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <button type="button" class="btn btn-secondary btn-compact" id="auto-geo">Use this panel</button>
                     </div>
                 </div>
+                <div class="auto-editor-layout">
                 <div class="auto-builder">
                     <section class="auto-drop" id="auto-when" data-auto-zone="when" aria-label="When">
                         <h3 class="settings-subtitle">When</h3>
@@ -860,6 +863,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         </div>
                     </div>
                     <div id="auto-tray" class="auto-tray"></div>
+                </div>
                 </div>
                 <div class="auto-editor-actions">
                     <button type="button" class="btn btn-secondary" id="auto-cancel">Cancel</button>

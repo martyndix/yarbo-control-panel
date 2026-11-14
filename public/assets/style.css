@@ -81,17 +81,24 @@ header h1 {
 
 .app-header {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+    margin-bottom: 1.25rem;
+}
+
+.app-header-top {
+    display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1.25rem;
 }
 
 .module-switcher {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    margin-top: 0.65rem;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+    width: 100%;
 }
 
 .module-switcher-btn {
@@ -99,14 +106,34 @@ header h1 {
     background: var(--surface);
     color: var(--text);
     border-radius: 999px;
-    padding: 0.25rem 0.7rem;
-    font-size: 0.85rem;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.82rem;
     cursor: pointer;
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .module-switcher-btn.is-active {
     border-color: var(--accent);
     background: rgba(61, 154, 95, 0.15);
+}
+
+@media (min-width: 721px) {
+    .module-switcher {
+        flex-wrap: wrap;
+        width: auto;
+        align-self: flex-start;
+    }
+
+    .module-switcher-btn {
+        flex: 0 0 auto;
+        padding: 0.25rem 0.7rem;
+        font-size: 0.85rem;
+    }
 }
 
 .vestaboard-card-header {
@@ -5106,9 +5133,36 @@ button.unifi-live-open:focus-visible img {
     display: none;
 }
 
+.auto-editor-layout {
+    display: grid;
+    gap: 1rem;
+}
+
 .auto-builder {
     display: grid;
     gap: 0.85rem;
+    min-width: 0;
+}
+
+@media (min-width: 960px) {
+    .auto-editor-layout {
+        grid-template-columns: minmax(0, 1fr) minmax(17rem, 23rem);
+        gap: 1rem 1.25rem;
+        align-items: start;
+    }
+
+    .auto-tray-wrap {
+        position: sticky;
+        top: 0.75rem;
+        align-self: start;
+        max-height: calc(100vh - 5.5rem);
+        overflow: auto;
+        padding-bottom: 0.5rem;
+    }
+
+    .auto-editor-layout .auto-tray {
+        max-height: none;
+    }
 }
 
 .auto-drop {

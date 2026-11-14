@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.291] - 2026-11-14
+
+### Changed
+- **Mobile module tabs:** Yarbo / Powerwall / Lymow / Home / UniFi sit on one compact row instead of stacking and eating the first screen.
+- **Automations editor (desktop):** the Add devices tray sits in a sticky right-hand column beside When / Only if / Then so you can drag without scrolling the whole page. Mobile keeps the stacked layout.
+
 ## [4.0.290] - 2026-11-13
 
 ### Fixed
