@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.301] - 2026-11-14
+
+### Added
+- **Yarbo Plan hold / Plan resume in Automations:** When and Only if can use Vestaboard **PLAN HOLD** (`planning_paused`) and when that hold clears. Example: When Plan hold → turn on a light, or Only if Plan hold before another When fires.
+
 ## [4.0.300] - 2026-11-14
 
 ### Fixed

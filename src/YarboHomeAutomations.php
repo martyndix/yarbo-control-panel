@@ -37,9 +37,11 @@ final class YarboHomeAutomations
     /** Synthetic When for Vestaboard night-hours door/window open alert. */
     public const VESTABOARD_NIGHT_ID = 'vestaboard_night';
     public const VESTABOARD_NIGHT_EVENTS = ['open'];
-    public const ROBOT_EVENTS = ['error', 'ok', 'rain', 'dry'];
+    public const ROBOT_EVENTS = ['error', 'ok', 'rain', 'dry', 'plan_hold', 'plan_resume'];
     /** Yarbo-only rain / dry (Lymow has no rain sensor). */
     public const YARBO_RAIN_EVENTS = ['rain', 'dry'];
+    /** Yarbo-only plan pause (Vestaboard PLAN HOLD) / resume. */
+    public const YARBO_PLAN_HOLD_EVENTS = ['plan_hold', 'plan_resume'];
     public const YARBO_COMMANDS = ['start_plan', 'return_to_dock', 'stop'];
     public const LYMOW_COMMANDS = ['start', 'pause', 'resume', 'dock', 'cancel'];
     public const HOLD_MIN_SEC = 60;
@@ -905,6 +907,7 @@ final class YarboHomeAutomations
                 'error_code' => $parsed['error_code'] ?? 0,
                 'power_fault' => $parsed['power_fault'] ?? 0,
                 'rain_detected' => !empty($parsed['rain_detected']),
+                'planning_paused' => !empty($parsed['planning_paused']),
                 'name' => trim((string) ($parsed['mqtt_robot_name'] ?? $parsed['robot_name'] ?? '')) ?: 'Yarbo',
             ]);
         } catch (\Throwable) {
@@ -1074,6 +1077,7 @@ final class YarboHomeAutomations
             'name' => $name,
             'error' => self::yarboErrorFromData($data),
             'rain' => self::yarboRainFromData($data),
+            'plan_hold' => self::yarboPlanHoldFromData($data),
         ];
     }
 
@@ -1125,6 +1129,20 @@ final class YarboHomeAutomations
         }
 
         return self::truthy($data['rain_detected'] ?? false);
+    }
+
+    /**
+     * Same planning_paused flag as Vestaboard PLAN HOLD (yellow flaps).
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function yarboPlanHoldFromData(array $data): bool
+    {
+        if (array_key_exists('plan_hold', $data) && is_bool($data['plan_hold'])) {
+            return $data['plan_hold'];
+        }
+
+        return self::truthy($data['planning_paused'] ?? false);
     }
 
     /**
@@ -1311,6 +1329,9 @@ final class YarboHomeAutomations
         if (in_array($event, self::YARBO_RAIN_EVENTS, true) && $id !== self::YARBO_ID) {
             $event = 'error';
         }
+        if (in_array($event, self::YARBO_PLAN_HOLD_EVENTS, true) && $id !== self::YARBO_ID) {
+            $event = 'error';
+        }
         if (!in_array($event, self::ROBOT_EVENTS, true)) {
             $event = 'error';
         }
@@ -1426,6 +1447,12 @@ final class YarboHomeAutomations
 
             return $event === 'dry' ? ($was && !$is) : (!$was && $is);
         }
+        if (in_array($event, self::YARBO_PLAN_HOLD_EVENTS, true)) {
+            $was = !empty($prev[$id]['plan_hold']);
+            $is = !empty($curr[$id]['plan_hold']);
+
+            return $event === 'plan_resume' ? ($was && !$is) : (!$was && $is);
+        }
         $was = !empty($prev[$id]['error']);
         $is = !empty($curr[$id]['error']);
         if ($event === 'ok') {
@@ -1454,6 +1481,14 @@ final class YarboHomeAutomations
             $is = !empty($snap['rain']);
 
             return $event === 'dry' ? !$is : $is;
+        }
+        if (in_array($event, self::YARBO_PLAN_HOLD_EVENTS, true)) {
+            if (!array_key_exists('plan_hold', $snap) || $snap['plan_hold'] === null) {
+                return false;
+            }
+            $is = !empty($snap['plan_hold']);
+
+            return $event === 'plan_resume' ? !$is : $is;
         }
         if (!array_key_exists('error', $snap) || $snap['error'] === null) {
             return false;
@@ -1751,6 +1786,8 @@ final class YarboHomeAutomations
                 'ok' => 'OK',
                 'rain' => 'Rain',
                 'dry' => 'Dry',
+                'plan_hold' => 'Plan hold',
+                'plan_resume' => 'Plan resume',
                 default => 'Error',
             };
 
@@ -2377,6 +2414,9 @@ final class YarboHomeAutomations
                 'rain' => array_key_exists('rain', $row)
                     ? (bool) $row['rain']
                     : (array_key_exists('rain_detected', $row) ? (bool) $row['rain_detected'] : null),
+                'plan_hold' => array_key_exists('plan_hold', $row)
+                    ? (bool) $row['plan_hold']
+                    : (array_key_exists('planning_paused', $row) ? (bool) $row['planning_paused'] : null),
             ];
             foreach (self::POWERWALL_METRICS as $metric) {
                 $out[$id][$metric] = isset($row[$metric]) && is_numeric($row[$metric]) ? (float) $row[$metric] : null;

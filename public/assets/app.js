@@ -8202,7 +8202,7 @@ function homeAutoRobotName(id) {
 function homeAutoRobotTrigger(id, event = 'error') {
     const robot = id === HOME_AUTO_LYMOW_ID ? HOME_AUTO_LYMOW_ID : HOME_AUTO_YARBO_ID;
     let ev = String(event || 'error');
-    if (robot === HOME_AUTO_YARBO_ID && (ev === 'rain' || ev === 'dry')) {
+    if (robot === HOME_AUTO_YARBO_ID && (ev === 'rain' || ev === 'dry' || ev === 'plan_hold' || ev === 'plan_resume')) {
         // keep
     } else if (ev === 'ok') {
         ev = 'ok';
@@ -8218,7 +8218,12 @@ function homeAutoRobotEventOptions(id, selected) {
         ['ok', 'OK'],
     ];
     if (id === HOME_AUTO_YARBO_ID) {
-        opts.push(['rain', 'Rain'], ['dry', 'Dry']);
+        opts.push(
+            ['rain', 'Rain'],
+            ['dry', 'Dry'],
+            ['plan_hold', 'Plan hold'],
+            ['plan_resume', 'Plan resume'],
+        );
     }
     return opts.map(([value, label]) =>
         `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`
@@ -8935,7 +8940,7 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
     }
     if (homeAutoIsRobot(trigger)) {
         const name = homeAutoRobotName(trigger.id);
-        const event = ['ok', 'rain', 'dry'].includes(trigger.event) ? trigger.event : 'error';
+        const event = ['ok', 'rain', 'dry', 'plan_hold', 'plan_resume'].includes(trigger.event) ? trigger.event : 'error';
         return `<div class="auto-chip auto-chip--robot" data-auto-when ${iAttr}>
             ${escapeHtml(name)}
             <select data-auto-robot-event aria-label="${escapeHtml(name)} when">
@@ -9089,7 +9094,7 @@ function homeAutoThenChipHtml(action, index) {
 function homeAutoIfChipHtml(cond, index) {
     if (homeAutoIsRobot(cond)) {
         const name = homeAutoRobotName(cond.id);
-        const event = ['ok', 'rain', 'dry'].includes(cond.event) ? cond.event : 'error';
+        const event = ['ok', 'rain', 'dry', 'plan_hold', 'plan_resume'].includes(cond.event) ? cond.event : 'error';
         return `<div class="auto-chip auto-chip--robot" data-auto-if-i="${index}">
             ${escapeHtml(name)}
             <select data-auto-if-robot-event aria-label="${escapeHtml(name)} only if">
@@ -9833,6 +9838,8 @@ function homeAutoTrayGroups(devices, scenes) {
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:ok`, 'OK', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:rain`, 'Rain', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:dry`, 'Dry', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:plan_hold`, 'Plan hold', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_YARBO_ID}:plan_resume`, 'Plan resume', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('yarbo', 'start_plan', 'Start plan', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('yarbo', 'return_to_dock', 'Dock', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('yarbo', 'stop', 'Stop', 'auto-chip--robot', '', 'then'),
