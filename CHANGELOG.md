@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.292] - 2026-11-14
+
+### Added
+- **Yarbo mow trail on the Location Map:** while a plan is running (and on the way home), the panel stores a shared GPS breadcrumb in `data/yarbo-mow-trail.json` and every browser paints the same lime path behind the robot. The trail clears automatically once the mower is back on the charge pad.
+
 ## [4.0.291] - 2026-11-14
 
 ### Changed

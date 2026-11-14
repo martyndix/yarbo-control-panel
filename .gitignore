@@ -21,6 +21,7 @@
 /data/install-id.json
 /data/metrics-last.json
 /data/map-last.json
+/data/yarbo-mow-trail.json
 /data/map-backup-last.json
 /data/map-backup-probe.json
 /data/map-restore-*.json

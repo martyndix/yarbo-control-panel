@@ -465,6 +465,7 @@ let mapLayers = { street: null, satellite: null };
 let currentMapLayer = 'street';
 let robotMarker = null;
 let headingLine = null;
+let mowTrailLine = null;
 let mapHasCentered = false;
 let mapFullscreen = false;
 let vestaboardSyncAt = 0;
@@ -2466,6 +2467,46 @@ function formatWirelessCharge(diag) {
     return `${Number(amps).toFixed(2)}A`;
 }
 
+function mowTrailLatLngs(data) {
+    const raw = Array.isArray(data?.mow_trail) ? data.mow_trail : [];
+    const out = [];
+    for (const pt of raw) {
+        if (!Array.isArray(pt) || pt.length < 2) continue;
+        const lat = Number(pt[0]);
+        const lon = Number(pt[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        out.push([lat, lon]);
+    }
+    return out;
+}
+
+function updateMowTrailOnMap(data) {
+    if (!map) return;
+    const latlngs = mowTrailLatLngs(data);
+    if (latlngs.length < 2) {
+        if (mowTrailLine) {
+            map.removeLayer(mowTrailLine);
+            mowTrailLine = null;
+        }
+        return;
+    }
+    if (!mowTrailLine) {
+        mowTrailLine = L.polyline(latlngs, {
+            color: '#b7d96a',
+            weight: 10,
+            opacity: 0.45,
+            lineCap: 'round',
+            lineJoin: 'round',
+            interactive: false,
+        }).addTo(map);
+    } else {
+        mowTrailLine.setLatLngs(latlngs);
+    }
+    if (typeof mowTrailLine.bringToBack === 'function') {
+        mowTrailLine.bringToBack();
+    }
+}
+
 function updateRobotOnMap(data) {
     if (!map || !els.mapStatus) return;
 
@@ -2477,6 +2518,7 @@ function updateRobotOnMap(data) {
     const hasFix = Boolean(data.gps_valid) && Number.isFinite(lat) && Number.isFinite(lon);
 
     lastRobotFix = { lat, lon, gps_valid: hasFix };
+    updateMowTrailOnMap(data);
 
     if (!hasFix) {
         updateMapStatus(`No GPS fix yet (fix_quality=${fixQuality}). Move outdoors and wait for RTK/GNSS lock.`);
@@ -2511,6 +2553,13 @@ function updateRobotOnMap(data) {
         headingLine = null;
     }
 
+    if (robotMarker && typeof robotMarker.bringToFront === 'function') {
+        robotMarker.bringToFront();
+    }
+    if (headingLine && typeof headingLine.bringToFront === 'function') {
+        headingLine.bringToFront();
+    }
+
     if (!mapHasCentered) {
         map.setView([lat, lon], 20);
         mapHasCentered = true;
@@ -2518,8 +2567,10 @@ function updateRobotOnMap(data) {
 
     const altitudeLabel = data.altitude != null ? `${Number(data.altitude).toFixed(1)}m` : 'n/a';
     const headingLabel = hasHeading ? ` | heading ${heading.toFixed(0)}°` : '';
+    const trailPts = mowTrailLatLngs(data).length;
+    const trailLabel = trailPts >= 2 ? ` | mow trail ${trailPts} pts` : '';
     updateMapStatus(
-        `GPS locked (fix_quality=${fixQuality}) at ${lat.toFixed(6)}, ${lon.toFixed(6)} | altitude ${altitudeLabel}${headingLabel}`
+        `GPS locked (fix_quality=${fixQuality}) at ${lat.toFixed(6)}, ${lon.toFixed(6)} | altitude ${altitudeLabel}${headingLabel}${trailLabel}`
     );
 }
 

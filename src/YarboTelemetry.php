@@ -26,8 +26,11 @@ final class YarboTelemetry
     public static function parseForPanel(array $raw, ?array $cellTemps, string $projectRoot): array
     {
         $settings = new YarboRainSettings($projectRoot . '/data');
+        $parsed = self::parse($raw, $cellTemps, $settings->sensitivity());
+        // Shared mow breadcrumb for every status / Vestaboard / PaperMono consumer.
+        $parsed['mow_trail'] = (new YarboMowTrail($projectRoot))->observe($parsed);
 
-        return self::parse($raw, $cellTemps, $settings->sensitivity());
+        return $parsed;
     }
 
     public static function parse(array $raw, ?array $cellTemps = null, ?int $rainSensitivity = null): array
