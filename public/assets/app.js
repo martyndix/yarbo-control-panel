@@ -2491,10 +2491,11 @@ function updateMowTrailOnMap(data) {
         return;
     }
     if (!mowTrailLine) {
+        // Above zone fills (blue wash hid the old pale trail); robot marker stays on top.
         mowTrailLine = L.polyline(latlngs, {
-            color: '#b7d96a',
-            weight: 10,
-            opacity: 0.45,
+            color: '#e8912d',
+            weight: 14,
+            opacity: 0.9,
             lineCap: 'round',
             lineJoin: 'round',
             interactive: false,
@@ -2502,8 +2503,8 @@ function updateMowTrailOnMap(data) {
     } else {
         mowTrailLine.setLatLngs(latlngs);
     }
-    if (typeof mowTrailLine.bringToBack === 'function') {
-        mowTrailLine.bringToBack();
+    if (typeof mowTrailLine.bringToFront === 'function') {
+        mowTrailLine.bringToFront();
     }
 }
 

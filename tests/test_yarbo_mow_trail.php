@@ -92,6 +92,8 @@ assert_true($dist > 0.9 && $dist < 1.4, 'haversine ~1.1m got ' . $dist);
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 assert_true(str_contains($js, 'updateMowTrailOnMap'), 'map draws shared trail');
 assert_true(str_contains($js, 'mow_trail'), 'reads mow_trail from status');
+assert_true(str_contains($js, "color: '#e8912d'"), 'trail uses high-contrast orange');
+assert_true(str_contains($js, 'opacity: 0.9'), 'trail is mostly opaque');
 
 $parsed = YarboTelemetry::parseForPanel([
     'StateMSG' => [

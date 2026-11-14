@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.293] - 2026-11-14
+
+### Changed
+- **Yarbo mow trail visibility:** thicker opaque orange stroke drawn above the zone fills (the old pale lime under the blue wash was nearly invisible).
+
 ## [4.0.292] - 2026-11-14
 
 ### Added
