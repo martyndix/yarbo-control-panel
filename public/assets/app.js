@@ -4702,13 +4702,23 @@ function homeMembersHaveOutletOn(members) {
     return (members || []).some((d) => Boolean(d?.on) && homeIsOutlet(d));
 }
 
+function homeIsVacuum(d) {
+    return String(d?.kind || '').toLowerCase() === 'vacuum';
+}
+
+function homeMembersHaveVacuumOn(members) {
+    return (members || []).some((d) => Boolean(d?.on) && homeIsVacuum(d));
+}
+
 function homeMembersHaveLightOn(members) {
     return (members || []).some((d) => Boolean(d?.on) && homeIsLight(d));
 }
 
 function homeHeadingHasActive(members, lightOn) {
     if (lightOn === true || homeMembersHaveLightOn(members)) return true;
-    return homeMembersHaveOutletOn(members);
+    if (homeMembersHaveOutletOn(members)) return true;
+    // Working vacuum: green name-dot only (not the full is-on room tile).
+    return homeMembersHaveVacuumOn(members);
 }
 
 function syncHomeHeadingActive(heading, members, lightOn) {
@@ -5340,6 +5350,8 @@ function patchOneHomeDeviceVisual(card, id, on, extras = {}) {
             const next = wrap.firstElementChild;
             if (next) actions.replaceWith(next);
         }
+        // Keep the room name-dot in sync when a vacuum starts/stops (has-active only).
+        syncHomeAlertsForDevice(id);
     }
 }
 
@@ -5412,7 +5424,7 @@ function patchHomeDashboard(data) {
         patchHomeBrightInput(el.querySelector('[data-home-room-bright]'), room.brightness);
         patchHomeClusterAdaptive(el, roomMembers);
         syncHomeHeadingAlerts(el, roomMembers);
-        // Full green tile only for lights; has-active greens the name-dot for plugs/relays too.
+        // Full green tile only for lights; has-active greens the name-dot for plugs/vacuums too.
         el.classList.toggle('is-on', Boolean(room.on));
         el.classList.toggle(
             'has-active',

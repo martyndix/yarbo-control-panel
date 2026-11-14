@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.313] - 2026-11-14
+
+### Changed
+- **Home room name-dot while a vacuum is working:** Hall / Landing (and other rooms) show the same green name-dot as an on plug when a vacuum in that room is Cleaning / Emptying / Washing / Refilling — not the full green room tile (that stays lights-only).
+
 ## [4.0.312] - 2026-11-14
 
 ### Fixed

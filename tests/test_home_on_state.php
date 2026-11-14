@@ -495,6 +495,9 @@ assert_true(YarboHome::countsTowardRoomOn(['kind' => 'door', 'on' => true]) === 
 assert_true(YarboHome::countsTowardRoomActiveDot(['kind' => 'plug', 'on' => true]) === true, 'plugs green the room name-dot');
 assert_true(YarboHome::countsTowardRoomActiveDot(['id' => 'unifi:relay:usl1:1', 'kind' => 'relay', 'on' => true]) === true, 'relays green the room name-dot');
 assert_true(YarboHome::countsTowardRoomActiveDot(['kind' => 'light', 'on' => true]) === true, 'lights green the room name-dot');
+assert_true(YarboHome::countsTowardRoomActiveDot(['kind' => 'vacuum', 'on' => true]) === true, 'working vacuums green the room name-dot');
+assert_true(YarboHome::countsTowardRoomActiveDot(['kind' => 'vacuum', 'on' => false]) === false, 'idle vacuums do not green the room name-dot');
+assert_true(YarboHome::isRoomVacuum(['kind' => 'vacuum']) === true, 'vacuums are room vacuums');
 assert_true(YarboHome::countsTowardRoomActiveDot(['kind' => 'plug', 'on' => false]) === false, 'off plugs do not green the room name-dot');
 assert_true(YarboHome::countsTowardRoomActiveDot(['kind' => 'sensor', 'on' => true]) === false, 'sensors do not green the room name-dot');
 
@@ -908,6 +911,7 @@ assert_true(str_contains($js, "card.classList.contains('home-device--camera')"),
 assert_true(str_contains($js, 'home-device--sensor'), 'sensor tiles are marked so they stay off the green on style');
 assert_true(str_contains($js, 'function homeAlertIconsHtml'), 'room headings show motion and open-door icons');
 assert_true(str_contains($js, 'function homeIsOutlet'), 'plugs and relays mark the room name-dot');
+assert_true(str_contains($js, 'function homeMembersHaveVacuumOn'), 'working vacuums mark the room name-dot');
 assert_true(str_contains($js, 'function homeHeadingHasActive'), 'collapsed rooms keep a green name-dot when an outlet is on');
 assert_true(str_contains($js, 'has-active'), 'room headings use has-active for the outlet name-dot');
 assert_true(str_contains($js, 'syncHomeHeadingAlerts(el, roomMembers)'), 'live Home patches keep motion and open icons');
@@ -931,6 +935,7 @@ assert_true(str_contains($css, '.home-room-alerts'), 'room heading alerts sit ne
 assert_true(str_contains($css, '.home-room.has-active .home-device-dot'), 'active outlet greens the room name-dot only');
 assert_true(str_contains($homePhp, 'function isRoomOutlet'), 'plugs and relays are room outlets');
 assert_true(str_contains($homePhp, 'function countsTowardRoomActiveDot'), 'room has_active includes plugs and relays');
+assert_true(str_contains($homePhp, 'function isRoomVacuum'), 'working vacuums count toward the room name-dot');
 assert_true(str_contains($homePhp, "'has_active' => \$stats['has_active']"), 'dashboard rooms expose has_active');
 assert_true(str_contains($css, '.home-scene-filter'), 'scene editor search field');
 assert_true(str_contains($css, 'max-height: min(28rem, 60vh)'), 'scene member list scrolls instead of growing');

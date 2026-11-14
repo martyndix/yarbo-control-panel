@@ -3091,7 +3091,18 @@ final class YarboHome
     }
 
     /**
-     * Green name-dot on a room/group when a light, plug, or relay is on.
+     * Working vacuum (Cleaning / Emptying / …) greens the room name-dot like a plug,
+     * without painting the full room tile (that stays lights-only).
+     *
+     * @param array<string, mixed> $device
+     */
+    public static function isRoomVacuum(array $device): bool
+    {
+        return strtolower(trim((string) ($device['kind'] ?? ''))) === self::KIND_VACUUM;
+    }
+
+    /**
+     * Green name-dot on a room/group when a light, plug, relay, or vacuum is on.
      *
      * @param array<string, mixed> $device
      */
@@ -3101,7 +3112,7 @@ final class YarboHome
             return false;
         }
 
-        return self::isRoomLight($device) || self::isRoomOutlet($device);
+        return self::isRoomLight($device) || self::isRoomOutlet($device) || self::isRoomVacuum($device);
     }
 
     /**
