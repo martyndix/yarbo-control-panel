@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.304] - 2026-11-14
+
+### Fixed
+- **Vacuum Start `ChangeToMode (generic failure)` on the pad again:** 4.0.299–300 reintroduced SelectAreas before Cleaning (Home Assistant order), but SwitchBot **K11+** refuses SelectAreas while Charging/Docked/Idle-on-pad — the same bug fixed in **4.0.93**. Start from the pad is **ChangeToMode Cleaning only** again (Apple Home / 4.0.100); SelectAreas runs only off the pad with a room subset. Matter agent **v61**; errors include `[matter v61]`.
+
 ## [4.0.303] - 2026-11-14
 
 ### Added

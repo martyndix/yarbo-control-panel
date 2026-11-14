@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 60
+AGENT_VERSION = 61
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -5822,15 +5822,19 @@ def set_vacuum_command(
         }
 
     def prepare_areas() -> dict[str, Any] | None:
-        """Home Assistant Start: SelectAreas before Cleaning.
+        """SelectAreas only off the pad with a room subset.
 
-        Empty newAreas = unconstrained full clean (clears a leftover room pick).
-        Specific rooms pass those ids. Skip when the robot has no Service Area.
+        K11+ refuses SelectAreas while Charging/Docked/Idle-on-pad (4.0.93).
+        All-rooms Start matches Apple Home: ChangeToMode Cleaning only (4.0.92/100).
+        Room chips / off-pad room picks still SelectAreas first.
         """
+        if at_charger():
+            return None
+        if all_rooms or not requested_ids:
+            return None
         if not areas and not all_ids:
             return None
-        ids = [] if all_rooms else list(requested_ids or [])
-        rpc = vacuum_select_areas(node_id, area_endpoint, ids)
+        rpc = vacuum_select_areas(node_id, area_endpoint, list(requested_ids))
         attempts.append(rpc)
         return rpc
 
@@ -5848,16 +5852,16 @@ def set_vacuum_command(
         sync_row()
         return started_ok(started_rpc), started_rpc
 
-    # Match Home Assistant: SelectAreas then ChangeToMode Cleaning.
+    # From the pad: Cleaning only (no SelectAreas — that is the 4.0.93/100 fix).
+    # Off pad with a room subset: SelectAreas then Cleaning. Never Mapping.
     # K11+ does not accept Operational Start (only Pause/Resume/GoHome).
-    # Mapping remaps — never send it (S10 Mapping is mode 1).
     done, started = run_clean_pass()
     if done is not None:
         return done
 
     status_code = int(started.get("status") or 0)
     # Leftover Cleaning/Mapping CurrentMode while Idle on the pad → reset to Idle,
-    # then SelectAreas + Cleaning again (no unsupported Operational Start).
+    # then Cleaning again (still no SelectAreas on the pad).
     if status_code in (2, 3) or at_charger():
         try_idle()
         settle_mode()

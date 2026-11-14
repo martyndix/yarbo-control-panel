@@ -177,7 +177,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 60, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 61, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -455,7 +455,7 @@ def main() -> int:
     assert start_all.get("ok") is True, start_all
     live_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("command_name") == "Resume" for c in live_cmds), live_cmds
-    assert select_areas_payloads(live_cmds, agent) == [[]], live_cmds
+    assert select_areas_payloads(live_cmds, agent) == [], live_cmds
     assert not any(c.get("command_name") == "Start" for c in live_cmds), live_cmds
     assert any(
         c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
@@ -492,7 +492,7 @@ def main() -> int:
     assert from_charge.get("ok") is True, from_charge
     assert from_charge.get("vacuum_status") == "Cleaning", from_charge
     charge_cmds = [args for command, args in calls if command == "device_command"]
-    assert select_areas_payloads(charge_cmds, agent) == [[]], charge_cmds
+    assert select_areas_payloads(charge_cmds, agent) == [], charge_cmds
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in charge_cmds), charge_cmds
     charge_modes = change_to_mode_values(charge_cmds, agent)
     assert not any(c.get("command_name") == "Start" for c in charge_cmds), charge_cmds
@@ -525,7 +525,7 @@ def main() -> int:
     assert leftover.get("vacuum_status") == "Cleaning", leftover
     leftover_cmds = [args for command, args in calls if command == "device_command"]
     leftover_modes = change_to_mode_values(leftover_cmds, agent)
-    assert select_areas_payloads(leftover_cmds, agent) == [[]], leftover_cmds
+    assert select_areas_payloads(leftover_cmds, agent) == [], leftover_cmds
     assert not any(c.get("command_name") == "Start" for c in leftover_cmds), leftover_cmds
     assert leftover_modes == [1], leftover_modes
     assert 2 not in leftover_modes, leftover_modes
@@ -591,7 +591,7 @@ def main() -> int:
         c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
         for c in start_cmds
     ), start_cmds
-    assert select_areas_payloads(start_cmds, agent) == [[]], start_cmds
+    assert select_areas_payloads(start_cmds, agent) == [], start_cmds
     assert not any(c.get("command_name") == "Start" for c in start_cmds), start_cmds
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in start_cmds), start_cmds
 
@@ -706,7 +706,7 @@ def main() -> int:
     assert refused.get("ok") is not True, refused
 
     calls.clear()
-    # Charging + Bathroom: SelectAreas then Cleaning (Home Assistant order).
+    # Charging + Bathroom: skip SelectAreas on the pad (4.0.93), Cleaning only.
     bath_ok_attrs = dict(vacuum_node()["attributes"])
     bath_ok_attrs["1/97/4"] = 0x41
     bath_ok_attrs["1/84/1"] = 0
@@ -734,7 +734,7 @@ def main() -> int:
     assert bath_ok.get("ok") is True, bath_ok
     assert bath_ok.get("vacuum_status") == "Cleaning", bath_ok
     bath_ok_cmds = [args for command, args in calls if command == "device_command"]
-    assert select_areas_payloads(bath_ok_cmds, agent) == [[3]], bath_ok_cmds
+    assert select_areas_payloads(bath_ok_cmds, agent) == [], bath_ok_cmds
     assert not any(c.get("cluster_id") == agent.RVC_CLEAN for c in bath_ok_cmds), bath_ok_cmds
     bath_modes = change_to_mode_values(bath_ok_cmds, agent)
     assert not any(c.get("command_name") == "Start" for c in bath_ok_cmds), bath_ok_cmds
@@ -743,7 +743,40 @@ def main() -> int:
     assert 0 not in bath_modes, bath_modes
 
     calls.clear()
-    # Start from the charger: SelectAreas [] then Cleaning. Never Mapping.
+    # Off-pad + Bathroom: SelectAreas then Cleaning.
+    bath_off_attrs = dict(vacuum_node()["attributes"])
+    bath_off_attrs["1/97/4"] = 0
+    bath_off_attrs["1/84/1"] = 0
+    bath_off_attrs["1/47/14"] = 0
+
+    def bath_off_ok_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": bath_off_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": bath_off_attrs}
+        if command == "device_command":
+            apply_select_areas(agent, bath_off_attrs, args or {})
+            apply_change_to_mode(agent, bath_off_attrs, args or {})
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = bath_off_ok_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    bath_off = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "areas": [3],
+    })
+    assert bath_off.get("ok") is True, bath_off
+    bath_off_cmds = [args for command, args in calls if command == "device_command"]
+    assert select_areas_payloads(bath_off_cmds, agent) == [[3]], bath_off_cmds
+    assert change_to_mode_values(bath_off_cmds, agent) == [1], bath_off_cmds
+
+    calls.clear()
+    # Start from the charger: Cleaning only (no SelectAreas). Never Mapping.
     undock_attrs = dict(vacuum_node()["attributes"])
     undock_attrs["0/40/3"] = "K11+"
     undock_attrs["1/97/4"] = 0x41
@@ -774,7 +807,7 @@ def main() -> int:
     assert undocked.get("vacuum_status") == "Cleaning", undocked
     undock_cmds = [args for command, args in calls if command == "device_command"]
     assert not any(c.get("command_name") == "Start" for c in undock_cmds), undock_cmds
-    assert select_areas_payloads(undock_cmds, agent) == [[]], undock_cmds
+    assert select_areas_payloads(undock_cmds, agent) == [], undock_cmds
     undock_modes = change_to_mode_values(undock_cmds, agent)
     assert undock_modes == [1], undock_modes
     assert 2 not in undock_modes, undock_modes
@@ -783,7 +816,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Stop" for c in undock_cmds), undock_cmds
 
     calls.clear()
-    # Cleaning refused on the pad: try Operational Start, retry Cleaning, never Mapping/Idle.
+    # Cleaning refused on the pad: Idle reset, retry Cleaning, never Mapping/SelectAreas.
     abort_attrs = dict(vacuum_node()["attributes"])
     abort_attrs["1/97/4"] = 0x41
     abort_attrs["1/84/1"] = 0
@@ -821,15 +854,15 @@ def main() -> int:
     # Cleaning fail → Idle reset → Cleaning fail. K11 has no Operational Start.
     assert abort_modes == [1, 0, 1], abort_modes
     assert 2 not in abort_modes, abort_modes
-    assert select_areas_payloads(abort_cmds, agent) == [[], []], abort_cmds
+    assert select_areas_payloads(abort_cmds, agent) == [], abort_cmds
     assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
-    assert "matter v60" in str(aborted.get("error") or ""), aborted
+    assert "matter v61" in str(aborted.get("error") or ""), aborted
 
     calls.clear()
     # Alejandro (K11+): Charging. Cleaning GenericFailure — Idle reset then retry.
-    # Mapping / Resume / Stop / Start are not used. SelectAreas clears leftover rooms.
+    # Mapping / Resume / Stop / Start / SelectAreas are not used on the pad.
     k11_attrs = dict(vacuum_node()["attributes"])
     k11_attrs["0/40/3"] = "K11+"
     k11_attrs["1/97/4"] = 0x41
@@ -875,7 +908,7 @@ def main() -> int:
     assert "while charging" not in err, bathroom
     assert bathroom.get("vacuum_status") == "Docked", bathroom
     k11_cmds = [args for command, args in calls if command == "device_command"]
-    assert select_areas_payloads(k11_cmds, agent) == [[3], [3]], k11_cmds
+    assert select_areas_payloads(k11_cmds, agent) == [], k11_cmds
     k11_modes = [
         (c.get("payload") or {}).get("newMode", (c.get("payload") or {}).get("NewMode"))
         for c in k11_cmds
@@ -1106,7 +1139,7 @@ def main() -> int:
 
     calls.clear()
     # Charging + PowerSource full: webpage was Charging while the app said
-    # charging complete. Show Docked, SelectAreas [] then Cleaning.
+    # charging complete. Show Docked, Cleaning only (no SelectAreas on pad).
     full_start_attrs = dict(vacuum_node()["attributes"])
     full_start_attrs["1/97/4"] = 0x41
     full_start_attrs["1/84/1"] = 0
@@ -1138,11 +1171,11 @@ def main() -> int:
     assert full_modes == [1], full_modes
     assert 2 not in full_modes, full_modes
     assert 0 not in full_modes, full_modes
-    assert select_areas_payloads(full_cmds, agent) == [[]], full_cmds
+    assert select_areas_payloads(full_cmds, agent) == [], full_cmds
 
     calls.clear()
-    # Full battery that still refuses Cleaning: Operational Start then retry;
-    # still Docked if Start does not undock. Never "while charging".
+    # Full battery that still refuses Cleaning: Idle reset then retry;
+    # still Docked if Cleaning does not undock. Never "while charging".
     full_fail_attrs = dict(vacuum_node()["attributes"])
     full_fail_attrs["1/97/4"] = 0x41
     full_fail_attrs["1/84/1"] = 0
@@ -1180,8 +1213,8 @@ def main() -> int:
     assert not any(c.get("command_name") == "Start" for c in full_fail_cmds), full_fail_cmds
     assert full_fail_modes == [1, 0, 1], full_fail_modes
     assert 2 not in full_fail_modes, full_fail_modes
-    assert select_areas_payloads(full_fail_cmds, agent) == [[], []], full_fail_cmds
-    assert "matter v60" in str(full_fail.get("error") or ""), full_fail
+    assert select_areas_payloads(full_fail_cmds, agent) == [], full_fail_cmds
+    assert "matter v61" in str(full_fail.get("error") or ""), full_fail
 
     agent._live_devices = [{
         "id": "40:1",
