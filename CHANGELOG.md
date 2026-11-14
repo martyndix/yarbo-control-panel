@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.297] - 2026-11-14
+
+### Fixed
+- **Matter vacuum Start `ChangeToMode (generic failure)`** on SwitchBot **K11+** (Alejandro) and **S10** when the tile showed **Idle** on the pad: Stopped + battery full/charging is treated as **Docked**, Start retries with Operational **Start** then Cleaning (never Mapping), and Vacuum/Mop chip refusals on the pad keep the preference instead of toasting a hard failure.
+
 ## [4.0.296] - 2026-11-14
 
 ### Fixed

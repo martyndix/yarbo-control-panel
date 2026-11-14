@@ -166,7 +166,7 @@ def main() -> int:
     agent.VACUUM_MODE_SETTLE_S = 0
     agent.VACUUM_START_SETTLE_S = 0
     assert agent.ATTR_OPERATIONAL_STATE == 4, agent.ATTR_OPERATIONAL_STATE
-    assert agent.AGENT_VERSION == 57, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 58, agent.AGENT_VERSION
     rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [vacuum_node()]})}
     vac = rows.get("40:1") or {}
     if vac.get("kind") != "vacuum":
@@ -194,6 +194,15 @@ def main() -> int:
     charging = {d["id"]: d for d in agent.flatten_nodes({"nodes": [charging_idle]})}.get("40:1") or {}
     if charging.get("vacuum_status") != "Docked" or charging.get("on") is True:
         raise SystemExit(f"charging idle should be Docked, got {charging}")
+    # Stopped/Idle (op 0) while PowerSource says full charge → Docked (Alejandro after charge).
+    idle_on_pad = vacuum_node()
+    idle_on_pad["attributes"]["1/97/4"] = 0
+    idle_on_pad["attributes"]["1/84/1"] = 0
+    idle_on_pad["attributes"]["1/47/14"] = 2
+    idle_on_pad["attributes"]["1/47/12"] = 200
+    idle_pad = {d["id"]: d for d in agent.flatten_nodes({"nodes": [idle_on_pad]})}.get("40:1") or {}
+    if idle_pad.get("vacuum_status") != "Docked":
+        raise SystemExit(f"idle+full on pad should be Docked, got {idle_pad}")
     full_charge = vacuum_node()
     full_charge["attributes"]["1/97/4"] = 0x41
     full_charge["attributes"]["1/84/1"] = 0
@@ -763,7 +772,7 @@ def main() -> int:
     assert not any(c.get("command_name") == "Stop" for c in undock_cmds), undock_cmds
 
     calls.clear()
-    # Start is a no-op and Cleaning is refused: fail without Mapping or Idle.
+    # Cleaning refused on the pad: try Operational Start, retry Cleaning, never Mapping/Idle.
     abort_attrs = dict(vacuum_node()["attributes"])
     abort_attrs["1/97/4"] = 0x41
     abort_attrs["1/84/1"] = 0
@@ -798,16 +807,16 @@ def main() -> int:
     assert aborted.get("ok") is False, aborted
     abort_cmds = [args for command, args in calls if command == "device_command"]
     abort_modes = change_to_mode_values(abort_cmds, agent)
-    assert abort_modes == [1], abort_modes
+    assert abort_modes == [1, 1], abort_modes
     assert 2 not in abort_modes, abort_modes
     assert 0 not in abort_modes, abort_modes
-    assert not any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
+    assert any(c.get("command_name") == "Start" for c in abort_cmds), abort_cmds
     assert aborted.get("vacuum_status") == "Docked", aborted
     assert "while charging" not in str(aborted.get("error") or "").lower(), aborted
 
     calls.clear()
-    # Alejandro (K11+): Charging. Cleaning and Mapping both GenericFailure.
-    # Resume/Stop are not used.
+    # Alejandro (K11+): Charging. Cleaning GenericFailure — Operational Start then retry.
+    # Mapping / Resume / Stop are not used. Room SelectAreas skipped while actively charging.
     k11_attrs = dict(vacuum_node()["attributes"])
     k11_attrs["0/40/3"] = "K11+"
     k11_attrs["1/97/4"] = 0x41
@@ -864,9 +873,9 @@ def main() -> int:
         for c in k11_cmds
         if c.get("cluster_id") == agent.RVC_RUN and c.get("command_name") == "ChangeToMode"
     ]
-    assert k11_modes == [1], k11_modes
+    assert k11_modes == [1, 1], k11_modes
     assert 2 not in k11_modes, k11_modes
-    assert not any(c.get("command_name") == "Start" for c in k11_cmds), k11_cmds
+    assert any(c.get("command_name") == "Start" for c in k11_cmds), k11_cmds
     assert all(
         "timed_request_timeout_ms" not in c
         for c in k11_cmds
@@ -881,6 +890,141 @@ def main() -> int:
     assert not any(c.get("command_name") == "Stop" for c in k11_cmds), k11_cmds
     assert not any(command == "write_attribute" for command, _args in calls), calls
     assert not any(c.get("cluster_id") == agent.ON_OFF for c in k11_cmds), k11_cmds
+
+    calls.clear()
+    # Idle on pad (op 0 + full charge): Cleaning fails once, Operational Start undocks, Cleaning runs.
+    idle_pad_attrs = dict(vacuum_node()["attributes"])
+    idle_pad_attrs["0/40/3"] = "K11+"
+    idle_pad_attrs["1/97/4"] = 0
+    idle_pad_attrs["1/84/1"] = 0
+    idle_pad_attrs["1/47/14"] = 2
+    idle_pad_attrs["1/47/12"] = 200
+    clean_attempts = {"n": 0}
+
+    def k11_idle_pad_recover_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": idle_pad_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": idle_pad_attrs}
+        if command == "device_command":
+            if args.get("command_name") == "Start":
+                apply_start(idle_pad_attrs, args, leave_charger=True)
+                return {"ok": True, "result": {"status": 0}}
+            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
+                payload = args.get("payload") or {}
+                mode = payload.get("newMode", payload.get("NewMode"))
+                if mode == 1:
+                    clean_attempts["n"] += 1
+                    if clean_attempts["n"] == 1:
+                        return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
+                    apply_change_to_mode(agent, idle_pad_attrs, args)
+                    return {"ok": True, "result": {"status": 0}}
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = k11_idle_pad_recover_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    recovered = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "start",
+        "kind": "vacuum",
+        "areas": "all",
+    })
+    assert recovered.get("ok") is True, recovered
+    assert recovered.get("vacuum_status") == "Cleaning", recovered
+    recover_cmds = [args for command, args in calls if command == "device_command"]
+    assert any(c.get("command_name") == "Start" for c in recover_cmds), recover_cmds
+    recover_modes = change_to_mode_values(recover_cmds, agent)
+    assert recover_modes == [1, 1], recover_modes
+    assert 2 not in recover_modes, recover_modes
+
+    calls.clear()
+    # S10 Idle on pad (op 0 + full charge): Cleaning (mode 2) fails once, Start undocks, retry.
+    s10_idle_attrs = s10_node()["attributes"]
+    s10_idle_attrs["1/97/4"] = 0
+    s10_idle_attrs["1/84/1"] = 0
+    s10_idle_attrs["1/47/14"] = 2
+    s10_idle_attrs["1/47/12"] = 200
+    s10_clean_n = {"n": 0}
+    s10_idle_row = {d["id"]: d for d in agent.flatten_nodes({"nodes": [{
+        "node_id": 50,
+        "available": True,
+        "attributes": s10_idle_attrs,
+    }]})}.get("50:1") or {}
+
+    def s10_idle_pad_recover_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 50, "attributes": s10_idle_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": s10_idle_attrs}
+        if command == "device_command":
+            if args.get("command_name") == "Start":
+                apply_start(s10_idle_attrs, args, leave_charger=True)
+                return {"ok": True, "result": {"status": 0}}
+            if args.get("cluster_id") == agent.RVC_RUN and args.get("command_name") == "ChangeToMode":
+                payload = args.get("payload") or {}
+                mode = payload.get("newMode", payload.get("NewMode"))
+                if mode == 2:
+                    s10_clean_n["n"] += 1
+                    if s10_clean_n["n"] == 1:
+                        return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
+                    apply_change_to_mode(agent, s10_idle_attrs, args)
+                    return {"ok": True, "result": {"status": 0}}
+                # Never Mapping (mode 1 on S10).
+                return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = s10_idle_pad_recover_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in s10_idle_row.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    s10_recovered = agent.dispatch({
+        "op": "command",
+        "id": "50:1",
+        "action": "start",
+        "kind": "vacuum",
+        "areas": "all",
+    })
+    assert s10_recovered.get("ok") is True, s10_recovered
+    assert s10_recovered.get("vacuum_status") == "Cleaning", s10_recovered
+    s10_rec_cmds = [args for command, args in calls if command == "device_command"]
+    assert any(c.get("command_name") == "Start" for c in s10_rec_cmds), s10_rec_cmds
+    s10_rec_modes = change_to_mode_values(s10_rec_cmds, agent)
+    assert s10_rec_modes == [2, 2], s10_rec_modes
+    assert 1 not in s10_rec_modes, s10_rec_modes
+
+    calls.clear()
+    # Vacuum/Mop chip GenericFailure on the pad: keep preference, no hard toast.
+    mop_attrs = dict(vacuum_node()["attributes"])
+    mop_attrs["1/97/4"] = 0x41
+
+    def k11_mop_fail_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        args = args or {}
+        if command == "get_node":
+            return {"ok": True, "result": {"node_id": 40, "attributes": mop_attrs}}
+        if command == "read_attribute":
+            return {"ok": True, "result": mop_attrs}
+        if command == "device_command":
+            if args.get("cluster_id") == agent.RVC_CLEAN and args.get("command_name") == "ChangeToMode":
+                return {"ok": True, "result": {"0": 2, "1": "GenericFailure"}}
+            return {"ok": True, "result": {"status": 0}}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = k11_mop_fail_rpc  # type: ignore[method-assign]
+    agent._live_devices = [{k: v for k, v in vac.items() if k not in ("run_modes", "clean_modes", "areas")}]
+    mop_pref = agent.dispatch({
+        "op": "command",
+        "id": "40:1",
+        "action": "mop",
+        "kind": "vacuum",
+    })
+    assert mop_pref.get("ok") is True, mop_pref
+    assert mop_pref.get("vacuum_clean") == "mop", mop_pref
 
     calls.clear()
     err_attrs = dict(vacuum_node()["attributes"])
@@ -1006,7 +1150,8 @@ def main() -> int:
     assert not any(c.get("cluster_id") == agent.SERVICE_AREA for c in full_cmds), full_cmds
 
     calls.clear()
-    # Full battery that still refuses Cleaning: Docked, never "while charging".
+    # Full battery that still refuses Cleaning: Operational Start then retry;
+    # still Docked if Start does not undock. Never "while charging".
     full_fail_attrs = dict(vacuum_node()["attributes"])
     full_fail_attrs["1/97/4"] = 0x41
     full_fail_attrs["1/84/1"] = 0
@@ -1038,10 +1183,11 @@ def main() -> int:
     assert full_fail.get("vacuum_status") == "Docked", full_fail
     err = str(full_fail.get("error") or "").lower()
     assert "while charging" not in err, full_fail
+    assert "generic failure" in err or "dock" in err, full_fail
     full_fail_cmds = [args for command, args in calls if command == "device_command"]
     full_fail_modes = change_to_mode_values(full_fail_cmds, agent)
-    assert not any(c.get("command_name") == "Start" for c in full_fail_cmds), full_fail_cmds
-    assert full_fail_modes == [1], full_fail_modes
+    assert any(c.get("command_name") == "Start" for c in full_fail_cmds), full_fail_cmds
+    assert full_fail_modes == [1, 1], full_fail_modes
     assert 2 not in full_fail_modes, full_fail_modes
     assert 0 not in full_fail_modes, full_fail_modes
 
