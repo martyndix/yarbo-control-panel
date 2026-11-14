@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 69
+AGENT_VERSION = 70
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -6707,12 +6707,13 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                     if rpc.get("ok"):
                         device_id = remap_device_endpoint(device_id, alt)
                         rpc = {**rpc, "id": device_id}
-            if rpc.get("ok") and color_command_should_turn_on(body):
-                patch_live_device(device_id, {"on": True, "color_temp": kelvin}, sticky=True)
-                rpc = {**rpc, "id": device_id, "on": True, "color_temp": kelvin}
-            elif rpc.get("ok"):
-                patch_live_device(device_id, {"color_temp": kelvin}, sticky=True)
-                rpc = {**rpc, "id": device_id, "color_temp": kelvin}
+            if rpc.get("ok"):
+                # Replace any prior RGB sticky (pulse colour) so the UI matches CT.
+                fields = {"color_temp": kelvin, "color_hex": kelvin_to_hex(kelvin)}
+                if color_command_should_turn_on(body):
+                    fields["on"] = True
+                patch_live_device(device_id, fields, sticky=True)
+                rpc = {**rpc, "id": device_id, **fields}
             return rpc
         shown = action or "(empty)"
         return {"ok": False, "error": f"Unknown Matter command ({shown})"}

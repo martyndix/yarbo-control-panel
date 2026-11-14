@@ -1652,6 +1652,90 @@ $cmdsOn = array_column($planOn, 'command');
 assert_true($cmdsOn === ['brightness', 'color', 'off', 'brightness', 'color'], 'pulse restores scene look: ' . json_encode($cmdsOn));
 assert_true(($planOn[3]['brightness'] ?? 0) === 40, 'restore brightness');
 assert_true(($planOn[4]['hex'] ?? '') === '#aabbcc', 'restore colour');
+$planAdaptive = YarboHome::pulsePlan('1:2', '#ff0000', 1, [
+    'on' => true,
+    'brightness' => 55,
+    'adaptive' => true,
+    'kelvin' => 2700,
+], true);
+$cmdsAdaptive = array_column($planAdaptive, 'command');
+assert_true(
+    $cmdsAdaptive === ['brightness', 'color', 'off', 'brightness'],
+    'adaptive pulse restores brightness only in plan (TOD after): ' . json_encode($cmdsAdaptive)
+);
+$adaptiveLook = YarboHome::pulseLookFromDevice([
+    'on' => true,
+    'brightness' => 40,
+    'adaptive' => true,
+    'color_temp' => 3000,
+]);
+assert_true(!empty($adaptiveLook['adaptive']), 'adaptive look flag');
+assert_true(($adaptiveLook['kelvin'] ?? 0) === 3000, 'adaptive look kelvin');
+
+$pulseRoot = sys_get_temp_dir() . '/yarbo-pulse-restore-' . bin2hex(random_bytes(3));
+mkdir($pulseRoot . '/data', 0775, true);
+file_put_contents($pulseRoot . '/data/hub-config.json', json_encode([
+    'modules' => ['home' => true],
+    'active_module' => 'home',
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($pulseRoot . '/data/home.json', json_encode([
+    'names' => ['9:1' => 'Lounge'],
+    'room_defs' => [],
+    'rooms' => [],
+    'group_defs' => [],
+    'groups' => [],
+    'scenes' => [],
+    'paper' => [],
+    'hidden' => [],
+    'device_order' => [],
+    'adaptive' => ['extra' => ['9:1'], 'paused' => [], 'last' => []],
+    'last_devices' => [[
+        'id' => '9:1',
+        'name' => 'Lounge',
+        'kind' => 'light',
+        'on' => true,
+        'brightness' => 40,
+        'color_ct' => true,
+        'colorable' => true,
+        'color_temp_min' => 2000,
+        'color_temp_max' => 6500,
+    ]],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($pulseRoot . '/data/home-nodes-cache.json', json_encode([
+    'v' => 6,
+    'saved_at' => time(),
+    'fabric_mtime' => 0,
+    'disk_ids' => ['9:1'],
+    'devices' => [[
+        'id' => '9:1',
+        'name' => 'Lounge',
+        'kind' => 'light',
+        'on' => true,
+        'brightness' => 40,
+        'color_ct' => true,
+        'colorable' => true,
+        'color_temp' => 2700,
+    ]],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($pulseRoot . '/data/home-automations.json', json_encode([
+    'timezone' => 'Europe/Zurich',
+    'latitude' => 47.37,
+    'longitude' => 8.54,
+    'automations' => [],
+], JSON_UNESCAPED_SLASHES));
+$pulseCaptureHome = new YarboHome($pulseRoot);
+$captured = $pulseCaptureHome->capturePulseLook('9:1');
+assert_true(($captured['on'] ?? false) === true, 'capture pulse on');
+assert_true(($captured['brightness'] ?? 0) === 40, 'capture pulse brightness');
+assert_true(!empty($captured['adaptive']), 'capture marks Time of day lights');
+assert_true(
+    !empty($captured['kelvin']) || !empty($captured['hex']),
+    'capture fills colour for TOD resume: ' . json_encode($captured)
+);
+$homeSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
+assert_true(str_contains($homeSrc, 'function finalizePulseRestore'), 'pulse finalize restores look after flash');
+assert_true(str_contains($homeSrc, 'unpauseAdaptiveDevice($id)'), 'pulse finalize unpauses Time of day');
+
 assert_true(YarboHome::normalizePulseCount(0) === 3, 'pulse count default');
 assert_true(YarboHome::normalizePulseCount(11) === 10, 'pulse count max 10');
 assert_true(
@@ -1969,7 +2053,7 @@ assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');
 assert_true(str_contains($js, 'if (!heater) {'), 'heater On is not optimistic');
-assert_true(str_contains($matterPhp, 'MIN_VERSION = 69'), 'Matter agent min version 69');
+assert_true(str_contains($matterPhp, 'MIN_VERSION = 70'), 'Matter agent min version 70');
 assert_true(str_contains($js, "action: 'scan'"), 'Look for devices scans paired bridges');
 assert_true(str_contains($js, 'id="home-scene-filter"') || str_contains($js, "getElementById('home-scene-filter')"), 'scene editor search field');
 assert_true(str_contains($index, 'id="home-scan"'), 'Look for devices button');
