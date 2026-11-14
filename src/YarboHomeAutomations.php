@@ -3872,7 +3872,15 @@ final class YarboHomeAutomations
         $hex = YarboHome::normalizeHexValue((string) ($action['hex'] ?? $action['color_hex'] ?? YarboHome::PULSE_HEX_DEFAULT))
             ?? YarboHome::PULSE_HEX_DEFAULT;
         $count = YarboHome::normalizePulseCount($action['pulse_count'] ?? YarboHome::PULSE_COUNT_DEFAULT);
-        $restore = $home->capturePulseLook($id);
+        // Live look once at fire time so sticky cache cannot invent “was on”.
+        $restore = $home->capturePulseLook($id, true);
+        if (empty($restore['on'])) {
+            $keepAdaptive = !empty($restore['adaptive']);
+            $restore = ['on' => false];
+            if ($keepAdaptive) {
+                $restore['adaptive'] = true;
+            }
+        }
         $job = [
             'id' => $id,
             'hex' => $hex,
