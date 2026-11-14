@@ -698,13 +698,13 @@ final class YarboVestaboard
         if (!$config['enabled']) {
             return ['ok' => true, 'skipped' => true];
         }
-        // Prefer OS zone over a leftover UTC stamp (UTC is the PHP default, not
-        // a real "I live in UTC" choice). Browser TZ still wins when the UI opens.
+        // Prefer a real local zone over leftover UTC (PHP/OS default). Home Automations
+        // and PaperMono often already know Europe/Zurich etc. before the web UI opens.
         $storedTz = self::normalizeTimezone((string) ($config['quiet_timezone'] ?? ''));
         if ($storedTz === '' || self::isUtcTimezone($storedTz)) {
-            $os = self::osTimezone();
-            if ($os !== '' && $os !== $storedTz) {
-                $this->save(['quiet_timezone' => $os]);
+            $better = $this->discoverLocalTimezone($config);
+            if ($better !== '' && !self::isUtcTimezone($better) && $better !== $storedTz) {
+                $this->save(['quiet_timezone' => $better]);
                 $config = $this->load();
             }
         }
@@ -814,6 +814,14 @@ final class YarboVestaboard
             $forceResume = true;
         }
 
+        // Morning exit first — do not wait on Tesla/Lymow probes (or a browser poll).
+        if ($forceResume) {
+            $left = $this->leaveOvernightNow($config);
+            if ($left !== null) {
+                return $left;
+            }
+        }
+
         $this->refreshCompanionModules();
         $activity = $this->applyActivityLivePolicy();
         $rotated = false;
@@ -828,29 +836,9 @@ final class YarboVestaboard
         }
         if (!($layout['online'] ?? false)) {
             if ($forceResume) {
-                $cached = $this->lastLiveLayout($this->load());
-                if ($cached !== null) {
-                    $result = $this->sendLayout($cached, true);
-                    if (!empty($result['ok'])) {
-                        $this->save(['quiet_active' => false, 'night_active' => false]);
-                    }
-
-                    return $result;
-                }
-                // Still leave overnight flaps even when companions are offline
-                // (e.g. Powerwall OFFLINE) — do not wait for a browser poll.
-                if (($layout['ok'] ?? false)
-                    && !$this->isOvernightLayoutVerb((string) ($layout['verb'] ?? ''))
-                ) {
-                    $leaveCodes = self::normalizeLiveCodes($layout['codes'] ?? null);
-                    if ($leaveCodes !== null && !$this->codesLookLikeOvernight($leaveCodes)) {
-                        $result = $this->sendLayout($layout, true);
-                        if (!empty($result['ok'])) {
-                            $this->save(['quiet_active' => false, 'night_active' => false]);
-                        }
-
-                        return $result;
-                    }
+                $left = $this->leaveOvernightNow($this->load(), $layout);
+                if ($left !== null) {
+                    return $left;
                 }
                 // Keep night_active/quiet_active so the next tick still force-resumes.
             }
@@ -864,6 +852,49 @@ final class YarboVestaboard
 
         $result = $this->sendLayout($layout, $forceResume || $rotated || !empty($activity['changed']));
         if ($forceResume && !empty($result['ok'])) {
+            $this->save(['quiet_active' => false, 'night_active' => false]);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Post the pre-overnight live snapshot (or a composed offline page) and clear sticky flags.
+     *
+     * @param array<string, mixed> $config
+     * @param array<string, mixed>|null $fallbackLayout
+     * @return array<string, mixed>|null null when nothing usable to post yet
+     */
+    private function leaveOvernightNow(array $config, ?array $fallbackLayout = null): ?array
+    {
+        $cached = $this->lastLiveLayout($config);
+        if ($cached !== null) {
+            $result = $this->sendLayout($cached, true);
+            if (!empty($result['ok'])) {
+                $this->save(['quiet_active' => false, 'night_active' => false]);
+            }
+
+            return $result;
+        }
+
+        $layout = $fallbackLayout;
+        if ($layout === null) {
+            $layout = $this->layoutForLiveModule();
+        }
+        if (!($layout['ok'] ?? false)) {
+            return null;
+        }
+        if ($this->isOvernightLayoutVerb((string) ($layout['verb'] ?? ''))) {
+            return null;
+        }
+        $leaveCodes = self::normalizeLiveCodes($layout['codes'] ?? null);
+        if ($leaveCodes === null || $this->codesLookLikeOvernight($leaveCodes)) {
+            return null;
+        }
+        // Still leave overnight flaps even when companions are offline
+        // (e.g. Powerwall OFFLINE) — do not wait for a browser poll.
+        $result = $this->sendLayout($layout, true);
+        if (!empty($result['ok'])) {
             $this->save(['quiet_active' => false, 'night_active' => false]);
         }
 
@@ -2184,9 +2215,9 @@ final class YarboVestaboard
         if ($stored !== '' && !self::isUtcTimezone($stored)) {
             return $stored;
         }
-        $os = self::osTimezone();
-        if ($os !== '') {
-            return $os;
+        $discovered = $this->discoverLocalTimezone($config);
+        if ($discovered !== '' && !self::isUtcTimezone($discovered)) {
+            return $discovered;
         }
         if ($stored !== '') {
             return $stored;
@@ -2194,6 +2225,51 @@ final class YarboVestaboard
         $php = self::normalizeTimezone((string) date_default_timezone_get());
 
         return $php !== '' ? $php : 'UTC';
+    }
+
+    /**
+     * Best non-UTC zone from OS / Home Automations / PaperMono without needing the web UI.
+     *
+     * @param array<string, mixed>|null $config
+     */
+    public function discoverLocalTimezone(?array $config = null): string
+    {
+        $os = self::osTimezone();
+        if ($os !== '' && !self::isUtcTimezone($os)) {
+            return $os;
+        }
+        foreach ($this->siblingTimezoneCandidates() as $zone) {
+            if ($zone !== '' && !self::isUtcTimezone($zone)) {
+                return $zone;
+            }
+        }
+
+        return $os;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function siblingTimezoneCandidates(): array
+    {
+        $out = [];
+        $homePath = rtrim($this->projectRoot, '/') . '/data/home-automations.json';
+        if (is_file($homePath)) {
+            $decoded = json_decode((string) file_get_contents($homePath), true);
+            if (is_array($decoded)) {
+                $out[] = self::normalizeTimezone((string) ($decoded['timezone'] ?? ''));
+            }
+        }
+        $paperPath = rtrim($this->projectRoot, '/') . '/data/papermono-devices.json';
+        if (is_file($paperPath)) {
+            $decoded = json_decode((string) file_get_contents($paperPath), true);
+            if (is_array($decoded)) {
+                $prefs = is_array($decoded['prefs'] ?? null) ? $decoded['prefs'] : [];
+                $out[] = self::normalizeTimezone((string) ($prefs['timezone'] ?? ''));
+            }
+        }
+
+        return array_values(array_filter($out, static fn (string $z): bool => $z !== ''));
     }
 
     public static function isUtcTimezone(string $zone): bool
@@ -2315,7 +2391,8 @@ final class YarboVestaboard
     public function nightHoursEndAt(?array $config = null): ?\DateTimeImmutable
     {
         $config ??= $this->load();
-        if (!($config['night_hours_enabled'] ?? false) || !$this->nightHoursAvailable()) {
+        // Clock-only — same rule as isNightHours(). Do not gate on UniFi inventory.
+        if (!($config['night_hours_enabled'] ?? false)) {
             return null;
         }
         $start = (string) ($config['night_start'] ?? '');

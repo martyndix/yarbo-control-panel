@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.294] - 2026-11-14
+
+### Fixed
+- **Night / quiet hours stuck until the web UI opened:** leftover **UTC** Vestaboard timezone no longer waits for a browser poll — the watcher adopts the Home Automations or PaperMono zone (or the OS zone) so 07:00 means local morning. Morning leave also posts the saved live page **before** Tesla/Lymow companion refresh, and skips that refresh while exiting overnight, so exit does not hang behind a slow Powerwall probe. `nightHoursEndAt` matches clock-only night hours (no UniFi inventory gate).
+
 ## [4.0.293] - 2026-11-14
 
 ### Changed

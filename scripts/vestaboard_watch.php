@@ -33,8 +33,14 @@ function vestaboard_run_tick(YarboVestaboard $board): void
         // Heartbeat first — Powerwall/Lymow refresh can take tens of seconds and
         // used to make the UI scream "background updater idle" mid-tick.
         $board->touchHeartbeat();
+        // Leave night/quiet before Tesla/Lymow probes so morning exit is not blocked
+        // behind a slow Powerwall refresh (and does not need the web UI open).
+        $cfg = $board->load();
+        $leavingOvernight = (!empty($cfg['night_active']) || !empty($cfg['quiet_active']))
+            && !$board->isNightHours()
+            && !$board->isQuietHours();
         // Overnight only needs door contacts + the Note; skip Tesla/Lymow probes.
-        if (!$board->isNightHours() && !$board->isQuietHours()) {
+        if (!$leavingOvernight && !$board->isNightHours() && !$board->isQuietHours()) {
             $board->refreshCompanionModules();
             $board->touchHeartbeat();
         }
