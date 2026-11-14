@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.299] - 2026-11-14
+
+### Fixed
+- **Matter vacuum Start still toasting `ChangeToMode (generic failure)`** on SwitchBot K11+/S10: Start now matches Home Assistant — **SelectAreas** (empty list for All rooms, or the picked rooms) **before** Cleaning — then Operational Start + retry if needed. Matter agent **v59**; the panel replaces a stale agent after Settings update when the version is below the minimum.
+
 ## [4.0.298] - 2026-11-14
 
 ### Fixed

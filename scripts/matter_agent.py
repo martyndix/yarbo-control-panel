@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 58
+AGENT_VERSION = 59
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -5822,8 +5822,26 @@ def set_vacuum_command(
             **({"vacuum_battery": battery} if battery is not None else {}),
         }
 
-    # Apple Home Start is ChangeToMode Cleaning. Rooms and Vacuum/Mop are
-    # separate taps. Mapping remaps — never send it (S10 Mapping is mode 1).
+    def prepare_areas() -> dict[str, Any] | None:
+        """Home Assistant Start: SelectAreas before Cleaning.
+
+        Empty newAreas = unconstrained full clean (clears a leftover room pick).
+        Specific rooms pass those ids. Skip when the robot has no Service Area.
+        """
+        if not areas and not all_ids:
+            return None
+        ids = [] if all_rooms else list(requested_ids or [])
+        rpc = vacuum_select_areas(node_id, area_endpoint, ids)
+        attempts.append(rpc)
+        return rpc
+
+    # Match Home Assistant: SelectAreas then ChangeToMode Cleaning.
+    # Mapping remaps — never send it (S10 Mapping is mode 1).
+    areas_prep = prepare_areas()
+    if areas_prep is not None and is_transport_error(areas_prep):
+        return areas_prep
+    if areas_prep is not None and areas_prep.get("ok"):
+        settle_mode()
     started = try_cleaning(verify=True)
     attempts.append(started)
     if is_transport_error(started):
@@ -5836,13 +5854,16 @@ def set_vacuum_command(
 
     status_code = int(started.get("status") or 0)
     # K11+/S10 on the pad: Cleaning GenericFailure while Idle/Docked/Charging.
-    # Operational Start can undock without Mapping; then retry Cleaning.
+    # Operational Start can undock without Mapping; then retry areas + Cleaning.
     if status_code == 2 or at_charger():
         op_start = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Start", {})
         attempts.append(op_start)
         if op_start.get("ok") and not is_transport_error(op_start):
             settle_start()
             sync_row()
+            areas_prep = prepare_areas()
+            if areas_prep is not None and areas_prep.get("ok"):
+                settle_mode()
             started = try_cleaning(verify=True)
             attempts.append(started)
             settle_start()
@@ -5850,24 +5871,18 @@ def set_vacuum_command(
             done = started_ok(started)
             if done is not None:
                 return done
-        # S10 Idle off-pad sometimes needs SelectAreas before Cleaning (InvalidInMode).
-        if (
-            status_code in (2, 3)
-            and not actively_charging()
-            and requested_ids
-            and not all_rooms
-        ):
-            areas_rpc = vacuum_select_areas(node_id, area_endpoint, requested_ids)
-            attempts.append(areas_rpc)
-            if areas_rpc.get("ok"):
+        # Retry areas + Cleaning once more (InvalidInMode / leftover room pick).
+        if status_code in (2, 3):
+            areas_prep = prepare_areas()
+            if areas_prep is not None and areas_prep.get("ok"):
                 settle_mode()
-                started = try_cleaning(verify=True)
-                attempts.append(started)
-                settle_start()
-                sync_row()
-                done = started_ok(started)
-                if done is not None:
-                    return done
+            started = try_cleaning(verify=True)
+            attempts.append(started)
+            settle_start()
+            sync_row()
+            done = started_ok(started)
+            if done is not None:
+                return done
 
     if int(started.get("status") or 0) == 2 and at_charger():
         started = {

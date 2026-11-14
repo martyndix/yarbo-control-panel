@@ -6,7 +6,7 @@ namespace Yarbo;
 
 final class YarboMatterAgentClient
 {
-    public const MIN_VERSION = 58;
+    public const MIN_VERSION = 59;
     private const SPAWN_COOLDOWN_S = 3.0;
 
     private static bool $spawnAttempted = false;
@@ -137,14 +137,25 @@ final class YarboMatterAgentClient
     public function ensureStarted(): void
     {
         if ($this->portOpen()) {
+            $probe = $this->post(['op' => 'ping'], 1.5);
+            if (self::agentSupportsColor($probe)) {
+                self::$spawnAttempted = true;
+
+                return;
+            }
+            // Stale agent still listening after a Settings update — replace it.
+            if (($probe['ok'] ?? false) === true) {
+                $version = (int) ($probe['version'] ?? 0);
+                if ($version > 0 && $version < self::MIN_VERSION) {
+                    $this->spawnAgent();
+
+                    return;
+                }
+            }
             if (self::$spawnAttempted) {
                 return;
             }
             self::$spawnAttempted = true;
-            $probe = $this->post(['op' => 'ping'], 1.5);
-            if (self::agentSupportsColor($probe)) {
-                return;
-            }
             if (($probe['ok'] ?? false) !== true) {
                 return;
             }
