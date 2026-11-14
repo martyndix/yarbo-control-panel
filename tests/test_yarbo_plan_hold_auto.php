@@ -119,20 +119,6 @@ assert_true(($r['fired'] ?? []) === [], 'noon but not held: blocked by Only if')
 $r = $auto->tick([$held], $noon + 86400);
 assert_true(($r['fired'] ?? []) === ['a-if-hold'], 'noon + plan_hold Only if: ' . json_encode($r));
 
-// Lymow cannot use plan_hold — normalizes to error.
-$ly = $auto->save([
-    'id' => 'a-ly-hold',
-    'enabled' => true,
-    'trigger' => ['type' => 'robot', 'id' => 'lymow', 'event' => 'plan_hold'],
-    'actions' => [['kind' => 'device', 'id' => 'unifi:light:porch', 'command' => 'on']],
-    'cooldown_sec' => 0,
-]);
-assert_true(!empty($ly['ok']), 'lymow plan_hold still saves');
-assert_true(
-    ($ly['automation']['trigger']['event'] ?? '') === 'error',
-    'lymow plan_hold becomes error: ' . json_encode($ly['automation']['trigger'] ?? null)
-);
-$auto->delete('a-ly-hold');
 $auto->delete('a-if-hold');
 
 $js = (string) file_get_contents($rootFs . '/public/assets/app.js');
@@ -142,7 +128,7 @@ assert_true(str_contains($js, 'HOME_AUTO_YARBO_ID}:plan_hold'), 'UI Plan hold tr
 assert_true(str_contains($js, 'HOME_AUTO_YARBO_ID}:plan_resume'), 'UI Plan resume tray chip');
 assert_true(str_contains($js, "['plan_hold', 'Plan hold']"), 'UI plan_hold option');
 assert_true(str_contains($php, 'planning_paused'), 'cache stores planning_paused');
-assert_true(str_contains($php, 'YARBO_PLAN_HOLD_EVENTS'), 'plan hold events constant');
+assert_true(str_contains($php, 'ROBOT_PLAN_HOLD_EVENTS'), 'plan hold events constant');
 assert_true(str_contains($change, '## [4.0.301]'), 'changelog 4.0.301');
 assert_true(str_contains($change, 'Plan hold'), 'changelog mentions Plan hold');
 

@@ -8202,10 +8202,10 @@ function homeAutoRobotName(id) {
 function homeAutoRobotTrigger(id, event = 'error') {
     const robot = id === HOME_AUTO_LYMOW_ID ? HOME_AUTO_LYMOW_ID : HOME_AUTO_YARBO_ID;
     let ev = String(event || 'error');
-    if (robot === HOME_AUTO_YARBO_ID && (ev === 'rain' || ev === 'dry' || ev === 'plan_hold' || ev === 'plan_resume')) {
+    if (robot === HOME_AUTO_YARBO_ID && (ev === 'rain' || ev === 'dry')) {
         // keep
-    } else if (ev === 'heading_home') {
-        ev = 'heading_home';
+    } else if (ev === 'plan_hold' || ev === 'plan_resume' || ev === 'heading_home') {
+        // keep — shared Yarbo + Lymow
     } else if (ev === 'ok') {
         ev = 'ok';
     } else {
@@ -8220,14 +8220,13 @@ function homeAutoRobotEventOptions(id, selected) {
         ['ok', 'OK'],
     ];
     if (id === HOME_AUTO_YARBO_ID) {
-        opts.push(
-            ['rain', 'Rain'],
-            ['dry', 'Dry'],
-            ['plan_hold', 'Plan hold'],
-            ['plan_resume', 'Plan resume'],
-        );
+        opts.push(['rain', 'Rain'], ['dry', 'Dry']);
     }
-    opts.push(['heading_home', 'Heading home']);
+    opts.push(
+        ['plan_hold', 'Plan hold'],
+        ['plan_resume', 'Plan resume'],
+        ['heading_home', 'Heading home'],
+    );
     return opts.map(([value, label]) =>
         `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`
     ).join('');
@@ -9853,6 +9852,8 @@ function homeAutoTrayGroups(devices, scenes) {
         buckets.lymow.push(
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:error`, 'Error', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:ok`, 'OK', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:plan_hold`, 'Plan hold', 'auto-chip--robot', '', 'when'),
+            homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:plan_resume`, 'Plan resume', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('robot', `${HOME_AUTO_LYMOW_ID}:heading_home`, 'Heading home', 'auto-chip--robot', '', 'when'),
             homeAutoTrayChipSpec('lymow', 'start', 'Start', 'auto-chip--robot', '', 'then'),
             homeAutoTrayChipSpec('lymow', 'pause', 'Pause', 'auto-chip--robot', '', 'then'),

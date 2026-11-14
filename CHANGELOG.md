@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.303] - 2026-11-14
+
+### Added
+- **Lymow Plan hold / Plan resume in Automations:** When and Only if can use Vestaboard **PLAN HOLD** for Lymow (`work_status` PAUSE), same chips as Yarbo. Example: When Lymow Plan hold → turn on a light.
+
 ## [4.0.302] - 2026-11-14
 
 ### Added

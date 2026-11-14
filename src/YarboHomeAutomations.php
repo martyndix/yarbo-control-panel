@@ -40,8 +40,8 @@ final class YarboHomeAutomations
     public const ROBOT_EVENTS = ['error', 'ok', 'rain', 'dry', 'plan_hold', 'plan_resume', 'heading_home'];
     /** Yarbo-only rain / dry (Lymow has no rain sensor). */
     public const YARBO_RAIN_EVENTS = ['rain', 'dry'];
-    /** Yarbo-only plan pause (Vestaboard PLAN HOLD) / resume. */
-    public const YARBO_PLAN_HOLD_EVENTS = ['plan_hold', 'plan_resume'];
+    /** Yarbo + Lymow: Vestaboard PLAN HOLD / resume. */
+    public const ROBOT_PLAN_HOLD_EVENTS = ['plan_hold', 'plan_resume'];
     /** Yarbo + Lymow: Vestaboard HEADING HOME / DOCKING. */
     public const ROBOT_HEADING_HOME_EVENTS = ['heading_home'];
     public const YARBO_COMMANDS = ['start_plan', 'return_to_dock', 'stop'];
@@ -1101,6 +1101,7 @@ final class YarboHomeAutomations
             'kind' => 'robot',
             'name' => $name,
             'error' => self::lymowErrorFromData($data),
+            'plan_hold' => self::lymowPlanHoldFromData($data),
             'heading_home' => self::lymowHeadingHomeFromData($data),
         ];
     }
@@ -1162,6 +1163,23 @@ final class YarboHomeAutomations
         }
 
         return self::truthy($data['returning_to_dock'] ?? false);
+    }
+
+    /**
+     * Same as Vestaboard Lymow PLAN HOLD: work_status PAUSE (3).
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function lymowPlanHoldFromData(array $data): bool
+    {
+        if (array_key_exists('plan_hold', $data) && is_bool($data['plan_hold'])) {
+            return $data['plan_hold'];
+        }
+        $work = isset($data['work_status']) && is_numeric($data['work_status'])
+            ? (int) $data['work_status']
+            : null;
+
+        return $work === 3;
     }
 
     /**
@@ -1371,9 +1389,6 @@ final class YarboHomeAutomations
         if (in_array($event, self::YARBO_RAIN_EVENTS, true) && $id !== self::YARBO_ID) {
             $event = 'error';
         }
-        if (in_array($event, self::YARBO_PLAN_HOLD_EVENTS, true) && $id !== self::YARBO_ID) {
-            $event = 'error';
-        }
         if (!in_array($event, self::ROBOT_EVENTS, true)) {
             $event = 'error';
         }
@@ -1489,7 +1504,7 @@ final class YarboHomeAutomations
 
             return $event === 'dry' ? ($was && !$is) : (!$was && $is);
         }
-        if (in_array($event, self::YARBO_PLAN_HOLD_EVENTS, true)) {
+        if (in_array($event, self::ROBOT_PLAN_HOLD_EVENTS, true)) {
             $was = !empty($prev[$id]['plan_hold']);
             $is = !empty($curr[$id]['plan_hold']);
 
@@ -1530,7 +1545,7 @@ final class YarboHomeAutomations
 
             return $event === 'dry' ? !$is : $is;
         }
-        if (in_array($event, self::YARBO_PLAN_HOLD_EVENTS, true)) {
+        if (in_array($event, self::ROBOT_PLAN_HOLD_EVENTS, true)) {
             if (!array_key_exists('plan_hold', $snap) || $snap['plan_hold'] === null) {
                 return false;
             }
