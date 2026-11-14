@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.305] - 2026-11-14
+
+### Fixed
+- **Vacuum Start still `ChangeToMode (generic failure)` after v61:** Cleaning-only from Idle/Docked on the pad was not enough. Start now matches Home Assistant again for Idle/Docked/charge-complete: **SelectAreas** (`[]` for All rooms, or the picked rooms) **then Cleaning**. SelectAreas is skipped only while *actively* Charging (**4.0.93**). Leftover Cleaning/Mapping still Idle-resets; already-Idle retries without a no-op Idle. Matter agent **v62**; errors include `[matter v62]`.
+
 ## [4.0.304] - 2026-11-14
 
 ### Fixed

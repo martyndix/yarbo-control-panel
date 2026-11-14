@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 61
+AGENT_VERSION = 62
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -5822,26 +5822,38 @@ def set_vacuum_command(
         }
 
     def prepare_areas() -> dict[str, Any] | None:
-        """SelectAreas only off the pad with a room subset.
+        """Home Assistant Start: SelectAreas before Cleaning.
 
-        K11+ refuses SelectAreas while Charging/Docked/Idle-on-pad (4.0.93).
-        All-rooms Start matches Apple Home: ChangeToMode Cleaning only (4.0.92/100).
-        Room chips / off-pad room picks still SelectAreas first.
+        Empty newAreas = unconstrained full clean. Room picks pass those ids.
+        K11+ refuses SelectAreas only while *actively* Charging (4.0.93) — not
+        when Idle/Docked on the pad after charge complete (HA still selects).
         """
-        if at_charger():
-            return None
-        if all_rooms or not requested_ids:
+        if actively_charging():
             return None
         if not areas and not all_ids:
             return None
-        rpc = vacuum_select_areas(node_id, area_endpoint, list(requested_ids))
+        ids = [] if all_rooms else list(requested_ids or [])
+        rpc = vacuum_select_areas(node_id, area_endpoint, ids)
         attempts.append(rpc)
         return rpc
+
+    def run_mode_needs_idle_reset() -> bool:
+        """Only Idle-reset when CurrentMode is leftover Cleaning/Mapping."""
+        if idle is None:
+            return False
+        try:
+            current = int(row["vacuum_run_mode"]) if row.get("vacuum_run_mode") is not None else None
+        except (TypeError, ValueError):
+            current = None
+        if current is None:
+            return True
+        return current != int(idle["mode"])
 
     def run_clean_pass() -> tuple[dict[str, Any] | None, dict[str, Any]]:
         areas_prep = prepare_areas()
         if areas_prep is not None and is_transport_error(areas_prep):
             return areas_prep, areas_prep
+        # SelectAreas may GenericFailure while charging — still try Cleaning.
         if areas_prep is not None and areas_prep.get("ok"):
             settle_mode()
         started_rpc = try_cleaning(verify=True)
@@ -5852,33 +5864,37 @@ def set_vacuum_command(
         sync_row()
         return started_ok(started_rpc), started_rpc
 
-    # From the pad: Cleaning only (no SelectAreas — that is the 4.0.93/100 fix).
-    # Off pad with a room subset: SelectAreas then Cleaning. Never Mapping.
-    # K11+ does not accept Operational Start (only Pause/Resume/GoHome).
+    # HA / SwitchBot: SelectAreas then ChangeToMode Cleaning (skip SelectAreas
+    # only while actively Charging). Never Mapping. No Operational Start (K11+).
     done, started = run_clean_pass()
     if done is not None:
         return done
 
     status_code = int(started.get("status") or 0)
-    # Leftover Cleaning/Mapping CurrentMode while Idle on the pad → reset to Idle,
-    # then Cleaning again (still no SelectAreas on the pad).
-    if status_code in (2, 3) or at_charger():
+    # Leftover Cleaning/Mapping CurrentMode → Idle, then SelectAreas + Cleaning again.
+    if (status_code in (2, 3) or at_charger()) and run_mode_needs_idle_reset():
         try_idle()
         settle_mode()
         sync_row()
         done, started = run_clean_pass()
         if done is not None:
             return done
-        # Resume only when paused — K11 accepts Resume but Charging+Resume → Error.
-        if str(row.get("vacuum_status") or "") == "Paused" or run_op() == OP_PAUSED:
-            resumed = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Resume", {})
-            attempts.append(resumed)
-            if resumed.get("ok") and not is_transport_error(resumed):
-                settle_start()
-                sync_row()
-                done = started_ok({**resumed, "ok": True})
-                if done is not None:
-                    return done
+    elif status_code in (2, 3) or at_charger():
+        # Already Idle: retry once without a no-op Idle ChangeToMode.
+        settle_mode()
+        done, started = run_clean_pass()
+        if done is not None:
+            return done
+    # Resume only when paused — K11 accepts Resume but Charging+Resume → Error.
+    if str(row.get("vacuum_status") or "") == "Paused" or run_op() == OP_PAUSED:
+        resumed = vacuum_rpc_command(node_id, rvc_ep, RVC_OPERATIONAL, "Resume", {})
+        attempts.append(resumed)
+        if resumed.get("ok") and not is_transport_error(resumed):
+            settle_start()
+            sync_row()
+            done = started_ok({**resumed, "ok": True})
+            if done is not None:
+                return done
 
     if int(started.get("status") or 0) == 2 and at_charger():
         started = {
