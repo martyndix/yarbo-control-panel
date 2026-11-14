@@ -1671,6 +1671,21 @@ $adaptiveLook = YarboHome::pulseLookFromDevice([
 ]);
 assert_true(!empty($adaptiveLook['adaptive']), 'adaptive look flag');
 assert_true(($adaptiveLook['kelvin'] ?? 0) === 3000, 'adaptive look kelvin');
+$scrubbed = YarboHome::scrubPulseRestoreLook([
+    'on' => true,
+    'brightness' => 40,
+    'hex' => '#ff0000',
+    'kelvin' => 2700,
+], '#ff0000');
+assert_true(!isset($scrubbed['hex']), 'scrub drops pulse hex masquerading as prior look');
+assert_true(($scrubbed['kelvin'] ?? 0) === 2700, 'scrub keeps kelvin');
+$scrubKeep = YarboHome::scrubPulseRestoreLook([
+    'on' => true,
+    'hex' => '#aabbcc',
+], '#ff0000');
+assert_true(($scrubKeep['hex'] ?? '') === '#aabbcc', 'scrub keeps a real prior colour');
+assert_true(str_contains($homeSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php'), 'ensurePulseEndedOff'), 'hard off after pulse when prior was off');
+assert_true(str_contains($homeSrc, 'scrubPulseRestoreLook'), 'pulse scrub helper present');
 
 $pulseRoot = sys_get_temp_dir() . '/yarbo-pulse-restore-' . bin2hex(random_bytes(3));
 mkdir($pulseRoot . '/data', 0775, true);
@@ -1732,7 +1747,6 @@ assert_true(
     !empty($captured['kelvin']) || !empty($captured['hex']),
     'capture fills colour for TOD resume: ' . json_encode($captured)
 );
-$homeSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 assert_true(str_contains($homeSrc, 'function finalizePulseRestore'), 'pulse finalize restores look after flash');
 assert_true(str_contains($homeSrc, 'unpauseAdaptiveDevice($id)'), 'pulse finalize unpauses Time of day');
 
@@ -2053,7 +2067,7 @@ assert_true(str_contains($js, 'HOME_HEATER_TIMEOUT_MS'), 'heater command timeout
 assert_true(str_contains($js, "kind: device?.kind || ''"), 'heater On/Off sends kind');
 assert_true(str_contains($js, "kind: device?.kind || 'heater'"), 'heater setpoint sends kind');
 assert_true(str_contains($js, 'if (!heater) {'), 'heater On is not optimistic');
-assert_true(str_contains($matterPhp, 'MIN_VERSION = 70'), 'Matter agent min version 70');
+assert_true(str_contains($matterPhp, 'MIN_VERSION = 71'), 'Matter agent min version 71');
 assert_true(str_contains($js, "action: 'scan'"), 'Look for devices scans paired bridges');
 assert_true(str_contains($js, 'id="home-scene-filter"') || str_contains($js, "getElementById('home-scene-filter')"), 'scene editor search field');
 assert_true(str_contains($index, 'id="home-scan"'), 'Look for devices button');
