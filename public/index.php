@@ -822,7 +822,8 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     </details>
                     <section class="auto-drop" id="auto-then" data-auto-zone="then" aria-label="Then">
                         <h3 class="settings-subtitle">Then</h3>
-                        <p class="hint">Drag lights, scenes, Unlock, or a Yarbo Start plan / Dock / Stop here. Pulse flashes a colour 1–10 times, then puts the light back to off, on, or its scene look. On can set brightness, colour, or temperature when the device has those.</p>
+                        <p class="hint">Drag lights, scenes, Unlock, or a Yarbo Start plan / Dock / Stop here. Pulse flashes a colour 1–10 times, then puts the light back to off, on, or its scene look. With many lights, use <strong>Set all lights</strong> so you do not edit each chip. On can set brightness, colour, or temperature when the device has those.</p>
+                        <div id="auto-then-bulk" class="auto-then-bulk hidden" hidden></div>
                         <div class="auto-drop-chips" id="auto-then-chips"></div>
                         <label class="settings-field auto-off-after" id="auto-off-after">
                             <span class="label">After Then</span>

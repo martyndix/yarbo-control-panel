@@ -1965,7 +1965,12 @@ assert_true(str_contains($js, 'homeAutoThenHasOffAfter'), 'hides After Then when
 assert_true(str_contains($js, 'homeAutoThenCanPulse'), 'pulse Then helper');
 assert_true(str_contains($js, "['pulse', 'Pulse']"), 'Pulse command');
 assert_true(str_contains($js, 'data-auto-pulse-count'), 'pulse count picker');
+assert_true(str_contains($js, 'homeAutoApplyThenBulk'), 'Then bulk apply helper');
+assert_true(str_contains($js, 'data-auto-bulk-apply'), 'Then Apply to all button');
+assert_true(str_contains($js, 'Set all'), 'Then Set all lights label');
+assert_true(str_contains($index, 'auto-then-bulk'), 'Then bulk bar in editor');
 assert_true(str_contains($index, 'Pulse flashes a colour'), 'Then pulse hint');
+assert_true(str_contains((string) file_get_contents(__DIR__ . '/../CHANGELOG.md'), '## [4.0.319]'), 'changelog 4.0.319');
 assert_true(str_contains($js, 'homeAutoIfStateOptions'), 'only-if states');
 assert_true(str_contains($js, 'data-auto-if-within-mode'), 'Only if motion within mode');
 assert_true(str_contains($js, 'data-auto-if-within'), 'Only if motion within amount');

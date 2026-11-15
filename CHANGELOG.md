@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.319] - 2026-11-15
+
+### Added
+- **Automations Then — Set all lights:** With two or more lights in Then, a bar lets you pick On / Off / Pulse (colour × times) or Brightness once and **Apply to all**, so you do not edit dozens of chips one by one.
+
 ## [4.0.318] - 2026-11-15
 
 ### Fixed
