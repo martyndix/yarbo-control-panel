@@ -7841,6 +7841,145 @@ function homeAutoThenShowsLook(cmd) {
     return !['off', 'stop', 'unlock', 'lock', 'open', 'close', 'pulse'].includes(String(cmd || 'on'));
 }
 
+function homeAutoThenBulkTargets() {
+    return (autoDraft?.actions || []).filter((action) => action
+        && action.kind !== 'scene'
+        && action.kind !== 'yarbo'
+        && action.kind !== 'lymow'
+        && String(action.id || '').trim() !== '');
+}
+
+function homeAutoThenBulkSample() {
+    const lights = homeAutoThenBulkTargets();
+    if (!lights.length) return null;
+    const pulse = lights.find((a) => a.command === 'pulse');
+    return pulse || lights[0];
+}
+
+function homeAutoThenBulkParamsHtml(cmd, sample) {
+    const action = sample || {};
+    if (cmd === 'pulse') {
+        const hex = action.hex || action.color_hex || '#ff3b30';
+        const n = Math.max(1, Math.min(10, Number(action.pulse_count || 3) || 3));
+        const times = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) =>
+            `<option value="${i}" ${i === n ? 'selected' : ''}>${i}×</option>`
+        ).join('');
+        return `<input type="color" data-auto-bulk-hex value="${escapeHtml(hex)}" aria-label="Pulse colour for all" title="Pulse colour">
+            <select data-auto-bulk-pulse-count aria-label="Pulse times for all">${times}</select>`;
+    }
+    if (cmd === 'off' || cmd === 'unlock' || cmd === 'lock' || cmd === 'open' || cmd === 'close' || cmd === 'stop') {
+        return '';
+    }
+    let html = '';
+    const bright = Number(action.brightness);
+    html += `<label class="auto-then-set"><input type="number" min="1" max="100" data-auto-bulk-bright value="${Number.isFinite(bright) && bright > 0 ? bright : 100}" aria-label="Brightness for all" title="Brightness">%</label>`;
+    const adaptive = Boolean(action.adaptive);
+    html += `<label class="auto-then-set" title="Warm at night, cooler in the day"><input type="checkbox" data-auto-bulk-adaptive ${adaptive ? 'checked' : ''}> Time of day</label>`;
+    if (!adaptive) {
+        const hex = action.hex || action.color_hex || '#ffd27a';
+        html += `<input type="color" data-auto-bulk-hex value="${escapeHtml(hex)}" aria-label="Colour for all" title="Colour">`;
+        const kelvin = Number(action.kelvin ?? action.color_temp ?? 2700);
+        html += `<label class="auto-then-set"><input type="number" min="1500" max="8000" step="50" data-auto-bulk-kelvin value="${Number.isFinite(kelvin) ? kelvin : 2700}" aria-label="Colour temperature for all" title="Colour temperature (K)">K</label>`;
+    }
+    return html;
+}
+
+function homeAutoThenBulkHtml() {
+    const lights = homeAutoThenBulkTargets();
+    if (lights.length < 2) return '';
+    const sample = homeAutoThenBulkSample() || {};
+    const cmd = ['on', 'off', 'pulse', 'brightness'].includes(sample.command) ? sample.command : 'on';
+    const opts = [
+        ['on', 'On'],
+        ['off', 'Off'],
+        ['pulse', 'Pulse'],
+        ['brightness', 'Brightness'],
+    ].map(([v, label]) => `<option value="${v}" ${v === cmd ? 'selected' : ''}>${label}</option>`).join('');
+    return `<span class="auto-then-bulk-label">Set all ${lights.length} lights</span>
+        <select data-auto-bulk-cmd aria-label="Command for all lights">${opts}</select>
+        <span class="auto-then-bulk-params" data-auto-bulk-params>${homeAutoThenBulkParamsHtml(cmd, sample)}</span>
+        <button type="button" class="btn btn-secondary btn-compact" data-auto-bulk-apply>Apply to all</button>`;
+}
+
+function homeAutoRefreshThenBulkParams() {
+    const bulk = document.getElementById('auto-then-bulk');
+    if (!bulk || bulk.hidden) return;
+    const cmd = bulk.querySelector('[data-auto-bulk-cmd]')?.value || 'on';
+    const params = bulk.querySelector('[data-auto-bulk-params]');
+    if (params) params.innerHTML = homeAutoThenBulkParamsHtml(cmd, homeAutoThenBulkSample() || {});
+}
+
+function homeAutoApplyThenBulk() {
+    if (!autoDraft) return;
+    const bulk = document.getElementById('auto-then-bulk');
+    if (!bulk || bulk.hidden) return;
+    const cmd = bulk.querySelector('[data-auto-bulk-cmd]')?.value || 'on';
+    const hexEl = bulk.querySelector('[data-auto-bulk-hex]');
+    const hex = hexEl ? String(hexEl.value || '').trim() : '';
+    const pulseCount = Number(bulk.querySelector('[data-auto-bulk-pulse-count]')?.value);
+    const bright = Number(bulk.querySelector('[data-auto-bulk-bright]')?.value);
+    const kelvin = Number(bulk.querySelector('[data-auto-bulk-kelvin]')?.value);
+    const adaptive = Boolean(bulk.querySelector('[data-auto-bulk-adaptive]')?.checked);
+    let changed = 0;
+    autoDraft.actions = (autoDraft.actions || []).map((action) => {
+        if (!action || action.kind === 'scene' || action.kind === 'yarbo' || action.kind === 'lymow') {
+            return action;
+        }
+        const d = homeAutoDeviceById(action.id) || { id: action.id, kind: action.device_kind || 'light' };
+        const allowed = homeAutoThenCommands(d).map(([v]) => v);
+        if (cmd === 'pulse' && !allowed.includes('pulse') && !homeAutoThenCanPulse(d)) {
+            return action;
+        }
+        if (cmd !== 'pulse' && !allowed.includes(cmd) && !(cmd === 'brightness' && homeAutoThenCanBright(d))) {
+            return action;
+        }
+        const next = { ...action, command: cmd, device_kind: d.kind || action.device_kind || 'light' };
+        delete next.brightness;
+        delete next.hex;
+        delete next.color_hex;
+        delete next.kelvin;
+        delete next.color_temp;
+        delete next.adaptive;
+        delete next.pulse_count;
+        delete next.celsius;
+        delete next.heating_setpoint;
+        if (cmd === 'pulse') {
+            next.hex = hex || '#ff3b30';
+            next.pulse_count = Number.isFinite(pulseCount)
+                ? Math.max(1, Math.min(10, Math.round(pulseCount)))
+                : 3;
+        } else if (cmd === 'off') {
+            // look cleared above
+        } else {
+            if (homeAutoThenCanBright(d) || cmd === 'brightness') {
+                next.brightness = Number.isFinite(bright) && bright > 0
+                    ? Math.max(1, Math.min(100, Math.round(bright)))
+                    : 100;
+            }
+            if (adaptive && homeAutoThenCanAdaptive(d)) {
+                next.adaptive = true;
+            } else if (homeAutoThenCanColor(d) && hex) {
+                next.hex = hex;
+            } else if (homeAutoThenCanKelvin(d) && Number.isFinite(kelvin)) {
+                next.kelvin = Math.max(1500, Math.min(8000, Math.round(kelvin)));
+            }
+        }
+        if (!homeAutoThenCanOffAfter(next)) {
+            delete next.off_after_sec;
+        } else if (!autoDraft.off_when_false && Number(autoDraft.off_after_sec || 0) > 0) {
+            next.off_after_sec = Number(autoDraft.off_after_sec);
+        }
+        changed += 1;
+        return next;
+    });
+    homeAutoSanitizeThenLooks();
+    homeAutoFollowName();
+    renderHomeAutoEditor();
+    if (changed) {
+        showToast(changed === 1 ? 'Updated 1 light' : `Updated ${changed} lights`);
+    }
+}
+
 function homeAutoThenParamsHtml(d, action, cmd) {
     if (cmd === 'pulse') {
         const hex = action.hex || action.color_hex || '#ff3b30';
@@ -8758,6 +8897,13 @@ function renderHomeAutoEditor() {
     document.getElementById('auto-coords')?.classList.toggle('hidden', !sun);
     homeAutoFillCoordFields();
     document.getElementById('auto-when-chips').innerHTML = homeAutoWhenChipsHtml();
+    const thenBulk = document.getElementById('auto-then-bulk');
+    if (thenBulk) {
+        const bulkHtml = homeAutoThenBulkHtml();
+        thenBulk.innerHTML = bulkHtml;
+        thenBulk.hidden = !bulkHtml;
+        thenBulk.classList.toggle('hidden', !bulkHtml);
+    }
     document.getElementById('auto-then-chips').innerHTML = (autoDraft.actions || []).map((action, i) => homeAutoThenChipHtml(action, i)).join('')
         || '<p class="hint">Drop a light or scene here.</p>';
     document.getElementById('auto-if-chips').innerHTML = (autoDraft.conditions || []).map((cond, i) => homeAutoIfChipHtml(cond, i)).join('');
@@ -10410,6 +10556,11 @@ function bindHomeAutomations() {
             renderHomeAutoEditor();
             return;
         }
+        const thenBulkApply = event.target.closest('[data-auto-bulk-apply]');
+        if (thenBulkApply && autoDraft) {
+            homeAutoApplyThenBulk();
+            return;
+        }
         const thenX = event.target.closest('[data-auto-then-x]');
         if (thenX && autoDraft) {
             autoDraft.actions.splice(Number(thenX.getAttribute('data-auto-then-x')), 1);
@@ -10646,6 +10797,24 @@ function bindHomeAutomations() {
             const cond = autoDraft.conditions[i];
             if (homeAutoIsRobot(cond)) {
                 autoDraft.conditions[i] = homeAutoRobotTrigger(cond.id, event.target.value);
+            }
+        }
+        if (event.target.matches('[data-auto-bulk-cmd]')) {
+            homeAutoRefreshThenBulkParams();
+        }
+        if (event.target.matches('[data-auto-bulk-adaptive]')) {
+            const bulk = document.getElementById('auto-then-bulk');
+            const params = bulk?.querySelector('[data-auto-bulk-params]');
+            const cmd = bulk?.querySelector('[data-auto-bulk-cmd]')?.value || 'on';
+            if (params) {
+                params.innerHTML = homeAutoThenBulkParamsHtml(cmd, {
+                    ...(homeAutoThenBulkSample() || {}),
+                    adaptive: event.target.checked,
+                    hex: bulk.querySelector('[data-auto-bulk-hex]')?.value,
+                    brightness: Number(bulk.querySelector('[data-auto-bulk-bright]')?.value),
+                    kelvin: Number(bulk.querySelector('[data-auto-bulk-kelvin]')?.value),
+                    pulse_count: Number(bulk.querySelector('[data-auto-bulk-pulse-count]')?.value),
+                });
             }
         }
         if (event.target.matches('[data-auto-cmd]')) {

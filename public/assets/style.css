@@ -5367,6 +5367,56 @@ button.unifi-live-open:focus-visible img {
     font-size: 0.8rem;
 }
 
+.auto-then-bulk {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem 0.55rem;
+    margin: 0.35rem 0 0.55rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--card, #1c1c1e) 88%, #2a2a2e);
+}
+
+.auto-then-bulk.hidden,
+.auto-then-bulk[hidden] {
+    display: none;
+}
+
+.auto-then-bulk-label {
+    font-weight: 650;
+    font-size: 0.86rem;
+    margin-right: 0.15rem;
+}
+
+.auto-then-bulk select,
+.auto-then-bulk input[type="number"],
+.auto-then-bulk input[type="color"] {
+    font: inherit;
+    font-size: 0.8rem;
+}
+
+.auto-then-bulk input[type="color"] {
+    width: 1.7rem;
+    height: 1.35rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+}
+
+.auto-then-bulk input[type="number"] {
+    width: 3.4rem;
+}
+
+.auto-then-bulk-params {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.45rem;
+}
+
 .auto-chip--clock {
     border-style: dashed;
 }
