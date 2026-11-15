@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.318] - 2026-11-15
+
+### Fixed
+- **Pulse flashed only dimly:** The wave set colour without raising level, so lights stayed at their prior brightness. Each flash now drives **brightness 100** before the pulse colour.
+
 ## [4.0.317] - 2026-11-15
 
 ### Fixed
