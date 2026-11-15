@@ -1641,15 +1641,19 @@ assert_true(($onLook['brightness'] ?? 0) === 40, 'on look brightness');
 assert_true(($onLook['hex'] ?? '') === '#aabbcc', 'on look hex');
 $planOff = YarboHome::pulsePlan('1:2', '#ff0000', 2, ['on' => false], false);
 $cmdsOff = array_column($planOff, 'command');
-assert_true($cmdsOff === ['color', 'off', 'color', 'off'], 'pulse 2× flash only: ' . json_encode($cmdsOff));
-assert_true(($planOff[0]['hex'] ?? '') === '#ff0000', 'pulse colour');
+assert_true(
+    $cmdsOff === ['brightness', 'color', 'off', 'brightness', 'color', 'off'],
+    'pulse 2× at full brightness: ' . json_encode($cmdsOff)
+);
+assert_true(($planOff[0]['brightness'] ?? 0) === 100, 'pulse brightness 100');
+assert_true(($planOff[1]['hex'] ?? '') === '#ff0000', 'pulse colour');
 $planOn = YarboHome::pulsePlan('1:2', '#ff3b30', 1, [
     'on' => true,
     'brightness' => 40,
     'hex' => '#aabbcc',
 ], true);
 $cmdsOn = array_column($planOn, 'command');
-assert_true($cmdsOn === ['color', 'off'], 'pulse flash only; restore is finalize: ' . json_encode($cmdsOn));
+assert_true($cmdsOn === ['brightness', 'color', 'off'], 'pulse full bright then colour: ' . json_encode($cmdsOn));
 $planAdaptive = YarboHome::pulsePlan('1:2', '#ff0000', 1, [
     'on' => true,
     'brightness' => 55,
@@ -1658,14 +1662,18 @@ $planAdaptive = YarboHome::pulsePlan('1:2', '#ff0000', 1, [
 ], true);
 $cmdsAdaptive = array_column($planAdaptive, 'command');
 assert_true(
-    $cmdsAdaptive === ['color', 'off'],
-    'adaptive pulse flash only in plan: ' . json_encode($cmdsAdaptive)
+    $cmdsAdaptive === ['brightness', 'color', 'off'],
+    'adaptive pulse still full bright flash: ' . json_encode($cmdsAdaptive)
 );
 $planNoColor = YarboHome::pulsePlan('1:2', null, 2, ['on' => false], true);
 assert_true(
-    array_column($planNoColor, 'command') === ['on', 'off', 'on', 'off'],
-    'pulse without colour still flashes on/off: ' . json_encode($planNoColor)
+    array_column($planNoColor, 'command') === ['brightness', 'off', 'brightness', 'off'],
+    'pulse without colour uses brightness 100: ' . json_encode($planNoColor)
 );
+assert_true(str_contains(
+    (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php'),
+    "'brightness' => 100"
+), 'wave flash drives brightness 100');
 assert_true(YarboHome::PULSE_DWELL_US >= 600000, 'pulse dwell long enough to see the flash');
 assert_true(YarboHome::PULSE_CONCURRENCY >= 8, 'pulse concurrency caps bridge stampede');
 assert_true(str_contains($homeSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php'), 'function executePulseBatch'), 'batch pulse for many lights');

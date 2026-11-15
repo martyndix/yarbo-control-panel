@@ -5984,11 +5984,10 @@ final class YarboHome
         $hex = $hex !== null ? self::normalizeHexValue($hex) : null;
         $steps = [];
         for ($i = 0; $i < $count; $i++) {
-            // Colour already sends On — skip brightness 100 (extra Hue traffic drops Off).
+            // Full brightness so the flash is not stuck at a prior dim level.
+            $steps[] = ['id' => $id, 'command' => 'brightness', 'brightness' => 100];
             if ($hex !== null) {
                 $steps[] = ['id' => $id, 'command' => 'color', 'hex' => $hex];
-            } else {
-                $steps[] = ['id' => $id, 'command' => 'on'];
             }
             $steps[] = ['id' => $id, 'command' => 'off'];
         }
@@ -6140,24 +6139,52 @@ final class YarboHome
      */
     private function pulseWaveFlashOn(array $lights): array
     {
+        // Brightness 100 first — colour alone often leaves Hue at the prior dim level.
+        $errors = $this->pulseWaveCommands($lights, static function (array $one): array {
+            return [
+                'id' => $one['id'],
+                'command' => 'brightness',
+                'brightness' => 100,
+                'kind' => (string) ($one['kind'] ?? 'light'),
+            ];
+        });
+        $withColor = [];
+        foreach ($lights as $one) {
+            $hex = self::normalizeHexValue((string) ($one['hex'] ?? ''));
+            if ($hex === null) {
+                continue;
+            }
+            $withColor[] = $one + ['hex' => $hex];
+        }
+        if ($withColor === []) {
+            return $errors;
+        }
+        $colorErrors = $this->pulseWaveCommands($withColor, static function (array $one): array {
+            return [
+                'id' => $one['id'],
+                'command' => 'color',
+                'hex' => $one['hex'],
+                'kind' => (string) ($one['kind'] ?? 'light'),
+            ];
+        });
+
+        return array_merge($errors, $colorErrors);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $lights
+     * @param callable(array<string, mixed>): array<string, mixed> $payloadFor
+     * @return list<string>
+     */
+    private function pulseWaveCommands(array $lights, callable $payloadFor): array
+    {
         $errors = [];
         foreach (array_chunk($lights, self::PULSE_CONCURRENCY) as $i => $chunk) {
             if ($i > 0) {
                 usleep(self::PULSE_CHUNK_GAP_US);
             }
             foreach ($chunk as $one) {
-                $hex = self::normalizeHexValue((string) ($one['hex'] ?? ''));
-                $payload = [
-                    'id' => $one['id'],
-                    'kind' => (string) ($one['kind'] ?? 'light'),
-                ];
-                if ($hex !== null) {
-                    $payload['command'] = 'color';
-                    $payload['hex'] = $hex;
-                } else {
-                    $payload['command'] = 'on';
-                }
-                $result = $this->command($payload);
+                $result = $this->command($payloadFor($one));
                 if (!($result['ok'] ?? false)) {
                     $errors[] = (string) ($result['error'] ?? 'failed');
                 }
@@ -6173,24 +6200,13 @@ final class YarboHome
      */
     private function pulseWaveOff(array $lights): array
     {
-        $errors = [];
-        foreach (array_chunk($lights, self::PULSE_CONCURRENCY) as $i => $chunk) {
-            if ($i > 0) {
-                usleep(self::PULSE_CHUNK_GAP_US);
-            }
-            foreach ($chunk as $one) {
-                $result = $this->command([
-                    'id' => $one['id'],
-                    'command' => 'off',
-                    'kind' => (string) ($one['kind'] ?? 'light'),
-                ]);
-                if (!($result['ok'] ?? false)) {
-                    $errors[] = (string) ($result['error'] ?? 'failed');
-                }
-            }
-        }
-
-        return $errors;
+        return $this->pulseWaveCommands($lights, static function (array $one): array {
+            return [
+                'id' => $one['id'],
+                'command' => 'off',
+                'kind' => (string) ($one['kind'] ?? 'light'),
+            ];
+        });
     }
 
     /**
