@@ -755,11 +755,30 @@ final class YarboHome
             'timezone' => $auto->timezonePublic(),
             'runner' => $auto->runnerPublic(),
             'sun_coords' => $auto->coordsPublic(),
+            'weather' => $this->weatherPublic($auto),
             'restored_home' => $this->restoredHomeFrom,
             'doors_tile' => $this->unifiDoorsTileConfigured(),
             'doors_tile_sensors' => $this->unifiDoorSensorsTileConfigured(),
             'unifi_doors' => $this->unifiDoorsPayload($store),
         ];
+    }
+
+    /**
+     * Current weather at the same coords as sunrise/sunset (Open-Meteo, cached).
+     *
+     * @return array{ok: bool, icon?: string, label?: string, temp_c?: float|null, is_day?: bool, at?: int, error?: string}
+     */
+    private function weatherPublic(YarboHomeAutomations $auto): array
+    {
+        $coords = $auto->coordsPublic();
+        $lat = isset($coords['latitude']) && is_numeric($coords['latitude'])
+            ? (float) $coords['latitude']
+            : null;
+        $lon = isset($coords['longitude']) && is_numeric($coords['longitude'])
+            ? (float) $coords['longitude']
+            : null;
+
+        return (new YarboWeather($this->projectRoot))->forCoords($lat, $lon);
     }
 
     /**
