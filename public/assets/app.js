@@ -3083,6 +3083,7 @@ function applyYarboOfflineHint(data) {
 
 function applyHubFromStatus(data) {
     applyPanelHealth(data);
+    if (data?.weather) renderPanelWeather(data.weather);
     const hub = data?.hub;
     if (!hub) {
         applyConnectionWarnings(data);
@@ -6385,9 +6386,67 @@ function homeSceneMemberRowHtml(d) {
     </div>`;
 }
 
+function homeWeatherSvg(icon) {
+    const stroke = 'currentColor';
+    const common = `fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
+    switch (icon) {
+        case 'clear':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" ${common}/><path d="M12 2v2.2M12 19.8V22M4.2 12H2M22 12h-2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6" ${common}/></svg>`;
+        case 'clear_night':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 14.5A7.5 7.5 0 0 1 9.5 6 6.5 6.5 0 1 0 18 14.5z" ${common}/></svg>`;
+        case 'mainly_clear':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="3.2" ${common}/><path d="M10 3.5v1.6M10 15v1.5M4.8 10H3.2M16.8 10h-1.6M5.9 5.9l1.1 1.1M13 13l1.1 1.1M5.9 14.1l1.1-1.1M13 7l1.1-1.1" ${common}/><path d="M9 17.5a4 4 0 0 0 .2 8h8.3a3.2 3.2 0 0 0 .3-6.4 4.6 4.6 0 0 0-7.3-1.8" ${common}/></svg>`;
+        case 'partly_cloudy':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9.5" cy="9" r="3" ${common}/><path d="M9.5 3.8v1.4M9.5 13v1.3M4.8 9H3.4M15.6 9h-1.4M5.9 5.4l1 1M12.1 11.6l1 1M5.9 12.6l1-1M12.1 6.4l1-1" ${common}/><path d="M8.5 17a3.8 3.8 0 0 0 .2 7.5h8a3 3 0 0 0 .3-6 4.3 4.3 0 0 0-6.8-1.7" ${common}/></svg>`;
+        case 'cloudy':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 17.5a4 4 0 0 1 .3-8 5.2 5.2 0 0 1 9.8 1.6 3.5 3.5 0 0 1 .4 6.9H7.8" ${common}/></svg>`;
+        case 'fog':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M4 12.5h16M6 16h12" ${common}/></svg>`;
+        case 'drizzle':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 14a4 4 0 0 1 .3-8 5.2 5.2 0 0 1 9.8 1.6 3.5 3.5 0 0 1 .4 6.4H7.8" ${common}/><path d="M9 17.5v2M12 18v2.5M15 17.5v2" ${common}/></svg>`;
+        case 'rain':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 13.5a4 4 0 0 1 .3-8 5.2 5.2 0 0 1 9.8 1.6 3.5 3.5 0 0 1 .4 6.4H7.8" ${common}/><path d="M8.5 17l-1 3M12 16.5l-1 3.5M15.5 17l-1 3" ${common}/></svg>`;
+        case 'snow':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 13.5a4 4 0 0 1 .3-8 5.2 5.2 0 0 1 9.8 1.6 3.5 3.5 0 0 1 .4 6.4H7.8" ${common}/><path d="M9 17.2l.8.8-.8.8M12 16.5l.9.9-.9.9M15 17.2l.8.8-.8.8" ${common}/></svg>`;
+        case 'thunder':
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 13a4 4 0 0 1 .3-8 5.2 5.2 0 0 1 9.8 1.6 3.5 3.5 0 0 1 .4 6.4H7.8" ${common}/><path d="M12.2 14.2l-2.2 4.2h2.4L11 21.5" ${common}/></svg>`;
+        default:
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 17.5a4 4 0 0 1 .3-8 5.2 5.2 0 0 1 9.8 1.6 3.5 3.5 0 0 1 .4 6.9H7.8" ${common}/></svg>`;
+    }
+}
+
+function renderPanelWeather(weather) {
+    const el = document.getElementById('panel-weather');
+    if (!el) return;
+    const w = weather;
+    if (!w || !w.ok || !w.icon) {
+        el.classList.add('hidden');
+        el.hidden = true;
+        el.innerHTML = '';
+        el.removeAttribute('title');
+        el.removeAttribute('aria-label');
+        return;
+    }
+    const temp = (typeof w.temp_c === 'number' && Number.isFinite(w.temp_c))
+        ? `${Math.round(w.temp_c)}°`
+        : '';
+    const label = String(w.label || '').trim();
+    el.innerHTML = `${homeWeatherSvg(w.icon)}${temp ? `<span class="home-weather-temp">${escapeHtml(temp)}</span>` : ''}`;
+    el.classList.remove('hidden');
+    el.hidden = false;
+    if (label) {
+        el.title = temp ? `${label} · ${temp}C` : label;
+        el.setAttribute('aria-label', temp ? `${label}, ${temp}C` : label);
+    } else {
+        el.removeAttribute('title');
+        el.removeAttribute('aria-label');
+    }
+}
+
 function renderHomeDashboard(data, opts = {}) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
+    if (data?.weather) renderPanelWeather(data.weather);
     if (data.restored_home && !renderHomeDashboard._restoredToast) {
         renderHomeDashboard._restoredToast = true;
         showToast('Restored rooms and scenes from a backup on this Pi', 'success');

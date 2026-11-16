@@ -122,8 +122,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
     <main class="container">
         <header class="app-header">
             <div class="app-header-top">
-            <div>
+            <div class="app-header-brand">
                 <h1 id="panel-title"><?= $panelTitleSafe ?></h1>
+                <span id="panel-weather" class="panel-weather home-weather hidden" hidden aria-live="polite"></span>
                 <p class="robot-name hidden" id="device-name"></p>
             </div>
             <div class="header-actions">

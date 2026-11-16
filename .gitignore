@@ -35,6 +35,7 @@
 /data/metrics-ping.log
 /data/powerwall-config.json
 /data/powerwall-cache.json
+/data/weather-cache.json
 /data/lymow-config.json
 /data/lymow-cloud.json
 /data/lymow-state.json
