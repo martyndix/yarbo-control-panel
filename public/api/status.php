@@ -14,6 +14,7 @@ use Yarbo\YarboPowerwall;
 use Yarbo\YarboRobotName;
 use Yarbo\YarboTelemetry;
 use Yarbo\YarboVestaboard;
+use Yarbo\YarboWeather;
 use Yarbo\YarboWifi;
 
 /** @var float */
@@ -135,12 +136,28 @@ function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVest
         }
     }
 
+    $weather = ['ok' => false, 'error' => 'unavailable'];
+    try {
+        $auto = new YarboHomeAutomations($root);
+        $coords = $auto->coordsPublic();
+        $lat = isset($coords['latitude']) && is_numeric($coords['latitude'])
+            ? (float) $coords['latitude']
+            : null;
+        $lon = isset($coords['longitude']) && is_numeric($coords['longitude'])
+            ? (float) $coords['longitude']
+            : null;
+        $weather = (new YarboWeather($root))->forCoords($lat, $lon);
+    } catch (Throwable) {
+        $weather = ['ok' => false, 'error' => 'unavailable'];
+    }
+
     $extras = [
         'hub' => $hub->publicView(),
         'powerwall' => $powerwall,
         'lymow' => $lymow,
         'home' => $home,
         'unifi' => $unifi,
+        'weather' => $weather,
     ];
     if ($includeVestaboard) {
         $extras['vestaboard'] = $vestaboard;

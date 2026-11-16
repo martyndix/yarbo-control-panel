@@ -9,7 +9,7 @@ This project follows a simple Keep a Changelog style with newest entries first.
 ## [4.0.320] - 2026-11-16
 
 ### Added
-- **Home weather:** The Home header shows a compact current-weather icon and temperature (°C) for the same lat/lon used for sunrise/sunset (saved coords, Yarbo GPS, or timezone city). Open-Meteo, no API key; cached ~12 minutes. Hidden when location is unknown or the fetch fails.
+- **Panel weather:** A compact current-weather icon and temperature (°C) sit next to the Control Panel title on every page, using the same lat/lon as sunrise/sunset (saved coords, Yarbo GPS, or timezone city). Open-Meteo, no API key; cached ~12 minutes. Hidden when location is unknown or the fetch fails.
 
 ## [4.0.319] - 2026-11-15
 

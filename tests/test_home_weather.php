@@ -132,10 +132,16 @@ assert_true(($dash['weather']['icon'] ?? '') === 'clear', 'dashboard weather ico
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 $css = (string) file_get_contents(__DIR__ . '/../public/assets/style.css');
-assert_true(str_contains($index, 'id="home-weather"'), 'Home weather chip markup');
-assert_true(str_contains($js, 'renderHomeWeather'), 'JS renders weather chip');
+$statusPhp = (string) file_get_contents(__DIR__ . '/../public/api/status.php');
+assert_true(str_contains($index, 'id="panel-weather"'), 'panel weather chip next to title');
+assert_true(str_contains($index, 'app-header-brand'), 'brand row holds title + weather');
+assert_true(!str_contains($index, 'id="home-weather"'), 'weather not on Home card');
+assert_true(str_contains($js, 'renderPanelWeather'), 'JS renders panel weather chip');
 assert_true(str_contains($js, 'homeWeatherSvg'), 'JS weather SVGs');
-assert_true(str_contains($css, '.home-weather'), 'weather chip CSS');
+assert_true(str_contains($js, 'data?.weather') || str_contains($js, 'data.weather'), 'status applies weather');
+assert_true(str_contains($css, '.panel-weather') || str_contains($css, '.home-weather'), 'weather chip CSS');
+assert_true(str_contains($statusPhp, 'YarboWeather'), 'status payload includes weather');
 assert_true(str_contains((string) file_get_contents(__DIR__ . '/../CHANGELOG.md'), '## [4.0.320]'), 'changelog 4.0.320');
 
 echo "ok\n";
+

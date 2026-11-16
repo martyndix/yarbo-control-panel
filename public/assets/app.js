@@ -3083,6 +3083,7 @@ function applyYarboOfflineHint(data) {
 
 function applyHubFromStatus(data) {
     applyPanelHealth(data);
+    if (data?.weather) renderPanelWeather(data.weather);
     const hub = data?.hub;
     if (!hub) {
         applyConnectionWarnings(data);
@@ -6414,15 +6415,16 @@ function homeWeatherSvg(icon) {
     }
 }
 
-function renderHomeWeather(data) {
-    const el = document.getElementById('home-weather');
+function renderPanelWeather(weather) {
+    const el = document.getElementById('panel-weather');
     if (!el) return;
-    const w = data?.weather;
+    const w = weather;
     if (!w || !w.ok || !w.icon) {
         el.classList.add('hidden');
         el.hidden = true;
         el.innerHTML = '';
         el.removeAttribute('title');
+        el.removeAttribute('aria-label');
         return;
     }
     const temp = (typeof w.temp_c === 'number' && Number.isFinite(w.temp_c))
@@ -6444,7 +6446,7 @@ function renderHomeWeather(data) {
 function renderHomeDashboard(data, opts = {}) {
     applyHomeSetupUi(data);
     applyHomeManageUi();
-    renderHomeWeather(data);
+    if (data?.weather) renderPanelWeather(data.weather);
     if (data.restored_home && !renderHomeDashboard._restoredToast) {
         renderHomeDashboard._restoredToast = true;
         showToast('Restored rooms and scenes from a backup on this Pi', 'success');

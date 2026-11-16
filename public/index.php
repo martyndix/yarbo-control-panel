@@ -122,8 +122,9 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
     <main class="container">
         <header class="app-header">
             <div class="app-header-top">
-            <div>
+            <div class="app-header-brand">
                 <h1 id="panel-title"><?= $panelTitleSafe ?></h1>
+                <span id="panel-weather" class="panel-weather home-weather hidden" hidden aria-live="polite"></span>
                 <p class="robot-name hidden" id="device-name"></p>
             </div>
             <div class="header-actions">
@@ -649,7 +650,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="section-header section-header--simple">
                 <h2>Home</h2>
                 <div class="section-header-actions">
-                    <span id="home-weather" class="home-weather hidden" hidden aria-live="polite"></span>
                     <button type="button" class="btn btn-secondary btn-compact" id="home-automations-open" aria-controls="home-automations-page" aria-expanded="false">Automations</button>
                     <button type="button" class="home-manage-toggle" id="home-manage-toggle" aria-pressed="false" aria-label="Show Home settings" title="Rename, reorder, rooms, scenes, backup, PaperMono assignment, hide, and add devices">⚙️</button>
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>

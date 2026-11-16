@@ -94,6 +94,27 @@ header h1 {
     gap: 1rem;
 }
 
+.app-header-brand {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.65rem;
+    min-width: 0;
+}
+
+.app-header-brand h1 {
+    margin: 0;
+}
+
+.app-header-brand .robot-name {
+    flex-basis: 100%;
+    margin: 0;
+}
+
+.panel-weather {
+    margin-right: 0;
+}
+
 .module-switcher {
     display: flex;
     flex-wrap: nowrap;
