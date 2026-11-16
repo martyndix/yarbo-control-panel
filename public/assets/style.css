@@ -1275,9 +1275,10 @@ body.modal-open {
 .home-weather {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    justify-content: center;
+    gap: 0.35rem;
     margin-right: 0.15rem;
-    padding: 0.2rem 0.45rem;
+    padding: 0.15rem 0.4rem;
     border-radius: 6px;
     color: var(--muted);
     font-size: 0.9rem;
@@ -1288,15 +1289,19 @@ body.modal-open {
 }
 
 .home-weather svg {
+    display: block;
     width: 1.15rem;
     height: 1.15rem;
     flex-shrink: 0;
 }
 
 .home-weather-temp {
+    display: inline-flex;
+    align-items: center;
     color: var(--text);
     font-weight: 600;
     letter-spacing: 0.01em;
+    line-height: 1;
 }
 
 .section-drag-handle {
