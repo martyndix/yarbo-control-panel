@@ -386,11 +386,11 @@ yarbo_matter_router_solicit() {
 }
 
 yarbo_matter_prefix_advertise() {
-  # Usage: prefix-advertise <iface> <prefix/64>
-  # Tells the LAN the prefix is on-link so a pairing reply can come back here.
-  local iface="${1:-}" prefix="${2:-}"
+  # Usage: prefix-advertise <iface> <prefix/64> [fe80 hop]
+  # Tells the HomePod the prefix is a route back to this Pi.
+  local iface="${1:-}" prefix="${2:-}" hop="${3:-}"
   if [[ -z "$iface" || -z "$prefix" || ! "$iface" =~ ^[A-Za-z0-9._:-]+$ ]]; then
-    echo "usage: prefix-advertise <iface> <prefix/64>" >&2
+    echo "usage: prefix-advertise <iface> <prefix/64> [fe80-hop]" >&2
     return 1
   fi
   case "$prefix" in
@@ -398,7 +398,15 @@ yarbo_matter_prefix_advertise() {
     */64) ;;
     *) echo "prefix must be /64" >&2; return 1 ;;
   esac
-  python3 "${ROOT}/scripts/matter_agent.py" --advertise-prefix "$iface" "$prefix"
+  case "$hop" in
+    ""|fe80:*) ;;
+    *) echo "hop must be fe80::" >&2; return 1 ;;
+  esac
+  if [[ -n "$hop" ]]; then
+    python3 "${ROOT}/scripts/matter_agent.py" --advertise-prefix "$iface" "$prefix" "$hop"
+  else
+    python3 "${ROOT}/scripts/matter_agent.py" --advertise-prefix "$iface" "$prefix"
+  fi
 }
 
 yarbo_matter_setup() {
@@ -575,11 +583,11 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   if [[ "$cmd" == "prefix-advertise" ]]; then
     yarbo_matter_install_wrapper
     if [[ -n "${1:-}" && -d "${1}/scripts" && "${2:-}" == "prefix-advertise" ]]; then
-      yarbo_matter_prefix_advertise "${3:-}" "${4:-}"
+      yarbo_matter_prefix_advertise "${3:-}" "${4:-}" "${5:-}"
     elif [[ "${1:-}" == "prefix-advertise" ]]; then
-      yarbo_matter_prefix_advertise "${2:-}" "${3:-}"
+      yarbo_matter_prefix_advertise "${2:-}" "${3:-}" "${4:-}"
     else
-      yarbo_matter_prefix_advertise "${1:-}" "${2:-}"
+      yarbo_matter_prefix_advertise "${1:-}" "${2:-}" "${3:-}"
     fi
     exit $?
   fi

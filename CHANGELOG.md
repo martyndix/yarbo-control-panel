@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.363] - 2026-11-17
+
+### Fixed
+
+- Pairing tells the HomePod that `fd58:b000:2::/64` is a route back to the Pi. v109 sourced the handshake from `fd58:b000:2::253` and only marked that prefix on-link. A HomePod does not publish an on-link prefix into Thread, so the sensor’s reply never returned. The advertisement now comes from the Pi’s link-local address and includes a route to the HomePod that advertised the sensor. `adv=rio` means that route was sent. Matter agent **v110**.
+
 ## [4.0.362] - 2026-11-17
 
 ### Fixed
