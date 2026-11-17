@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 85
+AGENT_VERSION = 86
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1794,6 +1794,10 @@ def tailscale_iface_present() -> bool:
 
 _tailscale_shield_depth = 0
 _tailscale_shield_ok: bool | None = None  # None=n/a, True/False after last begin
+_thread_route_attempted = False
+_last_matterc_hits: list[dict[str, Any]] = []
+_last_ra_proof = ""
+_last_routes_installed: list[str] = []
 
 
 def commission_job_is_running() -> bool:
@@ -1895,34 +1899,59 @@ def verify_tailscale_matter_shield() -> bool:
     return True
 
 
-def wait_for_thread_route(seconds: float = 20.0) -> str | None:
-    """Poll for Apple Thread RIO on the LAN NIC; nudge RA/RIO and install static routes."""
+def wait_for_thread_route(seconds: float = 8.0) -> str | None:
+    """One short pass: parse _matterc AAAA, install a Thread route, one RA solicit."""
+    global _thread_route_attempted, _last_ra_proof, _last_routes_installed
     prefer = primary_interface()
-    deadline = time.time() + max(0.0, seconds)
     hint = thread_route_hint(prefer)
     if hint:
+        _last_ra_proof = _last_ra_proof or "kernel"
         return hint
-    # First pass: parse rdisc6 / matterc and install static Thread routes if needed.
+    if _thread_route_attempted:
+        return thread_route_hint(prefer)
+    _thread_route_attempted = True
+    budget = min(8.0, max(1.5, seconds))
     try:
-        install_discovered_thread_routes(prefer)
+        browse_matterc_mdns(min(2.5, budget))
+        installed = install_routes_from_matterc_hits()
+        if installed:
+            _last_routes_installed = installed
+            _last_ra_proof = "mdns"
+            print(f"matter: Thread route from _matterc AAAA: {installed[:2]}", flush=True)
     except Exception as exc:  # noqa: BLE001
-        print(f"matter: install Thread routes: {exc}", flush=True)
+        print(f"matter: matterc route install: {exc}", flush=True)
     hint = thread_route_hint(prefer)
     if hint:
         return hint
-    while time.time() < deadline:
-        ensure_ipv6_default_route()
-        try:
-            install_discovered_thread_routes(prefer)
-        except Exception as exc:  # noqa: BLE001
-            print(f"matter: install Thread routes: {exc}", flush=True)
-        hint = thread_route_hint(prefer)
-        if hint:
-            return hint
-        time.sleep(1.0)
-        hint = thread_route_hint(prefer)
-        if hint:
-            return hint
+    try:
+        text = run_rdisc6_capture(prefer, wait_ms=2000) if prefer else ""
+        rows = parse_rdisc6_rios(text)
+        added: list[str] = []
+        for row in rows:
+            prefix = str(row.get("prefix") or "")
+            via = str(row.get("via") or "")
+            if prefix and via and add_ipv6_route(prefix, via, prefer):
+                added.append(f"{prefix} via {via}")
+        if added:
+            _last_routes_installed = added
+            _last_ra_proof = "installed"
+        elif rows:
+            _last_ra_proof = _last_ra_proof or "rio_seen"
+        elif re.search(r"from\s+fe80:", text or "", re.I):
+            _last_ra_proof = _last_ra_proof or "ra_no_rio"
+        elif not _last_ra_proof:
+            _last_ra_proof = "no_ra"
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: rdisc6 pass: {exc}", flush=True)
+        if not _last_ra_proof:
+            _last_ra_proof = "no_ra"
+    if thread_route_hint(prefer) is None and _last_matterc_hits:
+        onlink = any(
+            h.get("matterc") and not any(str(a).lower().startswith("fd") for a in (h.get("aaaa") or []))
+            for h in _last_matterc_hits
+        )
+        if onlink and _last_ra_proof in ("", "no_ra"):
+            _last_ra_proof = "onlink"
     return thread_route_hint(prefer)
 
 
@@ -2324,53 +2353,237 @@ def thread_route_hint(prefer_iface: str | None = None) -> str | None:
     return candidates[0] if candidates else None
 
 
-def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
-    """Best-effort PTR browse for commissionable Matter (_matterc._udp.local)."""
-    hits: list[str] = []
-    # Prefer avahi when present (same LAN stack Apple uses via the BR).
-    for cmd in (
-        ["avahi-browse", "-t", "-p", "_matterc._udp"],
-        ["timeout", "3", "avahi-browse", "-t", "-p", "_matterc._udp"],
-    ):
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=max(3.0, seconds + 1))
-        except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
-            continue
-        for line in (r.stdout or "").splitlines():
-            line = line.strip()
-            if line and "matterc" in line.lower():
-                hits.append(line[:160])
-        if hits:
-            return hits[:8]
-    # Raw IPv6 mDNS PTR query fallback.
+def _read_dns_name(data: bytes, offset: int, depth: int = 0) -> tuple[str, int]:
+    labels: list[str] = []
+    jumped = False
+    end_at = offset
+    guard = 0
+    while guard < 20 and 0 <= offset < len(data):
+        guard += 1
+        length = data[offset]
+        if length == 0:
+            offset += 1
+            if not jumped:
+                end_at = offset
+            break
+        if length & 0xC0 == 0xC0:
+            if offset + 1 >= len(data):
+                break
+            ptr = ((length & 0x3F) << 8) | data[offset + 1]
+            if not jumped:
+                end_at = offset + 2
+            jumped = True
+            if depth > 8 or ptr >= len(data):
+                break
+            target, _ = _read_dns_name(data, ptr, depth + 1)
+            if target:
+                labels.append(target)
+            break
+        offset += 1
+        if offset + length > len(data):
+            break
+        labels.append(data[offset : offset + length].decode("ascii", "replace"))
+        offset += length
+        if not jumped:
+            end_at = offset
+    return ".".join(labels), end_at
+
+
+def parse_mdns_message(data: bytes) -> dict[str, Any]:
+    """Pull _matterc names and AAAA addresses out of one DNS message."""
+    empty: dict[str, Any] = {"matterc": False, "aaaa": [], "response": False}
+    if len(data) < 12:
+        return empty
+    flags, qd, an, ns, ar = struct.unpack("!HHHHH", data[2:12])
+    is_response = bool(flags & 0x8000)
+    offset = 12
+    names: list[str] = []
+    aaaas: list[str] = []
+
+    def take_name() -> str:
+        nonlocal offset
+        name, offset = _read_dns_name(data, offset)
+        if name:
+            names.append(name)
+        return name
+
     try:
-        qname = "_matterc._udp.local"
-        labels = b"".join(bytes([len(p)]) + p.encode("ascii") for p in qname.split(".")) + b"\x00"
-        packet = struct.pack("!HHHHHH", 0x1200, 0, 1, 0, 0, 0) + labels + struct.pack("!HH", 12, 1)
-        sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 1)
-        sock.settimeout(0.4)
-        sock.bind(("", 0))
-        try:
-            sock.sendto(packet, ("ff02::fb", 5353, 0, 0))
-        except OSError as exc:
-            sock.close()
-            return [f"mdns send failed: {exc}"]
-        deadline = time.time() + seconds
-        while time.time() < deadline:
-            try:
-                data, addr = sock.recvfrom(2048)
-            except TimeoutError:
+        for _ in range(qd):
+            take_name()
+            offset += 4
+        for _ in range(an + ns + ar):
+            take_name()
+            if offset + 10 > len(data):
+                break
+            rtype, _rclass, _ttl, rdlen = struct.unpack("!HHIH", data[offset : offset + 10])
+            offset += 10
+            rdata = data[offset : offset + rdlen]
+            rdata_at = offset
+            offset += rdlen
+            if rtype == 28 and len(rdata) == 16:
+                aaaas.append(socket.inet_ntop(socket.AF_INET6, rdata))
+            elif rtype in (12, 33) and rdata:
+                # PTR target, or SRV name after 6-byte header.
+                start = rdata_at + (6 if rtype == 33 and len(rdata) > 6 else 0)
+                target, _ = _read_dns_name(data, start)
+                if target:
+                    names.append(target)
+    except Exception:  # noqa: BLE001
+        return empty
+    blob = " ".join(names).lower()
+    return {
+        "matterc": bool(is_response and "_matterc" in blob),
+        "aaaa": aaaas,
+        "response": is_response,
+    }
+
+
+def ipv6_prefix64(addr: str) -> str:
+    packed = socket.inet_pton(socket.AF_INET6, addr.split("%", 1)[0])
+    return socket.inet_ntop(socket.AF_INET6, packed[:8] + bytes(8)) + "/64"
+
+
+def _matterc_query_packet() -> bytes:
+    qname = "_matterc._udp.local"
+    labels = b"".join(bytes([len(part)]) + part.encode("ascii") for part in qname.split(".")) + b"\x00"
+    return struct.pack("!HHHHHH", 0x1200, 0, 1, 0, 0, 0) + labels + struct.pack("!HH", 12, 1)
+
+
+def _lan_ifaces() -> list[str]:
+    found: list[str] = []
+    for name in (primary_interface(), "end0", "eth0", "wlan0"):
+        if name and name not in found and iface_exists(name) and not iface_is_virtual(name):
+            found.append(name)
+    return found
+
+
+def _matterc_line_is_real(text: str) -> bool:
+    low = str(text or "").lower()
+    if not low or "no _matterc" in low or "mdns " in low or "failed" in low or "error" in low:
+        return False
+    return "_matterc" in low or " matterc " in f" {low} "
+
+
+def format_matterc_hit(hit: dict[str, Any]) -> str:
+    aaaas = [str(a) for a in (hit.get("aaaa") or [])]
+    fds = [a for a in aaaas if a.lower().startswith("fd") and not _is_tailscale_ula(a)]
+    fd = ipv6_prefix64(fds[0]) if fds else "none"
+    return f"{hit.get('src') or '?'} matterc fd={fd} via={hit.get('src') or 'none'} iface={hit.get('iface') or '?'}"
+
+
+def install_routes_from_matterc_hits() -> list[str]:
+    """Install fd…/64 via the host that answered _matterc."""
+    installed: list[str] = []
+    for hit in _last_matterc_hits:
+        if not hit.get("matterc"):
+            continue
+        via = str(hit.get("src") or "").split("%", 1)[0]
+        iface = str(hit.get("iface") or primary_interface() or "")
+        if not via.lower().startswith("fe80:") or not iface:
+            continue
+        for addr in hit.get("aaaa") or []:
+            raw = str(addr).split("%", 1)[0]
+            low = raw.lower()
+            if not low.startswith("fd") or _is_tailscale_ula(raw):
                 continue
+            prefix = ipv6_prefix64(raw)
+            if add_ipv6_route(prefix, via, iface):
+                installed.append(f"{prefix} via {via} dev {iface}")
+    return installed
+
+
+def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
+    """Query _matterc and keep only DNS responses that actually name it."""
+    global _last_matterc_hits
+    structured: list[dict[str, Any]] = []
+    packet = _matterc_query_packet()
+    ifaces = _lan_ifaces() or [""]
+    per = max(0.6, seconds / max(1, len(ifaces)))
+    for iface in ifaces:
+        scope = 0
+        if iface:
+            try:
+                scope = socket.if_nametoindex(iface)
             except OSError:
+                scope = 0
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 1)
+            if scope:
+                try:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, scope)
+                except OSError:
+                    pass
+            sock.settimeout(0.35)
+            try:
+                sock.bind(("::", 0, 0, scope))
+            except OSError:
+                sock.bind(("::", 0))
+            try:
+                sock.sendto(packet, ("ff02::fb", 5353, 0, scope))
+            except OSError as exc:
+                print(f"matter: mdns send {iface or '?'}: {exc}", flush=True)
+                continue
+            deadline = time.time() + per
+            while time.time() < deadline and len(structured) < 6:
+                try:
+                    data, addr = sock.recvfrom(2048)
+                except TimeoutError:
+                    continue
+                except OSError:
+                    break
+                parsed = parse_mdns_message(data)
+                if not parsed.get("matterc"):
+                    continue
+                src = str(addr[0]).split("%", 1)[0]
+                structured.append(
+                    {
+                        "src": src,
+                        "iface": iface or primary_interface(),
+                        "aaaa": list(parsed.get("aaaa") or []),
+                        "matterc": True,
+                    }
+                )
+        except OSError as exc:
+            print(f"matter: mdns browse {iface or '?'}: {exc}", flush=True)
+        finally:
+            if sock is not None:
+                sock.close()
+        if structured:
+            break
+    if not structured and seconds >= 1.5:
+        # avahi text fallback — still require the name _matterc, never raw byte counts.
+        for cmd in (
+            ["avahi-browse", "-t", "-r", "-p", "_matterc._udp"],
+            ["timeout", "2", "avahi-browse", "-t", "-r", "-p", "_matterc._udp"],
+        ):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=2.5)
+            except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
+                continue
+            aaaas = []
+            for line in (r.stdout or "").splitlines():
+                if "matterc" not in line.lower():
+                    continue
+                for m in re.finditer(r"(fe80:[0-9a-f:]+|fd[0-9a-f:]{8,})", line, re.I):
+                    aaaas.append(m.group(1).split("%", 1)[0])
+            if aaaas or "matterc" in (r.stdout or "").lower():
+                src = next((a for a in aaaas if a.lower().startswith("fe80:")), "")
+                structured.append(
+                    {
+                        "src": src,
+                        "iface": primary_interface(),
+                        "aaaa": aaaas,
+                        "matterc": True,
+                    }
+                )
                 break
-            hits.append(f"{addr[0]} +{len(data)}b")
-            if len(hits) >= 6:
-                break
-        sock.close()
-    except OSError as exc:
-        return [f"mdns error: {exc}"]
-    return hits or ["no _matterc replies"]
+    _last_matterc_hits = structured
+    if not structured:
+        return ["no _matterc replies"]
+    return [format_matterc_hit(hit) for hit in structured[:6]]
+
 
 
 def discovery_diag() -> dict[str, Any]:
@@ -2379,7 +2592,10 @@ def discovery_diag() -> dict[str, Any]:
     shared = shared_matter_container()
     name = shared if shared and matter_port_up() else DOCKER_NAME
     have, state = container_primary_interface_state(name)
-    matterc = browse_matterc_mdns(1.5)[:4]
+    if _last_matterc_hits:
+        matterc = [format_matterc_hit(hit) for hit in _last_matterc_hits[:4]]
+    else:
+        matterc = browse_matterc_mdns(1.2)[:4]
     route = thread_route_hint(iface) or ""
     ts_present = tailscale_iface_present()
     ts_up = tailscale_link_up() if ts_present else False
@@ -2395,19 +2611,21 @@ def discovery_diag() -> dict[str, Any]:
         shield_state = "idle"
     routes_sample = ipv6_route_sample(iface) if not route else []
     netmode = container_network_mode(name)
-    ra_proof = ""
-    installed: list[str] = []
-    try:
-        # Lightweight: reuse last install if route still missing
-        if not route:
-            info = install_discovered_thread_routes(iface)
-            ra_proof = str(info.get("ra_proof") or "")
-            installed = list(info.get("installed") or [])
-            route = thread_route_hint(iface) or route
-        else:
-            ra_proof = "kernel"
-    except Exception as exc:  # noqa: BLE001
-        ra_proof = f"err:{exc}"[:40]
+    ra_proof = _last_ra_proof or ("kernel" if route else "none")
+    installed = list(_last_routes_installed)
+    fd_prefix = "none"
+    via_addr = "none"
+    for hit in _last_matterc_hits:
+        src = str(hit.get("src") or "")
+        if src.lower().startswith("fe80:"):
+            via_addr = src.split("%", 1)[0]
+        for addr in hit.get("aaaa") or []:
+            raw = str(addr).split("%", 1)[0]
+            if raw.lower().startswith("fd") and not _is_tailscale_ula(raw):
+                fd_prefix = ipv6_prefix64(raw)
+                break
+        if fd_prefix != "none":
+            break
     return {
         "iface": iface,
         "container": name,
@@ -2427,19 +2645,16 @@ def discovery_diag() -> dict[str, Any]:
         "ra_proof": ra_proof,
         "routes_installed": installed,
         "routes_sample": routes_sample,
+        "fd": fd_prefix,
+        "via": via_addr,
         "matterc": matterc,
-        "matterc_seen": any(
-            str(x) and "no _matterc" not in str(x).lower() and "failed" not in str(x).lower() and "error" not in str(x).lower()
-            for x in matterc
-        ),
+        "matterc_seen": any(_matterc_line_is_real(str(x)) for x in matterc),
         "agent": AGENT_VERSION,
     }
 
 
 def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
     row = diag or discovery_diag()
-    matterc = row.get("matterc") or []
-    matterc_s = ", ".join(str(x) for x in matterc[:3]) if matterc else "none"
     route = str(row.get("thread_route") or "").strip() or "none"
     if not row.get("tailscale"):
         ts = "no"
@@ -2449,28 +2664,11 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
         ts = "up"
     else:
         ts = "yes"
-    shield = str(row.get("shield") or "n/a")
-    sample = row.get("routes_sample") or []
-    sample_s = "; ".join(str(x) for x in sample[:3]) if sample else ""
-    extra = f" routes={sample_s}" if sample_s and route == "none" else ""
-    ra = str(row.get("ra_proof") or "")
-    netmode = str(row.get("network_mode") or "")
-    fwd = "1" if row.get("forwarding") else "0"
-    installed = row.get("routes_installed") or []
-    inst_s = ";".join(str(x) for x in installed[:2])
-    more = ""
-    if ra:
-        more += f" ra={ra}"
-    if netmode:
-        more += f" net={netmode}"
-    more += f" fwd={fwd}"
-    if inst_s:
-        more += f" installed={inst_s}"
+    mc = "yes" if row.get("matterc_seen") else "no"
     return (
-        f"[diag iface={row.get('iface')} primary={row.get('primary_have')}/{row.get('primary_state')} "
-        f"accept_ra={row.get('accept_ra')} rt_info_max_plen={row.get('rt_info_max_plen')} "
-        f"ll={row.get('ipv6_ll')} thread_route={route} ts={ts} shield={shield} matterc={matterc_s} "
-        f"container={row.get('container')} v{row.get('agent')}{more}{extra}]"
+        f"[diag v{row.get('agent')} matterc={mc} fd={row.get('fd') or 'none'} "
+        f"via={row.get('via') or 'none'} ra={row.get('ra_proof') or 'none'} "
+        f"thread_route={route} iface={row.get('iface')} ts={ts} shield={row.get('shield') or 'n/a'}]"
     )
 
 
@@ -3166,48 +3364,27 @@ def friendly_commission_error(err: str) -> str:
             and diag.get("tailscale")
             and (diag.get("tailscale_up") or diag.get("tailscale_routing") or shield == "fail")
         )
-        if matterc_seen:
+        fd = str((diag or {}).get("fd") or "none")
+        ra = str((diag or {}).get("ra_proof") or "none")
+        if matterc_seen and no_thread and fd != "none":
             base = (
-                "Pairing timed out after the Pi saw a commissionable Matter accessory on the LAN. "
-                "Use a fresh Apple Home → Turn On Pairing Mode code (within ~3 minutes). "
+                f"Pairing timed out. _matterc included Thread prefix {fd} but traffic still failed. "
+                "Use a fresh Turn On Pairing Mode code and Add device again. "
             )
-            if no_thread:
-                base += (
-                    "No Apple Thread IPv6 route on the LAN NIC "
-                    "(Tailscale fd7a:… is not Thread) — keep the HomePod/Apple TV on the same LAN/VLAN as eth0. "
-                )
-            if shield == "fail":
-                base += "Tailscale shield failed during Add device (still routing); fix sudo/yarbo-matter-setup or pause Tailscale manually, then retry. "
-            elif has_ts and shield == "ok":
-                base += (
-                    "Tailscale was paused; if ra=no_ra HomePod RAs never hit eth0 "
-                    "(same LAN/VLAN — disable UniFi mDNS reflector / multicast enhancement). "
-                    "If ra=rio_seen the panel adds a static Thread route — retry with a fresh code. "
-                )
-            elif ts_active:
-                base += "Tailscale still looks active during pairing and can break Thread; pause it and retry. "
-            base += "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
+        elif matterc_seen and no_thread:
+            base = (
+                "Pairing timed out. _matterc was real but had no Thread fd… address and no router advertisement "
+                f"(ra={ra}). Put the HomePod on the same LAN as the Pi, then a fresh Turn On Pairing Mode code. "
+            )
+        elif matterc_seen:
+            base = "Pairing timed out after a real _matterc reply. Use a fresh Turn On Pairing Mode code. "
         else:
             base = (
-                "Pairing timed out — the Pi did not discover the accessory (Thread/mDNS). "
-                "In Apple Home open the accessory → Turn On Pairing Mode, paste a fresh code within ~3 minutes "
-                "(not the sticker QR). Keep a HomePod or Apple TV online on the same LAN/VLAN as the Pi with IPv6. "
+                "Pairing timed out. No _matterc DNS reply (a bare fe80 +byte count is not an accessory). "
+                "Apple Home → Turn On Pairing Mode, then Add device within ~3 minutes. "
             )
-            if no_thread and (ts_active or shield == "fail"):
-                base += (
-                    "Tailscale is still interfering and there is no Apple Thread route on eth0. "
-                    "Pause Tailscale or put HomePod on the eth0 LAN, then retry. "
-                )
-            elif no_thread and has_ts and shield == "ok":
-                base += (
-                    "Tailscale was paused but no Apple Thread route appeared on eth0 — "
-                    "put HomePod on the same LAN as the Pi ethernet, then retry. "
-                )
-            base += (
-                "Thread plugs need Apple border-router IPv6 routes on the LAN NIC "
-                "(panel 4.0.337+ verifies Tailscale pause and waits longer for Thread RIOs). "
-                "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
-            )
+        if shield == "fail":
+            base += "Tailscale shield failed; pause Tailscale and retry. "
         if "diag iface=" not in low:
             try:
                 return f"{base} {format_discovery_diag(diag)}"
@@ -3316,7 +3493,12 @@ def _set_commission_job(**fields: Any) -> None:
 
 def run_commission_with_code(code: str) -> dict[str, Any]:
     """Run prepare + commission_with_code (+ retry). Used by sync and async paths."""
+    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed
     shielded = False
+    _thread_route_attempted = False
+    _last_matterc_hits = []
+    _last_ra_proof = ""
+    _last_routes_installed = []
     try:
         shielded = begin_tailscale_matter_shield()
         ready_err = prepare_for_commission()

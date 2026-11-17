@@ -50,7 +50,7 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 85, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 86, agent.AGENT_VERSION
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
         "iface": "eth0",
@@ -62,7 +62,7 @@ def main() -> int:
         "ipv6_ll": True,
         "thread_route": "fd11::/64",
         "matterc": ["no _matterc replies"],
-        "agent": 85,
+        "agent": 86,
     }
     err = agent.friendly_commission_error("Pairing timed out while discovering")
     assert "Thread/mDNS" in err or "commissionable" in err.lower() or "Tailscale" in err or "timed out" in err.lower(), err
@@ -82,7 +82,7 @@ def main() -> int:
         "matterc_seen": True,
         "shield": "ok",
         "tailscale_shielded": True,
-        "agent": 85,
+        "agent": 86,
     }
     seen = agent.friendly_commission_error("Pairing timed out while discovering")
     assert "commissionable" in seen.lower() or "Tailscale" in seen or "Thread" in seen, seen
