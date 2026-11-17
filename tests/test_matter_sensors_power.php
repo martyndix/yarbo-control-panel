@@ -202,7 +202,7 @@ assert_true(str_contains($agent, 'ELECTRICAL_POWER = 0x0090'), 'agent Electrical
 assert_true(str_contains($agent, 'BOOLEAN_STATE = 0x0045'), 'agent Boolean State cluster');
 assert_true(str_contains($agent, 'OCCUPANCY_SENSING = 0x0406'), 'agent Occupancy Sensing cluster');
 assert_true(str_contains($agent, 'HUMIDITY_MEASUREMENT = 0x0405'), 'agent Humidity cluster');
-assert_true(str_contains($agent, 'AGENT_VERSION = 107'), 'agent v107');
+assert_true(str_contains($agent, 'AGENT_VERSION = 108'), 'agent v108');
 assert_true(str_contains($js, 'home-device-power'), 'Home shows plug watts');
 assert_true(str_contains($js, 'homeIsSensorKind(d)'), 'Home renders Matter sensors');
 assert_true(str_contains($js, 'homeMemberHasMotion'), 'Home person emoji uses motion');

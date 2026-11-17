@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 107, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 108, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -276,15 +276,16 @@ Router lifetime           :         1800
         raise SystemExit("verhoeff check digit missing")
     agent.subprocess.run = lambda cmd, **kwargs: Result(
         "2: eth0    inet6 fd10:d687:e7bf:4ba8:2ecf:67ff:fe70:97e7/64 scope global\n"
-        "2: eth0    inet6 2001:db8:9::253/64 scope global\n"
+        "2: eth0    inet6 2a02:1234:9::253/64 scope global\n"
     )
     assert agent.pairing_source_address(
         "eth0", ["fd10:d687:e7bf:4ba8::/64", "fdef:badd:6106::/64"]
-    ) == "2001:db8:9::253"
+    ) == "2a02:1234:9::253"
     agent.subprocess.run = lambda cmd, **kwargs: Result(
         "2: eth0    inet6 fd10:d687:e7bf:4ba8:2ecf:67ff:fe70:97e7/64 scope global\n"
     )
-    assert agent.pairing_source_address("eth0", ["fd10:d687:e7bf:4ba8::/64"]) == ""
+    assert agent.pairing_source_address("eth0", ["fdef:badd:6106::/64"]) == ""
+    assert agent.homepod_ula_prefixes("eth0") == ["fd10:d687:e7bf:4ba8::/64"]
     print("ok: thread route helpers")
     return 0
 
