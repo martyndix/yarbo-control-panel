@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import select
 import shutil
 import socket
 import struct
@@ -41,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 92
+AGENT_VERSION = 93
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1801,7 +1802,6 @@ _last_routes_installed: list[str] = []
 _mdns5353 = ""
 _mdns_quiesced = False
 _pase_target = ""
-_fd_blackholes: list[str] = []
 
 
 def commission_job_is_running() -> bool:
@@ -2387,8 +2387,8 @@ def _read_dns_name(data: bytes, offset: int, depth: int = 0) -> tuple[str, int]:
 
 
 def parse_mdns_message(data: bytes) -> dict[str, Any]:
-    """Pull _matterc names and AAAA addresses out of one DNS message."""
-    empty: dict[str, Any] = {"matterc": False, "aaaa": [], "response": False}
+    """Pull _matterc names, AAAA addresses, and the SRV port out of one DNS message."""
+    empty: dict[str, Any] = {"matterc": False, "aaaa": [], "response": False, "port": 0}
     if len(data) < 12:
         return empty
     flags, qd, an, ns, ar = struct.unpack("!HHHHH", data[2:12])
@@ -2396,6 +2396,8 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
     offset = 12
     names: list[str] = []
     aaaas: list[str] = []
+    port = 0
+    other_srv: list[int] = []
 
     def take_name() -> str:
         nonlocal offset
@@ -2409,7 +2411,7 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
             take_name()
             offset += 4
         for _ in range(an + ns + ar):
-            take_name()
+            name = take_name()
             if offset + 10 > len(data):
                 break
             rtype, _rclass, _ttl, rdlen = struct.unpack("!HHIH", data[offset : offset + 10])
@@ -2419,7 +2421,14 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
             offset += rdlen
             if rtype == 28 and len(rdata) == 16:
                 aaaas.append(socket.inet_ntop(socket.AF_INET6, rdata))
-            elif rtype in (12, 33) and rdata:
+            elif rtype == 33 and len(rdata) >= 6:
+                srv_port = struct.unpack("!HHH", rdata[:6])[2]
+                if 0 < srv_port < 65536:
+                    if "_matterc" in name.lower() and port == 0:
+                        port = int(srv_port)
+                    elif "_matterc" not in name.lower():
+                        other_srv.append(int(srv_port))
+            if rtype in (12, 33) and rdata:
                 # PTR target, or SRV name after 6-byte header.
                 start = rdata_at + (6 if rtype == 33 and len(rdata) > 6 else 0)
                 target, _ = _read_dns_name(data, start)
@@ -2428,10 +2437,14 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         return empty
     blob = " ".join(names).lower()
+    matterc = bool(is_response and "_matterc" in blob)
+    if matterc and port == 0 and len(other_srv) == 1:
+        port = other_srv[0]
     return {
-        "matterc": bool(is_response and "_matterc" in blob),
+        "matterc": matterc,
         "aaaa": aaaas,
         "response": is_response,
+        "port": port,
     }
 
 
@@ -2530,67 +2543,228 @@ def install_routes_from_matterc_hits() -> list[str]:
     return []
 
 
-def blackhole_mdns_fd_prefixes() -> list[str]:
-    """Make mDNS fd prefixes unreachable so they do not follow the default route.
+def clear_unreachable_fd_routes() -> int:
+    """Delete unreachable fd routes left from the v92 pairing attempt.
 
-    With no Thread route, the kernel sends fdef:… to the LAN gateway. The gateway
-    drops it, and PASE waits until message 33 times out. A real router advertisement
-    (lower metric) still wins over this unreachable route. Cleared when pairing ends
-    so a commissioned device can still be reached on that prefix.
+    An unreachable prefix makes CHIP fail immediately with ENETUNREACH, which
+    python-matter-server reports as error_code 1 and CHIP wraps as 0x03.
     """
-    global _fd_blackholes
+    removed = 0
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "route", "show"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    for raw in (shown.stdout or "").splitlines():
+        parts = raw.split()
+        if len(parts) < 2 or parts[0].lower() != "unreachable":
+            continue
+        dest = parts[1]
+        if not dest.lower().startswith("fd") or _is_tailscale_ula(dest):
+            continue
+        for cmd in (
+            ["sudo", "-n", "ip", "-6", "route", "del", "unreachable", dest],
+            ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "del", "unreachable", dest],
+            ["ip", "-6", "route", "del", "unreachable", dest],
+        ):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if result.returncode == 0:
+                removed += 1
+                print(f"matter: cleared unreachable {dest}", flush=True)
+                break
+    return removed
+
+
+def _ip_ok(args: list[str]) -> bool:
+    for cmd in (
+        ["sudo", "-n", "ip", *args],
+        ["sudo", "-n", "/usr/sbin/ip", *args],
+        ["ip", *args],
+    ):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode == 0:
+            return True
+    return False
+
+
+def claim_local_v6(addr: str) -> bool:
+    """Put an accessory address on lo so this host receives packets CHIP sends there."""
+    addr = addr.split("%", 1)[0]
+    if not addr:
+        return False
+    if _ip_ok(["-6", "addr", "replace", f"{addr}/128", "dev", "lo", "nodad"]):
+        return True
+    return _ip_ok(["-6", "addr", "replace", f"{addr}/128", "dev", "lo"])
+
+
+def release_local_v6(addr: str) -> None:
+    addr = addr.split("%", 1)[0]
+    if not addr:
+        return
+    _ip_ok(["-6", "addr", "del", f"{addr}/128", "dev", "lo"])
+
+
+def iface_link_local(iface: str) -> str:
+    if not iface:
+        return ""
+    try:
+        out = subprocess.run(
+            ["ip", "-6", "addr", "show", "dev", iface, "scope", "link"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    match = re.search(r"inet6\s+(fe80:[0-9a-f:]+)", out.stdout or "", re.I)
+    return match.group(1).split("/", 1)[0] if match else ""
+
+
+class UdpRelay:
+    """Forward datagrams between a local socket and one peer, and back."""
+
+    def __init__(self, listen: socket.socket, out: socket.socket, dest: str, port: int, scope: int) -> None:
+        self.listen = listen
+        self.out = out
+        self.dest = dest
+        self.port = port
+        self.scope = scope
+        self.running = True
+        self.chip_peer: Any = None
+        self.thread = threading.Thread(target=self._run, name="matter-pase-relay", daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def close(self) -> None:
+        self.running = False
+        for sock in (self.listen, self.out):
+            try:
+                sock.close()
+            except OSError:
+                pass
+        self.thread.join(timeout=1.5)
+
+    def _send_dest(self, data: bytes) -> None:
+        if self.scope:
+            self.out.sendto(data, (self.dest, self.port, 0, self.scope))
+        else:
+            self.out.sendto(data, (self.dest, self.port))
+
+    def _run(self) -> None:
+        while self.running:
+            try:
+                ready, _, _ = select.select([self.listen, self.out], [], [], 0.4)
+            except (OSError, ValueError):
+                break
+            for sock in ready:
+                try:
+                    data, addr = sock.recvfrom(2048)
+                except OSError:
+                    continue
+                try:
+                    if sock is self.listen:
+                        self.chip_peer = addr
+                        self._send_dest(data)
+                    elif self.chip_peer is not None:
+                        self.listen.sendto(data, self.chip_peer)
+                except OSError:
+                    continue
+
+
+class PaseLinkLocalProxy:
+    def __init__(self, claimed: str, relay: UdpRelay, label: str) -> None:
+        self.claimed = claimed
+        self.relay = relay
+        self.label = label
+
+    def close(self) -> None:
+        try:
+            self.relay.close()
+        finally:
+            release_local_v6(self.claimed)
+
+
+def start_pase_linklocal_proxy() -> PaseLinkLocalProxy | None:
+    """Relay CHIP's packets for the accessory fd address to its link-local.
+
+    commission_with_code uses the SRV port, but the address in that advertisement
+    is the fd ULA. With no Thread route the kernel sends that ULA to the gateway,
+    which drops it. v92 marked the prefix unreachable and CHIP aborted with
+    ENETUNREACH / 0x03. v91 sent the link-local on port 5540, which is not the
+    commissionable port. Claiming the fd address locally and relaying to
+    fe80 on the SRV port sends the handshake where the accessory is listening.
+    """
     hinted = (thread_route_hint() or "").lower()
     if " proto ra " in f" {hinted} ":
-        _fd_blackholes = []
-        return []
-    prefixes: list[str] = []
+        return None
+    chosen: tuple[str, str, int, str] | None = None
     for hit in _last_matterc_hits:
+        if not hit.get("matterc"):
+            continue
+        src = str(hit.get("src") or "").split("%", 1)[0]
+        iface = str(hit.get("iface") or primary_interface() or "")
+        try:
+            port = int(hit.get("port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        if not src.lower().startswith("fe80:") or not iface or port < 1 or port > 65535:
+            continue
+        fd_addr = ""
         for addr in hit.get("aaaa") or []:
             raw = str(addr).split("%", 1)[0]
-            if not raw.lower().startswith("fd") or _is_tailscale_ula(raw):
-                continue
-            try:
-                prefix = ipv6_prefix64(raw)
-            except OSError:
-                continue
-            if prefix not in prefixes:
-                prefixes.append(prefix)
-    installed: list[str] = []
-    for prefix in prefixes:
-        for cmd in (
-            ["sudo", "-n", "ip", "-6", "route", "replace", "unreachable", prefix, "metric", "1000"],
-            ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "replace", "unreachable", prefix, "metric", "1000"],
-            ["ip", "-6", "route", "replace", "unreachable", prefix, "metric", "1000"],
-        ):
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-            if result.returncode == 0:
-                installed.append(prefix)
-                print(f"matter: unreachable {prefix} (keep PASE off the default route)", flush=True)
+            if raw.lower().startswith("fd") and not _is_tailscale_ula(raw):
+                fd_addr = raw
                 break
-    _fd_blackholes = installed
-    return installed
-
-
-def clear_fd_blackholes() -> None:
-    """Drop pairing-only unreachable fd routes."""
-    global _fd_blackholes
-    for prefix in list(_fd_blackholes):
-        for cmd in (
-            ["sudo", "-n", "ip", "-6", "route", "del", "unreachable", prefix],
-            ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "del", "unreachable", prefix],
-            ["ip", "-6", "route", "del", "unreachable", prefix],
-        ):
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-            if result.returncode == 0:
-                print(f"matter: cleared unreachable {prefix}", flush=True)
-                break
-    _fd_blackholes = []
+        if fd_addr:
+            chosen = (fd_addr, src, port, iface)
+            break
+    if chosen is None:
+        return None
+    fd_addr, src, port, iface = chosen
+    if not claim_local_v6(fd_addr):
+        print(f"matter: could not claim {fd_addr} for PASE relay", flush=True)
+        return None
+    listen: socket.socket | None = None
+    out: socket.socket | None = None
+    try:
+        scope = socket.if_nametoindex(iface)
+        pi_ll = iface_link_local(iface)
+        listen = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        listen.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listen.bind((fd_addr, port))
+        out = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        if pi_ll:
+            out.bind((pi_ll, 0, 0, scope))
+        else:
+            out.bind(("::", 0, 0, scope))
+        relay = UdpRelay(listen, out, src, port, scope)
+        relay.start()
+    except OSError as exc:
+        print(f"matter: PASE relay bind failed: {exc}", flush=True)
+        for sock in (listen, out):
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+        release_local_v6(fd_addr)
+        return None
+    label = f"{src}%{iface}:{port}"
+    print(f"matter: relay PASE {fd_addr}:{port} -> {label}", flush=True)
+    return PaseLinkLocalProxy(fd_addr, relay, label)
 
 
 def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
@@ -2638,14 +2812,28 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
                 if not parsed.get("matterc"):
                     continue
                 src = str(addr[0]).split("%", 1)[0]
-                structured.append(
-                    {
-                        "src": src,
-                        "iface": iface or primary_interface(),
-                        "aaaa": list(parsed.get("aaaa") or []),
-                        "matterc": True,
-                    }
-                )
+                nic = iface or primary_interface()
+                port = int(parsed.get("port") or 0)
+                merged = False
+                for hit in structured:
+                    if hit.get("src") == src and hit.get("iface") == nic:
+                        for item in parsed.get("aaaa") or []:
+                            if item not in hit["aaaa"]:
+                                hit["aaaa"].append(item)
+                        if port and not hit.get("port"):
+                            hit["port"] = port
+                        merged = True
+                        break
+                if not merged:
+                    structured.append(
+                        {
+                            "src": src,
+                            "iface": nic,
+                            "aaaa": list(parsed.get("aaaa") or []),
+                            "port": port,
+                            "matterc": True,
+                        }
+                    )
         except OSError as exc:
             print(f"matter: mdns browse {iface or '?'}: {exc}", flush=True)
         finally:
@@ -2664,11 +2852,15 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
             except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
                 continue
             aaaas = []
+            port = 0
             for line in (r.stdout or "").splitlines():
                 if "matterc" not in line.lower():
                     continue
                 for m in re.finditer(r"(fe80:[0-9a-f:]+|fd[0-9a-f:]{8,})", line, re.I):
                     aaaas.append(m.group(1).split("%", 1)[0])
+                parts = line.split(";")
+                if len(parts) >= 9 and parts[8].isdigit():
+                    port = int(parts[8])
             if aaaas or "matterc" in (r.stdout or "").lower():
                 src = next((a for a in aaaas if a.lower().startswith("fe80:")), "")
                 structured.append(
@@ -2676,6 +2868,7 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
                         "src": src,
                         "iface": primary_interface(),
                         "aaaa": aaaas,
+                        "port": port,
                         "matterc": True,
                     }
                 )
@@ -2716,10 +2909,17 @@ def discovery_diag() -> dict[str, Any]:
     installed = list(_last_routes_installed)
     fd_prefix = "none"
     via_addr = "none"
+    mdns_port = 0
     for hit in _last_matterc_hits:
         src = str(hit.get("src") or "")
         if src.lower().startswith("fe80:"):
             via_addr = src.split("%", 1)[0]
+        try:
+            hit_port = int(hit.get("port") or 0)
+        except (TypeError, ValueError):
+            hit_port = 0
+        if hit_port and not mdns_port:
+            mdns_port = hit_port
         for addr in hit.get("aaaa") or []:
             raw = str(addr).split("%", 1)[0]
             if raw.lower().startswith("fd") and not _is_tailscale_ula(raw):
@@ -2753,6 +2953,7 @@ def discovery_diag() -> dict[str, Any]:
         "matterc_seen": any(_matterc_line_is_real(str(x)) for x in matterc),
         "agent": AGENT_VERSION,
         "pase_target": _pase_target,
+        "port": mdns_port,
     }
 
 
@@ -2773,7 +2974,7 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
         f"via={row.get('via') or 'none'} ra={row.get('ra_proof') or 'none'} "
         f"mdns5353={row.get('mdns5353') or 'unknown'} net={row.get('network_mode') or '?'} "
         f"thread_route={route} iface={row.get('iface')} pase={row.get('pase_target') or 'mdns'} "
-        f"ts={ts} shield={row.get('shield') or 'n/a'}]"
+        f"port={row.get('port') or 0} ts={ts} shield={row.get('shield') or 'n/a'}]"
     )
 
 
@@ -3462,6 +3663,16 @@ def friendly_commission_error(err: str) -> str:
         or "nodecommissionfailed" in low
         or re.search(r"\berror_code\s*1\b", low)
     ):
+        seen = False
+        try:
+            seen = bool(discovery_diag().get("matterc_seen"))
+        except Exception:  # noqa: BLE001
+            seen = False
+        if seen:
+            return (
+                "The accessory answered on the LAN, but the pairing session failed. "
+                "Use a fresh Turn On Pairing Mode code and Add device again."
+            )
         return (
             "Pairing started but the Pi never found the accessory on the network "
             "(Matter error_code 1 — usually Thread/mDNS discovery). Get a fresh code: Apple Home → "
@@ -3488,9 +3699,7 @@ def friendly_commission_error(err: str) -> str:
         if matterc_seen and "matter server timed out" in low:
             base = (
                 "The accessory answered on the LAN, but the pairing handshake got no reply "
-                "(PASE message 33). Its fd address was sent to the gateway. "
-                "This update keeps that prefix unreachable during pairing and lets Matter Server "
-                "discover the accessory on its own port. Use a fresh Turn On Pairing Mode code. "
+                "(PASE message 33). Use a fresh Turn On Pairing Mode code. "
             )
         elif matterc_seen and no_thread and fd != "none":
             base = (
@@ -3752,6 +3961,7 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
     _last_routes_installed = []
     _mdns_quiesced = False
     _pase_target = ""
+    proxy: PaseLinkLocalProxy | None = None
     try:
         shielded = begin_tailscale_matter_shield()
         try:
@@ -3767,15 +3977,18 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001
                 print(f"matter: matterc lookup: {exc}", flush=True)
         try:
-            blackholed = blackhole_mdns_fd_prefixes()
+            clear_unreachable_fd_routes()
         except Exception as exc:  # noqa: BLE001
-            blackholed = []
-            print(f"matter: fd unreachable: {exc}", flush=True)
-        if blackholed:
-            _pase_target = "link-local"
-        # Discover with the code so CHIP uses the mDNS port. The fd prefix is
-        # unreachable for this attempt, so it cannot follow the default route.
-        # CommissionIP to the link-local (v91) failed with CHIP 0x03 and ignores that port.
+            print(f"matter: clear unreachable fd: {exc}", flush=True)
+        try:
+            proxy = start_pase_linklocal_proxy()
+        except Exception as exc:  # noqa: BLE001
+            proxy = None
+            print(f"matter: PASE relay: {exc}", flush=True)
+        if proxy is not None:
+            _pase_target = proxy.label
+        # Discover with the code so CHIP uses the SRV port. The relay claims the
+        # advertised fd address and forwards those datagrams to the accessory link-local.
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
@@ -3845,10 +4058,15 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             "message": "Device added.",
         }
     finally:
+        if proxy is not None:
+            try:
+                proxy.close()
+            except Exception as exc:  # noqa: BLE001
+                print(f"matter: PASE relay close: {exc}", flush=True)
         try:
-            clear_fd_blackholes()
+            clear_unreachable_fd_routes()
         except Exception as exc:  # noqa: BLE001
-            print(f"matter: clear fd unreachable: {exc}", flush=True)
+            print(f"matter: clear unreachable fd: {exc}", flush=True)
         try:
             restore_host_mdns()
         except Exception as exc:  # noqa: BLE001

@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 92, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 93, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -50,28 +50,66 @@ Router lifetime           :         1800
     assert agent._matterc_line_is_real("fe80::1 matterc fd=fd8d:fc03:c02b::/64 via=fe80::1 iface=eth0")
     body = SCRIPT.read_text().split("def wait_for_thread_route", 1)[1].split("def ipv6_route_sample", 1)[0]
     assert "while time.time() < deadline" not in body
+    name = qname(["AABBCCDDEEFF", "_matterc", "_udp", "local"])
+    target = qname(["AABBCCDDEEFF", "local"])
+    aaaa = socket.inet_pton(socket.AF_INET6, "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0")
+    srv = struct.pack("!HHH", 0, 0, 5541) + target
+    pkt = struct.pack("!HHHHHH", 1, 0x8400, 0, 2, 0, 0)
+    pkt += name + struct.pack("!HHIH", 33, 1, 120, len(srv)) + srv
+    pkt += name + struct.pack("!HHIH", 28, 1, 120, 16) + aaaa
+    parsed = agent.parse_mdns_message(pkt)
+    assert parsed["matterc"] is True, parsed
+    assert parsed["port"] == 5541, parsed
+    assert "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0" in parsed["aaaa"], parsed
+
     calls: list[list[str]] = []
 
     class Result:
-        returncode = 0
-        stdout = ""
-        stderr = ""
+        def __init__(self, stdout: str = "") -> None:
+            self.returncode = 0
+            self.stdout = stdout
+            self.stderr = ""
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
+        if "show" in cmd:
+            return Result("unreachable fdef:badd:6106::/64 metric 1000\n")
         return Result()
 
     agent.subprocess.run = fake_run
-    agent._last_matterc_hits = [{
-        "aaaa": ["fdef:badd:6106:0:dbfc:813f:f2ae:dcd0"],
-        "matterc": True,
-    }]
-    installed = agent.blackhole_mdns_fd_prefixes()
-    assert installed == ["fdef:badd:6106::/64"], installed
-    assert any(c[-4:] == ["unreachable", "fdef:badd:6106::/64", "metric", "1000"] for c in calls), calls
-    agent.clear_fd_blackholes()
-    assert agent._fd_blackholes == []
+    assert agent.clear_unreachable_fd_routes() == 1
     assert any("del" in c and "unreachable" in c and "fdef:badd:6106::/64" in c for c in calls), calls
+
+    import threading
+    echo = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    echo.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    echo.bind(("::1", 0))
+    echo_port = echo.getsockname()[1]
+
+    def echo_thread() -> None:
+        data, addr = echo.recvfrom(1500)
+        echo.sendto(b"pong:" + data, addr)
+
+    threading.Thread(target=echo_thread, daemon=True).start()
+    listen = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    listen.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    listen.bind(("::1", 0))
+    out = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    out.bind(("::1", 0))
+    relay = agent.UdpRelay(listen, out, "::1", echo_port, 0)
+    relay.start()
+    try:
+        client = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        client.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        client.bind(("::1", 0))
+        client.settimeout(2)
+        client.sendto(b"ping", listen.getsockname())
+        reply, _ = client.recvfrom(1500)
+        assert reply == b"pong:ping", reply
+    finally:
+        relay.close()
+        echo.close()
     print("ok: thread route helpers")
     return 0
 
