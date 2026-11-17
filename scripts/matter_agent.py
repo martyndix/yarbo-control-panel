@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 105
+AGENT_VERSION = 106
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2446,7 +2446,7 @@ def _read_dns_name(data: bytes, offset: int, depth: int = 0) -> tuple[str, int]:
 
 def parse_mdns_message(data: bytes) -> dict[str, Any]:
     """Pull _matterc names, AAAA addresses, and the SRV port out of one DNS message."""
-    empty: dict[str, Any] = {"matterc": False, "aaaa": [], "a": [], "response": False, "port": 0}
+    empty: dict[str, Any] = {"matterc": False, "aaaa": [], "a": [], "hosts": [], "response": False, "port": 0}
     if len(data) < 12:
         return empty
     flags, qd, an, ns, ar = struct.unpack("!HHHHH", data[2:12])
@@ -2455,6 +2455,7 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
     names: list[str] = []
     aaaas: list[str] = []
     ipv4s: list[str] = []
+    hosts: list[str] = []
     port = 0
     other_srv: list[int] = []
 
@@ -2495,6 +2496,9 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
                 target, _ = _read_dns_name(data, start)
                 if target:
                     names.append(target)
+                    if rtype == 33 and "_matterc" in name.lower() and "_matterc" not in target.lower():
+                        if target not in hosts:
+                            hosts.append(target)
     except Exception:  # noqa: BLE001
         return empty
     blob = " ".join(names).lower()
@@ -2505,9 +2509,110 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
         "matterc": matterc,
         "aaaa": aaaas,
         "a": ipv4s,
+        "hosts": hosts,
         "response": is_response,
         "port": port,
     }
+
+
+def _mdns_name_query(fqdn: str, qtype: int) -> bytes:
+    """QU query for one hostname so the HomePod unicasts A/AAAA to this socket."""
+    labels = b"".join(
+        bytes([len(part)]) + part.encode("ascii")
+        for part in fqdn.strip(".").split(".")
+        if part
+    ) + b"\x00"
+    return struct.pack("!HHHHHH", 0x1200, 0, 1, 0, 0, 0) + labels + struct.pack("!HH", qtype, 0x8001)
+
+
+def query_mdns_addresses(fqdn: str, seconds: float = 1.2) -> dict[str, list[str]]:
+    """A and AAAA for the _matterc hostname. The service reply often has only the mesh address."""
+    found_a: list[str] = []
+    found_aaaa: list[str] = []
+    if not fqdn or fqdn.lower().startswith("_"):
+        return {"a": found_a, "aaaa": found_aaaa}
+    packets = [_mdns_name_query(fqdn, 1), _mdns_name_query(fqdn, 28)]
+    ifaces = _lan_ifaces() or [""]
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 1)
+        try:
+            sock.bind(("::", 0))
+        except OSError:
+            return {"a": found_a, "aaaa": found_aaaa}
+        for iface in ifaces:
+            scope = 0
+            if iface:
+                try:
+                    scope = socket.if_nametoindex(iface)
+                except OSError:
+                    scope = 0
+            if scope:
+                try:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, scope)
+                except OSError:
+                    pass
+            for packet in packets:
+                try:
+                    sock.sendto(packet, ("ff02::fb", 5353, 0, scope))
+                except OSError:
+                    continue
+        sock.settimeout(0.3)
+        deadline = time.time() + max(0.6, seconds)
+        while time.time() < deadline:
+            try:
+                data, _addr = sock.recvfrom(2048)
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            parsed = parse_mdns_message(data)
+            for addr in parsed.get("a") or []:
+                if addr not in found_a:
+                    found_a.append(addr)
+            for addr in parsed.get("aaaa") or []:
+                if addr not in found_aaaa:
+                    found_aaaa.append(addr)
+    except OSError as exc:
+        print(f"matter: mdns host {fqdn}: {exc}", flush=True)
+    finally:
+        if sock is not None:
+            sock.close()
+    return {"a": found_a, "aaaa": found_aaaa}
+
+
+def resolve_matter_host_addrs() -> None:
+    """Ask for the hostname's other addresses. _matterc often carries only the mesh-local one."""
+    names: list[str] = []
+    for hit in _last_matterc_hits:
+        for host in hit.get("hosts") or []:
+            if host not in names:
+                names.append(host)
+    for name in names[:4]:
+        try:
+            found = query_mdns_addresses(name, 1.2)
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: host lookup {name}: {exc}", flush=True)
+            continue
+        if not found.get("a") and not found.get("aaaa"):
+            continue
+        print(
+            f"matter: {name} a={','.join(found.get('a') or []) or '-'} "
+            f"aaaa={','.join(found.get('aaaa') or []) or '-'}",
+            flush=True,
+        )
+        for hit in _last_matterc_hits:
+            if name not in (hit.get("hosts") or []):
+                continue
+            hit.setdefault("a", [])
+            hit.setdefault("aaaa", [])
+            for addr in found.get("a") or []:
+                if addr not in hit["a"]:
+                    hit["a"].append(addr)
+            for addr in found.get("aaaa") or []:
+                if addr not in hit["aaaa"]:
+                    hit["aaaa"].append(addr)
 
 
 def ipv6_prefix64(addr: str) -> str:
@@ -3444,6 +3549,62 @@ def matterc_router_via() -> str:
     return found or fallback
 
 
+def accessory_lan_address() -> str:
+    """An address on the LAN, the kind the IKEA plug had once the HomePod shared the Pi's subnet.
+
+    IPv4 wins. An fd address outside the mesh-local prefix is the HomePod route.
+    The mesh-local fdef: address is not returned: the HomePod does not forward it.
+    """
+    host, prefix, _iface = matterc_fd_target()
+    mesh = None
+    if prefix:
+        try:
+            mesh = ipaddress.IPv6Network(prefix, strict=False)
+        except (ValueError, ipaddress.AddressValueError):
+            mesh = None
+    ipv4 = ""
+    ipv6 = ""
+    for hit in _last_matterc_hits:
+        for addr in hit.get("a") or []:
+            raw = str(addr).split("%", 1)[0]
+            try:
+                parsed = ipaddress.ip_address(raw)
+            except ValueError:
+                continue
+            if not isinstance(parsed, ipaddress.IPv4Address):
+                continue
+            if parsed.is_loopback or parsed.is_multicast or parsed.is_unspecified or parsed.is_link_local:
+                continue
+            ipv4 = ipv4 or raw
+        for addr in hit.get("aaaa") or []:
+            raw = str(addr).split("%", 1)[0]
+            if not raw or raw == host or _is_tailscale_ula(raw):
+                continue
+            try:
+                parsed = ipaddress.IPv6Address(raw)
+            except ValueError:
+                continue
+            if parsed.is_link_local or parsed.is_loopback or parsed.is_multicast or parsed.is_unspecified:
+                continue
+            if mesh is not None and parsed in mesh:
+                continue
+            ipv6 = ipv6 or raw
+    return ipv4 or ipv6
+
+
+def install_lan_accessory_route(addr: str) -> None:
+    """Send one LAN IPv6 address via the HomePod that advertised the accessory. No source address."""
+    if ":" not in (addr or ""):
+        return
+    _host, _prefix, iface = matterc_fd_target()
+    hop = matterc_router_via()
+    if not iface or not hop.lower().startswith("fe80:"):
+        return
+    delete_ipv6_prefix(f"{addr}/128")
+    if add_ipv6_route(f"{addr}/128", hop, iface, metric=50):
+        _last_routes_installed.append(f"{addr}/128 via {hop}")
+
+
 def try_commission_omr(code: str) -> dict[str, Any] | None:
     """Commission the address on the HomePod's prefix. Never a link-local."""
     global _last_omr
@@ -3617,6 +3778,10 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
                                 hit["a"].append(item)
                         if port and not hit.get("port"):
                             hit["port"] = port
+                        hit.setdefault("hosts", [])
+                        for host in parsed.get("hosts") or []:
+                            if host not in hit["hosts"]:
+                                hit["hosts"].append(host)
                         merged = True
                         break
                 if not merged:
@@ -3627,6 +3792,7 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
                             "aaaa": list(parsed.get("aaaa") or []),
                             "a": list(parsed.get("a") or []),
                             "port": port,
+                            "hosts": list(parsed.get("hosts") or []),
                             "matterc": True,
                         }
                     )
@@ -3671,6 +3837,10 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
                 )
                 break
     _last_matterc_hits = structured
+    try:
+        resolve_matter_host_addrs()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: host address lookup: {exc}", flush=True)
     if not structured:
         return ["no _matterc replies"]
     return [format_matterc_hit(hit) for hit in structured[:6]]
@@ -4495,9 +4665,26 @@ def friendly_commission_error(err: str) -> str:
         except Exception:  # noqa: BLE001
             seen = False
         if seen:
+            lan = ""
+            try:
+                lan = accessory_lan_address()
+            except Exception:  # noqa: BLE001
+                lan = ""
+            raw = " ".join(detail.split())[:120]
+            chip = f" chip={raw}" if raw else ""
+            if lan:
+                return (
+                    f"The accessory's LAN address {lan} did not finish pairing. "
+                    "Use a fresh Turn On Pairing Mode code and Add device again."
+                    f"{chip}"
+                )
             return (
-                "The accessory answered on the LAN, but the pairing session failed. "
-                "Use a fresh Turn On Pairing Mode code and Add device again."
+                "The sensor answered, but only on its Thread mesh address. "
+                "The IKEA plug paired once the HomePod was on the same subnet as the Pi, "
+                "because that plug had an address on the LAN. This sensor has no LAN address, "
+                "and the HomePod does not forward the mesh address, so the pairing session cannot start. "
+                "Use a fresh Turn On Pairing Mode code if you try again."
+                f"{chip}"
             )
         return (
             "Pairing started but the Pi never found the accessory on the network "
@@ -4843,14 +5030,43 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
-        # Do not commission a guessed fd10 address. That address is the Pi's,
-        # the attempt fails at once, and it uses up the pairing code (node 18).
-        rpc = matter_rpc(
-            "commission_with_code",
-            {"code": code, "network_only": True},
-            timeout=180.0 if long_wait else 120.0,
-            retries=1,
-        )
+        # The plug paired because it had an address on the LAN subnet. Use that
+        # kind of address when the hostname has one. Do not invent an fd10 address
+        # from the mesh id: that failed at once and used up the pairing code.
+        lan = ""
+        try:
+            lan = accessory_lan_address()
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: lan address: {exc}", flush=True)
+        lan_rpc: dict[str, Any] | None = None
+        if lan:
+            _last_omr = lan
+            try:
+                install_lan_accessory_route(lan)
+            except Exception as exc:  # noqa: BLE001
+                print(f"matter: lan route: {exc}", flush=True)
+            pin = manual_pairing_pin(code)
+            if pin:
+                print(f"matter: commissioning LAN address {lan}", flush=True)
+                lan_rpc = matter_rpc(
+                    "commission_on_network",
+                    {"setup_pin_code": pin, "ip_addr": lan},
+                    timeout=90.0,
+                    retries=1,
+                )
+        if lan_rpc and lan_rpc.get("ok"):
+            rpc = lan_rpc
+        else:
+            lan_err = str((lan_rpc or {}).get("error") or "")
+            if lan and lan_err and "unreachable" not in lan_err.lower():
+                rpc = lan_rpc or {"ok": False, "error": lan_err}
+            else:
+                rpc = matter_rpc(
+                    "commission_with_code",
+                    {"code": code, "network_only": True},
+                    timeout=180.0 if long_wait else 120.0,
+                    retries=1,
+                )
         err = str(rpc.get("error") or "")
         server_gave_up = "matter server timed out" in err.lower()
         if not rpc.get("ok") and not server_gave_up and commission_error_looks_retryable(err):
