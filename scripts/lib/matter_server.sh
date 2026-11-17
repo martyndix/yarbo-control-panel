@@ -374,6 +374,17 @@ yarbo_matter_thread_route_add() {
   yarbo_root ip -6 route replace "$prefix" via "$via" dev "$iface" metric 100
 }
 
+yarbo_matter_router_solicit() {
+  # Usage: router-solicit <iface>
+  # Sends an ICMPv6 router solicitation as root and prints JSON.
+  local iface="${1:-}"
+  if [[ -z "$iface" || ! "$iface" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+    echo "usage: router-solicit <iface>" >&2
+    return 1
+  fi
+  python3 "${ROOT}/scripts/matter_agent.py" --solicit-ra "$iface"
+}
+
 yarbo_matter_setup() {
   mkdir -p "${ROOT}/data/matter-server"
   yarbo_matter_write_status "running" "Setting up the Matter server"
@@ -499,7 +510,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   if [[ -n "${1:-}" && -d "${1}/scripts" ]]; then
     ROOT="$1"
     cmd="${2:-}"
-  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" || "${1:-}" == "tailscale-shield" || "${1:-}" == "tailscale-unshield" || "${1:-}" == "thread-route-add" || "${1:-}" == "mdns-quiesce" || "${1:-}" == "mdns-restore" ]]; then
+  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" || "${1:-}" == "tailscale-shield" || "${1:-}" == "tailscale-unshield" || "${1:-}" == "thread-route-add" || "${1:-}" == "router-solicit" || "${1:-}" == "mdns-quiesce" || "${1:-}" == "mdns-restore" ]]; then
     cmd="$1"
     if [[ -n "${YARBO_ROOT:-}" && -d "${YARBO_ROOT}/scripts" ]]; then
       ROOT="$YARBO_ROOT"
@@ -531,6 +542,17 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       yarbo_matter_thread_route_add "${2:-}" "${3:-}" "${4:-}"
     else
       yarbo_matter_thread_route_add "${1:-}" "${2:-}" "${3:-}"
+    fi
+    exit $?
+  fi
+  if [[ "$cmd" == "router-solicit" ]]; then
+    yarbo_matter_install_wrapper
+    if [[ -n "${1:-}" && -d "${1}/scripts" && "${2:-}" == "router-solicit" ]]; then
+      yarbo_matter_router_solicit "${3:-}"
+    elif [[ "${1:-}" == "router-solicit" ]]; then
+      yarbo_matter_router_solicit "${2:-}"
+    else
+      yarbo_matter_router_solicit "${1:-}"
     fi
     exit $?
   fi

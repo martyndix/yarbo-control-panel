@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -41,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 97
+AGENT_VERSION = 98
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2336,6 +2337,11 @@ def thread_route_hint(prefer_iface: str | None = None) -> str | None:
             continue
         if dev and iface_is_virtual(dev):
             continue
+        # A local address such as the v97 PASE source is not a Thread route.
+        if " proto kernel " in f" {low} " and " via " not in low:
+            continue
+        if low.startswith("fd58:b000:1::"):
+            continue
         if prefer and dev and dev != prefer:
             # Keep as fallback only when nothing on the primary NIC.
             pass
@@ -2390,7 +2396,7 @@ def _read_dns_name(data: bytes, offset: int, depth: int = 0) -> tuple[str, int]:
 
 def parse_mdns_message(data: bytes) -> dict[str, Any]:
     """Pull _matterc names, AAAA addresses, and the SRV port out of one DNS message."""
-    empty: dict[str, Any] = {"matterc": False, "aaaa": [], "response": False, "port": 0}
+    empty: dict[str, Any] = {"matterc": False, "aaaa": [], "a": [], "response": False, "port": 0}
     if len(data) < 12:
         return empty
     flags, qd, an, ns, ar = struct.unpack("!HHHHH", data[2:12])
@@ -2398,6 +2404,7 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
     offset = 12
     names: list[str] = []
     aaaas: list[str] = []
+    ipv4s: list[str] = []
     port = 0
     other_srv: list[int] = []
 
@@ -2421,7 +2428,9 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
             rdata = data[offset : offset + rdlen]
             rdata_at = offset
             offset += rdlen
-            if rtype == 28 and len(rdata) == 16:
+            if rtype == 1 and len(rdata) == 4:
+                ipv4s.append(socket.inet_ntop(socket.AF_INET, rdata))
+            elif rtype == 28 and len(rdata) == 16:
                 aaaas.append(socket.inet_ntop(socket.AF_INET6, rdata))
             elif rtype == 33 and len(rdata) >= 6:
                 srv_port = struct.unpack("!HHH", rdata[:6])[2]
@@ -2445,6 +2454,7 @@ def parse_mdns_message(data: bytes) -> dict[str, Any]:
     return {
         "matterc": matterc,
         "aaaa": aaaas,
+        "a": ipv4s,
         "response": is_response,
         "port": port,
     }
@@ -2866,6 +2876,274 @@ def discover_border_router_via(iface: str) -> str:
     return chosen
 
 
+def ipv6_network_text(raw16: bytes, plen: int) -> str:
+    """Masked prefix from 16 prefix bytes and a bit length."""
+    if plen <= 0 or plen > 128:
+        plen = 64
+    bits = int.from_bytes(raw16[:16].ljust(16, b"\x00"), "big")
+    if plen < 128:
+        bits &= ((1 << 128) - 1) << (128 - plen)
+    addr = socket.inet_ntop(socket.AF_INET6, bits.to_bytes(16, "big"))
+    return f"{addr}/{plen}"
+
+
+def parse_ra_packet(data: bytes, src: str = "") -> dict[str, list[dict[str, Any]]]:
+    """Prefix and route options from one ICMPv6 router advertisement."""
+    found: dict[str, list[dict[str, Any]]] = {"rios": [], "pios": []}
+    if len(data) < 16 or data[0] != 134:
+        return found
+    via = str(src or "").split("%", 1)[0]
+    offset = 16
+    while offset + 2 <= len(data):
+        otype = data[offset]
+        olen = data[offset + 1] * 8
+        if olen < 8 or offset + olen > len(data):
+            break
+        opt = data[offset : offset + olen]
+        if otype == 3 and olen >= 32:
+            plen = int(opt[2])
+            flags = int(opt[3])
+            if 0 < plen <= 128:
+                found["pios"].append({
+                    "prefix": ipv6_network_text(opt[16:32], plen),
+                    "length": plen,
+                    "onlink": bool(flags & 0x80),
+                    "auto": bool(flags & 0x40),
+                })
+        elif otype == 24 and olen >= 8 and via.lower().startswith("fe80:"):
+            plen = int(opt[2])
+            lifetime = struct.unpack("!I", opt[4:8])[0]
+            if lifetime and 0 < plen <= 128:
+                nbytes = (plen + 7) // 8
+                prefix = ipv6_network_text(opt[8 : 8 + nbytes], plen)
+                if prefix.lower().startswith("fd") and not _is_tailscale_ula(prefix):
+                    found["rios"].append({"prefix": prefix, "via": via})
+        offset += olen
+    return found
+
+
+def icmpv6_rs_packet() -> bytes:
+    """Router Solicitation. The kernel fills the ICMPv6 checksum."""
+    return struct.pack("!BBHI", 133, 0, 0, 0)
+
+
+def solicit_routers_once(iface: str, wait_s: float = 2.5) -> dict[str, Any]:
+    """Send one RS on iface and collect RAs. Needs a raw ICMPv6 socket."""
+    result: dict[str, Any] = {"sent": False, "rios": [], "pios": [], "error": ""}
+    if not iface or not re.fullmatch(r"[A-Za-z0-9._:-]+", iface):
+        result["error"] = "bad iface"
+        return result
+    try:
+        scope = socket.if_nametoindex(iface)
+    except OSError as exc:
+        result["error"] = str(exc)
+        return result
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_RAW, socket.IPPROTO_ICMPV6)
+    except OSError as exc:
+        result["error"] = str(exc)
+        return result
+    try:
+        sock.settimeout(0.4)
+        try:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 255)
+        except OSError:
+            pass
+        if hasattr(socket, "SO_BINDTODEVICE"):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, iface.encode() + b"\x00")
+            except OSError:
+                pass
+        sock.sendto(icmpv6_rs_packet(), ("ff02::2", 0, 0, scope))
+        result["sent"] = True
+        deadline = time.time() + max(0.5, wait_s)
+        while time.time() < deadline and len(result["rios"]) < 4:
+            try:
+                data, addr = sock.recvfrom(1500)
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            if not data or data[0] != 134:
+                continue
+            parsed = parse_ra_packet(data, str(addr[0]))
+            result["rios"].extend(parsed["rios"])
+            result["pios"].extend(parsed["pios"])
+    except OSError as exc:
+        result["error"] = str(exc)
+    finally:
+        sock.close()
+    return result
+
+
+def _run_matter_setup_text(*args: str, timeout: float = 20.0) -> str:
+    refresh_matter_setup_wrapper()
+    for cmd in (
+        ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", str(ROOT), *args],
+        ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", *args],
+    ):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"matter: setup {' '.join(args)}: {exc}", flush=True)
+            continue
+        out = (result.stdout or "").strip()
+        if out:
+            return out
+    return ""
+
+
+def solicit_routers(iface: str) -> dict[str, Any]:
+    """Ask the LAN for a router advertisement, without requiring the rdisc6 package."""
+    global _last_ra_proof
+    text = ""
+    try:
+        text = run_rdisc6_capture(iface, wait_ms=1500) if iface else ""
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: rdisc6: {exc}", flush=True)
+    rows = parse_rdisc6_rios(text) if text else []
+    if rows:
+        _last_ra_proof = "rdisc6"
+        return {"sent": True, "rios": rows, "pios": [], "error": ""}
+    local = solicit_routers_once(iface)
+    if local.get("rios") or local.get("pios"):
+        _last_ra_proof = "ra"
+        return local
+    if not local.get("sent"):
+        err = str(local.get("error") or "")
+        if "no interface" in err.lower() or err == "bad iface":
+            _last_ra_proof = "no_rs"
+            print(f"matter: router solicitation not sent: {err}", flush=True)
+            return local
+        raw = _run_matter_setup_text("router-solicit", iface)
+        payload: dict[str, Any] = {}
+        if raw:
+            try:
+                loaded = json.loads(raw.splitlines()[-1])
+            except (json.JSONDecodeError, IndexError):
+                loaded = {}
+            if isinstance(loaded, dict):
+                payload = loaded
+        if payload.get("rios") or payload.get("pios"):
+            _last_ra_proof = "ra"
+            return payload
+        if payload.get("sent"):
+            _last_ra_proof = "no_ra"
+            return payload
+        _last_ra_proof = "no_rs"
+        if local.get("error"):
+            print(f"matter: router solicitation not sent: {local['error']}", flush=True)
+        return local
+    _last_ra_proof = "no_ra"
+    return local
+
+
+def clear_pair_source() -> None:
+    """Remove the v97 source address so it is not reported as the Thread route."""
+    for iface in list(_lan_ifaces() or []) + [primary_interface() or ""]:
+        if iface:
+            _ip_ok(["-6", "addr", "del", f"{PAIR_SRC}/128", "dev", iface])
+
+
+def addr_in_prefix(iface: str, prefix: str) -> str:
+    try:
+        net = ipaddress.IPv6Network(prefix, strict=False)
+    except (ValueError, ipaddress.AddressValueError):
+        return ""
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "-o", "addr", "show", "dev", iface],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    for match in re.finditer(r"\binet6\s+([0-9a-f:]+)", shown.stdout or "", re.I):
+        raw = match.group(1).split("/", 1)[0]
+        try:
+            addr = ipaddress.IPv6Address(raw)
+        except ipaddress.AddressValueError:
+            continue
+        if addr in net and not addr.is_link_local:
+            return str(addr)
+    return ""
+
+
+def ensure_pio_source(iface: str, pios: list[dict[str, Any]]) -> str:
+    """Use or add an address in a prefix the router said is on-link."""
+    for pio in pios:
+        if not pio.get("onlink"):
+            continue
+        prefix = str(pio.get("prefix") or "")
+        if not prefix or _is_tailscale_ula(prefix):
+            continue
+        existing = addr_in_prefix(iface, prefix)
+        if existing:
+            return existing
+        try:
+            net = ipaddress.IPv6Network(prefix, strict=False)
+        except (ValueError, ipaddress.AddressValueError):
+            continue
+        host = net.network_address + 0x5050
+        if host not in net:
+            continue
+        if _ip_ok(["-6", "addr", "replace", f"{host}/{net.prefixlen}", "dev", iface, "nodad"]):
+            return str(host)
+    return ""
+
+
+def matterc_alt_addrs() -> list[str]:
+    """Addresses from _matterc that are not the accessory fd host or its /64."""
+    host, prefix, _iface = matterc_fd_target()
+    net = None
+    if prefix:
+        try:
+            net = ipaddress.IPv6Network(prefix, strict=False)
+        except (ValueError, ipaddress.AddressValueError):
+            net = None
+    found: list[str] = []
+    for hit in _last_matterc_hits:
+        for key in ("a", "aaaa"):
+            for addr in hit.get(key) or []:
+                raw = str(addr).split("%", 1)[0]
+                if not raw or raw == host or _is_tailscale_ula(raw):
+                    continue
+                try:
+                    parsed = ipaddress.ip_address(raw)
+                except ValueError:
+                    continue
+                if net is not None and isinstance(parsed, ipaddress.IPv6Address) and parsed in net:
+                    continue
+                if raw not in found:
+                    found.append(raw)
+    return found
+
+
+def install_advertised_routes(iface: str, solicitation: dict[str, Any]) -> str:
+    """Install prefixes a router actually advertised. No host route to the mDNS fd address."""
+    rios = list(solicitation.get("rios") or [])
+    if not rios or not iface:
+        return ""
+    src = ensure_pio_source(iface, list(solicitation.get("pios") or []))
+    via_used = ""
+    installed: list[str] = []
+    for row in rios:
+        prefix = str(row.get("prefix") or "")
+        via = str(row.get("via") or "").split("%", 1)[0]
+        if not prefix or not via.lower().startswith("fe80:"):
+            continue
+        if add_ipv6_route(prefix, via, iface, src):
+            via_used = via
+            installed.append(f"{prefix} via {via}")
+    if not via_used:
+        return ""
+    global _last_ra_proof, _last_routes_installed
+    _last_ra_proof = "ra"
+    _last_routes_installed = installed
+    return f"ra:{via_used}"
+
+
 def install_pair_source(iface: str) -> bool:
     """Address the Pi can use as a PASE source. Link-local is not forwarded onto Thread."""
     if not iface:
@@ -2899,36 +3177,60 @@ def install_routable_agent_route(host: str, iface: str) -> str:
 
 
 def install_border_router_route() -> str:
-    """Route the accessory fd prefix via a border router.
+    """Install a prefix a router advertised, or leave the unanswered fd host alone.
 
-    The source is a routable address on the Pi. v96 used the Pi's link-local,
-    which a border router will not forward onto Thread.
+    v97 pinned that host via the accessory and sourced from fd58:b000:1::1.
+    The toast showed that source address, and PASE message 33 still never came.
     """
+    try:
+        clear_pair_source()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: clear pair source: {exc}", flush=True)
     try:
         drop_onlink_fd_host_routes()
     except Exception as exc:  # noqa: BLE001
         print(f"matter: drop on-link fd: {exc}", flush=True)
+    try:
+        drop_static_fd_prefixes()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: drop static fd: {exc}", flush=True)
     host, prefix, iface = matterc_fd_target()
     if host:
         release_local_v6(host)
-    if not prefix or not iface:
-        return ""
-    via = discover_border_router_via(iface)
-    if not via:
-        hint = thread_route_hint(iface) or ""
-        found = re.search(r"via\s+(fe80:[0-9a-f:]+)", hint, re.I)
-        if found and found.group(1).lower() not in accessory_link_locals():
-            via = found.group(1)
-        else:
-            return install_routable_agent_route(host, iface)
-    if install_pair_source(iface) and add_ipv6_route(prefix, via, iface, PAIR_SRC):
-        pass
-    elif not add_ipv6_route(prefix, via, iface):
-        return install_routable_agent_route(host, iface)
-    global _last_ra_proof, _last_routes_installed
-    _last_ra_proof = "br"
-    _last_routes_installed = [f"{prefix} via {via} src {PAIR_SRC}"]
-    return f"br:{via}"
+    if not iface:
+        iface = primary_interface() or ""
+    solicitation: dict[str, Any] = {"sent": False, "rios": [], "pios": []}
+    if iface:
+        try:
+            solicitation = solicit_routers(iface)
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: router solicitation: {exc}", flush=True)
+            solicitation = {"sent": False, "rios": [], "pios": []}
+    if iface:
+        advertised = install_advertised_routes(iface, solicitation)
+        if advertised:
+            return advertised
+    via = ""
+    if iface:
+        try:
+            via = discover_border_router_via(iface)
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: border-router lookup: {exc}", flush=True)
+            via = ""
+    if via and prefix and iface and add_ipv6_route(prefix, via, iface):
+        global _last_ra_proof, _last_routes_installed
+        _last_ra_proof = "br"
+        _last_routes_installed = [f"{prefix} via {via}"]
+        return f"br:{via}"
+    alts = matterc_alt_addrs()
+    if alts:
+        print(f"matter: accessory also advertised {alts[0]}; not routing the fd host", flush=True)
+        return f"alt:{alts[0]}"
+    if solicitation.get("sent"):
+        print("matter: no router advertisement; not pinning the fd host", flush=True)
+        return "nora"
+    print("matter: router solicitation was not sent; not pinning the fd host", flush=True)
+    return "nors"
 
 
 def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
@@ -2984,6 +3286,10 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
                         for item in parsed.get("aaaa") or []:
                             if item not in hit["aaaa"]:
                                 hit["aaaa"].append(item)
+                        hit.setdefault("a", [])
+                        for item in parsed.get("a") or []:
+                            if item not in hit["a"]:
+                                hit["a"].append(item)
                         if port and not hit.get("port"):
                             hit["port"] = port
                         merged = True
@@ -2994,6 +3300,7 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
                             "src": src,
                             "iface": nic,
                             "aaaa": list(parsed.get("aaaa") or []),
+                            "a": list(parsed.get("a") or []),
                             "port": port,
                             "matterc": True,
                         }
@@ -3032,6 +3339,7 @@ def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
                         "src": src,
                         "iface": primary_interface(),
                         "aaaa": aaaas,
+                        "a": [],
                         "port": port,
                         "matterc": True,
                     }
@@ -3074,6 +3382,8 @@ def discovery_diag() -> dict[str, Any]:
     fd_prefix = "none"
     via_addr = "none"
     mdns_port = 0
+    v4s: list[str] = []
+    advertised: list[str] = []
     for hit in _last_matterc_hits:
         src = str(hit.get("src") or "")
         if src.lower().startswith("fe80:"):
@@ -3084,13 +3394,19 @@ def discovery_diag() -> dict[str, Any]:
             hit_port = 0
         if hit_port and not mdns_port:
             mdns_port = hit_port
+        for addr in hit.get("a") or []:
+            raw = str(addr).split("%", 1)[0]
+            if raw and raw not in v4s:
+                v4s.append(raw)
         for addr in hit.get("aaaa") or []:
             raw = str(addr).split("%", 1)[0]
-            if raw.lower().startswith("fd") and not _is_tailscale_ula(raw):
-                fd_prefix = ipv6_prefix64(raw)
-                break
-        if fd_prefix != "none":
-            break
+            if raw and raw not in advertised:
+                advertised.append(raw)
+            if fd_prefix == "none" and raw.lower().startswith("fd") and not _is_tailscale_ula(raw):
+                try:
+                    fd_prefix = ipv6_prefix64(raw)
+                except OSError:
+                    pass
     return {
         "iface": iface,
         "container": name,
@@ -3112,6 +3428,8 @@ def discovery_diag() -> dict[str, Any]:
         "routes_sample": routes_sample,
         "fd": fd_prefix,
         "via": via_addr,
+        "v4": v4s[0] if v4s else "none",
+        "addrs": advertised[:3],
         "mdns5353": _mdns5353 or "unknown",
         "matterc": matterc,
         "matterc_seen": any(_matterc_line_is_real(str(x)) for x in matterc),
@@ -3137,6 +3455,7 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
     return (
         f"[diag v{row.get('agent')} matterc={mc} fd={row.get('fd') or 'none'} "
         f"via={row.get('via') or 'none'} ra={row.get('ra_proof') or 'none'} "
+        f"v4={row.get('v4') or 'none'} addrs={','.join(row.get('addrs') or []) or 'none'} "
         f"mdns5353={row.get('mdns5353') or 'unknown'} net={row.get('network_mode') or '?'} "
         f"thread_route={route} iface={row.get('iface')} br={row.get('br') or 'none'} "
         f"pase={row.get('pase_target') or 'mdns'} "
@@ -4162,8 +4481,8 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             _pase_target = border
         elif _last_matterc_hits:
             _pase_target = "nobr"
-        # CHIP uses the SRV port from the code. The fd prefix goes via the border
-        # agent from a routable source so the router can forward it onto Thread.
+        # CHIP uses the SRV port from the code. A router advertisement supplies
+        # the prefix. The unanswered fd host is not pinned to the accessory.
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
@@ -9408,6 +9727,9 @@ def restore_nodes_cli() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 2 and sys.argv[1] == "--solicit-ra":
+        print(json.dumps(solicit_routers_once(sys.argv[2])), flush=True)
+        raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] in ("--restore-nodes", "restore_nodes"):
         raise SystemExit(restore_nodes_cli())
     main()

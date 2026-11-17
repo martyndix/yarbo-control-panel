@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 97, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 98, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -88,6 +88,25 @@ Router lifetime           :         1800
         "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0 dev lo proto kernel metric 256\n"
     )
     assert agent.thread_route_hint("eth0") is None
+    agent.subprocess.run = lambda cmd, **kwargs: Result(
+        "fd58:b000:1::1 dev eth0 proto kernel metric 256\n"
+    )
+    assert agent.thread_route_hint("eth0") is None
+    agent.subprocess.run = lambda cmd, **kwargs: Result(
+        "fd58:b000:1::1 dev eth0 proto kernel metric 256\n"
+        "fdef:badd:6106::/64 via fe80::1111:2222:3333:4444 dev eth0 metric 100\n"
+    )
+    hinted = agent.thread_route_hint("eth0") or ""
+    assert "via fe80::1111:2222:3333:4444" in hinted, hinted
+    pio = socket.inet_pton(socket.AF_INET6, "fd11:2233:4455::")
+    rio_raw = socket.inet_pton(socket.AF_INET6, "fd99:1:2::")
+    pio_opt = bytes([3, 4, 64, 0xC0]) + struct.pack("!II", 86400, 14400) + (b"\x00" * 4) + pio
+    rio_opt = bytes([24, 2, 64, 0]) + struct.pack("!I", 1800) + rio_raw[:8]
+    ra = bytes([134, 0, 0, 0, 64, 0]) + struct.pack("!HII", 1800, 0, 0) + pio_opt + rio_opt
+    parsed_ra = agent.parse_ra_packet(ra, "fe80::abcd")
+    assert parsed_ra["pios"] and parsed_ra["pios"][0]["onlink"] and parsed_ra["pios"][0]["prefix"].startswith("fd11:2233:4455::")
+    assert parsed_ra["rios"] and parsed_ra["rios"][0]["prefix"].startswith("fd99:1:2::")
+    assert parsed_ra["rios"][0]["via"] == "fe80::abcd"
 
     calls.clear()
 
@@ -113,6 +132,7 @@ Router lifetime           :         1800
     assert agent.pick_border_router(list(accessory), accessory) == ""
     assert agent.pick_border_router(["2001:db8::1"], accessory) == "2001:db8::1"
     agent.discover_border_router_via = lambda iface: homepod
+    agent.solicit_routers = lambda iface: {"sent": True, "rios": [], "pios": []}
     label = agent.install_border_router_route()
     assert label == f"br:{homepod}", label
     flat = [" ".join(c) for c in calls]
@@ -126,14 +146,21 @@ Router lifetime           :         1800
     calls.clear()
     agent.discover_border_router_via = lambda iface: ""
     label = agent.install_border_router_route()
-    assert label == "ulasrc:fd58:b000:1::1", label
+    assert label == "nora", label
     flat = [" ".join(c) for c in calls]
-    assert any("addr" in c and "fd58:b000:1::1" in c and "dev eth0" in c for c in flat), flat
-    assert any(
-        "route" in c and "replace" in c and "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0/128" in c
-        and "via" in c and "fe80::2a70:4eff:fe68:98ea" in c and "src" in c and "fd58:b000:1::1" in c
-        for c in flat
-    ), flat
+    assert not any("fdef:badd:6106:0:dbfc:813f:f2ae:dcd0/128" in c and "replace" in c for c in flat), flat
+    assert not any("fd58:b000:1::1" in c and "addr" in c and "replace" in c for c in flat), flat
+    saved: list[list[str]] = []
+    agent.add_ipv6_route = lambda prefix, via, iface, src="": saved.append(
+        ["replace", prefix, "via", via, "src", src]
+    ) or True
+    agent.ensure_pio_source = lambda iface, pios: "fd11:2233:4455::5050"
+    advertised = agent.install_advertised_routes("eth0", {
+        "rios": [{"prefix": "fd99:1:2::/64", "via": "fe80::abcd"}],
+        "pios": [{"prefix": "fd11:2233:4455::/64", "onlink": True}],
+    })
+    assert advertised == "ra:fe80::abcd", advertised
+    assert saved and saved[0][1] == "fd99:1:2::/64" and "dbfc" not in " ".join(saved[0]), saved
     assert not any("lladdr" in c for c in flat), flat
     print("ok: thread route helpers")
     return 0
