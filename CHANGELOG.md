@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.340] - 2026-11-17
+
+### Fixed
+- **Apple Home Add device still timing out after the Thread route exists:** the panel could see `_matterc` on a high port while Matter Server's own mDNS never got the replies, because `avahi-daemon` holds UDP 5353. Add device now stops avahi, restarts Matter so CHIP can bind that port, then starts avahi again (AirPlay pauses only during pairing). Diag includes `mdns5353=`. Matter agent **v87**.
+
 ## [4.0.339] - 2026-11-17
 
 ### Fixed

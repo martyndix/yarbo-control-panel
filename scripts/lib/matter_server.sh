@@ -335,6 +335,33 @@ yarbo_matter_tailscale_unshield() {
   fi
 }
 
+# CHIP's mDNS binds UDP 5353. avahi-daemon on the host takes those replies,
+# so the panel can see _matterc while Matter Server discovery times out.
+yarbo_matter_mdns_quiesce() {
+  local was=0
+  if pgrep -x avahi-daemon >/dev/null 2>&1; then
+    was=1
+  fi
+  mkdir -p /run
+  if [[ "$was" == "1" ]]; then
+    echo 1 > /run/yarbo-matter-avahi-was-up 2>/dev/null || echo 1 > "${ROOT}/data/yarbo-matter-avahi-was-up"
+  fi
+  yarbo_root systemctl stop avahi-daemon >/dev/null 2>&1 || true
+  yarbo_root systemctl stop avahi-daemon.socket >/dev/null 2>&1 || true
+  yarbo_root killall avahi-daemon >/dev/null 2>&1 || true
+}
+
+yarbo_matter_mdns_restore() {
+  local flag="/run/yarbo-matter-avahi-was-up"
+  if [[ ! -f "$flag" && -f "${ROOT}/data/yarbo-matter-avahi-was-up" ]]; then
+    flag="${ROOT}/data/yarbo-matter-avahi-was-up"
+  fi
+  if [[ -f "$flag" ]]; then
+    yarbo_root systemctl start avahi-daemon >/dev/null 2>&1 || true
+    rm -f /run/yarbo-matter-avahi-was-up "${ROOT}/data/yarbo-matter-avahi-was-up" 2>/dev/null || true
+  fi
+}
+
 
 yarbo_matter_thread_route_add() {
   # Usage: thread-route-add <prefix> <via-fe80> <iface>
@@ -478,7 +505,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   if [[ -n "${1:-}" && -d "${1}/scripts" ]]; then
     ROOT="$1"
     cmd="${2:-}"
-  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" || "${1:-}" == "tailscale-shield" || "${1:-}" == "tailscale-unshield" || "${1:-}" == "thread-route-add" ]]; then
+  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" || "${1:-}" == "tailscale-shield" || "${1:-}" == "tailscale-unshield" || "${1:-}" == "thread-route-add" || "${1:-}" == "mdns-quiesce" || "${1:-}" == "mdns-restore" ]]; then
     cmd="$1"
     if [[ -n "${YARBO_ROOT:-}" && -d "${YARBO_ROOT}/scripts" ]]; then
       ROOT="$YARBO_ROOT"
@@ -512,6 +539,16 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       yarbo_matter_thread_route_add "${1:-}" "${2:-}" "${3:-}"
     fi
     exit $?
+  fi
+  if [[ "$cmd" == "mdns-quiesce" ]]; then
+    yarbo_matter_install_wrapper
+    yarbo_matter_mdns_quiesce
+    exit 0
+  fi
+  if [[ "$cmd" == "mdns-restore" ]]; then
+    yarbo_matter_install_wrapper
+    yarbo_matter_mdns_restore
+    exit 0
   fi
   if [[ "$cmd" == "tailscale-shield" ]]; then
     yarbo_matter_install_wrapper

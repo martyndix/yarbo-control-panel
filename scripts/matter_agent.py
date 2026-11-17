@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 86
+AGENT_VERSION = 87
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1798,6 +1798,8 @@ _thread_route_attempted = False
 _last_matterc_hits: list[dict[str, Any]] = []
 _last_ra_proof = ""
 _last_routes_installed: list[str] = []
+_mdns5353 = ""
+_mdns_quiesced = False
 
 
 def commission_job_is_running() -> bool:
@@ -2647,6 +2649,7 @@ def discovery_diag() -> dict[str, Any]:
         "routes_sample": routes_sample,
         "fd": fd_prefix,
         "via": via_addr,
+        "mdns5353": _mdns5353 or "unknown",
         "matterc": matterc,
         "matterc_seen": any(_matterc_line_is_real(str(x)) for x in matterc),
         "agent": AGENT_VERSION,
@@ -2668,6 +2671,7 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
     return (
         f"[diag v{row.get('agent')} matterc={mc} fd={row.get('fd') or 'none'} "
         f"via={row.get('via') or 'none'} ra={row.get('ra_proof') or 'none'} "
+        f"mdns5353={row.get('mdns5353') or 'unknown'} "
         f"thread_route={route} iface={row.get('iface')} ts={ts} shield={row.get('shield') or 'n/a'}]"
     )
 
@@ -3377,7 +3381,12 @@ def friendly_commission_error(err: str) -> str:
                 f"(ra={ra}). Put the HomePod on the same LAN as the Pi, then a fresh Turn On Pairing Mode code. "
             )
         elif matterc_seen:
-            base = "Pairing timed out after a real _matterc reply. Use a fresh Turn On Pairing Mode code. "
+            base = (
+                "Pairing timed out after the Thread route was installed. "
+                "Matter Server uses UDP 5353 itself; avahi was taking those replies. "
+                "This update stops avahi and restarts Matter before pairing (AirPlay pauses, then returns). "
+                "Use a fresh Turn On Pairing Mode code. "
+            )
         else:
             base = (
                 "Pairing timed out. No _matterc DNS reply (a bare fe80 +byte count is not an accessory). "
@@ -3385,7 +3394,10 @@ def friendly_commission_error(err: str) -> str:
             )
         if shield == "fail":
             base += "Tailscale shield failed; pause Tailscale and retry. "
-        if "diag iface=" not in low:
+        raw = " ".join(err.split())[:110]
+        if raw:
+            base += f"chip={raw} "
+        if "[diag " not in low:
             try:
                 return f"{base} {format_discovery_diag(diag)}"
             except Exception:  # noqa: BLE001
@@ -3491,16 +3503,109 @@ def _set_commission_job(**fields: Any) -> None:
         _commission_job.update(fields)
 
 
+def udp_listeners(port: int) -> list[str]:
+    """Process command lines bound to a UDP port (IPv4 or IPv6)."""
+    hexport = f"{port:04X}"
+    inodes: set[str] = set()
+    for path in ("/proc/net/udp", "/proc/net/udp6"):
+        try:
+            lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 10:
+                continue
+            local = parts[1].upper()
+            if not local.endswith(":" + hexport):
+                continue
+            inodes.add(parts[9])
+    if not inodes:
+        return []
+    owners: list[str] = []
+    proc = Path("/proc")
+    try:
+        pids = [p for p in proc.iterdir() if p.name.isdigit()]
+    except OSError:
+        return []
+    for pid_dir in pids:
+        fd_dir = pid_dir / "fd"
+        try:
+            fds = list(fd_dir.iterdir())
+        except OSError:
+            continue
+        matched = False
+        for fd in fds:
+            try:
+                target = os.readlink(fd)
+            except OSError:
+                continue
+            if target.startswith("socket:[") and target[8:-1] in inodes:
+                matched = True
+                break
+        if not matched:
+            continue
+        try:
+            cmd = (pid_dir / "cmdline").read_bytes().replace(b"\x00", b" ").decode(errors="replace").strip()
+        except OSError:
+            cmd = pid_dir.name
+        owners.append((cmd or pid_dir.name)[:80])
+    return owners
+
+
+def matter_runtime_container() -> str:
+    shared = shared_matter_container()
+    if shared:
+        return shared
+    return DOCKER_NAME
+
+
+def quiesce_host_mdns() -> bool:
+    """Stop avahi when it owns UDP 5353 so CHIP can receive _matterc."""
+    global _mdns5353, _mdns_quiesced
+    owners = udp_listeners(5353)
+    _mdns5353 = ",".join(owners)[:80] if owners else "free"
+    if not any("avahi" in item.lower() for item in owners):
+        print(f"matter: UDP 5353 owner: {_mdns5353}", flush=True)
+        return False
+    print(f"matter: stopping avahi (UDP 5353 was {_mdns5353}) so CHIP can discover", flush=True)
+    _run_matter_setup_cmd("mdns-quiesce", timeout=20)
+    _mdns_quiesced = True
+    # CHIP binds 5353 at process start. Restart Matter now that the port is free.
+    name = matter_runtime_container()
+    try:
+        reset_ws()
+        run_docker(["restart", name], timeout=40.0)
+        wait_matter_port(30.0)
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: restart after mdns quiesce: {exc}", flush=True)
+    return True
+
+
+def restore_host_mdns() -> None:
+    global _mdns_quiesced
+    if not _mdns_quiesced:
+        return
+    print("matter: restoring avahi after pairing", flush=True)
+    _run_matter_setup_cmd("mdns-restore", timeout=20)
+    _mdns_quiesced = False
+
+
 def run_commission_with_code(code: str) -> dict[str, Any]:
     """Run prepare + commission_with_code (+ retry). Used by sync and async paths."""
-    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed
+    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _mdns_quiesced
     shielded = False
     _thread_route_attempted = False
     _last_matterc_hits = []
     _last_ra_proof = ""
     _last_routes_installed = []
+    _mdns_quiesced = False
     try:
         shielded = begin_tailscale_matter_shield()
+        try:
+            quiesce_host_mdns()
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: mdns quiesce: {exc}", flush=True)
         ready_err = prepare_for_commission()
         if ready_err:
             return {"ok": False, "error": friendly_commission_error(ready_err)}
@@ -3551,7 +3656,7 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             cleanup_failed_commission_node(detail)
             diag = discovery_diag()
             msg = friendly_commission_error(detail)
-            if "diag iface=" not in msg.lower():
+            if "[diag " not in msg.lower():
                 msg = f"{msg} {format_discovery_diag(diag)}"
             return {
                 "ok": False,
@@ -3567,6 +3672,10 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             "message": "Device added.",
         }
     finally:
+        try:
+            restore_host_mdns()
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: mdns restore: {exc}", flush=True)
         if shielded:
             while _tailscale_shield_depth > 0:
                 end_tailscale_matter_shield()
