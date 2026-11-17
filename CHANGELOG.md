@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.348] - 2026-11-17
+
+### Fixed
+
+- Add device no longer pins the accessory `fd…` address to the MAC that answered mDNS. That on-link route (v94) still got no PASE message 33. The host route and neighbor are removed, and the Thread prefix is installed via a border router (HomePod or Apple TV) that is not the accessory. Matter agent **v95**.
+
 ## [4.0.347] - 2026-11-17
 
 ### Fixed

@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 94, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 95, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -40,7 +40,7 @@ Router lifetime           :         1800
     assert parsed["matterc"] is True, parsed
     assert agent.ipv6_prefix64(parsed["aaaa"][0]) == "fd8d:fc03:c02b::/64", parsed
     assert agent.ipv6_host128(parsed["aaaa"][0]) == "fd8d:fc03:c02b::1/128"
-    install = SCRIPT.read_text().split("def install_routes_from_matterc_hits", 1)[1].split("def browse_matterc_mdns", 1)[0]
+    install = SCRIPT.read_text().split("def install_routes_from_matterc_hits", 1)[1].split("\ndef ", 1)[0]
     assert "add_ipv6_route" not in install
     assert "return []" in install
     assert "drop_static_fd_prefixes" in SCRIPT.read_text()
@@ -88,8 +88,12 @@ Router lifetime           :         1800
 
     calls.clear()
 
+    shown = {"text": "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0 dev eth0 metric 100\n"}
+
     def fake_install(cmd, **kwargs):
         calls.append(list(cmd))
+        if "show" in cmd:
+            return Result(shown["text"])
         return Result()
 
     agent.subprocess.run = fake_install
@@ -100,12 +104,23 @@ Router lifetime           :         1800
         "port": 5540,
         "matterc": True,
     }]
-    label = agent.install_onlink_accessory_route()
-    assert label == "onlink:28:70:4e:68:98:ea", label
+    accessory = {"fe80::2a70:4eff:fe68:98ea"}
+    homepod = "fe80::1111:2222:3333:4444"
+    assert agent.pick_border_router([*accessory, homepod], accessory) == homepod
+    assert agent.pick_border_router(list(accessory), accessory) == ""
+    agent.discover_border_router_via = lambda iface: homepod
+    label = agent.install_border_router_route()
+    assert label == f"br:{homepod}", label
     flat = [" ".join(c) for c in calls]
-    assert any("neigh" in c and "28:70:4e:68:98:ea" in c and "eth0" in c for c in flat), flat
-    assert any("route" in c and "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0/128" in c and "dev eth0" in c and " via " not in c for c in flat), flat
-    assert any("addr" in c and "del" in c and "dev lo" in c for c in flat), flat
+    assert any("route" in c and "del" in c and "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0" in c and "dev eth0" in c for c in flat), flat
+    assert any("neigh" in c and "del" in c and "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0" in c for c in flat), flat
+    assert any(
+        "route" in c and "replace" in c and "fdef:badd:6106::/64" in c and "via" in c and homepod in c
+        for c in flat
+    ), flat
+    assert not any("lladdr" in c and "28:70:4e:68:98:ea" in c for c in flat), flat
+    agent.discover_border_router_via = lambda iface: ""
+    assert agent.install_border_router_route() == ""
     print("ok: thread route helpers")
     return 0
 
