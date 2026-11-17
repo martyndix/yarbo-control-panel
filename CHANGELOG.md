@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.358] - 2026-11-17
+
+### Fixed
+
+- Add device sends the Timmerflotte through the HomePod that advertised it (`fe80::18e3:…`) instead of the other router advertisement (`fe80::1007:…`, `pref medium`). That other hop was dropping the Matter server connection during pairing. The kernel route for the sensor prefix is removed first and replaced at metric 50, with no Thread address as the source. A status check can no longer hang up the pairing connection. Matter agent **v105**.
+
 ## [4.0.357] - 2026-11-17
 
 ### Fixed

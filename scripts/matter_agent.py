@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 104
+AGENT_VERSION = 105
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2179,7 +2179,31 @@ def discover_apple_thread_rios(iface: str | None = None) -> list[dict[str, str]]
     return rows
 
 
-def add_ipv6_route(prefix: str, via: str, iface: str, src: str = "") -> bool:
+def delete_ipv6_prefix(prefix: str) -> None:
+    """Remove every route for prefix, including a kernel router advertisement."""
+    prefix = (prefix or "").strip()
+    if not prefix or _is_tailscale_ula(prefix):
+        return
+    for _ in range(4):
+        removed = False
+        for cmd in (
+            ["sudo", "-n", "ip", "-6", "route", "del", prefix],
+            ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "del", prefix],
+            ["ip", "-6", "route", "del", prefix],
+        ):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if result.returncode == 0:
+                removed = True
+                print(f"matter: removed route {prefix}", flush=True)
+                break
+        if not removed:
+            return
+
+
+def add_ipv6_route(prefix: str, via: str, iface: str, src: str = "", metric: int = 100) -> bool:
     """Install Thread /64 via Apple BR link-local (same workaround as HA on broken RIO kernels)."""
     prefix = (prefix or "").strip()
     via = (via or "").strip().split("%")[0]
@@ -2191,7 +2215,7 @@ def add_ipv6_route(prefix: str, via: str, iface: str, src: str = "") -> bool:
         return False
     if _is_tailscale_ula(prefix) or (src and _is_tailscale_ula(src)):
         return False
-    tail = ["src", src, "metric", "100"] if src else ["metric", "100"]
+    tail = ["src", src, "metric", str(metric)] if src else ["metric", str(metric)]
     for cmd in (
         ["sudo", "-n", "ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, *tail],
         ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, *tail],
@@ -2370,13 +2394,15 @@ def thread_route_hint(prefer_iface: str | None = None) -> str | None:
     except Exception:  # noqa: BLE001
         accessory_prefix = ""
 
-    def rank(line: str) -> tuple[int, int]:
+    def rank(line: str) -> tuple[int, int, int]:
         low = line.lower()
         dest = low.split()[0]
         covers = 0
         if accessory_prefix and (dest == accessory_prefix.lower() or dest.startswith(accessory_prefix.split("/")[0].lower())):
             covers = 1
-        return (covers, 1 if " via " in low else 0)
+        # A static route we installed must win over the kernel RA via the other router.
+        static = 0 if " proto ra " in f" {low} " else 1
+        return (covers, static, 1 if " via " in low else 0)
 
     candidates.sort(key=rank, reverse=True)
     return candidates[0]
@@ -2520,7 +2546,7 @@ def drop_static_fd_prefixes() -> int:
         dest_low = dest.lower()
         if not dest_low.startswith("fd") or _is_tailscale_ula(line):
             continue
-        if "metric 100" not in low:
+        if "metric 100" not in low and "metric 50" not in low:
             continue
         # /64, explicit /128, or a host route shown without a prefix length.
         if "/" in dest and not dest.endswith("/64") and not dest.endswith("/128"):
@@ -3397,16 +3423,25 @@ def accessory_omr_address() -> str:
 
 
 def matterc_router_via() -> str:
-    """Link-local of the border router that answered _matterc, not the accessory.
+    """Link-local of the border router that sent this accessory's address.
 
-    An EUI-64 fe80 (it contains ff:fe) is the sensor itself. A HomePod proxy
-    uses a random link-local and is the right next hop.
+    An EUI-64 fe80 (it contains ff:fe) is the sensor itself. When two routers
+    answer, use the one whose reply contained the accessory, and the latest
+    such reply. The other router's advertisement (fe80::1007:…) was black-holing
+    the Timmerflotte.
     """
+    host, _prefix, _iface = matterc_fd_target()
+    found = ""
+    fallback = ""
     for hit in _last_matterc_hits:
         src = str(hit.get("src") or "").split("%", 1)[0]
-        if src.lower().startswith("fe80:") and "ff:fe" not in src.lower():
-            return src
-    return ""
+        if not src.lower().startswith("fe80:") or "ff:fe" in src.lower():
+            continue
+        fallback = src
+        addrs = [str(a).split("%", 1)[0].lower() for a in (hit.get("aaaa") or [])]
+        if host and host.lower() in addrs:
+            found = src
+    return found or fallback
 
 
 def try_commission_omr(code: str) -> dict[str, Any] | None:
@@ -3489,7 +3524,9 @@ def install_border_router_route() -> str:
             # router advertisement. Do not source the route from the Thread prefix.
             hop = matterc_router_via() or via
             if prefix and hop.lower().startswith("fe80:"):
-                if add_ipv6_route(prefix, hop, iface):
+                # Drop the kernel RA via the other router. Metric 50 beats it if it returns.
+                delete_ipv6_prefix(prefix)
+                if add_ipv6_route(prefix, hop, iface, metric=50):
                     _last_routes_installed.append(f"{prefix} via {hop}")
                     print(f"matter: accessory prefix {prefix} via {hop}", flush=True)
             if hop.lower() != via.lower():
@@ -3695,6 +3732,9 @@ def discovery_diag() -> dict[str, Any]:
                     fd_prefix = ipv6_prefix64(raw)
                 except OSError:
                     pass
+    chosen = matterc_router_via()
+    if chosen:
+        via_addr = chosen
     return {
         "iface": iface,
         "container": name,
@@ -5841,19 +5881,26 @@ def matter_rpc(
                 last_err = "Matter server timed out"
                 with _pending_lock:
                     _pending.pop(message_id, None)
-                reset_ws(channel)
+                    busy = any(w.get("channel") == channel for w in _pending.values())
+                if not busy:
+                    reset_ws(channel)
                 continue
             with _pending_lock:
                 _pending.pop(message_id, None)
             if waiter.get("error"):
                 last_err = str(waiter["error"])
-                if attempt == 0:
+                with _pending_lock:
+                    busy = any(w.get("channel") == channel for w in _pending.values())
+                if attempt == 0 and not busy:
                     reset_ws(channel)
                 continue
             msg = waiter.get("msg")
             if not isinstance(msg, dict):
                 last_err = "Matter server unavailable"
-                reset_ws(channel)
+                with _pending_lock:
+                    busy = any(w.get("channel") == channel for w in _pending.values())
+                if not busy:
+                    reset_ws(channel)
                 continue
             if "error_code" in msg or "error" in msg:
                 return {"ok": False, "error": format_matter_rpc_error(msg)}
@@ -5862,7 +5909,9 @@ def matter_rpc(
             last_err = exc
             with _pending_lock:
                 _pending.pop(message_id, None)
-            reset_ws(channel)
+                busy = any(w.get("channel") == channel for w in _pending.values())
+            if not busy:
+                reset_ws(channel)
     return {"ok": False, "error": str(last_err) if last_err else "Matter server unavailable"}
 
 

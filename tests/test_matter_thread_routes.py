@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 104, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 105, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -188,6 +188,50 @@ Router lifetime           :         1800
         "fdef:badd:6106::/64" in c and "via" in c and "fe80::18e3:8d10:e524:10a9" in c and " src " not in c
         for c in flat
     ), flat
+    calls.clear()
+    other = "fe80::1007:c231:5072:1418"
+    homepod_ad = "fe80::18e3:8d10:e524:10a9"
+    agent.solicit_routers = lambda iface: {
+        "sent": True,
+        "rios": [{"prefix": "fd10:d687:e7bf:4ba8::/64", "via": other}],
+        "pios": [],
+    }
+    agent._last_matterc_hits = [
+        {
+            "matterc": True,
+            "src": other,
+            "aaaa": ["fe80::1007:c231:5072:1418"],
+            "iface": "eth0",
+            "port": 5540,
+        },
+        {
+            "matterc": True,
+            "src": homepod_ad,
+            "aaaa": ["fdef:badd:6106:0:89b5:1f3d:906e:51bc"],
+            "iface": "eth0",
+            "port": 5540,
+        },
+    ]
+    assert agent.matterc_router_via() == homepod_ad
+    label = agent.install_border_router_route()
+    assert label == f"ra:{homepod_ad}", label
+    flat = [" ".join(c) for c in calls]
+    assert any(
+        "del" in c and "fdef:badd:6106::/64" in c and "via" not in c
+        for c in flat
+    ), flat
+    assert any(
+        "replace" in c and "fdef:badd:6106::/64" in c and homepod_ad in c
+        and "metric 50" in c and " src " not in c and other not in c
+        for c in flat
+    ), flat
+    agent.subprocess.run = lambda cmd, **kwargs: Result(
+        "fdef:badd:6106::/64 via fe80::1007:c231:5072:1418 dev eth0 proto ra metric 100 pref medium\n"
+        "fdef:badd:6106::/64 via fe80::18e3:8d10:e524:10a9 dev eth0 proto static metric 50\n"
+    )
+    hinted = agent.thread_route_hint("eth0") or ""
+    assert "fe80::18e3:8d10:e524:10a9" in hinted and "fe80::1007" not in hinted, hinted
+    agent.subprocess.run = fake_install
     saved: list[list[str]] = []
     agent.add_ipv6_route = lambda prefix, via, iface, src="": saved.append(
         ["replace", prefix, "via", via, "src", src]
