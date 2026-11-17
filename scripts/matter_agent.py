@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 94
+AGENT_VERSION = 95
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1924,11 +1924,7 @@ def wait_for_thread_route(seconds: float = 8.0) -> str | None:
         # Drop again in case a host route was still present, then do not add one.
         drop_static_fd_prefixes()
         if _last_matterc_hits:
-            _last_ra_proof = "onlink"
-            print(
-                "matter: accessory is on-link; not routing its fd address (PASE uses link-local)",
-                flush=True,
-            )
+            print("matter: accessory answered _matterc; looking for a Thread border router", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"matter: matterc route install: {exc}", flush=True)
     hint = thread_route_hint(prefer)
@@ -2620,47 +2616,218 @@ def release_local_v6(addr: str) -> None:
 
 
 def install_onlink_accessory_route() -> str:
-    """Send the accessory fd address out the LAN NIC to the MAC that answered mDNS.
+    """Retired. v94 delivered PASE to the accessory MAC and message 33 still never came."""
+    return ""
 
-    v93 parked that address on lo and relayed to link-local port 5540. The SRV
-    port was already 5540, and the accessory never sent PASE message 33. A local
-    route also swallows any reply sourced from that address. An on-link /128 with
-    a permanent neighbor delivers the handshake on eth0 instead.
-    """
-    hinted = (thread_route_hint() or "").lower()
-    if " proto ra " in f" {hinted} " and " dev lo " not in hinted:
-        return ""
+
+def pick_border_router(candidates: list[str], accessory: set[str]) -> str:
+    """Link-local of a Thread border router that is not the accessory itself."""
+    blocked = {item.split("%", 1)[0].lower() for item in accessory if item}
+    for raw in candidates:
+        src = str(raw or "").split("%", 1)[0]
+        low = src.lower()
+        if low.startswith("fe80:") and low not in blocked:
+            return src
+    return ""
+
+
+def local_fe80s() -> set[str]:
+    """Link-locals on this Pi, so a border-router route is not via ourselves."""
+    found: set[str] = set()
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "-o", "addr", "show", "scope", "link"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return found
+    for match in re.finditer(r"\b(fe80:[0-9a-f:]+)", shown.stdout or "", re.I):
+        found.add(match.group(1).split("/", 1)[0].lower())
+    return found
+
+
+def accessory_link_locals() -> set[str]:
+    found: set[str] = set()
+    for hit in _last_matterc_hits:
+        src = str(hit.get("src") or "").split("%", 1)[0].lower()
+        if src.startswith("fe80:"):
+            found.add(src)
+    return found
+
+
+def matterc_fd_target() -> tuple[str, str, str]:
+    """Return (fd host, /64, iface) from the latest _matterc hit."""
     for hit in _last_matterc_hits:
         if not hit.get("matterc"):
             continue
-        src = str(hit.get("src") or "").split("%", 1)[0]
         iface = str(hit.get("iface") or primary_interface() or "")
-        if not src.lower().startswith("fe80:") or not iface:
-            continue
-        mac = eui64_to_mac(src)
-        if not mac:
-            continue
-        fd_addr = ""
         for addr in hit.get("aaaa") or []:
             raw = str(addr).split("%", 1)[0]
             if raw.lower().startswith("fd") and not _is_tailscale_ula(raw):
-                fd_addr = raw
-                break
-        if not fd_addr:
+                try:
+                    return raw, ipv6_prefix64(raw), iface
+                except OSError:
+                    continue
+    return "", "", ""
+
+
+def drop_onlink_fd_host_routes() -> int:
+    """Remove v94-style host routes that pin the accessory fd address to its own MAC.
+
+    Those routes are more specific than a border-router /64, and the accessory
+    never answered PASE on them.
+    """
+    removed = 0
+    try:
+        shown = subprocess.run(["ip", "-6", "route", "show"], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    for raw in (shown.stdout or "").splitlines():
+        line = raw.strip()
+        low = line.lower()
+        if not line or " via " in low or " proto ra " in f" {low} " or " dev lo" in low:
             continue
-        release_local_v6(fd_addr)
-        neigh_ok = _ip_ok(["-6", "neigh", "replace", fd_addr, "lladdr", mac, "dev", iface, "nud", "permanent"])
-        route_ok = _ip_ok(["-6", "route", "replace", f"{fd_addr}/128", "dev", iface, "metric", "100"])
-        if not route_ok:
-            print(f"matter: on-link route failed for {fd_addr} dev {iface}", flush=True)
+        dest = line.split()[0]
+        if not dest.lower().startswith("fd") or _is_tailscale_ula(dest):
             continue
-        label = f"onlink:{mac}"
-        print(
-            f"matter: on-link {fd_addr}/128 dev {iface} lladdr {mac} neigh={neigh_ok}",
-            flush=True,
-        )
-        return label
-    return ""
+        if "/" in dest and not dest.endswith("/128"):
+            continue
+        host = dest.split("/", 1)[0]
+        iface = ""
+        parts = low.split()
+        if "dev" in parts:
+            try:
+                iface = parts[parts.index("dev") + 1]
+            except (ValueError, IndexError):
+                iface = ""
+        deleted = _ip_ok(["-6", "route", "del", dest, "dev", iface]) if iface else _ip_ok(["-6", "route", "del", dest])
+        if not deleted:
+            continue
+        removed += 1
+        if iface:
+            _ip_ok(["-6", "neigh", "del", host, "dev", iface])
+        print(f"matter: removed on-link fd host route {dest}", flush=True)
+    return removed
+
+
+def _mdns_query(service: str) -> bytes:
+    qname = f"{service}._udp.local"
+    labels = b"".join(bytes([len(part)]) + part.encode("ascii") for part in qname.split(".")) + b"\x00"
+    return struct.pack("!HHHHHH", 0x1200, 0, 1, 0, 0, 0) + labels + struct.pack("!HH", 12, 1)
+
+
+def browse_mdns_sources(label: str, seconds: float = 2.0) -> list[str]:
+    """Link-locals that answer an mDNS service, in arrival order."""
+    needle = label.encode("ascii")
+    packet = _mdns_query(label)
+    found: list[str] = []
+    ifaces = _lan_ifaces() or [""]
+    per = max(0.6, seconds / max(1, len(ifaces)))
+    for iface in ifaces:
+        scope = 0
+        if iface:
+            try:
+                scope = socket.if_nametoindex(iface)
+            except OSError:
+                scope = 0
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 1)
+            if scope:
+                try:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, scope)
+                except OSError:
+                    pass
+            sock.settimeout(0.35)
+            try:
+                sock.bind(("::", 0, 0, scope))
+            except OSError:
+                sock.bind(("::", 0))
+            try:
+                sock.sendto(packet, ("ff02::fb", 5353, 0, scope))
+            except OSError as exc:
+                print(f"matter: mdns send {label} {iface or '?'}: {exc}", flush=True)
+                continue
+            deadline = time.time() + per
+            while time.time() < deadline and len(found) < 6:
+                try:
+                    data, addr = sock.recvfrom(2048)
+                except TimeoutError:
+                    continue
+                except OSError:
+                    break
+                if needle not in data:
+                    continue
+                src = str(addr[0]).split("%", 1)[0]
+                if src.lower().startswith("fe80:") and src not in found:
+                    found.append(src)
+        except OSError as exc:
+            print(f"matter: mdns browse {label} {iface or '?'}: {exc}", flush=True)
+        finally:
+            if sock is not None:
+                sock.close()
+        if found:
+            break
+    return found
+
+
+def discover_border_router_via(iface: str) -> str:
+    """HomePod/Apple TV (or other BR) link-local that can forward the Thread prefix."""
+    accessory = accessory_link_locals()
+    candidates: list[str] = []
+    try:
+        candidates.extend(browse_mdns_sources("_meshcop", 2.0))
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: meshcop browse: {exc}", flush=True)
+    try:
+        text = run_rdisc6_capture(iface, wait_ms=2000) if iface else ""
+        for row in parse_rdisc6_rios(text):
+            prefix = str(row.get("prefix") or "")
+            via = str(row.get("via") or "").split("%", 1)[0]
+            if prefix.lower().startswith("fd") and not _is_tailscale_ula(prefix) and via:
+                candidates.append(via)
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: border-router rdisc6: {exc}", flush=True)
+    chosen = pick_border_router(candidates, accessory | local_fe80s())
+    if chosen:
+        print(f"matter: Thread border router {chosen}", flush=True)
+    else:
+        print("matter: no Thread border router other than the accessory", flush=True)
+    return chosen
+
+
+def install_border_router_route() -> str:
+    """Route the accessory fd prefix via a border router, not the accessory MAC.
+
+    v94 installed fdef:…/128 dev eth0 to 28:70:4e:68:98:ea. CHIP sent PASE there
+    and the accessory still did not answer message 33. That address is on the
+    Thread mesh. A HomePod or Apple TV has to forward it.
+    """
+    try:
+        drop_onlink_fd_host_routes()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: drop on-link fd: {exc}", flush=True)
+    host, prefix, iface = matterc_fd_target()
+    if host:
+        release_local_v6(host)
+    if not prefix or not iface:
+        return ""
+    via = discover_border_router_via(iface)
+    if not via:
+        hint = thread_route_hint(iface) or ""
+        found = re.search(r"via\s+(fe80:[0-9a-f:]+)", hint, re.I)
+        if found and found.group(1).lower() not in accessory_link_locals():
+            return f"br:{found.group(1)}"
+        return ""
+    if not add_ipv6_route(prefix, via, iface):
+        return ""
+    global _last_ra_proof, _last_routes_installed
+    _last_ra_proof = "br"
+    _last_routes_installed = [f"{prefix} via {via}"]
+    return f"br:{via}"
 
 
 def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
@@ -3592,7 +3759,14 @@ def friendly_commission_error(err: str) -> str:
         )
         fd = str((diag or {}).get("fd") or "none")
         ra = str((diag or {}).get("ra_proof") or "none")
-        if matterc_seen and "matter server timed out" in low:
+        pase = str((diag or {}).get("pase_target") or "")
+        if matterc_seen and "matter server timed out" in low and pase == "nobr":
+            base = (
+                "The accessory answered on the LAN, but no other Thread border router did, "
+                "so its fd address has nowhere to go. Use a fresh Turn On Pairing Mode code "
+                "with a HomePod or Apple TV online on this LAN. "
+            )
+        elif matterc_seen and "matter server timed out" in low:
             base = (
                 "The accessory answered on the LAN, but it sent no pairing reply "
                 "(PASE message 33). Use a fresh Turn On Pairing Mode code. "
@@ -3876,14 +4050,16 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             print(f"matter: clear unreachable fd: {exc}", flush=True)
         try:
-            onlink = install_onlink_accessory_route()
+            border = install_border_router_route()
         except Exception as exc:  # noqa: BLE001
-            onlink = ""
-            print(f"matter: on-link accessory route: {exc}", flush=True)
-        if onlink:
-            _pase_target = onlink
-        # Discover with the code so CHIP uses the SRV port. The fd address is on-link
-        # to the accessory MAC, so the handshake is not looped through lo or the gateway.
+            border = ""
+            print(f"matter: border-router route: {exc}", flush=True)
+        if border:
+            _pase_target = border
+        elif _last_matterc_hits:
+            _pase_target = "nobr"
+        # Discover with the code so CHIP uses the SRV port. The fd prefix goes via
+        # a border router; the accessory MAC and its own link-local do not answer PASE.
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
