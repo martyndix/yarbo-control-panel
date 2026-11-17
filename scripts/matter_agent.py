@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 102
+AGENT_VERSION = 103
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3372,7 +3372,15 @@ def accessory_omr_address() -> str:
     if mesh.is_link_local or mesh.is_unspecified:
         return ""
     iid = mesh.packed[8:]
-    for raw in _last_rio_prefixes:
+    prefixes = list(_last_rio_prefixes)
+    iface = _iface or primary_interface() or ""
+    if iface:
+        prefixes.extend(interface_fd_prefixes(iface, mesh))
+    seen: set[str] = set()
+    for raw in prefixes:
+        if raw in seen:
+            continue
+        seen.add(raw)
         try:
             net = ipaddress.IPv6Network(raw, strict=False)
         except (ValueError, ipaddress.AddressValueError):
@@ -3388,11 +3396,41 @@ def accessory_omr_address() -> str:
     return ""
 
 
+def interface_fd_prefixes(iface: str, mesh: ipaddress.IPv6Address) -> list[str]:
+    """fd prefixes the Pi itself has, such as the HomePod SLAAC address."""
+    found: list[str] = []
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "-o", "addr", "show", "dev", iface],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return found
+    for match in re.finditer(r"\binet6\s+([0-9a-f:]+)", shown.stdout or "", re.I):
+        raw = match.group(1).split("/", 1)[0]
+        if not raw.lower().startswith("fd") or _is_tailscale_ula(raw):
+            continue
+        try:
+            addr = ipaddress.IPv6Address(raw)
+            prefix = ipv6_prefix64(raw)
+            net = ipaddress.IPv6Network(prefix, strict=False)
+        except (ValueError, OSError):
+            continue
+        if addr == mesh or mesh in net or prefix in found:
+            continue
+        found.append(prefix)
+    return found
+
+
 def try_commission_omr(code: str) -> dict[str, Any] | None:
     """Commission the address on the HomePod's prefix. Never a link-local."""
     global _last_omr
     omr = accessory_omr_address()
     pin = manual_pairing_pin(code)
+    if omr:
+        _last_omr = omr
     if not omr or not pin:
         return None
     try:
@@ -3401,7 +3439,6 @@ def try_commission_omr(code: str) -> dict[str, Any] | None:
         return None
     if parsed.is_link_local:
         return None
-    _last_omr = omr
     print(f"matter: commissioning {omr} on the HomePod prefix", flush=True)
     return matter_rpc(
         "commission_on_network",
@@ -3471,8 +3508,10 @@ def install_border_router_route() -> str:
                 and via.lower().startswith("fe80:")
                 and not rio_covers(prefix, list(solicitation.get("rios") or []))
             ):
-                src = ensure_pio_source(iface, list(solicitation.get("pios") or []))
-                if add_ipv6_route(prefix, via, iface, src):
+                # No preferred source. Pinning the HomePod prefix as src made
+                # the mesh-local route the only one CHIP could use, and mDNS
+                # advertisement then failed on that socket.
+                if add_ipv6_route(prefix, via, iface):
                     _last_routes_installed.append(f"{prefix} via {via}")
                     print(f"matter: accessory prefix {prefix} via {via}", flush=True)
             return advertised
@@ -4370,6 +4409,16 @@ def friendly_commission_error(err: str) -> str:
             "then try Add device again."
         )
     if "unavailable" in low or "not ready" in low:
+        seen = False
+        try:
+            seen = bool(discovery_diag().get("matterc_seen"))
+        except Exception:  # noqa: BLE001
+            seen = False
+        if seen:
+            return (
+                "The Matter server dropped the connection during pairing. "
+                "Tap Add device again with a fresh Turn On Pairing Mode code."
+            )
         return (
             "Could not talk to the Matter server just then (it still looks online). "
             "Wait a few seconds and tap Add device again with a fresh Apple Home pairing code."
@@ -4677,13 +4726,13 @@ def matter_server_log_hint() -> str:
         low = line.lower()
         if any(item in low for item in skip):
             continue
-        if "discovered on mdns" in low:
+        if "discovered on mdns" in low or "wifi statistic" in low:
             continue
         if any(key in low for key in keys):
             picked.append(line.strip())
     if not picked:
         return ""
-    return " | ".join(picked[-2:])[:220]
+    return " | ".join(picked[-2:])[:360]
 
 
 def quiesce_host_mdns() -> bool:
@@ -4763,18 +4812,26 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
-        rpc = matter_rpc(
-            "commission_with_code",
-            {"code": code, "network_only": True},
-            timeout=180.0 if long_wait else 120.0,
-            retries=1,
-        )
-        err = str(rpc.get("error") or "")
-        if not rpc.get("ok"):
-            omr_rpc = try_commission_omr(code)
-            if omr_rpc is not None:
+        # The mesh-local address is what mDNS offered. Reach the same device on
+        # the HomePod prefix before the long discovery call, which drops the
+        # Matter server connection when that address does not answer.
+        omr_rpc = try_commission_omr(code)
+        if omr_rpc and omr_rpc.get("ok"):
+            rpc = omr_rpc
+        else:
+            rpc = matter_rpc(
+                "commission_with_code",
+                {"code": code, "network_only": True},
+                timeout=180.0 if long_wait else 120.0,
+                retries=1,
+            )
+            if (
+                omr_rpc
+                and not rpc.get("ok")
+                and "unavailable" in str(rpc.get("error") or "").lower()
+            ):
                 rpc = omr_rpc
-                err = str(rpc.get("error") or "")
+        err = str(rpc.get("error") or "")
         server_gave_up = "matter server timed out" in err.lower()
         if not rpc.get("ok") and not server_gave_up and commission_error_looks_retryable(err):
             print(f"matter: commission retry after {err!r}", flush=True)

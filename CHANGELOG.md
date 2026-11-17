@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.356] - 2026-11-17
+
+### Fixed
+
+- Add device pairs a Thread sensor on the HomePod’s prefix before the mesh-local attempt. That first attempt was dropping the Matter server connection (`Matter server unavailable`) because the Timmerflotte’s `fdef:` address is not forwarded. The mesh-local route no longer forces the HomePod prefix as its source. Matter agent **v103**.
+
 ## [4.0.355] - 2026-11-17
 
 ### Fixed
