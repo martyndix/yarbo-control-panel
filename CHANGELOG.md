@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.359] - 2026-11-17
+
+### Fixed
+
+- Add device looks up the accessory hostname for a LAN address, the kind that let the IKEA plug pair once the HomePod was on the Pi’s subnet. The Timmerflotte reply still has only the Thread mesh address (`fdef:…`, `v4=none`). That mesh address is not forwarded by the HomePod, so a subnet move cannot pair it. A discovered LAN address is commissioned directly and routed through the advertising HomePod. A guessed `fd10:` address is still not used. Matter agent **v106**.
+
 ## [4.0.358] - 2026-11-17
 
 ### Fixed

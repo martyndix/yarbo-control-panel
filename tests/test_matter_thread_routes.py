@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 105, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 106, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -64,6 +64,7 @@ Router lifetime           :         1800
     assert parsed["matterc"] is True, parsed
     assert parsed["port"] == 5541, parsed
     assert "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0" in parsed["aaaa"], parsed
+    assert parsed["hosts"] == ["AABBCCDDEEFF.local"], parsed
 
     calls: list[list[str]] = []
 
@@ -252,6 +253,17 @@ Router lifetime           :         1800
         "port": 5540,
     }]
     agent._last_rio_prefixes = ["fd10:d687:e7bf:4ba8::/64"]
+    assert agent.accessory_lan_address() == ""
+    agent._last_matterc_hits[0]["a"] = ["192.168.9.40"]
+    agent._last_matterc_hits[0]["aaaa"] = [
+        "fdef:badd:6106:0:89b5:1f3d:906e:51bc",
+        "fd10:d687:e7bf:4ba8:1111:2222:3333:4444",
+    ]
+    assert agent.accessory_lan_address() == "192.168.9.40"
+    agent._last_matterc_hits[0]["a"] = []
+    assert agent.accessory_lan_address() == "fd10:d687:e7bf:4ba8:1111:2222:3333:4444"
+    agent._last_matterc_hits[0]["aaaa"] = ["fdef:badd:6106:0:89b5:1f3d:906e:51bc"]
+    assert agent.accessory_lan_address() == ""
     assert agent.accessory_omr_address() == "fd10:d687:e7bf:4ba8:89b5:1f3d:906e:51bc"
     agent._last_matterc_hits[0]["aaaa"] = ["fe80::18e3:8d10:e524:10a9"]
     assert agent.accessory_omr_address() == ""
