@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 88
+AGENT_VERSION = 89
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1902,16 +1902,20 @@ def verify_tailscale_matter_shield() -> bool:
 
 
 def wait_for_thread_route(seconds: float = 8.0) -> str | None:
-    """One short pass: parse _matterc AAAA, install a Thread route, one RA solicit."""
+    """Parse _matterc, install /128 host routes, solicit one RA.
+
+    A /64 via the accessory that answered mDNS blackholes the Thread prefix.
+    Only a router advertisement (proto ra) or rdisc6 RIO may install a /64.
+    """
     global _thread_route_attempted, _last_ra_proof, _last_routes_installed
     prefer = primary_interface()
-    hint = thread_route_hint(prefer)
-    if hint:
-        _last_ra_proof = _last_ra_proof or "kernel"
-        return hint
     if _thread_route_attempted:
         return thread_route_hint(prefer)
     _thread_route_attempted = True
+    try:
+        drop_static_fd_prefixes()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: drop static fd/64: {exc}", flush=True)
     budget = min(8.0, max(1.5, seconds))
     try:
         browse_matterc_mdns(min(2.5, budget))
@@ -1919,12 +1923,18 @@ def wait_for_thread_route(seconds: float = 8.0) -> str | None:
         if installed:
             _last_routes_installed = installed
             _last_ra_proof = "mdns"
-            print(f"matter: Thread route from _matterc AAAA: {installed[:2]}", flush=True)
+            print(f"matter: accessory /128 from _matterc AAAA: {installed[:2]}", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"matter: matterc route install: {exc}", flush=True)
     hint = thread_route_hint(prefer)
-    if hint:
+    if hint and " proto ra " in f" {hint.lower()} ":
+        _last_ra_proof = "kernel"
         return hint
+    accessory_vias = {
+        str(hit.get("src") or "").split("%", 1)[0].lower()
+        for hit in _last_matterc_hits
+        if hit.get("matterc")
+    }
     try:
         text = run_rdisc6_capture(prefer, wait_ms=2000) if prefer else ""
         rows = parse_rdisc6_rios(text)
@@ -1932,6 +1942,8 @@ def wait_for_thread_route(seconds: float = 8.0) -> str | None:
         for row in rows:
             prefix = str(row.get("prefix") or "")
             via = str(row.get("via") or "")
+            if via.lower() in accessory_vias:
+                continue
             if prefix and via and add_ipv6_route(prefix, via, prefer):
                 added.append(f"{prefix} via {via}")
         if added:
@@ -2237,43 +2249,29 @@ def install_discovered_thread_routes(iface: str | None = None) -> dict[str, Any]
 
 
 def begin_tailscale_matter_shield() -> bool:
-    """Hide Tailscale from Matter for the duration of a pairing attempt."""
+    """Hide Tailscale IPv6 for one pairing attempt. Leave the tunnel up."""
     global _tailscale_shield_depth, _tailscale_shield_ok
     if not (tailscale_iface_present() or iface_exists("tailscale0") or iface_exists("tailscale1")):
         _tailscale_shield_ok = None
         return False
     _tailscale_shield_depth += 1
-    print("matter: shielding Tailscale during Apple Home pairing", flush=True)
+    print("matter: hiding Tailscale IPv6 during pairing (tunnel stays up)", flush=True)
     setup_ok = _run_matter_setup_cmd("tailscale-shield")
     for ts in ("tailscale0", "tailscale1"):
         if iface_exists(ts):
             _sysctl_w(f"net.ipv6.conf.{ts}.disable_ipv6", "1")
             _sysctl_w(f"net.ipv6.conf.{ts}.accept_ra", "0")
-            for cmd in (
-                ["sudo", "-n", "ip", "link", "set", ts, "down"],
-                ["sudo", "-n", "/usr/sbin/ip", "link", "set", ts, "down"],
-            ):
-                try:
-                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
-                    if r.returncode == 0:
-                        break
-                    err = (r.stderr or r.stdout or "").strip()
-                    if err:
-                        print(f"matter: ip link set {ts} down: {err[:120]}", flush=True)
-                except (OSError, subprocess.TimeoutExpired) as exc:
-                    print(f"matter: ip link set {ts} down error: {exc}", flush=True)
-                    continue
     flush_tailscale_ipv6_routes()
     ok = verify_tailscale_matter_shield()
     _tailscale_shield_ok = ok and (setup_ok or ok)
     if not ok:
-        print("matter: Tailscale shield incomplete (link still up or fd7a routes remain)", flush=True)
-    # Re-learn Apple BR RIOs now that Tailscale is out of the way (~20s).
+        print("matter: Tailscale IPv6 still visible (fd7a routes remain)", flush=True)
+    # Re-learn Apple BR RIOs now that Tailscale IPv6 is out of the way.
     route = wait_for_thread_route(20.0)
     if route:
         print(f"matter: Thread route after shield: {route[:120]}", flush=True)
     else:
-        print("matter: no Apple Thread RIO yet after Tailscale shield wait", flush=True)
+        print("matter: no Apple Thread RIO yet after Tailscale IPv6 hide", flush=True)
     return True
 
 
@@ -2284,20 +2282,11 @@ def end_tailscale_matter_shield() -> None:
     _tailscale_shield_depth -= 1
     if _tailscale_shield_depth > 0:
         return
-    print("matter: restoring Tailscale after pairing attempt", flush=True)
+    print("matter: restoring Tailscale IPv6 after pairing", flush=True)
     _run_matter_setup_cmd("tailscale-unshield")
     for ts in ("tailscale0", "tailscale1"):
         if iface_exists(ts):
             _sysctl_w(f"net.ipv6.conf.{ts}.disable_ipv6", "0")
-            for cmd in (
-                ["sudo", "-n", "ip", "link", "set", ts, "up"],
-                ["sudo", "-n", "/usr/sbin/ip", "link", "set", ts, "up"],
-            ):
-                try:
-                    subprocess.run(cmd, capture_output=True, text=True, timeout=8)
-                    break
-                except (OSError, subprocess.TimeoutExpired):
-                    continue
     _tailscale_shield_ok = None
 
 
@@ -2445,6 +2434,54 @@ def ipv6_prefix64(addr: str) -> str:
     return socket.inet_ntop(socket.AF_INET6, packed[:8] + bytes(8)) + "/64"
 
 
+def ipv6_host128(addr: str) -> str:
+    raw = addr.split("%", 1)[0]
+    socket.inet_pton(socket.AF_INET6, raw)
+    return f"{raw}/128"
+
+
+def drop_static_fd_prefixes() -> int:
+    """Delete fd/64 routes this panel installed (metric 100, not proto ra).
+
+    Those were aimed at the accessory link-local. The accessory is not a Thread
+    border router, so the /64 blackholes every other address in the prefix.
+    """
+    removed = 0
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "route", "show"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    for raw in (shown.stdout or "").splitlines():
+        line = raw.strip()
+        low = line.lower()
+        if not line or " proto ra " in f" {low} ":
+            continue
+        dest = line.split()[0]
+        if not dest.lower().startswith("fd") or not dest.endswith("/64"):
+            continue
+        if "metric 100" not in low or _is_tailscale_ula(line):
+            continue
+        for cmd in (
+            ["sudo", "-n", "ip", "-6", "route", "del", dest],
+            ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "del", dest],
+            ["ip", "-6", "route", "del", dest],
+        ):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if result.returncode == 0:
+                removed += 1
+                print(f"matter: removed static Thread /64 {dest}", flush=True)
+                break
+    return removed
+
+
 def _matterc_query_packet() -> bytes:
     qname = "_matterc._udp.local"
     labels = b"".join(bytes([len(part)]) + part.encode("ascii") for part in qname.split(".")) + b"\x00"
@@ -2474,7 +2511,11 @@ def format_matterc_hit(hit: dict[str, Any]) -> str:
 
 
 def install_routes_from_matterc_hits() -> list[str]:
-    """Install fd…/64 via the host that answered _matterc."""
+    """Install a /128 for each fd AAAA via the host that answered _matterc.
+
+    The packet source is the accessory, not a border router. A /64 via that
+    link-local blackholes the rest of the Thread prefix.
+    """
     installed: list[str] = []
     for hit in _last_matterc_hits:
         if not hit.get("matterc"):
@@ -2488,7 +2529,10 @@ def install_routes_from_matterc_hits() -> list[str]:
             low = raw.lower()
             if not low.startswith("fd") or _is_tailscale_ula(raw):
                 continue
-            prefix = ipv6_prefix64(raw)
+            try:
+                prefix = ipv6_host128(raw)
+            except OSError:
+                continue
             if add_ipv6_route(prefix, via, iface):
                 installed.append(f"{prefix} via {via} dev {iface}")
     return installed
@@ -3382,9 +3426,10 @@ def friendly_commission_error(err: str) -> str:
             )
         elif matterc_seen and "matter server timed out" in low:
             base = (
-                "The panel stopped waiting while the Matter server was still pairing. "
-                "The Thread route is already installed. This update waits 3 minutes for that call. "
-                "Use a fresh Turn On Pairing Mode code. "
+                "The accessory is on the LAN, but the Matter server did not finish pairing. "
+                "A /64 route pointed at the accessory itself was blocking that prefix. "
+                "This update removes it, adds only that accessory address, and leaves Tailscale up "
+                "so UniFi does not disconnect. Use a fresh Turn On Pairing Mode code. "
             )
         elif matterc_seen:
             base = (
@@ -3564,19 +3609,29 @@ def matter_runtime_container() -> str:
     return DOCKER_NAME
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def matter_server_log_hint() -> str:
-    """Last CHIP/commission lines from the Matter container, for a failed Add device."""
+    """Last commission lines from the Matter container. Skip routine attribute errors."""
     name = matter_runtime_container()
     try:
-        result = run_docker(["logs", "--tail", "60", name], timeout=8.0)
+        result = run_docker(["logs", "--tail", "400", name], timeout=8.0)
     except Exception:  # noqa: BLE001
         return ""
-    text = f"{result.stdout or ''}\n{result.stderr or ''}"
-    keys = ("discover", "pase", "timeout", "commission", "mdns", "error", "matterc", "failed")
-    picked = [ln.strip() for ln in text.splitlines() if any(k in ln.lower() for k in keys)]
+    text = _ANSI_RE.sub("", f"{result.stdout or ''}\n{result.stderr or ''}")
+    skip = ("read_attribute", "subscribe_attribute", "write_attribute")
+    keys = ("commission", "discover", "pase", "pairing", "matterc", "failed to", "timeout", "operational")
+    picked: list[str] = []
+    for line in text.splitlines():
+        low = line.lower()
+        if any(item in low for item in skip):
+            continue
+        if any(key in low for key in keys):
+            picked.append(line.strip())
     if not picked:
-        picked = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    return " | ".join(picked[-2:])[:180]
+        return ""
+    return " | ".join(picked[-2:])[:220]
 
 
 def quiesce_host_mdns() -> bool:

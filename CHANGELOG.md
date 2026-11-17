@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.342] - 2026-11-17
+
+### Fixed
+
+- Add device no longer runs `tailscale down`. That rewrote DNS and dropped subnet routes for the whole pairing window, so UniFi Access and Protect showed every device disconnect and then reconnect. Tailscale IPv6 is hidden; the tunnel stays up.
+- The Thread route learned from `_matterc` is now a /128 to the accessory address. The previous /64 used the accessory’s own link-local as the next hop (`fdef:badd:6106::/64 via fe80::2a70:…`), which blackholed the prefix. That static /64 is removed at the start of pairing. Matter agent **v89**.
+
 ## [4.0.341] - 2026-11-17
 
 ### Fixed

@@ -296,16 +296,14 @@ yarbo_matter_prefer_shared() {
 
 yarbo_matter_tailscale_shield() {
   local iface
+  # Hide Tailscale IPv6 only. Stopping the tunnel rewrites DNS and withdraws
+  # subnet routes, which makes every UniFi device look disconnected.
   for iface in tailscale0 tailscale1; do
     if [[ -d "/sys/class/net/${iface}" ]]; then
       yarbo_root sysctl -w "net.ipv6.conf.${iface}.accept_ra=0" >/dev/null 2>&1 || true
       yarbo_root sysctl -w "net.ipv6.conf.${iface}.disable_ipv6=1" >/dev/null 2>&1 || true
-      yarbo_root ip link set "$iface" down >/dev/null 2>&1 || true
     fi
   done
-  if command -v tailscale >/dev/null 2>&1; then
-    yarbo_root tailscale down >/dev/null 2>&1 || true
-  fi
   # Drop leftover Tailscale ULA routes (destination first, then full line).
   ip -6 route show 2>/dev/null | while IFS= read -r line; do
     case "$line" in
@@ -327,12 +325,8 @@ yarbo_matter_tailscale_unshield() {
   for iface in tailscale0 tailscale1; do
     if [[ -d "/sys/class/net/${iface}" ]]; then
       yarbo_root sysctl -w "net.ipv6.conf.${iface}.disable_ipv6=0" >/dev/null 2>&1 || true
-      yarbo_root ip link set "$iface" up >/dev/null 2>&1 || true
     fi
   done
-  if command -v tailscale >/dev/null 2>&1; then
-    yarbo_root tailscale up >/dev/null 2>&1 || true
-  fi
 }
 
 # CHIP's mDNS binds UDP 5353. avahi-daemon on the host takes those replies,
