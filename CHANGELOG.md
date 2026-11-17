@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.339] - 2026-11-17
+
+### Fixed
+- **Apple Home Add device:** parse real `_matterc` DNS replies (ignore bare `fe80 +Nb` UDP), install one Thread `fd…/64` route from an AAAA when present, and stop the long RIO poll that burned Apple's pairing window. Diag leads with `matterc=` `fd=` `via=` `ra=`. Matter agent **v86**.
+
 ## [4.0.338] - 2026-11-17
 
 ### Fixed
