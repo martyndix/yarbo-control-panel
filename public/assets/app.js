@@ -18061,7 +18061,8 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
         if (!started.ok) throw new Error(started.error || 'Could not start pairing');
         const jobId = String(started.job_id || '');
         if (!jobId) throw new Error('Pairing did not return a job id');
-        const deadline = Date.now() + 180000;
+        const startedAt = Date.now();
+        const deadline = startedAt + 420000;
         let lastErr = '';
         let pollFails = 0;
         while (Date.now() < deadline) {
@@ -18095,10 +18096,12 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
                 throw new Error(data.error || 'Pairing failed');
             }
             if (status) {
-                const elapsed = Math.round((Date.now() - (deadline - 180000)) / 1000);
-                status.textContent = elapsed > 25
-                    ? 'Still pairing (Matter discovery can take a minute)…'
-                    : 'Pairing the device…';
+                const elapsed = Math.round((Date.now() - startedAt) / 1000);
+                status.textContent = elapsed > 90
+                    ? 'Still pairing (rechecking LAN / Matter discovery)…'
+                    : (elapsed > 25
+                        ? 'Still pairing (Matter discovery can take a minute)…'
+                        : 'Pairing the device…');
             }
         }
         throw new Error('Pairing timed out. Turn On Pairing Mode again in Apple Home and try Add device with a fresh code.');

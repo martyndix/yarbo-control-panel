@@ -106,18 +106,34 @@ yarbo_matter_ensure_ipv6_route() {
   yarbo_root ip -6 route add multicast ff00::/8 dev "$iface" table local >/dev/null 2>&1 || true
 }
 
+yarbo_matter_iface_has_ipv6_ll() {
+  local iface="$1"
+  [[ -n "$iface" ]] || return 1
+  ip -6 -o addr show dev "$iface" scope link 2>/dev/null | grep -q .
+}
+
 yarbo_matter_primary_interface() {
   if [[ -n "${YARBO_MATTER_PRIMARY_INTERFACE:-}" ]]; then
     echo "$YARBO_MATTER_PRIMARY_INTERFACE"
     return
   fi
-  local iface
-  iface="$(ip -4 route show default 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
-  if [[ -n "$iface" && -d "/sys/class/net/${iface}" ]]; then
-    echo "$iface"
+  local iface route
+  route="$(ip -4 route show default 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  if [[ -n "$route" && -d "/sys/class/net/${route}" ]] && yarbo_matter_iface_has_ipv6_ll "$route"; then
+    echo "$route"
     return
   fi
-  for iface in end0 eth0 enp1s0 wlan0; do
+  for iface in end0 eth0 enp1s0 enp0s3 wlan0; do
+    if [[ -d "/sys/class/net/${iface}" ]] && yarbo_matter_iface_has_ipv6_ll "$iface"; then
+      echo "$iface"
+      return
+    fi
+  done
+  if [[ -n "$route" && -d "/sys/class/net/${route}" ]]; then
+    echo "$route"
+    return
+  fi
+  for iface in end0 eth0 wlan0; do
     if [[ -d "/sys/class/net/${iface}" ]]; then
       echo "$iface"
       return
@@ -227,9 +243,24 @@ yarbo_matter_setup() {
     return 0
   fi
 
+  # Port up alone is not enough — CHIP may be missing --primary-interface for mDNS.
   if yarbo_matter_port_up; then
-    yarbo_matter_write_status "done" "Matter server is running"
-    return 0
+    local name_early iface_early args_early have_early
+    name_early="$(yarbo_matter_name)"
+    iface_early="$(yarbo_matter_primary_interface)"
+    if yarbo_docker inspect "$name_early" >/dev/null 2>&1; then
+      args_early="$(yarbo_docker inspect -f '{{range .Args}}{{.}} {{end}}' "$name_early" 2>/dev/null || true)"
+      args_early+=" $(yarbo_docker inspect -f '{{range .Config.Cmd}}{{.}} {{end}}' "$name_early" 2>/dev/null || true)"
+      have_early="$(printf '%s' "$args_early" | tr -s ' ')"
+      if printf '%s' " $have_early " | grep -q " --primary-interface ${iface_early} "; then
+        yarbo_matter_write_status "done" "Matter server is running"
+        return 0
+      fi
+    elif ! yarbo_docker inspect "$name_early" >/dev/null 2>&1; then
+      # Shared / foreign listener on 5580 — do not tear down.
+      yarbo_matter_write_status "done" "Matter server is running"
+      return 0
+    fi
   fi
 
   yarbo_matter_install_wrapper
@@ -284,12 +315,16 @@ yarbo_matter_setup() {
     if printf '%s' " $have " | grep -q " --primary-interface ${iface} "; then
       yarbo_docker start "$name" >/dev/null 2>&1 || true
     elif printf '%s' " $have " | grep -q " --primary-interface "; then
-      # Explicit wrong NIC — recreate. If the flag is missing entirely but the
-      # server is already listening with a fabric, leave it (avoid drop mid-pair).
+      # Explicit wrong NIC — recreate for Thread/mDNS discovery.
       yarbo_docker stop "$name" >/dev/null 2>&1 || true
       yarbo_docker rm "$name" >/dev/null 2>&1 || true
-    else
+    elif [[ -z "$have" ]] && yarbo_matter_port_up; then
+      # Inspect returned empty Args but server listens — leave alone (avoid drop mid-pair).
       yarbo_docker start "$name" >/dev/null 2>&1 || true
+    else
+      # Flag missing while Args are readable — recreate so CHIP binds the LAN NIC.
+      yarbo_docker stop "$name" >/dev/null 2>&1 || true
+      yarbo_docker rm "$name" >/dev/null 2>&1 || true
     fi
   fi
   if ! yarbo_docker inspect "$name" >/dev/null 2>&1; then

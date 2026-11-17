@@ -50,11 +50,16 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 78, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 79, agent.AGENT_VERSION
     assert "Thread/mDNS" in agent.friendly_commission_error("Pairing timed out while discovering")
     assert callable(agent.ensure_matter_primary_interface)
     assert callable(agent.discovery_preflight_error)
     assert callable(agent.container_command_tokens)
+    assert callable(agent.container_primary_interface_state)
+    assert callable(agent.commission_error_looks_discovery)
+    assert agent.commission_error_looks_discovery("Pairing timed out while discovering")
+    assert agent.commission_error_looks_discovery("Commission with code failed (error_code 1)")
+    assert not agent.commission_error_looks_discovery("CHIP Error 0x00000028: In use")
     assert callable(agent.start_commission_job)
     assert callable(agent.commission_job_snapshot)
     assert callable(agent.run_commission_with_code)
@@ -195,6 +200,55 @@ def main() -> int:
     # Wrong job id after completion of a different job.
     other = agent.dispatch({"op": "commission_status", "job_id": "not-this-job"})
     assert other.get("ok") is False, other
+
+    # Missing --primary-interface must recreate; unknown Args must not.
+    recreates: list[str] = []
+    agent.shared_matter_container = lambda: False  # type: ignore[method-assign]
+    agent.matter_port_up = lambda: True  # type: ignore[method-assign]
+    agent.primary_interface = lambda: "eth0"  # type: ignore[method-assign]
+    agent.recreate_matter_container = lambda: recreates.append("recreate")  # type: ignore[method-assign]
+    agent.run_docker = lambda args: type(  # type: ignore[method-assign]
+        "R",
+        (),
+        {"returncode": 0, "stdout": "true", "stderr": ""},
+    )()
+    agent.container_primary_interface_state = lambda: (None, "missing")  # type: ignore[method-assign]
+    agent.ensure_matter_primary_interface()
+    assert recreates == ["recreate"], recreates
+    recreates.clear()
+    agent.container_primary_interface_state = lambda: (None, "unknown")  # type: ignore[method-assign]
+    agent.ensure_matter_primary_interface()
+    assert recreates == [], recreates
+    agent.container_primary_interface_state = lambda: ("wlan0", "ok")  # type: ignore[method-assign]
+    agent.ensure_matter_primary_interface()
+    assert recreates == ["recreate"], recreates
+
+    # Discovery failure forces NIC rebind then retries commission once.
+    calls.clear()
+    forced: list[bool] = []
+    agent._live_devices = [hue]
+    agent.prepare_for_commission = lambda: None  # type: ignore[method-assign]
+    agent.cleanup_failed_commission_node = lambda _err: None  # type: ignore[method-assign]
+    agent.ensure_ipv6_default_route = lambda: None  # type: ignore[method-assign]
+    agent.ensure_matter_primary_interface = (  # type: ignore[method-assign]
+        lambda force=False: forced.append(bool(force))
+    )
+
+    def discover_then_ok(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        calls.append((command, args or {}))
+        if command == "commission_with_code":
+            if sum(1 for c, _ in calls if c == "commission_with_code") == 1:
+                return {"ok": False, "error": "Pairing timed out while discovering (error_code 1)"}
+            return {"ok": True, "result": mill_node() | {"node_id": 43}}
+        if command == "get_nodes":
+            return {"ok": True, "result": [mill_node() | {"node_id": 43}]}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = discover_then_ok  # type: ignore[method-assign]
+    recovered = agent.run_commission_with_code("31436531015")
+    assert recovered.get("ok") is True, recovered
+    assert True in forced, forced
+    assert sum(1 for c, _ in calls if c == "commission_with_code") == 2, calls
 
     print("ok: commission refreshes live devices")
     return 0

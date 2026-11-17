@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.331] - 2026-11-17
+
+### Fixed
+- **Apple Home Add device Thread/mDNS timeout:** recreate Matter when `--primary-interface` is missing (v77 only skipped unknown inspect), add IPv6 multicast route, and on discovery failure force-rebind the LAN NIC then retry once. Matter agent **v79**.
+
 ## [4.0.330] - 2026-11-17
 
 ### Fixed

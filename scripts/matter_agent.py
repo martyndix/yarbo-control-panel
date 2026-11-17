@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 78
+AGENT_VERSION = 79
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1606,6 +1606,29 @@ def ensure_ipv6_default_route() -> None:
             subprocess.run(cmd, capture_output=True, text=True, timeout=8)
         except (OSError, subprocess.TimeoutExpired):
             pass
+    # Matter discovery uses IPv6 multicast even when a default route already exists.
+    for cmd in (
+        ["ip", "-6", "route", "add", "multicast", "ff00::/8", "dev", iface, "table", "local"],
+        ["sudo", "-n", "ip", "-6", "route", "add", "multicast", "ff00::/8", "dev", iface, "table", "local"],
+        [
+            "sudo",
+            "-n",
+            "/usr/sbin/ip",
+            "-6",
+            "route",
+            "add",
+            "multicast",
+            "ff00::/8",
+            "dev",
+            iface,
+            "table",
+            "local",
+        ],
+    ):
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
     try:
         shown = subprocess.run(
             ["ip", "-6", "route", "show", "default"],
@@ -1677,42 +1700,64 @@ def container_command_tokens() -> list[str]:
     return tokens
 
 
-def container_primary_interface() -> str | None:
-    """`--primary-interface` currently baked into yarbo-matter-server, if any."""
+def container_primary_interface_state() -> tuple[str | None, str]:
+    """Return (iface_or_None, 'ok'|'missing'|'unknown').
+
+    unknown = Docker inspect returned no usable Args/Cmd (do not tear down).
+    missing = Args parsed but --primary-interface was never set (recreate).
+    """
     tokens = container_command_tokens()
+    if not tokens:
+        return None, "unknown"
     for i, part in enumerate(tokens):
         if part == "--primary-interface" and i + 1 < len(tokens):
-            return str(tokens[i + 1]).strip() or None
-    return None
+            val = str(tokens[i + 1]).strip()
+            if not val:
+                return None, "missing"
+            return val, "ok"
+    return None, "missing"
+
+
+def container_primary_interface() -> str | None:
+    """`--primary-interface` currently baked into yarbo-matter-server, if any."""
+    have, _state = container_primary_interface_state()
+    return have
 
 
 def ensure_matter_primary_interface(*, force: bool = False) -> None:
-    """Recreate our Matter container only when CHIP is known to be on the wrong NIC.
+    """Recreate Matter when CHIP is on the wrong NIC or missing --primary-interface.
 
-    Never tear down a healthy listening server just because inspect could not read
-    Args — that was falsely showing “Matter server is not ready” during Add device.
+    Leave a healthy listening server alone only when Docker inspect cannot read
+    Args at all — not when the flag is known to be absent.
     """
     if shared_matter_container():
         return
     want = primary_interface()
-    have = container_primary_interface()
+    have, state = container_primary_interface_state()
     inspect = run_docker(["inspect", "-f", "{{.State.Running}}", DOCKER_NAME])
     exists = inspect.returncode == 0
     running = exists and (inspect.stdout or "").strip().lower() == "true"
     listening = matter_port_up()
-    if have == want and running and listening:
+    if have == want and state == "ok" and running and listening:
         return
-    if have == want and exists:
+    if have == want and state == "ok" and exists:
         if not running:
             run_docker(["start", DOCKER_NAME])
         wait_matter_port(20.0)
         return
-    # Running + listening, but we could not parse Args: leave it alone during pair.
-    if have is None and listening and not force:
+    # Running + listening, but inspect returned no tokens: leave it alone during pair.
+    if state == "unknown" and listening and not force:
         print(
             f"matter: primary-interface unknown (want {want}); leaving healthy server alone",
             flush=True,
         )
+        return
+    if state == "missing":
+        print(
+            f"matter: primary-interface missing (want {want}); recreate for mDNS discovery",
+            flush=True,
+        )
+        recreate_matter_container()
         return
     if have is not None and have != want:
         print(
@@ -1724,7 +1769,7 @@ def ensure_matter_primary_interface(*, force: bool = False) -> None:
     if force or (not listening and not running):
         print(
             f"matter: primary-interface recreate (have={have!r} want={want!r} "
-            f"running={running} listening={listening})",
+            f"state={state} running={running} listening={listening})",
             flush=True,
         )
         recreate_matter_container()
@@ -2057,6 +2102,23 @@ def commission_error_looks_retryable(err: str) -> bool:
     return any(n in low for n in needles)
 
 
+def commission_error_looks_discovery(err: str) -> bool:
+    """Discovery / mDNS never saw the accessory — worth one NIC rebind retry."""
+    low = str(err or "").lower()
+    needles = (
+        "error_code 1",
+        "error code 1",
+        "nodecommissionfailed",
+        "timed out while discovering",
+        "timeout while discovering",
+        "pairing timed out",
+        "discovery timed out",
+        "failed to discover",
+        "mdns",
+    )
+    return any(n in low for n in needles)
+
+
 def failed_commission_node_id(err: str) -> int:
     match = re.search(r"\bnode\s+(\d+)\b", str(err or ""), re.I)
     if not match:
@@ -2272,12 +2334,10 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
         timeout=120.0,
         retries=1,
     )
-    if not rpc.get("ok") and commission_error_looks_retryable(str(rpc.get("error") or "")):
-        print(
-            f"matter: commission retry after {rpc.get('error')!r}",
-            flush=True,
-        )
-        cleanup_failed_commission_node(str(rpc.get("error") or ""))
+    err = str(rpc.get("error") or "")
+    if not rpc.get("ok") and commission_error_looks_retryable(err):
+        print(f"matter: commission retry after {err!r}", flush=True)
+        cleanup_failed_commission_node(err)
         time.sleep(2.5)
         prepare_for_commission()
         rpc = matter_rpc(
@@ -2286,8 +2346,27 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             timeout=120.0,
             retries=1,
         )
+        err = str(rpc.get("error") or "")
+    # Discovery timeout: force-rebind Matter to the LAN NIC + IPv6 multicast, then one more try.
+    if not rpc.get("ok") and commission_error_looks_discovery(err):
+        print(f"matter: discovery retry with NIC rebind after {err!r}", flush=True)
+        cleanup_failed_commission_node(err)
+        try:
+            ensure_matter_primary_interface(force=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: force primary-interface: {exc}", flush=True)
+        ensure_ipv6_default_route()
+        time.sleep(2.0)
+        prepare_for_commission()
+        rpc = matter_rpc(
+            "commission_with_code",
+            {"code": code, "network_only": True},
+            timeout=120.0,
+            retries=1,
+        )
+        err = str(rpc.get("error") or "")
     if not rpc.get("ok"):
-        detail = str(rpc.get("error") or "Pairing failed")
+        detail = err or "Pairing failed"
         cleanup_failed_commission_node(detail)
         return {
             "ok": False,
@@ -2380,7 +2459,7 @@ def start_commission_job(code: str) -> dict[str, Any]:
     }
 
 
-def wait_commission_job(job_id: str, timeout: float = 180.0) -> dict[str, Any]:
+def wait_commission_job(job_id: str, timeout: float = 400.0) -> dict[str, Any]:
     """Block until the named job finishes (used by sync op commission)."""
     deadline = time.time() + max(1.0, timeout)
     while time.time() < deadline:
@@ -7174,7 +7253,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         if not started.get("ok"):
             return started
         job_id = str(started.get("job_id") or "")
-        return wait_commission_job(job_id, timeout=180.0)
+        return wait_commission_job(job_id, timeout=400.0)
     if op == "remove_node":
         try:
             node_id = int(body.get("node_id") or 0)
