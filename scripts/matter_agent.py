@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 100
+AGENT_VERSION = 101
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2356,10 +2356,28 @@ def thread_route_hint(prefer_iface: str | None = None) -> str | None:
         )
         if not is_threadish:
             continue
-        if prefer and dev == prefer:
-            return raw[:160]
+        if prefer and dev and dev != prefer:
+            candidates.append(raw[:160])
+            continue
         candidates.append(raw[:160])
-    return candidates[0] if candidates else None
+    if not candidates:
+        return None
+    accessory_prefix = ""
+    try:
+        _host, accessory_prefix, _iface = matterc_fd_target()
+    except Exception:  # noqa: BLE001
+        accessory_prefix = ""
+
+    def rank(line: str) -> tuple[int, int]:
+        low = line.lower()
+        dest = low.split()[0]
+        covers = 0
+        if accessory_prefix and (dest == accessory_prefix.lower() or dest.startswith(accessory_prefix.split("/")[0].lower())):
+            covers = 1
+        return (covers, 1 if " via " in low else 0)
+
+    candidates.sort(key=rank, reverse=True)
+    return candidates[0]
 
 
 def _read_dns_name(data: bytes, offset: int, depth: int = 0) -> tuple[str, int]:
@@ -3332,12 +3350,29 @@ def install_same_prefix_source(host: str, iface: str) -> str:
     return f"pfxra:{src_addr}" if announced else f"pfx:{src_addr}"
 
 
+def rio_covers(prefix: str, rios: list[dict[str, Any]]) -> bool:
+    """True when prefix is already inside a router-advertised route."""
+    try:
+        want = ipaddress.IPv6Network(prefix, strict=False)
+    except (ValueError, ipaddress.AddressValueError):
+        return False
+    for row in rios:
+        try:
+            net = ipaddress.IPv6Network(str(row.get("prefix") or ""), strict=False)
+        except (ValueError, ipaddress.AddressValueError):
+            continue
+        if want == net or want.subnet_of(net):
+            return True
+    return False
+
+
 def install_border_router_route() -> str:
     """Install a prefix a router advertised, or leave the unanswered fd host alone.
 
     v97 pinned that host via the accessory and sourced from fd58:b000:1::1.
     The toast showed that source address, and PASE message 33 still never came.
     """
+    global _last_ra_proof, _last_routes_installed
     try:
         clear_pair_source()
         release_prefix_source()
@@ -3366,6 +3401,19 @@ def install_border_router_route() -> str:
     if iface:
         advertised = install_advertised_routes(iface, solicitation)
         if advertised:
+            via = advertised.split(":", 1)[1]
+            # The HomePod routes its own prefix (fd10:…). The Timmerflotte is
+            # reached at the address it advertised (fdef:badd:6106:…), which is
+            # a different prefix. Send that prefix via the same router.
+            if (
+                prefix
+                and via.lower().startswith("fe80:")
+                and not rio_covers(prefix, list(solicitation.get("rios") or []))
+            ):
+                src = ensure_pio_source(iface, list(solicitation.get("pios") or []))
+                if add_ipv6_route(prefix, via, iface, src):
+                    _last_routes_installed.append(f"{prefix} via {via}")
+                    print(f"matter: accessory prefix {prefix} via {via}", flush=True)
             return advertised
     via = ""
     if iface:
@@ -3375,7 +3423,6 @@ def install_border_router_route() -> str:
             print(f"matter: border-router lookup: {exc}", flush=True)
             via = ""
     if via and prefix and iface and add_ipv6_route(prefix, via, iface):
-        global _last_ra_proof, _last_routes_installed
         _last_ra_proof = "br"
         _last_routes_installed = [f"{prefix} via {via}"]
         return f"br:{via}"
