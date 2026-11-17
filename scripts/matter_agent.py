@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 75
+AGENT_VERSION = 76
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1517,10 +1517,42 @@ def matter_port_up() -> bool:
         probe.close()
 
 
-def primary_interface() -> str:
-    env = (os.environ.get("YARBO_MATTER_PRIMARY_INTERFACE") or "").strip()
-    if env:
-        return env
+def iface_operstate(name: str) -> str:
+    try:
+        return Path(f"/sys/class/net/{name}/operstate").read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return ""
+
+
+def iface_exists(name: str) -> bool:
+    return bool(name) and Path(f"/sys/class/net/{name}").is_dir()
+
+
+def iface_is_usable(name: str) -> bool:
+    if not iface_exists(name):
+        return False
+    state = iface_operstate(name)
+    # dormant is common on Wi‑Fi between scans; unknown/empty on some USB NICs.
+    return state in ("up", "unknown", "dormant", "")
+
+
+def iface_has_ipv6_ll(name: str) -> bool:
+    """True when the NIC has a link-local fe80:: address (needed for Matter mDNS)."""
+    if not name:
+        return False
+    try:
+        out = subprocess.run(
+            ["ip", "-6", "addr", "show", "dev", name, "scope", "link"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "fe80:" in (out.stdout or "")
+
+
+def default_ipv4_interface() -> str:
     try:
         out = subprocess.run(
             ["ip", "-4", "route", "show", "default"],
@@ -1533,14 +1565,44 @@ def primary_interface() -> str:
             return parts[parts.index("dev") + 1]
     except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
         pass
-    return "eth0"
+    return ""
+
+
+def primary_interface() -> str:
+    """LAN NIC CHIP should bind for mDNS — prefer IPv6 link-local on the default route."""
+    env = (os.environ.get("YARBO_MATTER_PRIMARY_INTERFACE") or "").strip()
+    if env and iface_is_usable(env):
+        return env
+    route = default_ipv4_interface()
+    if route and iface_is_usable(route) and iface_has_ipv6_ll(route):
+        return route
+    # Prefer common Pi LAN names that already have link-local IPv6.
+    for name in ("end0", "eth0", "enp1s0", "enp0s3", "wlan0"):
+        if iface_is_usable(name) and iface_has_ipv6_ll(name):
+            return name
+    if route and iface_is_usable(route):
+        return route
+    for name in ("end0", "eth0", "wlan0"):
+        if iface_is_usable(name):
+            return name
+    return route or "eth0"
 
 
 def ensure_ipv6_default_route() -> None:
-    """CHIP mDNS needs an IPv6 route even on IPv4-only ISPs (link-local on LAN)."""
+    """CHIP mDNS needs IPv6 (at least link-local) even on IPv4-only ISPs."""
     iface = primary_interface()
     if not iface:
         return
+    # Full fix via install wrapper (disable_ipv6 / accept_ra / multicast / default).
+    for cmd in (
+        ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", "ipv6-route"],
+        ["sudo", "-n", "sysctl", "-w", f"net.ipv6.conf.{iface}.disable_ipv6=0"],
+        ["sudo", "-n", "sysctl", "-w", f"net.ipv6.conf.{iface}.accept_ra=1"],
+    ):
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     try:
         shown = subprocess.run(
             ["ip", "-6", "route", "show", "default"],
@@ -1556,7 +1618,6 @@ def ensure_ipv6_default_route() -> None:
         ["ip", "-6", "route", "add", "default", "dev", iface],
         ["sudo", "-n", "ip", "-6", "route", "add", "default", "dev", iface],
         ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "add", "default", "dev", iface],
-        ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", "ipv6-route"],
     ]
     for cmd in candidates:
         try:
@@ -1568,6 +1629,7 @@ def ensure_ipv6_default_route() -> None:
 
 
 def matter_container_args() -> list[str]:
+    iface = primary_interface()
     return [
         "run",
         "-d",
@@ -1587,8 +1649,49 @@ def matter_container_args() -> list[str]:
         "--paa-root-cert-dir",
         "/data/credentials",
         "--primary-interface",
-        primary_interface(),
+        iface,
     ]
+
+
+def container_primary_interface() -> str | None:
+    """`--primary-interface` currently baked into yarbo-matter-server, if any."""
+    inspect = run_docker(["inspect", "-f", "{{json .Config.Cmd}}", DOCKER_NAME])
+    if inspect.returncode != 0:
+        return None
+    raw = (inspect.stdout or "").strip()
+    if not raw or raw == "null":
+        return None
+    try:
+        cmd = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(cmd, list):
+        return None
+    for i, part in enumerate(cmd):
+        if str(part) == "--primary-interface" and i + 1 < len(cmd):
+            return str(cmd[i + 1]).strip() or None
+    return None
+
+
+def ensure_matter_primary_interface() -> None:
+    """Recreate our Matter container when CHIP is bound to the wrong/missing NIC."""
+    if shared_matter_container():
+        return
+    want = primary_interface()
+    have = container_primary_interface()
+    inspect = run_docker(["inspect", "-f", "{{.State.Running}}", DOCKER_NAME])
+    running = inspect.returncode == 0 and (inspect.stdout or "").strip().lower() == "true"
+    if have == want and running:
+        return
+    if have == want and inspect.returncode == 0:
+        run_docker(["start", DOCKER_NAME])
+        wait_matter_port(20.0)
+        return
+    print(
+        f"matter: primary-interface {have!r} -> {want!r} (recreate container)",
+        flush=True,
+    )
+    recreate_matter_container()
 
 
 def recreate_matter_container() -> None:
@@ -1601,6 +1704,25 @@ def recreate_matter_container() -> None:
     run_docker(["rm", DOCKER_NAME])
     run_docker(matter_container_args())
     wait_matter_port(30.0)
+
+
+def discovery_preflight_error() -> str | None:
+    """Catch obvious LAN/IPv6 problems before a long commission timeout."""
+    iface = primary_interface()
+    if not iface_is_usable(iface):
+        return (
+            f"Matter cannot use network interface {iface!r}. "
+            "Connect the Pi to the same LAN as your HomePod/Apple TV, then try Add device again."
+        )
+    if not iface_has_ipv6_ll(iface):
+        ensure_ipv6_default_route()
+        if not iface_has_ipv6_ll(iface):
+            return (
+                f"No IPv6 link-local address on {iface} (Matter needs IPv6 for discovery). "
+                "Enable IPv6 on the Pi LAN, keep a HomePod/Apple TV online, then Turn On Pairing Mode "
+                "again and Add device with a fresh code."
+            )
+    return None
 
 
 def recover_docker_storage() -> str:
@@ -1987,16 +2109,16 @@ def friendly_commission_error(err: str) -> str:
     ):
         return (
             "Pairing started but the Pi never found the accessory on the network "
-            "(Matter error_code 1). Get a fresh code: Apple Home → accessory → Turn On Pairing Mode, "
-            "paste it here within ~3 minutes, keep a HomePod/Apple TV online, and keep the Pi on the "
-            "same LAN with IPv6. Then Add device again — not Look for devices."
+            "(Matter error_code 1 — usually Thread/mDNS discovery). Get a fresh code: Apple Home → "
+            "accessory → Turn On Pairing Mode, paste within ~3 minutes. Keep a HomePod/Apple TV online, "
+            "Pi on the same LAN/VLAN with IPv6 (not guest Wi‑Fi). Then Add device — not Look for devices."
         )
     if "timeout" in low or "timed out" in low:
         return (
-            "Pairing timed out. In Apple Home open the accessory → Turn On Pairing Mode, "
-            "paste that fresh code here within a few minutes (not the sticker QR). "
-            "Keep a HomePod or Apple TV online for Thread. "
-            "Look for devices only finds Hue lights on a paired Bridge — use Add device for Matter plugs and sensors."
+            "Pairing timed out — the Pi did not discover the accessory (Thread/mDNS). "
+            "In Apple Home open the accessory → Turn On Pairing Mode, paste a fresh code within ~3 minutes "
+            "(not the sticker QR). Keep a HomePod or Apple TV online; put the Pi on the same LAN/VLAN with IPv6. "
+            "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
         )
     if "discover" in low or "not found" in low or "no device" in low:
         return (
@@ -2041,9 +2163,16 @@ def format_matter_rpc_error(msg: dict[str, Any]) -> str:
 def prepare_for_commission() -> str | None:
     """Ensure Docker Matter server + listen socket are up before commission_with_code."""
     ensure_ipv6_default_route()
+    try:
+        ensure_matter_primary_interface()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: primary-interface ensure: {exc}", flush=True)
     err = ensure_matter_server()
     if err:
         return err
+    pre = discovery_preflight_error()
+    if pre:
+        return pre
     try:
         ensure_listening()
     except Exception as exc:  # noqa: BLE001

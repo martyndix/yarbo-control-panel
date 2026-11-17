@@ -111,7 +111,19 @@ yarbo_matter_primary_interface() {
     echo "$YARBO_MATTER_PRIMARY_INTERFACE"
     return
   fi
-  ip -4 route show default 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}'
+  local iface
+  iface="$(ip -4 route show default 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  if [[ -n "$iface" && -d "/sys/class/net/${iface}" ]]; then
+    echo "$iface"
+    return
+  fi
+  for iface in end0 eth0 enp1s0 wlan0; do
+    if [[ -d "/sys/class/net/${iface}" ]]; then
+      echo "$iface"
+      return
+    fi
+  done
+  echo "eth0"
 }
 
 yarbo_matter_install_docker() {
@@ -261,31 +273,30 @@ yarbo_matter_setup() {
   local name image
   name="$(yarbo_matter_name)"
   image="$(yarbo_matter_image)"
+  local iface
+  iface="$(yarbo_matter_primary_interface)"
   if yarbo_docker inspect "$name" >/dev/null 2>&1; then
-    yarbo_docker start "$name" >/dev/null 2>&1 || true
-  else
-    local iface
-    iface="$(yarbo_matter_primary_interface)"
-    if [[ -n "$iface" ]]; then
-      yarbo_docker run -d \
-        --name "$name" \
-        --restart unless-stopped \
-        --security-opt apparmor=unconfined \
-        --network host \
-        -v "${ROOT}/data/matter-server:/data" \
-        "$image" \
-        --storage-path /data \
-        --paa-root-cert-dir /data/credentials \
-        --primary-interface "$iface" >/dev/null 2>&1 || true
+    local have
+    have="$(yarbo_docker inspect -f '{{range .Config.Cmd}}{{.}} {{end}}' "$name" 2>/dev/null || true)"
+    if [[ "$have" != *"--primary-interface ${iface}"* && "$have" != *"--primary-interface ${iface} "* ]]; then
+      # CHIP was started on the wrong/missing NIC — recreate so Thread/mDNS discovery works.
+      yarbo_docker stop "$name" >/dev/null 2>&1 || true
+      yarbo_docker rm "$name" >/dev/null 2>&1 || true
     else
-      yarbo_docker run -d \
-        --name "$name" \
-        --restart unless-stopped \
-        --security-opt apparmor=unconfined \
-        --network host \
-        -v "${ROOT}/data/matter-server:/data" \
-        "$image" >/dev/null 2>&1 || true
+      yarbo_docker start "$name" >/dev/null 2>&1 || true
     fi
+  fi
+  if ! yarbo_docker inspect "$name" >/dev/null 2>&1; then
+    yarbo_docker run -d \
+      --name "$name" \
+      --restart unless-stopped \
+      --security-opt apparmor=unconfined \
+      --network host \
+      -v "${ROOT}/data/matter-server:/data" \
+      "$image" \
+      --storage-path /data \
+      --paa-root-cert-dir /data/credentials \
+      --primary-interface "$iface" >/dev/null 2>&1 || true
   fi
 
   local i

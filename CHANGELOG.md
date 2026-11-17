@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.328] - 2026-11-17
+
+### Fixed
+- **Matter pairing timeouts / discovery:** pick a LAN NIC with IPv6 link-local for CHIP `--primary-interface`, recreate the Matter container when that NIC was wrong/missing, and preflight IPv6 before Add device — so Apple Home Thread share is less likely to time out. Matter agent **v76**.
+
 ## [4.0.327] - 2026-11-17
 
 ### Fixed
