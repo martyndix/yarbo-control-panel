@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 93, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 94, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -80,36 +80,32 @@ Router lifetime           :         1800
     assert agent.clear_unreachable_fd_routes() == 1
     assert any("del" in c and "unreachable" in c and "fdef:badd:6106::/64" in c for c in calls), calls
 
-    import threading
-    echo = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-    echo.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-    echo.bind(("::1", 0))
-    echo_port = echo.getsockname()[1]
+    assert agent.eui64_to_mac("fe80::2a70:4eff:fe68:98ea") == "28:70:4e:68:98:ea"
+    agent.subprocess.run = lambda cmd, **kwargs: Result(
+        "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0 dev lo proto kernel metric 256\n"
+    )
+    assert agent.thread_route_hint("eth0") is None
 
-    def echo_thread() -> None:
-        data, addr = echo.recvfrom(1500)
-        echo.sendto(b"pong:" + data, addr)
+    calls.clear()
 
-    threading.Thread(target=echo_thread, daemon=True).start()
-    listen = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-    listen.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-    listen.bind(("::1", 0))
-    out = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-    out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-    out.bind(("::1", 0))
-    relay = agent.UdpRelay(listen, out, "::1", echo_port, 0)
-    relay.start()
-    try:
-        client = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-        client.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-        client.bind(("::1", 0))
-        client.settimeout(2)
-        client.sendto(b"ping", listen.getsockname())
-        reply, _ = client.recvfrom(1500)
-        assert reply == b"pong:ping", reply
-    finally:
-        relay.close()
-        echo.close()
+    def fake_install(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    agent.subprocess.run = fake_install
+    agent._last_matterc_hits = [{
+        "src": "fe80::2a70:4eff:fe68:98ea",
+        "iface": "eth0",
+        "aaaa": ["fdef:badd:6106:0:dbfc:813f:f2ae:dcd0"],
+        "port": 5540,
+        "matterc": True,
+    }]
+    label = agent.install_onlink_accessory_route()
+    assert label == "onlink:28:70:4e:68:98:ea", label
+    flat = [" ".join(c) for c in calls]
+    assert any("neigh" in c and "28:70:4e:68:98:ea" in c and "eth0" in c for c in flat), flat
+    assert any("route" in c and "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0/128" in c and "dev eth0" in c and " via " not in c for c in flat), flat
+    assert any("addr" in c and "del" in c and "dev lo" in c for c in flat), flat
     print("ok: thread route helpers")
     return 0
 

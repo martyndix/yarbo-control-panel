@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.347] - 2026-11-17
+
+### Fixed
+
+- Add device no longer parks the accessory `fd…` address on `lo`. That relay aimed the handshake at the link-local on port 5540, which is the port mDNS already advertised, and the accessory never sent PASE message 33. The address is now on-link on the LAN NIC, with a neighbor entry for the MAC that answered `_matterc`. Matter agent **v94**.
+
 ## [4.0.346] - 2026-11-17
 
 ### Fixed
