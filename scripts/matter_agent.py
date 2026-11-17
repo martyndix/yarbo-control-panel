@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 82
+AGENT_VERSION = 83
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1782,6 +1782,102 @@ def tailscale_iface_present() -> bool:
     return any(iface_exists(n) for n in ("tailscale0", "tailscale1"))
 
 
+_tailscale_shield_depth = 0
+
+
+def _run_matter_setup_cmd(*args: str, timeout: float = 25.0) -> None:
+    refresh_matter_setup_wrapper()
+    for cmd in (
+        ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", str(ROOT), *args],
+        ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", *args],
+    ):
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            return
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+
+
+def flush_tailscale_ipv6_routes() -> None:
+    """Drop Tailscale ULA routes so CHIP cannot prefer fd7a:… over Apple Thread."""
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "route", "show"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    for line in (shown.stdout or "").splitlines():
+        raw = line.strip()
+        if not raw or not _is_tailscale_ula(raw):
+            continue
+        # "ip route del" wants the route spec without extra metrics fluff when possible.
+        for cmd in (
+            ["sudo", "-n", "ip", "-6", "route", "del"] + raw.split(),
+            ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "del"] + raw.split(),
+        ):
+            try:
+                subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                break
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+
+
+def begin_tailscale_matter_shield() -> bool:
+    """Hide Tailscale from Matter for the duration of a pairing attempt."""
+    global _tailscale_shield_depth
+    if not (tailscale_iface_present() or iface_exists("tailscale0") or iface_exists("tailscale1")):
+        return False
+    _tailscale_shield_depth += 1
+    print("matter: shielding Tailscale during Apple Home pairing", flush=True)
+    _run_matter_setup_cmd("tailscale-shield")
+    for ts in ("tailscale0", "tailscale1"):
+        if iface_exists(ts):
+            _sysctl_w(f"net.ipv6.conf.{ts}.disable_ipv6", "1")
+            _sysctl_w(f"net.ipv6.conf.{ts}.accept_ra", "0")
+            for cmd in (
+                ["sudo", "-n", "ip", "link", "set", ts, "down"],
+                ["sudo", "-n", "/usr/sbin/ip", "link", "set", ts, "down"],
+            ):
+                try:
+                    subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+                    break
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+    flush_tailscale_ipv6_routes()
+    # Re-learn Apple BR RIOs now that Tailscale is out of the way.
+    ensure_ipv6_default_route()
+    deadline = time.time() + 5.0
+    while time.time() < deadline and thread_route_hint() is None:
+        time.sleep(0.5)
+    return True
+
+
+def end_tailscale_matter_shield() -> None:
+    global _tailscale_shield_depth
+    if _tailscale_shield_depth <= 0:
+        return
+    _tailscale_shield_depth -= 1
+    if _tailscale_shield_depth > 0:
+        return
+    print("matter: restoring Tailscale after pairing attempt", flush=True)
+    _run_matter_setup_cmd("tailscale-unshield")
+    for ts in ("tailscale0", "tailscale1"):
+        if iface_exists(ts):
+            _sysctl_w(f"net.ipv6.conf.{ts}.disable_ipv6", "0")
+            for cmd in (
+                ["sudo", "-n", "ip", "link", "set", ts, "up"],
+                ["sudo", "-n", "/usr/sbin/ip", "link", "set", ts, "up"],
+            ):
+                try:
+                    subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+                    break
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+
+
 def _is_tailscale_ula(line: str) -> bool:
     """Tailscale IPv6 ULA is fd7a:115c:a1e0::/48 — not Apple Thread."""
     low = line.lower()
@@ -2612,7 +2708,7 @@ def friendly_commission_error(err: str) -> str:
                     "(Tailscale fd7a:… is not Thread) — keep the HomePod/Apple TV on the same LAN/VLAN as eth0. "
                 )
             if has_ts:
-                base += "Tailscale is active on this Pi and often breaks Matter Thread pairing; try pausing Tailscale, then Add device again. "
+                base += "Tailscale is active on this Pi and often breaks Matter Thread pairing — Add device now auto-pauses it; if this still fails, keep HomePod on the eth0 LAN and retry with a fresh code. "
             base += "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
         else:
             base = (
@@ -2627,7 +2723,7 @@ def friendly_commission_error(err: str) -> str:
                 )
             base += (
                 "Thread plugs need Apple border-router IPv6 routes on the LAN NIC "
-                "(panel 4.0.335+ ignores Tailscale when detecting Thread). "
+                "(panel 4.0.336+ pauses Tailscale during Add device and ignores it when detecting Thread). "
                 "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
             )
         if "diag iface=" not in low:
@@ -2738,68 +2834,78 @@ def _set_commission_job(**fields: Any) -> None:
 
 def run_commission_with_code(code: str) -> dict[str, Any]:
     """Run prepare + commission_with_code (+ retry). Used by sync and async paths."""
-    ready_err = prepare_for_commission()
-    if ready_err:
-        return {"ok": False, "error": friendly_commission_error(ready_err)}
-    # Keep the first attempt shorter so a discovery rebind retry still fits Apple's
-    # ~3–5 minute Turn On Pairing Mode window.
-    rpc = matter_rpc(
-        "commission_with_code",
-        {"code": code, "network_only": True},
-        timeout=75.0,
-        retries=1,
-    )
-    err = str(rpc.get("error") or "")
-    if not rpc.get("ok") and commission_error_looks_retryable(err):
-        print(f"matter: commission retry after {err!r}", flush=True)
-        cleanup_failed_commission_node(err)
-        time.sleep(2.0)
-        prepare_for_commission()
+    shielded = False
+    try:
+        shielded = begin_tailscale_matter_shield()
+        ready_err = prepare_for_commission()
+        if ready_err:
+            return {"ok": False, "error": friendly_commission_error(ready_err)}
+        # Keep the first attempt shorter so a discovery rebind retry still fits Apple's
+        # ~3–5 minute Turn On Pairing Mode window.
         rpc = matter_rpc(
             "commission_with_code",
             {"code": code, "network_only": True},
-            timeout=90.0,
+            timeout=75.0,
             retries=1,
         )
         err = str(rpc.get("error") or "")
-    # Discovery timeout: force-rebind Matter + Thread IPv6 RIOs, then one more try.
-    if not rpc.get("ok") and commission_error_looks_discovery(err):
-        print(f"matter: discovery retry with NIC rebind after {err!r}", flush=True)
-        cleanup_failed_commission_node(err)
-        try:
-            ensure_matter_primary_interface(force=True)
-        except Exception as exc:  # noqa: BLE001
-            print(f"matter: force primary-interface: {exc}", flush=True)
-        ensure_ipv6_default_route()
-        time.sleep(3.0)
-        prepare_for_commission()
-        rpc = matter_rpc(
-            "commission_with_code",
-            {"code": code, "network_only": True},
-            timeout=100.0,
-            retries=1,
-        )
-        err = str(rpc.get("error") or "")
-    if not rpc.get("ok"):
-        detail = err or "Pairing failed"
-        cleanup_failed_commission_node(detail)
-        diag = discovery_diag()
-        msg = friendly_commission_error(detail)
-        if "diag iface=" not in msg.lower():
-            msg = f"{msg} {format_discovery_diag(diag)}"
+        if not rpc.get("ok") and commission_error_looks_retryable(err):
+            print(f"matter: commission retry after {err!r}", flush=True)
+            cleanup_failed_commission_node(err)
+            time.sleep(2.0)
+            prepare_for_commission()
+            rpc = matter_rpc(
+                "commission_with_code",
+                {"code": code, "network_only": True},
+                timeout=90.0,
+                retries=1,
+            )
+            err = str(rpc.get("error") or "")
+        # Discovery timeout: force-rebind Matter + Thread IPv6 RIOs, then one more try.
+        if not rpc.get("ok") and commission_error_looks_discovery(err):
+            print(f"matter: discovery retry with NIC rebind after {err!r}", flush=True)
+            cleanup_failed_commission_node(err)
+            try:
+                ensure_matter_primary_interface(force=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"matter: force primary-interface: {exc}", flush=True)
+            # Re-assert Tailscale shield after container bounce.
+            if shielded:
+                begin_tailscale_matter_shield()
+            ensure_ipv6_default_route()
+            time.sleep(3.0)
+            prepare_for_commission()
+            rpc = matter_rpc(
+                "commission_with_code",
+                {"code": code, "network_only": True},
+                timeout=100.0,
+                retries=1,
+            )
+            err = str(rpc.get("error") or "")
+        if not rpc.get("ok"):
+            detail = err or "Pairing failed"
+            cleanup_failed_commission_node(detail)
+            diag = discovery_diag()
+            msg = friendly_commission_error(detail)
+            if "diag iface=" not in msg.lower():
+                msg = f"{msg} {format_discovery_diag(diag)}"
+            return {
+                "ok": False,
+                "error": msg,
+                "diag": diag,
+            }
+        devices = refresh_after_commission(rpc.get("result"))
         return {
-            "ok": False,
-            "error": msg,
-            "diag": diag,
+            "ok": True,
+            "result": rpc.get("result"),
+            "devices": devices,
+            "node_id": node_id_from_any(rpc.get("result")),
+            "message": "Device added.",
         }
-    devices = refresh_after_commission(rpc.get("result"))
-    return {
-        "ok": True,
-        "result": rpc.get("result"),
-        "devices": devices,
-        "node_id": node_id_from_any(rpc.get("result")),
-        "message": "Device added.",
-    }
+    finally:
+        if shielded:
+            while _tailscale_shield_depth > 0:
+                end_tailscale_matter_shield()
 
 
 def _commission_worker(job_id: str, code: str) -> None:

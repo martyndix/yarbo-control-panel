@@ -271,12 +271,28 @@ install_update_sudoers() {
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.eth0.accept_ra_rt_info_max_plen=64"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.wlan0.accept_ra_rt_info_max_plen=64"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.end0.accept_ra_rt_info_max_plen=64"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.tailscale0.accept_ra=0"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.tailscale1.accept_ra=0"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.tailscale0.disable_ipv6=1"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.tailscale1.disable_ipv6=1"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.tailscale0.disable_ipv6=0"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.tailscale1.disable_ipv6=0"
     fi
     for ip_bin in /usr/sbin/ip /bin/ip /usr/bin/ip; do
       if [[ -x "$ip_bin" ]]; then
         echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} -6 route add default dev eth0"
         echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} -6 route add default dev wlan0"
         echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} -6 route add default dev end0"
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} link set tailscale0 down"
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} link set tailscale1 down"
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} link set tailscale0 up"
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} link set tailscale1 up"
+      fi
+    done
+    for ts_bin in /usr/bin/tailscale /usr/sbin/tailscale; do
+      if [[ -x "$ts_bin" ]]; then
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ts_bin} down"
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ts_bin} up"
       fi
     done
     if [[ -x /usr/sbin/usermod ]]; then

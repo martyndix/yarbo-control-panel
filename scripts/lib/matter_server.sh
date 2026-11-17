@@ -114,6 +114,11 @@ yarbo_matter_write_thread_sysctl_conf() {
         echo "net.ipv6.conf.${iface}.accept_ra_rt_info_max_plen=64"
       fi
     done
+    for iface in tailscale0 tailscale1; do
+      if [[ -d "/sys/class/net/${iface}" ]]; then
+        echo "net.ipv6.conf.${iface}.accept_ra=0"
+      fi
+    done
   } | yarbo_root tee "$conf" >/dev/null 2>&1 || true
   yarbo_root sysctl --system >/dev/null 2>&1 || true
 }
@@ -131,6 +136,11 @@ yarbo_matter_ensure_ipv6_route() {
       yarbo_root sysctl -w "net.ipv6.conf.${target}.disable_ipv6=0" >/dev/null 2>&1 || true
       yarbo_root sysctl -w "net.ipv6.conf.${target}.accept_ra=2" >/dev/null 2>&1 || true
       yarbo_root sysctl -w "net.ipv6.conf.${target}.accept_ra_rt_info_max_plen=64" >/dev/null 2>&1 || true
+    fi
+  done
+  for target in tailscale0 tailscale1; do
+    if [[ -f "/proc/sys/net/ipv6/conf/${target}/accept_ra" ]]; then
+      yarbo_root sysctl -w "net.ipv6.conf.${target}.accept_ra=0" >/dev/null 2>&1 || true
     fi
   done
   yarbo_root ip -6 route add multicast ff00::/8 dev "$iface" table local >/dev/null 2>&1 || true
@@ -283,6 +293,48 @@ yarbo_matter_prefer_shared() {
   return 1
 }
 
+
+yarbo_matter_tailscale_shield() {
+  local iface
+  for iface in tailscale0 tailscale1; do
+    if [[ -d "/sys/class/net/${iface}" ]]; then
+      yarbo_root sysctl -w "net.ipv6.conf.${iface}.accept_ra=0" >/dev/null 2>&1 || true
+      yarbo_root sysctl -w "net.ipv6.conf.${iface}.disable_ipv6=1" >/dev/null 2>&1 || true
+      yarbo_root ip link set "$iface" down >/dev/null 2>&1 || true
+    fi
+  done
+  if command -v tailscale >/dev/null 2>&1; then
+    yarbo_root tailscale down >/dev/null 2>&1 || true
+  fi
+  # Drop leftover Tailscale ULA routes (destination first, then full line).
+  ip -6 route show 2>/dev/null | while IFS= read -r line; do
+    case "$line" in
+      *fd7a:115c:a1e0:*|*dev\ tailscale*)
+        dest="${line%% *}"
+        if [[ -n "$dest" ]]; then
+          yarbo_root ip -6 route del "$dest" >/dev/null 2>&1 || true
+        fi
+        # shellcheck disable=SC2086
+        yarbo_root ip -6 route del $line >/dev/null 2>&1 || true
+        ;;
+    esac
+  done
+  yarbo_matter_ensure_ipv6_route
+}
+
+yarbo_matter_tailscale_unshield() {
+  local iface
+  for iface in tailscale0 tailscale1; do
+    if [[ -d "/sys/class/net/${iface}" ]]; then
+      yarbo_root sysctl -w "net.ipv6.conf.${iface}.disable_ipv6=0" >/dev/null 2>&1 || true
+      yarbo_root ip link set "$iface" up >/dev/null 2>&1 || true
+    fi
+  done
+  if command -v tailscale >/dev/null 2>&1; then
+    yarbo_root tailscale up >/dev/null 2>&1 || true
+  fi
+}
+
 yarbo_matter_setup() {
   mkdir -p "${ROOT}/data/matter-server"
   yarbo_matter_write_status "running" "Setting up the Matter server"
@@ -408,7 +460,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   if [[ -n "${1:-}" && -d "${1}/scripts" ]]; then
     ROOT="$1"
     cmd="${2:-}"
-  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" ]]; then
+  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" || "${1:-}" == "tailscale-shield" || "${1:-}" == "tailscale-unshield" ]]; then
     cmd="$1"
     if [[ -n "${YARBO_ROOT:-}" && -d "${YARBO_ROOT}/scripts" ]]; then
       ROOT="$YARBO_ROOT"
@@ -428,6 +480,16 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       YARBO_MATTER_IPV6_REEXEC=1 exec /usr/local/sbin/yarbo-matter-setup "$ROOT" ipv6-route
     fi
     yarbo_matter_enable_ipv6
+    exit 0
+  fi
+  if [[ "$cmd" == "tailscale-shield" ]]; then
+    yarbo_matter_install_wrapper
+    yarbo_matter_tailscale_shield
+    exit 0
+  fi
+  if [[ "$cmd" == "tailscale-unshield" ]]; then
+    yarbo_matter_install_wrapper
+    yarbo_matter_tailscale_unshield
     exit 0
   fi
   if [[ "$cmd" == "airplay-deps" ]]; then
