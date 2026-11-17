@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 72
+AGENT_VERSION = 73
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -56,6 +56,7 @@ COLOR_CONTROL = 0x0300
 THERMOSTAT = 0x0201
 TEMP_MEASUREMENT = 0x0402
 HUMIDITY_MEASUREMENT = 0x0405
+OCCUPANCY_SENSING = 0x0406
 BOOLEAN_STATE = 0x0045
 ELECTRICAL_POWER = 0x0090
 ELECTRICAL_MEASUREMENT = 0x0B04  # legacy ZCL; rare on Matter
@@ -67,6 +68,7 @@ POWER_SOURCE = 0x002F
 ATTR_SUPPORTED_MODES = 0
 ATTR_CURRENT_MODE = 1
 ATTR_MEASURED_HUMIDITY = 0
+ATTR_OCCUPANCY = 0  # Occupancy Sensing — OccupancyBitmap bit0 = occupied
 ATTR_BOOL_STATE_VALUE = 0
 ATTR_VOLTAGE = 4  # Electrical Power Measurement — millivolts
 ATTR_ACTIVE_CURRENT = 5  # milliamps
@@ -164,6 +166,7 @@ DEVTYPE_HEATING_COOLING = 0x0301
 DEVTYPE_TEMP_SENSOR = 0x0302
 DEVTYPE_HUMIDITY_SENSOR = 0x0303
 DEVTYPE_CONTACT_SENSOR = 0x0015
+DEVTYPE_OCCUPANCY_SENSOR = 0x0107
 DEVTYPE_RVC = 0x0074
 COLOR_CAP_HS = 1 << 0
 COLOR_CAP_EHUE = 1 << 1
@@ -1819,14 +1822,14 @@ def friendly_commission_error(err: str) -> str:
         )
     if "timeout" in low or "timed out" in low:
         return (
-            "Pairing timed out. In Apple Home open the plug → Turn On Pairing Mode, "
+            "Pairing timed out. In Apple Home open the accessory → Turn On Pairing Mode, "
             "paste that fresh code here within a few minutes (not the sticker QR). "
             "Keep a HomePod or Apple TV online for Thread. "
-            "Look for devices only finds Hue lights on a paired Bridge — use Add device for IKEA plugs."
+            "Look for devices only finds Hue lights on a paired Bridge — use Add device for Matter plugs and sensors."
         )
     if "discover" in low or "not found" in low or "no device" in low:
         return (
-            "Could not reach the plug on the network. Use Apple Home → Turn On Pairing Mode "
+            "Could not reach the device on the network. Use Apple Home → Turn On Pairing Mode "
             "(not the original QR), keep the HomePod/Apple TV online, then Add device."
         )
     if "invalid" in low and "code" in low:
@@ -2931,6 +2934,15 @@ def apply_attribute_event(data: Any) -> None:
         fields["has_open"] = True
         fields["open"] = opened
         fields["on"] = opened
+    elif cluster == OCCUPANCY_SENSING and attr == ATTR_OCCUPANCY:
+        occupied = matter_occupancy_occupied(value)
+        if occupied is None:
+            return
+        fields["has_motion"] = True
+        fields["motion"] = occupied
+        fields["on"] = occupied
+        if occupied:
+            fields["motion_at"] = int(time.time())
     elif cluster == ELECTRICAL_POWER and attr in (
         ATTR_ACTIVE_POWER,
         ATTR_VOLTAGE,
@@ -3018,15 +3030,30 @@ def apply_attribute_event(data: Any) -> None:
     elif cluster == SERVICE_AREA and attr == ATTR_SELECTED_AREAS:
         fields["selected_areas"] = parse_selected_areas(value)
     if fields:
-        if any(k in fields for k in ("temperature", "humidity", "open", "has_open", "local_temperature")):
+        if any(
+            k in fields
+            for k in (
+                "temperature",
+                "humidity",
+                "open",
+                "has_open",
+                "motion",
+                "has_motion",
+                "local_temperature",
+            )
+        ):
             live = live_row(device_id) or {}
             merged = {**live, **fields}
             open_val = merged.get("open")
+            motion_val = merged.get("motion")
+            has_motion = bool(merged.get("has_motion")) or motion_val is not None
             parts: list[str] = []
             if open_val is True:
                 parts.append("Open")
             elif open_val is False:
                 parts.append("Closed")
+            if motion_val is True:
+                parts.append("Motion")
             temp = merged.get("temperature")
             if temp is None:
                 temp = merged.get("local_temperature")
@@ -3038,6 +3065,8 @@ def apply_attribute_event(data: Any) -> None:
                     parts.append(f"{int(round(float(hum)))}% RH")
                 except (TypeError, ValueError):
                     pass
+            if not parts and has_motion and motion_val is False:
+                parts.append("OK")
             if parts:
                 fields["status"] = " · ".join(parts)
         if "power_w" in fields:
@@ -3212,7 +3241,15 @@ def device_kind(types: Any) -> str:
         return "vacuum"
     if any(i in (DEVTYPE_THERMOSTAT, DEVTYPE_HEATING_COOLING) for i in ids):
         return "heater"
-    if any(i in (DEVTYPE_TEMP_SENSOR, DEVTYPE_HUMIDITY_SENSOR, DEVTYPE_CONTACT_SENSOR) for i in ids):
+    if any(
+        i in (
+            DEVTYPE_TEMP_SENSOR,
+            DEVTYPE_HUMIDITY_SENSOR,
+            DEVTYPE_CONTACT_SENSOR,
+            DEVTYPE_OCCUPANCY_SENSOR,
+        )
+        for i in ids
+    ):
         return "sensor"
     if any(i in (0x010A, 0x010B) for i in ids):
         return "plug"
@@ -3832,10 +3869,29 @@ def endpoint_looks_contact_sensor(attributes: dict[str, Any], endpoint: int) -> 
     return endpoint_has_cluster(attributes, endpoint, BOOLEAN_STATE)
 
 
+def endpoint_looks_occupancy_sensor(attributes: dict[str, Any], endpoint: int) -> bool:
+    return endpoint_has_cluster(attributes, endpoint, OCCUPANCY_SENSING)
+
+
 def endpoint_looks_sensor(attributes: dict[str, Any], endpoint: int) -> bool:
-    return endpoint_looks_climate_sensor(attributes, endpoint) or endpoint_looks_contact_sensor(
-        attributes, endpoint
+    return (
+        endpoint_looks_climate_sensor(attributes, endpoint)
+        or endpoint_looks_contact_sensor(attributes, endpoint)
+        or endpoint_looks_occupancy_sensor(attributes, endpoint)
     )
+
+
+def matter_occupancy_occupied(raw: Any) -> bool | None:
+    """Occupancy Sensing OccupancyBitmap: bit 0 = occupied."""
+    if isinstance(raw, bool):
+        return raw
+    number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
+    if number is None:
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            return None
+    return (int(number) & 0x01) != 0
 
 
 def matter_humidity_percent(raw: Any) -> float | None:
@@ -3971,22 +4027,41 @@ def sensor_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         raw = attr_raw(attributes, endpoint, BOOLEAN_STATE, ATTR_BOOL_STATE_VALUE)
         if raw is not None:
             open_val = attr_bool(raw)
+    has_motion = endpoint_looks_occupancy_sensor(attributes, endpoint)
+    motion_val = None
+    if has_motion:
+        raw_occ = attr_raw(attributes, endpoint, OCCUPANCY_SENSING, ATTR_OCCUPANCY)
+        if raw_occ is not None:
+            motion_val = matter_occupancy_occupied(raw_occ)
     parts: list[str] = []
     if open_val is True:
         parts.append("Open")
     elif open_val is False:
         parts.append("Closed")
+    if motion_val is True:
+        parts.append("Motion")
     if temp is not None:
         parts.append(f"{temp}°")
     if humidity is not None:
         parts.append(f"{int(round(humidity))}% RH")
+    if not parts and has_motion and motion_val is False:
+        parts.append("OK")
+    if open_val is not None:
+        on_val = bool(open_val)
+    elif motion_val is not None:
+        on_val = bool(motion_val)
+    else:
+        on_val = False
     return {
         "temperature": temp,
         "humidity": humidity,
         "has_open": has_open,
         "open": open_val,
+        "has_motion": has_motion,
+        "motion": motion_val,
+        "motion_at": int(time.time()) if motion_val is True else 0,
         "status": " · ".join(parts) if parts else "",
-        "on": bool(open_val) if open_val is not None else False,
+        "on": on_val,
     }
 
 
@@ -6342,7 +6417,9 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 on = bool(thermo["thermostat_on"])
             elif vacuum:
                 on = bool(vacuum.get("on"))
-            elif sensor and sensor.get("open") is not None:
+            elif sensor and (
+                sensor.get("open") is not None or sensor.get("motion") is not None
+            ):
                 on = bool(sensor.get("on"))
             level = attr_num(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) if is_light else None
             brightness = None
@@ -6479,6 +6556,9 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                         "humidity",
                         "has_open",
                         "open",
+                        "has_motion",
+                        "motion",
+                        "motion_at",
                         "status",
                         "power_w",
                         "voltage_v",

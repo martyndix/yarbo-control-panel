@@ -808,7 +808,20 @@ def main() -> int:
             "2/144/12": 55,  # RMSCurrent mA (prefer)
         },
     }
-    sensor_rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [climate, contact, plug, grillplats]})}
+    occupancy = {
+        "node_id": 84,
+        "available": True,
+        "attributes": {
+            "0/40/1": "IKEA of Sweden",
+            "0/40/3": "VALLHORN",
+            "1/29/0": [{"deviceType": 0x0107, "revision": 1}],
+            "1/1030/0": 1,
+        },
+    }
+    sensor_rows = {
+        d["id"]: d
+        for d in agent.flatten_nodes({"nodes": [climate, contact, plug, grillplats, occupancy]})
+    }
     clim = sensor_rows.get("80:1") or {}
     if clim.get("kind") != "sensor" or clim.get("temperature") != 21.4 or clim.get("humidity") != 47.5:
         raise SystemExit(f"climate sensor flatten {clim}")
@@ -829,6 +842,13 @@ def main() -> int:
         raise SystemExit(f"grillplats V/A from sibling electrical endpoint {grill}")
     if "83:2" in sensor_rows:
         raise SystemExit(f"electrical sensor endpoint must not be its own Home row {sensor_rows.keys()}")
+    occ = sensor_rows.get("84:1") or {}
+    if occ.get("kind") != "sensor" or occ.get("has_motion") is not True or occ.get("motion") is not True:
+        raise SystemExit(f"occupancy flatten {occ}")
+    if occ.get("on") is not True or "Motion" not in str(occ.get("status") or ""):
+        raise SystemExit(f"occupancy motion status {occ}")
+    if agent.matter_occupancy_occupied(0) is not False or agent.matter_occupancy_occupied(1) is not True:
+        raise SystemExit("occupancy bitmap parse")
 
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0

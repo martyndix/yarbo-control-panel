@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.325] - 2026-11-17
+
+### Added
+- **Matter motion / occupancy sensors:** Occupancy Sensing cluster maps to the same `has_motion` / `motion` / `motion_at` fields as UniFi PIR — room 👤 alert, Automations When motion / no motion for. Matter contacts already share UniFi door/window workflows (opens/closes, ACCESS, Door/Window). Matter agent **v73**.
+
 ## [4.0.324] - 2026-11-17
 
 ### Fixed

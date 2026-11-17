@@ -15,6 +15,7 @@ final class YarboMatterFabric
     private const THERMOSTAT = 0x0201;
     private const TEMP_MEASUREMENT = 0x0402;
     private const HUMIDITY_MEASUREMENT = 0x0405;
+    private const OCCUPANCY_SENSING = 0x0406;
     private const BOOLEAN_STATE = 0x0045;
     private const ELECTRICAL_POWER = 0x0090;
     private const ELECTRICAL_MEASUREMENT = 0x0B04;
@@ -88,6 +89,7 @@ final class YarboMatterFabric
     private const ATTR_SYSTEM_MODE = 0x001C;
     private const ATTR_MEASURED_TEMP = 0;
     private const ATTR_MEASURED_HUMIDITY = 0;
+    private const ATTR_OCCUPANCY = 0;
     private const ATTR_BOOL_STATE_VALUE = 0;
     private const ATTR_VOLTAGE = 4;
     private const ATTR_ACTIVE_CURRENT = 5;
@@ -109,6 +111,7 @@ final class YarboMatterFabric
     private const DEVTYPE_TEMP_SENSOR = 0x0302;
     private const DEVTYPE_HUMIDITY_SENSOR = 0x0303;
     private const DEVTYPE_CONTACT_SENSOR = 0x0015;
+    private const DEVTYPE_OCCUPANCY_SENSOR = 0x0107;
     private const DEVTYPE_RVC = 0x0074;
 
     /**
@@ -353,7 +356,10 @@ final class YarboMatterFabric
                     $on = (bool) $thermo['thermostat_on'];
                 } elseif ($vacuum !== [] && array_key_exists('on', $vacuum)) {
                     $on = (bool) $vacuum['on'];
-                } elseif ($sensor !== [] && array_key_exists('open', $sensor) && $sensor['open'] !== null) {
+                } elseif ($sensor !== [] && (
+                    (array_key_exists('open', $sensor) && $sensor['open'] !== null)
+                    || (array_key_exists('motion', $sensor) && $sensor['motion'] !== null)
+                )) {
                     $on = (bool) ($sensor['on'] ?? false);
                 }
                 unset($thermo['thermostat_on']);
@@ -539,7 +545,8 @@ final class YarboMatterFabric
         foreach ($ids as $id) {
             if ($id === self::DEVTYPE_TEMP_SENSOR
                 || $id === self::DEVTYPE_HUMIDITY_SENSOR
-                || $id === self::DEVTYPE_CONTACT_SENSOR) {
+                || $id === self::DEVTYPE_CONTACT_SENSOR
+                || $id === self::DEVTYPE_OCCUPANCY_SENSOR) {
                 return 'sensor';
             }
         }
@@ -651,6 +658,7 @@ final class YarboMatterFabric
         $existing = strtolower(trim((string) ($row['kind'] ?? '')));
         if ($existing === 'sensor'
             || !empty($row['has_open'])
+            || !empty($row['has_motion'])
             || isset($row['temperature'])
             || isset($row['humidity'])) {
             $kind = 'sensor';
@@ -1458,10 +1466,31 @@ final class YarboMatterFabric
     /**
      * @param array<string, mixed> $attributes
      */
+    private static function endpointLooksOccupancySensor(array $attributes, int $endpoint): bool
+    {
+        return self::endpointHasCluster($attributes, $endpoint, self::OCCUPANCY_SENSING);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
     private static function endpointLooksSensor(array $attributes, int $endpoint): bool
     {
         return self::endpointLooksClimateSensor($attributes, $endpoint)
-            || self::endpointLooksContactSensor($attributes, $endpoint);
+            || self::endpointLooksContactSensor($attributes, $endpoint)
+            || self::endpointLooksOccupancySensor($attributes, $endpoint);
+    }
+
+    private static function matterOccupancyOccupied(mixed $raw): ?bool
+    {
+        if (is_bool($raw)) {
+            return $raw;
+        }
+        if (!is_numeric($raw)) {
+            return null;
+        }
+
+        return (((int) $raw) & 0x01) !== 0;
     }
 
     private static function matterHumidityPercent(mixed $raw): ?float
@@ -1605,11 +1634,22 @@ final class YarboMatterFabric
                 $open = self::attrBool($raw);
             }
         }
+        $hasMotion = self::endpointLooksOccupancySensor($attributes, $endpoint);
+        $motion = null;
+        if ($hasMotion) {
+            $rawOcc = self::attrRaw($attributes, $endpoint, self::OCCUPANCY_SENSING, self::ATTR_OCCUPANCY);
+            if ($rawOcc !== null) {
+                $motion = self::matterOccupancyOccupied($rawOcc);
+            }
+        }
         $parts = [];
         if ($open === true) {
             $parts[] = 'Open';
         } elseif ($open === false) {
             $parts[] = 'Closed';
+        }
+        if ($motion === true) {
+            $parts[] = 'Motion';
         }
         if ($temp !== null) {
             $parts[] = $temp . '°';
@@ -1617,14 +1657,27 @@ final class YarboMatterFabric
         if ($humidity !== null) {
             $parts[] = (string) (int) round($humidity) . '% RH';
         }
+        if ($parts === [] && $hasMotion && $motion === false) {
+            $parts[] = 'OK';
+        }
+        if ($open !== null) {
+            $on = (bool) $open;
+        } elseif ($motion !== null) {
+            $on = (bool) $motion;
+        } else {
+            $on = false;
+        }
 
         return [
             'temperature' => $temp,
             'humidity' => $humidity,
             'has_open' => $hasOpen,
             'open' => $open,
+            'has_motion' => $hasMotion,
+            'motion' => $motion,
+            'motion_at' => $motion === true ? time() : 0,
             'status' => $parts !== [] ? implode(' · ', $parts) : '',
-            'on' => $open !== null ? (bool) $open : false,
+            'on' => $on,
         ];
     }
 

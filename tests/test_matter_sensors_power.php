@@ -61,9 +61,29 @@ $grillplats = [
         '2/144/12' => 55,
     ],
 ];
+$occupancy = [
+    'node_id' => 84,
+    'available' => true,
+    'attributes' => [
+        '0/40/1' => 'IKEA of Sweden',
+        '0/40/3' => 'VALLHORN',
+        '1/29/0' => [['deviceType' => 0x0107, 'revision' => 1]],
+        '1/1030/0' => 1, // Occupancy Sensing OccupancyBitmap bit0 occupied
+    ],
+];
+$occupancyIdle = [
+    'node_id' => 85,
+    'available' => true,
+    'attributes' => [
+        '0/40/1' => 'IKEA of Sweden',
+        '0/40/3' => 'VALLHORN',
+        '1/29/0' => [['deviceType' => 0x0107, 'revision' => 1]],
+        '1/1030/0' => 0,
+    ],
+];
 
 $byId = [];
-foreach (YarboMatterFabric::flatten([$climate, $contact, $plug, $grillplats]) as $row) {
+foreach (YarboMatterFabric::flatten([$climate, $contact, $plug, $grillplats, $occupancy, $occupancyIdle]) as $row) {
     $byId[(string) ($row['id'] ?? '')] = $row;
 }
 
@@ -90,6 +110,18 @@ assert_true(($grill['power_w'] ?? null) === 12.5, 'grillplats watts from sibling
 assert_true(($grill['voltage_v'] ?? null) === 231.0, 'grillplats volts');
 assert_true(($grill['current_a'] ?? null) === 0.055, 'grillplats amps');
 assert_true(!isset($byId['83:2']), 'electrical sensor endpoint not a Home row');
+
+$occ = $byId['84:1'] ?? [];
+assert_true(($occ['kind'] ?? '') === 'sensor', 'occupancy kind');
+assert_true(($occ['has_motion'] ?? false) === true, 'occupancy has_motion');
+assert_true(($occ['motion'] ?? null) === true, 'occupancy motion true');
+assert_true(($occ['on'] ?? null) === true, 'occupancy on follows motion');
+assert_true(str_contains((string) ($occ['status'] ?? ''), 'Motion'), 'occupancy Motion status');
+assert_true(YarboHome::isOpenCloseSensor($occ) === false, 'occupancy is not open/close');
+$occIdle = $byId['85:1'] ?? [];
+assert_true(($occIdle['has_motion'] ?? false) === true, 'idle occupancy has_motion');
+assert_true(($occIdle['motion'] ?? null) === false, 'idle occupancy motion false');
+assert_true(str_contains((string) ($occIdle['status'] ?? ''), 'OK'), 'idle occupancy OK status');
 
 $root = sys_get_temp_dir() . '/yarbo-matter-access-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);
@@ -121,6 +153,18 @@ file_put_contents($root . '/data/home.json', json_encode([
         'on' => false,
         'available' => true,
     ], [
+        'id' => '84:1',
+        'node_id' => 84,
+        'endpoint' => 1,
+        'name' => 'Hall motion',
+        'kind' => 'sensor',
+        'has_motion' => true,
+        'motion' => true,
+        'motion_at' => time(),
+        'status' => 'Motion',
+        'on' => true,
+        'available' => true,
+    ], [
         'id' => '82:1',
         'node_id' => 82,
         'endpoint' => 1,
@@ -136,16 +180,33 @@ $items = (new YarboHome($root))->paperAccessItems();
 $ids = array_map(static fn ($row) => (string) ($row['id'] ?? ''), $items);
 assert_true(in_array('81:1', $ids, true), 'Matter contact on ACCESS: ' . json_encode($items));
 assert_true(!in_array('80:1', $ids, true), 'climate-only sensor stays off ACCESS');
+assert_true(!in_array('84:1', $ids, true), 'motion sensor stays off ACCESS');
 assert_true(!in_array('82:1', $ids, true), 'plug stays off ACCESS');
+
+$home = new YarboHome($root);
+$auto = $home->automationDevices();
+$autoById = [];
+foreach ($auto as $row) {
+    $autoById[(string) ($row['id'] ?? '')] = $row;
+}
+$autoOcc = $autoById['84:1'] ?? [];
+assert_true(($autoOcc['has_motion'] ?? false) === true, 'automationDevices has_motion');
+assert_true(($autoOcc['motion'] ?? null) === true, 'automationDevices motion');
+$autoCont = $autoById['81:1'] ?? [];
+assert_true(($autoCont['has_open'] ?? false) === true, 'automationDevices contact has_open');
 
 $agent = (string) file_get_contents(__DIR__ . '/../scripts/matter_agent.py');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($agent, 'ELECTRICAL_POWER = 0x0090'), 'agent Electrical Power cluster');
 assert_true(str_contains($agent, 'BOOLEAN_STATE = 0x0045'), 'agent Boolean State cluster');
+assert_true(str_contains($agent, 'OCCUPANCY_SENSING = 0x0406'), 'agent Occupancy Sensing cluster');
 assert_true(str_contains($agent, 'HUMIDITY_MEASUREMENT = 0x0405'), 'agent Humidity cluster');
+assert_true(str_contains($agent, 'AGENT_VERSION = 73'), 'agent v73');
 assert_true(str_contains($js, 'home-device-power'), 'Home shows plug watts');
 assert_true(str_contains($js, 'homeIsSensorKind(d)'), 'Home renders Matter sensors');
+assert_true(str_contains($js, 'homeMemberHasMotion'), 'Home person emoji uses motion');
+assert_true(str_contains($change, '## [4.0.325]'), 'changelog 4.0.325');
 assert_true(str_contains($change, '## [4.0.249]'), 'changelog 4.0.249');
 
 echo "ok: matter sensors + plug power\n";

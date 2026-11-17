@@ -5311,6 +5311,8 @@ function patchOneHomeDeviceVisual(card, id, on, extras = {}) {
             if (extras.dps != null) device.dps = extras.dps;
             if (extras.open != null) device.open = extras.open;
             if (typeof extras.motion === 'boolean') device.motion = extras.motion;
+            if (typeof extras.has_motion === 'boolean') device.has_motion = extras.has_motion;
+            if (extras.motion_at != null && Number(extras.motion_at) > 0) device.motion_at = Number(extras.motion_at);
             if (extras.status) device.status = extras.status;
         }
         const meta = card.querySelector('[data-home-dps], [data-home-status]');
@@ -7704,7 +7706,8 @@ function homeAutoCanMotion(d) {
     if (['light', 'plug', 'switch', 'heater', 'relay', 'vacuum', 'door', 'hub', 'scene'].includes(kind)) return false;
     if (d.has_motion === true) return true;
     if (homeAutoLooksLikeMotionName(d)) return true;
-    return kind === 'sensor' && !homeAutoCanOpen(d);
+    // Climate-only sensors are not motion sources (Matter Occupancy / UniFi PIR set has_motion).
+    return false;
 }
 
 function homeAutoIsCamera(d) {

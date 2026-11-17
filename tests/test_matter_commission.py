@@ -38,7 +38,7 @@ def mill_node() -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 72, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 73, agent.AGENT_VERSION
     assert agent.normalize_pairing_code("2462-204-0808") == "24622040808"
     assert agent.normalize_pairing_code(" 2462 204 0808 ") == "24622040808"
     assert agent.normalize_pairing_code("MT:ABCDEF").startswith("MT:")

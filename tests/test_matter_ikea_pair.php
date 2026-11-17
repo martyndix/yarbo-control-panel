@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 72, 'min agent 72');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 73, 'min agent 73');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -33,10 +33,13 @@ assert_true(str_contains($index, 'IKEA'), 'Home hint mentions IKEA');
 assert_true(str_contains($js, 'not IKEA/Matter plugs'), 'scan status clarifies Hue-only');
 assert_true(str_contains($home, 'normalizeMatterPairingCode'), 'PHP normalizes codes');
 assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan empty message');
-assert_true(str_contains($agent, 'AGENT_VERSION = 72'), 'agent v72');
+assert_true(str_contains($agent, 'AGENT_VERSION = 73'), 'agent v73');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
+assert_true(str_contains($agent, 'OCCUPANCY_SENSING = 0x0406'), 'occupancy sensing');
 assert_true(str_contains($docs, 'Look for devices** only finds Hue'), 'docs clarify scan');
+assert_true(str_contains($docs, 'Motion / occupancy'), 'docs motion parity');
 assert_true(str_contains($change, '## [4.0.324]'), 'changelog 4.0.324');
+assert_true(str_contains($change, '## [4.0.325]'), 'changelog 4.0.325');
 
 echo "test_matter_ikea_pair.php ok\n";

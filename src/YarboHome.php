@@ -639,7 +639,23 @@ final class YarboHome
                 }
                 if (array_key_exists('open', $device)) {
                     $row['open'] = (bool) $device['open'];
+                }
+                if (array_key_exists('has_motion', $device)) {
+                    $row['has_motion'] = (bool) $device['has_motion'];
+                }
+                if (array_key_exists('motion', $device) && $device['motion'] !== null) {
+                    $row['motion'] = (bool) $device['motion'];
+                }
+                if (isset($device['motion_at']) && is_numeric($device['motion_at'])) {
+                    $at = (int) $device['motion_at'];
+                    if ($at > 0) {
+                        $row['motion_at'] = $at;
+                    }
+                }
+                if (array_key_exists('open', $device) && $device['open'] !== null) {
                     $row['on'] = (bool) $device['open'];
+                } elseif (array_key_exists('motion', $device) && $device['motion'] !== null) {
+                    $row['on'] = (bool) $device['motion'];
                 }
                 if (isset($device['status']) && is_string($device['status']) && $device['status'] !== '') {
                     $row['status'] = $device['status'];
@@ -650,11 +666,17 @@ final class YarboHome
                     } elseif (($row['open'] ?? null) === false) {
                         $parts[] = 'Closed';
                     }
+                    if (($row['motion'] ?? null) === true) {
+                        $parts[] = 'Motion';
+                    }
                     if (isset($row['temperature'])) {
                         $parts[] = $row['temperature'] . '°';
                     }
                     if (isset($row['humidity'])) {
                         $parts[] = round((float) $row['humidity']) . '% RH';
+                    }
+                    if ($parts === [] && !empty($row['has_motion']) && ($row['motion'] ?? null) === false) {
+                        $parts[] = 'OK';
                     }
                     if ($parts !== []) {
                         $row['status'] = implode(' · ', $parts);
@@ -4806,6 +4828,15 @@ final class YarboHome
                 }
                 if (array_key_exists('open', $row)) {
                     $slim['open'] = (bool) $row['open'];
+                }
+                if (array_key_exists('has_motion', $row)) {
+                    $slim['has_motion'] = (bool) $row['has_motion'];
+                }
+                if (array_key_exists('motion', $row) && $row['motion'] !== null) {
+                    $slim['motion'] = (bool) $row['motion'];
+                }
+                if (isset($row['motion_at']) && is_numeric($row['motion_at']) && (int) $row['motion_at'] > 0) {
+                    $slim['motion_at'] = (int) $row['motion_at'];
                 }
                 if (isset($row['status']) && is_string($row['status']) && $row['status'] !== '') {
                     $slim['status'] = $row['status'];
