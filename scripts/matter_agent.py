@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 73
+AGENT_VERSION = 74
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1805,20 +1805,99 @@ def normalize_pairing_code(raw: str) -> str:
         return ""
     if code.upper().startswith("MT:"):
         return "MT:" + code[3:].strip()
-    digits = re.sub(r"[\s\-–—]", "", code)
-    if digits.isdigit() and len(digits) in (11, 21):
+    digits = re.sub(r"[\s\-–—_.]", "", code)
+    if digits.isdigit():
         return digits
+    # Labeled paste ("Setup code 2462-204-0808") → pull 11 or 21 digits.
+    only = re.sub(r"\D", "", code)
+    if len(only) in (11, 21):
+        return only
     return code
 
 
+def pairing_code_problem(code: str) -> str | None:
+    """Human-readable reason the pairing code cannot be used, or None if ok."""
+    code = str(code or "").strip()
+    if not code:
+        return "Pairing code is required"
+    if code.upper().startswith("MT:"):
+        return None if len(code) > 4 else "Incomplete MT: QR text"
+    if code.isdigit() and len(code) not in (11, 21):
+        return (
+            f"That code has {len(code)} digits; Matter needs the full 11-digit Apple Home code "
+            "(XXXX-XXX-XXXX from Turn On Pairing Mode) or a 21-digit / MT:… QR code — not a partial PIN."
+        )
+    return None
+
+
+def commission_error_looks_retryable(err: str) -> bool:
+    """CHIP stack not ready / busy — worth one more attempt after listen."""
+    low = str(err or "").lower()
+    needles = (
+        "uninitialized",
+        "incorrect state",
+        "in use",
+        "0x0000001c",
+        "0x00000028",
+        "0x00000003",
+        "chip error 0x1c",
+        "chip error 0x28",
+        "chip error 0x03",
+        "error_code 28",
+        "error code 28",
+        "error_code 40",
+        "error code 40",
+    )
+    return any(n in low for n in needles)
+
+
 def friendly_commission_error(err: str) -> str:
-    """Map opaque python-matter-server errors into panel-facing pairing hints."""
+    """Map opaque python-matter-server / CHIP errors into panel-facing pairing hints."""
     detail = str(err or "").strip() or "Pairing failed"
     low = detail.lower()
     if "not ready" in low or "unavailable" in low or "connection refused" in low:
         return (
             "Matter server is not ready. Open Settings → Home and tap Set up Matter server, "
             "then try Add device again."
+        )
+    # CHIP 0x1C (28) UNINITIALIZED — stack not ready yet.
+    if (
+        "uninitialized" in low
+        or "0x0000001c" in low
+        or "chip error 0x1c" in low
+        or re.search(r"\b(error[_\s-]?code|chip error)\s*0*28\b", low)
+    ):
+        return (
+            "Matter was not ready to pair (CHIP error 28 / uninitialized). "
+            "Wait a few seconds after the Matter server shows running, then in Apple Home "
+            "open the accessory → Turn On Pairing Mode and Add device with a fresh code."
+        )
+    # CHIP 0x28 (40) IN_USE — another commission or session is active.
+    if (
+        "in use" in low
+        or "0x00000028" in low
+        or "chip error 0x28" in low
+        or re.search(r"\b(error[_\s-]?code|chip error)\s*0*40\b", low)
+        or "busy" in low
+    ):
+        return (
+            "Pairing is busy (CHIP error 0x28 / in use). Wait ~30 seconds, then Turn On Pairing Mode "
+            "again in Apple Home and paste the new code into Add device."
+        )
+    if "incorrect state" in low or "0x00000003" in low or "chip error 0x03" in low:
+        return (
+            "Matter pairing hit an incorrect state. Confirm the Matter server is running, "
+            "Turn On Pairing Mode again in Apple Home, and retry Add device with a fresh code."
+        )
+    if (
+        "invalid argument" in low
+        or "0x0000002f" in low
+        or "integrity check" in low
+        or ("digit" in low and "code" in low)
+    ):
+        return (
+            "That pairing code was rejected. Use the full 11-digit code from Apple Home → "
+            "Turn On Pairing Mode (XXXX-XXX-XXXX), not the sticker QR and not a partial PIN."
         )
     if "timeout" in low or "timed out" in low:
         return (
@@ -1842,10 +1921,46 @@ def friendly_commission_error(err: str) -> str:
             "This fabric may already have that device, or pairing mode expired. "
             "Check Hidden under Home ⚙️, or Turn On Pairing Mode again in Apple Home."
         )
+    if "attest" in low:
+        return (
+            "Device attestation failed during pairing. Retry with a fresh Turn On Pairing Mode code; "
+            "if it keeps failing, factory-reset the accessory and add it to Apple Home again first."
+        )
     return (
-        f"{detail} — For a plug already in Apple Home: accessory → Turn On Pairing Mode → "
+        f"{detail} — For a device already in Apple Home: accessory → Turn On Pairing Mode → "
         "Add device (not Look for devices)."
     )
+
+
+def format_matter_rpc_error(msg: dict[str, Any]) -> str:
+    """Prefer details, then append numeric error_code when CHIP/server codes are otherwise lost."""
+    details = str(msg.get("details") or msg.get("error") or "").strip()
+    code = msg.get("error_code")
+    if code is None or code == "":
+        return details or "Matter error"
+    code_s = str(code).strip()
+    if not details:
+        return f"error_code {code_s}"
+    if code_s and code_s not in details:
+        return f"{details} (error_code {code_s})"
+    return details
+
+
+def prepare_for_commission() -> str | None:
+    """Ensure Docker Matter server + listen socket are up before commission_with_code."""
+    err = ensure_matter_server()
+    if err:
+        return err
+    try:
+        ensure_listening()
+    except Exception as exc:  # noqa: BLE001
+        # Listening helps readiness but commission can still proceed on the cmd socket.
+        print(f"matter: listen before commission: {exc}", flush=True)
+        try:
+            connected_ws(CMD_CHANNEL)
+        except Exception as cmd_exc:  # noqa: BLE001
+            return str(cmd_exc)
+    return None
 
 
 def refresh_after_commission(result: Any) -> list[dict[str, Any]]:
@@ -2717,8 +2832,7 @@ def matter_rpc(
                 reset_ws(channel)
                 continue
             if "error_code" in msg or "error" in msg:
-                err = msg.get("details") or msg.get("error") or msg.get("error_code")
-                return {"ok": False, "error": str(err)}
+                return {"ok": False, "error": format_matter_rpc_error(msg)}
             return {"ok": True, "result": msg.get("result")}
         except Exception as exc:  # noqa: BLE001
             last_err = exc
@@ -6607,13 +6721,31 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         }
     if op == "commission":
         code = normalize_pairing_code(str(body.get("code") or ""))
-        if not code:
-            return {"ok": False, "error": "Pairing code is required"}
+        problem = pairing_code_problem(code)
+        if problem:
+            return {"ok": False, "error": problem}
+        ready_err = prepare_for_commission()
+        if ready_err:
+            return {"ok": False, "error": friendly_commission_error(ready_err)}
         rpc = matter_rpc(
             "commission_with_code",
             {"code": code, "network_only": True},
             timeout=90.0,
+            retries=1,
         )
+        if not rpc.get("ok") and commission_error_looks_retryable(str(rpc.get("error") or "")):
+            print(
+                f"matter: commission retry after {rpc.get('error')!r}",
+                flush=True,
+            )
+            time.sleep(2.5)
+            prepare_for_commission()
+            rpc = matter_rpc(
+                "commission_with_code",
+                {"code": code, "network_only": True},
+                timeout=90.0,
+                retries=1,
+            )
         if not rpc.get("ok"):
             return {
                 "ok": False,

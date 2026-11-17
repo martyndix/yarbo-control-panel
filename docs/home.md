@@ -42,6 +42,7 @@ On a Mac, Matter pairing is optional and needs Docker Desktop; use the Pi for da
 - Already in Apple Home (IKEA plugs, sensors, …): accessory → **Turn On Pairing Mode** → paste the ~5-minute code into **Add device** (the printed QR is not reused). **Look for devices** only finds Hue lights on a Bridge you already paired — it will not find a new IKEA plug.
 - Other Matter devices: code or `MT:…` QR text from the vendor app.
 - Matter server must show as running on the Home card (Settings → Home → **Set up Matter server** if needed). Thread plugs need a HomePod / Apple TV online as the border router.
+- If Add device fails with **error 28** / uninitialized: wait until the Matter server shows running, then Turn On Pairing Mode again and paste a **fresh** 11-digit code. Error **0x28** / in use means wait ~30 seconds and retry with a new pairing-mode code.
 
 Thread devices keep using Apple’s (or another) border router. IPv6 is turned on automatically on the Pi when the Matter server is set up.
 

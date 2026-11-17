@@ -1135,9 +1135,13 @@ final class YarboHome
         if (strncasecmp($code, 'MT:', 3) === 0) {
             return 'MT:' . trim(substr($code, 3));
         }
-        $digits = preg_replace('/[\s\-–—]+/u', '', $code) ?? $code;
-        if ($digits !== '' && ctype_digit($digits) && (strlen($digits) === 11 || strlen($digits) === 21)) {
+        $digits = preg_replace('/[\s\-–—_.]+/u', '', $code) ?? $code;
+        if ($digits !== '' && ctype_digit($digits)) {
             return $digits;
+        }
+        $only = preg_replace('/\D+/', '', $code) ?? '';
+        if ($only !== '' && (strlen($only) === 11 || strlen($only) === 21)) {
+            return $only;
         }
 
         return $code;

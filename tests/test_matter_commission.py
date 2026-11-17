@@ -38,11 +38,19 @@ def mill_node() -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 73, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 74, agent.AGENT_VERSION
     assert agent.normalize_pairing_code("2462-204-0808") == "24622040808"
     assert agent.normalize_pairing_code(" 2462 204 0808 ") == "24622040808"
+    assert agent.normalize_pairing_code("Setup code 2462-204-0808") == "24622040808"
     assert agent.normalize_pairing_code("MT:ABCDEF").startswith("MT:")
+    assert agent.pairing_code_problem("24622040808") is None
+    assert "11-digit" in (agent.pairing_code_problem("246220408083") or "")
+    assert "error 28" in agent.friendly_commission_error("CHIP Error 0x0000001C: Uninitialized").lower()
+    assert "in use" in agent.friendly_commission_error("CHIP Error 0x00000028: In use").lower()
     assert "Turn On Pairing Mode" in agent.friendly_commission_error("timeout while discovering")
+    assert "error_code 28" in agent.format_matter_rpc_error(
+        {"details": "Commission with code failed for node 1.", "error_code": 28}
+    )
     assert agent.node_id_from_any({"node_id": 40}) == 40
     assert agent.node_id_from_any(40) == 40
     assert agent.node_id_from_any({"result": {"nodeId": 7}}) == 7
@@ -62,10 +70,13 @@ def main() -> int:
             return {"ok": True, "result": mill_node()}
         if command == "interview_node":
             return {"ok": True}
+        if command == "start_listening":
+            return {"ok": True, "result": []}
         return {"ok": True, "result": None}
 
     agent.matter_rpc = fake_rpc  # type: ignore[method-assign]
-    paired = agent.dispatch({"op": "commission", "code": "246220408083"})
+    agent.prepare_for_commission = lambda: None  # type: ignore[method-assign]
+    paired = agent.dispatch({"op": "commission", "code": "2462-204-0808"})
     assert paired.get("ok") is True, paired
     assert paired.get("node_id") == 40, paired
     ids = {str(row.get("id") or "") for row in paired.get("devices") or []}
@@ -75,6 +86,8 @@ def main() -> int:
     assert "40:2" in live_ids, live_ids
     assert any(command == "commission_with_code" for command, _ in calls), calls
     assert not any(command == "interview_node" for command, _ in calls), calls
+    bad = agent.dispatch({"op": "commission", "code": "12345"})
+    assert bad.get("ok") is False and "digit" in str(bad.get("error") or "").lower(), bad
 
     calls.clear()
     agent._live_devices = [hue]
@@ -102,7 +115,8 @@ def main() -> int:
         return {"ok": True, "result": None}
 
     agent.matter_rpc = id_only_rpc  # type: ignore[method-assign]
-    by_id = agent.dispatch({"op": "commission", "code": "111111111111"})
+    agent.prepare_for_commission = lambda: None  # type: ignore[method-assign]
+    by_id = agent.dispatch({"op": "commission", "code": "11112222333"})
     assert by_id.get("ok") is True, by_id
     assert any(command == "get_nodes" for command, _ in calls), calls
     got = {str(row.get("id") or "") for row in by_id.get("devices") or []}

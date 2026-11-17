@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.326] - 2026-11-17
+
+### Fixed
+- **Matter Add device “error 28”:** CHIP **0x1C / 28** (uninitialized) and **0x28** (in use) now show clear steps; the Matter server is warmed up before pairing, wrong-length codes are rejected early, and one automatic retry runs when the stack was not ready. Matter agent **v74**.
+
 ## [4.0.325] - 2026-11-17
 
 ### Added
