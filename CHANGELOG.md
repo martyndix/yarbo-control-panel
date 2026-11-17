@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.344] - 2026-11-17
+
+### Fixed
+
+- Add device sends the pairing handshake to the accessory link-local (`fe80::…%eth0`) instead of the `fd…` address from mDNS. With no Thread route, that `fd` address follows the normal IPv6 default route to the gateway, which drops it, so PASE waits for message 33 and times out. The prefix is also marked unreachable so it cannot use that default route. Matter agent **v91**.
+
 ## [4.0.343] - 2026-11-17
 
 ### Fixed
