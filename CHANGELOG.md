@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.362] - 2026-11-17
+
+### Fixed
+
+- Pairing no longer falls back to a link-local source. v108 reported `src=ll` because the Pi’s only IPv6 address is inside the HomePod prefix, and the HomePod does not answer a link-local source. The IKEA plug paired from an address on the LAN subnet. The Pi now uses `fd58:b000:2::253` and tells the LAN that prefix is on-link. Matter agent **v109**.
+
 ## [4.0.361] - 2026-11-17
 
 ### Fixed
