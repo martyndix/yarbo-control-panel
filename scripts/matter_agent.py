@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 101
+AGENT_VERSION = 102
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1799,6 +1799,8 @@ _thread_route_attempted = False
 _last_matterc_hits: list[dict[str, Any]] = []
 _last_ra_proof = ""
 _last_routes_installed: list[str] = []
+_last_rio_prefixes: list[str] = []
+_last_omr = ""
 _mdns5353 = ""
 _mdns_quiesced = False
 _pase_target = ""
@@ -3150,17 +3152,20 @@ def install_advertised_routes(iface: str, solicitation: dict[str, Any]) -> str:
     src = ensure_pio_source(iface, list(solicitation.get("pios") or []))
     via_used = ""
     installed: list[str] = []
+    global _last_ra_proof, _last_routes_installed, _last_rio_prefixes
+    _last_rio_prefixes = []
     for row in rios:
         prefix = str(row.get("prefix") or "")
         via = str(row.get("via") or "").split("%", 1)[0]
         if not prefix or not via.lower().startswith("fe80:"):
             continue
+        if prefix not in _last_rio_prefixes:
+            _last_rio_prefixes.append(prefix)
         if add_ipv6_route(prefix, via, iface, src):
             via_used = via
             installed.append(f"{prefix} via {via}")
     if not via_used:
         return ""
-    global _last_ra_proof, _last_routes_installed
     _last_ra_proof = "ra"
     _last_routes_installed = installed
     return f"ra:{via_used}"
@@ -3348,6 +3353,62 @@ def install_same_prefix_source(host: str, iface: str) -> str:
     announced = advertise_prefix(iface, prefix)
     print(f"matter: PASE source {src_addr} on {prefix} to {host} mac {mac}", flush=True)
     return f"pfxra:{src_addr}" if announced else f"pfx:{src_addr}"
+
+
+def accessory_omr_address() -> str:
+    """HomePod prefix plus the accessory's interface id.
+
+    mDNS often only carries the mesh-local address (fdef:…). The HomePod does
+    not forward that prefix. The same interface id on the prefix the HomePod
+    advertised (fd10:…) is the address the border router does forward.
+    """
+    host, _prefix, _iface = matterc_fd_target()
+    if not host:
+        return ""
+    try:
+        mesh = ipaddress.IPv6Address(host.split("%", 1)[0])
+    except ValueError:
+        return ""
+    if mesh.is_link_local or mesh.is_unspecified:
+        return ""
+    iid = mesh.packed[8:]
+    for raw in _last_rio_prefixes:
+        try:
+            net = ipaddress.IPv6Network(raw, strict=False)
+        except (ValueError, ipaddress.AddressValueError):
+            continue
+        if net.prefixlen != 64 or mesh in net:
+            continue
+        packed = bytearray(net.network_address.packed)
+        packed[8:] = iid
+        candidate = ipaddress.IPv6Address(bytes(packed))
+        if candidate.is_link_local or candidate.is_unspecified or candidate.is_multicast:
+            continue
+        return str(candidate)
+    return ""
+
+
+def try_commission_omr(code: str) -> dict[str, Any] | None:
+    """Commission the address on the HomePod's prefix. Never a link-local."""
+    global _last_omr
+    omr = accessory_omr_address()
+    pin = manual_pairing_pin(code)
+    if not omr or not pin:
+        return None
+    try:
+        parsed = ipaddress.IPv6Address(omr)
+    except ValueError:
+        return None
+    if parsed.is_link_local:
+        return None
+    _last_omr = omr
+    print(f"matter: commissioning {omr} on the HomePod prefix", flush=True)
+    return matter_rpc(
+        "commission_on_network",
+        {"setup_pin_code": pin, "ip_addr": omr},
+        timeout=90.0,
+        retries=1,
+    )
 
 
 def rio_covers(prefix: str, rios: list[dict[str, Any]]) -> bool:
@@ -3645,6 +3706,7 @@ def discovery_diag() -> dict[str, Any]:
         "pase_target": _pase_target,
         "br": _last_br_heard or "none",
         "port": mdns_port,
+        "omr": _last_omr,
     }
 
 
@@ -3667,7 +3729,9 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
         f"mdns5353={row.get('mdns5353') or 'unknown'} net={row.get('network_mode') or '?'} "
         f"thread_route={route} iface={row.get('iface')} br={row.get('br') or 'none'} "
         f"pase={row.get('pase_target') or 'mdns'} "
-        f"port={row.get('port') or 0} ts={ts} shield={row.get('shield') or 'n/a'}]"
+        f"port={row.get('port') or 0} ts={ts} shield={row.get('shield') or 'n/a'}"
+        + (f" omr={row.get('omr')}" if row.get("omr") else "")
+        + "]"
     )
 
 
@@ -4613,6 +4677,8 @@ def matter_server_log_hint() -> str:
         low = line.lower()
         if any(item in low for item in skip):
             continue
+        if "discovered on mdns" in low:
+            continue
         if any(key in low for key in keys):
             picked.append(line.strip())
     if not picked:
@@ -4653,12 +4719,14 @@ def restore_host_mdns() -> None:
 
 def run_commission_with_code(code: str) -> dict[str, Any]:
     """Run prepare + commission. Used by sync and async paths."""
-    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _mdns_quiesced, _pase_target, _last_br_heard
+    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard
     shielded = False
     _thread_route_attempted = False
     _last_matterc_hits = []
     _last_ra_proof = ""
     _last_routes_installed = []
+    _last_rio_prefixes = []
+    _last_omr = ""
     _mdns_quiesced = False
     _pase_target = ""
     _last_br_heard = ""
@@ -4702,6 +4770,11 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             retries=1,
         )
         err = str(rpc.get("error") or "")
+        if not rpc.get("ok"):
+            omr_rpc = try_commission_omr(code)
+            if omr_rpc is not None:
+                rpc = omr_rpc
+                err = str(rpc.get("error") or "")
         server_gave_up = "matter server timed out" in err.lower()
         if not rpc.get("ok") and not server_gave_up and commission_error_looks_retryable(err):
             print(f"matter: commission retry after {err!r}", flush=True)

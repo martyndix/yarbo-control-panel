@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.355] - 2026-11-17
+
+### Fixed
+
+- Add device commissions a Thread sensor on the prefix the HomePod advertises when mDNS only offers the mesh-local address. The Timmerflotte answered on `fdef:badd:6106::/64`, which the HomePod does not forward, while the plug was reachable on `fd10:…/64`. Matter agent **v102**.
+
 ## [4.0.354] - 2026-11-17
 
 ### Fixed

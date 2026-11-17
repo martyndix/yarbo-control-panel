@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 101, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 102, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -190,6 +190,25 @@ Router lifetime           :         1800
     })
     assert advertised == "ra:fe80::abcd", advertised
     assert saved and saved[0][1] == "fd99:1:2::/64" and "dbfc" not in " ".join(saved[0]), saved
+    agent._last_matterc_hits = [{
+        "matterc": True,
+        "aaaa": ["fdef:badd:6106:0:89b5:1f3d:906e:51bc"],
+        "a": [],
+        "src": "fe80::18e3:8d10:e524:10a9",
+        "iface": "eth0",
+        "port": 5540,
+    }]
+    agent._last_rio_prefixes = ["fd10:d687:e7bf:4ba8::/64"]
+    assert agent.accessory_omr_address() == "fd10:d687:e7bf:4ba8:89b5:1f3d:906e:51bc"
+    agent._last_matterc_hits[0]["aaaa"] = ["fe80::18e3:8d10:e524:10a9"]
+    assert agent.accessory_omr_address() == ""
+    body = "2412950753"
+    for digit in "0123456789":
+        if agent.verhoeff_ok(body + digit):
+            assert agent.manual_pairing_pin(body + digit) == 12345679
+            break
+    else:
+        raise SystemExit("verhoeff check digit missing")
     print("ok: thread route helpers")
     return 0
 
