@@ -50,7 +50,7 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 92, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 93, agent.AGENT_VERSION
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
         "iface": "eth0",
@@ -138,6 +138,11 @@ def main() -> int:
     assert "checksum" in (agent.pairing_code_problem("31436531014") or "").lower()
     assert "error 28" in agent.friendly_commission_error("CHIP Error 0x0000001C: Uninitialized").lower()
     assert "in use" in agent.friendly_commission_error("CHIP Error 0x00000028: In use").lower()
+    seen_fail = agent.friendly_commission_error(
+        "Commission with code failed for node 29. (error_code 1)"
+    ).lower()
+    assert "answered" in seen_fail, seen_fail
+    agent.discovery_diag = lambda: {"matterc_seen": False, "matterc": ["no _matterc replies"]}
     assert "never found" in agent.friendly_commission_error(
         "Commission with code failed for node 29. (error_code 1)"
     ).lower()

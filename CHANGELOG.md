@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.346] - 2026-11-17
+
+### Fixed
+
+- Add device no longer marks the accessory `fd…` prefix unreachable. That made CHIP fail at once with network unreachable, which showed up as error_code 1 and CHIP 0x03. Pairing still uses the code and the port from mDNS, and relays those packets to the accessory link-local address. Leftover unreachable `fd` routes from 4.0.345 are removed. Matter agent **v93**.
+
 ## [4.0.345] - 2026-11-17
 
 ### Fixed
