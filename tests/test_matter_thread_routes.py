@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 109, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 110, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -151,6 +151,11 @@ Router lifetime           :         1800
     assert not any("lladdr" in c and "28:70:4e:68:98:ea" in c for c in flat), flat
     ra_pkt = agent.icmpv6_ra_packet("fdef:badd:6106::/64", bytes.fromhex("001122334455"))
     assert ra_pkt[0] == 134 and ra_pkt[16:18] == b"\x01\x01" and ra_pkt[24:28] == b"\x03\x04\x40\x80", ra_pkt[:32]
+    assert ra_pkt[-16:-12] == bytes([24, 2, 64, 0x08]), ra_pkt[-16:]
+    assert struct.unpack("!H", ra_pkt[6:8])[0] == 0
+    routed = agent.icmpv6_ra_packet("fd58:b000:2::/64", bytes.fromhex("001122334455"), 90)
+    assert struct.unpack("!H", routed[6:8])[0] == 90, routed[:8]
+    assert routed[-16] == 24
     calls.clear()
     agent.discover_border_router_via = lambda iface: ""
     agent.advertise_prefix = lambda iface, prefix: True

@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 109
+AGENT_VERSION = 110
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1807,13 +1807,15 @@ _pase_target = ""
 _last_br_heard = ""
 _prefix_src = ""
 _last_pair_src = ""
+_last_ra_adv = ""
 _saved_ra_pinfo: tuple[str, str] | None = None
 _held_rio_addrs: list[tuple[str, str, str]] = []
 # Routable source for PASE. A link-local source is not forwarded by a border router.
 PAIR_SRC = "fd58:b000:1::1"
 # A LAN prefix that is not the HomePod's Thread prefix. The plug paired because it
 # had an address on the LAN subnet. The Pi's only other IPv6 address is inside the
-# HomePod prefix, and a link-local source gets no reply.
+# HomePod prefix, and a link-local source gets no reply. The HomePod only routes
+# this prefix back when the Pi advertises it as a route from its link-local.
 PAIR_LAN_PREFIX = "fd58:b000:2::/64"
 PAIR_LAN_ADDR = "fd58:b000:2::253"
 
@@ -3382,29 +3384,49 @@ def iface_mac(iface: str) -> bytes:
         return b""
 
 
-def icmpv6_ra_packet(prefix: str, mac: bytes) -> bytes:
-    """Router Advertisement that marks prefix on-link. Checksum is left for the kernel."""
+def icmpv6_ra_packet(prefix: str, mac: bytes, router_lifetime: int = 0) -> bytes:
+    """Router Advertisement with an on-link prefix and a route back to this host.
+
+    Checksum is left for the kernel. Lifetime 0 keeps hosts from treating the Pi
+    as their default router. A copy with a lifetime is sent only to routers.
+    """
     try:
         net = ipaddress.IPv6Network(prefix, strict=False)
     except (ValueError, ipaddress.AddressValueError):
         return b""
     if net.prefixlen != 64 or len(mac) != 6:
         return b""
-    header = struct.pack("!BBHBBHII", 134, 0, 0, 64, 0, 600, 0, 0)
+    lifetime = max(0, min(int(router_lifetime), 65535))
+    header = struct.pack("!BBHBBHII", 134, 0, 0, 64, 0, lifetime, 0, 0)
     source_link = bytes([1, 1]) + mac
     pio = bytes([3, 4, 64, 0x80]) + struct.pack("!II", 600, 0) + (b"\x00" * 4) + net.network_address.packed
-    return header + source_link + pio
+    # RFC 4191 Route Information, high preference. A HomePod publishes this into
+    # Thread. An on-link prefix alone stays on the LAN, so the sensor reply is lost.
+    rio = bytes([24, 2, 64, 0x08]) + struct.pack("!I", 600) + net.network_address.packed[:8]
+    return header + source_link + pio + rio
 
 
-def advertise_prefix_once(iface: str, prefix: str) -> dict[str, Any]:
-    """Tell hosts on iface that prefix is on-link. Needs a raw ICMPv6 socket."""
-    result: dict[str, Any] = {"sent": False, "error": ""}
+def advertise_prefix_once(iface: str, prefix: str, hop: str = "") -> dict[str, Any]:
+    """Tell the HomePod that prefix routes via this Pi's link-local address.
+
+    v109 sent an on-link prefix to every host and did not name a route. The
+    HomePod never published fd58:b000:2::/64 into Thread, so the reply to
+    fd58:b000:2::253 did not come back. The source has to be link-local or the
+    advertisement is discarded.
+    """
+    result: dict[str, Any] = {"sent": False, "error": "", "via": ""}
     if not iface or not re.fullmatch(r"[A-Za-z0-9._:-]+", iface):
         result["error"] = "bad iface"
         return result
-    packet = icmpv6_ra_packet(prefix, iface_mac(iface))
-    if not packet:
+    mac = iface_mac(iface)
+    host_pkt = icmpv6_ra_packet(prefix, mac, 0)
+    router_pkt = icmpv6_ra_packet(prefix, mac, 90)
+    if not host_pkt or not router_pkt:
         result["error"] = "bad prefix"
+        return result
+    ll = iface_fe80(iface)
+    if not ll:
+        result["error"] = "no link-local"
         return result
     try:
         scope = socket.if_nametoindex(iface)
@@ -3417,18 +3439,37 @@ def advertise_prefix_once(iface: str, prefix: str) -> dict[str, Any]:
         result["error"] = str(exc)
         return result
     try:
-        try:
-            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 255)
-        except OSError:
-            pass
+        for opt in (socket.IPV6_MULTICAST_HOPS, getattr(socket, "IPV6_UNICAST_HOPS", 16)):
+            try:
+                sock.setsockopt(socket.IPPROTO_IPV6, opt, 255)
+            except OSError:
+                pass
+        if hasattr(socket, "IPV6_CHECKSUM"):
+            try:
+                sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_CHECKSUM, 2)
+            except OSError:
+                pass
         if hasattr(socket, "SO_BINDTODEVICE"):
             try:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, iface.encode() + b"\x00")
             except OSError:
                 pass
-        for _ in range(3):
-            sock.sendto(packet, ("ff02::1", 0, 0, scope))
+        try:
+            sock.bind((ll, 0, 0, scope))
+        except OSError as exc:
+            result["error"] = f"bind {exc}"
+            return result
+        hop_addr = (hop or "").split("%", 1)[0]
+        targets: list[tuple[str, bytes]] = [("ff02::1", host_pkt), ("ff02::2", router_pkt)]
+        via = "multi"
+        if hop_addr.lower().startswith("fe80:"):
+            targets.append((hop_addr, router_pkt))
+            via = "rio"
+        for dest, packet in targets:
+            for _ in range(3):
+                sock.sendto(packet, (dest, 0, 0, scope))
         result["sent"] = True
+        result["via"] = via
     except OSError as exc:
         result["error"] = str(exc)
     finally:
@@ -3436,27 +3477,41 @@ def advertise_prefix_once(iface: str, prefix: str) -> dict[str, Any]:
     return result
 
 
-def advertise_prefix(iface: str, prefix: str) -> bool:
-    """Advertise prefix as on-link so the accessory answers this source on the LAN."""
-    local = advertise_prefix_once(iface, prefix)
+def advertise_pair_route(iface: str, prefix: str, hop: str = "") -> str:
+    """Advertise prefix as a route the HomePod can publish into Thread.
+
+    Returns rio (unicast to the HomePod), multi (routers only), or fail.
+    """
+    local = advertise_prefix_once(iface, prefix, hop)
     if local.get("sent"):
-        print(f"matter: advertised {prefix} on-link on {iface}", flush=True)
-        return True
+        mode = str(local.get("via") or "multi")
+        print(f"matter: advertised {prefix} {mode} on {iface}", flush=True)
+        return mode
     err = str(local.get("error") or "")
     if "no interface" in err.lower() or err in ("bad iface", "bad prefix"):
-        print(f"matter: prefix advertisement not sent: {err}", flush=True)
-        return False
-    raw = _run_matter_setup_text("prefix-advertise", iface, prefix)
+        print(f"matter: route advertisement not sent: {err}", flush=True)
+        return "fail"
+    hop_addr = (hop or "").split("%", 1)[0]
+    args = ["prefix-advertise", iface, prefix]
+    if hop_addr.lower().startswith("fe80:"):
+        args.append(hop_addr)
+    raw = _run_matter_setup_text(*args)
     if raw:
         try:
             loaded = json.loads(raw.splitlines()[-1])
         except (json.JSONDecodeError, IndexError):
             loaded = {}
         if isinstance(loaded, dict) and loaded.get("sent"):
-            print(f"matter: advertised {prefix} on-link on {iface}", flush=True)
-            return True
-    print(f"matter: prefix advertisement not sent: {err or 'no reply'}", flush=True)
-    return False
+            mode = str(loaded.get("via") or ("rio" if hop_addr.lower().startswith("fe80:") else "multi"))
+            print(f"matter: advertised {prefix} {mode} on {iface}", flush=True)
+            return mode
+    print(f"matter: route advertisement not sent: {err or 'no reply'}", flush=True)
+    return "fail"
+
+
+def advertise_prefix(iface: str, prefix: str, hop: str = "") -> bool:
+    """Advertise prefix so a pairing reply can come back to this Pi."""
+    return advertise_pair_route(iface, prefix, hop) != "fail"
 
 
 def install_same_prefix_source(host: str, iface: str) -> str:
@@ -3661,17 +3716,22 @@ def restore_thread_prefix_addresses() -> None:
     resume_onlink_prefix_info()
 
 
-def install_pair_lan_address(iface: str) -> str:
-    """Address on a LAN prefix the HomePod can answer with neighbor discovery."""
+def install_pair_lan_address(iface: str, hop: str = "") -> str:
+    """Address on a LAN prefix, plus a route the HomePod can publish into Thread."""
+    global _last_ra_adv
     if not iface:
         return ""
     if not _ip_ok(["-6", "addr", "replace", f"{PAIR_LAN_ADDR}/64", "dev", iface, "nodad"]):
         return ""
     try:
-        advertise_prefix_once(iface, PAIR_LAN_PREFIX)
+        _last_ra_adv = advertise_pair_route(iface, PAIR_LAN_PREFIX, hop)
     except Exception as exc:  # noqa: BLE001
+        _last_ra_adv = "fail"
         print(f"matter: pair LAN advertisement: {exc}", flush=True)
-    print(f"matter: pairing source {PAIR_LAN_ADDR} on {iface}", flush=True)
+    if _last_ra_adv != "fail":
+        # Thread network data takes a moment to carry the new route to the sensor.
+        time.sleep(1.2)
+    print(f"matter: pairing source {PAIR_LAN_ADDR} on {iface} adv={_last_ra_adv}", flush=True)
     return PAIR_LAN_ADDR
 
 
@@ -3690,8 +3750,9 @@ def install_thread_return_route(iface: str, hop: str, mesh_prefix: str) -> str:
     src = pairing_source_address(iface, avoid)
     if not src:
         # No global address outside the HomePod prefix. src=ll on v108 got no reply.
-        # The plug paired from a normal LAN address, so give the Pi one of those.
-        src = install_pair_lan_address(iface)
+        # v109 sourced from fd58:b000:2::253 but only marked that prefix on-link, and
+        # the HomePod does not publish an on-link prefix into Thread.
+        src = install_pair_lan_address(iface, hop)
     if src:
         pause_onlink_prefix_info(iface)
         hold_thread_prefix_addresses(iface, [prefix for prefix in ula_prefixes if prefix != PAIR_LAN_PREFIX])
@@ -4121,6 +4182,7 @@ def discovery_diag() -> dict[str, Any]:
         "port": mdns_port,
         "omr": _last_omr,
         "pair_src": _last_pair_src or "auto",
+        "ra_adv": _last_ra_adv or "none",
     }
 
 
@@ -4144,6 +4206,7 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
         f"thread_route={route} iface={row.get('iface')} br={row.get('br') or 'none'} "
         f"pase={row.get('pase_target') or 'mdns'} "
         f"src={row.get('pair_src') or 'auto'} "
+        f"adv={row.get('ra_adv') or 'none'} "
         f"port={row.get('port') or 0} ts={ts} shield={row.get('shield') or 'n/a'}"
         + (f" omr={row.get('omr')}" if row.get("omr") else "")
         + "]"
@@ -4866,8 +4929,9 @@ def friendly_commission_error(err: str) -> str:
                 )
             return (
                 "The IKEA plug paired because it had an address on the LAN subnet. "
-                "This sensor has none, so pairing is sent from a LAN address on the Pi "
-                "that the HomePod can answer. Use a fresh Turn On Pairing Mode code."
+                "This sensor has none. Pairing is sent from a LAN address, and the Pi "
+                "tells the HomePod that prefix is a route back here. "
+                "Use a fresh Turn On Pairing Mode code."
                 f"{chip}"
             )
         return (
@@ -5170,7 +5234,7 @@ def restore_host_mdns() -> None:
 
 def run_commission_with_code(code: str) -> dict[str, Any]:
     """Run prepare + commission. Used by sync and async paths."""
-    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard, _last_pair_src
+    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard, _last_pair_src, _last_ra_adv
     shielded = False
     _thread_route_attempted = False
     _last_matterc_hits = []
@@ -5179,6 +5243,7 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
     _last_rio_prefixes = []
     _last_omr = ""
     _last_pair_src = ""
+    _last_ra_adv = ""
     _mdns_quiesced = False
     _pase_target = ""
     _last_br_heard = ""
@@ -10510,7 +10575,8 @@ if __name__ == "__main__":
         print(json.dumps(solicit_routers_once(sys.argv[2])), flush=True)
         raise SystemExit(0)
     if len(sys.argv) > 3 and sys.argv[1] == "--advertise-prefix":
-        print(json.dumps(advertise_prefix_once(sys.argv[2], sys.argv[3])), flush=True)
+        hop = sys.argv[4] if len(sys.argv) > 4 else ""
+        print(json.dumps(advertise_prefix_once(sys.argv[2], sys.argv[3], hop)), flush=True)
         raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] in ("--restore-nodes", "restore_nodes"):
         raise SystemExit(restore_nodes_cli())
