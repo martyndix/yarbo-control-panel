@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 79
+AGENT_VERSION = 80
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1591,21 +1591,39 @@ def primary_interface() -> str:
     return route or "eth0"
 
 
+def _sysctl_w(key: str, value: str) -> None:
+    for cmd in (
+        ["sudo", "-n", "sysctl", "-w", f"{key}={value}"],
+        ["sudo", "-n", "/usr/sbin/sysctl", "-w", f"{key}={value}"],
+    ):
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            return
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+
+
 def ensure_ipv6_default_route() -> None:
-    """CHIP mDNS needs IPv6 (at least link-local) even on IPv4-only ISPs."""
+    """CHIP needs IPv6 LL + Apple Thread RIO routes for multi-admin discovery."""
     iface = primary_interface()
     if not iface:
         return
-    # Full fix via install wrapper (disable_ipv6 / accept_ra / multicast / default).
-    for cmd in (
-        ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", "ipv6-route"],
-        ["sudo", "-n", "sysctl", "-w", f"net.ipv6.conf.{iface}.disable_ipv6=0"],
-        ["sudo", "-n", "sysctl", "-w", f"net.ipv6.conf.{iface}.accept_ra=1"],
-    ):
-        try:
-            subprocess.run(cmd, capture_output=True, text=True, timeout=8)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+    # Prefer the install wrapper (passwordless) — it applies full iface fix.
+    try:
+        subprocess.run(
+            ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", "ipv6-route"],
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    # accept_ra=2 works even when ip_forward=1; rt_info_max_plen accepts Thread /64 RIOs
+    # advertised by HomePod / Apple TV border routers (required for Apple Home multi-admin).
+    for target in ("all", "default", iface, "end0", "eth0", "wlan0"):
+        _sysctl_w(f"net.ipv6.conf.{target}.disable_ipv6", "0")
+        _sysctl_w(f"net.ipv6.conf.{target}.accept_ra", "2")
+        _sysctl_w(f"net.ipv6.conf.{target}.accept_ra_rt_info_max_plen", "64")
     # Matter discovery uses IPv6 multicast even when a default route already exists.
     for cmd in (
         ["ip", "-6", "route", "add", "multicast", "ff00::/8", "dev", iface, "table", "local"],
@@ -1628,6 +1646,17 @@ def ensure_ipv6_default_route() -> None:
         try:
             subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.TimeoutExpired):
+            continue
+    # Nudge the stack to re-learn RA / RIO from the border router.
+    for cmd in (
+        ["rdisc6", "-1", "-r", "1", "-w", "1000", iface],
+        ["sudo", "-n", "rdisc6", "-1", "-r", "1", "-w", "1000", iface],
+        ["ndisc6", "-1", "-r", "1", "-w", "1000", "ff02::2", iface],
+    ):
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=6)
+            break
+        except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
             continue
     try:
         shown = subprocess.run(
@@ -1652,6 +1681,30 @@ def ensure_ipv6_default_route() -> None:
             continue
         if r.returncode == 0:
             return
+
+
+def thread_route_hint() -> str | None:
+    """Best-effort: do we already have a non-local IPv6 route that looks like Thread?"""
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "route", "show"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    text = shown.stdout or ""
+    for line in text.splitlines():
+        low = line.lower()
+        if "fe80:" in low or "unreachable" in low:
+            continue
+        # Thread meshes commonly use fd… ULAs advertised via RIO.
+        if low.startswith("fd") or " proto ra " in f" {low} " or " metric " in low and "via fe80:" in low:
+            if "default" in low:
+                continue
+            return line.strip()[:160]
+    return None
 
 
 def matter_container_args() -> list[str]:
@@ -1679,11 +1732,12 @@ def matter_container_args() -> list[str]:
     ]
 
 
-def container_command_tokens() -> list[str]:
-    """Args / Cmd / Entrypoint tokens for yarbo-matter-server (CHIP flags live in Args)."""
+def container_command_tokens(name: str | None = None) -> list[str]:
+    """Args / Cmd / Entrypoint tokens for a Matter container (CHIP flags live in Args)."""
+    target = name or DOCKER_NAME
     tokens: list[str] = []
     for fmt in ("{{json .Args}}", "{{json .Config.Cmd}}", "{{json .Config.Entrypoint}}"):
-        inspect = run_docker(["inspect", "-f", fmt, DOCKER_NAME])
+        inspect = run_docker(["inspect", "-f", fmt, target])
         if inspect.returncode != 0:
             continue
         raw = (inspect.stdout or "").strip()
@@ -1700,13 +1754,13 @@ def container_command_tokens() -> list[str]:
     return tokens
 
 
-def container_primary_interface_state() -> tuple[str | None, str]:
+def container_primary_interface_state(name: str | None = None) -> tuple[str | None, str]:
     """Return (iface_or_None, 'ok'|'missing'|'unknown').
 
     unknown = Docker inspect returned no usable Args/Cmd (do not tear down).
     missing = Args parsed but --primary-interface was never set (recreate).
     """
-    tokens = container_command_tokens()
+    tokens = container_command_tokens(name)
     if not tokens:
         return None, "unknown"
     for i, part in enumerate(tokens):
@@ -1718,10 +1772,83 @@ def container_primary_interface_state() -> tuple[str | None, str]:
     return None, "missing"
 
 
-def container_primary_interface() -> str | None:
-    """`--primary-interface` currently baked into yarbo-matter-server, if any."""
-    have, _state = container_primary_interface_state()
+def container_primary_interface(name: str | None = None) -> str | None:
+    """`--primary-interface` currently baked into the Matter container, if any."""
+    have, _state = container_primary_interface_state(name)
     return have
+
+
+def _container_bind_args(name: str) -> list[str]:
+    """Rebuild -v args from an existing container's mounts."""
+    inspect = run_docker(["inspect", "-f", "{{json .Mounts}}", name], timeout=8.0)
+    if inspect.returncode != 0:
+        return []
+    try:
+        mounts = json.loads((inspect.stdout or "").strip() or "[]")
+    except json.JSONDecodeError:
+        return []
+    out: list[str] = []
+    if not isinstance(mounts, list):
+        return out
+    for row in mounts:
+        if not isinstance(row, dict):
+            continue
+        src = str(row.get("Source") or "").strip()
+        dst = str(row.get("Destination") or "").strip()
+        if not src or not dst:
+            continue
+        mode = "ro" if row.get("RW") is False else "rw"
+        out.extend(["-v", f"{src}:{dst}:{mode}"])
+    return out
+
+
+def recreate_shared_matter_container(want: str) -> bool:
+    """Recreate Home Assistant matter-server with --primary-interface (keep mounts)."""
+    shared = shared_matter_container()
+    if not shared:
+        return False
+    image_i = run_docker(["inspect", "-f", "{{.Config.Image}}", shared], timeout=8.0)
+    image = (image_i.stdout or "").strip() if image_i.returncode == 0 else ""
+    if not image:
+        image = DOCKER_IMAGE
+    binds = _container_bind_args(shared)
+    if not binds:
+        # Fall back to common HA / yarbo data mounts.
+        binds = ["-v", f"{STORAGE}:/data"]
+    print(
+        f"matter: recreating shared {shared} with --primary-interface {want}",
+        flush=True,
+    )
+    reset_ws()
+    ensure_ipv6_default_route()
+    run_docker(["stop", shared], timeout=25.0)
+    run_docker(["rm", shared], timeout=15.0)
+    args = [
+        "run",
+        "-d",
+        "--name",
+        shared,
+        "--restart",
+        "unless-stopped",
+        "--security-opt",
+        "apparmor=unconfined",
+        "--network",
+        "host",
+        *binds,
+        image,
+        "--storage-path",
+        "/data",
+        "--paa-root-cert-dir",
+        "/data/credentials",
+        "--primary-interface",
+        want,
+    ]
+    created = run_docker(args, timeout=60.0)
+    if created.returncode != 0:
+        print(f"matter: shared recreate failed: {(created.stderr or created.stdout or '')[:240]}", flush=True)
+        return False
+    wait_matter_port(35.0)
+    return matter_port_up()
 
 
 def ensure_matter_primary_interface(*, force: bool = False) -> None:
@@ -1730,10 +1857,29 @@ def ensure_matter_primary_interface(*, force: bool = False) -> None:
     Leave a healthy listening server alone only when Docker inspect cannot read
     Args at all — not when the flag is known to be absent.
     """
-    if shared_matter_container():
-        return
     want = primary_interface()
-    have, state = container_primary_interface_state()
+    shared = shared_matter_container()
+    if shared and matter_port_up():
+        # HA matter-server owns 5580 — still fix its --primary-interface for discovery.
+        have, state = container_primary_interface_state(shared)
+        if have == want and state == "ok" and not force:
+            return
+        if state == "unknown" and not force:
+            print(
+                f"matter: shared primary-interface unknown (want {want}); leaving alone",
+                flush=True,
+            )
+            return
+        if state == "missing" or force or (have is not None and have != want):
+            if recreate_shared_matter_container(want):
+                return
+            print("matter: shared recreate failed; falling through to yarbo container", flush=True)
+        elif have == want and state == "ok":
+            return
+        else:
+            return
+
+    have, state = container_primary_interface_state(DOCKER_NAME)
     inspect = run_docker(["inspect", "-f", "{{.State.Running}}", DOCKER_NAME])
     exists = inspect.returncode == 0
     running = exists and (inspect.stdout or "").strip().lower() == "true"
@@ -1776,9 +1922,10 @@ def ensure_matter_primary_interface(*, force: bool = False) -> None:
 
 
 def recreate_matter_container() -> None:
-    if shared_matter_container():
-        prefer_shared_matter_server()
-        return
+    if shared_matter_container() and matter_port_up():
+        want = primary_interface()
+        if recreate_shared_matter_container(want):
+            return
     reset_ws()
     ensure_ipv6_default_route()
     run_docker(["stop", DOCKER_NAME])
@@ -1795,14 +1942,22 @@ def discovery_preflight_error() -> str | None:
             f"Matter cannot use network interface {iface!r}. "
             "Connect the Pi to the same LAN as your HomePod/Apple TV, then try Add device again."
         )
+    ensure_ipv6_default_route()
     if not iface_has_ipv6_ll(iface):
-        ensure_ipv6_default_route()
-        if not iface_has_ipv6_ll(iface):
-            return (
-                f"No IPv6 link-local address on {iface} (Matter needs IPv6 for discovery). "
-                "Enable IPv6 on the Pi LAN, keep a HomePod/Apple TV online, then Turn On Pairing Mode "
-                "again and Add device with a fresh code."
-            )
+        return (
+            f"No IPv6 link-local address on {iface} (Matter needs IPv6 for discovery). "
+            "Enable IPv6 on the Pi LAN, keep a HomePod/Apple TV online, then Turn On Pairing Mode "
+            "again and Add device with a fresh code."
+        )
+    # Soft wait for Thread RIO routes from the Apple border router (non-fatal if absent —
+    # Wi‑Fi Matter devices do not need them).
+    if thread_route_hint() is None:
+        time.sleep(1.5)
+    if thread_route_hint() is None:
+        print(
+            "matter: no Thread-like IPv6 route yet (Apple BR RIO may still arrive); continuing",
+            flush=True,
+        )
     return None
 
 
@@ -2222,7 +2377,9 @@ def friendly_commission_error(err: str) -> str:
         return (
             "Pairing timed out — the Pi did not discover the accessory (Thread/mDNS). "
             "In Apple Home open the accessory → Turn On Pairing Mode, paste a fresh code within ~3 minutes "
-            "(not the sticker QR). Keep a HomePod or Apple TV online; put the Pi on the same LAN/VLAN with IPv6. "
+            "(not the sticker QR). Keep a HomePod or Apple TV online on the same LAN/VLAN as the Pi with IPv6. "
+            "Thread plugs need the Pi to accept Apple border-router IPv6 routes "
+            "(panel 4.0.332+ sets accept_ra_rt_info_max_plen). "
             "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
         )
     if "discover" in low or "not found" in low or "no device" in low:
@@ -2328,26 +2485,28 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
     ready_err = prepare_for_commission()
     if ready_err:
         return {"ok": False, "error": friendly_commission_error(ready_err)}
+    # Keep the first attempt shorter so a discovery rebind retry still fits Apple's
+    # ~3–5 minute Turn On Pairing Mode window.
     rpc = matter_rpc(
         "commission_with_code",
         {"code": code, "network_only": True},
-        timeout=120.0,
+        timeout=75.0,
         retries=1,
     )
     err = str(rpc.get("error") or "")
     if not rpc.get("ok") and commission_error_looks_retryable(err):
         print(f"matter: commission retry after {err!r}", flush=True)
         cleanup_failed_commission_node(err)
-        time.sleep(2.5)
+        time.sleep(2.0)
         prepare_for_commission()
         rpc = matter_rpc(
             "commission_with_code",
             {"code": code, "network_only": True},
-            timeout=120.0,
+            timeout=90.0,
             retries=1,
         )
         err = str(rpc.get("error") or "")
-    # Discovery timeout: force-rebind Matter to the LAN NIC + IPv6 multicast, then one more try.
+    # Discovery timeout: force-rebind Matter + Thread IPv6 RIOs, then one more try.
     if not rpc.get("ok") and commission_error_looks_discovery(err):
         print(f"matter: discovery retry with NIC rebind after {err!r}", flush=True)
         cleanup_failed_commission_node(err)
@@ -2356,12 +2515,12 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             print(f"matter: force primary-interface: {exc}", flush=True)
         ensure_ipv6_default_route()
-        time.sleep(2.0)
+        time.sleep(3.0)
         prepare_for_commission()
         rpc = matter_rpc(
             "commission_with_code",
             {"code": code, "network_only": True},
-            timeout=120.0,
+            timeout=100.0,
             retries=1,
         )
         err = str(rpc.get("error") or "")

@@ -50,13 +50,16 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 79, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 80, agent.AGENT_VERSION
     assert "Thread/mDNS" in agent.friendly_commission_error("Pairing timed out while discovering")
+    assert "accept_ra_rt_info_max_plen" in agent.friendly_commission_error("Pairing timed out while discovering")
     assert callable(agent.ensure_matter_primary_interface)
     assert callable(agent.discovery_preflight_error)
     assert callable(agent.container_command_tokens)
     assert callable(agent.container_primary_interface_state)
     assert callable(agent.commission_error_looks_discovery)
+    assert callable(agent.thread_route_hint)
+    assert callable(agent.recreate_shared_matter_container)
     assert agent.commission_error_looks_discovery("Pairing timed out while discovering")
     assert agent.commission_error_looks_discovery("Commission with code failed (error_code 1)")
     assert not agent.commission_error_looks_discovery("CHIP Error 0x00000028: In use")
@@ -212,14 +215,14 @@ def main() -> int:
         (),
         {"returncode": 0, "stdout": "true", "stderr": ""},
     )()
-    agent.container_primary_interface_state = lambda: (None, "missing")  # type: ignore[method-assign]
+    agent.container_primary_interface_state = lambda _name=None: (None, "missing")  # type: ignore[method-assign]
     agent.ensure_matter_primary_interface()
     assert recreates == ["recreate"], recreates
     recreates.clear()
-    agent.container_primary_interface_state = lambda: (None, "unknown")  # type: ignore[method-assign]
+    agent.container_primary_interface_state = lambda _name=None: (None, "unknown")  # type: ignore[method-assign]
     agent.ensure_matter_primary_interface()
     assert recreates == [], recreates
-    agent.container_primary_interface_state = lambda: ("wlan0", "ok")  # type: ignore[method-assign]
+    agent.container_primary_interface_state = lambda _name=None: ("wlan0", "ok")  # type: ignore[method-assign]
     agent.ensure_matter_primary_interface()
     assert recreates == ["recreate"], recreates
 

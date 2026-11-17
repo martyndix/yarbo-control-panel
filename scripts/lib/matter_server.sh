@@ -81,9 +81,9 @@ yarbo_docker() {
 
 yarbo_matter_enable_ipv6() {
   local flag iface
-  for iface in all default eth0 wlan0; do
+  for iface in all default eth0 wlan0 end0; do
     flag="/proc/sys/net/ipv6/conf/${iface}/disable_ipv6"
-    if [[ -f "$flag" && "$(cat "$flag" 2>/dev/null || echo 0)" == "1" ]]; then
+    if [[ -f "$flag" ]]; then
       yarbo_root sysctl -w "net.ipv6.conf.${iface}.disable_ipv6=0" >/dev/null 2>&1 || true
     fi
   done
@@ -91,19 +91,29 @@ yarbo_matter_enable_ipv6() {
 }
 
 yarbo_matter_ensure_ipv6_route() {
-  local iface
+  local iface target
   iface="$(yarbo_matter_primary_interface)"
   if [[ -z "$iface" ]]; then
     return 0
   fi
-  yarbo_root sysctl -w "net.ipv6.conf.${iface}.accept_ra=1" >/dev/null 2>&1 || true
+  # accept_ra=2 works when ip_forward=1; rt_info_max_plen accepts Apple Thread /64 RIOs.
+  for target in all default "$iface" end0 eth0 wlan0; do
+    if [[ -f "/proc/sys/net/ipv6/conf/${target}/accept_ra" ]]; then
+      yarbo_root sysctl -w "net.ipv6.conf.${target}.disable_ipv6=0" >/dev/null 2>&1 || true
+      yarbo_root sysctl -w "net.ipv6.conf.${target}.accept_ra=2" >/dev/null 2>&1 || true
+      yarbo_root sysctl -w "net.ipv6.conf.${target}.accept_ra_rt_info_max_plen=64" >/dev/null 2>&1 || true
+    fi
+  done
+  yarbo_root ip -6 route add multicast ff00::/8 dev "$iface" table local >/dev/null 2>&1 || true
+  if command -v rdisc6 >/dev/null 2>&1; then
+    yarbo_root rdisc6 -1 -r 1 -w 1000 "$iface" >/dev/null 2>&1 || true
+  fi
   if ip -6 route show default 2>/dev/null | grep -q .; then
     return 0
   fi
   yarbo_root ip -6 route add default dev "$iface" >/dev/null 2>&1 \
     || ip -6 route add default dev "$iface" >/dev/null 2>&1 \
     || true
-  yarbo_root ip -6 route add multicast ff00::/8 dev "$iface" table local >/dev/null 2>&1 || true
 }
 
 yarbo_matter_iface_has_ipv6_ll() {

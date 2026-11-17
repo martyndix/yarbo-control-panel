@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.332] - 2026-11-17
+
+### Fixed
+- **Apple Home Thread multi-admin discovery:** accept Apple border-router IPv6 RIOs (`accept_ra=2`, `accept_ra_rt_info_max_plen=64`), rebind shared HA `matter-server` when `--primary-interface` is wrong/missing, and keep the first discovery attempt shorter so a retry still fits the pairing-mode window. Matter agent **v80**.
+
 ## [4.0.331] - 2026-11-17
 
 ### Fixed

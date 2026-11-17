@@ -257,13 +257,26 @@ install_update_sudoers() {
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.default.disable_ipv6=0"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.eth0.disable_ipv6=0"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.wlan0.disable_ipv6=0"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.end0.disable_ipv6=0"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.eth0.accept_ra=1"
       echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.wlan0.accept_ra=1"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.end0.accept_ra=1"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.all.accept_ra=2"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.default.accept_ra=2"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.eth0.accept_ra=2"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.wlan0.accept_ra=2"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.end0.accept_ra=2"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.all.accept_ra_rt_info_max_plen=64"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.default.accept_ra_rt_info_max_plen=64"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.eth0.accept_ra_rt_info_max_plen=64"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.wlan0.accept_ra_rt_info_max_plen=64"
+      echo "${owner} ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w net.ipv6.conf.end0.accept_ra_rt_info_max_plen=64"
     fi
     for ip_bin in /usr/sbin/ip /bin/ip /usr/bin/ip; do
       if [[ -x "$ip_bin" ]]; then
         echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} -6 route add default dev eth0"
         echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} -6 route add default dev wlan0"
+        echo "${owner} ALL=(ALL) NOPASSWD: ${ip_bin} -6 route add default dev end0"
       fi
     done
     if [[ -x /usr/sbin/usermod ]]; then
