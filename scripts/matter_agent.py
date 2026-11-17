@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 98
+AGENT_VERSION = 99
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1803,6 +1803,7 @@ _mdns5353 = ""
 _mdns_quiesced = False
 _pase_target = ""
 _last_br_heard = ""
+_prefix_src = ""
 # Routable source for PASE. A link-local source is not forwarded by a border router.
 PAIR_SRC = "fd58:b000:1::1"
 
@@ -2337,9 +2338,12 @@ def thread_route_hint(prefer_iface: str | None = None) -> str | None:
             continue
         if dev and iface_is_virtual(dev):
             continue
-        # A local address such as the v97 PASE source is not a Thread route.
+        # A /128 local address such as the v97 PASE source is not a Thread route.
+        # A /64 proto kernel route is the prefix source used to keep the reply on-link.
         if " proto kernel " in f" {low} " and " via " not in low:
-            continue
+            dest = low.split()[0]
+            if not dest.endswith("/64"):
+                continue
         if low.startswith("fd58:b000:1::"):
             continue
         if prefer and dev and dev != prefer:
@@ -3176,6 +3180,65 @@ def install_routable_agent_route(host: str, iface: str) -> str:
     return f"ulasrc:{PAIR_SRC}"
 
 
+def prefix_source_address(prefix: str) -> str:
+    """An address of ours inside prefix, not the network address itself."""
+    try:
+        net = ipaddress.IPv6Network(prefix, strict=False)
+    except (ValueError, ipaddress.AddressValueError):
+        return ""
+    host = net.network_address + 0x5050
+    if host not in net or host == net.network_address:
+        return ""
+    return str(host)
+
+
+def release_prefix_source() -> None:
+    """Drop the prefix address installed so a pairing reply can stay on the LAN."""
+    global _prefix_src
+    raw = _prefix_src
+    _prefix_src = ""
+    if not raw or "%" not in raw:
+        return
+    addr, iface = raw.split("%", 1)
+    if addr and iface:
+        _ip_ok(["-6", "addr", "del", f"{addr}/64", "dev", iface])
+
+
+def install_same_prefix_source(host: str, iface: str) -> str:
+    """Send PASE to the accessory from an address in its own prefix.
+
+    v94 delivered the packet on the LAN, but the Pi's source was a different
+    prefix, so the accessory's reply followed its default route and died.
+    A source in the same prefix is answered on this link.
+    """
+    global _prefix_src, _last_routes_installed
+    if not host or not iface:
+        return ""
+    mac = ""
+    for hit in _last_matterc_hits:
+        src = str(hit.get("src") or "").split("%", 1)[0]
+        if src.lower().startswith("fe80:"):
+            mac = eui64_to_mac(src)
+            if mac:
+                break
+    if not mac:
+        return ""
+    try:
+        prefix = ipv6_prefix64(host)
+    except OSError:
+        return ""
+    src_addr = prefix_source_address(prefix)
+    if not src_addr or src_addr == host.split("%", 1)[0]:
+        return ""
+    if not _ip_ok(["-6", "addr", "replace", f"{src_addr}/64", "dev", iface, "nodad"]):
+        return ""
+    _ip_ok(["-6", "neigh", "replace", host, "lladdr", mac, "dev", iface, "nud", "permanent"])
+    _prefix_src = f"{src_addr}%{iface}"
+    _last_routes_installed = [f"{prefix} dev {iface} src {src_addr}"]
+    print(f"matter: PASE source {src_addr} on {prefix} to {host} mac {mac}", flush=True)
+    return f"pfx:{src_addr}"
+
+
 def install_border_router_route() -> str:
     """Install a prefix a router advertised, or leave the unanswered fd host alone.
 
@@ -3184,6 +3247,7 @@ def install_border_router_route() -> str:
     """
     try:
         clear_pair_source()
+        release_prefix_source()
     except Exception as exc:  # noqa: BLE001
         print(f"matter: clear pair source: {exc}", flush=True)
     try:
@@ -3226,6 +3290,10 @@ def install_border_router_route() -> str:
     if alts:
         print(f"matter: accessory also advertised {alts[0]}; not routing the fd host", flush=True)
         return f"alt:{alts[0]}"
+    if host and iface:
+        sourced = install_same_prefix_source(host, iface)
+        if sourced:
+            return sourced
     if solicitation.get("sent"):
         print("matter: no router advertisement; not pinning the fd host", flush=True)
         return "nora"
@@ -4454,6 +4522,7 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
     _mdns_quiesced = False
     _pase_target = ""
     _last_br_heard = ""
+    keep_prefix = False
     try:
         shielded = begin_tailscale_matter_shield()
         try:
@@ -4481,8 +4550,8 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             _pase_target = border
         elif _last_matterc_hits:
             _pase_target = "nobr"
-        # CHIP uses the SRV port from the code. A router advertisement supplies
-        # the prefix. The unanswered fd host is not pinned to the accessory.
+        # CHIP uses the SRV port from the code. The handshake is sourced from
+        # the accessory prefix so the reply stays on this LAN.
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
@@ -4544,6 +4613,7 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
                 "diag": diag,
             }
         devices = refresh_after_commission(rpc.get("result"))
+        keep_prefix = True
         return {
             "ok": True,
             "result": rpc.get("result"),
@@ -4552,6 +4622,11 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             "message": "Device added.",
         }
     finally:
+        if not keep_prefix:
+            try:
+                release_prefix_source()
+            except Exception as exc:  # noqa: BLE001
+                print(f"matter: release prefix source: {exc}", flush=True)
         try:
             clear_unreachable_fd_routes()
         except Exception as exc:  # noqa: BLE001
