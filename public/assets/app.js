@@ -3966,6 +3966,7 @@ function unifiDeviceCardHtml(d) {
             </div>
             <div class="home-device-actions">
                 <button type="button" class="btn btn-secondary btn-compact" ${attr}="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
+                ${kind === 'relay' ? autoOffCountdownHtml(d) : ''}
             </div>
         </article>`;
     }
@@ -4503,6 +4504,7 @@ async function loadUnifiDashboard(opts = {}) {
 
 function startUnifiPoll() {
     stopUnifiPoll();
+    ensureAutoOffTick();
     loadUnifiDashboard({ replace: true });
     unifiPollTimer = window.setInterval(() => {
         if (activeModuleId !== 'unifi' || settingsModalOpen) return;
@@ -5251,6 +5253,7 @@ function homeCardIsWatching() {
 }
 
 function ensureHomeStatePoll() {
+    ensureAutoOffTick();
     if (homeStateTimer) return;
     homeStateTimer = window.setInterval(() => {
         if (homePollBlocked() || homeManageOpen) return;
@@ -6101,6 +6104,41 @@ async function homeSavePlugMotorMode(id) {
     }
 }
 
+function autoOffCountdownText(at) {
+    const left = Math.max(0, Math.round(Number(at) - Date.now() / 1000));
+    if (left <= 0) return '';
+    const minutes = Math.floor(left / 60);
+    const seconds = left % 60;
+    return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${seconds}s`;
+}
+
+function autoOffCountdownHtml(d) {
+    const at = Number(d?.auto_off_at) || 0;
+    if (!d?.on || at * 1000 <= Date.now()) return '';
+    const text = autoOffCountdownText(at);
+    if (!text) return '';
+    return `<span class="home-auto-off-count" data-auto-off-at="${at}">Off in ${escapeHtml(text)}</span>`;
+}
+
+let autoOffTickTimer = 0;
+
+function tickAutoOffCountdowns() {
+    document.querySelectorAll('[data-auto-off-at]').forEach((el) => {
+        const text = autoOffCountdownText(el.getAttribute('data-auto-off-at'));
+        if (!text) {
+            el.remove();
+            return;
+        }
+        const next = `Off in ${text}`;
+        if (el.textContent !== next) el.textContent = next;
+    });
+}
+
+function ensureAutoOffTick() {
+    if (autoOffTickTimer) return;
+    autoOffTickTimer = window.setInterval(tickAutoOffCountdowns, 1000);
+}
+
 function homeDeviceActionsHtml(d, bright, color) {
     if (homeIsUnifi(d)) {
         const kind = String(d.kind || '');
@@ -6132,6 +6170,7 @@ function homeDeviceActionsHtml(d, bright, color) {
         const on = Boolean(d.on);
         return `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-home-toggle="${escapeHtml(d.id)}">${on ? 'Off' : 'On'}</button>
+            ${kind === 'relay' ? autoOffCountdownHtml(d) : ''}
         </div>`;
     }
     if (String(d.kind || '') === 'heater') {
@@ -6165,8 +6204,10 @@ function homeDeviceActionsHtml(d, bright, color) {
     const electrical = String(d.kind || '') === 'plug' ? homePlugElectricalMetaHtml(d) : '';
     const pendingOff = String(d.kind || '') === 'plug' && Boolean(d.motor_pending_off);
     const toggleLabel = pendingOff ? 'Cancel off' : (on ? 'Off' : 'On');
+    const countdown = String(d.kind || '') === 'plug' ? autoOffCountdownHtml(d) : '';
     return `<div class="home-device-actions">
             <button type="button" class="btn btn-secondary btn-compact${pendingOff ? ' is-active' : ''}" data-home-toggle="${escapeHtml(d.id)}" title="${pendingOff ? 'Off queued until load drops — tap to cancel' : ''}">${toggleLabel}</button>
+            ${countdown}
             ${electrical}
             ${bright}
             ${color}
@@ -6875,10 +6916,16 @@ async function sendHomeDeviceToggle(id, button, forceOn) {
         if (device) device.motor_pending_off = Boolean(data.motor_pending_off);
         if (typeof data.on === 'boolean') setHomeDeviceOn(id, data.on);
         else if (!heater) setHomeDeviceOn(id, nextOn);
+        const onNow = typeof data.on === 'boolean' ? data.on : nextOn;
+        if (device && (device.kind === 'plug' || device.kind === 'relay')) {
+            const sec = Number(device.auto_off_sec) || 0;
+            device.auto_off_at = onNow && sec > 0 ? Math.floor(Date.now() / 1000) + sec : 0;
+            device.on = onNow;
+        }
         if (data.motor_pending_off) {
             showToast('Off queued until load drops', 'success');
             renderHomeDashboard(homeDash);
-        } else if (device?.kind === 'plug') {
+        } else if (device?.kind === 'plug' || device?.kind === 'relay') {
             renderHomeDashboard(homeDash);
         }
     } catch (err) {
@@ -17784,6 +17831,17 @@ document.getElementById('unifi-card')?.addEventListener('click', async (event) =
             if (typeof data.on === 'boolean') {
                 card?.classList.toggle('is-on', data.on);
                 toggleBtn.textContent = data.on ? 'Off' : 'On';
+            }
+            const row = (unifiDash?.devices || []).find((d) => d.id === id);
+            const onNow = typeof data.on === 'boolean' ? data.on : nextOn;
+            if (row && String(row.kind || '') === 'relay') {
+                const sec = Number(row.auto_off_sec) || 0;
+                row.on = onNow;
+                row.auto_off_at = onNow && sec > 0 ? Math.floor(Date.now() / 1000) + sec : 0;
+                card?.querySelector('[data-auto-off-at]')?.remove();
+                if (row.auto_off_at) {
+                    card?.querySelector('.home-device-actions')?.insertAdjacentHTML('beforeend', autoOffCountdownHtml(row));
+                }
             }
             if (lastHub?.modules?.home) loadHomeDashboard({ patch: true });
         } catch (err) {

@@ -723,6 +723,8 @@ final class YarboHome
                     'has_motion',
                     'motion_at',
                     'companion_of',
+                    'auto_off_sec',
+                    'auto_off_at',
                 ] as $key) {
                     if (array_key_exists($key, $device)) {
                         $row[$key] = $device[$key];
@@ -743,6 +745,7 @@ final class YarboHome
             }
             if (!$isUnifi && ($row['kind'] ?? '') === self::KIND_PLUG) {
                 $row['auto_off_sec'] = $this->autoOffSec($id);
+                $row['auto_off_at'] = !empty($row['on']) ? $this->autoOffAt($id) : 0;
                 $row['motor_mode_w'] = $this->motorModeWatts($id);
                 $row['motor_pending_off'] = $this->hasMotorPendingOff($id);
             }
@@ -1503,6 +1506,22 @@ final class YarboHome
         $map = $this->load()['auto_off_sec'] ?? [];
 
         return is_array($map) ? self::clampAutoOffSec((int) ($map[$id] ?? 0)) : 0;
+    }
+
+    /** Unix time the plug turns off, or 0 when no timer is running. */
+    public function autoOffAt(string $id): int
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return 0;
+        }
+        $job = $this->readAutoOffState()['pending'][$id] ?? null;
+        if (!is_array($job)) {
+            return 0;
+        }
+        $at = (int) ($job['at'] ?? 0);
+
+        return $at > time() ? $at : 0;
     }
 
     /**

@@ -44,9 +44,22 @@ $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(str_contains($js, 'function homePlugAutoOffHtml'), 'JS builds plug auto-off controls');
 assert_true(str_contains($js, "action: 'auto_off'"), 'JS saves auto-off');
 assert_true(str_contains($js, 'data-home-auto-off-enabled'), 'JS marks auto-off checkbox');
+assert_true(str_contains($js, 'function autoOffCountdownHtml'), 'JS builds auto-off countdown');
+assert_true(str_contains($js, 'data-auto-off-at'), 'countdown has a live deadline');
+
+$deadline = time() + 120;
+file_put_contents($root . '/data/home-auto-off.json', json_encode([
+    'pending' => [$plugId => ['at' => $deadline, 'sec' => 120]],
+], JSON_UNESCAPED_SLASHES));
+assert_true($home->autoOffAt($plugId) === $deadline, 'running timer exposes auto_off_at');
+file_put_contents($root . '/data/home-auto-off.json', json_encode([
+    'pending' => [$plugId => ['at' => time() - 5, 'sec' => 120]],
+], JSON_UNESCAPED_SLASHES));
+assert_true($home->autoOffAt($plugId) === 0, 'expired timer is not a countdown');
 
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 assert_true(str_contains($css, '.home-plug-auto-off'), 'auto-off has CSS');
+assert_true(str_contains($css, '.home-auto-off-count'), 'countdown has CSS');
 
 $change = (string) file_get_contents(dirname(__DIR__) . '/CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.221]'), 'changelog 4.0.221');

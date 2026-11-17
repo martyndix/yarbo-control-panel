@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 91, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 92, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -50,6 +50,28 @@ Router lifetime           :         1800
     assert agent._matterc_line_is_real("fe80::1 matterc fd=fd8d:fc03:c02b::/64 via=fe80::1 iface=eth0")
     body = SCRIPT.read_text().split("def wait_for_thread_route", 1)[1].split("def ipv6_route_sample", 1)[0]
     assert "while time.time() < deadline" not in body
+    calls: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    agent.subprocess.run = fake_run
+    agent._last_matterc_hits = [{
+        "aaaa": ["fdef:badd:6106:0:dbfc:813f:f2ae:dcd0"],
+        "matterc": True,
+    }]
+    installed = agent.blackhole_mdns_fd_prefixes()
+    assert installed == ["fdef:badd:6106::/64"], installed
+    assert any(c[-4:] == ["unreachable", "fdef:badd:6106::/64", "metric", "1000"] for c in calls), calls
+    agent.clear_fd_blackholes()
+    assert agent._fd_blackholes == []
+    assert any("del" in c and "unreachable" in c and "fdef:badd:6106::/64" in c for c in calls), calls
     print("ok: thread route helpers")
     return 0
 

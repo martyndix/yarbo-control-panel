@@ -5063,6 +5063,13 @@ button.unifi-live-open:focus-visible img {
     width: 100%;
 }
 
+.home-auto-off-count {
+    font-variant-numeric: tabular-nums;
+    font-size: 0.82rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
 .home-plug-auto-off-toggle {
     display: inline-flex;
     align-items: center;
