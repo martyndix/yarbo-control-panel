@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.365] - 2026-11-17
+
+### Fixed
+
+- Pairing no longer sends the Timmerflotte through the other router (`fe80::1007:…`) when a Thread border agent answers `_meshcop`. v110 advertised the return route (`adv=rio`) but the session still used that other hop, which drops the sensor. The forward path is the border agent, and every other router is told the return route (`alt=`). Matter agent **v111**.
+
 ## [4.0.364] - 2026-11-17
 
 ### Fixed

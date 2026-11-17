@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 110
+AGENT_VERSION = 111
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1807,6 +1807,8 @@ _pase_target = ""
 _last_br_heard = ""
 _prefix_src = ""
 _last_pair_src = ""
+_last_pair_hop = ""
+_last_alt_hops: list[str] = []
 _last_ra_adv = ""
 _saved_ra_pinfo: tuple[str, str] | None = None
 _held_rio_addrs: list[tuple[str, str, str]] = []
@@ -3792,9 +3794,71 @@ def matterc_router_via() -> str:
             continue
         fallback = src
         addrs = [str(a).split("%", 1)[0].lower() for a in (hit.get("aaaa") or [])]
-        if host and host.lower() in addrs:
+        if host and host.lower() in addrs and not found:
             found = src
     return found or fallback
+
+
+def _fe80_routers(raws: list[str]) -> list[str]:
+    """Link-locals that can be routers. An fe80 with ff:fe is the sensor itself."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for raw in raws:
+        src = str(raw or "").split("%", 1)[0]
+        low = src.lower()
+        if not low.startswith("fe80:") or "ff:fe" in low or low in seen:
+            continue
+        seen.add(low)
+        found.append(src)
+    return found
+
+
+def accessory_matterc_sources() -> list[str]:
+    """Link-locals whose _matterc reply contained the accessory address."""
+    host, _prefix, _iface = matterc_fd_target()
+    found: list[str] = []
+    if not host:
+        return found
+    want = host.lower()
+    for hit in _last_matterc_hits:
+        src = str(hit.get("src") or "").split("%", 1)[0]
+        if not src.lower().startswith("fe80:") or "ff:fe" in src.lower():
+            continue
+        addrs = [str(a).split("%", 1)[0].lower() for a in (hit.get("aaaa") or [])]
+        if want in addrs and src not in found:
+            found.append(src)
+    return found
+
+
+def choose_thread_hop(rio_vias: list[str], meshcop: list[str]) -> tuple[str, list[str]]:
+    """Forward hop, plus every other router that should learn the return route.
+
+    _matterc can be reflected by another router on the LAN (fe80::1007:…). Packets
+    via that hop do not reach the sensor. A _meshcop answer is the border router.
+    """
+    accessory = _fe80_routers(accessory_matterc_sources())
+    mesh = _fe80_routers(meshcop)
+    rios = _fe80_routers(rio_vias)
+    mesh_l = {src.lower() for src in mesh}
+    chosen = ""
+    for src in accessory:
+        if src.lower() in mesh_l:
+            chosen = src
+            break
+    if not chosen and mesh and (not accessory or accessory[0].lower() not in mesh_l):
+        chosen = mesh[0]
+    if not chosen and accessory:
+        chosen = accessory[0]
+    if not chosen and rios:
+        chosen = rios[0]
+    if not chosen:
+        chosen = matterc_router_via()
+    rest: list[str] = []
+    for src in mesh + accessory + rios:
+        if not src or not chosen or src.lower() == chosen.lower() or src in rest:
+            continue
+        rest.append(src)
+    return chosen, rest
 
 
 def accessory_lan_address() -> str:
@@ -3899,7 +3963,7 @@ def install_border_router_route() -> str:
     v97 pinned that host via the accessory and sourced from fd58:b000:1::1.
     The toast showed that source address, and PASE message 33 still never came.
     """
-    global _last_ra_proof, _last_routes_installed
+    global _last_ra_proof, _last_routes_installed, _last_pair_hop, _last_alt_hops
     try:
         clear_pair_source()
         release_prefix_source()
@@ -3929,13 +3993,26 @@ def install_border_router_route() -> str:
         advertised = install_advertised_routes(iface, solicitation)
         if advertised:
             via = advertised.split(":", 1)[1]
-            # Prefer the HomePod that advertised this accessory over a different
-            # router advertisement. Do not source the route from the Thread prefix.
-            hop = matterc_router_via() or via
+            rio_vias = [str(row.get("via") or "") for row in (solicitation.get("rios") or [])]
+            mesh: list[str] = []
+            try:
+                mesh = browse_mdns_sources("_meshcop", 1.0)
+            except Exception as exc:  # noqa: BLE001
+                print(f"matter: meshcop browse: {exc}", flush=True)
+            hop, alts = choose_thread_hop(rio_vias, mesh)
+            if not hop:
+                hop = matterc_router_via() or via
+            _last_alt_hops = alts
+            _last_pair_hop = hop
             if hop.lower().startswith("fe80:"):
-                # The sensor flashes on this hop, so the request arrives. Source the
-                # reply from outside the HomePod prefix and send that prefix the same way.
+                # The sensor flashes when the request uses the border agent. A reflected
+                # mDNS source (the other router) drops it. Tell every router the return route.
                 install_thread_return_route(iface, hop, prefix)
+                for alt in alts:
+                    try:
+                        advertise_pair_route(iface, PAIR_LAN_PREFIX, alt)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"matter: return route to {alt}: {exc}", flush=True)
             if hop.lower() != via.lower():
                 return f"ra:{hop}"
             return advertised
@@ -4147,7 +4224,7 @@ def discovery_diag() -> dict[str, Any]:
                     fd_prefix = ipv6_prefix64(raw)
                 except OSError:
                     pass
-    chosen = matterc_router_via()
+    chosen = _last_pair_hop or matterc_router_via()
     if chosen:
         via_addr = chosen
     return {
@@ -4183,6 +4260,7 @@ def discovery_diag() -> dict[str, Any]:
         "omr": _last_omr,
         "pair_src": _last_pair_src or "auto",
         "ra_adv": _last_ra_adv or "none",
+        "alt_hops": list(_last_alt_hops),
     }
 
 
@@ -4207,6 +4285,7 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
         f"pase={row.get('pase_target') or 'mdns'} "
         f"src={row.get('pair_src') or 'auto'} "
         f"adv={row.get('ra_adv') or 'none'} "
+        f"alt={','.join(row.get('alt_hops') or []) or 'none'} "
         f"port={row.get('port') or 0} ts={ts} shield={row.get('shield') or 'n/a'}"
         + (f" omr={row.get('omr')}" if row.get("omr") else "")
         + "]"
@@ -5234,7 +5313,7 @@ def restore_host_mdns() -> None:
 
 def run_commission_with_code(code: str) -> dict[str, Any]:
     """Run prepare + commission. Used by sync and async paths."""
-    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard, _last_pair_src, _last_ra_adv
+    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard, _last_pair_src, _last_ra_adv, _last_pair_hop, _last_alt_hops
     shielded = False
     _thread_route_attempted = False
     _last_matterc_hits = []
@@ -5244,6 +5323,8 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
     _last_omr = ""
     _last_pair_src = ""
     _last_ra_adv = ""
+    _last_pair_hop = ""
+    _last_alt_hops = []
     _mdns_quiesced = False
     _pase_target = ""
     _last_br_heard = ""
