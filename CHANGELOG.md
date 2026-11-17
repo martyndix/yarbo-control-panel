@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.357] - 2026-11-17
+
+### Fixed
+
+- Add device no longer commissions a guessed address in the Pi’s own `fd10:` prefix. That attempt failed at once (`Commissioning failed for node 18`) and used up the Timmerflotte pairing code. The sensor’s prefix is now routed through the HomePod that advertised it, without using the Thread prefix as the packet source. Matter agent **v104**.
+
 ## [4.0.356] - 2026-11-17
 
 ### Fixed

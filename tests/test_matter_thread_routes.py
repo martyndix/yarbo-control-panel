@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 103, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 104, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -177,8 +177,17 @@ Router lifetime           :         1800
     label = agent.install_border_router_route()
     assert label == f"ra:{border}", label
     flat = [" ".join(c) for c in calls]
-    assert any("fd10:d687:e7bf:4ba8::/64" in c and border in c for c in flat), flat
-    assert any("fdef:badd:6106::/64" in c and "via" in c and border in c for c in flat), flat
+    assert any("fd10:d687:e7bf:4ba8::/64" in c and border in c and " src " not in c for c in flat), flat
+    assert any("fdef:badd:6106::/64" in c and "via" in c and border in c and " src " not in c for c in flat), flat
+    calls.clear()
+    agent._last_matterc_hits[0]["src"] = "fe80::18e3:8d10:e524:10a9"
+    label = agent.install_border_router_route()
+    assert label == "ra:fe80::18e3:8d10:e524:10a9", label
+    flat = [" ".join(c) for c in calls]
+    assert any(
+        "fdef:badd:6106::/64" in c and "via" in c and "fe80::18e3:8d10:e524:10a9" in c and " src " not in c
+        for c in flat
+    ), flat
     saved: list[list[str]] = []
     agent.add_ipv6_route = lambda prefix, via, iface, src="": saved.append(
         ["replace", prefix, "via", via, "src", src]
