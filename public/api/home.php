@@ -68,7 +68,7 @@ if ($action === 'sensor_history_sample') {
 }
 
 set_time_limit($action === 'commission' || $action === 'scan' ? 150 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'group_command' || $action === 'scene_run' || $action === 'scene_off' ? 180 : ($action === 'command' ? 100 : 70))));
-ignore_user_abort($action === 'setup');
+ignore_user_abort($action === 'setup' || $action === 'commission_start' || $action === 'commission_status');
 
 try {
     $result = match ($action) {

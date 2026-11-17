@@ -41,6 +41,7 @@ cleanup() {
     kill "${HTTPS_PROXY_PID}" 2>/dev/null || true
   fi
   if [[ -n "${PHP_PID:-}" ]]; then
+    pkill -P "${PHP_PID}" 2>/dev/null || true
     kill "${PHP_PID}" 2>/dev/null || true
   fi
   if [[ -n "${AGENT_PID:-}" ]]; then
@@ -277,7 +278,8 @@ pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
 echo "==> Starting panel on http://${HOST}:${PORT}"
 echo "    Keep this process running. Hard-refresh the browser after start."
 echo "    Close the official Yarbo app while testing controls/drive."
-"$PHP_BIN" -d max_execution_time=1200 -S "${HOST}:${PORT}" -t "${ROOT}/public" &
+# A few workers so Add device is not stuck behind a slow Home list on the one PHP process.
+PHP_CLI_SERVER_WORKERS=4 "$PHP_BIN" -d max_execution_time=1200 -S "${HOST}:${PORT}" -t "${ROOT}/public" &
 PHP_PID=$!
 
 # Wait until the HTTP listener accepts before binding HTTPS in front of it.
