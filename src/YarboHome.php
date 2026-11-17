@@ -989,6 +989,86 @@ final class YarboHome
     }
 
     /**
+     * Start Apple Home / Matter pairing in the background (survives Cloudflare ~100s).
+     *
+     * @return array<string, mixed>
+     */
+    public function commissionStart(string $code): array
+    {
+        $code = self::normalizeMatterPairingCode($code);
+        if ($code === '') {
+            return ['ok' => false, 'error' => 'Paste a Matter pairing code or QR text'];
+        }
+        $agent = YarboMatterAgentClient::fromEnv();
+        $result = $agent->request(['op' => 'commission_start', 'code' => $code], 8.0);
+        if (!($result['ok'] ?? false)) {
+            return [
+                'ok' => false,
+                'error' => (string) ($result['error'] ?? 'Could not start pairing'),
+                'job_id' => (string) ($result['job_id'] ?? ''),
+                'status' => (string) ($result['status'] ?? 'error'),
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'job_id' => (string) ($result['job_id'] ?? ''),
+            'status' => (string) ($result['status'] ?? 'pending'),
+            'message' => (string) ($result['message'] ?? 'Pairing started.'),
+        ];
+    }
+
+    /**
+     * Poll a background commission job. Merges devices into Home cache on success.
+     *
+     * @return array<string, mixed>
+     */
+    public function commissionStatus(string $jobId): array
+    {
+        $jobId = trim($jobId);
+        $agent = YarboMatterAgentClient::fromEnv();
+        $payload = ['op' => 'commission_status'];
+        if ($jobId !== '') {
+            $payload['job_id'] = $jobId;
+        }
+        $result = $agent->request($payload, 5.0);
+        $status = (string) ($result['status'] ?? 'idle');
+        if ($status === 'error' || (($result['ok'] ?? true) === false && $status !== 'pending' && $status !== 'running' && $status !== 'idle')) {
+            return [
+                'ok' => false,
+                'job_id' => (string) ($result['job_id'] ?? $jobId),
+                'status' => $status === '' ? 'error' : $status,
+                'error' => (string) ($result['error'] ?? 'Pairing failed. Check the code is still valid and the device is on the LAN.'),
+            ];
+        }
+        if ($status !== 'ok') {
+            return [
+                'ok' => true,
+                'job_id' => (string) ($result['job_id'] ?? $jobId),
+                'status' => $status === '' ? 'idle' : $status,
+                'message' => (string) ($result['message'] ?? 'Pairing…'),
+            ];
+        }
+
+        $incoming = is_array($result['devices'] ?? null) ? $result['devices'] : [];
+        if ($incoming === []) {
+            $states = $agent->request(['op' => 'states'], 2.5, false);
+            $incoming = is_array($states['devices'] ?? null) ? $states['devices'] : [];
+        }
+        $this->mergeCommissionedDevices($incoming);
+
+        return [
+            'ok' => true,
+            'job_id' => (string) ($result['job_id'] ?? $jobId),
+            'status' => 'ok',
+            'message' => (string) ($result['message'] ?? 'Device added.'),
+            'node_id' => $result['node_id'] ?? null,
+        ];
+    }
+
+    /**
+     * Sync commission (scripts / legacy). Prefer commissionStart + commissionStatus from the UI.
+     *
      * @return array<string, mixed>
      */
     public function commission(string $code): array
@@ -1011,6 +1091,16 @@ final class YarboHome
             $states = $agent->request(['op' => 'states'], 2.5, false);
             $incoming = is_array($states['devices'] ?? null) ? $states['devices'] : [];
         }
+        $this->mergeCommissionedDevices($incoming);
+
+        return ['ok' => true, 'message' => 'Device added.'];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $incoming
+     */
+    private function mergeCommissionedDevices(array $incoming): void
+    {
         $cachePath = $this->projectRoot . '/data/home-nodes-cache.json';
         if ($incoming !== []) {
             $merged = self::unionDeviceLists($this->load()['last_devices'] ?? [], $incoming);
@@ -1023,8 +1113,6 @@ final class YarboHome
         } else {
             @unlink($cachePath);
         }
-
-        return ['ok' => true, 'message' => 'Device added.'];
     }
 
     /**

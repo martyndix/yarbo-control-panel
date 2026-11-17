@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.330] - 2026-11-17
+
+### Fixed
+- **Add device gateway 524 over Cloudflare:** pairing now starts a background Matter job and the UI polls with short requests, so Apple Home codes are no longer cut off by Cloudflare’s ~100s origin timeout. Matter agent **v78**.
+
 ## [4.0.329] - 2026-11-17
 
 ### Fixed

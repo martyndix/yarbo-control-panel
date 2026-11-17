@@ -18054,15 +18054,54 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
         status.textContent = 'Pairing the device. This can take up to a minute.';
         status.classList.remove('hidden');
     }
+    const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
     try {
-        const data = await homeApi({ action: 'commission', code }, 135000);
-        if (!data.ok) throw new Error(data.error || 'Pairing failed');
-        if (input) input.value = '';
-        const message = data.message || 'Device added';
-        if (status) status.textContent = message;
-        showToast(message, 'success');
-        await loadHomeDashboard({ force: true });
-        window.setTimeout(() => loadHomeDashboard({ force: true }), 3000);
+        // Short requests only — Cloudflare kills ~100s origin waits with 524.
+        const started = await homeApi({ action: 'commission_start', code }, 10000);
+        if (!started.ok) throw new Error(started.error || 'Could not start pairing');
+        const jobId = String(started.job_id || '');
+        if (!jobId) throw new Error('Pairing did not return a job id');
+        const deadline = Date.now() + 180000;
+        let lastErr = '';
+        let pollFails = 0;
+        while (Date.now() < deadline) {
+            await sleep(2000);
+            let data;
+            try {
+                data = await homeApi({ action: 'commission_status', job_id: jobId }, 10000);
+                pollFails = 0;
+            } catch (pollErr) {
+                pollFails += 1;
+                lastErr = pollErr.message || 'Pairing status check failed';
+                if (status) {
+                    status.textContent = pollFails < 3
+                        ? 'Still pairing… (connection blip, retrying)'
+                        : lastErr;
+                }
+                if (pollFails >= 8) throw new Error(lastErr);
+                continue;
+            }
+            const jobStatus = String(data.status || '');
+            if (jobStatus === 'ok') {
+                if (input) input.value = '';
+                const message = data.message || 'Device added';
+                if (status) status.textContent = message;
+                showToast(message, 'success');
+                await loadHomeDashboard({ force: true });
+                window.setTimeout(() => loadHomeDashboard({ force: true }), 3000);
+                return;
+            }
+            if (jobStatus === 'error' || data.ok === false) {
+                throw new Error(data.error || 'Pairing failed');
+            }
+            if (status) {
+                const elapsed = Math.round((Date.now() - (deadline - 180000)) / 1000);
+                status.textContent = elapsed > 25
+                    ? 'Still pairing (Matter discovery can take a minute)…'
+                    : 'Pairing the device…';
+            }
+        }
+        throw new Error('Pairing timed out. Turn On Pairing Mode again in Apple Home and try Add device with a fresh code.');
     } catch (err) {
         showToast(err.message || 'Pairing failed', 'error');
         if (status) {

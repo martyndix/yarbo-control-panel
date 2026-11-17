@@ -42,6 +42,7 @@ On a Mac, Matter pairing is optional and needs Docker Desktop; use the Pi for da
 - Already in Apple Home (IKEA plugs, sensors, …): accessory → **Turn On Pairing Mode** → paste the ~5-minute code into **Add device** (the printed QR is not reused). **Look for devices** only finds Hue lights on a Bridge you already paired — it will not find a new IKEA plug.
 - Other Matter devices: code or `MT:…` QR text from the vendor app.
 - Matter server must show as running on the Home card (Settings → Home → **Set up Matter server** if needed). Thread plugs need a HomePod / Apple TV online as the border router.
+- **Add device** (panel **4.0.330+**) runs pairing in the background and polls status, so remote access through Cloudflare no longer ends in **gateway 524** while Matter is still discovering. Stay on the page until it finishes or shows a Matter error.
 - If Add device fails with **error 28** / uninitialized: wait until the Matter server shows running, then Turn On Pairing Mode again and paste a **fresh** 11-digit code. Error **0x28** / in use means wait ~30 seconds and retry with a new pairing-mode code.
 - **error_code 1** / **Pairing timed out** usually means the Pi never saw the accessory on the LAN (Thread/mDNS discovery). Get a **fresh** Turn On Pairing Mode code within ~3 minutes, keep a HomePod/Apple TV online, and keep the Pi on the **same LAN/VLAN** with **IPv6** (not guest Wi‑Fi). Panel update **4.0.328+** rebinds Matter to the correct NIC when needed. Then Add device again.
 

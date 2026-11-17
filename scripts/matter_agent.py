@@ -41,12 +41,13 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 77
+AGENT_VERSION = 78
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
 LISTEN_CHANNEL = "listen"
 POLL_CHANNEL = "poll"
+COMMISSION_JOB_STATUSES = frozenset({"pending", "running", "ok", "error"})
 COLOR_ACTIONS = frozenset({"color", "colour", "set_color", "set_colour"})
 COLOR_TEMP_ACTIONS = frozenset({"color_temp", "colour_temp", "kelvin"})
 
@@ -217,6 +218,8 @@ FIRST_SCAN_DELAY_S = 90.0
 SCAN_NODE_CAP = 2
 SCAN_POST_INTERVIEW_S = 6.0
 SCAN_RETRY_WAIT_S = 10.0
+_commission_job_lock = threading.Lock()
+_commission_job: dict[str, Any] | None = None
 _command_busy = 0
 _command_busy_lock = threading.Lock()
 _listen_starting = False
@@ -2223,6 +2226,177 @@ def prepare_for_commission() -> str | None:
         except Exception as cmd_exc:  # noqa: BLE001
             return str(cmd_exc)
     return None
+
+
+def commission_job_snapshot(job: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Public status payload for commission_start / commission_status."""
+    with _commission_job_lock:
+        row = dict(job if job is not None else (_commission_job or {}))
+    if not row:
+        return {"ok": True, "status": "idle", "job_id": ""}
+    status = str(row.get("status") or "idle")
+    out: dict[str, Any] = {
+        "ok": True,
+        "job_id": str(row.get("id") or ""),
+        "status": status,
+        "started_at": row.get("started_at"),
+        "finished_at": row.get("finished_at"),
+    }
+    if status == "ok":
+        out["devices"] = list(row.get("devices") or [])
+        out["node_id"] = row.get("node_id")
+        out["result"] = row.get("result")
+        out["message"] = str(row.get("message") or "Device added.")
+    elif status == "error":
+        out["ok"] = False
+        out["error"] = str(row.get("error") or "Pairing failed")
+    return out
+
+
+def _set_commission_job(**fields: Any) -> None:
+    global _commission_job
+    with _commission_job_lock:
+        if _commission_job is None:
+            return
+        _commission_job.update(fields)
+
+
+def run_commission_with_code(code: str) -> dict[str, Any]:
+    """Run prepare + commission_with_code (+ retry). Used by sync and async paths."""
+    ready_err = prepare_for_commission()
+    if ready_err:
+        return {"ok": False, "error": friendly_commission_error(ready_err)}
+    rpc = matter_rpc(
+        "commission_with_code",
+        {"code": code, "network_only": True},
+        timeout=120.0,
+        retries=1,
+    )
+    if not rpc.get("ok") and commission_error_looks_retryable(str(rpc.get("error") or "")):
+        print(
+            f"matter: commission retry after {rpc.get('error')!r}",
+            flush=True,
+        )
+        cleanup_failed_commission_node(str(rpc.get("error") or ""))
+        time.sleep(2.5)
+        prepare_for_commission()
+        rpc = matter_rpc(
+            "commission_with_code",
+            {"code": code, "network_only": True},
+            timeout=120.0,
+            retries=1,
+        )
+    if not rpc.get("ok"):
+        detail = str(rpc.get("error") or "Pairing failed")
+        cleanup_failed_commission_node(detail)
+        return {
+            "ok": False,
+            "error": friendly_commission_error(detail),
+        }
+    devices = refresh_after_commission(rpc.get("result"))
+    return {
+        "ok": True,
+        "result": rpc.get("result"),
+        "devices": devices,
+        "node_id": node_id_from_any(rpc.get("result")),
+        "message": "Device added.",
+    }
+
+
+def _commission_worker(job_id: str, code: str) -> None:
+    _set_commission_job(status="running")
+    print(f"matter: commission job {job_id} running", flush=True)
+    try:
+        outcome = run_commission_with_code(code)
+    except Exception as exc:  # noqa: BLE001
+        outcome = {"ok": False, "error": friendly_commission_error(str(exc))}
+    finished = time.time()
+    if outcome.get("ok"):
+        _set_commission_job(
+            status="ok",
+            finished_at=finished,
+            devices=list(outcome.get("devices") or []),
+            node_id=outcome.get("node_id"),
+            result=outcome.get("result"),
+            message=str(outcome.get("message") or "Device added."),
+            error=None,
+        )
+        print(f"matter: commission job {job_id} ok", flush=True)
+        return
+    _set_commission_job(
+        status="error",
+        finished_at=finished,
+        error=str(outcome.get("error") or "Pairing failed"),
+        devices=[],
+        node_id=None,
+        result=None,
+    )
+    print(f"matter: commission job {job_id} error: {outcome.get('error')}", flush=True)
+
+
+def start_commission_job(code: str) -> dict[str, Any]:
+    """Validate code and start a background commission job (returns quickly)."""
+    global _commission_job
+    normalized = normalize_pairing_code(code)
+    problem = pairing_code_problem(normalized)
+    if problem:
+        return {"ok": False, "error": problem}
+    with _commission_job_lock:
+        current = _commission_job
+        if current and str(current.get("status") or "") in ("pending", "running"):
+            return {
+                "ok": False,
+                "error": (
+                    "Another pairing is already in progress. Wait for it to finish, "
+                    "then try Add device again with a fresh Apple Home code."
+                ),
+                "job_id": str(current.get("id") or ""),
+                "status": str(current.get("status") or "running"),
+            }
+        job_id = uuid.uuid4().hex[:12]
+        _commission_job = {
+            "id": job_id,
+            "status": "pending",
+            "code": normalized,
+            "started_at": time.time(),
+            "finished_at": None,
+            "error": None,
+            "devices": [],
+            "node_id": None,
+            "result": None,
+            "message": None,
+        }
+    threading.Thread(
+        target=_commission_worker,
+        args=(job_id, normalized),
+        daemon=True,
+        name=f"matter-commission-{job_id}",
+    ).start()
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "status": "pending",
+        "message": "Pairing started.",
+    }
+
+
+def wait_commission_job(job_id: str, timeout: float = 180.0) -> dict[str, Any]:
+    """Block until the named job finishes (used by sync op commission)."""
+    deadline = time.time() + max(1.0, timeout)
+    while time.time() < deadline:
+        snap = commission_job_snapshot()
+        if str(snap.get("job_id") or "") != job_id:
+            return {"ok": False, "error": "Pairing job was replaced"}
+        status = str(snap.get("status") or "")
+        if status in ("ok", "error"):
+            return snap
+        time.sleep(0.4)
+    return {
+        "ok": False,
+        "error": "Pairing timed out waiting for Matter. Try Add device again with a fresh code.",
+        "job_id": job_id,
+        "status": "error",
+    }
 
 
 def refresh_after_commission(result: Any) -> list[dict[str, Any]]:
@@ -6981,48 +7155,26 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "restored": restored,
             "reloaded": bool(restored),
         }
-    if op == "commission":
-        code = normalize_pairing_code(str(body.get("code") or ""))
-        problem = pairing_code_problem(code)
-        if problem:
-            return {"ok": False, "error": problem}
-        ready_err = prepare_for_commission()
-        if ready_err:
-            return {"ok": False, "error": friendly_commission_error(ready_err)}
-        rpc = matter_rpc(
-            "commission_with_code",
-            {"code": code, "network_only": True},
-            timeout=120.0,
-            retries=1,
-        )
-        if not rpc.get("ok") and commission_error_looks_retryable(str(rpc.get("error") or "")):
-            print(
-                f"matter: commission retry after {rpc.get('error')!r}",
-                flush=True,
-            )
-            cleanup_failed_commission_node(str(rpc.get("error") or ""))
-            time.sleep(2.5)
-            prepare_for_commission()
-            rpc = matter_rpc(
-                "commission_with_code",
-                {"code": code, "network_only": True},
-                timeout=120.0,
-                retries=1,
-            )
-        if not rpc.get("ok"):
-            detail = str(rpc.get("error") or "Pairing failed")
-            cleanup_failed_commission_node(detail)
+    if op == "commission_start":
+        return start_commission_job(str(body.get("code") or ""))
+    if op == "commission_status":
+        want = str(body.get("job_id") or "").strip()
+        snap = commission_job_snapshot()
+        if want and snap.get("job_id") and want != snap.get("job_id"):
             return {
                 "ok": False,
-                "error": friendly_commission_error(detail),
+                "error": "That pairing job is no longer active.",
+                "job_id": want,
+                "status": "error",
             }
-        devices = refresh_after_commission(rpc.get("result"))
-        return {
-            "ok": True,
-            "result": rpc.get("result"),
-            "devices": devices,
-            "node_id": node_id_from_any(rpc.get("result")),
-        }
+        return snap
+    if op == "commission":
+        # Sync wrapper for scripts/tests: start background job and wait.
+        started = start_commission_job(str(body.get("code") or ""))
+        if not started.get("ok"):
+            return started
+        job_id = str(started.get("job_id") or "")
+        return wait_commission_job(job_id, timeout=180.0)
     if op == "remove_node":
         try:
             node_id = int(body.get("node_id") or 0)

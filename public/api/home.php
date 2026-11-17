@@ -74,6 +74,8 @@ try {
     $result = match ($action) {
         'setup' => $home->startSetup(),
         'commission' => $home->commission((string) ($input['code'] ?? '')),
+        'commission_start' => $home->commissionStart((string) ($input['code'] ?? '')),
+        'commission_status' => $home->commissionStatus((string) ($input['job_id'] ?? '')),
         'scan' => $home->scanDevices(),
         'forget' => $home->forgetNode((int) ($input['node_id'] ?? 0)),
         'hide' => $home->hideDevice((string) ($input['id'] ?? ''), true),

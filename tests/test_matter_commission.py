@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,13 +37,27 @@ def mill_node() -> dict:
     }
 
 
+def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        snap = agent.dispatch({"op": "commission_status", "job_id": job_id})
+        status = str(snap.get("status") or "")
+        if status in ("ok", "error"):
+            return snap
+        time.sleep(0.05)
+    raise AssertionError(f"job {job_id} did not finish: {agent.commission_job_snapshot()}")
+
+
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 77, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 78, agent.AGENT_VERSION
     assert "Thread/mDNS" in agent.friendly_commission_error("Pairing timed out while discovering")
     assert callable(agent.ensure_matter_primary_interface)
     assert callable(agent.discovery_preflight_error)
     assert callable(agent.container_command_tokens)
+    assert callable(agent.start_commission_job)
+    assert callable(agent.commission_job_snapshot)
+    assert callable(agent.run_commission_with_code)
     # Healthy server + transient unavailable must not say "Set up Matter server".
     agent.matter_port_up = lambda: True  # type: ignore[method-assign]
     soft = agent.friendly_commission_error("Matter server unavailable")
@@ -143,6 +158,43 @@ def main() -> int:
     assert any(command == "get_nodes" for command, _ in calls), calls
     got = {str(row.get("id") or "") for row in by_id.get("devices") or []}
     assert "41:2" in got, by_id
+
+    # Async start + status (and reject concurrent start while running).
+    slow_gate = {"hold": True}
+
+    def slow_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
+        if command == "commission_with_code":
+            while slow_gate["hold"]:
+                time.sleep(0.02)
+            return {"ok": True, "result": mill_node() | {"node_id": 42}}
+        if command == "get_nodes":
+            return {"ok": True, "result": [mill_node() | {"node_id": 42}]}
+        return {"ok": True, "result": None}
+
+    agent.matter_rpc = slow_rpc  # type: ignore[method-assign]
+    agent.prepare_for_commission = lambda: None  # type: ignore[method-assign]
+    agent.cleanup_failed_commission_node = lambda _err: None  # type: ignore[method-assign]
+    with agent._commission_job_lock:
+        agent._commission_job = None
+    started = agent.dispatch({"op": "commission_start", "code": "31436531015"})
+    assert started.get("ok") is True, started
+    job_id = str(started.get("job_id") or "")
+    assert job_id, started
+    assert started.get("status") in ("pending", "running"), started
+    busy = agent.dispatch({"op": "commission_start", "code": "31436531015"})
+    assert busy.get("ok") is False, busy
+    assert "progress" in str(busy.get("error") or "").lower(), busy
+    mid = agent.dispatch({"op": "commission_status", "job_id": job_id})
+    assert mid.get("status") in ("pending", "running"), mid
+    slow_gate["hold"] = False
+    done = wait_job(agent, job_id)
+    assert done.get("ok") is True, done
+    assert done.get("status") == "ok", done
+    assert done.get("node_id") == 42, done
+
+    # Wrong job id after completion of a different job.
+    other = agent.dispatch({"op": "commission_status", "job_id": "not-this-job"})
+    assert other.get("ok") is False, other
 
     print("ok: commission refreshes live devices")
     return 0
