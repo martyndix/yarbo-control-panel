@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 88, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 89, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -39,6 +39,10 @@ Router lifetime           :         1800
     parsed = agent.parse_mdns_message(pkt)
     assert parsed["matterc"] is True, parsed
     assert agent.ipv6_prefix64(parsed["aaaa"][0]) == "fd8d:fc03:c02b::/64", parsed
+    assert agent.ipv6_host128(parsed["aaaa"][0]) == "fd8d:fc03:c02b::1/128"
+    install = SCRIPT.read_text().split("def install_routes_from_matterc_hits", 1)[1].split("def browse_matterc_mdns", 1)[0]
+    assert "ipv6_host128" in install
+    assert "drop_static_fd_prefixes" in SCRIPT.read_text()
     query = struct.pack("!HHHHHH", 1, 0, 1, 0, 0, 0) + name + struct.pack("!HH", 12, 1)
     assert agent.parse_mdns_message(query)["matterc"] is False
     assert agent._matterc_line_is_real("no _matterc replies") is False
