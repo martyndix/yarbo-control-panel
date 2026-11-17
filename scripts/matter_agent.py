@@ -16,7 +16,6 @@ import hashlib
 import json
 import os
 import re
-import select
 import shutil
 import socket
 import struct
@@ -42,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 93
+AGENT_VERSION = 94
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2332,6 +2331,8 @@ def thread_route_hint(prefer_iface: str | None = None) -> str | None:
                 dev = parts[parts.index("dev") + 1]
             except (ValueError, IndexError):
                 dev = ""
+        if dev in ("lo", "lo0"):
+            continue
         if dev and iface_is_virtual(dev):
             continue
         if prefer and dev and dev != prefer:
@@ -2597,14 +2598,18 @@ def _ip_ok(args: list[str]) -> bool:
     return False
 
 
-def claim_local_v6(addr: str) -> bool:
-    """Put an accessory address on lo so this host receives packets CHIP sends there."""
-    addr = addr.split("%", 1)[0]
-    if not addr:
-        return False
-    if _ip_ok(["-6", "addr", "replace", f"{addr}/128", "dev", "lo", "nodad"]):
-        return True
-    return _ip_ok(["-6", "addr", "replace", f"{addr}/128", "dev", "lo"])
+def eui64_to_mac(addr: str) -> str:
+    """MAC from an fe80 address that embeds EUI-64, or ''."""
+    try:
+        packed = socket.inet_pton(socket.AF_INET6, addr.split("%", 1)[0])
+    except OSError:
+        return ""
+    iid = packed[8:]
+    if iid[3:5] != b"\xff\xfe":
+        return ""
+    mac = bytearray(iid[:3] + iid[5:])
+    mac[0] ^= 0x02
+    return ":".join(f"{b:02x}" for b in mac)
 
 
 def release_local_v6(addr: str) -> None:
@@ -2614,111 +2619,26 @@ def release_local_v6(addr: str) -> None:
     _ip_ok(["-6", "addr", "del", f"{addr}/128", "dev", "lo"])
 
 
-def iface_link_local(iface: str) -> str:
-    if not iface:
-        return ""
-    try:
-        out = subprocess.run(
-            ["ip", "-6", "addr", "show", "dev", iface, "scope", "link"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    match = re.search(r"inet6\s+(fe80:[0-9a-f:]+)", out.stdout or "", re.I)
-    return match.group(1).split("/", 1)[0] if match else ""
+def install_onlink_accessory_route() -> str:
+    """Send the accessory fd address out the LAN NIC to the MAC that answered mDNS.
 
-
-class UdpRelay:
-    """Forward datagrams between a local socket and one peer, and back."""
-
-    def __init__(self, listen: socket.socket, out: socket.socket, dest: str, port: int, scope: int) -> None:
-        self.listen = listen
-        self.out = out
-        self.dest = dest
-        self.port = port
-        self.scope = scope
-        self.running = True
-        self.chip_peer: Any = None
-        self.thread = threading.Thread(target=self._run, name="matter-pase-relay", daemon=True)
-
-    def start(self) -> None:
-        self.thread.start()
-
-    def close(self) -> None:
-        self.running = False
-        for sock in (self.listen, self.out):
-            try:
-                sock.close()
-            except OSError:
-                pass
-        self.thread.join(timeout=1.5)
-
-    def _send_dest(self, data: bytes) -> None:
-        if self.scope:
-            self.out.sendto(data, (self.dest, self.port, 0, self.scope))
-        else:
-            self.out.sendto(data, (self.dest, self.port))
-
-    def _run(self) -> None:
-        while self.running:
-            try:
-                ready, _, _ = select.select([self.listen, self.out], [], [], 0.4)
-            except (OSError, ValueError):
-                break
-            for sock in ready:
-                try:
-                    data, addr = sock.recvfrom(2048)
-                except OSError:
-                    continue
-                try:
-                    if sock is self.listen:
-                        self.chip_peer = addr
-                        self._send_dest(data)
-                    elif self.chip_peer is not None:
-                        self.listen.sendto(data, self.chip_peer)
-                except OSError:
-                    continue
-
-
-class PaseLinkLocalProxy:
-    def __init__(self, claimed: str, relay: UdpRelay, label: str) -> None:
-        self.claimed = claimed
-        self.relay = relay
-        self.label = label
-
-    def close(self) -> None:
-        try:
-            self.relay.close()
-        finally:
-            release_local_v6(self.claimed)
-
-
-def start_pase_linklocal_proxy() -> PaseLinkLocalProxy | None:
-    """Relay CHIP's packets for the accessory fd address to its link-local.
-
-    commission_with_code uses the SRV port, but the address in that advertisement
-    is the fd ULA. With no Thread route the kernel sends that ULA to the gateway,
-    which drops it. v92 marked the prefix unreachable and CHIP aborted with
-    ENETUNREACH / 0x03. v91 sent the link-local on port 5540, which is not the
-    commissionable port. Claiming the fd address locally and relaying to
-    fe80 on the SRV port sends the handshake where the accessory is listening.
+    v93 parked that address on lo and relayed to link-local port 5540. The SRV
+    port was already 5540, and the accessory never sent PASE message 33. A local
+    route also swallows any reply sourced from that address. An on-link /128 with
+    a permanent neighbor delivers the handshake on eth0 instead.
     """
     hinted = (thread_route_hint() or "").lower()
-    if " proto ra " in f" {hinted} ":
-        return None
-    chosen: tuple[str, str, int, str] | None = None
+    if " proto ra " in f" {hinted} " and " dev lo " not in hinted:
+        return ""
     for hit in _last_matterc_hits:
         if not hit.get("matterc"):
             continue
         src = str(hit.get("src") or "").split("%", 1)[0]
         iface = str(hit.get("iface") or primary_interface() or "")
-        try:
-            port = int(hit.get("port") or 0)
-        except (TypeError, ValueError):
-            port = 0
-        if not src.lower().startswith("fe80:") or not iface or port < 1 or port > 65535:
+        if not src.lower().startswith("fe80:") or not iface:
+            continue
+        mac = eui64_to_mac(src)
+        if not mac:
             continue
         fd_addr = ""
         for addr in hit.get("aaaa") or []:
@@ -2726,45 +2646,21 @@ def start_pase_linklocal_proxy() -> PaseLinkLocalProxy | None:
             if raw.lower().startswith("fd") and not _is_tailscale_ula(raw):
                 fd_addr = raw
                 break
-        if fd_addr:
-            chosen = (fd_addr, src, port, iface)
-            break
-    if chosen is None:
-        return None
-    fd_addr, src, port, iface = chosen
-    if not claim_local_v6(fd_addr):
-        print(f"matter: could not claim {fd_addr} for PASE relay", flush=True)
-        return None
-    listen: socket.socket | None = None
-    out: socket.socket | None = None
-    try:
-        scope = socket.if_nametoindex(iface)
-        pi_ll = iface_link_local(iface)
-        listen = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-        listen.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-        listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listen.bind((fd_addr, port))
-        out = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-        out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-        if pi_ll:
-            out.bind((pi_ll, 0, 0, scope))
-        else:
-            out.bind(("::", 0, 0, scope))
-        relay = UdpRelay(listen, out, src, port, scope)
-        relay.start()
-    except OSError as exc:
-        print(f"matter: PASE relay bind failed: {exc}", flush=True)
-        for sock in (listen, out):
-            if sock is not None:
-                try:
-                    sock.close()
-                except OSError:
-                    pass
+        if not fd_addr:
+            continue
         release_local_v6(fd_addr)
-        return None
-    label = f"{src}%{iface}:{port}"
-    print(f"matter: relay PASE {fd_addr}:{port} -> {label}", flush=True)
-    return PaseLinkLocalProxy(fd_addr, relay, label)
+        neigh_ok = _ip_ok(["-6", "neigh", "replace", fd_addr, "lladdr", mac, "dev", iface, "nud", "permanent"])
+        route_ok = _ip_ok(["-6", "route", "replace", f"{fd_addr}/128", "dev", iface, "metric", "100"])
+        if not route_ok:
+            print(f"matter: on-link route failed for {fd_addr} dev {iface}", flush=True)
+            continue
+        label = f"onlink:{mac}"
+        print(
+            f"matter: on-link {fd_addr}/128 dev {iface} lladdr {mac} neigh={neigh_ok}",
+            flush=True,
+        )
+        return label
+    return ""
 
 
 def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
@@ -3698,7 +3594,7 @@ def friendly_commission_error(err: str) -> str:
         ra = str((diag or {}).get("ra_proof") or "none")
         if matterc_seen and "matter server timed out" in low:
             base = (
-                "The accessory answered on the LAN, but the pairing handshake got no reply "
+                "The accessory answered on the LAN, but it sent no pairing reply "
                 "(PASE message 33). Use a fresh Turn On Pairing Mode code. "
             )
         elif matterc_seen and no_thread and fd != "none":
@@ -3961,7 +3857,6 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
     _last_routes_installed = []
     _mdns_quiesced = False
     _pase_target = ""
-    proxy: PaseLinkLocalProxy | None = None
     try:
         shielded = begin_tailscale_matter_shield()
         try:
@@ -3981,14 +3876,14 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             print(f"matter: clear unreachable fd: {exc}", flush=True)
         try:
-            proxy = start_pase_linklocal_proxy()
+            onlink = install_onlink_accessory_route()
         except Exception as exc:  # noqa: BLE001
-            proxy = None
-            print(f"matter: PASE relay: {exc}", flush=True)
-        if proxy is not None:
-            _pase_target = proxy.label
-        # Discover with the code so CHIP uses the SRV port. The relay claims the
-        # advertised fd address and forwards those datagrams to the accessory link-local.
+            onlink = ""
+            print(f"matter: on-link accessory route: {exc}", flush=True)
+        if onlink:
+            _pase_target = onlink
+        # Discover with the code so CHIP uses the SRV port. The fd address is on-link
+        # to the accessory MAC, so the handshake is not looped through lo or the gateway.
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
@@ -4058,11 +3953,6 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             "message": "Device added.",
         }
     finally:
-        if proxy is not None:
-            try:
-                proxy.close()
-            except Exception as exc:  # noqa: BLE001
-                print(f"matter: PASE relay close: {exc}", flush=True)
         try:
             clear_unreachable_fd_routes()
         except Exception as exc:  # noqa: BLE001
