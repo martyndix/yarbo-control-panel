@@ -50,7 +50,7 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 83, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 84, agent.AGENT_VERSION
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
         "iface": "eth0",
@@ -62,7 +62,7 @@ def main() -> int:
         "ipv6_ll": True,
         "thread_route": "fd11::/64",
         "matterc": ["no _matterc replies"],
-        "agent": 83,
+        "agent": 84,
     }
     err = agent.friendly_commission_error("Pairing timed out while discovering")
     assert "Thread/mDNS" in err or "commissionable" in err.lower() or "Tailscale" in err or "timed out" in err.lower(), err
@@ -80,10 +80,12 @@ def main() -> int:
         "tailscale": True,
         "matterc": ["fe80::1 +200b"],
         "matterc_seen": True,
-        "agent": 83,
+        "shield": "ok",
+        "tailscale_shielded": True,
+        "agent": 84,
     }
     seen = agent.friendly_commission_error("Pairing timed out while discovering")
-    assert "commissionable" in seen.lower() or "Tailscale" in seen, seen
+    assert "commissionable" in seen.lower() or "Tailscale" in seen or "Thread" in seen, seen
 
     assert callable(agent.ensure_matter_primary_interface)
     assert callable(agent.discovery_preflight_error)
@@ -100,6 +102,13 @@ def main() -> int:
     assert callable(agent.begin_tailscale_matter_shield)
     assert callable(agent.end_tailscale_matter_shield)
     assert callable(agent.flush_tailscale_ipv6_routes)
+    assert callable(agent.verify_tailscale_matter_shield)
+    assert callable(agent.wait_for_thread_route)
+    assert callable(agent.tailscale_link_up)
+    src = SCRIPT.read_text(encoding="utf-8")
+    assert "ts=" in src and "shield=" in src
+    assert "verify_tailscale_matter_shield" in src
+    assert "wait_for_thread_route" in src
     assert callable(agent.refresh_matter_setup_wrapper)
     assert agent.rt_info_max_plen.__code__.co_argcount >= 0
     assert agent.commission_error_looks_discovery("Pairing timed out while discovering")

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.337] - 2026-11-17
+
+### Fixed
+- **Apple Home Matter Thread RIO:** after pausing Tailscale, Add device waits longer for HomePod/Apple TV IPv6 RIOs on eth0, verifies the Tailscale shield actually took (diag `ts=shielded` / `shield=ok|fail`), skips Matter Docker restart mid-pair, and stops claiming Tailscale is “active” when only the iface node remains. Matter agent **v84**.
+
 ## [4.0.336] - 2026-11-17
 
 ### Fixed
