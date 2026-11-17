@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 106, 'min agent 106');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 107, 'min agent 107');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -47,7 +47,7 @@ assert_true(str_contains($home, 'function commissionStatus'), 'PHP commissionSta
 assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan empty message');
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 106'), 'agent v106');
+assert_true(str_contains($agent, 'AGENT_VERSION = 107'), 'agent v107');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
@@ -96,6 +96,7 @@ assert_true(str_contains($docs, 'error 28'), 'docs error 28');
 assert_true(str_contains($docs, 'error_code 1'), 'docs error_code 1');
 assert_true(str_contains($docs, 'gateway 524'), 'docs gateway 524');
 assert_true(str_contains($docs, '4.0.339+'), 'docs 4.0.339 discovery');
+assert_true(str_contains($docs, '4.0.360+'), 'docs 4.0.360 pairing reply stays on the LAN');
 assert_true(str_contains($docs, '4.0.359+'), 'docs 4.0.359 LAN address like the plug');
 assert_true(str_contains($docs, '4.0.358+'), 'docs 4.0.358 replace the other router hop');
 assert_true(str_contains($docs, '4.0.357+'), 'docs 4.0.357 route via the advertising HomePod');
@@ -141,6 +142,7 @@ assert_true(str_contains($change, '## [4.0.356]'), 'changelog 4.0.356');
 assert_true(str_contains($change, '## [4.0.357]'), 'changelog 4.0.357');
 assert_true(str_contains($change, '## [4.0.358]'), 'changelog 4.0.358');
 assert_true(str_contains($change, '## [4.0.359]'), 'changelog 4.0.359');
+assert_true(str_contains($change, '## [4.0.360]'), 'changelog 4.0.360');
 assert_true(str_contains($agent, 'clear_unreachable_fd_routes'), 'drop v92 unreachable fd routes');
 assert_true(str_contains($agent, 'install_border_router_route'), 'route fd prefix via border router');
 assert_true(str_contains($agent, 'parse_ra_packet'), 'parse router advertisements');

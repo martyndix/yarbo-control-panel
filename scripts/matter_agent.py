@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 106
+AGENT_VERSION = 107
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1806,6 +1806,9 @@ _mdns_quiesced = False
 _pase_target = ""
 _last_br_heard = ""
 _prefix_src = ""
+_last_pair_src = ""
+_saved_ra_pinfo: tuple[str, str] | None = None
+_held_rio_addrs: list[tuple[str, str, str]] = []
 # Routable source for PASE. A link-local source is not forwarded by a border router.
 PAIR_SRC = "fd58:b000:1::1"
 
@@ -3277,12 +3280,13 @@ def matterc_alt_addrs() -> list[str]:
 
 def install_advertised_routes(iface: str, solicitation: dict[str, Any]) -> str:
     """Install prefixes a router actually advertised. No host route to the mDNS fd address."""
+    global _last_ra_proof, _last_routes_installed, _last_rio_prefixes
     rios = list(solicitation.get("rios") or [])
     if not rios or not iface:
+        _last_rio_prefixes = []
         return ""
     via_used = ""
     installed: list[str] = []
-    global _last_ra_proof, _last_routes_installed, _last_rio_prefixes
     _last_rio_prefixes = []
     for row in rios:
         prefix = str(row.get("prefix") or "")
@@ -3527,6 +3531,142 @@ def accessory_omr_address() -> str:
     return ""
 
 
+def iface_global_addrs(iface: str) -> list[tuple[str, int]]:
+    """Global IPv6 addresses on iface as (address, prefix length)."""
+    if not iface:
+        return []
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "-o", "addr", "show", "dev", iface, "scope", "global"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    found: list[tuple[str, int]] = []
+    for match in re.finditer(r"inet6 ([0-9a-f:]+)/(\d+)", shown.stdout or "", re.I):
+        plen = int(match.group(2))
+        if 0 < plen <= 128:
+            found.append((match.group(1), plen))
+    return found
+
+
+def pairing_source_address(iface: str, avoid_prefixes: list[str]) -> str:
+    """LAN address that is not inside a Thread prefix.
+
+    The sensor flashes because the request arrives. If the source is the Pi's
+    address in the HomePod prefix, the HomePod treats the reply as Thread
+    traffic and it never comes back.
+    """
+    nets: list[ipaddress.IPv6Network] = []
+    for raw in avoid_prefixes:
+        try:
+            nets.append(ipaddress.IPv6Network(raw, strict=False))
+        except (ValueError, ipaddress.AddressValueError):
+            continue
+    gua = ""
+    ula = ""
+    for addr, _plen in iface_global_addrs(iface):
+        if _is_tailscale_ula(addr):
+            continue
+        try:
+            parsed = ipaddress.IPv6Address(addr)
+        except ValueError:
+            continue
+        if parsed.is_link_local or parsed.is_loopback or parsed.is_unspecified:
+            continue
+        if any(parsed in net for net in nets):
+            continue
+        if addr.lower().startswith("fd"):
+            ula = ula or addr
+        else:
+            gua = gua or addr
+    return gua or ula
+
+
+def pause_onlink_prefix_info(iface: str) -> None:
+    """Stop SLAAC from putting the Pi back inside the HomePod prefix mid-pair."""
+    global _saved_ra_pinfo
+    if not iface or _saved_ra_pinfo:
+        return
+    key = f"net.ipv6.conf.{iface}.accept_ra_pinfo"
+    prev = read_sysctl(key) or "1"
+    _saved_ra_pinfo = (iface, prev)
+    _sysctl_w(key, "0")
+
+
+def resume_onlink_prefix_info() -> None:
+    global _saved_ra_pinfo
+    if not _saved_ra_pinfo:
+        return
+    iface, prev = _saved_ra_pinfo
+    _saved_ra_pinfo = None
+    if iface:
+        _sysctl_w(f"net.ipv6.conf.{iface}.accept_ra_pinfo", prev or "1")
+
+
+def hold_thread_prefix_addresses(iface: str, prefixes: list[str]) -> None:
+    """Remove the Pi's address in a Thread prefix for the duration of pairing."""
+    global _held_rio_addrs
+    nets: list[ipaddress.IPv6Network] = []
+    for raw in prefixes:
+        try:
+            nets.append(ipaddress.IPv6Network(raw, strict=False))
+        except (ValueError, ipaddress.AddressValueError):
+            continue
+    if not iface or not nets:
+        return
+    for addr, plen in iface_global_addrs(iface):
+        try:
+            parsed = ipaddress.IPv6Address(addr)
+        except ValueError:
+            continue
+        if not any(parsed in net for net in nets):
+            continue
+        if _ip_ok(["-6", "addr", "del", f"{addr}/{plen}", "dev", iface]):
+            _held_rio_addrs.append((addr, str(plen), iface))
+            print(f"matter: held {addr} so the pairing reply is not aimed into Thread", flush=True)
+
+
+def restore_thread_prefix_addresses() -> None:
+    """Put back an address held during pairing and allow prefix info again."""
+    global _held_rio_addrs
+    held = list(_held_rio_addrs)
+    _held_rio_addrs = []
+    for addr, plen, iface in held:
+        _ip_ok(["-6", "addr", "replace", f"{addr}/{plen}", "dev", iface, "nodad"])
+    resume_onlink_prefix_info()
+
+
+def install_thread_return_route(iface: str, hop: str, mesh_prefix: str) -> str:
+    """Send Thread prefixes via hop, from an address the HomePod will answer on the LAN."""
+    global _last_pair_src, _last_routes_installed
+    if not iface or not hop.lower().startswith("fe80:"):
+        return ""
+    avoid = [prefix for prefix in _last_rio_prefixes if prefix]
+    if mesh_prefix and mesh_prefix not in avoid:
+        avoid.append(mesh_prefix)
+    src = pairing_source_address(iface, avoid)
+    _last_pair_src = src
+    if not src:
+        pause_onlink_prefix_info(iface)
+        hold_thread_prefix_addresses(iface, list(_last_rio_prefixes))
+        _last_pair_src = "ll"
+    prefixes: list[str] = []
+    for prefix in list(_last_rio_prefixes) + ([mesh_prefix] if mesh_prefix else []):
+        if prefix and prefix not in prefixes:
+            prefixes.append(prefix)
+    for prefix in prefixes:
+        delete_ipv6_prefix(prefix)
+        if add_ipv6_route(prefix, hop, iface, src if src and src != "ll" else "", metric=50):
+            shown = f"{prefix} via {hop}" + (f" src {src}" if src and src != "ll" else "")
+            if shown not in _last_routes_installed:
+                _last_routes_installed.append(shown)
+            print(f"matter: thread prefix {prefix} via {hop} src {src or 'll'}", flush=True)
+    return src or "ll"
+
+
 def matterc_router_via() -> str:
     """Link-local of the border router that sent this accessory's address.
 
@@ -3684,12 +3824,10 @@ def install_border_router_route() -> str:
             # Prefer the HomePod that advertised this accessory over a different
             # router advertisement. Do not source the route from the Thread prefix.
             hop = matterc_router_via() or via
-            if prefix and hop.lower().startswith("fe80:"):
-                # Drop the kernel RA via the other router. Metric 50 beats it if it returns.
-                delete_ipv6_prefix(prefix)
-                if add_ipv6_route(prefix, hop, iface, metric=50):
-                    _last_routes_installed.append(f"{prefix} via {hop}")
-                    print(f"matter: accessory prefix {prefix} via {hop}", flush=True)
+            if hop.lower().startswith("fe80:"):
+                # The sensor flashes on this hop, so the request arrives. Source the
+                # reply from outside the HomePod prefix and send that prefix the same way.
+                install_thread_return_route(iface, hop, prefix)
             if hop.lower() != via.lower():
                 return f"ra:{hop}"
             return advertised
@@ -3700,9 +3838,8 @@ def install_border_router_route() -> str:
         except Exception as exc:  # noqa: BLE001
             print(f"matter: border-router lookup: {exc}", flush=True)
             via = ""
-    if via and prefix and iface and add_ipv6_route(prefix, via, iface):
+    if via and prefix and iface and install_thread_return_route(iface, via, prefix):
         _last_ra_proof = "br"
-        _last_routes_installed = [f"{prefix} via {via}"]
         return f"br:{via}"
     alts = matterc_alt_addrs()
     if alts:
@@ -3936,6 +4073,7 @@ def discovery_diag() -> dict[str, Any]:
         "br": _last_br_heard or "none",
         "port": mdns_port,
         "omr": _last_omr,
+        "pair_src": _last_pair_src or "auto",
     }
 
 
@@ -3958,6 +4096,7 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
         f"mdns5353={row.get('mdns5353') or 'unknown'} net={row.get('network_mode') or '?'} "
         f"thread_route={route} iface={row.get('iface')} br={row.get('br') or 'none'} "
         f"pase={row.get('pase_target') or 'mdns'} "
+        f"src={row.get('pair_src') or 'auto'} "
         f"port={row.get('port') or 0} ts={ts} shield={row.get('shield') or 'n/a'}"
         + (f" omr={row.get('omr')}" if row.get("omr") else "")
         + "]"
@@ -4679,11 +4818,10 @@ def friendly_commission_error(err: str) -> str:
                     f"{chip}"
                 )
             return (
-                "The sensor answered, but only on its Thread mesh address. "
-                "The IKEA plug paired once the HomePod was on the same subnet as the Pi, "
-                "because that plug had an address on the LAN. This sensor has no LAN address, "
-                "and the HomePod does not forward the mesh address, so the pairing session cannot start. "
-                "Use a fresh Turn On Pairing Mode code if you try again."
+                "The sensor flashes because the pairing request arrives. "
+                "The reply is aimed at the Pi's address in the HomePod prefix, and the HomePod "
+                "forwards that into Thread, so the session stops. "
+                "Use a fresh Turn On Pairing Mode code."
                 f"{chip}"
             )
         return (
@@ -4986,7 +5124,7 @@ def restore_host_mdns() -> None:
 
 def run_commission_with_code(code: str) -> dict[str, Any]:
     """Run prepare + commission. Used by sync and async paths."""
-    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard
+    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard, _last_pair_src
     shielded = False
     _thread_route_attempted = False
     _last_matterc_hits = []
@@ -4994,6 +5132,7 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
     _last_routes_installed = []
     _last_rio_prefixes = []
     _last_omr = ""
+    _last_pair_src = ""
     _mdns_quiesced = False
     _pase_target = ""
     _last_br_heard = ""
@@ -5137,6 +5276,10 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             clear_unreachable_fd_routes()
         except Exception as exc:  # noqa: BLE001
             print(f"matter: clear unreachable fd: {exc}", flush=True)
+        try:
+            restore_thread_prefix_addresses()
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: restore thread address: {exc}", flush=True)
         try:
             restore_host_mdns()
         except Exception as exc:  # noqa: BLE001

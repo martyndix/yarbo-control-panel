@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.360] - 2026-11-17
+
+### Fixed
+
+- The Timmerflotte flashes because the pairing request arrives, then the session stops. The Pi’s address in the HomePod prefix was the packet source, so the HomePod forwarded the reply into Thread. Pairing now uses a LAN address outside that prefix, holds the Thread-prefix address while the session runs, and sends both prefixes through the HomePod that the sensor answered. Matter agent **v107**.
+
 ## [4.0.359] - 2026-11-17
 
 ### Fixed
