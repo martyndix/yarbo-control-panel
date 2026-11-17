@@ -18073,7 +18073,7 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
     }
     if (input) input.disabled = true;
     if (status) {
-        status.textContent = 'Pairing the device. This can take up to a minute.';
+        status.textContent = 'Pairing the device. This can take up to 3 minutes.';
         status.classList.remove('hidden');
     }
     const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -18120,7 +18120,7 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
             if (status) {
                 const elapsed = Math.round((Date.now() - startedAt) / 1000);
                 status.textContent = elapsed > 90
-                    ? 'Still pairing (rechecking LAN / Matter discovery)…'
+                    ? 'Still pairing (the Matter server can take about 3 minutes)…'
                     : (elapsed > 25
                         ? 'Still pairing (Matter discovery can take a minute)…'
                         : 'Pairing the device…');
