@@ -207,9 +207,10 @@ final class YarboVestaboard
         if (!is_file($this->configPath())) {
             return $defaults;
         }
-        $raw = file_get_contents($this->configPath());
-        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        $decoded = $this->readConfigJson();
         if (!is_array($decoded)) {
+            // Torn concurrent write used to decode as null → defaults wiped overnight
+            // sticky flags and the next tick posted Yarbo until config recovered.
             return $defaults;
         }
         $port = (int) ($decoded['port'] ?? self::DEFAULT_PORT);
@@ -480,8 +481,26 @@ final class YarboVestaboard
         if ($json === false) {
             return false;
         }
+        $dir = $this->dataDir();
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return false;
+        }
+        // Atomic replace — readers must never see a half-written config (that decoded
+        // as null, cleared night/quiet sticky flags, and flicked Yarbo onto the Note).
+        $path = $this->configPath();
+        $tmp = $path . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(2));
+        if (@file_put_contents($tmp, $json . "\n", LOCK_EX) === false) {
+            @unlink($tmp);
 
-        return file_put_contents($this->configPath(), $json . "\n", LOCK_EX) !== false;
+            return false;
+        }
+        if (!@rename($tmp, $path)) {
+            @unlink($tmp);
+
+            return file_put_contents($path, $json . "\n", LOCK_EX) !== false;
+        }
+
+        return true;
     }
 
     /**
@@ -705,6 +724,22 @@ final class YarboVestaboard
      */
     public function tick(): array
     {
+        $lock = $this->acquireTickLock();
+        if ($lock === false) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'tick_busy'];
+        }
+        try {
+            return $this->tickInner();
+        } finally {
+            $this->releaseTickLock($lock);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function tickInner(): array
+    {
         $this->touchHeartbeat();
         $config = $this->load();
         if (!$config['enabled']) {
@@ -776,25 +811,23 @@ final class YarboVestaboard
             || ((string) $config['last_hash'] === $quietHash)
             || $this->isExternalHoldExpired($config);
 
-        // Prefer sticky overnight over a brief false-negative clock (timezone thrash,
-        // torn config). Require sustained outside-window before posting Yarbo again.
-        $clockNight = $this->isNightHours();
-        $clockQuiet = $this->isQuietHours();
-        $stickyOvernightHold = false;
-        if ($clockNight || $clockQuiet) {
-            if (($config['overnight_outside_since'] ?? null) !== null) {
-                $this->save(['overnight_outside_since' => null]);
-                $config = $this->load();
-            }
-        } elseif (($wasNight || $wasQuiet) && !$this->overnightLeaveConfirmed($config)) {
-            // Still outside the clock — keep night/quiet flaps, but do not clear the
-            // leave timer (that would reset confirm every tick and never resume).
-            $stickyOvernightHold = true;
-            if ($wasNight && !empty($config['night_hours_enabled'])) {
-                $clockNight = true;
-            } elseif ($wasQuiet && !empty($config['quiet_hours_enabled'])) {
-                $clockQuiet = true;
-            }
+        // Sticky night/quiet holds until the scheduled end (+ grace), not merely until
+        // isNightHours()/isQuietHours() blips false (timezone thrash / torn config).
+        $stickyRole = $this->stickyOvernightRole($config);
+        $clockNight = $this->isNightHours() || $stickyRole === 'night';
+        $clockQuiet = $this->isQuietHours() || $stickyRole === 'quiet';
+        if ($clockNight && $clockQuiet) {
+            $clockQuiet = false;
+        }
+        $stickyOvernightHold = $stickyRole !== null
+            && !$this->isNightHours()
+            && !$this->isQuietHours();
+        if ($stickyRole === null && ($config['overnight_outside_since'] ?? null) !== null) {
+            $this->save(['overnight_outside_since' => null]);
+            $config = $this->load();
+        } elseif ($stickyRole !== null && ($config['overnight_outside_since'] ?? null) !== null
+            && !$stickyOvernightHold) {
+            $this->save(['overnight_outside_since' => null]);
             $config = $this->load();
         }
 
@@ -868,10 +901,16 @@ final class YarboVestaboard
         }
 
         // Morning exit first — do not wait on Tesla/Lymow probes (or a browser poll).
-        if ($forceResume) {
+        // If sticky overnight still owns the window, leaveOvernightNow returns null —
+        // never fall through to compose/post Yarbo (that started flaps then night
+        // overwrote them a second later).
+        if ($wasNight || $wasQuiet || $forceResume) {
             $left = $this->leaveOvernightNow($config);
             if ($left !== null) {
                 return $left;
+            }
+            if ($this->stickyOvernightRole($this->load()) !== null || $wasNight || $wasQuiet) {
+                return ['ok' => true, 'skipped' => true, 'reason' => 'overnight_hold'];
             }
         }
 
@@ -904,7 +943,10 @@ final class YarboVestaboard
         }
 
         $result = $this->sendLayout($layout, $forceResume || $rotated || !empty($activity['changed']));
-        if ($forceResume && !empty($result['ok'])) {
+        // Only clear sticky overnight after a real live write — skipped overnight
+        // blocks used to look like ok and wiped night_active, so the next tick
+        // posted Yarbo then night forced it back mid-flap.
+        if ($forceResume && !empty($result['ok']) && empty($result['skipped'])) {
             $this->save([
                 'quiet_active' => false,
                 'night_active' => false,
@@ -924,6 +966,10 @@ final class YarboVestaboard
      */
     private function leaveOvernightNow(array $config, ?array $fallbackLayout = null): ?array
     {
+        // Refuse leave while sticky overnight still owns the window (end + grace).
+        if ($this->stickyOvernightRole($config) !== null) {
+            return null;
+        }
         $cached = $this->lastLiveLayout($config);
         if ($cached !== null) {
             $result = $this->sendLayout($cached, true, [], true);
@@ -967,27 +1013,123 @@ final class YarboVestaboard
     }
 
     /**
-     * Sticky overnight must see a sustained outside-window before leaveOvernightNow.
+     * Sticky overnight role while night_active/quiet_active is set and the feature is
+     * still enabled, until the scheduled window end plus grace. Clock blips alone must
+     * not clear overnight — that posted Yarbo mid-window then night/quiet again.
      *
      * @param array<string, mixed> $config
+     * @return 'night'|'quiet'|null
      */
-    private function overnightLeaveConfirmed(array $config): bool
+    private function stickyOvernightRole(array $config): ?string
     {
-        $now = time();
-        $since = $config['overnight_outside_since'] ?? null;
-        if (!is_string($since) || $since === '') {
-            $this->save(['overnight_outside_since' => gmdate('c', $now)]);
+        if (!empty($config['night_active']) && !empty($config['night_hours_enabled'])) {
+            $past = $this->secondsPastWindowEnd(
+                (string) ($config['night_start'] ?? ''),
+                (string) ($config['night_end'] ?? ''),
+                $config
+            );
+            if ($past === null || $past < self::OVERNIGHT_LEAVE_CONFIRM_SEC) {
+                return 'night';
+            }
+        }
+        if (!empty($config['quiet_active']) && !empty($config['quiet_hours_enabled'])) {
+            $past = $this->secondsPastWindowEnd(
+                (string) ($config['quiet_start'] ?? ''),
+                (string) ($config['quiet_end'] ?? ''),
+                $config
+            );
+            if ($past === null || $past < self::OVERNIGHT_LEAVE_CONFIRM_SEC) {
+                return 'quiet';
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Seconds since the most recent window end, or null while still inside the window.
+     *
+     * @param array<string, mixed>|null $config
+     */
+    public function secondsPastWindowEnd(string $start, string $end, ?array $config = null): ?int
+    {
+        $start = self::normalizeClock($start, '');
+        $end = self::normalizeClock($end, '');
+        if ($start === '' || $end === '' || $start === $end) {
+            return 0;
+        }
+        $config ??= $this->load();
+        try {
+            $tz = new \DateTimeZone($this->resolveQuietTimezone($config));
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('UTC');
+        }
+        $now = new \DateTimeImmutable('now', $tz);
+        $hm = $now->format('H:i');
+        $inWindow = $start < $end
+            ? ($hm >= $start && $hm < $end)
+            : ($hm >= $start || $hm < $end);
+        if ($inWindow) {
+            return null;
+        }
+        $endParts = array_map('intval', explode(':', $end));
+        $endToday = $now->setTime($endParts[0] ?? 0, $endParts[1] ?? 0, 0);
+        $endAt = $now < $endToday ? $endToday->modify('-1 day') : $endToday;
+
+        return max(0, $now->getTimestamp() - $endAt->getTimestamp());
+    }
+
+    /**
+     * @return resource|false
+     */
+    private function acquireTickLock()
+    {
+        $dir = $this->dataDir();
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return false;
+        }
+        $fh = @fopen($dir . '/vestaboard-tick.lock', 'c+');
+        if ($fh === false) {
+            return false;
+        }
+        if (!flock($fh, LOCK_EX | LOCK_NB)) {
+            fclose($fh);
 
             return false;
         }
-        $then = strtotime($since);
-        if ($then === false) {
-            $this->save(['overnight_outside_since' => gmdate('c', $now)]);
 
-            return false;
+        return $fh;
+    }
+
+    /**
+     * @param resource|false $lock
+     */
+    private function releaseTickLock($lock): void
+    {
+        if ($lock === false || !is_resource($lock)) {
+            return;
         }
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
 
-        return ($now - $then) >= self::OVERNIGHT_LEAVE_CONFIRM_SEC;
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function readConfigJson(): ?array
+    {
+        $path = $this->configPath();
+        $raw = @file_get_contents($path);
+        $decoded = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+        // Brief retry — a non-atomic writer (pre-4.0.322) could tear the file mid-read.
+        usleep(25000);
+        $raw = @file_get_contents($path);
+        $decoded = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**
@@ -1018,10 +1160,12 @@ final class YarboVestaboard
      */
     public function sendNow(array $override = []): array
     {
-        if ($this->isNightHours()) {
+        $config = $this->mergedConfig($override);
+        $sticky = $this->stickyOvernightRole($config);
+        if ($this->isNightHours() || $sticky === 'night') {
             return $this->sendLayout($this->nightLayout(), true, $override);
         }
-        if ($this->isQuietHours()) {
+        if ($this->isQuietHours() || $sticky === 'quiet') {
             return $this->sendLayout($this->quietLayout(), true, $override);
         }
         $layout = $this->layoutForLiveModule();
@@ -1734,12 +1878,16 @@ final class YarboVestaboard
         }
         $hash = hash('sha256', json_encode($layout['codes']));
         $overnight = $this->isOvernightLayoutVerb((string) ($layout['verb'] ?? ''));
-        // Hard stop: while the clock says quiet/night, never POST Yarbo/Powerwall/Lymow
-        // (except an explicit morning leave). Stops flicker from concurrent ticks.
+        // Hard stop: while quiet/night clock OR sticky overnight is active, never POST
+        // Yarbo/Powerwall/Lymow (except an explicit morning leave).
         if (
             !$overnight
             && !$allowLeaveOvernight
-            && ($this->isNightHours() || $this->isQuietHours())
+            && (
+                $this->isNightHours()
+                || $this->isQuietHours()
+                || $this->stickyOvernightRole($config) !== null
+            )
         ) {
             return ['ok' => true, 'skipped' => true, 'reason' => 'overnight', 'lines' => $layout['lines']];
         }
@@ -2297,9 +2445,12 @@ final class YarboVestaboard
         if ($current === $zone) {
             return true;
         }
-        // Never let a browser/status poll replace a real local zone with UTC —
-        // that briefly flips night/quiet off and posts Yarbo until the next tick.
-        if (self::isUtcTimezone($zone) && $current !== '' && !self::isUtcTimezone($current)) {
+        // Once a real local zone is stored, status/browser polls must not thrash it
+        // (UTC or another city). Settings save can still change quiet_timezone.
+        if ($current !== '' && !self::isUtcTimezone($current)) {
+            return true;
+        }
+        if (self::isUtcTimezone($zone)) {
             return true;
         }
 
@@ -2667,6 +2818,7 @@ final class YarboVestaboard
         ];
         $ours = $hash === $lastHash
             || in_array($hash, $this->normalizeRecentHashes($config['recent_hashes'] ?? null, $lastHash), true)
+            || $this->codesLookLikeOvernight($codes)
             || $this->codesLookLikeOwnPowerwall($codes)
             || $this->codesLookLikeOwnLymow($codes)
             || $this->codesLookLikeOwnYarbo($codes)

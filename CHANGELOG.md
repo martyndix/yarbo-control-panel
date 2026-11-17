@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.322] - 2026-11-17
+
+### Fixed
+- **Vestaboard quiet/night still flicking Yarbo:** Overnight sticks until the scheduled end (+ ~90s grace). A refused morning leave no longer falls through to post Yarbo (flaps started toward Yarbo then night overwrote mid-change). Skipped live writes no longer clear `night_active`. Night/quiet layouts count as our own board so GET refresh does not arm a false app-hold. Config saves are atomic; timezone from the browser only fills empty/UTC; ticks are single-flight.
+
 ## [4.0.321] - 2026-11-17
 
 ### Fixed
