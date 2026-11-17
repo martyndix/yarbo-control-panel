@@ -19,7 +19,8 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 110, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 111, agent.AGENT_VERSION
+    agent.browse_mdns_sources = lambda label, seconds=1.0: []
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -298,6 +299,19 @@ Router lifetime           :         1800
     )
     assert agent.pairing_source_address("eth0", ["fdef:badd:6106::/64"]) == ""
     assert agent.homepod_ula_prefixes("eth0") == ["fd10:d687:e7bf:4ba8::/64"]
+    agent._last_matterc_hits = [{
+        "matterc": True,
+        "src": "fe80::1007:c231:5072:1418",
+        "aaaa": ["fdef:badd:6106:0:89b5:1f3d:906e:51bc"],
+        "iface": "eth0",
+        "port": 5540,
+    }]
+    hop, alts = agent.choose_thread_hop(
+        ["fe80::1007:c231:5072:1418"],
+        ["fe80::18e3:8d10:e524:10a9"],
+    )
+    assert hop == "fe80::18e3:8d10:e524:10a9", (hop, alts)
+    assert any(item.startswith("fe80::1007") for item in alts), alts
     print("ok: thread route helpers")
     return 0
 
