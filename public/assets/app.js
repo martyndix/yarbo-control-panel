@@ -18135,12 +18135,47 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
         status.classList.remove('hidden');
     }
     const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+    const startGaveUp = 'Pairing did not start. Tap Add device again with the same code.';
     try {
-        // Short requests only — Cloudflare kills ~100s origin waits with 524.
-        const started = await homeApi({ action: 'commission_start', code }, 10000);
-        if (!started.ok) throw new Error(started.error || 'Could not start pairing');
+        // The Pi answers on its own. A 10s abort became "Fetch is aborted" while the
+        // Matter agent restarted or the single PHP worker was still on the Home list.
+        let started = null;
+        let startErr = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+                const data = await homeApi({ action: 'commission_start', code }, 30000);
+                const jobStatus = String(data.status || '');
+                if (data.job_id && (data.ok || jobStatus === 'pending' || jobStatus === 'running' || jobStatus === 'ok')) {
+                    started = data;
+                    break;
+                }
+                if (!data.ok) throw new Error(data.error || 'Could not start pairing');
+                throw new Error('Pairing did not return a job id');
+            } catch (err) {
+                startErr = err;
+                const text = String(err?.message || '');
+                const retryable = isAbortError(err)
+                    || /timed out|not running|failed to fetch|load failed|network/i.test(text);
+                if (!retryable) throw err;
+                if (status) status.textContent = 'Still starting pairing…';
+                if (attempt < 2) await sleep(1500);
+            }
+        }
+        if (!started && startErr && isAbortError(startErr)) {
+            try {
+                const snap = await homeApi({ action: 'commission_status', job_id: '' }, 15000);
+                const snapStatus = String(snap.status || '');
+                if (snap.job_id && (snapStatus === 'pending' || snapStatus === 'running' || snapStatus === 'ok')) {
+                    started = snap;
+                }
+            } catch {
+                started = null;
+            }
+        }
+        if (!started) {
+            throw new Error(startErr && isAbortError(startErr) ? startGaveUp : (startErr?.message || startGaveUp));
+        }
         const jobId = String(started.job_id || '');
-        if (!jobId) throw new Error('Pairing did not return a job id');
         const startedAt = Date.now();
         const deadline = startedAt + 420000;
         let lastErr = '';
@@ -18149,11 +18184,13 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
             await sleep(2000);
             let data;
             try {
-                data = await homeApi({ action: 'commission_status', job_id: jobId }, 10000);
+                data = await homeApi({ action: 'commission_status', job_id: jobId }, 15000);
                 pollFails = 0;
             } catch (pollErr) {
                 pollFails += 1;
-                lastErr = pollErr.message || 'Pairing status check failed';
+                lastErr = isAbortError(pollErr)
+                    ? 'Still pairing… the status check was interrupted'
+                    : (pollErr.message || 'Pairing status check failed');
                 if (status) {
                     status.textContent = pollFails < 3
                         ? 'Still pairing… (connection blip, retrying)'

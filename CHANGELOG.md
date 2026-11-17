@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.364] - 2026-11-17
+
+### Fixed
+
+- Add device no longer stops with **Fetch is aborted**. That was the browser giving up while the Pi was still starting pairing (Matter agent restart, or the Home list holding the only PHP worker). Pairing now waits, retries the start, and keeps going if the job is already running. The panel PHP server runs a few workers so that list and Add device can proceed together.
+
 ## [4.0.363] - 2026-11-17
 
 ### Fixed

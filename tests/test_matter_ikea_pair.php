@@ -33,6 +33,8 @@ assert_true(str_contains($index, 'Turn On Pairing Mode'), 'Home hint pairing mod
 assert_true(str_contains($index, 'IKEA'), 'Home hint mentions IKEA');
 assert_true(str_contains($js, 'not IKEA/Matter plugs'), 'scan status clarifies Hue-only');
 assert_true(str_contains($js, "action: 'commission_start'"), 'UI starts async commission');
+assert_true(str_contains($js, 'Still starting pairing'), 'pairing start retries after an abort');
+assert_true(str_contains($js, 'Pairing did not start'), 'abort is not shown as Fetch is aborted');
 assert_true(str_contains($js, "action: 'commission_status'"), 'UI polls commission status');
 assert_true(!str_contains($js, "action: 'commission', code }, 135000"), 'UI does not sync-wait 135s');
 assert_true(str_contains($js, "sticky = type === 'error'"), 'error toasts stay until clicked');
@@ -46,6 +48,7 @@ assert_true(str_contains($home, 'function commissionStart'), 'PHP commissionStar
 assert_true(str_contains($home, 'function commissionStatus'), 'PHP commissionStatus');
 assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan empty message');
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
+assert_true(str_contains($api, "commission_start' || \$action === 'commission_status'"), 'pairing start survives a browser abort');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
 assert_true(str_contains($agent, 'AGENT_VERSION = 110'), 'agent v110');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
@@ -149,7 +152,11 @@ assert_true(str_contains($change, '## [4.0.358]'), 'changelog 4.0.358');
 assert_true(str_contains($change, '## [4.0.359]'), 'changelog 4.0.359');
 assert_true(str_contains($change, '## [4.0.360]'), 'changelog 4.0.360');
 assert_true(str_contains($change, '## [4.0.361]'), 'changelog 4.0.361');
+assert_true(str_contains($change, '## [4.0.364]'), 'changelog 4.0.364');
 assert_true(str_contains($change, '## [4.0.363]'), 'changelog 4.0.363');
+assert_true(str_contains($docs, '4.0.364+'), 'docs 4.0.364 pairing start survives abort');
+$panel = (string) file_get_contents(__DIR__ . '/../scripts/panel.sh');
+assert_true(str_contains($panel, 'PHP_CLI_SERVER_WORKERS=4'), 'panel PHP can serve Home and Add device together');
 assert_true(str_contains($change, '## [4.0.362]'), 'changelog 4.0.362');
 assert_true(str_contains($agent, 'clear_unreachable_fd_routes'), 'drop v92 unreachable fd routes');
 assert_true(str_contains($agent, 'install_border_router_route'), 'route fd prefix via border router');
