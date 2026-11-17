@@ -50,7 +50,7 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 106, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 107, agent.AGENT_VERSION
     agent.install_border_router_route = lambda: "nora"  # type: ignore[method-assign]
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
@@ -142,7 +142,7 @@ def main() -> int:
     seen_fail = agent.friendly_commission_error(
         "Commission with code failed for node 29. (error_code 1)"
     ).lower()
-    assert "answered" in seen_fail, seen_fail
+    assert "flashes" in seen_fail, seen_fail
     agent.discovery_diag = lambda: {"matterc_seen": False, "matterc": ["no _matterc replies"]}
     assert "never found" in agent.friendly_commission_error(
         "Commission with code failed for node 29. (error_code 1)"
