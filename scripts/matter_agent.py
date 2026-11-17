@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 111
+AGENT_VERSION = 112
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1800,6 +1800,10 @@ _last_matterc_hits: list[dict[str, Any]] = []
 _last_ra_proof = ""
 _last_routes_installed: list[str] = []
 _last_rio_prefixes: list[str] = []
+_last_rio_rows: list[dict[str, str]] = []
+_last_pios: list[dict[str, Any]] = []
+_last_pio_label = ""
+_last_mesh_sources: list[str] = []
 _last_omr = ""
 _mdns5353 = ""
 _mdns_quiesced = False
@@ -3001,15 +3005,31 @@ def browse_mdns_sources(label: str, seconds: float = 3.0) -> list[str]:
     return found
 
 
+def remember_mesh_sources(sources: list[str]) -> None:
+    """Keep every _meshcop answer, including a ULA, for the pairing toast."""
+    global _last_mesh_sources, _last_br_heard
+    found: list[str] = []
+    for raw in sources:
+        src = str(raw or "").split("%", 1)[0]
+        if not src or src.lower().startswith("ff") or src in found:
+            continue
+        found.append(src)
+    _last_mesh_sources = found
+    _last_br_heard = found[0] if found else "none"
+
+
 def discover_border_router_via(iface: str) -> str:
     """HomePod/Apple TV (or other BR) link-local that can forward the Thread prefix."""
     global _last_br_heard
     accessory = accessory_link_locals()
     candidates: list[str] = []
+    mesh: list[str] = []
     try:
-        candidates.extend(browse_mdns_sources("_meshcop", 3.0))
+        mesh = browse_mdns_sources("_meshcop", 3.0)
+        candidates.extend(mesh)
     except Exception as exc:  # noqa: BLE001
         print(f"matter: meshcop browse: {exc}", flush=True)
+    remember_mesh_sources(mesh)
     try:
         text = run_rdisc6_capture(iface, wait_ms=2000) if iface else ""
         for row in parse_rdisc6_rios(text):
@@ -3737,44 +3757,121 @@ def install_pair_lan_address(iface: str, hop: str = "") -> str:
     return PAIR_LAN_ADDR
 
 
-def install_thread_return_route(iface: str, hop: str, mesh_prefix: str) -> str:
-    """Send Thread prefixes via hop, from an address the HomePod will answer on the LAN."""
-    global _last_pair_src, _last_routes_installed
-    if not iface or not hop.lower().startswith("fe80:"):
+def remember_router_advertisement(solicitation: dict[str, Any]) -> None:
+    """Keep the RIOs and PIOs a router actually sent, before any route rewrite."""
+    global _last_rio_rows, _last_pios
+    pios: list[dict[str, Any]] = []
+    for row in solicitation.get("pios") or []:
+        if isinstance(row, dict) and row.get("prefix"):
+            pios.append(dict(row))
+    rows: list[dict[str, str]] = []
+    for row in solicitation.get("rios") or []:
+        prefix = str(row.get("prefix") or "")
+        via = str(row.get("via") or "").split("%", 1)[0]
+        if prefix and via.lower().startswith("fe80:"):
+            rows.append({"prefix": prefix, "via": via})
+    _last_pios = pios
+    _last_rio_rows = rows
+
+
+def pio_flag_text(pio: dict[str, Any]) -> str:
+    flags = ("A" if pio.get("auto") else "") + ("L" if pio.get("onlink") else "")
+    return flags or "-"
+
+
+def format_pio_label(pios: list[dict[str, Any]], accessory_prefix: str) -> str:
+    """pio= text. `same` when the only prefix is the one the sensor already uses."""
+    shown: list[tuple[str, str]] = []
+    for pio in pios:
+        prefix = str(pio.get("prefix") or "")
+        if not prefix or _is_tailscale_ula(prefix):
+            continue
+        shown.append((prefix, pio_flag_text(pio)))
+    if not shown:
+        return "none"
+    if len(shown) == 1 and accessory_prefix and shown[0][0].lower() == accessory_prefix.lower():
+        return "same"
+    return ";".join(f"{prefix},{flags}" for prefix, flags in shown)
+
+
+def format_rio_label(rows: list[dict[str, str]]) -> str:
+    parts = [f"{row['prefix']} via {row['via']}" for row in rows if row.get("prefix") and row.get("via")]
+    return ",".join(parts) or "none"
+
+
+def select_pio_source(iface: str, accessory_prefix: str) -> str:
+    """Address in an autonomous PIO the border router can publish into Thread.
+
+    The address is left configured. fd58 is not substituted: a prefix the Pi
+    invents is not a PIO the HomePod learned. When the only PIO is the accessory
+    prefix, the existing address in that prefix is kept.
+    """
+    autos = [
+        pio for pio in _last_pios
+        if pio.get("auto") and pio.get("prefix") and not _is_tailscale_ula(str(pio.get("prefix")))
+    ]
+    if not autos:
         return ""
-    # The fd10 SLAAC address is the Pi itself. v107 pinned it as src because the
-    # HomePod prefix was on-link, not in the route list. The plug never used it:
-    # the plug had an address on the LAN subnet.
-    ula_prefixes = homepod_ula_prefixes(iface)
-    avoid = [prefix for prefix in list(_last_rio_prefixes) + ula_prefixes if prefix]
-    if mesh_prefix and mesh_prefix not in avoid:
-        avoid.append(mesh_prefix)
-    src = pairing_source_address(iface, avoid)
-    if not src:
-        # No global address outside the HomePod prefix. src=ll on v108 got no reply.
-        # v109 sourced from fd58:b000:2::253 but only marked that prefix on-link, and
-        # the HomePod does not publish an on-link prefix into Thread.
-        src = install_pair_lan_address(iface, hop)
-    if src:
-        pause_onlink_prefix_info(iface)
-        hold_thread_prefix_addresses(iface, [prefix for prefix in ula_prefixes if prefix != PAIR_LAN_PREFIX])
-        _last_pair_src = src
-    else:
-        pause_onlink_prefix_info(iface)
-        hold_thread_prefix_addresses(iface, avoid)
-        _last_pair_src = "ll"
-    prefixes: list[str] = []
-    for prefix in list(_last_rio_prefixes) + ula_prefixes + ([mesh_prefix] if mesh_prefix else []):
-        if prefix and prefix not in prefixes:
-            prefixes.append(prefix)
-    for prefix in prefixes:
-        delete_ipv6_prefix(prefix)
-        if add_ipv6_route(prefix, hop, iface, src if src and src != "ll" else "", metric=50):
-            shown = f"{prefix} via {hop}" + (f" src {src}" if src and src != "ll" else "")
-            if shown not in _last_routes_installed:
-                _last_routes_installed.append(shown)
-            print(f"matter: thread prefix {prefix} via {hop} src {src or 'll'}", flush=True)
-    return src or "ll"
+    others = [
+        pio for pio in autos
+        if not accessory_prefix or str(pio.get("prefix")).lower() != accessory_prefix.lower()
+    ]
+    pool = others or autos
+    for pio in pool:
+        found = addr_in_prefix(iface, str(pio.get("prefix") or ""))
+        if found:
+            return found
+    for pio in pool:
+        if not pio.get("onlink"):
+            continue
+        found = ensure_pio_source(iface, [pio])
+        if found:
+            return found
+    return ""
+
+
+def drop_invented_pair_address() -> None:
+    """Remove fd58 so the kernel cannot source pairing from a prefix Thread does not know."""
+    for iface in list(_lan_ifaces() or []) + [primary_interface() or ""]:
+        if iface:
+            _ip_ok(["-6", "addr", "del", f"{PAIR_LAN_ADDR}/64", "dev", iface])
+
+
+def install_thread_return_route(iface: str, hop: str, mesh_prefix: str) -> str:
+    """Route the accessory prefix via hop, sourced from a PIO address when one exists.
+
+    RIOs for other prefixes stay on the router that advertised them. The HomePod
+    publishes infrastructure PIOs into Thread; it does not publish fd58.
+    """
+    global _last_pair_src, _last_routes_installed, _last_pio_label, _last_ra_adv
+    if not iface or not str(hop or "").lower().startswith("fe80:"):
+        return ""
+    _last_pio_label = format_pio_label(_last_pios, mesh_prefix)
+    _last_ra_adv = "none"
+    src = select_pio_source(iface, mesh_prefix)
+    _last_pair_src = src or "none"
+    if not mesh_prefix:
+        return src or "none"
+    advertised_via = ""
+    for row in _last_rio_rows:
+        if str(row.get("prefix") or "").lower() == mesh_prefix.lower():
+            advertised_via = str(row.get("via") or "").split("%", 1)[0]
+            break
+    same_hop = bool(advertised_via) and advertised_via.lower() == hop.lower()
+    if not same_hop:
+        # Only the accessory prefix moves. Other RIOs keep the next hop that advertised them.
+        delete_ipv6_prefix(mesh_prefix)
+    if add_ipv6_route(mesh_prefix, hop, iface, src, metric=50):
+        shown = f"{mesh_prefix} via {hop}" + (f" src {src}" if src else "")
+        if shown not in _last_routes_installed:
+            _last_routes_installed.append(shown)
+        print(
+            f"matter: accessory prefix {mesh_prefix} via {hop} src {src or 'pio-none'} pio={_last_pio_label}",
+            flush=True,
+        )
+    elif same_hop:
+        print(f"matter: accessory prefix {mesh_prefix} stays via {hop}", flush=True)
+    return src or "none"
 
 
 def matterc_router_via() -> str:
@@ -3830,31 +3927,62 @@ def accessory_matterc_sources() -> list[str]:
     return found
 
 
-def choose_thread_hop(rio_vias: list[str], meshcop: list[str]) -> tuple[str, list[str]]:
-    """Forward hop, plus every other router that should learn the return route.
+def choose_thread_hop(
+    rio_vias: list[str],
+    meshcop: list[str],
+    rios: list[dict[str, Any]] | None = None,
+) -> tuple[str, list[str]]:
+    """Hop for the accessory prefix, plus every other router that was heard.
 
-    _matterc can be reflected by another router on the LAN (fe80::1007:…). Packets
-    via that hop do not reach the sensor. A _meshcop answer is the border router.
+    Thread 1.3 sends the off-mesh prefix to the router that advertised it.
+    When the only RIO sender is the router that reflected _matterc (fe80::1007:…)
+    and another router answered _meshcop or sent a different RA, use that other
+    router. A _meshcop answer that is not fe80 is recorded for the toast and is
+    not used as a next hop.
     """
     accessory = _fe80_routers(accessory_matterc_sources())
     mesh = _fe80_routers(meshcop)
-    rios = _fe80_routers(rio_vias)
-    mesh_l = {src.lower() for src in mesh}
-    chosen = ""
-    for src in accessory:
-        if src.lower() in mesh_l:
-            chosen = src
+    rio_fe = _fe80_routers(rio_vias)
+    accessory_l = {src.lower() for src in accessory}
+    _host, prefix, _iface = matterc_fd_target()
+    prefix_via = ""
+    for row in rios or []:
+        raw_prefix = str(row.get("prefix") or "")
+        via = str(row.get("via") or "").split("%", 1)[0]
+        if not raw_prefix or not via.lower().startswith("fe80:"):
+            continue
+        if prefix and raw_prefix.lower() == prefix.lower():
+            prefix_via = via
             break
-    if not chosen and mesh and (not accessory or accessory[0].lower() not in mesh_l):
-        chosen = mesh[0]
-    if not chosen and accessory:
+    other: list[str] = []
+    for src in mesh + rio_fe:
+        if src.lower() in accessory_l or src in other:
+            continue
+        other.append(src)
+    chosen = ""
+    rio_is_reflector = bool(rio_fe) and all(src.lower() in accessory_l for src in rio_fe)
+    if prefix_via and prefix_via.lower() not in accessory_l:
+        chosen = prefix_via
+    elif prefix_via and prefix_via.lower() in accessory_l and other:
+        chosen = other[0]
+    elif rio_is_reflector and other:
+        chosen = other[0]
+    elif accessory and (not rio_fe or accessory[0].lower() not in {src.lower() for src in rio_fe}):
         chosen = accessory[0]
-    if not chosen and rios:
-        chosen = rios[0]
-    if not chosen:
+    elif prefix_via:
+        chosen = prefix_via
+    elif other:
+        chosen = other[0]
+    elif accessory:
+        chosen = accessory[0]
+    elif rio_fe:
+        chosen = rio_fe[0]
+    elif mesh:
+        chosen = mesh[0]
+    else:
         chosen = matterc_router_via()
     rest: list[str] = []
-    for src in mesh + accessory + rios:
+    for src in mesh + accessory + rio_fe:
         if not src or not chosen or src.lower() == chosen.lower() or src in rest:
             continue
         rest.append(src)
@@ -3963,9 +4091,10 @@ def install_border_router_route() -> str:
     v97 pinned that host via the accessory and sourced from fd58:b000:1::1.
     The toast showed that source address, and PASE message 33 still never came.
     """
-    global _last_ra_proof, _last_routes_installed, _last_pair_hop, _last_alt_hops
+    global _last_ra_proof, _last_routes_installed, _last_pair_hop, _last_alt_hops, _last_pio_label
     try:
         clear_pair_source()
+        drop_invented_pair_address()
         release_prefix_source()
     except Exception as exc:  # noqa: BLE001
         print(f"matter: clear pair source: {exc}", flush=True)
@@ -3989,6 +4118,8 @@ def install_border_router_route() -> str:
         except Exception as exc:  # noqa: BLE001
             print(f"matter: router solicitation: {exc}", flush=True)
             solicitation = {"sent": False, "rios": [], "pios": []}
+    remember_router_advertisement(solicitation)
+    _last_pio_label = format_pio_label(_last_pios, prefix)
     if iface:
         advertised = install_advertised_routes(iface, solicitation)
         if advertised:
@@ -3999,20 +4130,17 @@ def install_border_router_route() -> str:
                 mesh = browse_mdns_sources("_meshcop", 1.0)
             except Exception as exc:  # noqa: BLE001
                 print(f"matter: meshcop browse: {exc}", flush=True)
-            hop, alts = choose_thread_hop(rio_vias, mesh)
+            remember_mesh_sources(mesh)
+            hop, alts = choose_thread_hop(rio_vias, mesh, solicitation.get("rios") or [])
             if not hop:
                 hop = matterc_router_via() or via
             _last_alt_hops = alts
             _last_pair_hop = hop
             if hop.lower().startswith("fe80:"):
-                # The sensor flashes when the request uses the border agent. A reflected
-                # mDNS source (the other router) drops it. Tell every router the return route.
+                # Keep each RIO on the router that sent it. The accessory prefix
+                # follows that router, or the other border agent when the RIO
+                # sender is only the mDNS reflector.
                 install_thread_return_route(iface, hop, prefix)
-                for alt in alts:
-                    try:
-                        advertise_pair_route(iface, PAIR_LAN_PREFIX, alt)
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"matter: return route to {alt}: {exc}", flush=True)
             if hop.lower() != via.lower():
                 return f"ra:{hop}"
             return advertised
@@ -4024,6 +4152,7 @@ def install_border_router_route() -> str:
             print(f"matter: border-router lookup: {exc}", flush=True)
             via = ""
     if via and prefix and iface and install_thread_return_route(iface, via, prefix):
+        _last_pair_hop = via
         _last_ra_proof = "br"
         return f"br:{via}"
     alts = matterc_alt_addrs()
@@ -4261,6 +4390,9 @@ def discovery_diag() -> dict[str, Any]:
         "pair_src": _last_pair_src or "auto",
         "ra_adv": _last_ra_adv or "none",
         "alt_hops": list(_last_alt_hops),
+        "rio": format_rio_label(_last_rio_rows),
+        "pio": _last_pio_label or format_pio_label(_last_pios, fd_prefix if fd_prefix != "none" else ""),
+        "mesh": ",".join(_last_mesh_sources) or "none",
     }
 
 
@@ -4286,6 +4418,9 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
         f"src={row.get('pair_src') or 'auto'} "
         f"adv={row.get('ra_adv') or 'none'} "
         f"alt={','.join(row.get('alt_hops') or []) or 'none'} "
+        f"rio={row.get('rio') or 'none'} "
+        f"pio={row.get('pio') or 'none'} "
+        f"mesh={row.get('mesh') or 'none'} "
         f"port={row.get('port') or 0} ts={ts} shield={row.get('shield') or 'n/a'}"
         + (f" omr={row.get('omr')}" if row.get("omr") else "")
         + "]"
@@ -5313,13 +5448,17 @@ def restore_host_mdns() -> None:
 
 def run_commission_with_code(code: str) -> dict[str, Any]:
     """Run prepare + commission. Used by sync and async paths."""
-    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard, _last_pair_src, _last_ra_adv, _last_pair_hop, _last_alt_hops
+    global _thread_route_attempted, _last_matterc_hits, _last_ra_proof, _last_routes_installed, _last_rio_prefixes, _last_rio_rows, _last_pios, _last_pio_label, _last_mesh_sources, _last_omr, _mdns_quiesced, _pase_target, _last_br_heard, _last_pair_src, _last_ra_adv, _last_pair_hop, _last_alt_hops
     shielded = False
     _thread_route_attempted = False
     _last_matterc_hits = []
     _last_ra_proof = ""
     _last_routes_installed = []
     _last_rio_prefixes = []
+    _last_rio_rows = []
+    _last_pios = []
+    _last_pio_label = ""
+    _last_mesh_sources = []
     _last_omr = ""
     _last_pair_src = ""
     _last_ra_adv = ""

@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 111, 'min agent 111');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 112, 'min agent 112');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -50,7 +50,7 @@ assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "commission_start' || \$action === 'commission_status'"), 'pairing start survives a browser abort');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 111'), 'agent v111');
+assert_true(str_contains($agent, 'AGENT_VERSION = 112'), 'agent v112');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
@@ -101,6 +101,7 @@ assert_true(str_contains($docs, 'error 28'), 'docs error 28');
 assert_true(str_contains($docs, 'error_code 1'), 'docs error_code 1');
 assert_true(str_contains($docs, 'gateway 524'), 'docs gateway 524');
 assert_true(str_contains($docs, '4.0.339+'), 'docs 4.0.339 discovery');
+assert_true(str_contains($docs, '4.0.366+'), 'docs 4.0.366 Thread RIO and PIO');
 assert_true(str_contains($docs, '4.0.365+'), 'docs 4.0.365 border agent hop');
 assert_true(str_contains($docs, '4.0.363+'), 'docs 4.0.363 HomePod route advertisement');
 assert_true(str_contains($docs, '4.0.362+'), 'docs 4.0.362 LAN pairing source');
@@ -153,6 +154,7 @@ assert_true(str_contains($change, '## [4.0.358]'), 'changelog 4.0.358');
 assert_true(str_contains($change, '## [4.0.359]'), 'changelog 4.0.359');
 assert_true(str_contains($change, '## [4.0.360]'), 'changelog 4.0.360');
 assert_true(str_contains($change, '## [4.0.361]'), 'changelog 4.0.361');
+assert_true(str_contains($change, '## [4.0.366]'), 'changelog 4.0.366');
 assert_true(str_contains($change, '## [4.0.365]'), 'changelog 4.0.365');
 assert_true(str_contains($change, '## [4.0.364]'), 'changelog 4.0.364');
 assert_true(str_contains($change, '## [4.0.363]'), 'changelog 4.0.363');

@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 111, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 112, agent.AGENT_VERSION
     agent.browse_mdns_sources = lambda label, seconds=1.0: []
     sample = """
 Soliciting ff02::2 on eth0...
@@ -185,11 +185,15 @@ Router lifetime           :         1800
     assert label == f"ra:{border}", label
     flat = [" ".join(c) for c in calls]
     assert any(
-        "fd10:d687:e7bf:4ba8::/64" in c and "replace" in c and border in c and "src fd58:b000:2::253" in c
+        "fd10:d687:e7bf:4ba8::/64" in c and "replace" in c and border in c and "fd58:" not in c
         for c in flat
     ), flat
     assert any(
-        "fdef:badd:6106::/64" in c and "via" in c and border in c and "src fd58:b000:2::253" in c and "fd10:" not in c
+        "fdef:badd:6106::/64" in c and "via" in c and border in c and "fd10:" not in c and "fd58:" not in c
+        for c in flat
+    ), flat
+    assert not any(
+        "fd58:b000:2::253" in c and any(word in c.split() for word in ("replace", "add", "src"))
         for c in flat
     ), flat
     calls.clear()
@@ -199,7 +203,11 @@ Router lifetime           :         1800
     flat = [" ".join(c) for c in calls]
     assert any(
         "fdef:badd:6106::/64" in c and "via" in c and "fe80::18e3:8d10:e524:10a9" in c
-        and "src fd58:b000:2::253" in c and "fd10:" not in c
+        and "fd10:" not in c and "fd58:" not in c
+        for c in flat
+    ), flat
+    assert not any(
+        "fd58:b000:2::253" in c and any(word in c.split() for word in ("replace", "add", "src"))
         for c in flat
     ), flat
     calls.clear()
@@ -236,7 +244,15 @@ Router lifetime           :         1800
     ), flat
     assert any(
         "replace" in c and "fdef:badd:6106::/64" in c and homepod_ad in c
-        and "metric 50" in c and "src fd58:b000:2::253" in c and "fd10:" not in c and other not in c
+        and "metric 50" in c and "fd10:" not in c and "fd58:" not in c and other not in c
+        for c in flat
+    ), flat
+    assert any(
+        "replace" in c and "fd10:d687:e7bf:4ba8::/64" in c and other in c and homepod_ad not in c
+        for c in flat
+    ), flat
+    assert not any(
+        "fd58:b000:2::253" in c and any(word in c.split() for word in ("replace", "add", "src"))
         for c in flat
     ), flat
     agent.subprocess.run = lambda cmd, **kwargs: Result(
@@ -247,7 +263,8 @@ Router lifetime           :         1800
     assert "fe80::18e3:8d10:e524:10a9" in hinted and "fe80::1007" not in hinted, hinted
     agent.subprocess.run = fake_install
     saved: list[list[str]] = []
-    agent.add_ipv6_route = lambda prefix, via, iface, src="": saved.append(
+    saved_add_route = agent.add_ipv6_route
+    agent.add_ipv6_route = lambda prefix, via, iface, src="", metric=100: saved.append(
         ["replace", prefix, "via", via, "src", src]
     ) or True
     agent.ensure_pio_source = lambda iface, pios: "fd11:2233:4455::5050"
@@ -257,6 +274,7 @@ Router lifetime           :         1800
     })
     assert advertised == "ra:fe80::abcd", advertised
     assert saved and saved[0][1] == "fd99:1:2::/64" and "dbfc" not in " ".join(saved[0]), saved
+    agent.add_ipv6_route = saved_add_route
     agent._last_matterc_hits = [{
         "matterc": True,
         "aaaa": ["fdef:badd:6106:0:89b5:1f3d:906e:51bc"],
@@ -312,6 +330,87 @@ Router lifetime           :         1800
     )
     assert hop == "fe80::18e3:8d10:e524:10a9", (hop, alts)
     assert any(item.startswith("fe80::1007") for item in alts), alts
+    calls.clear()
+    reflector = "fe80::1007:c231:5072:1418"
+    border_agent = "fe80::18e3:8d10:e524:10a9"
+    agent.browse_mdns_sources = lambda label, seconds=1.0: [border_agent, "fd10:d687:e7bf:4ba8::1"]
+    agent._last_matterc_hits = [{
+        "matterc": True,
+        "src": reflector,
+        "aaaa": ["fdef:badd:6106:0:89b5:1f3d:906e:51bc"],
+        "iface": "eth0",
+        "port": 5540,
+    }]
+    agent.solicit_routers = lambda iface: {
+        "sent": True,
+        "rios": [{"prefix": "fdef:badd:6106::/64", "via": border_agent}],
+        "pios": [{
+            "prefix": "fd10:d687:e7bf:4ba8::/64",
+            "onlink": True,
+            "auto": True,
+        }],
+    }
+
+    def fake_pio(cmd, **kwargs):
+        calls.append(list(cmd))
+        if "addr" in cmd and "show" in cmd:
+            return Result(
+                "2: eth0    inet6 fd10:d687:e7bf:4ba8:2ecf:67ff:fe70:97e7/64 scope global\n"
+            )
+        if "show" in cmd:
+            return Result("")
+        return Result()
+
+    agent.subprocess.run = fake_pio
+    label = agent.install_border_router_route()
+    assert border_agent in label, label
+    flat = [" ".join(c) for c in calls]
+    assert any(
+        "replace" in c and "fdef:badd:6106::/64" in c and border_agent in c
+        and "src fd10:d687:e7bf:4ba8:2ecf:67ff:fe70:97e7" in c
+        for c in flat
+    ), flat
+    assert not any("replace" in c and "fdef:badd:6106::/64" in c and reflector in c for c in flat), flat
+    assert not any(
+        "fd58:b000:2::253" in c and any(word in c.split() for word in ("replace", "add", "src"))
+        for c in flat
+    ), flat
+    assert agent.format_pio_label(
+        [{"prefix": "fdef:badd:6106::/64", "auto": True, "onlink": False}],
+        "fdef:badd:6106::/64",
+    ) == "same"
+    assert agent._last_rio_rows and agent._last_rio_rows[0]["via"] == border_agent
+    assert agent._last_pio_label.startswith("fd10:d687:e7bf:4ba8::/64,AL"), agent._last_pio_label
+    assert border_agent in agent._last_mesh_sources
+    assert "fd10:d687:e7bf:4ba8::1" in agent._last_mesh_sources
+    text = agent.format_discovery_diag({
+        "agent": agent.AGENT_VERSION,
+        "thread_route": "fdef:badd:6106::/64 via " + border_agent,
+        "tailscale": False,
+        "matterc_seen": True,
+        "fd": "fdef:badd:6106::/64",
+        "via": border_agent,
+        "ra_proof": "ra",
+        "v4": "none",
+        "addrs": ["fdef:badd:6106:0:89b5:1f3d:906e:51bc"],
+        "mdns5353": "free",
+        "network_mode": "host",
+        "iface": "eth0",
+        "br": border_agent,
+        "pase_target": "ra:" + border_agent,
+        "pair_src": "fd10:d687:e7bf:4ba8:2ecf:67ff:fe70:97e7",
+        "ra_adv": "none",
+        "alt_hops": [reflector],
+        "port": 5540,
+        "shield": "ok",
+        "rio": agent.format_rio_label(agent._last_rio_rows),
+        "pio": agent._last_pio_label,
+        "mesh": ",".join(agent._last_mesh_sources),
+    })
+    assert "rio=fdef:badd:6106::/64 via " + border_agent in text, text
+    assert "pio=fd10:d687:e7bf:4ba8::/64,AL" in text, text
+    assert "mesh=" + border_agent in text, text
+    assert "fd58:b000:2::253" not in text
     print("ok: thread route helpers")
     return 0
 
