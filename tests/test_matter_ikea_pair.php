@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 84, 'min agent 84');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 85, 'min agent 85');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -47,7 +47,7 @@ assert_true(str_contains($home, 'function commissionStatus'), 'PHP commissionSta
 assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan empty message');
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 84'), 'agent v84');
+assert_true(str_contains($agent, 'AGENT_VERSION = 85'), 'agent v85');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
@@ -68,6 +68,9 @@ assert_true(str_contains($agent, 'begin_tailscale_matter_shield'), 'pause Tailsc
 assert_true(str_contains($agent, 'end_tailscale_matter_shield'), 'restore Tailscale after pair');
 assert_true(str_contains($agent, 'verify_tailscale_matter_shield'), 'verify Tailscale shield');
 assert_true(str_contains($agent, 'wait_for_thread_route'), 'wait for Thread RIO');
+assert_true(str_contains($agent, 'install_discovered_thread_routes'), 'install Thread routes');
+assert_true(str_contains($agent, 'parse_rdisc6_rios'), 'parse rdisc6 RIOs');
+assert_true(str_contains($agent, 'ensure_matter_host_network'), 'enforce host network');
 assert_true(str_contains($agent, "ts="), 'diag ts= field');
 assert_true(str_contains($agent, 'shield='), 'diag shield field');
 assert_true(str_contains($agent, 'ff00::/8'), 'ipv6 multicast route');
@@ -80,6 +83,7 @@ assert_true(str_contains($shell, 'accept_ra_rt_info_max_plen=64'), 'shell thread
 assert_true(str_contains($shell, 'tailscale-shield'), 'shell shield cmd');
 assert_true(str_contains($shell, 'tailscale-unshield'), 'shell unshield cmd');
 assert_true(str_contains($shell, 'yarbo_matter_tailscale_shield'), 'shell shield fn');
+assert_true(str_contains($shell, 'thread-route-add'), 'shell thread-route-add');
 assert_true(str_contains($shell, '99-yarbo-matter-thread.conf'), 'persist thread sysctl');
 assert_true(str_contains($shell, 'YARBO_MATTER_IPV6_REEXEC'), 'reexec fresh ipv6-route wrapper');
 assert_true(str_contains($update, 'yarbo_matter_install_wrapper'), 'update refreshes wrapper first');
@@ -88,7 +92,7 @@ assert_true(str_contains($docs, 'Motion / occupancy'), 'docs motion parity');
 assert_true(str_contains($docs, 'error 28'), 'docs error 28');
 assert_true(str_contains($docs, 'error_code 1'), 'docs error_code 1');
 assert_true(str_contains($docs, 'gateway 524'), 'docs gateway 524');
-assert_true(str_contains($docs, '4.0.337+'), 'docs 4.0.337 discovery');
+assert_true(str_contains($docs, '4.0.338+'), 'docs 4.0.338 discovery');
 assert_true(str_contains($change, '## [4.0.324]'), 'changelog 4.0.324');
 assert_true(str_contains($change, '## [4.0.325]'), 'changelog 4.0.325');
 assert_true(str_contains($change, '## [4.0.326]'), 'changelog 4.0.326');
@@ -103,5 +107,6 @@ assert_true(str_contains($change, '## [4.0.334]'), 'changelog 4.0.334');
 assert_true(str_contains($change, '## [4.0.335]'), 'changelog 4.0.335');
 assert_true(str_contains($change, '## [4.0.336]'), 'changelog 4.0.336');
 assert_true(str_contains($change, '## [4.0.337]'), 'changelog 4.0.337');
+assert_true(str_contains($change, '## [4.0.338]'), 'changelog 4.0.338');
 
 echo "test_matter_ikea_pair.php ok\n";

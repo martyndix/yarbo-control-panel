@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.338] - 2026-11-17
+
+### Fixed
+- **Apple Home Thread pairing root cause:** when the kernel never installs Apple BR RIOs (`thread_route=none` with only `fe80::/64`), Add device now parses `rdisc6` / resolved `_matterc` Thread prefixes and installs a static `fd…/64 via fe80::…` route (same workaround as Home Assistant on broken RIO stacks), enforces Matter `--network host`, and reports `ra=` / `net=` / `fwd=` in diag. Matter agent **v85**.
+
 ## [4.0.337] - 2026-11-17
 
 ### Fixed
