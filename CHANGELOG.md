@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.350] - 2026-11-17
+
+### Fixed
+
+- Add device sends the accessory `fd…` address via the Thread border agent from a routable address on the Pi. v96 sourced that packet from the Pi’s link-local (`pase=llsrc`), which a border router does not forward onto Thread. `br=self` means the accessory itself is the only border agent on the LAN. Matter agent **v97**.
+
 ## [4.0.349] - 2026-11-17
 
 ### Fixed
