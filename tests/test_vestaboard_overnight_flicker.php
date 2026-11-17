@@ -75,48 +75,13 @@ assert_true(
     'blocked live write must not change board_codes'
 );
 
-$confirm = $ref->getMethod('overnightLeaveConfirmed');
-$confirm->setAccessible(true);
+$role = $ref->getMethod('stickyOvernightRole');
+$role->setAccessible(true);
+assert_true($role->invoke($quiet, $quiet->load()) === 'quiet', 'sticky quiet role while active');
 
-// Sticky night + clock outside: first check arms the timer, does not confirm leave.
-$outsideStart = $now->modify('-4 hours')->format('H:i');
-$outsideEnd = $now->modify('-2 hours')->format('H:i');
-file_put_contents($root . '/data/vestaboard-config.json', json_encode([
-    'enabled' => true,
-    'transport' => 'local',
-    'host' => '127.0.0.1',
-    'port' => 1,
-    'api_key' => 'test-key',
-    'quiet_timezone' => 'UTC',
-    'night_hours_enabled' => true,
-    'night_start' => $outsideStart,
-    'night_end' => $outsideEnd,
-    'night_active' => true,
-    'quiet_hours_enabled' => false,
-    'quiet_active' => false,
-    'overnight_outside_since' => null,
-    'last_live_codes' => $yarboCodes,
-], JSON_UNESCAPED_SLASHES));
-$sticky = new YarboVestaboard($root);
-assert_true(!$sticky->isNightHours(), 'clock outside night window');
-$stickyRef = new ReflectionClass($sticky);
-$stickyConfirm = $stickyRef->getMethod('overnightLeaveConfirmed');
-$stickyConfirm->setAccessible(true);
-assert_true($stickyConfirm->invoke($sticky, $sticky->load()) === false, 'first outside tick arms leave timer');
-$armed = json_decode((string) file_get_contents($root . '/data/vestaboard-config.json'), true);
-assert_true(
-    is_string($armed['overnight_outside_since'] ?? null) && ($armed['overnight_outside_since'] ?? '') !== '',
-    'overnight_outside_since stamped'
-);
-assert_true($stickyConfirm->invoke($sticky, $sticky->load()) === false, 'still inside confirm window');
-
-$armed['overnight_outside_since'] = gmdate('c', time() - YarboVestaboard::OVERNIGHT_LEAVE_CONFIRM_SEC - 5);
-file_put_contents($root . '/data/vestaboard-config.json', json_encode($armed, JSON_UNESCAPED_SLASHES));
-$ready = new YarboVestaboard($root);
-$readyRef = new ReflectionClass($ready);
-$readyConfirm = $readyRef->getMethod('overnightLeaveConfirmed');
-$readyConfirm->setAccessible(true);
-assert_true($readyConfirm->invoke($ready, $ready->load()) === true, 'sustained outside confirms leave');
+$leave = $ref->getMethod('leaveOvernightNow');
+$leave->setAccessible(true);
+assert_true($leave->invoke($quiet, $quiet->load()) === null, 'leave refused while sticky quiet');
 
 $tzRoot = sys_get_temp_dir() . '/yarbo-vb-tz-' . bin2hex(random_bytes(3));
 mkdir($tzRoot . '/data', 0775, true);
@@ -133,9 +98,11 @@ $src = (string) file_get_contents(__DIR__ . '/../src/YarboVestaboard.php');
 assert_true(str_contains($src, 'OVERNIGHT_LEAVE_CONFIRM_SEC'), 'leave confirm constant');
 assert_true(str_contains($src, 'forceQuiet'), 'quiet force only on enter/stuck');
 assert_true(str_contains($src, "reason' => 'overnight'"), 'sendLayout overnight hard stop');
-assert_true(str_contains($src, 'Never let a browser/status poll replace a real local zone with UTC'), 'timezone harden');
+assert_true(str_contains($src, 'stickyOvernightRole'), 'sticky overnight role');
+assert_true(str_contains($src, 'Once a real local zone is stored'), 'timezone harden');
 
 $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 assert_true(str_contains($change, '## [4.0.321]'), 'changelog 4.0.321');
+assert_true(str_contains($change, '## [4.0.322]'), 'changelog 4.0.322');
 
 echo "test_vestaboard_overnight_flicker.php ok\n";
