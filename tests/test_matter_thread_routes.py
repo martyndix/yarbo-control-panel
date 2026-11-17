@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 96, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 97, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -111,6 +111,7 @@ Router lifetime           :         1800
     homepod = "fe80::1111:2222:3333:4444"
     assert agent.pick_border_router([*accessory, homepod], accessory) == homepod
     assert agent.pick_border_router(list(accessory), accessory) == ""
+    assert agent.pick_border_router(["2001:db8::1"], accessory) == "2001:db8::1"
     agent.discover_border_router_via = lambda iface: homepod
     label = agent.install_border_router_route()
     assert label == f"br:{homepod}", label
@@ -124,16 +125,16 @@ Router lifetime           :         1800
     assert not any("lladdr" in c and "28:70:4e:68:98:ea" in c for c in flat), flat
     calls.clear()
     agent.discover_border_router_via = lambda iface: ""
-    agent.iface_fe80 = lambda iface: "fe80::aabb:ccff:fedd:eeff"
     label = agent.install_border_router_route()
-    assert label == "llsrc:fe80::aabb:ccff:fedd:eeff", label
+    assert label == "ulasrc:fd58:b000:1::1", label
     flat = [" ".join(c) for c in calls]
+    assert any("addr" in c and "fd58:b000:1::1" in c and "dev eth0" in c for c in flat), flat
     assert any(
         "route" in c and "replace" in c and "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0/128" in c
-        and "src" in c and "fe80::aabb:ccff:fedd:eeff" in c
+        and "via" in c and "fe80::2a70:4eff:fe68:98ea" in c and "src" in c and "fd58:b000:1::1" in c
         for c in flat
     ), flat
-    assert any("neigh" in c and "lladdr" in c and "28:70:4e:68:98:ea" in c for c in flat), flat
+    assert not any("lladdr" in c for c in flat), flat
     print("ok: thread route helpers")
     return 0
 

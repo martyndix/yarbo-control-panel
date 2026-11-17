@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 96
+AGENT_VERSION = 97
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1802,6 +1802,8 @@ _mdns5353 = ""
 _mdns_quiesced = False
 _pase_target = ""
 _last_br_heard = ""
+# Routable source for PASE. A link-local source is not forwarded by a border router.
+PAIR_SRC = "fd58:b000:1::1"
 
 
 def commission_job_is_running() -> bool:
@@ -2173,21 +2175,23 @@ def discover_apple_thread_rios(iface: str | None = None) -> list[dict[str, str]]
     return rows
 
 
-def add_ipv6_route(prefix: str, via: str, iface: str) -> bool:
+def add_ipv6_route(prefix: str, via: str, iface: str, src: str = "") -> bool:
     """Install Thread /64 via Apple BR link-local (same workaround as HA on broken RIO kernels)."""
     prefix = (prefix or "").strip()
     via = (via or "").strip().split("%")[0]
     iface = (iface or "").strip()
+    src = (src or "").strip().split("%", 1)[0]
     if not prefix or not via or not iface:
         return False
     if not via.lower().startswith("fe80:"):
         return False
-    if _is_tailscale_ula(prefix):
+    if _is_tailscale_ula(prefix) or (src and _is_tailscale_ula(src)):
         return False
+    tail = ["src", src, "metric", "100"] if src else ["metric", "100"]
     for cmd in (
-        ["sudo", "-n", "ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, "metric", "100"],
-        ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, "metric", "100"],
-        ["ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, "metric", "100"],
+        ["sudo", "-n", "ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, *tail],
+        ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, *tail],
+        ["ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, *tail],
     ):
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
@@ -2622,14 +2626,22 @@ def install_onlink_accessory_route() -> str:
 
 
 def pick_border_router(candidates: list[str], accessory: set[str]) -> str:
-    """Link-local of a Thread border router that is not the accessory itself."""
+    """Border router that is not the accessory. Prefer a link-local, else a routable address."""
     blocked = {item.split("%", 1)[0].lower() for item in accessory if item}
+    fe80s: list[str] = []
+    others: list[str] = []
     for raw in candidates:
         src = str(raw or "").split("%", 1)[0]
         low = src.lower()
-        if low.startswith("fe80:") and low not in blocked:
-            return src
-    return ""
+        if not low or low in blocked or low.startswith("ff") or _is_tailscale_ula(low):
+            continue
+        if low.startswith("fe80:"):
+            fe80s.append(src)
+        elif ":" in low:
+            others.append(src)
+    if fe80s:
+        return fe80s[0]
+    return others[0] if others else ""
 
 
 def local_fe80s() -> set[str]:
@@ -2799,7 +2811,10 @@ def browse_mdns_sources(label: str, seconds: float = 3.0) -> list[str]:
             if needle not in data:
                 continue
             src = str(addr[0]).split("%", 1)[0]
-            if src.lower().startswith("fe80:") and src not in found:
+            low = src.lower()
+            if not low or low.startswith("ff") or _is_tailscale_ula(low):
+                continue
+            if src not in found:
                 found.append(src)
     except OSError as exc:
         print(f"matter: mdns browse {label}: {exc}", flush=True)
@@ -2828,6 +2843,11 @@ def discover_border_router_via(iface: str) -> str:
     except Exception as exc:  # noqa: BLE001
         print(f"matter: border-router rdisc6: {exc}", flush=True)
     blocked = accessory | local_fe80s()
+    for hit in _last_matterc_hits:
+        for addr in hit.get("aaaa") or []:
+            raw = str(addr).split("%", 1)[0].lower()
+            if raw.startswith("fd") and not _is_tailscale_ula(raw):
+                blocked.add(raw)
     chosen = pick_border_router(candidates, blocked)
     heard: list[str] = []
     for raw in candidates:
@@ -2846,41 +2866,43 @@ def discover_border_router_via(iface: str) -> str:
     return chosen
 
 
-def install_linklocal_source_route(host: str, iface: str) -> str:
-    """Deliver the accessory fd address on the LAN, sourced from our link-local.
+def install_pair_source(iface: str) -> bool:
+    """Address the Pi can use as a PASE source. Link-local is not forwarded onto Thread."""
+    if not iface:
+        return False
+    if _ip_ok(["-6", "addr", "replace", f"{PAIR_SRC}/128", "dev", iface, "nodad"]):
+        return True
+    return _ip_ok(["-6", "addr", "add", f"{PAIR_SRC}/128", "dev", iface, "nodad"])
 
-    With no border router, v95 left this address on the IPv6 default route, so
-    PASE went to the gateway. v94 delivered it to the accessory MAC from whatever
-    source the kernel picked, and the accessory sent no reply. Pin the source to
-    the Pi's fe80 so the accessory can answer without a route.
+
+def install_routable_agent_route(host: str, iface: str) -> str:
+    """Send the accessory fd address via the border agent, from a routable source.
+
+    v96 delivered it on-link from the Pi's fe80 (pase=llsrc). A border router does
+    not forward a link-local source, and br=self means this accessory is that router.
     """
-    src = iface_fe80(iface)
-    mac = ""
+    via = ""
     for hit in _last_matterc_hits:
-        hit_src = str(hit.get("src") or "").split("%", 1)[0]
-        if hit_src.lower().startswith("fe80:"):
-            mac = eui64_to_mac(hit_src)
-            if mac:
-                break
-    if not host or not iface or not src or not mac:
-        print(f"matter: link-local source route skipped host={host or '-'} src={src or '-'} mac={mac or '-'}", flush=True)
+        src = str(hit.get("src") or "").split("%", 1)[0]
+        if src.lower().startswith("fe80:"):
+            via = src
+            break
+    if not host or not iface or not via:
+        print(f"matter: routable route skipped host={host or '-'} via={via or '-'}", flush=True)
         return ""
-    _ip_ok(["-6", "neigh", "replace", host, "lladdr", mac, "dev", iface, "nud", "permanent"])
-    routed = _ip_ok(["-6", "route", "replace", f"{host}/128", "dev", iface, "src", src, "metric", "100"])
-    if not routed:
-        routed = _ip_ok(["-6", "route", "replace", f"{host}/128", "dev", iface, "metric", "100"])
-    if not routed:
-        print(f"matter: link-local source route failed for {host}", flush=True)
+    if not install_pair_source(iface):
+        print("matter: routable source address was not added", flush=True)
         return ""
-    print(f"matter: on-link {host}/128 dev {iface} src {src} lladdr {mac}", flush=True)
-    return f"llsrc:{src}"
+    if not add_ipv6_route(f"{host}/128", via, iface, PAIR_SRC):
+        return ""
+    return f"ulasrc:{PAIR_SRC}"
 
 
 def install_border_router_route() -> str:
-    """Route the accessory fd prefix via a border router when one answers.
+    """Route the accessory fd prefix via a border router.
 
-    Otherwise deliver that host on the LAN from the Pi's own link-local. Leaving
-    it unrouted sends PASE to the IPv6 gateway, which drops it.
+    The source is a routable address on the Pi. v96 used the Pi's link-local,
+    which a border router will not forward onto Thread.
     """
     try:
         drop_onlink_fd_host_routes()
@@ -2896,13 +2918,16 @@ def install_border_router_route() -> str:
         hint = thread_route_hint(iface) or ""
         found = re.search(r"via\s+(fe80:[0-9a-f:]+)", hint, re.I)
         if found and found.group(1).lower() not in accessory_link_locals():
-            return f"br:{found.group(1)}"
-        return install_linklocal_source_route(host, iface)
-    if not add_ipv6_route(prefix, via, iface):
-        return install_linklocal_source_route(host, iface)
+            via = found.group(1)
+        else:
+            return install_routable_agent_route(host, iface)
+    if install_pair_source(iface) and add_ipv6_route(prefix, via, iface, PAIR_SRC):
+        pass
+    elif not add_ipv6_route(prefix, via, iface):
+        return install_routable_agent_route(host, iface)
     global _last_ra_proof, _last_routes_installed
     _last_ra_proof = "br"
-    _last_routes_installed = [f"{prefix} via {via}"]
+    _last_routes_installed = [f"{prefix} via {via} src {PAIR_SRC}"]
     return f"br:{via}"
 
 
@@ -4137,8 +4162,8 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             _pase_target = border
         elif _last_matterc_hits:
             _pase_target = "nobr"
-        # CHIP uses the SRV port from the code. The fd prefix goes via a border
-        # router when one answered; otherwise it is on-link from our link-local.
+        # CHIP uses the SRV port from the code. The fd prefix goes via the border
+        # agent from a routable source so the router can forward it onto Thread.
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
