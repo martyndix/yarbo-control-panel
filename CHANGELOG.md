@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.324] - 2026-11-17
+
+### Fixed
+- **IKEA / Matter plug pairing from Apple Home:** pairing codes with dashes or spaces are accepted, failed Add device shows clearer steps (Turn On Pairing Mode, not Look for devices / sticker QR), and the Home hint explains that Look for devices only finds Hue Bridge lights. Matter agent **v72**.
+
 ## [4.0.323] - 2026-11-17
 
 ### Fixed

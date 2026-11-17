@@ -669,7 +669,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="btn btn-secondary" id="home-scan">Look for devices</button>
                 </div>
                 <p id="home-pair-status" class="hint hidden" role="status"></p>
-                <p class="hint">Hue: Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Already in Apple Home: accessory → Turn On Pairing Mode. Do not pair the same Hue Bridge twice. Lights you later add in Hue or Apple Home appear here after Look for devices (wait for it to finish, try once more if needed), or on the next hunt (about every 15 minutes). Check Hidden before pairing anything again.</p>
+                <p class="hint"><strong>IKEA / Matter plug already in Apple Home:</strong> open the accessory → <strong>Turn On Pairing Mode</strong> → paste that fresh code (XXXX-XXX-XXXX) and tap <strong>Add device</strong> — not the sticker QR, and not Look for devices. Keep a HomePod or Apple TV online for Thread. <strong>Hue:</strong> Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Do not pair the same Hue Bridge twice. New Hue bulbs later appear after <strong>Look for devices</strong> (wait for it to finish), or on the next hunt (~15 minutes). Check Hidden before pairing anything again.</p>
             </div>
             <div id="home-room-add" class="home-room-add">
                 <input type="text" id="home-room-name" placeholder="Kitchen" maxlength="32" aria-label="New room name">

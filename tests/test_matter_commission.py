@@ -38,7 +38,11 @@ def mill_node() -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 61, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 72, agent.AGENT_VERSION
+    assert agent.normalize_pairing_code("2462-204-0808") == "24622040808"
+    assert agent.normalize_pairing_code(" 2462 204 0808 ") == "24622040808"
+    assert agent.normalize_pairing_code("MT:ABCDEF").startswith("MT:")
+    assert "Turn On Pairing Mode" in agent.friendly_commission_error("timeout while discovering")
     assert agent.node_id_from_any({"node_id": 40}) == 40
     assert agent.node_id_from_any(40) == 40
     assert agent.node_id_from_any({"result": {"nodeId": 7}}) == 7

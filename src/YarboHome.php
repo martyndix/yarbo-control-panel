@@ -971,7 +971,7 @@ final class YarboHome
      */
     public function commission(string $code): array
     {
-        $code = trim($code);
+        $code = self::normalizeMatterPairingCode($code);
         if ($code === '') {
             return ['ok' => false, 'error' => 'Paste a Matter pairing code or QR text'];
         }
@@ -1095,10 +1095,30 @@ final class YarboHome
             $this->rememberDevices($merged);
         }
         $message = $added === 0
-            ? 'No new devices. Check Hidden, then tap Look for devices again. Do not pair the Hue Bridge a second time.'
+            ? 'No new devices. Look for devices only finds Hue lights on a paired Bridge — for an IKEA/Matter plug already in Apple Home, use Add device with Turn On Pairing Mode. Check Hidden, then try again. Do not pair the Hue Bridge a second time.'
             : ($added === 1 ? 'Found 1 new device.' : 'Found ' . $added . ' new devices.');
 
         return ['ok' => true, 'message' => $message, 'added' => $added];
+    }
+
+    /**
+     * Accept 11-digit, XXXX-XXX-XXXX, or MT:… codes from Apple Home / device labels.
+     */
+    public static function normalizeMatterPairingCode(string $raw): string
+    {
+        $code = trim($raw);
+        if ($code === '') {
+            return '';
+        }
+        if (strncasecmp($code, 'MT:', 3) === 0) {
+            return 'MT:' . trim(substr($code, 3));
+        }
+        $digits = preg_replace('/[\s\-–—]+/u', '', $code) ?? $code;
+        if ($digits !== '' && ctype_digit($digits) && (strlen($digits) === 11 || strlen($digits) === 21)) {
+            return $digits;
+        }
+
+        return $code;
     }
 
     /**

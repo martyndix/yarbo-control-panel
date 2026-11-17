@@ -18082,7 +18082,7 @@ document.getElementById('home-scan')?.addEventListener('click', async () => {
         btn.textContent = 'Looking…';
     }
     if (status) {
-        status.textContent = 'Looking for new Hue lights on the paired Bridge. This can take a couple of minutes.';
+        status.textContent = 'Looking for new Hue lights on the paired Bridge (not IKEA/Matter plugs — those need Add device). This can take a couple of minutes.';
         status.classList.remove('hidden');
     }
     try {

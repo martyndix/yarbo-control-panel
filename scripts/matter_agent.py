@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 71
+AGENT_VERSION = 72
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1793,6 +1793,56 @@ def merge_live_devices(extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if merged:
         remember_live_devices(merged)
     return current_live_devices()
+
+
+def normalize_pairing_code(raw: str) -> str:
+    """Accept 11-digit / XXXX-XXX-XXXX / MT:… codes from Apple Home or the device."""
+    code = str(raw or "").strip()
+    if not code:
+        return ""
+    if code.upper().startswith("MT:"):
+        return "MT:" + code[3:].strip()
+    digits = re.sub(r"[\s\-–—]", "", code)
+    if digits.isdigit() and len(digits) in (11, 21):
+        return digits
+    return code
+
+
+def friendly_commission_error(err: str) -> str:
+    """Map opaque python-matter-server errors into panel-facing pairing hints."""
+    detail = str(err or "").strip() or "Pairing failed"
+    low = detail.lower()
+    if "not ready" in low or "unavailable" in low or "connection refused" in low:
+        return (
+            "Matter server is not ready. Open Settings → Home and tap Set up Matter server, "
+            "then try Add device again."
+        )
+    if "timeout" in low or "timed out" in low:
+        return (
+            "Pairing timed out. In Apple Home open the plug → Turn On Pairing Mode, "
+            "paste that fresh code here within a few minutes (not the sticker QR). "
+            "Keep a HomePod or Apple TV online for Thread. "
+            "Look for devices only finds Hue lights on a paired Bridge — use Add device for IKEA plugs."
+        )
+    if "discover" in low or "not found" in low or "no device" in low:
+        return (
+            "Could not reach the plug on the network. Use Apple Home → Turn On Pairing Mode "
+            "(not the original QR), keep the HomePod/Apple TV online, then Add device."
+        )
+    if "invalid" in low and "code" in low:
+        return (
+            "That pairing code is invalid or expired. In Apple Home open the accessory → "
+            "Turn On Pairing Mode and paste the new code (XXXX-XXX-XXXX)."
+        )
+    if "already" in low and ("commission" in low or "fabric" in low or "paired" in low):
+        return (
+            "This fabric may already have that device, or pairing mode expired. "
+            "Check Hidden under Home ⚙️, or Turn On Pairing Mode again in Apple Home."
+        )
+    return (
+        f"{detail} — For a plug already in Apple Home: accessory → Turn On Pairing Mode → "
+        "Add device (not Look for devices)."
+    )
 
 
 def refresh_after_commission(result: Any) -> list[dict[str, Any]]:
@@ -6476,7 +6526,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "reloaded": bool(restored),
         }
     if op == "commission":
-        code = str(body.get("code") or "").strip()
+        code = normalize_pairing_code(str(body.get("code") or ""))
         if not code:
             return {"ok": False, "error": "Pairing code is required"}
         rpc = matter_rpc(
@@ -6485,7 +6535,10 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             timeout=90.0,
         )
         if not rpc.get("ok"):
-            return rpc
+            return {
+                "ok": False,
+                "error": friendly_commission_error(str(rpc.get("error") or "Pairing failed")),
+            }
         devices = refresh_after_commission(rpc.get("result"))
         return {
             "ok": True,

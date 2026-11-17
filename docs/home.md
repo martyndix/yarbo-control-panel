@@ -39,8 +39,9 @@ On a Mac, Matter pairing is optional and needs Docker Desktop; use the Pi for da
 ### Pairing tips
 
 - Hue Bridge: Matter code from the Hue app. Do **not** also share the same bridge from Apple Home (fabric slots are limited; Apple already uses two).
-- Already in Apple Home: accessory → **Turn On Pairing Mode** → paste the ~5-minute code (the printed QR is not reused).
+- Already in Apple Home (IKEA plugs, sensors, …): accessory → **Turn On Pairing Mode** → paste the ~5-minute code into **Add device** (the printed QR is not reused). **Look for devices** only finds Hue lights on a Bridge you already paired — it will not find a new IKEA plug.
 - Other Matter devices: code or `MT:…` QR text from the vendor app.
+- Matter server must show as running on the Home card (Settings → Home → **Set up Matter server** if needed). Thread plugs need a HomePod / Apple TV online as the border router.
 
 Thread devices keep using Apple’s (or another) border router. IPv6 is turned on automatically on the Pi when the Matter server is set up.
 
