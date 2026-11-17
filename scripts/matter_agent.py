@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 108
+AGENT_VERSION = 109
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1811,6 +1811,11 @@ _saved_ra_pinfo: tuple[str, str] | None = None
 _held_rio_addrs: list[tuple[str, str, str]] = []
 # Routable source for PASE. A link-local source is not forwarded by a border router.
 PAIR_SRC = "fd58:b000:1::1"
+# A LAN prefix that is not the HomePod's Thread prefix. The plug paired because it
+# had an address on the LAN subnet. The Pi's only other IPv6 address is inside the
+# HomePod prefix, and a link-local source gets no reply.
+PAIR_LAN_PREFIX = "fd58:b000:2::/64"
+PAIR_LAN_ADDR = "fd58:b000:2::253"
 
 
 def commission_job_is_running() -> bool:
@@ -3595,6 +3600,8 @@ def homepod_ula_prefixes(iface: str) -> list[str]:
         if not parsed.is_private:
             continue
         text = str(net)
+        if text == PAIR_LAN_PREFIX:
+            continue
         if text not in found:
             found.append(text)
     return found
@@ -3654,6 +3661,20 @@ def restore_thread_prefix_addresses() -> None:
     resume_onlink_prefix_info()
 
 
+def install_pair_lan_address(iface: str) -> str:
+    """Address on a LAN prefix the HomePod can answer with neighbor discovery."""
+    if not iface:
+        return ""
+    if not _ip_ok(["-6", "addr", "replace", f"{PAIR_LAN_ADDR}/64", "dev", iface, "nodad"]):
+        return ""
+    try:
+        advertise_prefix_once(iface, PAIR_LAN_PREFIX)
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: pair LAN advertisement: {exc}", flush=True)
+    print(f"matter: pairing source {PAIR_LAN_ADDR} on {iface}", flush=True)
+    return PAIR_LAN_ADDR
+
+
 def install_thread_return_route(iface: str, hop: str, mesh_prefix: str) -> str:
     """Send Thread prefixes via hop, from an address the HomePod will answer on the LAN."""
     global _last_pair_src, _last_routes_installed
@@ -3667,8 +3688,15 @@ def install_thread_return_route(iface: str, hop: str, mesh_prefix: str) -> str:
     if mesh_prefix and mesh_prefix not in avoid:
         avoid.append(mesh_prefix)
     src = pairing_source_address(iface, avoid)
-    _last_pair_src = src
     if not src:
+        # No global address outside the HomePod prefix. src=ll on v108 got no reply.
+        # The plug paired from a normal LAN address, so give the Pi one of those.
+        src = install_pair_lan_address(iface)
+    if src:
+        pause_onlink_prefix_info(iface)
+        hold_thread_prefix_addresses(iface, [prefix for prefix in ula_prefixes if prefix != PAIR_LAN_PREFIX])
+        _last_pair_src = src
+    else:
         pause_onlink_prefix_info(iface)
         hold_thread_prefix_addresses(iface, avoid)
         _last_pair_src = "ll"
@@ -4838,8 +4866,8 @@ def friendly_commission_error(err: str) -> str:
                 )
             return (
                 "The IKEA plug paired because it had an address on the LAN subnet. "
-                "This sensor has no LAN address. The Pi's only IPv6 address is inside the HomePod "
-                "prefix, so the reply does not come back. Use a fresh Turn On Pairing Mode code."
+                "This sensor has none, so pairing is sent from a LAN address on the Pi "
+                "that the HomePod can answer. Use a fresh Turn On Pairing Mode code."
                 f"{chip}"
             )
         return (
