@@ -50,7 +50,7 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 82, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 83, agent.AGENT_VERSION
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
         "iface": "eth0",
@@ -62,7 +62,7 @@ def main() -> int:
         "ipv6_ll": True,
         "thread_route": "fd11::/64",
         "matterc": ["no _matterc replies"],
-        "agent": 82,
+        "agent": 83,
     }
     err = agent.friendly_commission_error("Pairing timed out while discovering")
     assert "Thread/mDNS" in err or "commissionable" in err.lower() or "Tailscale" in err or "timed out" in err.lower(), err
@@ -80,7 +80,7 @@ def main() -> int:
         "tailscale": True,
         "matterc": ["fe80::1 +200b"],
         "matterc_seen": True,
-        "agent": 82,
+        "agent": 83,
     }
     seen = agent.friendly_commission_error("Pairing timed out while discovering")
     assert "commissionable" in seen.lower() or "Tailscale" in seen, seen
@@ -97,6 +97,9 @@ def main() -> int:
     assert not agent.iface_is_virtual("eth0")
     assert agent._is_tailscale_ula("fd7a:115c:a1e0::1 dev tailscale0")
     assert callable(agent.tailscale_iface_present)
+    assert callable(agent.begin_tailscale_matter_shield)
+    assert callable(agent.end_tailscale_matter_shield)
+    assert callable(agent.flush_tailscale_ipv6_routes)
     assert callable(agent.refresh_matter_setup_wrapper)
     assert agent.rt_info_max_plen.__code__.co_argcount >= 0
     assert agent.commission_error_looks_discovery("Pairing timed out while discovering")

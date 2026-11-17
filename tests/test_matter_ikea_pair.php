@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 82, 'min agent 82');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 83, 'min agent 83');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -47,7 +47,7 @@ assert_true(str_contains($home, 'function commissionStatus'), 'PHP commissionSta
 assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan empty message');
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 82'), 'agent v82');
+assert_true(str_contains($agent, 'AGENT_VERSION = 83'), 'agent v83');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
@@ -64,6 +64,8 @@ assert_true(str_contains($agent, 'discovery_diag'), 'discovery diag');
 assert_true(str_contains($agent, 'iface_is_virtual'), 'skip VPN ifaces');
 assert_true(str_contains($agent, 'tailscale_iface_present'), 'detect Tailscale');
 assert_true(str_contains($agent, '_is_tailscale_ula'), 'ignore Tailscale ULA');
+assert_true(str_contains($agent, 'begin_tailscale_matter_shield'), 'pause Tailscale on pair');
+assert_true(str_contains($agent, 'end_tailscale_matter_shield'), 'restore Tailscale after pair');
 assert_true(str_contains($agent, 'ff00::/8'), 'ipv6 multicast route');
 assert_true(str_contains($agent, 'leaving healthy server alone'), 'do not tear down healthy server');
 assert_true(str_contains($agent, 'discovery_preflight_error'), 'discovery preflight');
@@ -71,6 +73,9 @@ assert_true(str_contains($agent, 'OCCUPANCY_SENSING = 0x0406'), 'occupancy sensi
 $shell = (string) file_get_contents(__DIR__ . '/../scripts/lib/matter_server.sh');
 $update = (string) file_get_contents(__DIR__ . '/../scripts/update.sh');
 assert_true(str_contains($shell, 'accept_ra_rt_info_max_plen=64'), 'shell thread RIO');
+assert_true(str_contains($shell, 'tailscale-shield'), 'shell shield cmd');
+assert_true(str_contains($shell, 'tailscale-unshield'), 'shell unshield cmd');
+assert_true(str_contains($shell, 'yarbo_matter_tailscale_shield'), 'shell shield fn');
 assert_true(str_contains($shell, '99-yarbo-matter-thread.conf'), 'persist thread sysctl');
 assert_true(str_contains($shell, 'YARBO_MATTER_IPV6_REEXEC'), 'reexec fresh ipv6-route wrapper');
 assert_true(str_contains($update, 'yarbo_matter_install_wrapper'), 'update refreshes wrapper first');
@@ -79,7 +84,7 @@ assert_true(str_contains($docs, 'Motion / occupancy'), 'docs motion parity');
 assert_true(str_contains($docs, 'error 28'), 'docs error 28');
 assert_true(str_contains($docs, 'error_code 1'), 'docs error_code 1');
 assert_true(str_contains($docs, 'gateway 524'), 'docs gateway 524');
-assert_true(str_contains($docs, '4.0.335+'), 'docs 4.0.335 discovery');
+assert_true(str_contains($docs, '4.0.336+'), 'docs 4.0.336 discovery');
 assert_true(str_contains($change, '## [4.0.324]'), 'changelog 4.0.324');
 assert_true(str_contains($change, '## [4.0.325]'), 'changelog 4.0.325');
 assert_true(str_contains($change, '## [4.0.326]'), 'changelog 4.0.326');
@@ -92,5 +97,6 @@ assert_true(str_contains($change, '## [4.0.332]'), 'changelog 4.0.332');
 assert_true(str_contains($change, '## [4.0.333]'), 'changelog 4.0.333');
 assert_true(str_contains($change, '## [4.0.334]'), 'changelog 4.0.334');
 assert_true(str_contains($change, '## [4.0.335]'), 'changelog 4.0.335');
+assert_true(str_contains($change, '## [4.0.336]'), 'changelog 4.0.336');
 
 echo "test_matter_ikea_pair.php ok\n";

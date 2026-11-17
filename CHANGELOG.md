@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.336] - 2026-11-17
+
+### Fixed
+- **Apple Home Matter + Tailscale:** Add device auto-pauses Tailscale (`tailscale down` / IPv6 off / flush `fd7a:…` routes) for the pairing window, then restores it — so Thread RIOs on eth0 are not drowned out. Matter agent **v83**.
+
 ## [4.0.335] - 2026-11-17
 
 ### Fixed
