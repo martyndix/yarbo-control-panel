@@ -335,6 +335,24 @@ yarbo_matter_tailscale_unshield() {
   fi
 }
 
+
+yarbo_matter_thread_route_add() {
+  # Usage: thread-route-add <prefix> <via-fe80> <iface>
+  local prefix="${1:-}" via="${2:-}" iface="${3:-}"
+  if [[ -z "$prefix" || -z "$via" || -z "$iface" ]]; then
+    echo "usage: thread-route-add <prefix> <via> <iface>" >&2
+    return 1
+  fi
+  case "$prefix" in
+    fd7a:115c:a1e0:*) echo "refusing Tailscale ULA" >&2; return 1 ;;
+  esac
+  case "$via" in
+    fe80:*) ;;
+    *) echo "via must be fe80::" >&2; return 1 ;;
+  esac
+  yarbo_root ip -6 route replace "$prefix" via "$via" dev "$iface" metric 100
+}
+
 yarbo_matter_setup() {
   mkdir -p "${ROOT}/data/matter-server"
   yarbo_matter_write_status "running" "Setting up the Matter server"
@@ -460,7 +478,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   if [[ -n "${1:-}" && -d "${1}/scripts" ]]; then
     ROOT="$1"
     cmd="${2:-}"
-  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" || "${1:-}" == "tailscale-shield" || "${1:-}" == "tailscale-unshield" ]]; then
+  elif [[ "${1:-}" == "ipv6-route" || "${1:-}" == "airplay-deps" || "${1:-}" == "airplay-quiesce" || "${1:-}" == "tailscale-shield" || "${1:-}" == "tailscale-unshield" || "${1:-}" == "thread-route-add" ]]; then
     cmd="$1"
     if [[ -n "${YARBO_ROOT:-}" && -d "${YARBO_ROOT}/scripts" ]]; then
       ROOT="$YARBO_ROOT"
@@ -481,6 +499,19 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     fi
     yarbo_matter_enable_ipv6
     exit 0
+  fi
+  if [[ "$cmd" == "thread-route-add" ]]; then
+    yarbo_matter_install_wrapper
+    # Invoked as: setup <ROOT> thread-route-add <prefix> <via> <iface>
+    #         or: setup thread-route-add <prefix> <via> <iface>
+    if [[ -n "${1:-}" && -d "${1}/scripts" && "${2:-}" == "thread-route-add" ]]; then
+      yarbo_matter_thread_route_add "${3:-}" "${4:-}" "${5:-}"
+    elif [[ "${1:-}" == "thread-route-add" ]]; then
+      yarbo_matter_thread_route_add "${2:-}" "${3:-}" "${4:-}"
+    else
+      yarbo_matter_thread_route_add "${1:-}" "${2:-}" "${3:-}"
+    fi
+    exit $?
   fi
   if [[ "$cmd" == "tailscale-shield" ]]; then
     yarbo_matter_install_wrapper

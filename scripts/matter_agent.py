@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 84
+AGENT_VERSION = 85
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1896,14 +1896,26 @@ def verify_tailscale_matter_shield() -> bool:
 
 
 def wait_for_thread_route(seconds: float = 20.0) -> str | None:
-    """Poll for Apple Thread RIO on the LAN NIC; nudge RA/RIO periodically."""
+    """Poll for Apple Thread RIO on the LAN NIC; nudge RA/RIO and install static routes."""
     prefer = primary_interface()
     deadline = time.time() + max(0.0, seconds)
     hint = thread_route_hint(prefer)
     if hint:
         return hint
+    # First pass: parse rdisc6 / matterc and install static Thread routes if needed.
+    try:
+        install_discovered_thread_routes(prefer)
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: install Thread routes: {exc}", flush=True)
+    hint = thread_route_hint(prefer)
+    if hint:
+        return hint
     while time.time() < deadline:
         ensure_ipv6_default_route()
+        try:
+            install_discovered_thread_routes(prefer)
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: install Thread routes: {exc}", flush=True)
         hint = thread_route_hint(prefer)
         if hint:
             return hint
@@ -1940,6 +1952,257 @@ def ipv6_route_sample(prefer_iface: str | None = None, limit: int = 4) -> list[s
         if len(out) >= limit:
             break
     return out
+
+
+
+def ipv6_forwarding_on() -> bool:
+    return read_sysctl("net.ipv6.conf.all.forwarding") == "1"
+
+
+def container_network_mode(name: str | None = None) -> str:
+    target = name or shared_matter_container() or DOCKER_NAME
+    try:
+        inspect = run_docker(["inspect", "-f", "{{.HostConfig.NetworkMode}}", target], timeout=8.0)
+    except TypeError:
+        # Tests may stub run_docker without timeout=
+        inspect = run_docker(["inspect", "-f", "{{.HostConfig.NetworkMode}}", target])
+    if inspect.returncode != 0:
+        return ""
+    return (inspect.stdout or "").strip().lower()
+
+
+def ensure_matter_host_network() -> None:
+    """CHIP must share the host FIB to use Apple Thread RIOs / static Thread routes."""
+    shared = shared_matter_container()
+    name = shared if shared and matter_port_up() else DOCKER_NAME
+    mode = container_network_mode(name)
+    if mode in ("", "host"):
+        return
+    # Only act on clear non-host modes (ignore inspect stubs / unknown strings).
+    if mode not in ("bridge", "default", "none") and not mode.startswith("container:"):
+        print(f"matter: {name} NetworkMode={mode!r}; leaving alone", flush=True)
+        return
+    print(f"matter: {name} NetworkMode={mode!r}; recreating with --network host", flush=True)
+    want = primary_interface()
+    if shared and name == shared:
+        recreate_shared_matter_container(want)
+    else:
+        recreate_matter_container()
+
+
+def parse_rdisc6_rios(text: str) -> list[dict[str, str]]:
+    """Extract Apple-style Thread RIO prefixes + router LL from rdisc6 output."""
+    rows: list[dict[str, str]] = []
+    router = ""
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        low = line.lower()
+        if low.startswith("from "):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].lower().startswith("fe80:"):
+                router = parts[1].split("%")[0]
+            continue
+        # "Route: fdxx::/64" or "Route                    : fdxx::/64"
+        if "route" in low and ":" in line:
+            # Prefer explicit Route Information Option lines.
+            if "route preference" in low or "route lifetime" in low:
+                continue
+            m = re.search(r"(fd[0-9a-f:]+)/\s*(\d{1,3})", line, re.I)
+            if not m:
+                m = re.search(r"(fd[0-9a-f:]+)::/?(\d{0,3})", line, re.I)
+            if not m:
+                continue
+            prefix = m.group(1)
+            if not prefix.endswith("::"):
+                # normalize bare fdaddr to /64 network if plen given
+                pass
+            plen = m.group(2) or "64"
+            if not plen.isdigit():
+                plen = "64"
+            plen_i = int(plen)
+            if plen_i < 48 or plen_i > 64:
+                continue
+            if _is_tailscale_ula(prefix):
+                continue
+            # Build CIDR
+            if "/" in prefix:
+                cidr = prefix
+            else:
+                base = prefix if prefix.endswith("::") else prefix.rstrip(":") + "::"
+                cidr = f"{base}/{plen_i}"
+            rows.append({"prefix": cidr, "via": router})
+    # Attach last-seen router to rows that missed via (rdisc6 prints from at end).
+    if router:
+        for row in rows:
+            if not row.get("via"):
+                row["via"] = router
+    # Dedup
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        key = f"{row.get('prefix')}|{row.get('via')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def run_rdisc6_capture(iface: str, wait_ms: int = 3500) -> str:
+    """Solicit RAs and return rdisc6 stdout (needs ndisc6 package)."""
+    for cmd in (
+        ["rdisc6", "-1", "-n", "-r", "3", "-w", str(wait_ms), iface],
+        ["sudo", "-n", "rdisc6", "-1", "-n", "-r", "3", "-w", str(wait_ms), iface],
+        ["rdisc6", "-1", "-r", "3", "-w", str(wait_ms), iface],
+        ["sudo", "-n", "rdisc6", "-1", "-r", "3", "-w", str(wait_ms), iface],
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=max(6.0, wait_ms / 1000.0 + 3))
+        except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+        out = (r.stdout or "") + "\n" + (r.stderr or "")
+        if out.strip():
+            return out
+    return ""
+
+
+def resolve_matterc_thread_prefixes() -> list[str]:
+    """Resolve _matterc AAAA records and return Thread ULA /64 prefixes (not Tailscale)."""
+    prefixes: list[str] = []
+    for cmd in (
+        ["avahi-browse", "-t", "-r", "-p", "_matterc._udp"],
+        ["timeout", "6", "avahi-browse", "-t", "-r", "-p", "_matterc._udp"],
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+        for line in (r.stdout or "").splitlines():
+            for m in re.finditer(r"(fd[0-9a-f:]{10,})", line, re.I):
+                addr = m.group(1).lower()
+                if _is_tailscale_ula(addr):
+                    continue
+                # Collapse to /64: first 4 hextets
+                hextets = addr.split(":")
+                # Expand poorly — take leading fdxx:yy:zz pattern commonly advertised
+                parts = [p for p in addr.split(":") if p != ""]
+                if len(parts) >= 3:
+                    cidr = f"{parts[0]}:{parts[1]}:{parts[2]}::/64"
+                else:
+                    cidr = addr if "/" in addr else f"{addr}::/64"
+                if cidr not in prefixes:
+                    prefixes.append(cidr)
+        if prefixes:
+            break
+    return prefixes[:6]
+
+
+def discover_apple_thread_rios(iface: str | None = None) -> list[dict[str, str]]:
+    """Find Thread prefixes via rdisc6 RIO and/or resolved _matterc addresses."""
+    nic = (iface or primary_interface() or "").strip()
+    if not nic:
+        return []
+    text = run_rdisc6_capture(nic)
+    rows = parse_rdisc6_rios(text)
+    # Fallback: Thread ULA from commissionable Matter DNS-SD + router LL from RA/from matterc.
+    routers = [r.get("via") or "" for r in rows if r.get("via")]
+    if not routers:
+        # Prefer fe80 from rdisc6 "from" even without Route lines
+        for m in re.finditer(r"from\s+(fe80:[0-9a-f:]+)", text or "", re.I):
+            routers.append(m.group(1).split("%")[0])
+        # Matterc responders are often the BR or on-link proxies
+        for hit in browse_matterc_mdns(1.2)[:4]:
+            m = re.search(r"(fe80:[0-9a-f:]+)", str(hit), re.I)
+            if m:
+                routers.append(m.group(1).split("%")[0])
+    via = routers[0] if routers else ""
+    for prefix in resolve_matterc_thread_prefixes():
+        if any(r.get("prefix") == prefix for r in rows):
+            continue
+        if via:
+            rows.append({"prefix": prefix, "via": via, "source": "matterc"})
+        else:
+            rows.append({"prefix": prefix, "via": "", "source": "matterc"})
+    for r in rows:
+        r.setdefault("source", "rdisc6")
+    return rows
+
+
+def add_ipv6_route(prefix: str, via: str, iface: str) -> bool:
+    """Install Thread /64 via Apple BR link-local (same workaround as HA on broken RIO kernels)."""
+    prefix = (prefix or "").strip()
+    via = (via or "").strip().split("%")[0]
+    iface = (iface or "").strip()
+    if not prefix or not via or not iface:
+        return False
+    if not via.lower().startswith("fe80:"):
+        return False
+    if _is_tailscale_ula(prefix):
+        return False
+    for cmd in (
+        ["sudo", "-n", "ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, "metric", "100"],
+        ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, "metric", "100"],
+        ["ip", "-6", "route", "replace", prefix, "via", via, "dev", iface, "metric", "100"],
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            if r.returncode == 0:
+                print(f"matter: installed Thread route {prefix} via {via} dev {iface}", flush=True)
+                return True
+            err = (r.stderr or r.stdout or "").strip()
+            if err:
+                print(f"matter: route replace failed: {err[:160]}", flush=True)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"matter: route replace error: {exc}", flush=True)
+            continue
+    # Passwordless wrapper fallback
+    ok = _run_matter_setup_cmd("thread-route-add", prefix, via, iface)
+    return ok
+
+
+def install_discovered_thread_routes(iface: str | None = None) -> dict[str, Any]:
+    """Discover Apple Thread RIOs and install static routes when kernel did not."""
+    nic = (iface or primary_interface() or "").strip()
+    result: dict[str, Any] = {
+        "iface": nic,
+        "rios": [],
+        "installed": [],
+        "ra_proof": "none",
+        "forwarding": ipv6_forwarding_on(),
+    }
+    if not nic:
+        return result
+    # Ensure RIO sysctls + solicit
+    ensure_ipv6_default_route()
+    if Path(f"/proc/sys/net/ipv6/conf/{nic}/accept_ra_rt_info_min_plen").exists():
+        _sysctl_w(f"net.ipv6.conf.{nic}.accept_ra_rt_info_min_plen", "0")
+        _sysctl_w("net.ipv6.conf.all.accept_ra_rt_info_min_plen", "0")
+    hint = thread_route_hint(nic)
+    if hint:
+        result["ra_proof"] = "kernel"
+        result["rios"] = [{"prefix": hint, "via": "", "source": "kernel"}]
+        return result
+    rows = discover_apple_thread_rios(nic)
+    result["rios"] = rows
+    if not rows:
+        # Distinguish no RA vs RA without Route option
+        text = run_rdisc6_capture(nic, wait_ms=2500)
+        if re.search(r"from\s+fe80:", text or "", re.I):
+            result["ra_proof"] = "ra_no_rio"
+        else:
+            result["ra_proof"] = "no_ra"
+        return result
+    result["ra_proof"] = "rio_seen"
+    for row in rows:
+        prefix = str(row.get("prefix") or "")
+        via = str(row.get("via") or "")
+        if not via:
+            continue
+        if add_ipv6_route(prefix, via, nic):
+            result["installed"].append(f"{prefix} via {via}")
+    if result["installed"] or thread_route_hint(nic):
+        result["ra_proof"] = "installed" if result["installed"] else "kernel"
+    return result
 
 
 def begin_tailscale_matter_shield() -> bool:
@@ -2131,20 +2394,38 @@ def discovery_diag() -> dict[str, Any]:
     else:
         shield_state = "idle"
     routes_sample = ipv6_route_sample(iface) if not route else []
+    netmode = container_network_mode(name)
+    ra_proof = ""
+    installed: list[str] = []
+    try:
+        # Lightweight: reuse last install if route still missing
+        if not route:
+            info = install_discovered_thread_routes(iface)
+            ra_proof = str(info.get("ra_proof") or "")
+            installed = list(info.get("installed") or [])
+            route = thread_route_hint(iface) or route
+        else:
+            ra_proof = "kernel"
+    except Exception as exc:  # noqa: BLE001
+        ra_proof = f"err:{exc}"[:40]
     return {
         "iface": iface,
         "container": name,
         "primary_have": have,
         "primary_state": state,
+        "network_mode": netmode or "unknown",
         "accept_ra": read_sysctl(f"net.ipv6.conf.{iface}.accept_ra") if iface else "",
         "rt_info_max_plen": rt_info_max_plen(iface),
         "ipv6_ll": bool(iface and iface_has_ipv6_ll(iface)),
+        "forwarding": ipv6_forwarding_on(),
         "thread_route": route,
         "tailscale": ts_present,
         "tailscale_up": ts_up,
         "tailscale_routing": ts_routing,
         "tailscale_shielded": shielded,
         "shield": shield_state,
+        "ra_proof": ra_proof,
+        "routes_installed": installed,
         "routes_sample": routes_sample,
         "matterc": matterc,
         "matterc_seen": any(
@@ -2172,11 +2453,24 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
     sample = row.get("routes_sample") or []
     sample_s = "; ".join(str(x) for x in sample[:3]) if sample else ""
     extra = f" routes={sample_s}" if sample_s and route == "none" else ""
+    ra = str(row.get("ra_proof") or "")
+    netmode = str(row.get("network_mode") or "")
+    fwd = "1" if row.get("forwarding") else "0"
+    installed = row.get("routes_installed") or []
+    inst_s = ";".join(str(x) for x in installed[:2])
+    more = ""
+    if ra:
+        more += f" ra={ra}"
+    if netmode:
+        more += f" net={netmode}"
+    more += f" fwd={fwd}"
+    if inst_s:
+        more += f" installed={inst_s}"
     return (
         f"[diag iface={row.get('iface')} primary={row.get('primary_have')}/{row.get('primary_state')} "
         f"accept_ra={row.get('accept_ra')} rt_info_max_plen={row.get('rt_info_max_plen')} "
         f"ll={row.get('ipv6_ll')} thread_route={route} ts={ts} shield={shield} matterc={matterc_s} "
-        f"container={row.get('container')} v{row.get('agent')}{extra}]"
+        f"container={row.get('container')} v{row.get('agent')}{more}{extra}]"
     )
 
 
@@ -2331,11 +2625,16 @@ def ensure_matter_primary_interface(*, force: bool = False) -> None:
     Args at all — not when the flag is known to be absent.
     """
     want = primary_interface()
+    try:
+        ensure_matter_host_network()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: host-network ensure: {exc}", flush=True)
     shared = shared_matter_container()
     if shared and matter_port_up():
         # HA matter-server owns 5580 — still fix its --primary-interface for discovery.
         have, state = container_primary_interface_state(shared)
-        if have == want and state == "ok" and not force:
+        mode = container_network_mode(shared)
+        if have == want and state == "ok" and mode in ("", "host") and not force:
             return
         if state == "unknown" and not force:
             print(
@@ -2416,6 +2715,10 @@ def discovery_preflight_error() -> str | None:
             "Connect the Pi to the same LAN as your HomePod/Apple TV, then try Add device again."
         )
     ensure_ipv6_default_route()
+    try:
+        ensure_matter_host_network()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: host-network preflight: {exc}", flush=True)
     if not iface_has_ipv6_ll(iface):
         return (
             f"No IPv6 link-local address on {iface} (Matter needs IPv6 for discovery). "
@@ -2876,7 +3179,11 @@ def friendly_commission_error(err: str) -> str:
             if shield == "fail":
                 base += "Tailscale shield failed during Add device (still routing); fix sudo/yarbo-matter-setup or pause Tailscale manually, then retry. "
             elif has_ts and shield == "ok":
-                base += "Tailscale was paused for pairing but Apple Thread RIOs still never arrived on eth0 — HomePod must share that LAN. "
+                base += (
+                    "Tailscale was paused; if ra=no_ra HomePod RAs never hit eth0 "
+                    "(same LAN/VLAN — disable UniFi mDNS reflector / multicast enhancement). "
+                    "If ra=rio_seen the panel adds a static Thread route — retry with a fresh code. "
+                )
             elif ts_active:
                 base += "Tailscale still looks active during pairing and can break Thread; pause it and retry. "
             base += "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
