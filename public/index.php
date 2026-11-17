@@ -2496,7 +2496,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </div>
 
-        <section id="toast" class="toast hidden" role="status"></section>
+        <section id="toast" class="toast hidden" role="status" title=""></section>
     </main>
     <script
         src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"

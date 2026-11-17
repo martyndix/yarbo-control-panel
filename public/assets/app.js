@@ -2651,13 +2651,35 @@ async function loadSavedAreas(button = null) {
     }
 }
 
-function showToast(message, type = 'success') {
-    els.toast.textContent = message;
-    els.toast.className = `toast ${type}`;
-    els.toast.classList.remove('hidden');
+function hideToast() {
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => els.toast.classList.add('hidden'), 3000);
+    toastTimer = null;
+    if (els.toast) {
+        els.toast.classList.add('hidden');
+        els.toast.removeAttribute('title');
+        els.toast.setAttribute('role', 'status');
+    }
 }
+
+function showToast(message, type = 'success') {
+    if (!els.toast) return;
+    const sticky = type === 'error';
+    els.toast.textContent = message;
+    els.toast.className = sticky ? `toast ${type} toast-sticky` : `toast ${type}`;
+    els.toast.classList.remove('hidden');
+    els.toast.setAttribute('role', sticky ? 'alert' : 'status');
+    els.toast.title = sticky ? 'Click to dismiss' : '';
+    clearTimeout(toastTimer);
+    toastTimer = null;
+    // Errors stay until clicked so long Matter/diag messages can be read or copied.
+    if (!sticky) {
+        toastTimer = setTimeout(hideToast, 3000);
+    }
+}
+
+els.toast?.addEventListener('click', () => {
+    hideToast();
+});
 
 function gatewayHtmlError(status, text) {
     const body = String(text || '');

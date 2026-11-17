@@ -1248,7 +1248,13 @@ body.modal-open {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     font-size: 0.9rem;
     z-index: 2000;
-    max-width: 90%;
+    max-width: min(90%, 42rem);
+    max-height: 40vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+    cursor: pointer;
 }
 
 .toast.success {
@@ -1257,6 +1263,10 @@ body.modal-open {
 
 .toast.error {
     border-color: var(--danger);
+}
+
+.toast.toast-sticky {
+    cursor: pointer;
 }
 
 .hidden {

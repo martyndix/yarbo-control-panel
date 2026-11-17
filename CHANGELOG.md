@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.334] - 2026-11-17
+
+### Changed
+- **Error toasts stay until clicked** (success toasts still auto-hide), so long Matter pairing / diag messages can be read or copied.
+
 ## [4.0.333] - 2026-11-17
 
 ### Fixed

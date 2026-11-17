@@ -35,6 +35,12 @@ assert_true(str_contains($js, 'not IKEA/Matter plugs'), 'scan status clarifies H
 assert_true(str_contains($js, "action: 'commission_start'"), 'UI starts async commission');
 assert_true(str_contains($js, "action: 'commission_status'"), 'UI polls commission status');
 assert_true(!str_contains($js, "action: 'commission', code }, 135000"), 'UI does not sync-wait 135s');
+assert_true(str_contains($js, "sticky = type === 'error'"), 'error toasts stay until clicked');
+assert_true(str_contains($js, 'function hideToast'), 'toast click dismiss helper');
+assert_true(str_contains($js, "toast-sticky"), 'sticky toast class');
+$css = (string) file_get_contents(__DIR__ . '/../public/assets/style.css');
+assert_true(str_contains($css, 'user-select: text'), 'toast text selectable for copy');
+assert_true(str_contains($change, '## [4.0.334]'), 'changelog 4.0.334 sticky toasts');
 assert_true(str_contains($home, 'normalizeMatterPairingCode'), 'PHP normalizes codes');
 assert_true(str_contains($home, 'function commissionStart'), 'PHP commissionStart');
 assert_true(str_contains($home, 'function commissionStatus'), 'PHP commissionStatus');
