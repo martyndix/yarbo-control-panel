@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.366] - 2026-11-18
+
+### Fixed
+
+- Pairing follows the Thread 1.3 route the HomePod already advertised. v111 still sent the Timmerflotte through `fe80::1007:…` (`alt=` was the HomePod) and sourced from `fd58:b000:2::253`, a prefix the HomePod never publishes into Thread. Each route information option stays on the router that sent it. The sensor’s prefix uses that router, or the other border agent when the only advertisement came from the mDNS reflector. The handshake is sourced from the Pi’s address in a prefix the router advertised for autoconfiguration (`pio=`). `rio=` is that advertisement and `mesh=` is every `_meshcop` answer. Matter agent **v112**.
+
 ## [4.0.365] - 2026-11-17
 
 ### Fixed
