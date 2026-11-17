@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 103
+AGENT_VERSION = 104
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3149,7 +3149,6 @@ def install_advertised_routes(iface: str, solicitation: dict[str, Any]) -> str:
     rios = list(solicitation.get("rios") or [])
     if not rios or not iface:
         return ""
-    src = ensure_pio_source(iface, list(solicitation.get("pios") or []))
     via_used = ""
     installed: list[str] = []
     global _last_ra_proof, _last_routes_installed, _last_rio_prefixes
@@ -3161,7 +3160,9 @@ def install_advertised_routes(iface: str, solicitation: dict[str, Any]) -> str:
             continue
         if prefix not in _last_rio_prefixes:
             _last_rio_prefixes.append(prefix)
-        if add_ipv6_route(prefix, via, iface, src):
+        # No preferred source. The HomePod prefix (fd10:…) as src made replies
+        # look like they belonged on the Thread mesh, so they never came back.
+        if add_ipv6_route(prefix, via, iface):
             via_used = via
             installed.append(f"{prefix} via {via}")
     if not via_used:
@@ -3372,10 +3373,9 @@ def accessory_omr_address() -> str:
     if mesh.is_link_local or mesh.is_unspecified:
         return ""
     iid = mesh.packed[8:]
+    # Only a prefix the router advertised. The Pi's own fd10 address is on the
+    # LAN; commissioning that prefix fails immediately and uses up the code.
     prefixes = list(_last_rio_prefixes)
-    iface = _iface or primary_interface() or ""
-    if iface:
-        prefixes.extend(interface_fd_prefixes(iface, mesh))
     seen: set[str] = set()
     for raw in prefixes:
         if raw in seen:
@@ -3396,32 +3396,17 @@ def accessory_omr_address() -> str:
     return ""
 
 
-def interface_fd_prefixes(iface: str, mesh: ipaddress.IPv6Address) -> list[str]:
-    """fd prefixes the Pi itself has, such as the HomePod SLAAC address."""
-    found: list[str] = []
-    try:
-        shown = subprocess.run(
-            ["ip", "-6", "-o", "addr", "show", "dev", iface],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return found
-    for match in re.finditer(r"\binet6\s+([0-9a-f:]+)", shown.stdout or "", re.I):
-        raw = match.group(1).split("/", 1)[0]
-        if not raw.lower().startswith("fd") or _is_tailscale_ula(raw):
-            continue
-        try:
-            addr = ipaddress.IPv6Address(raw)
-            prefix = ipv6_prefix64(raw)
-            net = ipaddress.IPv6Network(prefix, strict=False)
-        except (ValueError, OSError):
-            continue
-        if addr == mesh or mesh in net or prefix in found:
-            continue
-        found.append(prefix)
-    return found
+def matterc_router_via() -> str:
+    """Link-local of the border router that answered _matterc, not the accessory.
+
+    An EUI-64 fe80 (it contains ff:fe) is the sensor itself. A HomePod proxy
+    uses a random link-local and is the right next hop.
+    """
+    for hit in _last_matterc_hits:
+        src = str(hit.get("src") or "").split("%", 1)[0]
+        if src.lower().startswith("fe80:") and "ff:fe" not in src.lower():
+            return src
+    return ""
 
 
 def try_commission_omr(code: str) -> dict[str, Any] | None:
@@ -3500,20 +3485,15 @@ def install_border_router_route() -> str:
         advertised = install_advertised_routes(iface, solicitation)
         if advertised:
             via = advertised.split(":", 1)[1]
-            # The HomePod routes its own prefix (fd10:…). The Timmerflotte is
-            # reached at the address it advertised (fdef:badd:6106:…), which is
-            # a different prefix. Send that prefix via the same router.
-            if (
-                prefix
-                and via.lower().startswith("fe80:")
-                and not rio_covers(prefix, list(solicitation.get("rios") or []))
-            ):
-                # No preferred source. Pinning the HomePod prefix as src made
-                # the mesh-local route the only one CHIP could use, and mDNS
-                # advertisement then failed on that socket.
-                if add_ipv6_route(prefix, via, iface):
-                    _last_routes_installed.append(f"{prefix} via {via}")
-                    print(f"matter: accessory prefix {prefix} via {via}", flush=True)
+            # Prefer the HomePod that advertised this accessory over a different
+            # router advertisement. Do not source the route from the Thread prefix.
+            hop = matterc_router_via() or via
+            if prefix and hop.lower().startswith("fe80:"):
+                if add_ipv6_route(prefix, hop, iface):
+                    _last_routes_installed.append(f"{prefix} via {hop}")
+                    print(f"matter: accessory prefix {prefix} via {hop}", flush=True)
+            if hop.lower() != via.lower():
+                return f"ra:{hop}"
             return advertised
     via = ""
     if iface:
@@ -4722,12 +4702,23 @@ def matter_server_log_hint() -> str:
     )
     keys = ("commission", "discover", "pase", "pairing", "matterc", "failed to", "timeout", "operational")
     picked: list[str] = []
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     for line in text.splitlines():
         low = line.lower()
         if any(item in low for item in skip):
             continue
         if "discovered on mdns" in low or "wifi statistic" in low:
             continue
+        if "failed to advertise" in low:
+            continue
+        stamp = re.search(r"(20\d\d-\d\d-\d\d \d\d:\d\d:\d\d)", line)
+        if stamp:
+            try:
+                logged = datetime.strptime(stamp.group(1), "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                logged = None
+            if logged is not None and (now - logged).total_seconds() > 180:
+                continue
         if any(key in low for key in keys):
             picked.append(line.strip())
     if not picked:
@@ -4812,25 +4803,14 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
         long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         if not _pase_target:
             _pase_target = "mdns"
-        # The mesh-local address is what mDNS offered. Reach the same device on
-        # the HomePod prefix before the long discovery call, which drops the
-        # Matter server connection when that address does not answer.
-        omr_rpc = try_commission_omr(code)
-        if omr_rpc and omr_rpc.get("ok"):
-            rpc = omr_rpc
-        else:
-            rpc = matter_rpc(
-                "commission_with_code",
-                {"code": code, "network_only": True},
-                timeout=180.0 if long_wait else 120.0,
-                retries=1,
-            )
-            if (
-                omr_rpc
-                and not rpc.get("ok")
-                and "unavailable" in str(rpc.get("error") or "").lower()
-            ):
-                rpc = omr_rpc
+        # Do not commission a guessed fd10 address. That address is the Pi's,
+        # the attempt fails at once, and it uses up the pairing code (node 18).
+        rpc = matter_rpc(
+            "commission_with_code",
+            {"code": code, "network_only": True},
+            timeout=180.0 if long_wait else 120.0,
+            retries=1,
+        )
         err = str(rpc.get("error") or "")
         server_gave_up = "matter server timed out" in err.lower()
         if not rpc.get("ok") and not server_gave_up and commission_error_looks_retryable(err):
