@@ -50,7 +50,7 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 90, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 91, agent.AGENT_VERSION
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
         "iface": "eth0",
@@ -130,6 +130,8 @@ def main() -> int:
     assert agent.normalize_pairing_code("Setup code 2462-204-0808") == "24622040808"
     assert agent.normalize_pairing_code("MT:ABCDEF").startswith("MT:")
     assert agent.verhoeff_ok("31436531015") is True
+    assert agent.manual_pairing_pin("34970112332") == 20202021
+    assert agent.manual_pairing_pin("34970112332") != agent.manual_pairing_pin("31436531015")
     assert agent.pairing_code_problem("31436531015") is None
     assert "checksum" in (agent.pairing_code_problem("24622040808") or "").lower()
     assert "11-digit" in (agent.pairing_code_problem("246220408083") or "")
