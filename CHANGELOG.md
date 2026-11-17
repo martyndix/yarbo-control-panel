@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.321] - 2026-11-17
+
+### Fixed
+- **Vestaboard quiet/night flickering to Yarbo:** Sticky overnight now needs ~90s outside the clock window before resuming live status, quiet no longer force-rewrites every tick, live POSTs are blocked while quiet/night is active, and status polls cannot replace a real timezone with UTC (that briefly dropped overnight and posted Yarbo).
+
 ## [4.0.320] - 2026-11-16
 
 ### Added

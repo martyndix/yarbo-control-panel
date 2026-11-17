@@ -15,6 +15,8 @@ final class YarboVestaboard
     public const COLS = 15;
     public const MIN_SEND_GAP_SECONDS = 15.0;
     public const MIN_PROGRESS_SEND_GAP_SECONDS = 120.0;
+    /** Sticky night/quiet must stay outside the clock window this long before Yarbo resume. */
+    public const OVERNIGHT_LEAVE_CONFIRM_SEC = 90;
     public const EXTERNAL_HOLD_SECONDS = 3600;
     public const EXTERNAL_HOLD_SETTLE_SECONDS = 30;
     public const RECENT_HASH_LIMIT = 3;
@@ -182,6 +184,7 @@ final class YarboVestaboard
             'night_last_open' => false,
             'night_last_kind' => '',
             'night_last_open_key' => '',
+            'overnight_outside_since' => null,
             'last_live_codes' => null,
             'quiet_timezone' => '',
             'last_progress_stable_hash' => '',
@@ -239,6 +242,10 @@ final class YarboVestaboard
             'night_last_open' => (bool) ($decoded['night_last_open'] ?? false),
             'night_last_kind' => (string) ($decoded['night_last_kind'] ?? ''),
             'night_last_open_key' => (string) ($decoded['night_last_open_key'] ?? ''),
+            'overnight_outside_since' => isset($decoded['overnight_outside_since']) && is_string($decoded['overnight_outside_since'])
+                && $decoded['overnight_outside_since'] !== ''
+                ? $decoded['overnight_outside_since']
+                : null,
             'last_live_codes' => self::normalizeLiveCodes($decoded['last_live_codes'] ?? null),
             'quiet_timezone' => self::normalizeTimezone((string) ($decoded['quiet_timezone'] ?? '')),
             'last_progress_stable_hash' => (string) ($decoded['last_progress_stable_hash'] ?? ''),
@@ -390,6 +397,11 @@ final class YarboVestaboard
             'night_last_open_key' => array_key_exists('night_last_open_key', $input)
                 ? (string) $input['night_last_open_key']
                 : (string) ($current['night_last_open_key'] ?? ''),
+            'overnight_outside_since' => array_key_exists('overnight_outside_since', $input)
+                ? (is_string($input['overnight_outside_since']) && $input['overnight_outside_since'] !== ''
+                    ? $input['overnight_outside_since']
+                    : null)
+                : ($current['overnight_outside_since'] ?? null),
             'last_live_codes' => array_key_exists('last_live_codes', $input)
                 ? (self::normalizeLiveCodes($input['last_live_codes']) ?? ($current['last_live_codes'] ?? null))
                 : ($current['last_live_codes'] ?? null),
@@ -764,7 +776,29 @@ final class YarboVestaboard
             || ((string) $config['last_hash'] === $quietHash)
             || $this->isExternalHoldExpired($config);
 
-        if ($this->isNightHours()) {
+        // Prefer sticky overnight over a brief false-negative clock (timezone thrash,
+        // torn config). Require sustained outside-window before posting Yarbo again.
+        $clockNight = $this->isNightHours();
+        $clockQuiet = $this->isQuietHours();
+        $stickyOvernightHold = false;
+        if ($clockNight || $clockQuiet) {
+            if (($config['overnight_outside_since'] ?? null) !== null) {
+                $this->save(['overnight_outside_since' => null]);
+                $config = $this->load();
+            }
+        } elseif (($wasNight || $wasQuiet) && !$this->overnightLeaveConfirmed($config)) {
+            // Still outside the clock — keep night/quiet flaps, but do not clear the
+            // leave timer (that would reset confirm every tick and never resume).
+            $stickyOvernightHold = true;
+            if ($wasNight && !empty($config['night_hours_enabled'])) {
+                $clockNight = true;
+            } elseif ($wasQuiet && !empty($config['quiet_hours_enabled'])) {
+                $clockQuiet = true;
+            }
+            $config = $this->load();
+        }
+
+        if ($clockNight) {
             // Re-read Access DPS + Protect contacts every tick so open/close updates the Note.
             $this->refreshNightContacts();
             $this->touchHeartbeat();
@@ -787,24 +821,43 @@ final class YarboVestaboard
             $liveStuck = $onBoard !== null && $this->codesLookLikeLiveStatus($onBoard);
             $force = !$wasNight || $openChanged || $liveStuck;
             $result = $this->sendLayout($layout, $force);
-            $this->save([
+            $nightSave = [
                 'night_active' => true,
                 'quiet_active' => false,
                 'night_last_open' => $openNow,
                 'night_last_kind' => $kindNow,
                 'night_last_open_key' => $openKey,
-            ]);
+            ];
+            if (!$stickyOvernightHold) {
+                $nightSave['overnight_outside_since'] = null;
+            }
+            $this->save($nightSave);
             $this->touchHeartbeat();
 
             return $result;
         }
 
-        if ($this->isQuietHours()) {
+        if ($clockQuiet) {
             if (!$wasQuiet || self::normalizeLiveCodes($config['last_live_codes'] ?? null) === null) {
                 $this->snapshotLiveLayout();
             }
-            $result = $this->sendLayout($this->quietLayout(), $forceResume);
-            $this->save(['quiet_active' => true, 'night_active' => false]);
+            // Force only on enter or when flaps still show a live page — not every tick.
+            // (wasQuiet in $forceResume used to rewrite quiet every ~8s and fight Yarbo.)
+            $onBoard = self::normalizeLiveCodes($config['board_codes'] ?? null);
+            $liveStuck = $onBoard !== null && $this->codesLookLikeLiveStatus($onBoard);
+            $forceQuiet = !$wasQuiet
+                || $liveStuck
+                || ((string) $config['last_hash'] !== $quietHash)
+                || $this->isExternalHoldExpired($config);
+            $result = $this->sendLayout($this->quietLayout(), $forceQuiet);
+            $quietSave = [
+                'quiet_active' => true,
+                'night_active' => false,
+            ];
+            if (!$stickyOvernightHold) {
+                $quietSave['overnight_outside_since'] = null;
+            }
+            $this->save($quietSave);
 
             return $result;
         }
@@ -852,7 +905,11 @@ final class YarboVestaboard
 
         $result = $this->sendLayout($layout, $forceResume || $rotated || !empty($activity['changed']));
         if ($forceResume && !empty($result['ok'])) {
-            $this->save(['quiet_active' => false, 'night_active' => false]);
+            $this->save([
+                'quiet_active' => false,
+                'night_active' => false,
+                'overnight_outside_since' => null,
+            ]);
         }
 
         return $result;
@@ -869,9 +926,13 @@ final class YarboVestaboard
     {
         $cached = $this->lastLiveLayout($config);
         if ($cached !== null) {
-            $result = $this->sendLayout($cached, true);
+            $result = $this->sendLayout($cached, true, [], true);
             if (!empty($result['ok'])) {
-                $this->save(['quiet_active' => false, 'night_active' => false]);
+                $this->save([
+                    'quiet_active' => false,
+                    'night_active' => false,
+                    'overnight_outside_since' => null,
+                ]);
             }
 
             return $result;
@@ -893,12 +954,40 @@ final class YarboVestaboard
         }
         // Still leave overnight flaps even when companions are offline
         // (e.g. Powerwall OFFLINE) — do not wait for a browser poll.
-        $result = $this->sendLayout($layout, true);
+        $result = $this->sendLayout($layout, true, [], true);
         if (!empty($result['ok'])) {
-            $this->save(['quiet_active' => false, 'night_active' => false]);
+            $this->save([
+                'quiet_active' => false,
+                'night_active' => false,
+                'overnight_outside_since' => null,
+            ]);
         }
 
         return $result;
+    }
+
+    /**
+     * Sticky overnight must see a sustained outside-window before leaveOvernightNow.
+     *
+     * @param array<string, mixed> $config
+     */
+    private function overnightLeaveConfirmed(array $config): bool
+    {
+        $now = time();
+        $since = $config['overnight_outside_since'] ?? null;
+        if (!is_string($since) || $since === '') {
+            $this->save(['overnight_outside_since' => gmdate('c', $now)]);
+
+            return false;
+        }
+        $then = strtotime($since);
+        if ($then === false) {
+            $this->save(['overnight_outside_since' => gmdate('c', $now)]);
+
+            return false;
+        }
+
+        return ($now - $then) >= self::OVERNIGHT_LEAVE_CONFIRM_SEC;
     }
 
     /**
@@ -939,9 +1028,13 @@ final class YarboVestaboard
         if (!($layout['ok'] ?? false)) {
             return $layout;
         }
-        $result = $this->sendLayout($layout, true, $override);
+        $result = $this->sendLayout($layout, true, $override, true);
         if (!empty($result['ok'])) {
-            $this->save(['quiet_active' => false, 'night_active' => false]);
+            $this->save([
+                'quiet_active' => false,
+                'night_active' => false,
+                'overnight_outside_since' => null,
+            ]);
         }
 
         return $result;
@@ -1629,7 +1722,7 @@ final class YarboVestaboard
      * @param array<string, mixed> $override
      * @return array<string, mixed>
      */
-    private function sendLayout(array $layout, bool $force, array $override = []): array
+    private function sendLayout(array $layout, bool $force, array $override = [], bool $allowLeaveOvernight = false): array
     {
         $config = $this->mergedConfig($override);
         $missing = $this->missingCredentialError($config);
@@ -1641,6 +1734,15 @@ final class YarboVestaboard
         }
         $hash = hash('sha256', json_encode($layout['codes']));
         $overnight = $this->isOvernightLayoutVerb((string) ($layout['verb'] ?? ''));
+        // Hard stop: while the clock says quiet/night, never POST Yarbo/Powerwall/Lymow
+        // (except an explicit morning leave). Stops flicker from concurrent ticks.
+        if (
+            !$overnight
+            && !$allowLeaveOvernight
+            && ($this->isNightHours() || $this->isQuietHours())
+        ) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'overnight', 'lines' => $layout['lines']];
+        }
         if (!$force && $hash === $config['last_hash']) {
             // Never store night/quiet flaps as the resume snapshot.
             return ['ok' => true, 'skipped' => true, 'lines' => $layout['lines']];
@@ -2193,6 +2295,11 @@ final class YarboVestaboard
         }
         $current = (string) ($this->load()['quiet_timezone'] ?? '');
         if ($current === $zone) {
+            return true;
+        }
+        // Never let a browser/status poll replace a real local zone with UTC —
+        // that briefly flips night/quiet off and posts Yarbo until the next tick.
+        if (self::isUtcTimezone($zone) && $current !== '' && !self::isUtcTimezone($current)) {
             return true;
         }
 
