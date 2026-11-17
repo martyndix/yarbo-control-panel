@@ -38,10 +38,19 @@ def mill_node() -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 76, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 77, agent.AGENT_VERSION
     assert "Thread/mDNS" in agent.friendly_commission_error("Pairing timed out while discovering")
     assert callable(agent.ensure_matter_primary_interface)
     assert callable(agent.discovery_preflight_error)
+    assert callable(agent.container_command_tokens)
+    # Healthy server + transient unavailable must not say "Set up Matter server".
+    agent.matter_port_up = lambda: True  # type: ignore[method-assign]
+    soft = agent.friendly_commission_error("Matter server unavailable")
+    assert "Set up Matter server" not in soft, soft
+    assert "fresh" in soft.lower() or "again" in soft.lower(), soft
+    agent.matter_port_up = lambda: False  # type: ignore[method-assign]
+    hard = agent.friendly_commission_error("Matter server unavailable")
+    assert "Set up Matter server" in hard, hard
     assert agent.normalize_pairing_code("2462-204-0808") == "24622040808"
     assert agent.normalize_pairing_code(" 2462 204 0808 ") == "24622040808"
     assert agent.normalize_pairing_code("Setup code 2462-204-0808") == "24622040808"

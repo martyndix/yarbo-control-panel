@@ -276,10 +276,16 @@ yarbo_matter_setup() {
   local iface
   iface="$(yarbo_matter_primary_interface)"
   if yarbo_docker inspect "$name" >/dev/null 2>&1; then
-    local have
-    have="$(yarbo_docker inspect -f '{{range .Config.Cmd}}{{.}} {{end}}' "$name" 2>/dev/null || true)"
-    if [[ "$have" != *"--primary-interface ${iface}"* && "$have" != *"--primary-interface ${iface} "* ]]; then
-      # CHIP was started on the wrong/missing NIC — recreate so Thread/mDNS discovery works.
+    local args have
+    # CHIP flags are usually in Args (after the image entrypoint), not only Config.Cmd.
+    args="$(yarbo_docker inspect -f '{{range .Args}}{{.}} {{end}}' "$name" 2>/dev/null || true)"
+    args+=" $(yarbo_docker inspect -f '{{range .Config.Cmd}}{{.}} {{end}}' "$name" 2>/dev/null || true)"
+    have="$(printf '%s' "$args" | tr -s ' ')"
+    if printf '%s' " $have " | grep -q " --primary-interface ${iface} "; then
+      yarbo_docker start "$name" >/dev/null 2>&1 || true
+    elif printf '%s' " $have " | grep -q " --primary-interface "; then
+      # Explicit wrong NIC — recreate. If the flag is missing entirely but the
+      # server is already listening with a fabric, leave it (avoid drop mid-pair).
       yarbo_docker stop "$name" >/dev/null 2>&1 || true
       yarbo_docker rm "$name" >/dev/null 2>&1 || true
     else

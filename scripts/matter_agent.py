@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 76
+AGENT_VERSION = 77
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1653,45 +1653,78 @@ def matter_container_args() -> list[str]:
     ]
 
 
+def container_command_tokens() -> list[str]:
+    """Args / Cmd / Entrypoint tokens for yarbo-matter-server (CHIP flags live in Args)."""
+    tokens: list[str] = []
+    for fmt in ("{{json .Args}}", "{{json .Config.Cmd}}", "{{json .Config.Entrypoint}}"):
+        inspect = run_docker(["inspect", "-f", fmt, DOCKER_NAME])
+        if inspect.returncode != 0:
+            continue
+        raw = (inspect.stdout or "").strip()
+        if not raw or raw == "null":
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, list):
+            tokens.extend(str(part) for part in parsed)
+        elif isinstance(parsed, str) and parsed:
+            tokens.append(parsed)
+    return tokens
+
+
 def container_primary_interface() -> str | None:
     """`--primary-interface` currently baked into yarbo-matter-server, if any."""
-    inspect = run_docker(["inspect", "-f", "{{json .Config.Cmd}}", DOCKER_NAME])
-    if inspect.returncode != 0:
-        return None
-    raw = (inspect.stdout or "").strip()
-    if not raw or raw == "null":
-        return None
-    try:
-        cmd = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(cmd, list):
-        return None
-    for i, part in enumerate(cmd):
-        if str(part) == "--primary-interface" and i + 1 < len(cmd):
-            return str(cmd[i + 1]).strip() or None
+    tokens = container_command_tokens()
+    for i, part in enumerate(tokens):
+        if part == "--primary-interface" and i + 1 < len(tokens):
+            return str(tokens[i + 1]).strip() or None
     return None
 
 
-def ensure_matter_primary_interface() -> None:
-    """Recreate our Matter container when CHIP is bound to the wrong/missing NIC."""
+def ensure_matter_primary_interface(*, force: bool = False) -> None:
+    """Recreate our Matter container only when CHIP is known to be on the wrong NIC.
+
+    Never tear down a healthy listening server just because inspect could not read
+    Args — that was falsely showing “Matter server is not ready” during Add device.
+    """
     if shared_matter_container():
         return
     want = primary_interface()
     have = container_primary_interface()
     inspect = run_docker(["inspect", "-f", "{{.State.Running}}", DOCKER_NAME])
-    running = inspect.returncode == 0 and (inspect.stdout or "").strip().lower() == "true"
-    if have == want and running:
+    exists = inspect.returncode == 0
+    running = exists and (inspect.stdout or "").strip().lower() == "true"
+    listening = matter_port_up()
+    if have == want and running and listening:
         return
-    if have == want and inspect.returncode == 0:
-        run_docker(["start", DOCKER_NAME])
+    if have == want and exists:
+        if not running:
+            run_docker(["start", DOCKER_NAME])
         wait_matter_port(20.0)
         return
-    print(
-        f"matter: primary-interface {have!r} -> {want!r} (recreate container)",
-        flush=True,
-    )
-    recreate_matter_container()
+    # Running + listening, but we could not parse Args: leave it alone during pair.
+    if have is None and listening and not force:
+        print(
+            f"matter: primary-interface unknown (want {want}); leaving healthy server alone",
+            flush=True,
+        )
+        return
+    if have is not None and have != want:
+        print(
+            f"matter: primary-interface {have!r} -> {want!r} (recreate container)",
+            flush=True,
+        )
+        recreate_matter_container()
+        return
+    if force or (not listening and not running):
+        print(
+            f"matter: primary-interface recreate (have={have!r} want={want!r} "
+            f"running={running} listening={listening})",
+            flush=True,
+        )
+        recreate_matter_container()
 
 
 def recreate_matter_container() -> None:
@@ -2056,10 +2089,17 @@ def friendly_commission_error(err: str) -> str:
     """Map opaque python-matter-server / CHIP errors into panel-facing pairing hints."""
     detail = str(err or "").strip() or "Pairing failed"
     low = detail.lower()
-    if "not ready" in low or "unavailable" in low or "connection refused" in low:
+    if "connection refused" in low or (
+        ("not ready" in low or "unavailable" in low) and not matter_port_up()
+    ):
         return (
             "Matter server is not ready. Open Settings → Home and tap Set up Matter server, "
             "then try Add device again."
+        )
+    if "unavailable" in low or "not ready" in low:
+        return (
+            "Could not talk to the Matter server just then (it still looks online). "
+            "Wait a few seconds and tap Add device again with a fresh Apple Home pairing code."
         )
     # CHIP 0x1C (28) UNINITIALIZED — stack not ready yet.
     if (

@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.329] - 2026-11-17
+
+### Fixed
+- **False “Matter server is not ready” on Add device:** a healthy Matter server (already showing connected devices) is no longer torn down when Docker inspect cannot read `--primary-interface`; only a known wrong NIC triggers recreate. Matter agent **v77**.
+
 ## [4.0.328] - 2026-11-17
 
 ### Fixed
