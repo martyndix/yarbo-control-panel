@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.333] - 2026-11-17
+
+### Fixed
+- **Thread RIO sysctls actually applied on update:** refresh `yarbo-matter-setup` before Matter setup / `ipv6-route`, persist `/etc/sysctl.d/99-yarbo-matter-thread.conf`, verify `accept_ra_rt_info_max_plen`, restart Matter after enabling RIOs, and append a live discovery diag (iface / plen / Thread route / `_matterc`) to Add device timeouts. Matter agent **v81**.
+
 ## [4.0.332] - 2026-11-17
 
 ### Fixed

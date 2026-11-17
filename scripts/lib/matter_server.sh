@@ -90,12 +90,41 @@ yarbo_matter_enable_ipv6() {
   yarbo_matter_ensure_ipv6_route
 }
 
+yarbo_matter_write_thread_sysctl_conf() {
+  local iface conf
+  iface="$(yarbo_matter_primary_interface)"
+  conf="/etc/sysctl.d/99-yarbo-matter-thread.conf"
+  {
+    echo "# Yarbo Matter — accept Apple HomePod/Apple TV Thread RIO routes"
+    echo "net.ipv6.conf.all.disable_ipv6=0"
+    echo "net.ipv6.conf.default.disable_ipv6=0"
+    echo "net.ipv6.conf.all.accept_ra=2"
+    echo "net.ipv6.conf.default.accept_ra=2"
+    echo "net.ipv6.conf.all.accept_ra_rt_info_max_plen=64"
+    echo "net.ipv6.conf.default.accept_ra_rt_info_max_plen=64"
+    if [[ -n "$iface" ]]; then
+      echo "net.ipv6.conf.${iface}.disable_ipv6=0"
+      echo "net.ipv6.conf.${iface}.accept_ra=2"
+      echo "net.ipv6.conf.${iface}.accept_ra_rt_info_max_plen=64"
+    fi
+    for iface in end0 eth0 wlan0; do
+      if [[ -d "/sys/class/net/${iface}" ]]; then
+        echo "net.ipv6.conf.${iface}.disable_ipv6=0"
+        echo "net.ipv6.conf.${iface}.accept_ra=2"
+        echo "net.ipv6.conf.${iface}.accept_ra_rt_info_max_plen=64"
+      fi
+    done
+  } | yarbo_root tee "$conf" >/dev/null 2>&1 || true
+  yarbo_root sysctl --system >/dev/null 2>&1 || true
+}
+
 yarbo_matter_ensure_ipv6_route() {
   local iface target
   iface="$(yarbo_matter_primary_interface)"
   if [[ -z "$iface" ]]; then
     return 0
   fi
+  yarbo_matter_write_thread_sysctl_conf
   # accept_ra=2 works when ip_forward=1; rt_info_max_plen accepts Apple Thread /64 RIOs.
   for target in all default "$iface" end0 eth0 wlan0; do
     if [[ -f "/proc/sys/net/ipv6/conf/${target}/accept_ra" ]]; then
@@ -246,6 +275,8 @@ yarbo_matter_prefer_shared() {
 yarbo_matter_setup() {
   mkdir -p "${ROOT}/data/matter-server"
   yarbo_matter_write_status "running" "Setting up the Matter server"
+  # Refresh root helper first so ipv6-route / Thread RIO sysctls are not stale.
+  yarbo_matter_install_wrapper
   yarbo_matter_enable_ipv6
   yarbo_matter_make_storage_readable
 
@@ -272,8 +303,6 @@ yarbo_matter_setup() {
       return 0
     fi
   fi
-
-  yarbo_matter_install_wrapper
 
   if ! yarbo_matter_install_docker; then
     if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -381,6 +410,12 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   fi
   if [[ "$cmd" == "ipv6-route" || "${1:-}" == "ipv6-route" ]]; then
+    # Always copy latest script first — otherwise an old wrapper never gains Thread RIO sysctls.
+    yarbo_matter_install_wrapper
+    # Re-exec freshly installed wrapper once so this process is not the stale copy.
+    if [[ -x /usr/local/sbin/yarbo-matter-setup && "${YARBO_MATTER_IPV6_REEXEC:-}" != "1" ]]; then
+      YARBO_MATTER_IPV6_REEXEC=1 exec /usr/local/sbin/yarbo-matter-setup "$ROOT" ipv6-route
+    fi
     yarbo_matter_enable_ipv6
     exit 0
   fi

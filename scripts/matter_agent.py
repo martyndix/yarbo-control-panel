@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 80
+AGENT_VERSION = 81
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1603,21 +1603,68 @@ def _sysctl_w(key: str, value: str) -> None:
             continue
 
 
+def read_sysctl(key: str) -> str:
+    path = Path("/proc/sys") / key.replace(".", "/")
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def refresh_matter_setup_wrapper() -> None:
+    """Copy scripts/lib/matter_server.sh → /usr/local/sbin/yarbo-matter-setup."""
+    src = ROOT / "scripts" / "lib" / "matter_server.sh"
+    dest = "/usr/local/sbin/yarbo-matter-setup"
+    if not src.is_file():
+        return
+    for cmd in (
+        ["sudo", "-n", "cp", str(src), dest],
+        ["sudo", "-n", "chmod", "755", dest],
+    ):
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def rt_info_max_plen(iface: str | None = None) -> int:
+    """Current accept_ra_rt_info_max_plen for iface (fallback all)."""
+    targets = []
+    if iface:
+        targets.append(iface)
+    targets.extend(["all", "default"])
+    for name in targets:
+        raw = read_sysctl(f"net.ipv6.conf.{name}.accept_ra_rt_info_max_plen")
+        if raw.isdigit():
+            return int(raw)
+    return -1
+
+
 def ensure_ipv6_default_route() -> None:
     """CHIP needs IPv6 LL + Apple Thread RIO routes for multi-admin discovery."""
     iface = primary_interface()
     if not iface:
         return
-    # Prefer the install wrapper (passwordless) — it applies full iface fix.
+    before = rt_info_max_plen(iface)
+    refresh_matter_setup_wrapper()
+    # Prefer the install wrapper (passwordless) — it applies full iface fix + sysctl.d.
     try:
         subprocess.run(
-            ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", "ipv6-route"],
+            ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", str(ROOT), "ipv6-route"],
             capture_output=True,
             text=True,
-            timeout=12,
+            timeout=20,
         )
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        try:
+            subprocess.run(
+                ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", "ipv6-route"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     # accept_ra=2 works even when ip_forward=1; rt_info_max_plen accepts Thread /64 RIOs
     # advertised by HomePod / Apple TV border routers (required for Apple Home multi-admin).
     for target in ("all", "default", iface, "end0", "eth0", "wlan0"):
@@ -1658,6 +1705,22 @@ def ensure_ipv6_default_route() -> None:
             break
         except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
             continue
+    after = rt_info_max_plen(iface)
+    if before < 64 <= after:
+        print(
+            f"matter: Thread RIO enabled on {iface} (accept_ra_rt_info_max_plen {before}->{after})",
+            flush=True,
+        )
+        # CHIP may already have bound sockets; restart Matter so it sees new routes
+        # (plain restart — avoid recreate→ensure_ipv6 recursion).
+        try:
+            target = shared_matter_container() if matter_port_up() else None
+            target = target or DOCKER_NAME
+            reset_ws()
+            run_docker(["restart", target], timeout=40.0)
+            wait_matter_port(30.0)
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: restart after RIO enable: {exc}", flush=True)
     try:
         shown = subprocess.run(
             ["ip", "-6", "route", "show", "default"],
@@ -1705,6 +1768,88 @@ def thread_route_hint() -> str | None:
                 continue
             return line.strip()[:160]
     return None
+
+
+def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
+    """Best-effort PTR browse for commissionable Matter (_matterc._udp.local)."""
+    hits: list[str] = []
+    # Prefer avahi when present (same LAN stack Apple uses via the BR).
+    for cmd in (
+        ["avahi-browse", "-t", "-p", "_matterc._udp"],
+        ["timeout", "3", "avahi-browse", "-t", "-p", "_matterc._udp"],
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=max(3.0, seconds + 1))
+        except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+        for line in (r.stdout or "").splitlines():
+            line = line.strip()
+            if line and "matterc" in line.lower():
+                hits.append(line[:160])
+        if hits:
+            return hits[:8]
+    # Raw IPv6 mDNS PTR query fallback.
+    try:
+        qname = "_matterc._udp.local"
+        labels = b"".join(bytes([len(p)]) + p.encode("ascii") for p in qname.split(".")) + b"\x00"
+        packet = struct.pack("!HHHHHH", 0x1200, 0, 1, 0, 0, 0) + labels + struct.pack("!HH", 12, 1)
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 1)
+        sock.settimeout(0.4)
+        sock.bind(("", 0))
+        try:
+            sock.sendto(packet, ("ff02::fb", 5353, 0, 0))
+        except OSError as exc:
+            sock.close()
+            return [f"mdns send failed: {exc}"]
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            try:
+                data, addr = sock.recvfrom(2048)
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            hits.append(f"{addr[0]} +{len(data)}b")
+            if len(hits) >= 6:
+                break
+        sock.close()
+    except OSError as exc:
+        return [f"mdns error: {exc}"]
+    return hits or ["no _matterc replies"]
+
+
+def discovery_diag() -> dict[str, Any]:
+    """Snapshot used in pairing errors so remote Add device failures are actionable."""
+    iface = primary_interface()
+    shared = shared_matter_container()
+    name = shared if shared and matter_port_up() else DOCKER_NAME
+    have, state = container_primary_interface_state(name)
+    return {
+        "iface": iface,
+        "container": name,
+        "primary_have": have,
+        "primary_state": state,
+        "accept_ra": read_sysctl(f"net.ipv6.conf.{iface}.accept_ra") if iface else "",
+        "rt_info_max_plen": rt_info_max_plen(iface),
+        "ipv6_ll": bool(iface and iface_has_ipv6_ll(iface)),
+        "thread_route": thread_route_hint() or "",
+        "matterc": browse_matterc_mdns(1.5)[:4],
+        "agent": AGENT_VERSION,
+    }
+
+
+def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
+    row = diag or discovery_diag()
+    matterc = row.get("matterc") or []
+    matterc_s = ", ".join(str(x) for x in matterc[:3]) if matterc else "none"
+    route = str(row.get("thread_route") or "").strip() or "none"
+    return (
+        f"[diag iface={row.get('iface')} primary={row.get('primary_have')}/{row.get('primary_state')} "
+        f"accept_ra={row.get('accept_ra')} rt_info_max_plen={row.get('rt_info_max_plen')} "
+        f"ll={row.get('ipv6_ll')} thread_route={route} matterc={matterc_s} "
+        f"container={row.get('container')} v{row.get('agent')}]"
+    )
 
 
 def matter_container_args() -> list[str]:
@@ -2374,14 +2519,21 @@ def friendly_commission_error(err: str) -> str:
             "Pi on the same LAN/VLAN with IPv6 (not guest Wi‑Fi). Then Add device — not Look for devices."
         )
     if "timeout" in low or "timed out" in low:
-        return (
+        base = (
             "Pairing timed out — the Pi did not discover the accessory (Thread/mDNS). "
             "In Apple Home open the accessory → Turn On Pairing Mode, paste a fresh code within ~3 minutes "
             "(not the sticker QR). Keep a HomePod or Apple TV online on the same LAN/VLAN as the Pi with IPv6. "
             "Thread plugs need the Pi to accept Apple border-router IPv6 routes "
-            "(panel 4.0.332+ sets accept_ra_rt_info_max_plen). "
+            "(panel 4.0.333+ refreshes yarbo-matter-setup and sets accept_ra_rt_info_max_plen=64). "
             "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
         )
+        # Append live LAN/Thread snapshot when this is a real pairing failure (not unit-test stubs).
+        if "diag iface=" not in low:
+            try:
+                return f"{base} {format_discovery_diag()}"
+            except Exception:  # noqa: BLE001
+                return base
+        return base
     if "discover" in low or "not found" in low or "no device" in low:
         return (
             "Could not reach the device on the network. Use Apple Home → Turn On Pairing Mode "
@@ -2469,6 +2621,8 @@ def commission_job_snapshot(job: dict[str, Any] | None = None) -> dict[str, Any]
     elif status == "error":
         out["ok"] = False
         out["error"] = str(row.get("error") or "Pairing failed")
+        if isinstance(row.get("diag"), dict):
+            out["diag"] = row.get("diag")
     return out
 
 
@@ -2527,9 +2681,14 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
     if not rpc.get("ok"):
         detail = err or "Pairing failed"
         cleanup_failed_commission_node(detail)
+        diag = discovery_diag()
+        msg = friendly_commission_error(detail)
+        if "diag iface=" not in msg.lower():
+            msg = f"{msg} {format_discovery_diag(diag)}"
         return {
             "ok": False,
-            "error": friendly_commission_error(detail),
+            "error": msg,
+            "diag": diag,
         }
     devices = refresh_after_commission(rpc.get("result"))
     return {
@@ -2565,6 +2724,7 @@ def _commission_worker(job_id: str, code: str) -> None:
         status="error",
         finished_at=finished,
         error=str(outcome.get("error") or "Pairing failed"),
+        diag=outcome.get("diag"),
         devices=[],
         node_id=None,
         result=None,
@@ -7393,6 +7553,8 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
             "restored": restored,
             "reloaded": bool(restored),
         }
+    if op == "discovery_diag":
+        return {"ok": True, "diag": discovery_diag(), "summary": format_discovery_diag()}
     if op == "commission_start":
         return start_commission_job(str(body.get("code") or ""))
     if op == "commission_status":

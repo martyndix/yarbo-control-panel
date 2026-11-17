@@ -376,6 +376,9 @@ chmod +x "${ROOT}/scripts/lib/matter_server.sh" "${ROOT}/scripts/matter_setup.sh
 if [[ -f "${ROOT}/scripts/lib/matter_server.sh" ]]; then
   # shellcheck source=scripts/lib/matter_server.sh
   source "${ROOT}/scripts/lib/matter_server.sh"
+  # Refresh /usr/local/sbin/yarbo-matter-setup before invoking it — an old binary
+  # can early-return without Thread RIO sysctls or new subcommands.
+  yarbo_matter_install_wrapper
   yarbo_matter_make_storage_readable
   if sudo -n /usr/local/sbin/yarbo-matter-setup "${ROOT}" >/dev/null 2>&1; then
     step "Matter server is running"
