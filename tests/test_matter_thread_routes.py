@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 98, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 99, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -93,6 +93,11 @@ Router lifetime           :         1800
     )
     assert agent.thread_route_hint("eth0") is None
     agent.subprocess.run = lambda cmd, **kwargs: Result(
+        "fdef:badd:6106::/64 dev eth0 proto kernel metric 256\n"
+    )
+    hinted64 = agent.thread_route_hint("eth0") or ""
+    assert hinted64.startswith("fdef:badd:6106::/64"), hinted64
+    agent.subprocess.run = lambda cmd, **kwargs: Result(
         "fd58:b000:1::1 dev eth0 proto kernel metric 256\n"
         "fdef:badd:6106::/64 via fe80::1111:2222:3333:4444 dev eth0 metric 100\n"
     )
@@ -146,8 +151,17 @@ Router lifetime           :         1800
     calls.clear()
     agent.discover_border_router_via = lambda iface: ""
     label = agent.install_border_router_route()
-    assert label == "nora", label
+    assert label == "pfx:fdef:badd:6106::5050", label
     flat = [" ".join(c) for c in calls]
+    assert any(
+        "addr" in c and "replace" in c and "fdef:badd:6106::5050/64" in c and "dev eth0" in c
+        for c in flat
+    ), flat
+    assert any(
+        "neigh" in c and "replace" in c and "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0" in c
+        and "lladdr" in c and "28:70:4e:68:98:ea" in c
+        for c in flat
+    ), flat
     assert not any("fdef:badd:6106:0:dbfc:813f:f2ae:dcd0/128" in c and "replace" in c for c in flat), flat
     assert not any("fd58:b000:1::1" in c and "addr" in c and "replace" in c for c in flat), flat
     saved: list[list[str]] = []
@@ -161,7 +175,6 @@ Router lifetime           :         1800
     })
     assert advertised == "ra:fe80::abcd", advertised
     assert saved and saved[0][1] == "fd99:1:2::/64" and "dbfc" not in " ".join(saved[0]), saved
-    assert not any("lladdr" in c for c in flat), flat
     print("ok: thread route helpers")
     return 0
 

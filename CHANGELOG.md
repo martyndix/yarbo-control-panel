@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.352] - 2026-11-17
+
+### Fixed
+
+- Add device sends the pairing handshake from an address in the accessory’s own prefix (`pase=pfx:`) and delivers it on the LAN to the MAC that answered mDNS. v98 got no router advertisement (`pase=nora`, `ra=no_ra`) and left that prefix unrouted, so the handshake followed the IPv6 default route. Earlier attempts used a source outside the prefix, so a reply could not come back on this link. Matter agent **v99**.
+
 ## [4.0.351] - 2026-11-17
 
 ### Fixed
