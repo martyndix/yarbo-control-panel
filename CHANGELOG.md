@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.361] - 2026-11-17
+
+### Fixed
+
+- Pairing no longer uses the Pi’s HomePod-prefix address as the packet source. v107 pinned `fd10:d687:e7bf:4ba8:2ecf:67ff:fe70:97e7` because that prefix was on-link rather than a recorded route. The IKEA plug paired without it: the plug had an address on the LAN subnet, and this sensor does not (`v4=none`). Matter agent **v108**.
+
 ## [4.0.360] - 2026-11-17
 
 ### Fixed

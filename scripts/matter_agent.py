@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 107
+AGENT_VERSION = 108
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3566,7 +3566,6 @@ def pairing_source_address(iface: str, avoid_prefixes: list[str]) -> str:
         except (ValueError, ipaddress.AddressValueError):
             continue
     gua = ""
-    ula = ""
     for addr, _plen in iface_global_addrs(iface):
         if _is_tailscale_ula(addr):
             continue
@@ -3574,15 +3573,31 @@ def pairing_source_address(iface: str, avoid_prefixes: list[str]) -> str:
             parsed = ipaddress.IPv6Address(addr)
         except ValueError:
             continue
-        if parsed.is_link_local or parsed.is_loopback or parsed.is_unspecified:
+        if not parsed.is_global:
             continue
         if any(parsed in net for net in nets):
             continue
-        if addr.lower().startswith("fd"):
-            ula = ula or addr
-        else:
-            gua = gua or addr
-    return gua or ula
+        gua = gua or addr
+    return gua
+
+
+def homepod_ula_prefixes(iface: str) -> list[str]:
+    """/64s of ULA addresses on the Pi. The HomePod prefix arrives as SLAAC, not always as a route."""
+    found: list[str] = []
+    for addr, plen in iface_global_addrs(iface):
+        if _is_tailscale_ula(addr) or plen != 64:
+            continue
+        try:
+            parsed = ipaddress.IPv6Address(addr)
+            net = ipaddress.IPv6Network(f"{addr}/{plen}", strict=False)
+        except (ValueError, ipaddress.AddressValueError):
+            continue
+        if not parsed.is_private:
+            continue
+        text = str(net)
+        if text not in found:
+            found.append(text)
+    return found
 
 
 def pause_onlink_prefix_info(iface: str) -> None:
@@ -3644,17 +3659,21 @@ def install_thread_return_route(iface: str, hop: str, mesh_prefix: str) -> str:
     global _last_pair_src, _last_routes_installed
     if not iface or not hop.lower().startswith("fe80:"):
         return ""
-    avoid = [prefix for prefix in _last_rio_prefixes if prefix]
+    # The fd10 SLAAC address is the Pi itself. v107 pinned it as src because the
+    # HomePod prefix was on-link, not in the route list. The plug never used it:
+    # the plug had an address on the LAN subnet.
+    ula_prefixes = homepod_ula_prefixes(iface)
+    avoid = [prefix for prefix in list(_last_rio_prefixes) + ula_prefixes if prefix]
     if mesh_prefix and mesh_prefix not in avoid:
         avoid.append(mesh_prefix)
     src = pairing_source_address(iface, avoid)
     _last_pair_src = src
     if not src:
         pause_onlink_prefix_info(iface)
-        hold_thread_prefix_addresses(iface, list(_last_rio_prefixes))
+        hold_thread_prefix_addresses(iface, avoid)
         _last_pair_src = "ll"
     prefixes: list[str] = []
-    for prefix in list(_last_rio_prefixes) + ([mesh_prefix] if mesh_prefix else []):
+    for prefix in list(_last_rio_prefixes) + ula_prefixes + ([mesh_prefix] if mesh_prefix else []):
         if prefix and prefix not in prefixes:
             prefixes.append(prefix)
     for prefix in prefixes:
@@ -4818,10 +4837,9 @@ def friendly_commission_error(err: str) -> str:
                     f"{chip}"
                 )
             return (
-                "The sensor flashes because the pairing request arrives. "
-                "The reply is aimed at the Pi's address in the HomePod prefix, and the HomePod "
-                "forwards that into Thread, so the session stops. "
-                "Use a fresh Turn On Pairing Mode code."
+                "The IKEA plug paired because it had an address on the LAN subnet. "
+                "This sensor has no LAN address. The Pi's only IPv6 address is inside the HomePod "
+                "prefix, so the reply does not come back. Use a fresh Turn On Pairing Mode code."
                 f"{chip}"
             )
         return (
