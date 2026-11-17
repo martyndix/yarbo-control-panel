@@ -554,6 +554,22 @@ final class YarboUnifi
         return is_array($map) ? self::clampAutoOffSec((int) ($map[$homeId] ?? 0)) : 0;
     }
 
+    /** Unix time the relay turns off, or 0 when no timer is running. */
+    public function autoOffAt(string $homeId): int
+    {
+        $homeId = trim($homeId);
+        if ($homeId === '') {
+            return 0;
+        }
+        $job = $this->readAutoOffState()['pending'][$homeId] ?? null;
+        if (!is_array($job)) {
+            return 0;
+        }
+        $at = (int) ($job['at'] ?? 0);
+
+        return $at > time() ? $at : 0;
+    }
+
     /**
      * @return array<string, int>
      */
@@ -2681,6 +2697,7 @@ final class YarboUnifi
                 $extra = ['show_on_home' => isset($show[$id])];
                 if (($row['kind'] ?? '') === self::KIND_RELAY || $group === 'relays') {
                     $extra['auto_off_sec'] = (int) ($autoOff[$id] ?? 0);
+                    $extra['auto_off_at'] = !empty($row['on']) ? $this->autoOffAt($id) : 0;
                 }
                 $out[] = $row + $extra;
             }

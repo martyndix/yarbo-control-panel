@@ -65,6 +65,7 @@ foreach ($catalog as $row) {
 }
 assert_true(is_array($found), 'catalog includes relay');
 assert_true(($found['auto_off_sec'] ?? 0) === 300, 'catalog attaches auto_off_sec');
+assert_true(($found['auto_off_at'] ?? 0) === 0, 'off relay has no countdown');
 
 $posted = [];
 $unifi->setTransport(function (string $method, string $url, array $headers, ?string $body) use (&$posted): array {
@@ -82,6 +83,18 @@ $state = json_decode((string) file_get_contents($unifi->autoOffStatePath()), tru
 assert_true(isset($state['pending'][$relayId]['at']), 'turning on schedules auto-off');
 $at = (int) $state['pending'][$relayId]['at'];
 assert_true($at > time(), 'auto-off is in the future');
+assert_true($unifi->autoOffAt($relayId) === $at, 'running timer exposes auto_off_at');
+$liveInventory = json_decode((string) file_get_contents($root . '/data/unifi-inventory.json'), true);
+$liveInventory['relays'][0]['on'] = true;
+$live = $unifi->catalogFromInventory($liveInventory, []);
+$liveRow = null;
+foreach ($live as $row) {
+    if (($row['id'] ?? '') === $relayId) {
+        $liveRow = $row;
+        break;
+    }
+}
+assert_true(($liveRow['auto_off_at'] ?? 0) === $at, 'on relay catalog includes countdown');
 assert_true((int) ($state['pending'][$relayId]['sec'] ?? 0) === 300, 'pending remembers duration');
 
 $again = $unifi->command(['id' => $relayId, 'command' => 'on']);
@@ -131,5 +144,7 @@ assert_true(str_contains($js, 'data-unifi-auto-off-enabled'), 'JS marks auto-off
 assert_true(str_contains($css, '.unifi-pick-auto-off'), 'auto-off has CSS');
 assert_true(str_contains($html, 'auto-off'), 'Settings hint mentions auto-off');
 assert_true(str_contains($change, '## [4.0.219]'), 'changelog 4.0.219');
+assert_true(str_contains($js, 'function autoOffCountdownHtml'), 'JS builds auto-off countdown');
+assert_true($unifi->autoOffAt($relayId) === 0, 'no countdown before a timer');
 
 fwrite(STDOUT, "test_unifi_relay_auto_off.php ok\n");

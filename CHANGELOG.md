@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.345] - 2026-11-17
+
+### Fixed
+
+- Add device no longer aims the pairing handshake at the accessory link-local on port 5540. That path (v91) failed with CHIP 0x00000003 Incorrect state. Pairing again uses the code and the port from mDNS, and the accessory `fd…` prefix is unreachable only while that attempt runs so it cannot follow the IPv6 default route to the gateway. The unreachable route is removed when pairing ends. Matter agent **v92**.
+
+### Added
+
+- Plugs and UniFi relays with an auto-off timer show a live “Off in m:ss” countdown on the card while they are on.
+
 ## [4.0.344] - 2026-11-17
 
 ### Fixed

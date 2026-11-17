@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 91
+AGENT_VERSION = 92
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1801,6 +1801,7 @@ _last_routes_installed: list[str] = []
 _mdns5353 = ""
 _mdns_quiesced = False
 _pase_target = ""
+_fd_blackholes: list[str] = []
 
 
 def commission_job_is_running() -> bool:
@@ -2534,10 +2535,13 @@ def blackhole_mdns_fd_prefixes() -> list[str]:
 
     With no Thread route, the kernel sends fdef:… to the LAN gateway. The gateway
     drops it, and PASE waits until message 33 times out. A real router advertisement
-    (lower metric) still wins over this unreachable route.
+    (lower metric) still wins over this unreachable route. Cleared when pairing ends
+    so a commissioned device can still be reached on that prefix.
     """
+    global _fd_blackholes
     hinted = (thread_route_hint() or "").lower()
     if " proto ra " in f" {hinted} ":
+        _fd_blackholes = []
         return []
     prefixes: list[str] = []
     for hit in _last_matterc_hits:
@@ -2566,7 +2570,27 @@ def blackhole_mdns_fd_prefixes() -> list[str]:
                 installed.append(prefix)
                 print(f"matter: unreachable {prefix} (keep PASE off the default route)", flush=True)
                 break
+    _fd_blackholes = installed
     return installed
+
+
+def clear_fd_blackholes() -> None:
+    """Drop pairing-only unreachable fd routes."""
+    global _fd_blackholes
+    for prefix in list(_fd_blackholes):
+        for cmd in (
+            ["sudo", "-n", "ip", "-6", "route", "del", "unreachable", prefix],
+            ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "del", "unreachable", prefix],
+            ["ip", "-6", "route", "del", "unreachable", prefix],
+        ):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if result.returncode == 0:
+                print(f"matter: cleared unreachable {prefix}", flush=True)
+                break
+    _fd_blackholes = []
 
 
 def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
@@ -3307,34 +3331,6 @@ def manual_pairing_pin(code: str) -> int | None:
     return pin
 
 
-def accessory_pase_target() -> str:
-    """Scoped link-local of the host that answered _matterc, or empty."""
-    iface_fallback = primary_interface() or ""
-    for hit in _last_matterc_hits:
-        if not hit.get("matterc"):
-            continue
-        src = str(hit.get("src") or "").split("%", 1)[0]
-        iface = str(hit.get("iface") or iface_fallback)
-        if src.lower().startswith("fe80:") and iface:
-            return f"{src}%{iface}"
-    return ""
-
-
-def _command_unsupported(err: str) -> bool:
-    low = str(err or "").lower()
-    return any(
-        needle in low
-        for needle in (
-            "unknown command",
-            "invalid command",
-            "no such command",
-            "unexpected keyword",
-            "extra fields",
-            "not in schema",
-        )
-    )
-
-
 def commission_error_looks_retryable(err: str) -> bool:
     """CHIP stack not ready / busy — worth one more attempt after listen."""
     low = str(err or "").lower()
@@ -3492,9 +3488,9 @@ def friendly_commission_error(err: str) -> str:
         if matterc_seen and "matter server timed out" in low:
             base = (
                 "The accessory answered on the LAN, but the pairing handshake got no reply "
-                "(PASE message 33). Its fd address follows the normal IPv6 route to the gateway, "
-                "which drops it. This update sends the handshake to the accessory link-local. "
-                "Use a fresh Turn On Pairing Mode code. "
+                "(PASE message 33). Its fd address was sent to the gateway. "
+                "This update keeps that prefix unreachable during pairing and lets Matter Server "
+                "discover the accessory on its own port. Use a fresh Turn On Pairing Mode code. "
             )
         elif matterc_seen and no_thread and fd != "none":
             base = (
@@ -3771,40 +3767,24 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001
                 print(f"matter: matterc lookup: {exc}", flush=True)
         try:
-            blackhole_mdns_fd_prefixes()
+            blackholed = blackhole_mdns_fd_prefixes()
         except Exception as exc:  # noqa: BLE001
+            blackholed = []
             print(f"matter: fd unreachable: {exc}", flush=True)
-        # A seen accessory plus a Thread route still takes CHIP about 2 minutes.
-        # Cutting the socket at 75s reports "Matter server timed out" and aborts pairing.
-        pin = manual_pairing_pin(code)
-        target = accessory_pase_target()
-        rpc: dict[str, Any] | None = None
-        if pin and target:
-            _pase_target = target
-            print(f"matter: PASE to on-link {target}", flush=True)
-            rpc = matter_rpc(
-                "commission_on_network",
-                {"setup_pin_code": pin, "ip_addr": target},
-                timeout=120.0,
-                retries=1,
-            )
-            err = str(rpc.get("error") or "")
-            if not rpc.get("ok") and (
-                _command_unsupported(err) or "invalid argument" in err.lower() or "0x0000002f" in err.lower()
-            ):
-                print(f"matter: commission_on_network unsupported ({err[:140]}); using discovery", flush=True)
-                rpc = None
-                _pase_target = ""
-        if rpc is None:
-            long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
-            if not _pase_target:
-                _pase_target = "mdns"
-            rpc = matter_rpc(
-                "commission_with_code",
-                {"code": code, "network_only": True},
-                timeout=180.0 if long_wait else 120.0,
-                retries=1,
-            )
+        if blackholed:
+            _pase_target = "link-local"
+        # Discover with the code so CHIP uses the mDNS port. The fd prefix is
+        # unreachable for this attempt, so it cannot follow the default route.
+        # CommissionIP to the link-local (v91) failed with CHIP 0x03 and ignores that port.
+        long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
+        if not _pase_target:
+            _pase_target = "mdns"
+        rpc = matter_rpc(
+            "commission_with_code",
+            {"code": code, "network_only": True},
+            timeout=180.0 if long_wait else 120.0,
+            retries=1,
+        )
         err = str(rpc.get("error") or "")
         server_gave_up = "matter server timed out" in err.lower()
         if not rpc.get("ok") and not server_gave_up and commission_error_looks_retryable(err):
@@ -3865,6 +3845,10 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             "message": "Device added.",
         }
     finally:
+        try:
+            clear_fd_blackholes()
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: clear fd unreachable: {exc}", flush=True)
         try:
             restore_host_mdns()
         except Exception as exc:  # noqa: BLE001
