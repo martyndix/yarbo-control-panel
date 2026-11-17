@@ -900,21 +900,32 @@ final class YarboVestaboard
             $forceResume = true;
         }
 
-        // Morning exit first — do not wait on Tesla/Lymow probes (or a browser poll).
-        // If sticky overnight still owns the window, leaveOvernightNow returns null —
-        // never fall through to compose/post Yarbo (that started flaps then night
-        // overwrote them a second later).
+        // Morning exit first. If sticky overnight still owns the window, hold —
+        // do not fall through to Yarbo (that flicked flaps mid-change). Once the
+        // window has ended, leave even without a browser: refresh companions and
+        // post the live snapshot (or an offline live page).
         if ($wasNight || $wasQuiet || $forceResume) {
             $left = $this->leaveOvernightNow($config);
             if ($left !== null) {
                 return $left;
             }
-            if ($this->stickyOvernightRole($this->load()) !== null || $wasNight || $wasQuiet) {
+            // Only hold while sticky says we are still inside the overnight window.
+            // (4.0.322 also held on wasNight alone, so a failed leave left the Note
+            // on night until a browser poll finally cleared it.)
+            if ($this->stickyOvernightRole($this->load()) !== null) {
                 return ['ok' => true, 'skipped' => true, 'reason' => 'overnight_hold'];
             }
         }
 
         $this->refreshCompanionModules();
+        // Retry morning leave after companions refresh — snapshot may be missing
+        // and Yarbo/Powerwall were skipped all night.
+        if ($wasNight || $wasQuiet || $forceResume) {
+            $left = $this->leaveOvernightNow($this->load());
+            if ($left !== null) {
+                return $left;
+            }
+        }
         $activity = $this->applyActivityLivePolicy();
         $rotated = false;
         if (!($activity['active'] ?? false)) {
@@ -927,12 +938,24 @@ final class YarboVestaboard
             return $layout;
         }
         if (!($layout['online'] ?? false)) {
-            if ($forceResume) {
+            if ($forceResume || $wasNight || $wasQuiet) {
                 $left = $this->leaveOvernightNow($this->load(), $layout);
                 if ($left !== null) {
                     return $left;
                 }
-                // Keep night_active/quiet_active so the next tick still force-resumes.
+                // Offline live page is still a valid morning exit.
+                if (!$this->isOvernightLayoutVerb((string) ($layout['verb'] ?? ''))) {
+                    $result = $this->sendLayout($layout, true, [], true);
+                    if (!empty($result['ok']) && empty($result['skipped'])) {
+                        $this->save([
+                            'quiet_active' => false,
+                            'night_active' => false,
+                            'overnight_outside_since' => null,
+                        ]);
+                    }
+
+                    return $result;
+                }
             }
 
             return [
@@ -946,7 +969,7 @@ final class YarboVestaboard
         // Only clear sticky overnight after a real live write — skipped overnight
         // blocks used to look like ok and wiped night_active, so the next tick
         // posted Yarbo then night forced it back mid-flap.
-        if ($forceResume && !empty($result['ok']) && empty($result['skipped'])) {
+        if (($forceResume || $wasNight || $wasQuiet) && !empty($result['ok']) && empty($result['skipped'])) {
             $this->save([
                 'quiet_active' => false,
                 'night_active' => false,

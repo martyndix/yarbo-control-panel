@@ -40,7 +40,9 @@ function vestaboard_run_tick(YarboVestaboard $board): void
             && !$board->isNightHours()
             && !$board->isQuietHours();
         // Overnight only needs door contacts + the Note; skip Tesla/Lymow probes.
-        if (!$leavingOvernight && !$board->isNightHours() && !$board->isQuietHours()) {
+        // Morning leave needs companions when the live snapshot is missing — do not
+        // wait for a browser status poll to refresh Powerwall/Yarbo.
+        if ($leavingOvernight || (!$board->isNightHours() && !$board->isQuietHours())) {
             $board->refreshCompanionModules();
             $board->touchHeartbeat();
         }
