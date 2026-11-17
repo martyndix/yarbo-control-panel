@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 99
+AGENT_VERSION = 100
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3204,12 +3204,102 @@ def release_prefix_source() -> None:
         _ip_ok(["-6", "addr", "del", f"{addr}/64", "dev", iface])
 
 
+def iface_mac(iface: str) -> bytes:
+    try:
+        text = Path(f"/sys/class/net/{iface}/address").read_text().strip()
+    except OSError:
+        return b""
+    parts = text.split(":")
+    if len(parts) != 6:
+        return b""
+    try:
+        return bytes(int(part, 16) for part in parts)
+    except ValueError:
+        return b""
+
+
+def icmpv6_ra_packet(prefix: str, mac: bytes) -> bytes:
+    """Router Advertisement that marks prefix on-link. Checksum is left for the kernel."""
+    try:
+        net = ipaddress.IPv6Network(prefix, strict=False)
+    except (ValueError, ipaddress.AddressValueError):
+        return b""
+    if net.prefixlen != 64 or len(mac) != 6:
+        return b""
+    header = struct.pack("!BBHBBHII", 134, 0, 0, 64, 0, 600, 0, 0)
+    source_link = bytes([1, 1]) + mac
+    pio = bytes([3, 4, 64, 0x80]) + struct.pack("!II", 600, 0) + (b"\x00" * 4) + net.network_address.packed
+    return header + source_link + pio
+
+
+def advertise_prefix_once(iface: str, prefix: str) -> dict[str, Any]:
+    """Tell hosts on iface that prefix is on-link. Needs a raw ICMPv6 socket."""
+    result: dict[str, Any] = {"sent": False, "error": ""}
+    if not iface or not re.fullmatch(r"[A-Za-z0-9._:-]+", iface):
+        result["error"] = "bad iface"
+        return result
+    packet = icmpv6_ra_packet(prefix, iface_mac(iface))
+    if not packet:
+        result["error"] = "bad prefix"
+        return result
+    try:
+        scope = socket.if_nametoindex(iface)
+    except OSError as exc:
+        result["error"] = str(exc)
+        return result
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_RAW, socket.IPPROTO_ICMPV6)
+    except OSError as exc:
+        result["error"] = str(exc)
+        return result
+    try:
+        try:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 255)
+        except OSError:
+            pass
+        if hasattr(socket, "SO_BINDTODEVICE"):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, iface.encode() + b"\x00")
+            except OSError:
+                pass
+        for _ in range(3):
+            sock.sendto(packet, ("ff02::1", 0, 0, scope))
+        result["sent"] = True
+    except OSError as exc:
+        result["error"] = str(exc)
+    finally:
+        sock.close()
+    return result
+
+
+def advertise_prefix(iface: str, prefix: str) -> bool:
+    """Advertise prefix as on-link so the accessory answers this source on the LAN."""
+    local = advertise_prefix_once(iface, prefix)
+    if local.get("sent"):
+        print(f"matter: advertised {prefix} on-link on {iface}", flush=True)
+        return True
+    err = str(local.get("error") or "")
+    if "no interface" in err.lower() or err in ("bad iface", "bad prefix"):
+        print(f"matter: prefix advertisement not sent: {err}", flush=True)
+        return False
+    raw = _run_matter_setup_text("prefix-advertise", iface, prefix)
+    if raw:
+        try:
+            loaded = json.loads(raw.splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            loaded = {}
+        if isinstance(loaded, dict) and loaded.get("sent"):
+            print(f"matter: advertised {prefix} on-link on {iface}", flush=True)
+            return True
+    print(f"matter: prefix advertisement not sent: {err or 'no reply'}", flush=True)
+    return False
+
+
 def install_same_prefix_source(host: str, iface: str) -> str:
     """Send PASE to the accessory from an address in its own prefix.
 
-    v94 delivered the packet on the LAN, but the Pi's source was a different
-    prefix, so the accessory's reply followed its default route and died.
-    A source in the same prefix is answered on this link.
+    v99 used that source, but the accessory had no on-link route for the prefix,
+    so its reply still followed the default gateway. Advertise the prefix first.
     """
     global _prefix_src, _last_routes_installed
     if not host or not iface:
@@ -3232,11 +3322,14 @@ def install_same_prefix_source(host: str, iface: str) -> str:
         return ""
     if not _ip_ok(["-6", "addr", "replace", f"{src_addr}/64", "dev", iface, "nodad"]):
         return ""
-    _ip_ok(["-6", "neigh", "replace", host, "lladdr", mac, "dev", iface, "nud", "permanent"])
+    if not _ip_ok(["-6", "neigh", "replace", host, "lladdr", mac, "dev", iface, "nud", "permanent"]):
+        _ip_ok(["-6", "addr", "del", f"{src_addr}/64", "dev", iface])
+        return ""
     _prefix_src = f"{src_addr}%{iface}"
     _last_routes_installed = [f"{prefix} dev {iface} src {src_addr}"]
+    announced = advertise_prefix(iface, prefix)
     print(f"matter: PASE source {src_addr} on {prefix} to {host} mac {mac}", flush=True)
-    return f"pfx:{src_addr}"
+    return f"pfxra:{src_addr}" if announced else f"pfx:{src_addr}"
 
 
 def install_border_router_route() -> str:
@@ -9804,6 +9897,9 @@ def restore_nodes_cli() -> int:
 if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "--solicit-ra":
         print(json.dumps(solicit_routers_once(sys.argv[2])), flush=True)
+        raise SystemExit(0)
+    if len(sys.argv) > 3 and sys.argv[1] == "--advertise-prefix":
+        print(json.dumps(advertise_prefix_once(sys.argv[2], sys.argv[3])), flush=True)
         raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] in ("--restore-nodes", "restore_nodes"):
         raise SystemExit(restore_nodes_cli())
