@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 95, 'min agent 95');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 96, 'min agent 96');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -47,7 +47,7 @@ assert_true(str_contains($home, 'function commissionStatus'), 'PHP commissionSta
 assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan empty message');
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 95'), 'agent v95');
+assert_true(str_contains($agent, 'AGENT_VERSION = 96'), 'agent v96');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
@@ -96,6 +96,7 @@ assert_true(str_contains($docs, 'error 28'), 'docs error 28');
 assert_true(str_contains($docs, 'error_code 1'), 'docs error_code 1');
 assert_true(str_contains($docs, 'gateway 524'), 'docs gateway 524');
 assert_true(str_contains($docs, '4.0.339+'), 'docs 4.0.339 discovery');
+assert_true(str_contains($docs, '4.0.349+'), 'docs 4.0.349 meshcop listen');
 assert_true(str_contains($docs, '4.0.348+'), 'docs 4.0.348 border router');
 assert_true(str_contains($docs, '4.0.347+'), 'docs 4.0.347 on-link accessory');
 assert_true(str_contains($change, '## [4.0.324]'), 'changelog 4.0.324');
@@ -119,9 +120,10 @@ assert_true(str_contains($change, '## [4.0.345]'), 'changelog 4.0.345');
 assert_true(str_contains($change, '## [4.0.346]'), 'changelog 4.0.346');
 assert_true(str_contains($change, '## [4.0.347]'), 'changelog 4.0.347');
 assert_true(str_contains($change, '## [4.0.348]'), 'changelog 4.0.348');
+assert_true(str_contains($change, '## [4.0.349]'), 'changelog 4.0.349');
 assert_true(str_contains($agent, 'clear_unreachable_fd_routes'), 'drop v92 unreachable fd routes');
 assert_true(str_contains($agent, 'install_border_router_route'), 'route fd prefix via border router');
-assert_true(str_contains($agent, 'drop_onlink_fd_host_routes'), 'drop v94 on-link host route');
+assert_true(str_contains($agent, 'install_linklocal_source_route'), 'link-local source when no border router');
 assert_true(!str_contains($agent, 'start_pase_linklocal_proxy'), 'do not relay PASE through lo');
 assert_true(!str_contains($agent, 'blackhole_mdns_fd_prefixes'), 'do not blackhole the fd prefix');
 assert_true(!str_contains($agent, 'commission_on_network'), 'do not CommissionIP the link-local');

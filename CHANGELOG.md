@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.349] - 2026-11-17
+
+### Fixed
+
+- Add device listens for a Thread border router on UDP 5353. The previous search waited on a random port, so a HomePod answering mDNS was missed and the handshake followed the IPv6 default route (`pase=nobr`). When no border router answers, the accessory address is sent on the LAN from the Pi’s link-local instead of the gateway. Matter agent **v96**.
+
 ## [4.0.348] - 2026-11-17
 
 ### Fixed

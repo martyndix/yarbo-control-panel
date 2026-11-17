@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 95, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 96, agent.AGENT_VERSION
     sample = """
 Soliciting ff02::2 on eth0...
 Hop limit                 :           64
@@ -43,6 +43,9 @@ Router lifetime           :         1800
     install = SCRIPT.read_text().split("def install_routes_from_matterc_hits", 1)[1].split("\ndef ", 1)[0]
     assert "add_ipv6_route" not in install
     assert "return []" in install
+    query_pkt = agent._mdns_query("_meshcop")
+    assert struct.unpack("!H", query_pkt[-2:])[0] == 0x8001
+    assert b"_meshcop" in query_pkt
     assert "drop_static_fd_prefixes" in SCRIPT.read_text()
     query = struct.pack("!HHHHHH", 1, 0, 1, 0, 0, 0) + name + struct.pack("!HH", 12, 1)
     assert agent.parse_mdns_message(query)["matterc"] is False
@@ -119,8 +122,18 @@ Router lifetime           :         1800
         for c in flat
     ), flat
     assert not any("lladdr" in c and "28:70:4e:68:98:ea" in c for c in flat), flat
+    calls.clear()
     agent.discover_border_router_via = lambda iface: ""
-    assert agent.install_border_router_route() == ""
+    agent.iface_fe80 = lambda iface: "fe80::aabb:ccff:fedd:eeff"
+    label = agent.install_border_router_route()
+    assert label == "llsrc:fe80::aabb:ccff:fedd:eeff", label
+    flat = [" ".join(c) for c in calls]
+    assert any(
+        "route" in c and "replace" in c and "fdef:badd:6106:0:dbfc:813f:f2ae:dcd0/128" in c
+        and "src" in c and "fe80::aabb:ccff:fedd:eeff" in c
+        for c in flat
+    ), flat
+    assert any("neigh" in c and "lladdr" in c and "28:70:4e:68:98:ea" in c for c in flat), flat
     print("ok: thread route helpers")
     return 0
 
