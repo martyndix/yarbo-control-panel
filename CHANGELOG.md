@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.343] - 2026-11-17
+
+### Fixed
+
+- Add device no longer installs a route to the accessory `fd…` address. v89’s `/128` made CHIP send the pairing handshake there, and the accessory never answered (PASE message 33, PBKDFParamResponse). The accessory is on the LAN, so pairing uses its link-local. Existing metric-100 `fd` routes, including that `/128`, are removed at the start of pairing. Matter agent **v90**.
+
 ## [4.0.342] - 2026-11-17
 
 ### Fixed

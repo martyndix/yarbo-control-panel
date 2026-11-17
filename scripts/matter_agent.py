@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 89
+AGENT_VERSION = 90
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1902,10 +1902,11 @@ def verify_tailscale_matter_shield() -> bool:
 
 
 def wait_for_thread_route(seconds: float = 8.0) -> str | None:
-    """Parse _matterc, install /128 host routes, solicit one RA.
+    """See _matterc, drop panel fd routes, solicit one RA.
 
-    A /64 via the accessory that answered mDNS blackholes the Thread prefix.
-    Only a router advertisement (proto ra) or rdisc6 RIO may install a /64.
+    The accessory that answers mDNS is on-link. A route to its fd address makes
+    CHIP send PASE there, and the accessory never answers (message type 33).
+    Only a router advertisement may install a /64.
     """
     global _thread_route_attempted, _last_ra_proof, _last_routes_installed
     prefer = primary_interface()
@@ -1919,11 +1920,14 @@ def wait_for_thread_route(seconds: float = 8.0) -> str | None:
     budget = min(8.0, max(1.5, seconds))
     try:
         browse_matterc_mdns(min(2.5, budget))
-        installed = install_routes_from_matterc_hits()
-        if installed:
-            _last_routes_installed = installed
-            _last_ra_proof = "mdns"
-            print(f"matter: accessory /128 from _matterc AAAA: {installed[:2]}", flush=True)
+        # Drop again in case a host route was still present, then do not add one.
+        drop_static_fd_prefixes()
+        if _last_matterc_hits:
+            _last_ra_proof = "onlink"
+            print(
+                "matter: accessory is on-link; not routing its fd address (PASE uses link-local)",
+                flush=True,
+            )
     except Exception as exc:  # noqa: BLE001
         print(f"matter: matterc route install: {exc}", flush=True)
     hint = thread_route_hint(prefer)
@@ -2441,10 +2445,10 @@ def ipv6_host128(addr: str) -> str:
 
 
 def drop_static_fd_prefixes() -> int:
-    """Delete fd/64 routes this panel installed (metric 100, not proto ra).
+    """Delete metric-100 fd routes this panel installed (not proto ra).
 
-    Those were aimed at the accessory link-local. The accessory is not a Thread
-    border router, so the /64 blackholes every other address in the prefix.
+    Both the /64 and the later /128 sent PASE to the accessory fd address.
+    The accessory did not answer that handshake. Link-local needs no route.
     """
     removed = 0
     try:
@@ -2459,12 +2463,16 @@ def drop_static_fd_prefixes() -> int:
     for raw in (shown.stdout or "").splitlines():
         line = raw.strip()
         low = line.lower()
-        if not line or " proto ra " in f" {low} ":
+        if not line or " proto ra " in f" {low} " or " via " not in low:
             continue
         dest = line.split()[0]
-        if not dest.lower().startswith("fd") or not dest.endswith("/64"):
+        dest_low = dest.lower()
+        if not dest_low.startswith("fd") or _is_tailscale_ula(line):
             continue
-        if "metric 100" not in low or _is_tailscale_ula(line):
+        if "metric 100" not in low:
+            continue
+        # /64, explicit /128, or a host route shown without a prefix length.
+        if "/" in dest and not dest.endswith("/64") and not dest.endswith("/128"):
             continue
         for cmd in (
             ["sudo", "-n", "ip", "-6", "route", "del", dest],
@@ -2477,7 +2485,7 @@ def drop_static_fd_prefixes() -> int:
                 continue
             if result.returncode == 0:
                 removed += 1
-                print(f"matter: removed static Thread /64 {dest}", flush=True)
+                print(f"matter: removed static fd route {dest}", flush=True)
                 break
     return removed
 
@@ -2511,31 +2519,13 @@ def format_matterc_hit(hit: dict[str, Any]) -> str:
 
 
 def install_routes_from_matterc_hits() -> list[str]:
-    """Install a /128 for each fd AAAA via the host that answered _matterc.
+    """Do not route the accessory fd address.
 
-    The packet source is the accessory, not a border router. A /64 via that
-    link-local blackholes the rest of the Thread prefix.
+    v89 installed fdef:…/128 via the accessory link-local. CHIP then sent PASE
+    to that address and timed out waiting for message 33 (PBKDFParamResponse).
+    The accessory is on-link, so the handshake has to use its fe80 address.
     """
-    installed: list[str] = []
-    for hit in _last_matterc_hits:
-        if not hit.get("matterc"):
-            continue
-        via = str(hit.get("src") or "").split("%", 1)[0]
-        iface = str(hit.get("iface") or primary_interface() or "")
-        if not via.lower().startswith("fe80:") or not iface:
-            continue
-        for addr in hit.get("aaaa") or []:
-            raw = str(addr).split("%", 1)[0]
-            low = raw.lower()
-            if not low.startswith("fd") or _is_tailscale_ula(raw):
-                continue
-            try:
-                prefix = ipv6_host128(raw)
-            except OSError:
-                continue
-            if add_ipv6_route(prefix, via, iface):
-                installed.append(f"{prefix} via {via} dev {iface}")
-    return installed
+    return []
 
 
 def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
@@ -3414,22 +3404,22 @@ def friendly_commission_error(err: str) -> str:
         )
         fd = str((diag or {}).get("fd") or "none")
         ra = str((diag or {}).get("ra_proof") or "none")
-        if matterc_seen and no_thread and fd != "none":
+        if matterc_seen and "matter server timed out" in low:
             base = (
-                f"Pairing timed out. _matterc included Thread prefix {fd} but traffic still failed. "
+                "The accessory answered on the LAN, but it did not answer the pairing handshake "
+                "(PASE message 33). That handshake was sent to its fd address. "
+                "This update removes that route so the Pi uses the accessory link-local on the LAN port. "
+                "Use a fresh Turn On Pairing Mode code. "
+            )
+        elif matterc_seen and no_thread and fd != "none":
+            base = (
+                f"Pairing timed out. _matterc included Thread prefix {fd} and the accessory is on-link. "
                 "Use a fresh Turn On Pairing Mode code and Add device again. "
             )
         elif matterc_seen and no_thread:
             base = (
                 "Pairing timed out. _matterc was real but had no Thread fd… address and no router advertisement "
                 f"(ra={ra}). Put the HomePod on the same LAN as the Pi, then a fresh Turn On Pairing Mode code. "
-            )
-        elif matterc_seen and "matter server timed out" in low:
-            base = (
-                "The accessory is on the LAN, but the Matter server did not finish pairing. "
-                "A /64 route pointed at the accessory itself was blocking that prefix. "
-                "This update removes it, adds only that accessory address, and leaves Tailscale up "
-                "so UniFi does not disconnect. Use a fresh Turn On Pairing Mode code. "
             )
         elif matterc_seen:
             base = (
