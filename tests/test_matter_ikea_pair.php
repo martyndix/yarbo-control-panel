@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 87, 'min agent 87');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 88, 'min agent 88');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -47,7 +47,7 @@ assert_true(str_contains($home, 'function commissionStatus'), 'PHP commissionSta
 assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan empty message');
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 87'), 'agent v87');
+assert_true(str_contains($agent, 'AGENT_VERSION = 88'), 'agent v88');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
@@ -96,7 +96,7 @@ assert_true(str_contains($docs, 'error 28'), 'docs error 28');
 assert_true(str_contains($docs, 'error_code 1'), 'docs error_code 1');
 assert_true(str_contains($docs, 'gateway 524'), 'docs gateway 524');
 assert_true(str_contains($docs, '4.0.339+'), 'docs 4.0.339 discovery');
-assert_true(str_contains($docs, '4.0.340+'), 'docs 4.0.340 avahi');
+assert_true(str_contains($docs, '4.0.341+'), 'docs 4.0.341 long wait');
 assert_true(str_contains($change, '## [4.0.324]'), 'changelog 4.0.324');
 assert_true(str_contains($change, '## [4.0.325]'), 'changelog 4.0.325');
 assert_true(str_contains($change, '## [4.0.326]'), 'changelog 4.0.326');
@@ -113,6 +113,6 @@ assert_true(str_contains($change, '## [4.0.336]'), 'changelog 4.0.336');
 assert_true(str_contains($change, '## [4.0.337]'), 'changelog 4.0.337');
 assert_true(str_contains($change, '## [4.0.338]'), 'changelog 4.0.338');
 assert_true(str_contains($change, '## [4.0.339]'), 'changelog 4.0.339');
-assert_true(str_contains($change, '## [4.0.340]'), 'changelog 4.0.340');
+assert_true(str_contains($change, '## [4.0.341]'), 'changelog 4.0.341');
 
 echo "test_matter_ikea_pair.php ok\n";

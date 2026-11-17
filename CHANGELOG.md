@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.341] - 2026-11-17
+
+### Fixed
+
+- Add device no longer hangs up on the Matter server after 75 seconds. A seen Thread accessory now gets one 3 minute `commission_with_code` call. A client timeout is not retried (that abort was the `Matter server timed out` toast). The error includes the last Matter container log line.
+
 ## [4.0.340] - 2026-11-17
 
 ### Fixed

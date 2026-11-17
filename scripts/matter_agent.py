@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 87
+AGENT_VERSION = 88
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -2671,7 +2671,7 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
     return (
         f"[diag v{row.get('agent')} matterc={mc} fd={row.get('fd') or 'none'} "
         f"via={row.get('via') or 'none'} ra={row.get('ra_proof') or 'none'} "
-        f"mdns5353={row.get('mdns5353') or 'unknown'} "
+        f"mdns5353={row.get('mdns5353') or 'unknown'} net={row.get('network_mode') or '?'} "
         f"thread_route={route} iface={row.get('iface')} ts={ts} shield={row.get('shield') or 'n/a'}]"
     )
 
@@ -3380,11 +3380,15 @@ def friendly_commission_error(err: str) -> str:
                 "Pairing timed out. _matterc was real but had no Thread fd… address and no router advertisement "
                 f"(ra={ra}). Put the HomePod on the same LAN as the Pi, then a fresh Turn On Pairing Mode code. "
             )
+        elif matterc_seen and "matter server timed out" in low:
+            base = (
+                "The panel stopped waiting while the Matter server was still pairing. "
+                "The Thread route is already installed. This update waits 3 minutes for that call. "
+                "Use a fresh Turn On Pairing Mode code. "
+            )
         elif matterc_seen:
             base = (
                 "Pairing timed out after the Thread route was installed. "
-                "Matter Server uses UDP 5353 itself; avahi was taking those replies. "
-                "This update stops avahi and restarts Matter before pairing (AirPlay pauses, then returns). "
                 "Use a fresh Turn On Pairing Mode code. "
             )
         else:
@@ -3560,6 +3564,21 @@ def matter_runtime_container() -> str:
     return DOCKER_NAME
 
 
+def matter_server_log_hint() -> str:
+    """Last CHIP/commission lines from the Matter container, for a failed Add device."""
+    name = matter_runtime_container()
+    try:
+        result = run_docker(["logs", "--tail", "60", name], timeout=8.0)
+    except Exception:  # noqa: BLE001
+        return ""
+    text = f"{result.stdout or ''}\n{result.stderr or ''}"
+    keys = ("discover", "pase", "timeout", "commission", "mdns", "error", "matterc", "failed")
+    picked = [ln.strip() for ln in text.splitlines() if any(k in ln.lower() for k in keys)]
+    if not picked:
+        picked = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return " | ".join(picked[-2:])[:180]
+
+
 def quiesce_host_mdns() -> bool:
     """Stop avahi when it owns UDP 5353 so CHIP can receive _matterc."""
     global _mdns5353, _mdns_quiesced
@@ -3609,16 +3628,18 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
         ready_err = prepare_for_commission()
         if ready_err:
             return {"ok": False, "error": friendly_commission_error(ready_err)}
-        # Keep the first attempt shorter so a discovery rebind retry still fits Apple's
-        # ~3–5 minute Turn On Pairing Mode window.
+        # A seen accessory plus a Thread route still takes CHIP about 2 minutes.
+        # Cutting the socket at 75s reports "Matter server timed out" and aborts pairing.
+        long_wait = bool(_last_matterc_hits) or thread_route_hint() is not None
         rpc = matter_rpc(
             "commission_with_code",
             {"code": code, "network_only": True},
-            timeout=75.0,
+            timeout=180.0 if long_wait else 120.0,
             retries=1,
         )
         err = str(rpc.get("error") or "")
-        if not rpc.get("ok") and commission_error_looks_retryable(err):
+        server_gave_up = "matter server timed out" in err.lower()
+        if not rpc.get("ok") and not server_gave_up and commission_error_looks_retryable(err):
             print(f"matter: commission retry after {err!r}", flush=True)
             cleanup_failed_commission_node(err)
             time.sleep(2.0)
@@ -3630,8 +3651,9 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
                 retries=1,
             )
             err = str(rpc.get("error") or "")
+        server_gave_up = "matter server timed out" in err.lower()
         # Discovery timeout: force-rebind Matter + Thread IPv6 RIOs, then one more try.
-        if not rpc.get("ok") and commission_error_looks_discovery(err):
+        if not rpc.get("ok") and not server_gave_up and commission_error_looks_discovery(err):
             print(f"matter: discovery retry with NIC rebind after {err!r}", flush=True)
             cleanup_failed_commission_node(err)
             try:
@@ -3656,6 +3678,9 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             cleanup_failed_commission_node(detail)
             diag = discovery_diag()
             msg = friendly_commission_error(detail)
+            logs = matter_server_log_hint()
+            if logs and "server=" not in msg:
+                msg = f"{msg} server={logs}"
             if "[diag " not in msg.lower():
                 msg = f"{msg} {format_discovery_diag(diag)}"
             return {
