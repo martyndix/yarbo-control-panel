@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 83
+AGENT_VERSION = 84
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1618,16 +1618,22 @@ def primary_interface() -> str:
     return route or "eth0"
 
 
-def _sysctl_w(key: str, value: str) -> None:
+def _sysctl_w(key: str, value: str) -> bool:
     for cmd in (
         ["sudo", "-n", "sysctl", "-w", f"{key}={value}"],
         ["sudo", "-n", "/usr/sbin/sysctl", "-w", f"{key}={value}"],
     ):
         try:
-            subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            return
-        except (OSError, subprocess.TimeoutExpired):
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                return True
+            err = (r.stderr or r.stdout or "").strip()
+            if err:
+                print(f"matter: sysctl {key}={value} failed: {err[:160]}", flush=True)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"matter: sysctl {key}={value} error: {exc}", flush=True)
             continue
+    return False
 
 
 def read_sysctl(key: str) -> str:
@@ -1744,15 +1750,19 @@ def ensure_ipv6_default_route() -> None:
             flush=True,
         )
         # CHIP may already have bound sockets; restart Matter so it sees new routes
-        # (plain restart — avoid recreate→ensure_ipv6 recursion).
-        try:
-            target = shared_matter_container() if matter_port_up() else None
-            target = target or DOCKER_NAME
-            reset_ws()
-            run_docker(["restart", target], timeout=40.0)
-            wait_matter_port(30.0)
-        except Exception as exc:  # noqa: BLE001
-            print(f"matter: restart after RIO enable: {exc}", flush=True)
+        # (plain restart — avoid recreate→ensure_ipv6 recursion). Skip while pairing
+        # / Tailscale shield is active — a mid-pair restart worsens discovery.
+        if _tailscale_shield_depth > 0 or commission_job_is_running():
+            print("matter: skip Matter restart during pairing/Tailscale shield", flush=True)
+        else:
+            try:
+                target = shared_matter_container() if matter_port_up() else None
+                target = target or DOCKER_NAME
+                reset_ws()
+                run_docker(["restart", target], timeout=40.0)
+                wait_matter_port(30.0)
+            except Exception as exc:  # noqa: BLE001
+                print(f"matter: restart after RIO enable: {exc}", flush=True)
     try:
         shown = subprocess.run(
             ["ip", "-6", "route", "show", "default"],
@@ -1783,23 +1793,40 @@ def tailscale_iface_present() -> bool:
 
 
 _tailscale_shield_depth = 0
+_tailscale_shield_ok: bool | None = None  # None=n/a, True/False after last begin
 
 
-def _run_matter_setup_cmd(*args: str, timeout: float = 25.0) -> None:
+def commission_job_is_running() -> bool:
+    with _commission_job_lock:
+        job = _commission_job
+        if not job:
+            return False
+        return str(job.get("status") or "") in ("queued", "running", "starting")
+
+
+def _run_matter_setup_cmd(*args: str, timeout: float = 25.0) -> bool:
     refresh_matter_setup_wrapper()
+    last_err = ""
     for cmd in (
         ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", str(ROOT), *args],
         ["sudo", "-n", "/usr/local/sbin/yarbo-matter-setup", *args],
     ):
         try:
-            subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-            return
-        except (OSError, subprocess.TimeoutExpired):
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if r.returncode == 0:
+                return True
+            last_err = (r.stderr or r.stdout or f"exit {r.returncode}").strip()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            last_err = str(exc)
             continue
+    if last_err:
+        print(f"matter: setup {' '.join(args)} failed: {last_err[:200]}", flush=True)
+    return False
 
 
-def flush_tailscale_ipv6_routes() -> None:
+def flush_tailscale_ipv6_routes() -> int:
     """Drop Tailscale ULA routes so CHIP cannot prefer fd7a:… over Apple Thread."""
+    removed = 0
     try:
         shown = subprocess.run(
             ["ip", "-6", "route", "show"],
@@ -1808,31 +1835,122 @@ def flush_tailscale_ipv6_routes() -> None:
             timeout=3,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return
+        return 0
     for line in (shown.stdout or "").splitlines():
         raw = line.strip()
         if not raw or not _is_tailscale_ula(raw):
             continue
-        # "ip route del" wants the route spec without extra metrics fluff when possible.
         for cmd in (
             ["sudo", "-n", "ip", "-6", "route", "del"] + raw.split(),
             ["sudo", "-n", "/usr/sbin/ip", "-6", "route", "del"] + raw.split(),
         ):
             try:
-                subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                break
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                if r.returncode == 0:
+                    removed += 1
+                    break
             except (OSError, subprocess.TimeoutExpired):
                 continue
+    return removed
+
+
+def tailscale_link_up() -> bool:
+    for ts in ("tailscale0", "tailscale1"):
+        if iface_exists(ts) and iface_operstate(ts) == "up":
+            return True
+    return False
+
+
+def tailscale_routing_present() -> bool:
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "route", "show"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return any(_is_tailscale_ula(line.strip()) for line in (shown.stdout or "").splitlines() if line.strip())
+
+
+def tailscale_ipv6_disabled() -> bool:
+    for ts in ("tailscale0", "tailscale1"):
+        if not iface_exists(ts):
+            continue
+        raw = read_sysctl(f"net.ipv6.conf.{ts}.disable_ipv6")
+        if raw == "1":
+            return True
+    return False
+
+
+def verify_tailscale_matter_shield() -> bool:
+    """True when Tailscale is not presenting IPv6 routes to Matter."""
+    if not tailscale_iface_present():
+        return True
+    if tailscale_routing_present():
+        return False
+    if tailscale_link_up() and not tailscale_ipv6_disabled():
+        return False
+    return True
+
+
+def wait_for_thread_route(seconds: float = 20.0) -> str | None:
+    """Poll for Apple Thread RIO on the LAN NIC; nudge RA/RIO periodically."""
+    prefer = primary_interface()
+    deadline = time.time() + max(0.0, seconds)
+    hint = thread_route_hint(prefer)
+    if hint:
+        return hint
+    while time.time() < deadline:
+        ensure_ipv6_default_route()
+        hint = thread_route_hint(prefer)
+        if hint:
+            return hint
+        time.sleep(1.0)
+        hint = thread_route_hint(prefer)
+        if hint:
+            return hint
+    return thread_route_hint(prefer)
+
+
+def ipv6_route_sample(prefer_iface: str | None = None, limit: int = 4) -> list[str]:
+    """Short non-default IPv6 routes for empty-thread diag (sanitized)."""
+    prefer = (prefer_iface or primary_interface() or "").strip()
+    try:
+        shown = subprocess.run(
+            ["ip", "-6", "route", "show"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    out: list[str] = []
+    for line in (shown.stdout or "").splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        low = raw.lower()
+        if low.startswith("default") or low.startswith("unreachable") or low.startswith("local "):
+            continue
+        if prefer and f"dev {prefer}" not in low and not low.startswith("fd"):
+            continue
+        out.append(raw[:100])
+        if len(out) >= limit:
+            break
+    return out
 
 
 def begin_tailscale_matter_shield() -> bool:
     """Hide Tailscale from Matter for the duration of a pairing attempt."""
-    global _tailscale_shield_depth
+    global _tailscale_shield_depth, _tailscale_shield_ok
     if not (tailscale_iface_present() or iface_exists("tailscale0") or iface_exists("tailscale1")):
+        _tailscale_shield_ok = None
         return False
     _tailscale_shield_depth += 1
     print("matter: shielding Tailscale during Apple Home pairing", flush=True)
-    _run_matter_setup_cmd("tailscale-shield")
+    setup_ok = _run_matter_setup_cmd("tailscale-shield")
     for ts in ("tailscale0", "tailscale1"):
         if iface_exists(ts):
             _sysctl_w(f"net.ipv6.conf.{ts}.disable_ipv6", "1")
@@ -1842,21 +1960,31 @@ def begin_tailscale_matter_shield() -> bool:
                 ["sudo", "-n", "/usr/sbin/ip", "link", "set", ts, "down"],
             ):
                 try:
-                    subprocess.run(cmd, capture_output=True, text=True, timeout=8)
-                    break
-                except (OSError, subprocess.TimeoutExpired):
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+                    if r.returncode == 0:
+                        break
+                    err = (r.stderr or r.stdout or "").strip()
+                    if err:
+                        print(f"matter: ip link set {ts} down: {err[:120]}", flush=True)
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    print(f"matter: ip link set {ts} down error: {exc}", flush=True)
                     continue
     flush_tailscale_ipv6_routes()
-    # Re-learn Apple BR RIOs now that Tailscale is out of the way.
-    ensure_ipv6_default_route()
-    deadline = time.time() + 5.0
-    while time.time() < deadline and thread_route_hint() is None:
-        time.sleep(0.5)
+    ok = verify_tailscale_matter_shield()
+    _tailscale_shield_ok = ok and (setup_ok or ok)
+    if not ok:
+        print("matter: Tailscale shield incomplete (link still up or fd7a routes remain)", flush=True)
+    # Re-learn Apple BR RIOs now that Tailscale is out of the way (~20s).
+    route = wait_for_thread_route(20.0)
+    if route:
+        print(f"matter: Thread route after shield: {route[:120]}", flush=True)
+    else:
+        print("matter: no Apple Thread RIO yet after Tailscale shield wait", flush=True)
     return True
 
 
 def end_tailscale_matter_shield() -> None:
-    global _tailscale_shield_depth
+    global _tailscale_shield_depth, _tailscale_shield_ok
     if _tailscale_shield_depth <= 0:
         return
     _tailscale_shield_depth -= 1
@@ -1876,6 +2004,7 @@ def end_tailscale_matter_shield() -> None:
                     break
                 except (OSError, subprocess.TimeoutExpired):
                     continue
+    _tailscale_shield_ok = None
 
 
 def _is_tailscale_ula(line: str) -> bool:
@@ -1989,6 +2118,19 @@ def discovery_diag() -> dict[str, Any]:
     have, state = container_primary_interface_state(name)
     matterc = browse_matterc_mdns(1.5)[:4]
     route = thread_route_hint(iface) or ""
+    ts_present = tailscale_iface_present()
+    ts_up = tailscale_link_up() if ts_present else False
+    ts_routing = tailscale_routing_present() if ts_present else False
+    shielded = _tailscale_shield_depth > 0
+    if not ts_present:
+        shield_state = "n/a"
+    elif _tailscale_shield_ok is True or (shielded and verify_tailscale_matter_shield()):
+        shield_state = "ok"
+    elif shielded or _tailscale_shield_ok is False:
+        shield_state = "fail"
+    else:
+        shield_state = "idle"
+    routes_sample = ipv6_route_sample(iface) if not route else []
     return {
         "iface": iface,
         "container": name,
@@ -1998,7 +2140,12 @@ def discovery_diag() -> dict[str, Any]:
         "rt_info_max_plen": rt_info_max_plen(iface),
         "ipv6_ll": bool(iface and iface_has_ipv6_ll(iface)),
         "thread_route": route,
-        "tailscale": tailscale_iface_present(),
+        "tailscale": ts_present,
+        "tailscale_up": ts_up,
+        "tailscale_routing": ts_routing,
+        "tailscale_shielded": shielded,
+        "shield": shield_state,
+        "routes_sample": routes_sample,
         "matterc": matterc,
         "matterc_seen": any(
             str(x) and "no _matterc" not in str(x).lower() and "failed" not in str(x).lower() and "error" not in str(x).lower()
@@ -2013,12 +2160,23 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
     matterc = row.get("matterc") or []
     matterc_s = ", ".join(str(x) for x in matterc[:3]) if matterc else "none"
     route = str(row.get("thread_route") or "").strip() or "none"
-    ts = "yes" if row.get("tailscale") else "no"
+    if not row.get("tailscale"):
+        ts = "no"
+    elif row.get("shield") == "ok" or row.get("tailscale_shielded"):
+        ts = "shielded"
+    elif row.get("tailscale_up") or row.get("tailscale_routing"):
+        ts = "up"
+    else:
+        ts = "yes"
+    shield = str(row.get("shield") or "n/a")
+    sample = row.get("routes_sample") or []
+    sample_s = "; ".join(str(x) for x in sample[:3]) if sample else ""
+    extra = f" routes={sample_s}" if sample_s and route == "none" else ""
     return (
         f"[diag iface={row.get('iface')} primary={row.get('primary_have')}/{row.get('primary_state')} "
         f"accept_ra={row.get('accept_ra')} rt_info_max_plen={row.get('rt_info_max_plen')} "
-        f"ll={row.get('ipv6_ll')} thread_route={route} tailscale={ts} matterc={matterc_s} "
-        f"container={row.get('container')} v{row.get('agent')}]"
+        f"ll={row.get('ipv6_ll')} thread_route={route} ts={ts} shield={shield} matterc={matterc_s} "
+        f"container={row.get('container')} v{row.get('agent')}{extra}]"
     )
 
 
@@ -2265,9 +2423,11 @@ def discovery_preflight_error() -> str | None:
             "again and Add device with a fresh code."
         )
     # Soft wait for Thread RIO routes from the Apple border router (non-fatal if absent —
-    # Wi‑Fi Matter devices do not need them).
+    # Wi‑Fi Matter devices do not need them). Shield path already waited ~20s when Tailscale
+    # is present; keep a shorter nudge here for Wi‑Fi-only / no-Tailscale installs.
+    wait_s = 4.0 if _tailscale_shield_depth > 0 else 12.0
     if thread_route_hint() is None:
-        time.sleep(1.5)
+        wait_for_thread_route(wait_s)
     if thread_route_hint() is None:
         print(
             "matter: no Thread-like IPv6 route yet (Apple BR RIO may still arrive); continuing",
@@ -2697,6 +2857,12 @@ def friendly_commission_error(err: str) -> str:
         matterc_seen = bool(diag and diag.get("matterc_seen"))
         no_thread = not (diag and str(diag.get("thread_route") or "").strip())
         has_ts = bool(diag and diag.get("tailscale"))
+        shield = str((diag or {}).get("shield") or "")
+        ts_active = bool(
+            diag
+            and diag.get("tailscale")
+            and (diag.get("tailscale_up") or diag.get("tailscale_routing") or shield == "fail")
+        )
         if matterc_seen:
             base = (
                 "Pairing timed out after the Pi saw a commissionable Matter accessory on the LAN. "
@@ -2707,8 +2873,12 @@ def friendly_commission_error(err: str) -> str:
                     "No Apple Thread IPv6 route on the LAN NIC "
                     "(Tailscale fd7a:… is not Thread) — keep the HomePod/Apple TV on the same LAN/VLAN as eth0. "
                 )
-            if has_ts:
-                base += "Tailscale is active on this Pi and often breaks Matter Thread pairing — Add device now auto-pauses it; if this still fails, keep HomePod on the eth0 LAN and retry with a fresh code. "
+            if shield == "fail":
+                base += "Tailscale shield failed during Add device (still routing); fix sudo/yarbo-matter-setup or pause Tailscale manually, then retry. "
+            elif has_ts and shield == "ok":
+                base += "Tailscale was paused for pairing but Apple Thread RIOs still never arrived on eth0 — HomePod must share that LAN. "
+            elif ts_active:
+                base += "Tailscale still looks active during pairing and can break Thread; pause it and retry. "
             base += "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
         else:
             base = (
@@ -2716,14 +2886,19 @@ def friendly_commission_error(err: str) -> str:
                 "In Apple Home open the accessory → Turn On Pairing Mode, paste a fresh code within ~3 minutes "
                 "(not the sticker QR). Keep a HomePod or Apple TV online on the same LAN/VLAN as the Pi with IPv6. "
             )
-            if has_ts and no_thread:
+            if no_thread and (ts_active or shield == "fail"):
                 base += (
-                    "Tailscale is up and there is no Apple Thread route on eth0 "
-                    "(ignore Tailscale fd7a:… addresses). Pause Tailscale or put HomePod on the eth0 LAN, then retry. "
+                    "Tailscale is still interfering and there is no Apple Thread route on eth0. "
+                    "Pause Tailscale or put HomePod on the eth0 LAN, then retry. "
+                )
+            elif no_thread and has_ts and shield == "ok":
+                base += (
+                    "Tailscale was paused but no Apple Thread route appeared on eth0 — "
+                    "put HomePod on the same LAN as the Pi ethernet, then retry. "
                 )
             base += (
                 "Thread plugs need Apple border-router IPv6 routes on the LAN NIC "
-                "(panel 4.0.336+ pauses Tailscale during Add device and ignores it when detecting Thread). "
+                "(panel 4.0.337+ verifies Tailscale pause and waits longer for Thread RIOs). "
                 "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
             )
         if "diag iface=" not in low:
