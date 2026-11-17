@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.351] - 2026-11-17
+
+### Fixed
+
+- Add device asks the LAN for a router advertisement and installs a prefix that router advertised, sourced from an address in the on-link prefix. v97 sourced the handshake from `fd58:b000:1::1` and pinned the accessory `fd…` host; the toast then showed that Pi address (`pase=ulasrc`) and PASE message 33 still never arrived. When no router answers, that host is left alone (`pase=nora` or `pase=nors`). IPv4 and other addresses from `_matterc` are on the toast as `v4=` and `addrs=`. Matter agent **v98**.
+
 ## [4.0.350] - 2026-11-17
 
 ### Fixed

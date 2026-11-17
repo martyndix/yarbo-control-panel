@@ -50,7 +50,8 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 97, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 98, agent.AGENT_VERSION
+    agent.install_border_router_route = lambda: "nora"  # type: ignore[method-assign]
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
         "iface": "eth0",
