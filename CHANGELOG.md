@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.327] - 2026-11-17
+
+### Fixed
+- **Matter Add device error_code 1:** when pairing starts but the Pi never finds the accessory (common with Apple Home Thread share), show a clear LAN/HomePod/fresh-code message, remove the incomplete node stub, validate Manual Pairing Code checksums, and allow a longer commission wait. Matter agent **v75**.
+
 ## [4.0.326] - 2026-11-17
 
 ### Fixed

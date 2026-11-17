@@ -18055,7 +18055,7 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
         status.classList.remove('hidden');
     }
     try {
-        const data = await homeApi({ action: 'commission', code }, 110000);
+        const data = await homeApi({ action: 'commission', code }, 135000);
         if (!data.ok) throw new Error(data.error || 'Pairing failed');
         if (input) input.value = '';
         const message = data.message || 'Device added';

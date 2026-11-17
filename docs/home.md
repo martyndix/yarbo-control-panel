@@ -43,6 +43,7 @@ On a Mac, Matter pairing is optional and needs Docker Desktop; use the Pi for da
 - Other Matter devices: code or `MT:…` QR text from the vendor app.
 - Matter server must show as running on the Home card (Settings → Home → **Set up Matter server** if needed). Thread plugs need a HomePod / Apple TV online as the border router.
 - If Add device fails with **error 28** / uninitialized: wait until the Matter server shows running, then Turn On Pairing Mode again and paste a **fresh** 11-digit code. Error **0x28** / in use means wait ~30 seconds and retry with a new pairing-mode code.
+- **error_code 1** (“Commission with code failed for node …”) usually means the Pi never saw the accessory on the LAN (Thread discovery). Get a **fresh** Turn On Pairing Mode code within ~3 minutes, keep a HomePod/Apple TV online, and keep the Pi on the same LAN with IPv6 — then Add device again.
 
 Thread devices keep using Apple’s (or another) border router. IPv6 is turned on automatically on the Pi when the Matter server is set up.
 

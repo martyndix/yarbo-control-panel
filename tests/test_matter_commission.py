@@ -38,18 +38,25 @@ def mill_node() -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 74, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 75, agent.AGENT_VERSION
     assert agent.normalize_pairing_code("2462-204-0808") == "24622040808"
     assert agent.normalize_pairing_code(" 2462 204 0808 ") == "24622040808"
     assert agent.normalize_pairing_code("Setup code 2462-204-0808") == "24622040808"
     assert agent.normalize_pairing_code("MT:ABCDEF").startswith("MT:")
-    assert agent.pairing_code_problem("24622040808") is None
+    assert agent.verhoeff_ok("31436531015") is True
+    assert agent.pairing_code_problem("31436531015") is None
+    assert "checksum" in (agent.pairing_code_problem("24622040808") or "").lower()
     assert "11-digit" in (agent.pairing_code_problem("246220408083") or "")
+    assert "checksum" in (agent.pairing_code_problem("31436531014") or "").lower()
     assert "error 28" in agent.friendly_commission_error("CHIP Error 0x0000001C: Uninitialized").lower()
     assert "in use" in agent.friendly_commission_error("CHIP Error 0x00000028: In use").lower()
+    assert "never found" in agent.friendly_commission_error(
+        "Commission with code failed for node 29. (error_code 1)"
+    ).lower()
+    assert agent.failed_commission_node_id("Commission with code failed for node 29.") == 29
     assert "Turn On Pairing Mode" in agent.friendly_commission_error("timeout while discovering")
-    assert "error_code 28" in agent.format_matter_rpc_error(
-        {"details": "Commission with code failed for node 1.", "error_code": 28}
+    assert "error_code 1" in agent.format_matter_rpc_error(
+        {"details": "Commission with code failed for node 29.", "error_code": 1}
     )
     assert agent.node_id_from_any({"node_id": 40}) == 40
     assert agent.node_id_from_any(40) == 40
@@ -76,7 +83,8 @@ def main() -> int:
 
     agent.matter_rpc = fake_rpc  # type: ignore[method-assign]
     agent.prepare_for_commission = lambda: None  # type: ignore[method-assign]
-    paired = agent.dispatch({"op": "commission", "code": "2462-204-0808"})
+    agent.cleanup_failed_commission_node = lambda _err: None  # type: ignore[method-assign]
+    paired = agent.dispatch({"op": "commission", "code": "3143-653-1015"})
     assert paired.get("ok") is True, paired
     assert paired.get("node_id") == 40, paired
     ids = {str(row.get("id") or "") for row in paired.get("devices") or []}
@@ -91,6 +99,7 @@ def main() -> int:
 
     calls.clear()
     agent._live_devices = [hue]
+    cleaned: list[str] = []
 
     def id_only_rpc(command, args=None, timeout=20.0, channel="", listen=True, **_kwargs):
         calls.append((command, args or {}))
@@ -116,7 +125,8 @@ def main() -> int:
 
     agent.matter_rpc = id_only_rpc  # type: ignore[method-assign]
     agent.prepare_for_commission = lambda: None  # type: ignore[method-assign]
-    by_id = agent.dispatch({"op": "commission", "code": "11112222333"})
+    agent.cleanup_failed_commission_node = cleaned.append  # type: ignore[method-assign]
+    by_id = agent.dispatch({"op": "commission", "code": "31436531015"})
     assert by_id.get("ok") is True, by_id
     assert any(command == "get_nodes" for command, _ in calls), calls
     got = {str(row.get("id") or "") for row in by_id.get("devices") or []}

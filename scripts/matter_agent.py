@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 74
+AGENT_VERSION = 75
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1815,6 +1815,39 @@ def normalize_pairing_code(raw: str) -> str:
     return code
 
 
+def verhoeff_ok(digits: str) -> bool:
+    """True when digits (including trailing Verhoeff check digit) are valid."""
+    if not digits or not digits.isdigit():
+        return False
+    # Dihedral D table + permutation P (Matter / CHIP Manual Pairing Code).
+    d_table = (
+        (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+        (1, 2, 3, 4, 0, 6, 7, 8, 9, 5),
+        (2, 3, 4, 0, 1, 7, 8, 9, 5, 6),
+        (3, 4, 0, 1, 2, 8, 9, 5, 6, 7),
+        (4, 0, 1, 2, 3, 9, 5, 6, 7, 8),
+        (5, 9, 8, 7, 6, 0, 4, 3, 2, 1),
+        (6, 5, 9, 8, 7, 1, 0, 4, 3, 2),
+        (7, 6, 5, 9, 8, 2, 1, 0, 4, 3),
+        (8, 7, 6, 5, 9, 3, 2, 1, 0, 4),
+        (9, 8, 7, 6, 5, 4, 3, 2, 1, 0),
+    )
+    p_table = (
+        (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+        (1, 5, 7, 6, 2, 8, 3, 0, 9, 4),
+        (5, 8, 0, 3, 7, 9, 6, 1, 4, 2),
+        (8, 9, 1, 6, 0, 4, 3, 5, 2, 7),
+        (9, 4, 5, 3, 1, 2, 6, 8, 7, 0),
+        (4, 2, 8, 6, 5, 7, 3, 9, 0, 1),
+        (2, 7, 9, 3, 8, 0, 6, 4, 1, 5),
+        (7, 0, 4, 6, 9, 1, 3, 2, 5, 8),
+    )
+    c = 0
+    for i, ch in enumerate(reversed(digits)):
+        c = d_table[c][p_table[i % 8][int(ch)]]
+    return c == 0
+
+
 def pairing_code_problem(code: str) -> str | None:
     """Human-readable reason the pairing code cannot be used, or None if ok."""
     code = str(code or "").strip()
@@ -1827,6 +1860,21 @@ def pairing_code_problem(code: str) -> str | None:
             f"That code has {len(code)} digits; Matter needs the full 11-digit Apple Home code "
             "(XXXX-XXX-XXXX from Turn On Pairing Mode) or a 21-digit / MT:… QR code — not a partial PIN."
         )
+    if code.isdigit() and len(code) in (11, 21):
+        if int(code[0]) >= 8:
+            return "That pairing code version is not supported. Copy a fresh code from Apple Home Turn On Pairing Mode."
+        # Bit 2 of the first digit must match 11 vs 21 length (VID/PID present).
+        wants_long = bool(int(code[0]) & 0x04)
+        if wants_long != (len(code) == 21):
+            return (
+                "That pairing code length does not match its type bit. "
+                "Paste the full code from Apple Home Turn On Pairing Mode."
+            )
+        if not verhoeff_ok(code):
+            return (
+                "That pairing code fails the Matter checksum (typo or incomplete). "
+                "In Apple Home open the accessory → Turn On Pairing Mode and copy the code again."
+            )
     return None
 
 
@@ -1849,6 +1897,37 @@ def commission_error_looks_retryable(err: str) -> bool:
         "error code 40",
     )
     return any(n in low for n in needles)
+
+
+def failed_commission_node_id(err: str) -> int:
+    match = re.search(r"\bnode\s+(\d+)\b", str(err or ""), re.I)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 0
+
+
+def cleanup_failed_commission_node(err: str) -> None:
+    """Remove the incomplete fabric node left after NodeCommissionFailed so the next try is clean."""
+    node_id = failed_commission_node_id(err)
+    if node_id <= 0:
+        return
+    try:
+        removed = matter_rpc(
+            "remove_node",
+            {"node_id": node_id},
+            timeout=15.0,
+            retries=1,
+            listen=False,
+        )
+        print(
+            f"matter: cleanup failed commission node {node_id}: {removed.get('ok')}",
+            flush=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: cleanup node {node_id} failed: {exc}", flush=True)
 
 
 def friendly_commission_error(err: str) -> str:
@@ -1878,7 +1957,7 @@ def friendly_commission_error(err: str) -> str:
         or "0x00000028" in low
         or "chip error 0x28" in low
         or re.search(r"\b(error[_\s-]?code|chip error)\s*0*40\b", low)
-        or "busy" in low
+        or ("busy" in low and "commission" in low)
     ):
         return (
             "Pairing is busy (CHIP error 0x28 / in use). Wait ~30 seconds, then Turn On Pairing Mode "
@@ -1894,10 +1973,23 @@ def friendly_commission_error(err: str) -> str:
         or "0x0000002f" in low
         or "integrity check" in low
         or ("digit" in low and "code" in low)
+        or "checksum" in low
     ):
         return (
             "That pairing code was rejected. Use the full 11-digit code from Apple Home → "
             "Turn On Pairing Mode (XXXX-XXX-XXXX), not the sticker QR and not a partial PIN."
+        )
+    # python-matter-server NodeCommissionFailed (error_code 1) — usually DNS-SD discovery.
+    if (
+        "commission with code failed" in low
+        or "nodecommissionfailed" in low
+        or re.search(r"\berror_code\s*1\b", low)
+    ):
+        return (
+            "Pairing started but the Pi never found the accessory on the network "
+            "(Matter error_code 1). Get a fresh code: Apple Home → accessory → Turn On Pairing Mode, "
+            "paste it here within ~3 minutes, keep a HomePod/Apple TV online, and keep the Pi on the "
+            "same LAN with IPv6. Then Add device again — not Look for devices."
         )
     if "timeout" in low or "timed out" in low:
         return (
@@ -1948,6 +2040,7 @@ def format_matter_rpc_error(msg: dict[str, Any]) -> str:
 
 def prepare_for_commission() -> str | None:
     """Ensure Docker Matter server + listen socket are up before commission_with_code."""
+    ensure_ipv6_default_route()
     err = ensure_matter_server()
     if err:
         return err
@@ -6730,7 +6823,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         rpc = matter_rpc(
             "commission_with_code",
             {"code": code, "network_only": True},
-            timeout=90.0,
+            timeout=120.0,
             retries=1,
         )
         if not rpc.get("ok") and commission_error_looks_retryable(str(rpc.get("error") or "")):
@@ -6738,18 +6831,21 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
                 f"matter: commission retry after {rpc.get('error')!r}",
                 flush=True,
             )
+            cleanup_failed_commission_node(str(rpc.get("error") or ""))
             time.sleep(2.5)
             prepare_for_commission()
             rpc = matter_rpc(
                 "commission_with_code",
                 {"code": code, "network_only": True},
-                timeout=90.0,
+                timeout=120.0,
                 retries=1,
             )
         if not rpc.get("ok"):
+            detail = str(rpc.get("error") or "Pairing failed")
+            cleanup_failed_commission_node(detail)
             return {
                 "ok": False,
-                "error": friendly_commission_error(str(rpc.get("error") or "Pairing failed")),
+                "error": friendly_commission_error(detail),
             }
         devices = refresh_after_commission(rpc.get("result"))
         return {

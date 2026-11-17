@@ -998,7 +998,7 @@ final class YarboHome
             return ['ok' => false, 'error' => 'Paste a Matter pairing code or QR text'];
         }
         $agent = YarboMatterAgentClient::fromEnv();
-        $result = $agent->request(['op' => 'commission', 'code' => $code], 105.0);
+        $result = $agent->request(['op' => 'commission', 'code' => $code], 130.0);
         if (!($result['ok'] ?? false)) {
             return [
                 'ok' => false,
