@@ -151,6 +151,14 @@ yarbo_matter_iface_has_ipv6_ll() {
   ip -6 -o addr show dev "$iface" scope link 2>/dev/null | grep -q .
 }
 
+yarbo_matter_iface_is_virtual() {
+  local iface="$1"
+  case "$iface" in
+    tailscale*|wg*|tun*|tap*|docker*|br-*|veth*|zt*|cni*|flannel*|virbr*|vmnet*) return 0 ;;
+  esac
+  return 1
+}
+
 yarbo_matter_primary_interface() {
   if [[ -n "${YARBO_MATTER_PRIMARY_INTERFACE:-}" ]]; then
     echo "$YARBO_MATTER_PRIMARY_INTERFACE"
@@ -158,6 +166,9 @@ yarbo_matter_primary_interface() {
   fi
   local iface route
   route="$(ip -4 route show default 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  if yarbo_matter_iface_is_virtual "$route"; then
+    route=""
+  fi
   if [[ -n "$route" && -d "/sys/class/net/${route}" ]] && yarbo_matter_iface_has_ipv6_ll "$route"; then
     echo "$route"
     return

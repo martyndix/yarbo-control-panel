@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.335] - 2026-11-17
+
+### Fixed
+- **Tailscale mistaken for Thread:** discovery diag no longer treats Tailscale `fd7a:115c:a1e0::` / `tailscale0` as an Apple Thread route; Matter primary NIC skips VPN overlays; clearer timeout copy when `_matterc` was seen but eth0 has no Thread RIO. Matter agent **v82**.
+
 ## [4.0.334] - 2026-11-17
 
 ### Changed

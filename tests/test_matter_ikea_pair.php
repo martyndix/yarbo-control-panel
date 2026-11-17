@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 81, 'min agent 81');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 82, 'min agent 82');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -47,7 +47,7 @@ assert_true(str_contains($home, 'function commissionStatus'), 'PHP commissionSta
 assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan empty message');
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 81'), 'agent v81');
+assert_true(str_contains($agent, 'AGENT_VERSION = 82'), 'agent v82');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
@@ -61,6 +61,9 @@ assert_true(str_contains($agent, 'accept_ra_rt_info_max_plen'), 'thread RIO sysc
 assert_true(str_contains($agent, 'recreate_shared_matter_container'), 'shared HA rebind');
 assert_true(str_contains($agent, 'refresh_matter_setup_wrapper'), 'refresh setup wrapper');
 assert_true(str_contains($agent, 'discovery_diag'), 'discovery diag');
+assert_true(str_contains($agent, 'iface_is_virtual'), 'skip VPN ifaces');
+assert_true(str_contains($agent, 'tailscale_iface_present'), 'detect Tailscale');
+assert_true(str_contains($agent, '_is_tailscale_ula'), 'ignore Tailscale ULA');
 assert_true(str_contains($agent, 'ff00::/8'), 'ipv6 multicast route');
 assert_true(str_contains($agent, 'leaving healthy server alone'), 'do not tear down healthy server');
 assert_true(str_contains($agent, 'discovery_preflight_error'), 'discovery preflight');
@@ -76,7 +79,7 @@ assert_true(str_contains($docs, 'Motion / occupancy'), 'docs motion parity');
 assert_true(str_contains($docs, 'error 28'), 'docs error 28');
 assert_true(str_contains($docs, 'error_code 1'), 'docs error_code 1');
 assert_true(str_contains($docs, 'gateway 524'), 'docs gateway 524');
-assert_true(str_contains($docs, '4.0.333+'), 'docs 4.0.333 discovery');
+assert_true(str_contains($docs, '4.0.335+'), 'docs 4.0.335 discovery');
 assert_true(str_contains($change, '## [4.0.324]'), 'changelog 4.0.324');
 assert_true(str_contains($change, '## [4.0.325]'), 'changelog 4.0.325');
 assert_true(str_contains($change, '## [4.0.326]'), 'changelog 4.0.326');
@@ -87,5 +90,7 @@ assert_true(str_contains($change, '## [4.0.330]'), 'changelog 4.0.330');
 assert_true(str_contains($change, '## [4.0.331]'), 'changelog 4.0.331');
 assert_true(str_contains($change, '## [4.0.332]'), 'changelog 4.0.332');
 assert_true(str_contains($change, '## [4.0.333]'), 'changelog 4.0.333');
+assert_true(str_contains($change, '## [4.0.334]'), 'changelog 4.0.334');
+assert_true(str_contains($change, '## [4.0.335]'), 'changelog 4.0.335');
 
 echo "test_matter_ikea_pair.php ok\n";

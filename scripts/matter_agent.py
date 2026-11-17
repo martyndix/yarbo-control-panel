@@ -41,7 +41,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 81
+AGENT_VERSION = 82
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1531,8 +1531,30 @@ def iface_exists(name: str) -> bool:
     return bool(name) and Path(f"/sys/class/net/{name}").is_dir()
 
 
+def iface_is_virtual(name: str) -> bool:
+    """True for VPN/overlay NICs that must not be Matter primary or Thread routes."""
+    n = str(name or "").strip().lower()
+    if not n:
+        return True
+    needles = (
+        "tailscale",
+        "wg",
+        "tun",
+        "tap",
+        "docker",
+        "br-",
+        "veth",
+        "zt",
+        "cni",
+        "flannel",
+        "virbr",
+        "vmnet",
+    )
+    return any(n == p or n.startswith(p) or p in n for p in needles)
+
+
 def iface_is_usable(name: str) -> bool:
-    if not iface_exists(name):
+    if not iface_exists(name) or iface_is_virtual(name):
         return False
     state = iface_operstate(name)
     # dormant is common on Wi‑Fi between scans; unknown/empty on some USB NICs.
@@ -1572,11 +1594,16 @@ def default_ipv4_interface() -> str:
 
 
 def primary_interface() -> str:
-    """LAN NIC CHIP should bind for mDNS — prefer IPv6 link-local on the default route."""
+    """LAN NIC CHIP should bind for mDNS — prefer IPv6 link-local on the default route.
+
+    Never pick Tailscale/VPN overlays — they break Apple Thread multi-admin discovery.
+    """
     env = (os.environ.get("YARBO_MATTER_PRIMARY_INTERFACE") or "").strip()
     if env and iface_is_usable(env):
         return env
     route = default_ipv4_interface()
+    if route and iface_is_virtual(route):
+        route = ""
     if route and iface_is_usable(route) and iface_has_ipv6_ll(route):
         return route
     # Prefer common Pi LAN names that already have link-local IPv6.
@@ -1671,6 +1698,11 @@ def ensure_ipv6_default_route() -> None:
         _sysctl_w(f"net.ipv6.conf.{target}.disable_ipv6", "0")
         _sysctl_w(f"net.ipv6.conf.{target}.accept_ra", "2")
         _sysctl_w(f"net.ipv6.conf.{target}.accept_ra_rt_info_max_plen", "64")
+    # Keep Tailscale from swallowing Apple Thread RIOs / confusing CHIP multi-homing.
+    if tailscale_iface_present():
+        for ts in ("tailscale0", "tailscale1"):
+            if iface_exists(ts):
+                _sysctl_w(f"net.ipv6.conf.{ts}.accept_ra", "0")
     # Matter discovery uses IPv6 multicast even when a default route already exists.
     for cmd in (
         ["ip", "-6", "route", "add", "multicast", "ff00::/8", "dev", iface, "table", "local"],
@@ -1746,8 +1778,19 @@ def ensure_ipv6_default_route() -> None:
             return
 
 
-def thread_route_hint() -> str | None:
-    """Best-effort: do we already have a non-local IPv6 route that looks like Thread?"""
+def tailscale_iface_present() -> bool:
+    return any(iface_exists(n) for n in ("tailscale0", "tailscale1"))
+
+
+def _is_tailscale_ula(line: str) -> bool:
+    """Tailscale IPv6 ULA is fd7a:115c:a1e0::/48 — not Apple Thread."""
+    low = line.lower()
+    return "fd7a:115c:a1e0:" in low or "dev tailscale" in low
+
+
+def thread_route_hint(prefer_iface: str | None = None) -> str | None:
+    """Best-effort Apple Thread RIO on the LAN NIC — never Tailscale/VPN overlays."""
+    prefer = (prefer_iface or primary_interface() or "").strip()
     try:
         shown = subprocess.run(
             ["ip", "-6", "route", "show"],
@@ -1757,17 +1800,40 @@ def thread_route_hint() -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    text = shown.stdout or ""
-    for line in text.splitlines():
-        low = line.lower()
-        if "fe80:" in low or "unreachable" in low:
+    candidates: list[str] = []
+    for line in (shown.stdout or "").splitlines():
+        raw = line.strip()
+        low = raw.lower()
+        if not raw or "unreachable" in low or low.startswith("default"):
             continue
-        # Thread meshes commonly use fd… ULAs advertised via RIO.
-        if low.startswith("fd") or " proto ra " in f" {low} " or " metric " in low and "via fe80:" in low:
-            if "default" in low:
-                continue
-            return line.strip()[:160]
-    return None
+        if _is_tailscale_ula(raw) or any(
+            f"dev {v}" in low for v in ("tailscale0", "tailscale1", "docker0", "wg0")
+        ):
+            continue
+        # Require the route to land on a real LAN NIC.
+        dev = ""
+        parts = low.split()
+        if "dev" in parts:
+            try:
+                dev = parts[parts.index("dev") + 1]
+            except (ValueError, IndexError):
+                dev = ""
+        if dev and iface_is_virtual(dev):
+            continue
+        if prefer and dev and dev != prefer:
+            # Keep as fallback only when nothing on the primary NIC.
+            pass
+        is_threadish = (
+            (low.startswith("fd") and not _is_tailscale_ula(raw))
+            or " proto ra " in f" {low} "
+            or ("via fe80:" in low and "dev " in low)
+        )
+        if not is_threadish:
+            continue
+        if prefer and dev == prefer:
+            return raw[:160]
+        candidates.append(raw[:160])
+    return candidates[0] if candidates else None
 
 
 def browse_matterc_mdns(seconds: float = 2.0) -> list[str]:
@@ -1825,6 +1891,8 @@ def discovery_diag() -> dict[str, Any]:
     shared = shared_matter_container()
     name = shared if shared and matter_port_up() else DOCKER_NAME
     have, state = container_primary_interface_state(name)
+    matterc = browse_matterc_mdns(1.5)[:4]
+    route = thread_route_hint(iface) or ""
     return {
         "iface": iface,
         "container": name,
@@ -1833,8 +1901,13 @@ def discovery_diag() -> dict[str, Any]:
         "accept_ra": read_sysctl(f"net.ipv6.conf.{iface}.accept_ra") if iface else "",
         "rt_info_max_plen": rt_info_max_plen(iface),
         "ipv6_ll": bool(iface and iface_has_ipv6_ll(iface)),
-        "thread_route": thread_route_hint() or "",
-        "matterc": browse_matterc_mdns(1.5)[:4],
+        "thread_route": route,
+        "tailscale": tailscale_iface_present(),
+        "matterc": matterc,
+        "matterc_seen": any(
+            str(x) and "no _matterc" not in str(x).lower() and "failed" not in str(x).lower() and "error" not in str(x).lower()
+            for x in matterc
+        ),
         "agent": AGENT_VERSION,
     }
 
@@ -1844,10 +1917,11 @@ def format_discovery_diag(diag: dict[str, Any] | None = None) -> str:
     matterc = row.get("matterc") or []
     matterc_s = ", ".join(str(x) for x in matterc[:3]) if matterc else "none"
     route = str(row.get("thread_route") or "").strip() or "none"
+    ts = "yes" if row.get("tailscale") else "no"
     return (
         f"[diag iface={row.get('iface')} primary={row.get('primary_have')}/{row.get('primary_state')} "
         f"accept_ra={row.get('accept_ra')} rt_info_max_plen={row.get('rt_info_max_plen')} "
-        f"ll={row.get('ipv6_ll')} thread_route={route} matterc={matterc_s} "
+        f"ll={row.get('ipv6_ll')} thread_route={route} tailscale={ts} matterc={matterc_s} "
         f"container={row.get('container')} v{row.get('agent')}]"
     )
 
@@ -2519,18 +2593,46 @@ def friendly_commission_error(err: str) -> str:
             "Pi on the same LAN/VLAN with IPv6 (not guest Wi‑Fi). Then Add device — not Look for devices."
         )
     if "timeout" in low or "timed out" in low:
-        base = (
-            "Pairing timed out — the Pi did not discover the accessory (Thread/mDNS). "
-            "In Apple Home open the accessory → Turn On Pairing Mode, paste a fresh code within ~3 minutes "
-            "(not the sticker QR). Keep a HomePod or Apple TV online on the same LAN/VLAN as the Pi with IPv6. "
-            "Thread plugs need the Pi to accept Apple border-router IPv6 routes "
-            "(panel 4.0.333+ refreshes yarbo-matter-setup and sets accept_ra_rt_info_max_plen=64). "
-            "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
-        )
-        # Append live LAN/Thread snapshot when this is a real pairing failure (not unit-test stubs).
+        diag = None
+        try:
+            diag = discovery_diag()
+        except Exception:  # noqa: BLE001
+            diag = None
+        matterc_seen = bool(diag and diag.get("matterc_seen"))
+        no_thread = not (diag and str(diag.get("thread_route") or "").strip())
+        has_ts = bool(diag and diag.get("tailscale"))
+        if matterc_seen:
+            base = (
+                "Pairing timed out after the Pi saw a commissionable Matter accessory on the LAN. "
+                "Use a fresh Apple Home → Turn On Pairing Mode code (within ~3 minutes). "
+            )
+            if no_thread:
+                base += (
+                    "No Apple Thread IPv6 route on the LAN NIC "
+                    "(Tailscale fd7a:… is not Thread) — keep the HomePod/Apple TV on the same LAN/VLAN as eth0. "
+                )
+            if has_ts:
+                base += "Tailscale is active on this Pi and often breaks Matter Thread pairing; try pausing Tailscale, then Add device again. "
+            base += "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
+        else:
+            base = (
+                "Pairing timed out — the Pi did not discover the accessory (Thread/mDNS). "
+                "In Apple Home open the accessory → Turn On Pairing Mode, paste a fresh code within ~3 minutes "
+                "(not the sticker QR). Keep a HomePod or Apple TV online on the same LAN/VLAN as the Pi with IPv6. "
+            )
+            if has_ts and no_thread:
+                base += (
+                    "Tailscale is up and there is no Apple Thread route on eth0 "
+                    "(ignore Tailscale fd7a:… addresses). Pause Tailscale or put HomePod on the eth0 LAN, then retry. "
+                )
+            base += (
+                "Thread plugs need Apple border-router IPv6 routes on the LAN NIC "
+                "(panel 4.0.335+ ignores Tailscale when detecting Thread). "
+                "Look for devices only finds Hue lights — use Add device for Matter plugs and sensors."
+            )
         if "diag iface=" not in low:
             try:
-                return f"{base} {format_discovery_diag()}"
+                return f"{base} {format_discovery_diag(diag)}"
             except Exception:  # noqa: BLE001
                 return base
         return base

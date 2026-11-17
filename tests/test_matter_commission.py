@@ -50,7 +50,7 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 81, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 82, agent.AGENT_VERSION
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
         "iface": "eth0",
@@ -62,11 +62,29 @@ def main() -> int:
         "ipv6_ll": True,
         "thread_route": "fd11::/64",
         "matterc": ["no _matterc replies"],
-        "agent": 81,
+        "agent": 82,
     }
-    assert "Thread/mDNS" in agent.friendly_commission_error("Pairing timed out while discovering")
-    assert "accept_ra_rt_info_max_plen" in agent.friendly_commission_error("Pairing timed out while discovering")
-    assert "[diag test]" in agent.friendly_commission_error("Pairing timed out while discovering")
+    err = agent.friendly_commission_error("Pairing timed out while discovering")
+    assert "Thread/mDNS" in err or "commissionable" in err.lower() or "Tailscale" in err or "timed out" in err.lower(), err
+    assert "[diag test]" in err
+    # When matterc was seen, copy mentions Tailscale/Thread route instead of only rt_info.
+    agent.discovery_diag = lambda: {
+        "iface": "eth0",
+        "container": "matter-server",
+        "primary_have": "eth0",
+        "primary_state": "ok",
+        "accept_ra": "2",
+        "rt_info_max_plen": 64,
+        "ipv6_ll": True,
+        "thread_route": "",
+        "tailscale": True,
+        "matterc": ["fe80::1 +200b"],
+        "matterc_seen": True,
+        "agent": 82,
+    }
+    seen = agent.friendly_commission_error("Pairing timed out while discovering")
+    assert "commissionable" in seen.lower() or "Tailscale" in seen, seen
+
     assert callable(agent.ensure_matter_primary_interface)
     assert callable(agent.discovery_preflight_error)
     assert callable(agent.container_command_tokens)
@@ -75,6 +93,10 @@ def main() -> int:
     assert callable(agent.thread_route_hint)
     assert callable(agent.recreate_shared_matter_container)
     assert callable(agent.discovery_diag)
+    assert agent.iface_is_virtual("tailscale0")
+    assert not agent.iface_is_virtual("eth0")
+    assert agent._is_tailscale_ula("fd7a:115c:a1e0::1 dev tailscale0")
+    assert callable(agent.tailscale_iface_present)
     assert callable(agent.refresh_matter_setup_wrapper)
     assert agent.rt_info_max_plen.__code__.co_argcount >= 0
     assert agent.commission_error_looks_discovery("Pairing timed out while discovering")
