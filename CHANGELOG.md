@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.353] - 2026-11-17
+
+### Fixed
+
+- Add device tells the LAN that the accessory prefix is on-link before the handshake (`pase=pfxra:`). v99 sourced the handshake from that prefix (`pase=pfx:`), but the accessory had no on-link route for it, so the reply still followed the accessory’s default gateway and PASE message 33 never arrived. Matter agent **v100**.
+
 ## [4.0.352] - 2026-11-17
 
 ### Fixed
