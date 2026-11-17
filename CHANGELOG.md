@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.354] - 2026-11-17
+
+### Fixed
+
+- Add device routes the accessory’s own prefix through the HomePod when that prefix is not the one the HomePod advertises. The Timmerflotte answered on `fdef:badd:6106::/64` while the HomePod route was `fd10:…/64`, so the pairing session never reached it. Matter agent **v101**.
+
 ## [4.0.353] - 2026-11-17
 
 ### Fixed
