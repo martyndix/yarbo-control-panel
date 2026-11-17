@@ -6,6 +6,11 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.323] - 2026-11-17
+
+### Fixed
+- **Vestaboard stayed on night until the website opened:** Morning leave no longer soft-locks on `night_active` when the overnight window has ended. The watcher refreshes companions on leave and retries the live snapshot so the Note resumes without a browser poll.
+
 ## [4.0.322] - 2026-11-17
 
 ### Fixed
