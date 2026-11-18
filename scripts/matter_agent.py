@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 115
+AGENT_VERSION = 116
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -240,6 +240,17 @@ VACUUM_POLL_INTERVAL_S = 20.0
 # fills the Matter server until taps and the page itself time out.
 LIGHT_POLL_LISTEN_S = 45.0
 LIGHT_POLL_FALLBACK_S = 8.0
+# IKEA MYGGSPRAY reports occupancy once, then sleeps. A cached "occupied"
+# from pairing otherwise stays on the tile and the light automation never
+# sees the next rising edge.
+MOTION_HOLD_S = 60.0
+OCC_POLL_INTERVAL_S = 20.0
+OCC_POLL_TIMEOUT = 1.5
+ATTR_PIR_OCCUPIED_TO_UNOCCUPIED = 0x0010
+_occ_poll_at = 0.0
+_occ_cursor = 0
+_reading_poll = False
+_occupancy_idle: set[str] = set()
 _command_slots = threading.BoundedSemaphore(2)
 _commission_job_lock = threading.Lock()
 _commission_job: dict[str, Any] | None = None
@@ -4849,7 +4860,7 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
             item = dict(row)
             device_id = str(item.get("id") or "")
             prev = previous.get(device_id)
-            item = _prefer_richer_row(prev, item)
+            item = stabilize_motion(prev, _prefer_richer_row(prev, item))
             patched_at = float((prev or {}).get("_patched_at") or 0)
             if prev is not None and patched_at > 0 and (now - patched_at) < STICKY_HOLD:
                 keys = prev.get("_sticky_keys") or STICKY_STATE_KEYS
@@ -5832,6 +5843,15 @@ COLOR_POLL_ATTRS = (
 
 
 def apply_read_attributes(node_id: int, values: Any) -> None:
+    global _reading_poll
+    _reading_poll = True
+    try:
+        _apply_read_attributes(node_id, values)
+    finally:
+        _reading_poll = False
+
+
+def _apply_read_attributes(node_id: int, values: Any) -> None:
     if isinstance(values, dict) and "result" in values and not any(
         "/" in str(key) for key in values if key != "result"
     ):
@@ -5920,12 +5940,12 @@ def _chunked(paths: list[str], size: int) -> list[list[str]]:
     return [paths[i : i + size] for i in range(0, len(paths), size)] if paths else []
 
 
-def _poll_read(node_id: int, paths: list[str]) -> dict[str, Any]:
+def _poll_read(node_id: int, paths: list[str], timeout: float | None = None) -> dict[str, Any]:
     """One background read. A retry would send a second read while the first is still running."""
     return matter_rpc(
         "read_attribute",
         {"node_id": node_id, "attribute_path": paths},
-        timeout=POLL_READ_TIMEOUT,
+        timeout=POLL_READ_TIMEOUT if timeout is None else timeout,
         channel=POLL_CHANNEL,
         listen=False,
         retries=1,
@@ -6347,7 +6367,7 @@ def start_state_poll() -> None:
     _state_poll_started = True
 
     def loop() -> None:
-        global _light_poll_at
+        global _light_poll_at, _occ_poll_at
         while True:
             try:
                 # Listen dump can take tens of seconds on a Hue Bridge. Do not
@@ -6367,6 +6387,10 @@ def start_state_poll() -> None:
                     gap = LIGHT_POLL_LISTEN_S if _listening else LIGHT_POLL_FALLBACK_S
                     _light_poll_at = time.time() + gap
                 poll_vacuum_attributes()
+                if now >= _occ_poll_at:
+                    poll_occupancy_attributes()
+                    _occ_poll_at = time.time() + OCC_POLL_INTERVAL_S
+                expire_stale_motion()
                 maybe_scan_new_endpoints()
             except Exception as exc:  # noqa: BLE001
                 print(f"matter state poll failed: {exc}", flush=True)
@@ -6938,15 +6962,31 @@ def apply_attribute_event(data: Any) -> None:
         fields["has_open"] = True
         fields["open"] = opened
         fields["on"] = opened
+    elif cluster == OCCUPANCY_SENSING and attr == ATTR_PIR_OCCUPIED_TO_UNOCCUPIED:
+        seconds = event_number(value)
+        if seconds is None:
+            return
+        fields["motion_hold"] = max(30, min(600, int(seconds)))
     elif cluster == OCCUPANCY_SENSING and attr == ATTR_OCCUPANCY:
         occupied = matter_occupancy_occupied(value)
         if occupied is None:
+            return
+        already = (live_row(device_id) or {}).get("motion") is True
+        # A background read of the cached occupied bit is not a person walking in.
+        # A pushed report is. Repeat occupied while the tile is already on does
+        # not start the light automation again.
+        if occupied and _reading_poll and device_id not in _occupancy_idle:
+            return
+        if occupied and already:
             return
         fields["has_motion"] = True
         fields["motion"] = occupied
         fields["on"] = occupied
         if occupied:
+            _occupancy_idle.discard(device_id)
             fields["motion_at"] = int(time.time())
+        else:
+            _occupancy_idle.add(device_id)
     elif cluster == ELECTRICAL_POWER and attr in (
         ATTR_ACTIVE_POWER,
         ATTR_VOLTAGE,
@@ -7100,7 +7140,7 @@ def merge_live_nodes(nodes: list[dict[str, Any]]) -> None:
             prev = by_id.get(device_id, {})
             merged = dict(prev)
             merged.update(row)
-            by_id[device_id] = merged
+            by_id[device_id] = stabilize_motion(prev or None, merged)
         _live_devices.clear()
         _live_devices.extend(by_id.values())
 
@@ -7898,6 +7938,17 @@ def matter_occupancy_occupied(raw: Any) -> bool | None:
     """Occupancy Sensing OccupancyBitmap: bit 0 = occupied."""
     if isinstance(raw, bool):
         return raw
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in ("occupied", "motion", "detected"):
+            return True
+        if text in ("unoccupied", "clear", "none", "idle"):
+            return False
+    if isinstance(raw, dict):
+        for key in ("Occupied", "occupied", "Occupancy", "occupancy", "value", "Value", 0, "0"):
+            if key in raw:
+                return matter_occupancy_occupied(raw[key])
+        return None
     number = event_number(raw) if not isinstance(raw, (int, float)) else float(raw)
     if number is None:
         try:
@@ -7905,6 +7956,123 @@ def matter_occupancy_occupied(raw: Any) -> bool | None:
         except (TypeError, ValueError):
             return None
     return (int(number) & 0x01) != 0
+
+
+def _status_without_motion(status: Any) -> str:
+    parts = [part.strip() for part in str(status or "").split("·")]
+    kept = [part for part in parts if part and part.lower() != "motion"]
+    return " · ".join(kept) if kept else "OK"
+
+
+def stabilize_motion(prev: dict[str, Any] | None, item: dict[str, Any]) -> dict[str, Any]:
+    """A node snapshot must not refresh a stale occupied bit into a new motion event."""
+    if not item.get("has_motion") and not (prev or {}).get("has_motion"):
+        return item
+    now = time.time()
+    prev_hold = (prev or {}).get("motion_hold")
+    if prev_hold and not item.get("motion_hold"):
+        item["motion_hold"] = prev_hold
+    hold = float(item.get("motion_hold") or MOTION_HOLD_S)
+    prev_at = int((prev or {}).get("motion_at") or 0)
+    prev_motion = (prev or {}).get("motion") is True
+    if item.get("motion") is True:
+        if prev is not None and prev_motion and prev_at > 0:
+            item["motion_at"] = prev_at
+        elif prev is not None:
+            item["motion"] = False
+            if not item.get("open"):
+                item["on"] = False
+            if prev_at > 0:
+                item["motion_at"] = prev_at
+            item["status"] = _status_without_motion(item.get("status"))
+    elif prev_at > 0 and not item.get("motion_at"):
+        item["motion_at"] = prev_at
+    if item.get("motion") is True:
+        at = int(item.get("motion_at") or 0)
+        if at > 0 and (now - at) >= hold:
+            item["motion"] = False
+            if not item.get("open"):
+                item["on"] = False
+            item["status"] = _status_without_motion(item.get("status"))
+    return item
+
+
+def expire_stale_motion() -> None:
+    """Drop Motion once the sensor's hold has passed without a new occupied report."""
+    now = time.time()
+    for row in current_live_devices():
+        if not isinstance(row, dict) or row.get("motion") is not True:
+            continue
+        try:
+            at = int(row.get("motion_at") or 0)
+        except (TypeError, ValueError):
+            at = 0
+        if at <= 0:
+            continue
+        hold = float(row.get("motion_hold") or MOTION_HOLD_S)
+        if (now - at) < hold:
+            continue
+        device_id = str(row.get("id") or "")
+        patch_live_device(
+            device_id,
+            {
+                "motion": False,
+                "on": False if not row.get("open") else row.get("on"),
+                "status": _status_without_motion(row.get("status")),
+            },
+        )
+
+
+def occupancy_poll_groups() -> dict[int, list[int]]:
+    groups: dict[int, list[int]] = {}
+    for row in current_live_devices():
+        if not isinstance(row, dict) or row.get("has_motion") is not True:
+            continue
+        if str(row.get("kind") or "") != "sensor":
+            continue
+        if row.get("available") is False:
+            continue
+        try:
+            node_id = int(row.get("node_id") or 0)
+            endpoint = int(row.get("endpoint") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+            endpoint = 0
+        if node_id <= 0 or endpoint <= 0:
+            try:
+                node_s, ep_s = str(row.get("id") or "").split(":", 1)
+                node_id, endpoint = int(node_s), int(ep_s)
+            except (TypeError, ValueError):
+                continue
+        if node_id <= 0 or endpoint <= 0:
+            continue
+        bucket = groups.setdefault(node_id, [])
+        if endpoint not in bucket:
+            bucket.append(endpoint)
+    return groups
+
+
+def poll_occupancy_attributes() -> None:
+    """One short occupancy read. Sleepy IKEA sensors miss subscriptions; a read can still see clear."""
+    global _occ_cursor
+    if poll_paused():
+        return
+    groups = occupancy_poll_groups()
+    if not groups:
+        return
+    now = time.time()
+    node_ids = [node_id for node_id in groups if not _poll_node_cooling(node_id, now)]
+    if not node_ids:
+        return
+    node_id = node_ids[_occ_cursor % len(node_ids)]
+    _occ_cursor += 1
+    paths: list[str] = []
+    for endpoint in groups[node_id]:
+        paths.append(attr_key(endpoint, OCCUPANCY_SENSING, ATTR_OCCUPANCY))
+        paths.append(attr_key(endpoint, OCCUPANCY_SENSING, ATTR_PIR_OCCUPIED_TO_UNOCCUPIED))
+    if poll_paused() or not paths:
+        return
+    _poll_note_result(node_id, _poll_read(node_id, paths, OCC_POLL_TIMEOUT))
 
 
 def matter_humidity_percent(raw: Any) -> float | None:
@@ -10606,6 +10774,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
         }
     if op == "states":
         start_state_poll()
+        expire_stale_motion()
         return {
             "ok": True,
             "devices": current_live_devices(),

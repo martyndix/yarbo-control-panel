@@ -267,6 +267,6 @@ assert_true(str_contains($change, '## [4.0.146]'), 'changelog 4.0.146');
 assert_true(str_contains($change, '## [4.0.156]'), 'changelog 4.0.156');
 $agentPy = (string) file_get_contents(dirname(__DIR__) . '/scripts/matter_agent.py');
 assert_true(str_contains($agentPy, 'def color_command_should_turn_on'), 'Matter skips On for Time of day');
-assert_true(str_contains($agentPy, 'AGENT_VERSION = 115'), 'Matter agent version 115');
+assert_true(str_contains($agentPy, 'AGENT_VERSION = 116'), 'Matter agent version 116');
 
 echo "ok\n";
