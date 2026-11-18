@@ -348,7 +348,7 @@ def main() -> int:
 
     calls: list[tuple] = []
 
-    def fake_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True):
+    def fake_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True, retries=2):
         calls.append((command, args, channel))
         if command == "read_attribute":
             paths = list((args or {}).get("attribute_path") or [])
@@ -371,6 +371,8 @@ def main() -> int:
         {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": False, "brightness": 5, "color_hex": "#111111"}
     ]
     agent.matter_rpc = fake_rpc
+    agent._poll_color_at = 0.0
+    agent._poll_node_backoff.clear()
     agent.poll_light_attributes()
     polled = agent.current_live_devices()
     on_paths = []
@@ -390,7 +392,7 @@ def main() -> int:
 
     calls.clear()
 
-    def fake_rpc_off(command, args=None, timeout=20.0, channel="cmd", listen=True):
+    def fake_rpc_off(command, args=None, timeout=20.0, channel="cmd", listen=True, retries=2):
         calls.append((command, args, channel))
         if command == "read_attribute":
             paths = list((args or {}).get("attribute_path") or [])
@@ -410,7 +412,7 @@ def main() -> int:
     calls.clear()
     empty_nodes = []
 
-    def fake_rpc_empty_live(command, args=None, timeout=20.0, channel="cmd", listen=True):
+    def fake_rpc_empty_live(command, args=None, timeout=20.0, channel="cmd", listen=True, retries=2):
         calls.append((command, args, channel))
         if command == "get_nodes":
             return {"ok": True, "result": [hue_bridge(1)]}
@@ -437,6 +439,62 @@ def main() -> int:
     if calls:
         raise SystemExit(f"poll must skip while a website command is in flight {calls}")
     agent._command_busy = 0
+
+    calls.clear()
+    agent._poll_node_backoff.clear()
+    agent._poll_color_at = 0.0
+    agent._live_devices = [
+        {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": True, "available": True},
+        {"id": "1:3", "node_id": 1, "endpoint": 3, "kind": "light", "on": True, "available": False},
+    ]
+
+    def fake_timeout(command, args=None, timeout=20.0, channel="cmd", listen=True, retries=2):
+        calls.append((command, args, channel))
+        return {"ok": False, "error": "Matter server timed out"}
+
+    agent.matter_rpc = fake_timeout
+    agent.poll_light_attributes()
+    timed_reads = [item for item in calls if item[0] == "read_attribute"]
+    if len(timed_reads) != 1:
+        raise SystemExit(f"a timed out poll must stop, not fan out {calls}")
+    timed_paths = list((timed_reads[0][1] or {}).get("attribute_path") or [])
+    if any(str(path).startswith("3/") for path in timed_paths):
+        raise SystemExit(f"unavailable bulb was polled {timed_paths}")
+    if int((timed_reads[0][1] or {}).get("node_id") or 0) != 1:
+        raise SystemExit(f"timeout poll node {timed_reads}")
+    calls.clear()
+    agent.poll_light_attributes()
+    if any(item[0] == "read_attribute" for item in calls):
+        raise SystemExit(f"node must cool down after a poll timeout {calls}")
+
+    calls.clear()
+    agent._poll_node_backoff.clear()
+    agent._poll_color_at = 0.0
+    agent._live_devices = [
+        {"id": "1:2", "node_id": 1, "endpoint": 2, "kind": "light", "on": True, "available": True},
+        {"id": "1:4", "node_id": 1, "endpoint": 4, "kind": "light", "on": True, "available": True},
+    ]
+
+    def fake_color_fail(command, args=None, timeout=20.0, channel="cmd", listen=True, retries=2):
+        calls.append((command, args, channel, retries))
+        paths = [str(path) for path in ((args or {}).get("attribute_path") or [])]
+        if any("/768/" in path for path in paths):
+            return {"ok": False, "error": "unsupported cluster"}
+        result = {}
+        for path in paths:
+            if path.endswith("/6/0"):
+                result[path] = True
+            elif path.endswith("/8/0"):
+                result[path] = 80
+        return {"ok": True, "result": result}
+
+    agent.matter_rpc = fake_color_fail
+    agent.poll_light_attributes()
+    color_reads = [item for item in calls if item[0] == "read_attribute"]
+    if len(color_reads) != 3:
+        raise SystemExit(f"colour failure must not read each bulb again {calls}")
+    if any(item[3] != 1 for item in calls if item[0] == "read_attribute"):
+        raise SystemExit(f"poll reads must be a single attempt {calls}")
 
     agent._live_devices = [{"id": "1:2", "on": False, "brightness": 10}]
     agent.apply_read_attributes(1, [["2/6/0", True], ["2/8/0", 127]])

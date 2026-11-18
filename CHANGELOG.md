@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.367] - 2026-11-18
+
+### Fixed
+
+- Light commands stay responsive after the Pi has been up. The background poll was reading every bulb’s colour on a long timeout and, once that read failed, reading each bulb again. Those reads use the same Matter server as On and Off, so a tap waited longer the longer the panel had been running. The poll now stops while a command or pairing is in progress, reads colour less often, skips bulbs the server already marks unavailable, and leaves a node alone for a minute after it times out. Matter agent **v113**.
+
 ## [4.0.366] - 2026-11-18
 
 ### Fixed
