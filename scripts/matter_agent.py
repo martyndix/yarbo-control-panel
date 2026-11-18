@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 113
+AGENT_VERSION = 114
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -222,12 +222,19 @@ SCAN_RETRY_WAIT_S = 10.0
 # Background reads share the Matter server with light commands. Keep each one
 # short, and leave a node alone after it fails to answer so the next tap is
 # not queued behind another full-bridge colour read.
-POLL_READ_TIMEOUT = 4.0
+POLL_READ_TIMEOUT = 2.5
 POLL_PATH_CHUNK = 24
-POLL_NODE_BACKOFF_S = 60.0
+POLL_NODE_BACKOFF_S = 15.0
 POLL_COLOR_INTERVAL_S = 30.0
+# A handful of bulbs can be read in one pass. A Hue bridge cannot: each extra
+# read sits in front of On/Off and the screen's next update.
+POLL_LARGE_ENDPOINT_MIN = 5
+POLL_LARGE_ENDPOINTS = 12
 _poll_node_backoff: dict[int, float] = {}
 _poll_color_at = 0.0
+_poll_cursor = 0
+_vacuum_poll_at = 0.0
+VACUUM_POLL_INTERVAL_S = 20.0
 _commission_job_lock = threading.Lock()
 _commission_job: dict[str, Any] | None = None
 _command_busy = 0
@@ -5904,6 +5911,62 @@ def _chunked(paths: list[str], size: int) -> list[list[str]]:
     return [paths[i : i + size] for i in range(0, len(paths), size)] if paths else []
 
 
+def _poll_read(node_id: int, paths: list[str]) -> dict[str, Any]:
+    """One background read. A retry would send a second read while the first is still running."""
+    return matter_rpc(
+        "read_attribute",
+        {"node_id": node_id, "attribute_path": paths},
+        timeout=POLL_READ_TIMEOUT,
+        channel=POLL_CHANNEL,
+        listen=False,
+        retries=1,
+    )
+
+
+def _poll_note_result(node_id: int, rpc: dict[str, Any]) -> bool:
+    """Apply a poll read. Return True when the node should be left alone for a bit."""
+    if rpc.get("ok"):
+        apply_read_attributes(node_id, rpc.get("result"))
+        _poll_node_backoff.pop(node_id, None)
+        return False
+    err = str(rpc.get("error") or "").lower()
+    if "timed" in err or "timeout" in err:
+        _poll_node_backoff[node_id] = time.time() + POLL_NODE_BACKOFF_S
+        return True
+    return False
+
+
+def _poll_large_bridge(groups: dict[int, list[int]], now: float, read_color: bool) -> None:
+    """One short read for a big bridge, then get out of the way of taps and subscriptions."""
+    global _poll_cursor, _poll_color_at
+    pairs: list[tuple[int, int]] = []
+    for node_id, endpoints in groups.items():
+        if _poll_node_cooling(node_id, now):
+            continue
+        for endpoint in endpoints:
+            pairs.append((node_id, endpoint))
+    if not pairs or poll_paused():
+        return
+    start = _poll_cursor % len(pairs)
+    window = [pairs[(start + offset) % len(pairs)] for offset in range(min(POLL_LARGE_ENDPOINTS, len(pairs)))]
+    _poll_cursor = start + len(window)
+    node_id = window[0][0]
+    endpoints = [ep for nid, ep in window if nid == node_id]
+    if read_color:
+        paths: list[str] = []
+        for endpoint in endpoints[:3]:
+            paths.extend(attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS)
+        _poll_color_at = time.time() + POLL_COLOR_INTERVAL_S
+    else:
+        paths = []
+        for endpoint in endpoints:
+            paths.append(attr_key(endpoint, ON_OFF, ATTR_ON_OFF))
+            paths.append(attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL))
+    if not paths or poll_paused():
+        return
+    _poll_note_result(node_id, _poll_read(node_id, paths))
+
+
 def poll_light_attributes() -> None:
     global _poll_color_at
     if poll_paused():
@@ -5917,6 +5980,10 @@ def poll_light_attributes() -> None:
             return
     now = time.time()
     read_color = now >= _poll_color_at
+    endpoint_count = sum(len(endpoints) for endpoints in groups.values())
+    if endpoint_count >= POLL_LARGE_ENDPOINT_MIN:
+        _poll_large_bridge(groups, now, read_color)
+        return
     any_ok = False
     saw_timeout = False
     color_started = False
@@ -5941,26 +6008,15 @@ def poll_light_attributes() -> None:
             for chunk in _chunked(paths, POLL_PATH_CHUNK):
                 if poll_paused():
                     return
-                # One attempt. The default retry closes the socket and sends
-                # the read again while the server is still on the first one.
-                rpc = matter_rpc(
-                    "read_attribute",
-                    {"node_id": node_id, "attribute_path": chunk},
-                    timeout=POLL_READ_TIMEOUT,
-                    channel=POLL_CHANNEL,
-                    listen=False,
-                    retries=1,
-                )
-                if not rpc.get("ok"):
-                    err = str(rpc.get("error") or "").lower()
-                    if "timed" in err or "timeout" in err:
-                        _poll_node_backoff[node_id] = time.time() + POLL_NODE_BACKOFF_S
-                        node_timed_out = True
-                        saw_timeout = True
+                rpc = _poll_read(node_id, chunk)
+                if _poll_note_result(node_id, rpc):
+                    node_timed_out = True
+                    saw_timeout = True
                     # A failed colour batch used to fan out to one read per
                     # bulb. That queue is what made taps slower over uptime.
                     break
-                apply_read_attributes(node_id, rpc.get("result"))
+                if not rpc.get("ok"):
+                    break
                 any_ok = True
         if not node_timed_out:
             _poll_node_backoff.pop(node_id, None)
@@ -9729,7 +9785,7 @@ def refresh_vacuum_capabilities(
     rpc = matter_rpc(
         "read_attribute",
         {"node_id": node_id, "attribute_path": paths},
-        timeout=18.0 if not status_only else 8.0,
+        timeout=18.0 if not status_only else 3.0,
         retries=1,
         channel=POLL_CHANNEL if status_only else CMD_CHANNEL,
         listen=not status_only,
@@ -9756,8 +9812,13 @@ def refresh_vacuum_capabilities(
 
 
 def poll_vacuum_attributes() -> None:
+    global _vacuum_poll_at
     if poll_paused():
         return
+    now = time.time()
+    if now < _vacuum_poll_at:
+        return
+    _vacuum_poll_at = now + VACUUM_POLL_INTERVAL_S
     for row in current_live_devices():
         if poll_paused():
             return

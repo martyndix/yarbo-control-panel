@@ -496,6 +496,39 @@ def main() -> int:
     if any(item[3] != 1 for item in calls if item[0] == "read_attribute"):
         raise SystemExit(f"poll reads must be a single attempt {calls}")
 
+    calls.clear()
+    agent._poll_node_backoff.clear()
+    agent._poll_cursor = 0
+    agent._poll_color_at = 10**12
+    agent._live_devices = [
+        {
+            "id": f"9:{endpoint}",
+            "node_id": 9,
+            "endpoint": endpoint,
+            "kind": "light",
+            "on": False,
+            "available": True,
+        }
+        for endpoint in range(1, 31)
+    ]
+
+    def fake_slice(command, args=None, timeout=20.0, channel="cmd", listen=True, retries=2):
+        calls.append((command, args, channel, timeout, retries))
+        return {"ok": True, "result": {}}
+
+    agent.matter_rpc = fake_slice
+    agent.poll_light_attributes()
+    agent.poll_light_attributes()
+    slice_reads = [item for item in calls if item[0] == "read_attribute"]
+    if len(slice_reads) != 2:
+        raise SystemExit(f"a large bridge must be one read per poll {calls}")
+    first_paths = list((slice_reads[0][1] or {}).get("attribute_path") or [])
+    second_paths = list((slice_reads[1][1] or {}).get("attribute_path") or [])
+    if len(first_paths) != 24 or first_paths == second_paths:
+        raise SystemExit(f"large poll did not advance {first_paths} {second_paths}")
+    if slice_reads[0][3] > 3 or slice_reads[0][4] != 1:
+        raise SystemExit(f"large poll read was too heavy {slice_reads[0]}")
+
     agent._live_devices = [{"id": "1:2", "on": False, "brightness": 10}]
     agent.apply_read_attributes(1, [["2/6/0", True], ["2/8/0", 127]])
     listed = agent.current_live_devices()
