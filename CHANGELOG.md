@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.374] - 2026-11-18
+
+### Fixed
+
+- An IKEA MYGGBETT (and any other Matter door or window contact already on the PaperMono Access page) now shows in the Home **DOORS / WINDOWS** tile, with the UniFi doors. That list is the same open/close sensors as Access, including a contact you renamed and put in a room. The UniFi “also show door sensors” tick does not hide it.
+
+### Changed
+
+- PaperMono Access pages through a long list: twelve tiles per page, with **PREV** and **NEXT**. The panel sends up to 96 doors and windows. Firmware **0.1.97** — update the tablet after the panel (USB or the E-paper Update button).
+
 ## [4.0.373] - 2026-11-18
 
 ### Fixed

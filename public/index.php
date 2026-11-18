@@ -248,7 +248,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         <section class="card panel-section home-doors-card hidden module-pane-hidden" id="home-doors-card" data-panel-id="home-doors" data-module="home">
             <div class="section-header section-header--simple">
-                <h2>Doors</h2>
+                <h2>DOORS / WINDOWS</h2>
             </div>
             <div id="home-doors-grid" class="home-device-grid home-doors-grid"></div>
         </section>
@@ -688,11 +688,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="home-manage-extras">
             <label class="settings-field settings-checkbox" id="home-doors-tile-row">
                 <input type="checkbox" id="home-doors-tile" checked>
-                <span>Show UniFi doors under Vestaboard</span>
+                <span>Show DOORS / WINDOWS under Vestaboard</span>
             </label>
             <label class="settings-field settings-checkbox" id="home-doors-tile-sensors-row">
                 <input type="checkbox" id="home-doors-tile-sensors">
-                <span>Also show door sensors (Open/Closed, no unlock)</span>
+                <span>Also show UniFi door sensors (Open/Closed, no unlock). IKEA and other Matter contacts are already in DOORS / WINDOWS.</span>
             </label>
             <p class="hint">Each open/close sensor can be <strong>Door</strong> or <strong>Window</strong> on its row. That chooses 🚪 or 🪟 on Home and on the PaperMono <strong>ACCESS</strong> page. Lockable Access doors stay doors.</p>
             <div class="home-backup">
@@ -1216,11 +1216,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Protect floodlights use On/Off to force the LED (not the motion schedule). Protect relays (USL-Relay) are switches, not Access doors — each relay can optionally <strong>auto-off</strong> after a timer whenever it is turned On (Home, UniFi, scenes, or automations). Door controllers (UA Hub / Gate Hub) unlock the bound Access door. If a wired door-position sensor shows <strong>Open</strong>, that button is labelled <strong>Lock</strong> but still sends unlock. With no DPS it stays Unlock. If Test shows 0 doors and “permission”, the Access token is missing <code>view:space</code> / <code>view:device</code> — recreate it in Access → Settings → General → Advanced → API Token.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-unifi-doors-tile" name="unifi_doors_tile" checked>
-                                <span>Show a doors tile under Vestaboard on Home (Unlock/Lock and live Open/Closed)</span>
+                                <span>Show a DOORS / WINDOWS tile under Vestaboard on Home (Unlock/Lock and live Open/Closed)</span>
                             </label>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-unifi-doors-tile-sensors" name="unifi_doors_tile_sensors">
-                                <span>Also list door sensors on that tile (Access position sensors and Protect contacts)</span>
+                                <span>Also list UniFi door sensors on that tile (Access position sensors and Protect contacts). IKEA and other Matter door and window sensors on Home are included with the doors.</span>
                             </label>
                             <h3 class="settings-subtitle">Radio Player</h3>
                             <p class="hint">Optional. Puts a <strong>Radio</strong> button in the header on every screen (only while the UniFi module is on). Streams UK national radio (and your own URLs) to Protect speakers such as a G3 Reader Pro via talkback. Needs ffmpeg and UDP 7004 from this panel to each device. Untick to hide the button and stop playback. BBC HLS URLs can change; edit or restore defaults below.</p>
@@ -1649,7 +1649,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">PaperMono frontlight. Needs firmware 0.1.28 (earlier builds ignored this because LoRa init reset the light PWM).</p>
                             <fieldset class="settings-theme-fieldset">
                                 <legend class="label">Alerts</legend>
-                                <p class="hint">Colour, flash, backlight, brightness, and screen need firmware 0.1.96. Night door/window lights only while Vestaboard Night hours is active. Backlight stays at the chosen % until the error clears or the message is read.</p>
+                                <p class="hint">Colour, flash, backlight, brightness, and screen need firmware 0.1.97. Night door/window lights only while Vestaboard Night hours is active. Backlight stays at the chosen % until the error clears or the message is read.</p>
                                 <div class="papermono-alert-row" data-alert-row="message">
                                     <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer)</span></label>
                                     <div class="papermono-alert-opts">
@@ -2042,7 +2042,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="398" y="449" width="36" height="6" fill="#f4f1e8"/>
                                         <rect x="414" y="431" width="6" height="42" fill="#f4f1e8"/>
                                     </svg>
-                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.96.</figcaption>
+                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.97.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">
@@ -2209,7 +2209,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.96 / 0.2.30-colour. Missing or stale firmware builds automatically in the background after a panel update — wait until the E-paper status says built, then press <strong>Update</strong>. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the tablet is on travel Wi-Fi (not the flashed home SSID) — even if home polls sometimes use Funnel or a public subdomain. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.97 / 0.2.30-colour. Missing or stale firmware builds automatically in the background after a panel update — wait until the E-paper status says built, then press <strong>Update</strong>. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the tablet is on travel Wi-Fi (not the flashed home SSID) — even if home polls sometimes use Funnel or a public subdomain. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#define PAPERMONO_FW_VERSION "0.1.96"
+#define PAPERMONO_FW_VERSION "0.1.97"
 /* Status poll. Do not go much faster: SSD1677 must not stream partial refreshes. */
 #define PAPERMONO_LOGO_PX 160
 #define PAPERMONO_POLL_MS 15000
@@ -36,8 +36,9 @@
 #define PAPERMONO_HOME_VISIBLE 12
 #define PAPERMONO_ROBOT_MAX 12
 #define PAPERMONO_ROBOT_VISIBLE 12
-#define PAPERMONO_ACCESS_MAX 36
-#define PAPERMONO_ACCESS_VISIBLE 36
+#define PAPERMONO_ACCESS_MAX 96
+/* Two columns, six rows. Further devices use PREV / NEXT. */
+#define PAPERMONO_ACCESS_VISIBLE 12
 #define PAPERMONO_HEAT_MAX 12
 #define PAPERMONO_HEAT_VISIBLE 12
 #define PAPERMONO_VAC_AREA_MAX 8

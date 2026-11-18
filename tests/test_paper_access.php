@@ -315,7 +315,7 @@ $manyRoot = sys_get_temp_dir() . '/yarbo-paper-access-many-' . bin2hex(random_by
 mkdir($manyRoot . '/data', 0775, true);
 $manyIds = [];
 $manySensors = [];
-for ($i = 1; $i <= 24; $i++) {
+for ($i = 1; $i <= 100; $i++) {
     $id = 'unifi:sensor:w' . $i;
     $manyIds[] = $id;
     $manySensors[] = [
@@ -347,7 +347,7 @@ file_put_contents($manyRoot . '/data/unifi-inventory.json', json_encode([
 file_put_contents($manyRoot . '/data/home.json', json_encode(['hidden' => [], 'last_devices' => []], JSON_UNESCAPED_SLASHES));
 $manyHome = new YarboHome($manyRoot);
 $manyItems = $manyHome->paperAccessItems();
-assert_true(count($manyItems) === 24, 'ACCESS payload keeps 24 sensors: ' . count($manyItems));
+assert_true(count($manyItems) === 96, 'ACCESS payload pages past the old 36 cap: ' . count($manyItems));
 
 $php = (string) file_get_contents(__DIR__ . '/../src/YarboPaperDevice.php');
 $homePhp = (string) file_get_contents(__DIR__ . '/../src/YarboHome.php');
@@ -360,8 +360,8 @@ $change = (string) file_get_contents(__DIR__ . '/../CHANGELOG.md');
 
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_ACCESS 12'), 'access page id');
 assert_true(str_contains($ver, '#define PAPERMONO_PAGE_COUNT 14'), 'page count includes HEAT');
-assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.96"'), 'firmware 0.1.96');
-assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.96';"), 'panel pin 0.1.96');
+assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.97"'), 'firmware 0.1.97');
+assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.97';"), 'panel pin 0.1.97');
 assert_true(str_contains($homePhp, 'function paperAccessItems'), 'paper ACCESS helper');
 assert_true(str_contains($homePhp, 'paperContactOpen'), 'ACCESS fill uses paperContactOpen / DPS');
 assert_true(str_contains($homePhp, 'function assignContactKind'), 'contact_kind save');
@@ -372,13 +372,18 @@ assert_true(str_contains($fw, 'void drawAccessPage(bool forceFull)'), 'firmware 
 assert_true(str_contains($fw, 'void layoutAccessGrid'), 'ACCESS grid shrinks to fit one screen');
 assert_true(str_contains($fw, 'void drawThickRoundRect'), 'lockable doors use a thick border');
 assert_true(!str_contains($fw, 'drawRoundRect(x + 3, y + 3'), 'no double-line door border');
-assert_true(str_contains($ver, '#define PAPERMONO_ACCESS_MAX 36'), 'firmware holds 36 access tiles');
-assert_true(str_contains($homePhp, 'public const PAPER_ACCESS_MAX = 36;'), 'panel sends up to 36 ACCESS items');
+assert_true(str_contains($ver, '#define PAPERMONO_ACCESS_MAX 96'), 'firmware holds 96 access tiles');
+assert_true(str_contains($ver, '#define PAPERMONO_ACCESS_VISIBLE 12'), 'ACCESS shows 12 tiles per page');
+assert_true(str_contains($homePhp, 'public const PAPER_ACCESS_MAX = 96;'), 'panel sends up to 96 ACCESS items');
+assert_true(str_contains($fw, 'int accessPage'), 'ACCESS keeps a page index');
+assert_true(str_contains($fw, 'accessPageCount'), 'ACCESS knows how many pages');
+assert_true(str_contains($fw, '"PREV"'), 'ACCESS draws PREV');
+assert_true(str_contains($fw, '"NEXT "'), 'ACCESS draws NEXT n/pages');
 assert_true(str_contains($fw, 'void drawWindowGlyph'), 'window glyph');
 assert_true(str_contains($fw, 'void drawLockMark'), 'lockable doors have a lock mark');
 assert_true(str_contains($fw, 'void handleAccessTouch'), 'ACCESS tap handler');
-assert_true(str_contains($fw, 'accessUnlock[i]'), 'only lockable tiles send unlock');
-assert_true(str_contains($fw, 'accessChanged[i]'), 'ACCESS draws changed time');
+assert_true(str_contains($fw, 'accessUnlock[idx]'), 'only lockable tiles send unlock');
+assert_true(str_contains($fw, 'accessChanged[idx]'), 'ACCESS draws changed time');
 assert_true(str_contains($fw, 'accessHaveItems'), 'menu can show ACCESS before compact');
 assert_true(str_contains($fw, 'o["changed"]'), 'firmware parses changed');
 assert_true(str_contains($html, 'data-menu-id="access"'), 'settings ACCESS row');
