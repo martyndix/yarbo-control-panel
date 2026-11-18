@@ -10,7 +10,7 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ### Fixed
 
-- An IKEA MYGGBETT (and other Matter door or window contacts) now shows in the Home **Doors and windows** strip, with the UniFi doors. It already showed in its room and on the PaperMono Access page. The strip heading is **Doors and windows**.
+- An IKEA MYGGBETT (and any other Matter door or window contact already on the PaperMono Access page) now shows in the Home **DOORS / WINDOWS** tile, with the UniFi doors. That list is the same open/close sensors as Access, including a contact you renamed and put in a room. The UniFi “also show door sensors” tick does not hide it.
 
 ### Changed
 

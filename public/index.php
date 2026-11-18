@@ -248,7 +248,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 
         <section class="card panel-section home-doors-card hidden module-pane-hidden" id="home-doors-card" data-panel-id="home-doors" data-module="home">
             <div class="section-header section-header--simple">
-                <h2>Doors and windows</h2>
+                <h2>DOORS / WINDOWS</h2>
             </div>
             <div id="home-doors-grid" class="home-device-grid home-doors-grid"></div>
         </section>
@@ -688,11 +688,11 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <div class="home-manage-extras">
             <label class="settings-field settings-checkbox" id="home-doors-tile-row">
                 <input type="checkbox" id="home-doors-tile" checked>
-                <span>Show UniFi doors under Vestaboard</span>
+                <span>Show DOORS / WINDOWS under Vestaboard</span>
             </label>
             <label class="settings-field settings-checkbox" id="home-doors-tile-sensors-row">
                 <input type="checkbox" id="home-doors-tile-sensors">
-                <span>Also show door sensors (Open/Closed, no unlock)</span>
+                <span>Also show UniFi door sensors (Open/Closed, no unlock). IKEA and other Matter contacts are already in DOORS / WINDOWS.</span>
             </label>
             <p class="hint">Each open/close sensor can be <strong>Door</strong> or <strong>Window</strong> on its row. That chooses 🚪 or 🪟 on Home and on the PaperMono <strong>ACCESS</strong> page. Lockable Access doors stay doors.</p>
             <div class="home-backup">
@@ -1216,7 +1216,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">Ticks save as you click — no need to wait on Settings → Save. Protect floodlights use On/Off to force the LED (not the motion schedule). Protect relays (USL-Relay) are switches, not Access doors — each relay can optionally <strong>auto-off</strong> after a timer whenever it is turned On (Home, UniFi, scenes, or automations). Door controllers (UA Hub / Gate Hub) unlock the bound Access door. If a wired door-position sensor shows <strong>Open</strong>, that button is labelled <strong>Lock</strong> but still sends unlock. With no DPS it stays Unlock. If Test shows 0 doors and “permission”, the Access token is missing <code>view:space</code> / <code>view:device</code> — recreate it in Access → Settings → General → Advanced → API Token.</p>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-unifi-doors-tile" name="unifi_doors_tile" checked>
-                                <span>Show a doors tile under Vestaboard on Home (Unlock/Lock and live Open/Closed)</span>
+                                <span>Show a DOORS / WINDOWS tile under Vestaboard on Home (Unlock/Lock and live Open/Closed)</span>
                             </label>
                             <label class="settings-field settings-checkbox">
                                 <input type="checkbox" id="settings-unifi-doors-tile-sensors" name="unifi_doors_tile_sensors">

@@ -65,6 +65,15 @@ file_put_contents($root . '/data/home.json', json_encode([
             'open' => true,
             'status' => 'Open',
         ],
+        [
+            'id' => '31:1',
+            'node_id' => 31,
+            'name' => 'Pantry',
+            'kind' => 'other',
+            'source' => 'matter',
+            'product' => 'MYGGBETT',
+            'status' => 'Closed',
+        ],
     ],
 ], JSON_UNESCAPED_SLASHES));
 file_put_contents($root . '/data/home-automations.json', json_encode([
@@ -227,6 +236,7 @@ assert_true(!in_array('unifi:sensor:side-door', $tileIds, true), 'door sensors s
 assert_true(in_array('27:1', $tileIds, true), 'Matter contact is on the doors and windows strip');
 assert_true(!in_array('28:1', $tileIds, true), 'Matter motion stays off the doors strip');
 assert_true(!in_array('29:1', $tileIds, true), 'hidden Matter contact stays off the doors strip');
+assert_true(in_array('31:1', $tileIds, true), 'renamed MYGGBETT is on DOORS / WINDOWS');
 $matterDoor = null;
 foreach ($dash['unifi_doors'] ?? [] as $row) {
     if (($row['id'] ?? '') === '27:1') {
@@ -453,6 +463,7 @@ $html = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
 $css = (string) file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
 $change = (string) file_get_contents(dirname(__DIR__) . '/CHANGELOG.md');
 assert_true(str_contains($html, 'id="home-doors-card"'), 'Home markup has the doors card');
+assert_true(str_contains($html, '<h2>DOORS / WINDOWS</h2>'), 'tile is labelled DOORS / WINDOWS');
 assert_true(str_contains($html, 'data-module="home"'), 'doors card is a Home-tab pane');
 $vbPos = strpos($html, 'id="vestaboard-card"');
 $doorsPos = strpos($html, 'id="home-doors-card"');

@@ -645,7 +645,19 @@ final class YarboHome
                 $row['heating_min'] = self::optionalCelsius($device['heating_min'] ?? 5) ?? 5.0;
                 $row['heating_max'] = self::optionalCelsius($device['heating_max'] ?? 35) ?? 35.0;
             }
-            if (!$isUnifi && ($row['kind'] ?? '') === 'sensor') {
+            $matterSensor = !$isUnifi && (
+                ($row['kind'] ?? '') === 'sensor'
+                || array_key_exists('has_open', $device)
+                || array_key_exists('has_motion', $device)
+                || isset($device['temperature'])
+                || isset($device['humidity'])
+            );
+            if ($matterSensor && ($row['kind'] ?? '') !== 'sensor'
+                && (array_key_exists('has_open', $device) || array_key_exists('has_motion', $device)
+                    || isset($device['temperature']) || isset($device['humidity']))) {
+                $row['kind'] = 'sensor';
+            }
+            if ($matterSensor) {
                 $temp = self::optionalCelsius($device['temperature'] ?? $device['local_temperature'] ?? null);
                 if ($temp !== null) {
                     $row['temperature'] = $temp;
@@ -3929,37 +3941,59 @@ final class YarboHome
         foreach ($out as $row) {
             $seen[(string) ($row['id'] ?? '')] = true;
         }
+        $byId = [];
         foreach ($homeDevices as $device) {
             if (!is_array($device)) {
                 continue;
             }
             $id = trim((string) ($device['id'] ?? ''));
-            if ($id === '' || isset($seen[$id]) || !empty($device['hidden'])) {
+            if ($id !== '') {
+                $byId[$id] = $device;
+            }
+        }
+        // Same open/close contacts as the PaperMono Access page. UniFi sensors
+        // stay behind the sensors tick; Matter contacts (MYGGBETT and the same) do not.
+        foreach ($this->paperAccessItems() as $item) {
+            if (!is_array($item)) {
                 continue;
             }
-            if (YarboUnifi::isHomeId($id) || ((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE) {
+            $id = trim((string) ($item['id'] ?? ''));
+            if ($id === '' || isset($seen[$id]) || !empty($item['unlock'])) {
                 continue;
             }
-            if (!self::isOpenCloseSensor($device)) {
+            if (YarboUnifi::isHomeId($id)) {
                 continue;
             }
-            $defaultName = (string) ($device['name'] ?? $id);
+            $device = $byId[$id] ?? [
+                'id' => $id,
+                'name' => (string) ($item['name'] ?? $id),
+                'kind' => 'sensor',
+                'source' => 'matter',
+                'has_open' => true,
+                'open' => !empty($item['on']),
+                'status' => !empty($item['on']) ? 'Open' : 'Closed',
+                'contact_kind' => (string) ($item['role'] ?? ''),
+            ];
+            if (!empty($device['hidden'])) {
+                continue;
+            }
+            $defaultName = (string) ($device['name'] ?? $item['name'] ?? $id);
             $row = [
                 'id' => $id,
                 'name' => is_string($names[$id] ?? null) && $names[$id] !== '' ? $names[$id] : $defaultName,
                 'kind' => 'sensor',
                 'source' => (string) ($device['source'] ?? 'matter'),
-                'status' => (string) ($device['status'] ?? ''),
+                'status' => (string) ($device['status'] ?? (!empty($item['on']) ? 'Open' : 'Closed')),
                 'has_open' => true,
                 'product' => (string) ($device['product'] ?? ''),
                 'contact_kind' => (string) ($device['contact_kind'] ?? '') !== ''
                     ? (string) $device['contact_kind']
-                    : $this->contactRoleFor($device, $store),
+                    : (string) ($item['role'] ?? $this->contactRoleFor($device, $store)),
                 'can_assign_contact' => true,
+                'open' => array_key_exists('open', $device) && $device['open'] !== null
+                    ? self::paperContactOpen($device)
+                    : !empty($item['on']),
             ];
-            if (array_key_exists('open', $device) && $device['open'] !== null) {
-                $row['open'] = self::paperContactOpen($device);
-            }
             foreach (['temperature', 'humidity', 'open_changed_at'] as $key) {
                 if (array_key_exists($key, $device)) {
                     $row[$key] = $device[$key];
@@ -5898,8 +5932,11 @@ final class YarboHome
         if ($product === 'Door position sensor' || str_starts_with($native, 'dps-') || str_contains($native, ':dps-')) {
             return true;
         }
+        if (preg_match('/\b(myggbett|parasoll)\b/i', $name . ' ' . $product) === 1) {
+            return true;
+        }
         if (!empty($row['has_open']) || !empty($row['has_dps'])) {
-            return $kind === 'sensor' || $kind === '';
+            return true;
         }
         if ($kind !== 'sensor') {
             return false;
