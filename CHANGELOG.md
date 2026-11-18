@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.382] - 2026-11-18
+
+### Fixed
+
+- A Hisense TV on firmware 9 was added, then the broker refused the login. The set only accepts the VIDAA app certificate over TLS, with the current app username. Add TV uses that certificate first. If the set then shows a code, enter it on Home.
+
 ## [4.0.381] - 2026-11-18
 
 ### Added
