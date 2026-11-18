@@ -334,4 +334,12 @@ $silent = $tv->command('hisense:192.168.1.50', 'off', []);
 assert_true(($silent['ok'] ?? false) === true && ($silent['on'] ?? null) === false, 'second login hears standby ' . json_encode($silent));
 assert_true($tries >= 2, 'a silent login is not the last try ' . $tries);
 
+$tv->setTransport(static function (string $host, array $profile, array $outgoing): array {
+    return ['ok' => true, 'messages' => []];
+});
+$code = $tv->command('hisense:192.168.1.50', 'on', []);
+assert_true(($code['ok'] ?? true) === false, 'code request does not pretend to turn on ' . json_encode($code));
+assert_true(($code['tv']['needs_pin'] ?? false) === true, 'a code on the screen opens the box ' . json_encode($code));
+assert_true(str_contains((string) ($code['error'] ?? ''), 'Enter the code'), 'tells you to type the code ' . json_encode($code));
+
 echo "ok\n";

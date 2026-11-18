@@ -5320,6 +5320,7 @@ async function loadHomeDashboard(opts = {}) {
             if (autoDraft) renderHomeAutoTray();
             else renderHomeAutomations();
         }
+        homeTvOfferCode(homeDash?.devices);
         if (!opts.patch && !opts.skipTv) {
             homeRefreshTvsIfNeeded();
         }
@@ -6381,7 +6382,8 @@ function homeTvActionsHtml(d) {
     const select = options
         ? `<select data-home-tv-input="${escapeHtml(d.id)}" aria-label="TV input">${options}</select>`
         : '';
-    const pin = d.needs_pin
+    const askCode = d.needs_pin || d.power_known !== true;
+    const pin = askCode
         ? `<input class="home-tv-pin" data-home-tv-pin="${escapeHtml(d.id)}" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="Code" aria-label="Code on the TV">
            <button type="button" class="btn btn-secondary btn-compact" data-home-tv-pin-send="${escapeHtml(d.id)}">Send</button>`
         : '';
@@ -6392,6 +6394,7 @@ function homeTvActionsHtml(d) {
     return `<div class="home-device-actions">
         <button type="button" class="btn btn-secondary btn-compact" data-home-tv-power="${escapeHtml(d.id)}" data-home-tv-on="${on ? '0' : '1'}">${on ? 'Off' : 'On'}</button>
         ${select}
+        ${pin}
         ${status}
     </div>`;
 }
@@ -7198,6 +7201,7 @@ async function sendHomeTvPower(id, button) {
         }, 20000);
         if (!data.ok) {
             await loadHomeDashboard({ force: true, replace: true, skipTv: true });
+            if (data.tv?.needs_pin || data.tv?.power_known !== true) homeTvShowPin(id);
             throw new Error(data.error || 'TV command failed');
         }
         showToast(turnOn ? 'TV on' : 'TV off', 'success');
@@ -18776,6 +18780,11 @@ function homeTvShowPin(id) {
     if (!box) return;
     box.dataset.tvId = id || '';
     box.classList.toggle('hidden', !id);
+}
+
+function homeTvOfferCode(devices) {
+    const tv = (devices || []).find((d) => d && d.kind === 'tv' && (d.needs_pin || d.power_known !== true));
+    if (tv) homeTvShowPin(tv.id);
 }
 
 function homeTvFoundHtml(found) {

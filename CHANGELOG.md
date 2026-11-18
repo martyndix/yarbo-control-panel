@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.386] - 2026-11-18
+
+### Fixed
+
+- Pressing On could put a code on the Hisense screen and then say to type it on the row, with no box to type in. The code box now sits on the TV row and under **Hisense TV IP**.
+
 ## [4.0.385] - 2026-11-18
 
 ### Fixed

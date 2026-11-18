@@ -448,7 +448,9 @@ final class YarboHisense
                 $messages = array_merge($messages, $pinMessages);
                 $pinParsed = self::interpretMessages($pinMessages);
                 $row = $this->mergeRead($row, $pinParsed, (string) ($pin['mode'] ?? ''));
-                if (!empty($pinParsed['needs_pin']) && ($pinParsed['token'] ?? '') === '') {
+                // Publishing this request puts a code on the screen. The set often
+                // does that without sending the authentication message in time.
+                if (($pinParsed['token'] ?? '') === '' && $pinParsed['on'] === null && $pinParsed['sources'] === []) {
                     $row['needs_pin'] = true;
                 }
                 if ($pinParsed['on'] !== null) {
