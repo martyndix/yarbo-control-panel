@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.387] - 2026-11-18
+
+### Fixed
+
+- A Hisense code could be marked accepted before the set agreed, so every **On** put a new code on the screen and the code box stayed on the row. The box is now under the gear (**Show code**, then the digits). **On** and **Off** use the saved login. The code is sent as a number, and the row updates only after the set returns its login.
+
 ## [4.0.386] - 2026-11-18
 
 ### Fixed

@@ -142,38 +142,53 @@ final class YarboHisense
             return ['ok' => false, 'error' => 'Enter the code shown on the TV'];
         }
         $host = (string) ($row['host'] ?? '');
+        // Firmware 9 compares the code as a number. A quoted code connects and
+        // then comes back as "not this code", which used to be reported as accepted.
         $result = $this->exchange($host, [
-            ['topic' => 'authenticationcode', 'payload' => json_encode(['authNum' => $pin], JSON_UNESCAPED_SLASHES) ?: ''],
-        ], 6.0);
+            ['topic' => 'authenticationcode', 'payload' => json_encode(['authNum' => (int) $pin]) ?: ''],
+        ], 12.0);
         if (!($result['ok'] ?? false)) {
-            return ['ok' => false, 'error' => (string) ($result['error'] ?? 'The TV did not accept the code')];
+            return ['ok' => false, 'error' => (string) ($result['error'] ?? 'The TV did not accept the code'), 'tv' => $this->publicRow($row)];
         }
         $parsed = self::interpretMessages(is_array($result['messages'] ?? null) ? $result['messages'] : []);
-        if ($parsed['token'] !== '') {
-            $row['token'] = $parsed['token'];
-        }
-        if (($parsed['refresh_token'] ?? '') !== '') {
-            $row['refresh_token'] = $parsed['refresh_token'];
-        }
-        if ($parsed['sources'] !== []) {
-            $row['sources'] = $parsed['sources'];
-        }
-        $row['needs_pin'] = $parsed['needs_pin'] && $parsed['sources'] === [] && $parsed['token'] === '';
-        if ($parsed['on'] !== null) {
-            $row['on'] = $parsed['on'];
-        }
-        $row['connected'] = true;
-        $row['error'] = !empty($row['needs_pin']) ? 'The TV is still waiting for a code' : '';
-        $row['seen_at'] = time();
-        $store['tvs'][$id] = $row;
-        $this->save($store);
-        if (!empty($row['needs_pin'])) {
+        $row = $this->mergeRead($row, $parsed, (string) ($result['mode'] ?? ''));
+        $pinResult = $parsed['pin_result'];
+        if ($pinResult !== null && $pinResult !== 1) {
+            $row['needs_pin'] = true;
+            $row['error'] = 'That code was not accepted';
+            $row = $this->persist($id, $row);
+
             return [
                 'ok' => false,
-                'error' => 'That code was not accepted. Look at the TV and try the new code.',
+                'error' => 'That code was not accepted. Tap Show code and enter the code on the TV now.',
                 'tv' => $this->publicRow($row),
             ];
         }
+        if (trim((string) ($row['token'] ?? '')) === '' && $pinResult === 1) {
+            $again = $this->exchange($host, [[
+                'topic' => 'gettoken',
+                'payload' => '{"refreshtoken":""}',
+            ]], 6.0);
+            if (!empty($again['ok'])) {
+                $againParsed = self::interpretMessages(is_array($again['messages'] ?? null) ? $again['messages'] : []);
+                $row = $this->mergeRead($row, $againParsed, (string) ($again['mode'] ?? ''));
+            }
+        }
+        if (trim((string) ($row['token'] ?? '')) === '') {
+            $row['needs_pin'] = true;
+            $row['error'] = 'The TV did not take that code';
+            $row = $this->persist($id, $row);
+
+            return [
+                'ok' => false,
+                'error' => 'The TV did not take that code. Open the gear, tap Show code, and enter the new one.',
+                'tv' => $this->publicRow($row),
+            ];
+        }
+        $row['needs_pin'] = false;
+        $row['error'] = '';
+        $row['connected'] = true;
+        $row = $this->persist($id, $row);
         if ($this->lock(true)) {
             try {
                 $row = $this->readRow($row, 3.0);
@@ -184,6 +199,40 @@ final class YarboHisense
         }
 
         return ['ok' => true, 'tv' => $this->publicRow($row)];
+    }
+
+    /**
+     * Ask the set to show one code. On does not call this: repeating it
+     * replaces the code already on the screen.
+     *
+     * @return array<string, mixed>
+     */
+    public function requestCode(string $id): array
+    {
+        $id = trim($id);
+        $store = $this->load();
+        $row = is_array($store['tvs'][$id] ?? null) ? $store['tvs'][$id] : null;
+        if ($row === null) {
+            return ['ok' => false, 'error' => 'Add the TV first'];
+        }
+        if (trim((string) ($row['token'] ?? '')) !== '') {
+            return ['ok' => true, 'tv' => $this->publicRow($row)];
+        }
+        $locked = $this->lock(true);
+        try {
+            $row = $this->readRow($row, 3.5, true);
+            $readOk = !empty($row['_read_ok']);
+            if (trim((string) ($row['token'] ?? '')) === '') {
+                $row['needs_pin'] = true;
+            }
+            $row = $this->persist($id, $row);
+
+            return ['ok' => $readOk, 'tv' => $this->publicRow($row)];
+        } finally {
+            if ($locked) {
+                $this->unlock();
+            }
+        }
     }
 
     public function remove(string $id): bool
@@ -225,7 +274,7 @@ final class YarboHisense
         }
         $locked = $this->lock(true);
         try {
-            $row = $this->readRow($row, 3.5, true);
+            $row = $this->readRow($row, 3.5);
             if (empty($row['_read_ok'])) {
                 $this->wake($row);
                 $row = $this->readRow($row, 4.0);
@@ -247,11 +296,21 @@ final class YarboHisense
                 return ['ok' => false, 'error' => 'Enter the code shown on the TV', 'tv' => $this->publicRow($row)];
             }
             if ($on === null && $action !== 'input') {
-                $row = $this->persist($id, $row);
                 $heard = trim((string) ($row['heard'] ?? ''));
+                if (trim((string) ($row['token'] ?? '')) === '') {
+                    $row['needs_pin'] = true;
+                    $row = $this->persist($id, $row);
+
+                    return [
+                        'ok' => false,
+                        'error' => 'Open the gear, tap Show code, and enter the code from the TV.',
+                        'tv' => $this->publicRow($row),
+                    ];
+                }
+                $row = $this->persist($id, $row);
                 $error = $heard !== ''
                     ? ('The TV sent: ' . $heard)
-                    : 'The TV connected but sent no state. If a code is on the screen, enter it on this row.';
+                    : 'The TV connected but sent no state.';
 
                 return ['ok' => false, 'error' => $error, 'tv' => $this->publicRow($row)];
             }
@@ -608,7 +667,7 @@ final class YarboHisense
 
     /**
      * @param list<array<string, mixed>> $messages
-     * @return array{on: ?bool, source_id: string, source_name: string, sources: list<array{id: string, name: string}>, token: string, refresh_token: string, needs_pin: bool}
+     * @return array{on: ?bool, source_id: string, source_name: string, sources: list<array{id: string, name: string}>, token: string, refresh_token: string, needs_pin: bool, pin_result: ?int}
      */
     public static function interpretMessages(array $messages): array
     {
@@ -619,6 +678,7 @@ final class YarboHisense
         $token = '';
         $refreshToken = '';
         $needsPin = false;
+        $pinResult = null;
         foreach ($messages as $message) {
             if (!is_array($message)) {
                 continue;
@@ -635,14 +695,22 @@ final class YarboHisense
                     $sources = $parsed;
                 }
             }
-            if (str_contains($topic, 'token') && is_array($json)) {
-                $access = trim((string) ($json['accesstoken'] ?? $json['accessToken'] ?? ''));
+            if (is_array($json)) {
+                $access = trim((string) ($json['accesstoken'] ?? $json['accessToken'] ?? $json['access_token'] ?? ''));
                 if ($access !== '') {
                     $token = $access;
                 }
-                $refresh = trim((string) ($json['refreshtoken'] ?? $json['refreshToken'] ?? ''));
+                $refresh = trim((string) ($json['refreshtoken'] ?? $json['refreshToken'] ?? $json['refresh_token'] ?? ''));
                 if ($refresh !== '') {
                     $refreshToken = $refresh;
+                }
+                if (
+                    str_contains($topic, 'authenticationcode')
+                    && !str_contains($topic, 'close')
+                    && !str_contains($topic, 'toast')
+                    && array_key_exists('result', $json)
+                ) {
+                    $pinResult = (int) $json['result'];
                 }
             }
             if (str_contains($topic, 'authentication') && !str_contains($topic, 'authenticationcode')) {
@@ -670,6 +738,7 @@ final class YarboHisense
             'token' => $token,
             'refresh_token' => $refreshToken,
             'needs_pin' => $needsPin && $sources === [] && $token === '',
+            'pin_result' => $pinResult,
         ];
     }
 
@@ -839,15 +908,18 @@ final class YarboHisense
         if (!$open && $this->transport === null) {
             return $base;
         }
-        $result = $this->exchange($host, [
+        $asks = [
             ['topic' => 'sourcelist', 'payload' => ''],
             ['topic' => 'gettvstate', 'payload' => ''],
-            ['topic' => 'vidaa_app_connect', 'payload' => json_encode([
+        ];
+        if ($this->tokenFor($host) === '') {
+            $asks[] = ['topic' => 'vidaa_app_connect', 'payload' => json_encode([
                 'app_version' => 2,
                 'connect_result' => 0,
                 'device_type' => 'Mobile App',
-            ], JSON_UNESCAPED_SLASHES) ?: ''],
-        ], 4.0);
+            ], JSON_UNESCAPED_SLASHES) ?: ''];
+        }
+        $result = $this->exchange($host, $asks, 4.0);
         if (!($result['ok'] ?? false)) {
             $base['error'] = (string) ($result['error'] ?? 'The TV broker refused the connection');
             $base['port_open'] = $open;
@@ -973,11 +1045,14 @@ final class YarboHisense
                 $base . '/ui_service/data/state',
                 $base . '/ui_service/data/authentication',
                 $base . '/ui_service/data/authenticationcode',
+                $base . '/ui_service/data/authenticationcodeclose',
+                $base . '/ui_service/data/authenticationcodetoast',
                 $base . '/ui_service/data/tokenissuance',
                 $base . '/ui_service/data/vidaa_app_connect',
                 $base . '/platform_service/data/authentication',
                 $base . '/platform_service/data/authenticationcode',
                 $base . '/platform_service/data/tokenissuance',
+                $base . '/platform_service/data/gettoken',
                 $base . '/platform_service/data/state',
                 $base . '/platform_service/data/sourcelist',
                 $base . '/ui_service/data/login_each_other_info',
@@ -991,6 +1066,7 @@ final class YarboHisense
             }
             $wantSources = false;
             $wantState = false;
+            $doingPin = false;
             foreach ($publishes as $publish) {
                 $asked = (string) ($publish['topic'] ?? '');
                 if ($asked === 'sourcelist') {
@@ -998,6 +1074,9 @@ final class YarboHisense
                 }
                 if ($asked === 'gettvstate') {
                     $wantState = true;
+                }
+                if ($asked === 'authenticationcode') {
+                    $doingPin = true;
                 }
             }
             $started = microtime(true);
@@ -1012,12 +1091,32 @@ final class YarboHisense
                 foreach ($services as $service) {
                     $path = '/remoteapp/tv/' . $service . '/' . $clientId . '/actions/' . $action;
                     $client->publish($path, (string) ($publish['payload'] ?? ''), 0);
+                    if ($action === 'gettoken' && $service === 'platform_service') {
+                        $client->publish('/remoteapp/tv/platform_service/' . $clientId . '/data/gettoken', (string) ($publish['payload'] ?? ''), 0);
+                    }
                 }
             }
+            $pinFollowUp = false;
             $deadline = microtime(true) + $wait;
             while (microtime(true) < $deadline) {
                 $client->loopOnce($started, true);
                 $parsed = self::interpretMessages($messages);
+                if ($doingPin && !$pinFollowUp && $parsed['pin_result'] === 1) {
+                    $pinFollowUp = true;
+                    $client->publish(
+                        '/remoteapp/tv/platform_service/' . $clientId . '/data/gettoken',
+                        '{"refreshtoken":""}',
+                        0
+                    );
+                    $client->publish(
+                        '/remoteapp/tv/ui_service/' . $clientId . '/actions/authenticationcodeclose',
+                        '',
+                        0
+                    );
+                }
+                if ($doingPin && $parsed['pin_result'] !== null && $parsed['pin_result'] !== 1) {
+                    break;
+                }
                 $gotSources = !$wantSources || $parsed['sources'] !== [];
                 $gotState = !$wantState || $parsed['on'] !== null;
                 if ($gotSources && $gotState) {
@@ -1347,6 +1446,7 @@ final class YarboHisense
             'input' => (string) ($row['source_id'] ?? ''),
             'input_name' => (string) ($row['source_name'] ?? ''),
             'needs_pin' => !empty($row['needs_pin']),
+            'paired' => trim((string) ($row['token'] ?? '')) !== '',
             'status' => $status,
             'detail' => trim((string) ($row['heard'] ?? '')),
             'has_on_off' => true,
