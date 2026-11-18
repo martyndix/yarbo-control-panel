@@ -3331,6 +3331,13 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     margin: 0;
 }
 
+.home-tv-found {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.25rem 0 0.5rem;
+}
+
 #home-card:not(.home-card--manage) .home-add-wrap {
     display: none;
 }

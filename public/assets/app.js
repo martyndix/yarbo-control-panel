@@ -4823,7 +4823,7 @@ function homeIsUnifi(d) {
 function homeCanAdaptive(d) {
     if (!d || homeIsUnifi(d)) return false;
     const kind = String(d.kind || 'light');
-    if (kind === 'heater' || kind === 'vacuum' || kind === 'switch' || kind === 'plug') return false;
+    if (kind === 'heater' || kind === 'vacuum' || kind === 'switch' || kind === 'plug' || kind === 'button' || kind === 'tv') return false;
     return Boolean(d.color_ct || d.colorable || d.color_hs || d.color_xy);
 }
 
@@ -4840,7 +4840,7 @@ function homeDeviceCanToggle(d) {
         return kind === 'light' || kind === 'relay';
     }
     const kind = String(d.kind || 'light');
-    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub' && kind !== 'vacuum' && kind !== 'switch';
+    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub' && kind !== 'vacuum' && kind !== 'switch' && kind !== 'button' && kind !== 'tv';
 }
 
 function homeIsLight(d) {
@@ -5102,6 +5102,10 @@ function homeKindLabel(d) {
             return 'Plug';
         case 'switch':
             return 'Switch';
+        case 'button':
+            return 'Button';
+        case 'tv':
+            return 'TV';
         case 'sensor':
             if (homeCanAssignContact(d) || d.has_open || d.has_dps) {
                 return homeContactRole(d) === 'window' ? '🪟 Window' : '🚪 Door';
@@ -6164,8 +6168,9 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const label = homeManageOpen
         ? `<input type="text" class="home-device-name-input" data-home-name="${escapeHtml(d.id)}" value="${escapeHtml(d.name)}" placeholder="${escapeHtml(defaultName)}" maxlength="48" aria-label="Device name">`
         : `<p class="home-device-name">${escapeHtml(d.name)}</p>`;
-    const roomSelect = hidden ? '' : homeRoomSelectHtml(d, rooms || homeDash.rooms || []);
-    const groupSelect = hidden ? '' : homeGroupSelectHtml(d, rooms || homeDash.rooms || []);
+    const isTv = String(d.kind || '') === 'tv';
+    const roomSelect = hidden || isTv ? '' : homeRoomSelectHtml(d, rooms || homeDash.rooms || []);
+    const groupSelect = hidden || isTv ? '' : homeGroupSelectHtml(d, rooms || homeDash.rooms || []);
     const dotStyle = on && d.color_hex
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
@@ -6317,6 +6322,27 @@ function ensureAutoOffTick() {
     autoOffTickTimer = window.setInterval(tickAutoOffCountdowns, 1000);
 }
 
+function homeTvActionsHtml(d) {
+    const on = Boolean(d.on);
+    const inputs = Array.isArray(d.inputs) ? d.inputs : [];
+    const current = String(d.input || '');
+    const options = inputs.map((source) => {
+        const id = String(source.id ?? '');
+        const name = String(source.name || id);
+        return `<option value="${escapeHtml(id)}" ${id === current ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+    }).join('');
+    const select = options
+        ? `<select data-home-tv-input="${escapeHtml(d.id)}" aria-label="TV input">${options}</select>`
+        : '';
+    const pin = d.needs_pin ? '<span class="home-device-meta">Code on the TV</span>' : '';
+    const status = !pin && d.status ? `<span class="home-device-meta">${escapeHtml(d.status)}</span>` : pin;
+    return `<div class="home-device-actions">
+        <button type="button" class="btn btn-secondary btn-compact" data-home-tv-power="${escapeHtml(d.id)}" data-home-tv-on="${on ? '0' : '1'}">${on ? 'Off' : 'On'}</button>
+        ${select}
+        ${status}
+    </div>`;
+}
+
 function homeDeviceActionsHtml(d, bright, color) {
     if (homeIsUnifi(d)) {
         const kind = String(d.kind || '');
@@ -6359,6 +6385,9 @@ function homeDeviceActionsHtml(d, bright, color) {
     }
     if (String(d.kind || '') === 'switch') {
         return `<div class="home-device-actions"><span class="home-device-meta">Switch</span></div>`;
+    }
+    if (String(d.kind || '') === 'tv') {
+        return homeTvActionsHtml(d);
     }
     if (homeIsSensorKind(d)) {
         const status = String(d.status || '');
@@ -6766,7 +6795,13 @@ function renderHomeDashboard(data, opts = {}) {
             const rooms = data.rooms || [];
             const byRoom = new Map(rooms.map((r) => [r.id, []]));
             const ungrouped = [];
+            const tvs = [];
             devices.forEach((d) => {
+                if (d.kind === 'button') return;
+                if (d.kind === 'tv') {
+                    tvs.push(d);
+                    return;
+                }
                 if (d.room_id && byRoom.has(d.room_id)) byRoom.get(d.room_id).push(d);
                 else ungrouped.push(d);
             });
@@ -6796,6 +6831,10 @@ function renderHomeDashboard(data, opts = {}) {
                 html += homeGroupAddHtml(room.id);
                 html += '</div></div>';
             });
+            if (tvs.length) {
+                html += '<div class="home-node-heading"><h3 class="home-node-title">TV</h3></div>';
+                html += tvs.map((d) => homeDeviceCardHtml(d, false, rooms)).join('');
+            }
             if (ungrouped.length) {
                 if (html) {
                     html += '<div class="home-node-heading"><h3 class="home-node-title">Ungrouped</h3></div>';
@@ -7087,6 +7126,51 @@ async function sendHomeVacuumCommand(id, command, button) {
         }
     } finally {
         if (button) button.disabled = false;
+    }
+}
+
+async function sendHomeTvPower(id, button) {
+    if (!id) return;
+    const turnOn = button?.getAttribute('data-home-tv-on') !== '0';
+    const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
+    const input = card?.querySelector('[data-home-tv-input]')?.value || '';
+    if (button) button.disabled = true;
+    try {
+        const data = await homeApi({
+            action: 'command',
+            id,
+            command: turnOn ? 'on' : 'off',
+            kind: 'tv',
+            input: turnOn ? input : '',
+        }, 20000);
+        if (!data.ok) throw new Error(data.error || 'TV command failed');
+        showToast(turnOn ? 'TV on' : 'TV off', 'success');
+        await loadHomeDashboard({ patch: true });
+    } catch (err) {
+        showToast(err.message || 'TV command failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function sendHomeTvInput(id, input, select) {
+    if (!id || !input) return;
+    if (select) select.disabled = true;
+    try {
+        const data = await homeApi({
+            action: 'command',
+            id,
+            command: 'on',
+            kind: 'tv',
+            input,
+        }, 20000);
+        if (!data.ok) throw new Error(data.error || 'Could not change input');
+        showToast('TV input', 'success');
+        await loadHomeDashboard({ patch: true });
+    } catch (err) {
+        showToast(err.message || 'Could not change input', 'error');
+    } finally {
+        if (select) select.disabled = false;
     }
 }
 
@@ -7662,6 +7746,11 @@ function bindHomeDashboard() {
             );
             return;
         }
+        const tvPower = event.target.closest('[data-home-tv-power]');
+        if (tvPower) {
+            await sendHomeTvPower(tvPower.getAttribute('data-home-tv-power') || '', tvPower);
+            return;
+        }
         const btn = event.target.closest('[data-home-toggle]');
         if (btn) {
             await sendHomeDeviceToggle(btn.getAttribute('data-home-toggle') || '', btn);
@@ -7711,6 +7800,11 @@ function bindHomeDashboard() {
         if (bright) syncHomeBrightPct(bright);
     });
     document.getElementById('home-devices')?.addEventListener('change', async (event) => {
+        const tvInput = event.target.closest('[data-home-tv-input]');
+        if (tvInput) {
+            await sendHomeTvInput(tvInput.getAttribute('data-home-tv-input') || '', tvInput.value, tvInput);
+            return;
+        }
         const plugAutoOff = event.target.closest('[data-home-auto-off-enabled], [data-home-auto-off-value], [data-home-auto-off-unit]');
         if (plugAutoOff) {
             const id = plugAutoOff.getAttribute('data-home-auto-off-enabled')
@@ -7951,7 +8045,7 @@ function homeAutoThenOk(d) {
         return kind === 'light' || kind === 'relay' || kind === 'door' || kind === 'hub';
     }
     const kind = String(d.kind || 'light');
-    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub';
+    return kind !== 'camera' && kind !== 'sensor' && kind !== 'door' && kind !== 'hub' && kind !== 'button';
 }
 
 function homeAutoDurationEvent(event) {
@@ -7974,7 +8068,7 @@ function homeAutoCanOpen(d) {
     if (!d) return false;
     const kind = homeAutoKind(d);
     if (kind === 'door' || kind === 'hub') return true;
-    if (['light', 'plug', 'switch', 'heater', 'relay', 'vacuum', 'scene', 'camera'].includes(kind)) return false;
+    if (['light', 'plug', 'switch', 'heater', 'relay', 'vacuum', 'scene', 'camera', 'button', 'tv'].includes(kind)) return false;
     if (homeAutoLooksLikeMotionName(d) && !homeAutoLooksLikeContactName(d)) return false;
     if (d.has_open === true || d.has_dps === true) return true;
     return kind === 'sensor' && homeAutoLooksLikeContactName(d);
@@ -7984,7 +8078,7 @@ function homeAutoCanMotion(d) {
     if (!d) return false;
     const kind = homeAutoKind(d);
     if (kind === 'camera') return true;
-    if (['light', 'plug', 'switch', 'heater', 'relay', 'vacuum', 'door', 'hub', 'scene'].includes(kind)) return false;
+    if (['light', 'plug', 'switch', 'heater', 'relay', 'vacuum', 'door', 'hub', 'scene', 'button', 'tv'].includes(kind)) return false;
     if (d.has_motion === true) return true;
     if (homeAutoLooksLikeMotionName(d)) return true;
     // Climate-only sensors are not motion sources (Matter Occupancy / UniFi PIR set has_motion).
@@ -8014,7 +8108,7 @@ function homeAutoIsDetectEvent(event) {
 }
 
 function homeAutoCanOnOff(d) {
-    return ['light', 'plug', 'switch', 'heater', 'relay', 'vacuum'].includes(homeAutoKind(d));
+    return ['light', 'plug', 'switch', 'heater', 'relay', 'vacuum', 'tv'].includes(homeAutoKind(d));
 }
 
 function homeAutoHasPower(d) {
@@ -8044,6 +8138,9 @@ function homeAutoIsElectricalPlug(d) {
 
 function homeAutoWhenEvents(d) {
     if (!d) return [];
+    if (d.kind === 'button') {
+        return [['press', 'pressed'], ['double', 'double pressed'], ['hold', 'held']];
+    }
     const events = [];
     if (homeAutoCanSmartDetect(d)) {
         events.push(...homeAutoDetectEvents());
@@ -8101,6 +8198,9 @@ function homeAutoThenCanPulse(d) {
 
 function homeAutoThenCommands(d) {
     if (!d) return [['on', 'On']];
+    if (d.kind === 'tv') {
+        return [['on', 'On'], ['off', 'Off']];
+    }
     if (d.kind === 'scene' || String(d.id || '').startsWith('scene:')) {
         return [['run', 'Run'], ['stop', 'Off']];
     }
@@ -8323,7 +8423,21 @@ function homeAutoApplyThenBulk() {
     }
 }
 
+function homeAutoTvInputHtml(d, action) {
+    const inputs = Array.isArray(d?.inputs) ? d.inputs : [];
+    const current = String(action?.input || d?.input || (inputs[0] && inputs[0].id) || '');
+    if (!inputs.length) return '';
+    return `<select data-auto-input aria-label="TV input">${inputs.map((source) => {
+        const id = String(source.id ?? '');
+        const name = String(source.name || id);
+        return `<option value="${escapeHtml(id)}" ${id === current ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+    }).join('')}</select>`;
+}
+
 function homeAutoThenParamsHtml(d, action, cmd) {
+    if (String(d?.kind || '') === 'tv') {
+        return cmd === 'on' || cmd === 'input' ? homeAutoTvInputHtml(d, action) : '';
+    }
     if (cmd === 'pulse') {
         const hex = action.hex || action.color_hex || '#ff3b30';
         const n = Math.max(1, Math.min(10, Number(action.pulse_count || 3) || 3));
@@ -8366,6 +8480,9 @@ function homeAutoThenParamsHtml(d, action, cmd) {
 
 function homeAutoDefaultWhen(d) {
     if (!d) return null;
+    if (d.kind === 'button') {
+        return { type: 'device', id: d.id, event: 'press' };
+    }
     if (homeAutoCanSmartDetect(d)) {
         return { type: 'device', id: d.id, event: 'person' };
     }
@@ -8393,6 +8510,16 @@ function homeAutoDefaultThen(d) {
     if (d.kind === 'vacuum') {
         return { kind: 'device', id: d.id, command: 'start', device_kind: 'vacuum' };
     }
+    if (d.kind === 'tv') {
+        const inputs = Array.isArray(d.inputs) ? d.inputs : [];
+        const first = inputs[0] || {};
+        const action = { kind: 'device', id: d.id, command: 'on', device_kind: 'tv' };
+        if (first.id != null && String(first.id) !== '') {
+            action.input = String(first.id);
+            action.input_name = String(first.name || first.id);
+        }
+        return action;
+    }
     if (!homeAutoThenOk(d)) return null;
     const action = { kind: 'device', id: d.id, command: 'on', device_kind: d.kind || 'light' };
     if (homeAutoThenCanBright(d)) {
@@ -8415,7 +8542,8 @@ function homeAutoAllDevices() {
     ];
     const overlay = ['dimmable', 'colorable', 'color_hs', 'color_xy', 'color_ct', 'color_hex', 'color_temp',
         'color_temp_min', 'color_temp_max', 'brightness', 'kind', 'heating_setpoint', 'heating_min', 'heating_max',
-        'has_thermostat', 'product', 'vendor', 'source', 'name', 'room', 'room_id', 'type_label'];
+        'has_thermostat', 'product', 'vendor', 'source', 'name', 'room', 'room_id', 'type_label',
+        'inputs', 'input', 'input_name', 'needs_pin', 'press_at', 'press_gesture'];
     lists.forEach((list) => {
         list.forEach((d) => {
             if (!d || !d.id) return;
@@ -8480,6 +8608,9 @@ function homeAutoWhenPhrase(trigger, names) {
         opens: 'opens',
         closes: 'closes',
         motion: 'motion',
+        press: 'pressed',
+        double: 'double pressed',
+        hold: 'held',
         person: 'person detected',
         vehicle: 'vehicle detected',
         animal: 'animal detected',
@@ -8532,11 +8663,18 @@ function homeAutoApplyThenLook(el) {
         const n = Number(el.value);
         if (Number.isFinite(n)) action.pulse_count = Math.max(1, Math.min(10, Math.round(n)));
     }
+    if (el.matches('[data-auto-input]')) {
+        action.input = el.value;
+        const label = el.selectedOptions?.[0]?.textContent || el.value;
+        action.input_name = String(label || '').trim();
+        action.device_kind = 'tv';
+        if (!action.command || action.command === 'input') action.command = 'on';
+    }
 }
 
 function homeAutoReadThenLooks() {
     if (!autoDraft) return;
-    document.querySelectorAll('#auto-then-chips [data-auto-bright], #auto-then-chips [data-auto-hex], #auto-then-chips [data-auto-kelvin], #auto-then-chips [data-auto-celsius], #auto-then-chips [data-auto-pulse-count], #auto-then-chips [data-auto-adaptive]').forEach((el) => {
+    document.querySelectorAll('#auto-then-chips [data-auto-bright], #auto-then-chips [data-auto-hex], #auto-then-chips [data-auto-kelvin], #auto-then-chips [data-auto-celsius], #auto-then-chips [data-auto-pulse-count], #auto-then-chips [data-auto-adaptive], #auto-then-chips [data-auto-input]').forEach((el) => {
         homeAutoApplyThenLook(el);
     });
 }
@@ -8572,6 +8710,13 @@ function homeAutoThenPhrase(action, names) {
     }
     const name = names[action.id] || 'Device';
     if (action.command === 'off') return `${name} off`;
+    if (action.device_kind === 'tv' || String(action.id || '').startsWith('hisense:')) {
+        const input = String(action.input_name || action.input || '').trim();
+        let text = input ? `${name} on ${input}` : `${name} on`;
+        const off = Number(action.off_after_sec || 0);
+        if (off > 0) text += `, off after ${homeAutoFormatDuration(off)}`;
+        return text;
+    }
     if (action.command === 'start') return `${name} start`;
     if (action.command === 'dock') return `${name} dock`;
     if (action.command === 'pause') return `${name} pause`;
@@ -9516,11 +9661,17 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
     const events = homeAutoWhenEvents(d || { id: trigger.id, kind: 'light' });
     const eventName = trigger.event || 'turns_on';
     const dur = homeAutoDurationEvent(eventName) ? homeAutoDurationParts(trigger.for_sec || 300) : null;
+    const buttonStop = events.some(([v]) => v === 'press')
+        ? `<select data-auto-stop aria-label="Stop gesture"><option value="">no stop</option>${events.filter(([v]) => v !== eventName).map(([v, label]) =>
+            `<option value="${v}" ${v === trigger.stop_event ? 'selected' : ''}>stop on ${label}</option>`
+        ).join('')}</select>`
+        : '';
     return `<div class="auto-chip" data-auto-when ${iAttr}>
         ${homeAutoChipNameHtml(d || { name: trigger.id })}
         <select data-auto-event>${events.map(([v, label]) =>
             `<option value="${v}" ${v === eventName ? 'selected' : ''}>${label}</option>`
         ).join('')}</select>
+        ${buttonStop}
         ${dur ? `<input type="number" min="1" data-auto-for value="${dur.value}">
             <select data-auto-for-unit>
                 <option value="1" ${dur.unit === 1 ? 'selected' : ''}>sec</option>
@@ -9921,6 +10072,7 @@ function homeAutoFillIfDeviceSelect(select, selectedId, query) {
 
 function homeAutoIfStateOptions(d) {
     if (!d) return [['on', 'on'], ['off', 'off']];
+    if (d.kind === 'button') return [];
     const states = [];
     if (homeAutoCanOnOff(d)) {
         states.push(['on', 'on'], ['off', 'off']);
@@ -9954,6 +10106,8 @@ function homeAutoDeviceSelectGroups(devices) {
         ['doors', 'Doors'],
         ['controllers', 'Controllers'],
         ['vacuums', 'Vacuums'],
+        ['buttons', 'Buttons'],
+        ['tvs', 'TVs'],
         ['other', 'Other'],
     ];
     const buckets = {};
@@ -10164,6 +10318,10 @@ function homeAutoDeviceGroupId(d) {
             return 'plugs';
         case 'switch':
             return 'switches';
+        case 'button':
+            return 'buttons';
+        case 'tv':
+            return 'tvs';
         case 'sensor':
             return 'sensors';
         case 'camera':
@@ -10244,6 +10402,8 @@ function homeAutoTypeLabel(d) {
     if (kind === 'vacuum') return 'Vacuum';
     if (kind === 'plug') return 'Plug';
     if (kind === 'switch') return 'Switch';
+    if (kind === 'button') return 'Button';
+    if (kind === 'tv') return 'TV';
     return '';
 }
 
@@ -10314,6 +10474,8 @@ function homeAutoTrayGroups(devices, scenes) {
         ['doors', 'Doors'],
         ['controllers', 'Controllers'],
         ['vacuums', 'Vacuums'],
+        ['buttons', 'Buttons'],
+        ['tvs', 'TVs'],
         ['scenes', 'Scenes'],
         ['other', 'Other'],
     ];
@@ -10542,6 +10704,20 @@ function homeAutoApplyTray(kind, id, zone) {
     }
     const d = homeAutoDeviceById(id);
     if (!d) return;
+    if (d.kind === 'button') {
+        if (zone === 'then') {
+            showToast('Buttons stay in When', 'error');
+            return;
+        }
+        if (zone === 'if') {
+            showToast('Buttons stay in When', 'error');
+            return;
+        }
+        homeAutoApplyWhen(homeAutoDefaultWhen(d));
+        homeAutoFollowName();
+        renderHomeAutoEditor();
+        return;
+    }
     if (zone === 'if') {
         const states = homeAutoIfStateOptions(d);
         if (!states.length) {
@@ -10685,6 +10861,9 @@ function homeAutoApplyEvent(raw, index = 0) {
     }
     const id = trigger.id;
     list[index] = { type: 'device', id, event: raw };
+    if (['press', 'double', 'hold'].includes(raw) && ['press', 'double', 'hold'].includes(trigger.stop_event) && trigger.stop_event !== raw) {
+        list[index].stop_event = trigger.stop_event;
+    }
     if (homeAutoDurationEvent(raw)) {
         const chip = document.querySelector(`[data-auto-when-i="${index}"]`);
         list[index].for_sec = homeAutoReadDuration(chip || document);
@@ -10705,6 +10884,12 @@ async function homeAutoSave() {
         if (trigger.type === 'time') {
             const atEl = chip?.querySelector('[data-auto-at]');
             if (atEl && atEl.value) trigger.at = atEl.value;
+        }
+        const stop = chip?.querySelector('[data-auto-stop]')?.value || '';
+        if (['press', 'double', 'hold'].includes(trigger.event) && ['press', 'double', 'hold'].includes(stop) && stop !== trigger.event) {
+            trigger.stop_event = stop;
+        } else {
+            delete trigger.stop_event;
         }
         if (homeAutoIsPowerwallThreshold(trigger)) {
             const metric = chip?.querySelector('[data-auto-pw-metric]')?.value || trigger.metric;
@@ -11063,6 +11248,17 @@ function bindHomeAutomations() {
             homeAutoSetTriggers(list);
         }
         if (event.target.matches('[data-auto-event]')) homeAutoApplyEvent(event.target.value, homeAutoTriggerIndex(event.target));
+        if (event.target.matches('[data-auto-stop]')) {
+            const i = homeAutoTriggerIndex(event.target);
+            const list = homeAutoTriggers();
+            const stop = event.target.value;
+            if (list[i]) {
+                if (['press', 'double', 'hold'].includes(stop) && stop !== list[i].event) list[i].stop_event = stop;
+                else delete list[i].stop_event;
+                homeAutoSetTriggers(list);
+            }
+        }
+        if (event.target.matches('[data-auto-input]')) homeAutoApplyThenLook(event.target);
         if (event.target.matches('[data-auto-for], [data-auto-for-unit]')) {
             const i = homeAutoTriggerIndex(event.target);
             const list = homeAutoTriggers();
@@ -11164,6 +11360,10 @@ function bindHomeAutomations() {
             const i = Number(event.target.closest('[data-auto-then]')?.getAttribute('data-auto-then') || 0);
             if (autoDraft.actions[i]) {
                 autoDraft.actions[i].command = event.target.value;
+                if (event.target.value === 'off') {
+                    delete autoDraft.actions[i].input;
+                    delete autoDraft.actions[i].input_name;
+                }
                 if (event.target.value === 'brightness' && autoDraft.actions[i].brightness == null) {
                     autoDraft.actions[i].brightness = 100;
                 }
@@ -11285,12 +11485,12 @@ function bindHomeAutomations() {
             const i = Number(chip?.getAttribute('data-auto-if-i') || 0);
             if (autoDraft.conditions[i]) homeAutoApplyIfFor(autoDraft.conditions[i], chip);
         }
-        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive], [data-auto-if-within-mode], [data-auto-if-within], [data-auto-if-within-unit], [data-auto-if-for-mode], [data-auto-if-for], [data-auto-if-for-unit]')) {
+        if (event.target.matches('[data-auto-at], [data-auto-sun], [data-auto-offset], [data-auto-event], [data-auto-stop], [data-auto-for], [data-auto-for-unit], #auto-off-after-enabled, #auto-off-after-value, #auto-off-after-unit, #auto-hold-sec, [data-auto-thresh], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-cmd], [data-auto-bright], [data-auto-hex], [data-auto-kelvin], [data-auto-celsius], [data-auto-input], [data-auto-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive], [data-auto-if-within-mode], [data-auto-if-within], [data-auto-if-within-unit], [data-auto-if-for-mode], [data-auto-if-for], [data-auto-if-for-unit]')) {
             homeAutoFollowName();
         } else {
             homeAutoSyncName();
         }
-        if (event.target.matches('[data-auto-event], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-state], [data-auto-if-within-mode], [data-auto-if-for-mode], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) renderHomeAutoEditor();
+        if (event.target.matches('[data-auto-event], [data-auto-stop], [data-auto-cmd], [data-auto-sun], #auto-off-after-enabled, #auto-hold-sec, [data-auto-if-id], [data-auto-if-state], [data-auto-if-within-mode], [data-auto-if-for-mode], [data-auto-if-sun-start], [data-auto-if-sun-end], [data-auto-pw-metric], [data-auto-pw-op], [data-auto-if-pw-metric], [data-auto-if-pw-op], [data-auto-robot-event], [data-auto-if-robot-event], [data-auto-yarbo-plan], [data-auto-pulse-count], [data-auto-adaptive]')) renderHomeAutoEditor();
     });
     page.addEventListener('dragstart', (event) => {
         const tray = event.target.closest('[data-auto-tray]');
@@ -18454,6 +18654,134 @@ document.getElementById('home-pair')?.addEventListener('click', async () => {
             btn.textContent = 'Add device';
         }
         if (input) input.disabled = false;
+    }
+});
+function homeTvStatus(text, show = true) {
+    const status = document.getElementById('home-tv-status');
+    if (!status) return;
+    status.textContent = text || '';
+    status.classList.toggle('hidden', !show || !text);
+}
+
+function homeTvShowPin(id) {
+    const box = document.getElementById('home-tv-pin');
+    if (!box) return;
+    box.dataset.tvId = id || '';
+    box.classList.toggle('hidden', !id);
+}
+
+function homeTvFoundHtml(found) {
+    const box = document.getElementById('home-tv-found');
+    if (!box) return;
+    const rows = (found || []).filter((row) => row && (row.host || row.port_open || row.connected));
+    if (!rows.length) {
+        box.innerHTML = '';
+        return;
+    }
+    box.innerHTML = rows.map((row) => {
+        const host = String(row.host || '');
+        const note = row.needs_pin ? 'code on the TV' : (row.error || row.status || (row.connected ? 'ready' : 'port open'));
+        return `<button type="button" class="btn btn-secondary btn-compact" data-home-tv-found="${escapeHtml(host)}">Add ${escapeHtml(host)}</button> <span class="hint">${escapeHtml(String(note))}</span>`;
+    }).join('<br>');
+}
+
+async function homeTvAdd(host) {
+    const data = await homeApi({ action: 'tv_add', host }, 90000);
+    if (!data.ok) throw new Error(data.error || 'Could not add the TV');
+    const tv = data.tv || {};
+    if (tv.needs_pin) {
+        homeTvShowPin(tv.id || '');
+        homeTvStatus('The TV is showing a code. Enter it here.');
+    } else {
+        homeTvShowPin('');
+        homeTvStatus(tv.status || 'TV added');
+    }
+    showToast(tv.needs_pin ? 'Enter the code on the TV' : 'TV added', tv.needs_pin ? 'info' : 'success');
+    await loadHomeDashboard({ force: true });
+}
+
+document.getElementById('home-tv-look')?.addEventListener('click', async () => {
+    const btn = document.getElementById('home-tv-look');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Looking…';
+    }
+    homeTvStatus('Looking for a Hisense TV on this network…');
+    try {
+        const data = await homeApi({ action: 'tv_discover' }, 90000);
+        if (!data.ok) throw new Error(data.error || 'Look for TV failed');
+        const found = Array.isArray(data.found) ? data.found : [];
+        homeTvFoundHtml(found);
+        homeTvStatus(found.length ? `Found ${found.length}. Tap Add.` : 'No TV answered. Type its IP and tap Add TV.');
+    } catch (err) {
+        homeTvStatus(err.message || 'Look for TV failed');
+        showToast(err.message || 'Look for TV failed', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Look for TV';
+        }
+    }
+});
+document.getElementById('home-tv-add')?.addEventListener('click', async () => {
+    const host = document.getElementById('home-tv-host')?.value.trim() || '';
+    const btn = document.getElementById('home-tv-add');
+    if (!host) {
+        homeTvStatus('Enter the TV IP address');
+        showToast('Enter the TV IP address', 'error');
+        return;
+    }
+    if (btn) btn.disabled = true;
+    homeTvStatus('Talking to the TV…');
+    try {
+        await homeTvAdd(host);
+    } catch (err) {
+        homeTvStatus(err.message || 'Could not add the TV');
+        showToast(err.message || 'Could not add the TV', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+});
+document.getElementById('home-tv-found')?.addEventListener('click', async (event) => {
+    const btn = event.target.closest('[data-home-tv-found]');
+    if (!btn) return;
+    const host = btn.getAttribute('data-home-tv-found') || '';
+    const field = document.getElementById('home-tv-host');
+    if (field) field.value = host;
+    btn.disabled = true;
+    try {
+        await homeTvAdd(host);
+    } catch (err) {
+        homeTvStatus(err.message || 'Could not add the TV');
+        showToast(err.message || 'Could not add the TV', 'error');
+    } finally {
+        btn.disabled = false;
+    }
+});
+document.getElementById('home-tv-pin-send')?.addEventListener('click', async () => {
+    const box = document.getElementById('home-tv-pin');
+    const pin = document.getElementById('home-tv-pin-code')?.value.trim() || '';
+    const id = box?.dataset.tvId || '';
+    const btn = document.getElementById('home-tv-pin-send');
+    if (!id || pin.length < 4) {
+        homeTvStatus('Enter the code shown on the TV');
+        return;
+    }
+    if (btn) btn.disabled = true;
+    try {
+        const data = await homeApi({ action: 'tv_pin', id, pin }, 30000);
+        if (!data.ok) throw new Error(data.error || 'The TV did not accept the code');
+        homeTvShowPin('');
+        const code = document.getElementById('home-tv-pin-code');
+        if (code) code.value = '';
+        homeTvStatus('TV added');
+        showToast('TV added', 'success');
+        await loadHomeDashboard({ force: true });
+    } catch (err) {
+        homeTvStatus(err.message || 'The TV did not accept the code');
+        showToast(err.message || 'The TV did not accept the code', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
     }
 });
 document.getElementById('home-scan')?.addEventListener('click', async () => {

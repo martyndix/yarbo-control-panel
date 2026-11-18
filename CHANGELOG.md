@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.381] - 2026-11-18
+
+### Added
+
+- **Hisense TV.** Apple Home does not share a pairing code for the set. Home **⚙️** can **Look for TV** or add it by IP. The row shows On/Off and the inputs the TV reports. An automation can turn it on to a chosen input and turn it off after a timer.
+- **IKEA Bilresa.** Pair it with Turn On Pairing Mode. It stays out of rooms and shows up in Automations as pressed, double pressed, or held. A different gesture on the same When can stop the automation. Matter agent **v122**.
+
 ## [4.0.380] - 2026-11-18
 
 ### Added

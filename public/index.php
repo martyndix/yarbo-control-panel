@@ -669,8 +669,25 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="btn" id="home-pair">Add device</button>
                     <button type="button" class="btn btn-secondary" id="home-scan">Look for devices</button>
                 </div>
+                <div class="home-add">
+                    <label class="settings-field">
+                        <span class="label">Hisense TV IP</span>
+                        <input type="text" id="home-tv-host" spellcheck="false" autocomplete="off" placeholder="192.168.1.20" inputmode="decimal">
+                    </label>
+                    <button type="button" class="btn btn-secondary" id="home-tv-look">Look for TV</button>
+                    <button type="button" class="btn" id="home-tv-add">Add TV</button>
+                </div>
+                <p id="home-tv-status" class="hint hidden" role="status"></p>
+                <div id="home-tv-found" class="home-tv-found"></div>
+                <div id="home-tv-pin" class="home-add hidden">
+                    <label class="settings-field">
+                        <span class="label">Code on the TV</span>
+                        <input type="text" id="home-tv-pin-code" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="4 digits">
+                    </label>
+                    <button type="button" class="btn" id="home-tv-pin-send">Send code</button>
+                </div>
                 <p id="home-pair-status" class="hint hidden" role="status"></p>
-                <p class="hint"><strong>Matter device already in Apple Home</strong> (IKEA plug, motion, door/window, …): open the accessory → <strong>Turn On Pairing Mode</strong> → paste that fresh code (XXXX-XXX-XXXX) and tap <strong>Add device</strong> — not the sticker QR, and not Look for devices. Keep a HomePod or Apple TV online for Thread. Motion and contact sensors then use the same Home / Automations workflows as UniFi (👤 / 🚪 / opens / motion). <strong>Hue:</strong> Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Do not pair the same Hue Bridge twice. New Hue bulbs later appear after <strong>Look for devices</strong> (wait for it to finish), or on the next hunt (~15 minutes). Check Hidden before pairing anything again.</p>
+                <p class="hint"><strong>Matter device already in Apple Home</strong> (IKEA plug, motion, door/window, Bilresa button, …): open the accessory → <strong>Turn On Pairing Mode</strong> → paste that fresh code (XXXX-XXX-XXXX) and tap <strong>Add device</strong> — not the sticker QR, and not Look for devices. Keep a HomePod or Apple TV online for Thread. A Bilresa button does not appear in a room. It shows up in Automations as pressed, double pressed, or held. <strong>Hisense TV:</strong> Apple Home does not give this panel a pairing code. Use <strong>Look for TV</strong> or type the TV’s IP, then <strong>Add TV</strong>. If the set shows a code, enter it here. <strong>Hue:</strong> Hue app → Settings → Smart Home → Matter code (adds the bridge and its lights). Do not pair the same Hue Bridge twice. New Hue bulbs later appear after <strong>Look for devices</strong> (wait for it to finish), or on the next hunt (~15 minutes). Check Hidden before pairing anything again.</p>
             </div>
             <div id="home-room-add" class="home-room-add">
                 <input type="text" id="home-room-name" placeholder="Kitchen" maxlength="32" aria-label="New room name">

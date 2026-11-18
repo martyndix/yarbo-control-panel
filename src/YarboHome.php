@@ -19,6 +19,8 @@ final class YarboHome
     public const PULSE_CHUNK_GAP_US = 30000;
     public const KIND_PLUG = 'plug';
     public const KIND_SWITCH = 'switch';
+    public const KIND_BUTTON = 'button';
+    public const KIND_TV = 'tv';
     public const KIND_HEATER = 'heater';
     public const KIND_VACUUM = 'vacuum';
     public const KIND_SCENE = 'scene';
@@ -780,10 +782,30 @@ final class YarboHome
                 $row['motor_mode_w'] = $this->motorModeWatts($id);
                 $row['motor_pending_off'] = $this->hasMotorPendingOff($id);
             }
+            if (($row['kind'] ?? '') === self::KIND_BUTTON) {
+                $row['room_id'] = '';
+                $row['room'] = '';
+                $row['group_id'] = '';
+                $row = $this->applyButtonPress($row);
+            }
             if ($row['hidden']) {
                 $hiddenDevices[] = $row;
             } else {
                 $devices[] = $row;
+            }
+        }
+        foreach ((new YarboHisense($this->projectRoot))->homeRows() as $tv) {
+            $tvId = (string) ($tv['id'] ?? '');
+            if ($tvId === '' || isset($seenIds[$tvId])) {
+                continue;
+            }
+            $seenIds[$tvId] = true;
+            $tv['name'] = (string) ($store['names'][$tvId] ?? $tv['name'] ?? 'Hisense TV');
+            $tv['hidden'] = isset($hidden[$tvId]);
+            if ($tv['hidden']) {
+                $hiddenDevices[] = $tv;
+            } else {
+                $devices[] = $tv;
             }
         }
         $devices = self::dropUnavailableNameDuplicates($devices);
@@ -1277,6 +1299,23 @@ final class YarboHome
     {
         $id = trim((string) ($input['id'] ?? ''));
         $action = strtolower(trim((string) ($input['command'] ?? $input['home_action'] ?? '')));
+        if ($action === 'colour' || $action === 'set_color' || $action === 'set_colour') {
+            $action = 'color';
+        }
+        if ($action === 'colour_temp' || $action === 'kelvin') {
+            $action = 'color_temp';
+        }
+        if ($id === '' || $action === '') {
+            return ['ok' => false, 'error' => 'Device and action are required'];
+        }
+        if (str_starts_with($id, YarboHisense::ID_PREFIX)) {
+            $result = (new YarboHisense($this->projectRoot))->command($id, $action, $input);
+            if ($result['ok'] ?? false) {
+                $this->rememberCommandTrigger($id, $action, $input, $result);
+            }
+
+            return $result;
+        }
         if ($id !== '' && !YarboUnifi::isHomeId($id)) {
             $cached = $this->cachedDeviceRow($id);
             if (is_array($cached) && self::looksLikeLeftoverHueEndpoint($cached)) {
@@ -1288,15 +1327,6 @@ final class YarboHome
             if (is_array($cached) && (YarboMatterFabric::reclassifyRow($cached)['kind'] ?? '') === 'switch') {
                 return ['ok' => false, 'error' => 'That is a Hue switch, not a light.'];
             }
-        }
-        if ($action === 'colour' || $action === 'set_color' || $action === 'set_colour') {
-            $action = 'color';
-        }
-        if ($action === 'colour_temp' || $action === 'kelvin') {
-            $action = 'color_temp';
-        }
-        if ($id === '' || $action === '') {
-            return ['ok' => false, 'error' => 'Device and action are required'];
         }
         if (!YarboUnifi::isHomeId($id) && $action === 'adaptive') {
             return $this->commandAdaptiveFollow($id, $input);
@@ -2231,6 +2261,11 @@ final class YarboHome
     public function removeDevice(string $id, bool $wholeNode = false): array
     {
         $id = trim($id);
+        if (str_starts_with($id, YarboHisense::ID_PREFIX)) {
+            return (new YarboHisense($this->projectRoot))->remove($id)
+                ? ['ok' => true]
+                : ['ok' => false, 'error' => 'That TV is not added'];
+        }
         if (YarboUnifi::isHomeId($id)) {
             return $this->hideDevice($id, true);
         }
@@ -3352,6 +3387,12 @@ final class YarboHome
 
             return false;
         }
+        if (str_starts_with($id, YarboHisense::ID_PREFIX) || $kind === self::KIND_TV) {
+            return in_array($action, ['on', 'off', 'toggle', 'input'], true);
+        }
+        if ($kind === self::KIND_BUTTON) {
+            return false;
+        }
         $kind = strtolower(trim((string) $kind));
         if (in_array($action, ['start', 'dock', 'pause', 'resume', 'mop', 'vacuum', 'select_areas'], true)) {
             return $kind === '' || $kind === self::KIND_VACUUM;
@@ -3359,8 +3400,11 @@ final class YarboHome
         if ($kind === '') {
             $kind = self::KIND_LIGHT;
         }
-        if (in_array($kind, ['camera', 'sensor', 'door', 'hub', 'switch'], true)) {
+        if (in_array($kind, ['camera', 'sensor', 'door', 'hub', 'switch', self::KIND_BUTTON], true)) {
             return false;
+        }
+        if ($kind === self::KIND_TV) {
+            return in_array($action, ['on', 'off', 'toggle', 'input'], true);
         }
         if ($kind === self::KIND_HEATER) {
             return in_array($action, ['on', 'off', 'toggle', 'setpoint', 'temperature', 'heating_setpoint'], true);
@@ -3487,6 +3531,14 @@ final class YarboHome
                 'motion_at' => isset($device['motion_at']) && is_numeric($device['motion_at'])
                     ? (int) $device['motion_at']
                     : 0,
+                'press_at' => isset($device['press_at']) && is_numeric($device['press_at'])
+                    ? (int) $device['press_at']
+                    : 0,
+                'press_gesture' => (string) ($device['press_gesture'] ?? ''),
+                'inputs' => is_array($device['inputs'] ?? null) ? $device['inputs'] : [],
+                'input' => (string) ($device['input'] ?? ''),
+                'input_name' => (string) ($device['input_name'] ?? ''),
+                'needs_pin' => !empty($device['needs_pin']),
                 'person' => !empty($device['person']),
                 'vehicle' => !empty($device['vehicle']),
                 'animal' => !empty($device['animal']),
@@ -3558,10 +3610,71 @@ final class YarboHome
                     ? (float) $device['heating_max']
                     : null,
             ];
-            $out[] = $row;
+            $out[] = $this->applyButtonPress($row);
+        }
+        $seen = [];
+        foreach ($out as $row) {
+            $seen[(string) ($row['id'] ?? '')] = true;
+        }
+        foreach ((new YarboHisense($this->projectRoot))->homeRows() as $tv) {
+            $tvId = (string) ($tv['id'] ?? '');
+            if ($tvId === '' || isset($seen[$tvId])) {
+                continue;
+            }
+            $out[] = $tv;
         }
 
         return $out;
+    }
+
+    /**
+     * @return array<string, array{gesture?: string, at?: int}>
+     */
+    public static function buttonPresses(string $projectRoot): array
+    {
+        $path = $projectRoot . '/data/button-press.json';
+        if (!is_file($path)) {
+            return [];
+        }
+        $raw = file_get_contents($path);
+        $json = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+        if (!is_array($json)) {
+            return [];
+        }
+        $out = [];
+        foreach ($json as $id => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $out[(string) $id] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function applyButtonPress(array $row): array
+    {
+        $id = (string) ($row['id'] ?? '');
+        if ($id === '') {
+            return $row;
+        }
+        $hit = self::buttonPresses($this->projectRoot)[$id] ?? null;
+        if (!is_array($hit)) {
+            return $row;
+        }
+        if (isset($hit['at']) && is_numeric($hit['at']) && (int) $hit['at'] > (int) ($row['press_at'] ?? 0)) {
+            $row['press_at'] = (int) $hit['at'];
+        }
+        $gesture = strtolower(trim((string) ($hit['gesture'] ?? '')));
+        if (in_array($gesture, ['press', 'double', 'hold'], true)) {
+            $row['press_gesture'] = $gesture;
+        }
+
+        return $row;
     }
 
     /**
@@ -3633,6 +3746,8 @@ final class YarboHome
             self::KIND_VACUUM => 'Vacuum',
             self::KIND_PLUG => 'Plug',
             self::KIND_SWITCH => 'Switch',
+            self::KIND_BUTTON => 'Button',
+            self::KIND_TV => 'TV',
             'sensor' => 'Sensor',
             default => '',
         };
@@ -4564,6 +4679,12 @@ final class YarboHome
         if (isset($live['motion_at']) && is_numeric($live['motion_at']) && (int) $live['motion_at'] > 0) {
             $device['motion_at'] = (int) $live['motion_at'];
         }
+        if (isset($live['press_at']) && is_numeric($live['press_at']) && (int) $live['press_at'] > 0) {
+            $device['press_at'] = (int) $live['press_at'];
+        }
+        if (isset($live['press_gesture']) && is_string($live['press_gesture']) && $live['press_gesture'] !== '') {
+            $device['press_gesture'] = $live['press_gesture'];
+        }
         if (array_key_exists('status', $live) && is_string($live['status']) && $live['status'] !== '') {
             $device['status'] = $live['status'];
         }
@@ -5123,6 +5244,15 @@ final class YarboHome
                 }
                 if (is_array($row['climate_endpoints'] ?? null) && $row['climate_endpoints'] !== []) {
                     $slim['climate_endpoints'] = array_values(array_map(static fn ($ep): int => (int) $ep, $row['climate_endpoints']));
+                }
+            }
+            if ($kind === self::KIND_BUTTON) {
+                if (isset($row['press_at']) && is_numeric($row['press_at']) && (int) $row['press_at'] > 0) {
+                    $slim['press_at'] = (int) $row['press_at'];
+                }
+                $gesture = strtolower(trim((string) ($row['press_gesture'] ?? '')));
+                if (in_array($gesture, ['press', 'double', 'hold'], true)) {
+                    $slim['press_gesture'] = $gesture;
                 }
             }
             if ($kind === self::KIND_PLUG) {
