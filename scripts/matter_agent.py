@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 116
+AGENT_VERSION = 117
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -6958,7 +6958,9 @@ def apply_attribute_event(data: Any) -> None:
     elif cluster == HUMIDITY_MEASUREMENT and attr == ATTR_MEASURED_HUMIDITY:
         fields["humidity"] = matter_humidity_percent(value)
     elif cluster == BOOLEAN_STATE and attr == ATTR_BOOL_STATE_VALUE:
-        opened = attr_bool(value)
+        opened = contact_state_is_open(value)
+        if opened is None:
+            return
         fields["has_open"] = True
         fields["open"] = opened
         fields["on"] = opened
@@ -7439,6 +7441,16 @@ def bridged_parent_names(
 
 def attr_num(attributes: dict[str, Any], endpoint: int, cluster: int, attr: int) -> float | None:
     return event_number(attr_raw(attributes, endpoint, cluster, attr))
+
+
+def contact_state_is_open(raw: Any) -> bool | None:
+    """Contact Sensor StateValue is the contact: TRUE is closed, FALSE is open.
+
+    MYGGBETT and PARASOLL follow that, and so does Apple Home.
+    """
+    if raw is None:
+        return None
+    return not attr_bool(raw)
 
 
 def attr_bool(val: Any) -> bool:
@@ -8207,7 +8219,7 @@ def sensor_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     if has_open:
         raw = attr_raw(attributes, endpoint, BOOLEAN_STATE, ATTR_BOOL_STATE_VALUE)
         if raw is not None:
-            open_val = attr_bool(raw)
+            open_val = contact_state_is_open(raw)
     has_motion = endpoint_looks_occupancy_sensor(attributes, endpoint)
     motion_val = None
     if has_motion:

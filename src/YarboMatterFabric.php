@@ -1464,6 +1464,19 @@ final class YarboMatterFabric
     }
 
     /**
+     * Contact Sensor StateValue is the contact: TRUE is closed, FALSE is open.
+     * MYGGBETT and PARASOLL follow that, and so does Apple Home.
+     */
+    private static function contactStateIsOpen(mixed $raw): ?bool
+    {
+        if ($raw === null) {
+            return null;
+        }
+
+        return !self::attrBool($raw);
+    }
+
+    /**
      * @param array<string, mixed> $attributes
      */
     private static function endpointLooksOccupancySensor(array $attributes, int $endpoint): bool
@@ -1631,7 +1644,7 @@ final class YarboMatterFabric
         if ($hasOpen) {
             $raw = self::attrRaw($attributes, $endpoint, self::BOOLEAN_STATE, self::ATTR_BOOL_STATE_VALUE);
             if ($raw !== null) {
-                $open = self::attrBool($raw);
+                $open = self::contactStateIsOpen($raw);
             }
         }
         $hasMotion = self::endpointLooksOccupancySensor($attributes, $endpoint);

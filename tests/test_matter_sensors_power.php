@@ -33,7 +33,7 @@ $contact = [
         '0/40/1' => 'IKEA of Sweden',
         '0/40/3' => 'PARASOLL',
         '1/29/0' => [['deviceType' => 0x0015, 'revision' => 1]],
-        '1/69/0' => true,
+        '1/69/0' => false, // Contact Sensor StateValue FALSE = open
     ],
 ];
 $plug = [
@@ -96,9 +96,21 @@ assert_true(str_contains((string) ($clim['status'] ?? ''), '°'), 'climate statu
 $cont = $byId['81:1'] ?? [];
 assert_true(($cont['kind'] ?? '') === 'sensor', 'contact kind');
 assert_true(($cont['has_open'] ?? false) === true, 'contact has_open');
-assert_true(($cont['open'] ?? null) === true, 'contact open');
+assert_true(($cont['open'] ?? null) === true, 'contact open when StateValue is false');
+assert_true(str_contains((string) ($cont['status'] ?? ''), 'Open'), 'contact Open status');
 assert_true(YarboHome::isOpenCloseSensor($cont), 'ACCESS treats Matter contact as open/close');
 assert_true(YarboHome::contactIsOpen($cont) === true, 'contactIsOpen true');
+$closedContact = $contact;
+$closedContact['attributes']['1/69/0'] = true;
+$closedRow = [];
+foreach (YarboMatterFabric::flatten([$closedContact]) as $row) {
+    if (($row['id'] ?? '') === '81:1') {
+        $closedRow = $row;
+    }
+}
+assert_true(($closedRow['open'] ?? null) === false, 'MYGGBETT StateValue true is closed');
+assert_true(str_contains((string) ($closedRow['status'] ?? ''), 'Closed'), 'contact Closed status');
+assert_true(YarboHome::contactIsOpen($closedRow) === false, 'contactIsOpen false when closed');
 assert_true(YarboHome::deviceAcceptsCommand('81:1', 'toggle', 'sensor') === false, 'sensors reject toggle');
 
 $plugRow = $byId['82:1'] ?? [];
@@ -202,7 +214,7 @@ assert_true(str_contains($agent, 'ELECTRICAL_POWER = 0x0090'), 'agent Electrical
 assert_true(str_contains($agent, 'BOOLEAN_STATE = 0x0045'), 'agent Boolean State cluster');
 assert_true(str_contains($agent, 'OCCUPANCY_SENSING = 0x0406'), 'agent Occupancy Sensing cluster');
 assert_true(str_contains($agent, 'HUMIDITY_MEASUREMENT = 0x0405'), 'agent Humidity cluster');
-assert_true(str_contains($agent, 'AGENT_VERSION = 116'), 'agent v116');
+assert_true(str_contains($agent, 'AGENT_VERSION = 117'), 'agent v117');
 assert_true(str_contains($js, 'home-device-power'), 'Home shows plug watts');
 assert_true(str_contains($js, 'homeIsSensorKind(d)'), 'Home renders Matter sensors');
 assert_true(str_contains($js, 'homeMemberHasMotion'), 'Home person emoji uses motion');

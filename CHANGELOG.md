@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.372] - 2026-11-18
+
+### Fixed
+
+- An IKEA MYGGBETT (and other Matter contact sensors such as PARASOLL) now shows **Closed** when the door or window is closed and **Open** when it is open, matching Apple Home. Matter reports the contact itself: true means the magnet is together. Matter agent **v117**.
+
 ## [4.0.371] - 2026-11-18
 
 ### Fixed
