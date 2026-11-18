@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.379] - 2026-11-18
+
+### Added
+
+- Metering plugs keep a **power history**. Watts, volts, and amps are saved every 30 minutes for up to a year, the same way temperature and humidity are. Tap the **W · V · A** line on the plug to open the graph.
+
 ## [4.0.378] - 2026-11-18
 
 ### Fixed

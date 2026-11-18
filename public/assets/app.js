@@ -2132,6 +2132,14 @@ function sensorHistoryParseDateInput(value, endOfDay) {
     return Number.isFinite(ts) ? ts : 0;
 }
 
+function sensorHistoryTooltipUnit(axis) {
+    if (axis === 'yHum') return '%';
+    if (axis === 'yW') return ' W';
+    if (axis === 'yV') return ' V';
+    if (axis === 'yA') return ' A';
+    return '°';
+}
+
 function formatSensorTrendMetric(label, unit, trend) {
     if (!trend) return '';
     const slope = trend.slope === 'up' ? '↑' : (trend.slope === 'down' ? '↓' : '→');
@@ -2216,7 +2224,7 @@ async function loadSensorHistoryChart() {
     } catch (err) {
         destroySensorHistoryChart();
         if (els.sensorHistorySummary) {
-            els.sensorHistorySummary.textContent = 'No climate history yet — samples are taken every 30 minutes.';
+            els.sensorHistorySummary.textContent = 'No history yet — samples are taken every 30 minutes.';
         }
         if (els.sensorHistoryError) {
             els.sensorHistoryError.textContent = err.message || 'Could not load history';
@@ -2230,6 +2238,9 @@ async function loadSensorHistoryChart() {
 function renderSensorHistoryChart(data) {
     const points = Array.isArray(data.points) ? data.points : [];
     const hasHumidity = Boolean(data.has_humidity);
+    const hasPower = Boolean(data.has_power);
+    const hasVoltage = Boolean(data.has_voltage);
+    const hasCurrent = Boolean(data.has_current);
     const labels = points.map((p) => {
         const d = new Date(Number(p.t) * 1000);
         if (data.bucket === '1d') {
@@ -2244,8 +2255,15 @@ function renderSensorHistoryChart(data) {
     });
     const temps = points.map((p) => (p.temperature == null ? null : Number(p.temperature)));
     const hums = points.map((p) => (p.humidity == null ? null : Number(p.humidity)));
+    const watts = points.map((p) => (p.power_w == null ? null : Number(p.power_w)));
+    const volts = points.map((p) => (p.voltage_v == null ? null : Number(p.voltage_v)));
+    const amps = points.map((p) => (p.current_a == null ? null : Number(p.current_a)));
     const tempMins = points.map((p) => (p.temp_min == null ? null : Number(p.temp_min)));
     const tempMaxs = points.map((p) => (p.temp_max == null ? null : Number(p.temp_max)));
+    const powerMins = points.map((p) => (p.power_min == null ? null : Number(p.power_min)));
+    const powerMaxs = points.map((p) => (p.power_max == null ? null : Number(p.power_max)));
+    const climate = temps.some((v) => v != null) || hums.some((v) => v != null);
+    const electrical = (hasPower || hasVoltage || hasCurrent) && !climate;
 
     if (els.sensorHistorySummary) {
         const n = points.length;
@@ -2255,11 +2273,20 @@ function renderSensorHistoryChart(data) {
             : 'No samples in this range yet — history builds every 30 minutes.';
     }
     const trendBits = [];
-    const tTrend = formatSensorTrendMetric('Temp', '°', data.trends?.temperature);
-    if (tTrend) trendBits.push(tTrend);
-    if (hasHumidity) {
-        const hTrend = formatSensorTrendMetric('Humidity', '%', data.trends?.humidity);
-        if (hTrend) trendBits.push(hTrend);
+    if (electrical) {
+        const wTrend = formatSensorTrendMetric('Power', ' W', data.trends?.power_w);
+        if (wTrend) trendBits.push(wTrend);
+        const vTrend = formatSensorTrendMetric('Voltage', ' V', data.trends?.voltage_v);
+        if (vTrend) trendBits.push(vTrend);
+        const aTrend = formatSensorTrendMetric('Current', ' A', data.trends?.current_a);
+        if (aTrend) trendBits.push(aTrend);
+    } else {
+        const tTrend = formatSensorTrendMetric('Temp', '°', data.trends?.temperature);
+        if (tTrend) trendBits.push(tTrend);
+        if (hasHumidity) {
+            const hTrend = formatSensorTrendMetric('Humidity', '%', data.trends?.humidity);
+            if (hTrend) trendBits.push(hTrend);
+        }
     }
     if (els.sensorHistoryTrends) {
         els.sensorHistoryTrends.textContent = trendBits.join(' · ');
@@ -2274,7 +2301,7 @@ function renderSensorHistoryChart(data) {
     }
 
     destroySensorHistoryChart();
-    const datasets = [
+    const datasets = electrical ? [] : [
         {
             label: 'Temperature °C',
             data: temps,
@@ -2288,7 +2315,7 @@ function renderSensorHistoryChart(data) {
             spanGaps: true,
         },
     ];
-    if (data.bucket === '1d' && tempMins.some((v) => v != null) && tempMaxs.some((v) => v != null)) {
+    if (!electrical && data.bucket === '1d' && tempMins.some((v) => v != null) && tempMaxs.some((v) => v != null)) {
         datasets.push({
             label: 'Temp max',
             data: tempMaxs,
@@ -2314,7 +2341,7 @@ function renderSensorHistoryChart(data) {
             spanGaps: true,
         });
     }
-    if (hasHumidity) {
+    if (!electrical && hasHumidity) {
         datasets.push({
             label: 'Humidity %',
             data: hums,
@@ -2328,8 +2355,83 @@ function renderSensorHistoryChart(data) {
             spanGaps: true,
         });
     }
+    if (electrical && hasPower) {
+        datasets.push({
+            label: 'Power W',
+            data: watts,
+            borderColor: '#c45c26',
+            backgroundColor: 'rgba(196, 92, 38, 0.16)',
+            borderWidth: 2,
+            pointRadius: points.length > 80 ? 0 : 2,
+            tension: 0.25,
+            fill: true,
+            yAxisID: 'yW',
+            spanGaps: true,
+        });
+        if (data.bucket === '1d' && powerMins.some((v) => v != null) && powerMaxs.some((v) => v != null)) {
+            datasets.push({
+                label: 'Power max',
+                data: powerMaxs,
+                borderColor: 'rgba(196, 92, 38, 0.35)',
+                borderWidth: 1,
+                borderDash: [4, 4],
+                pointRadius: 0,
+                tension: 0.2,
+                fill: false,
+                yAxisID: 'yW',
+                spanGaps: true,
+            });
+            datasets.push({
+                label: 'Power min',
+                data: powerMins,
+                borderColor: 'rgba(196, 92, 38, 0.35)',
+                borderWidth: 1,
+                borderDash: [4, 4],
+                pointRadius: 0,
+                tension: 0.2,
+                fill: false,
+                yAxisID: 'yW',
+                spanGaps: true,
+            });
+        }
+    }
+    if (electrical && hasCurrent) {
+        datasets.push({
+            label: 'Current A',
+            data: amps,
+            borderColor: '#1f7a8c',
+            backgroundColor: 'rgba(31, 122, 140, 0.12)',
+            borderWidth: 2,
+            pointRadius: points.length > 80 ? 0 : 2,
+            tension: 0.25,
+            fill: false,
+            yAxisID: 'yA',
+            spanGaps: true,
+        });
+    }
+    if (electrical && hasVoltage) {
+        datasets.push({
+            label: 'Voltage V',
+            data: volts,
+            borderColor: '#6b5b95',
+            backgroundColor: 'rgba(107, 91, 149, 0.12)',
+            borderWidth: 2,
+            pointRadius: points.length > 80 ? 0 : 2,
+            tension: 0.25,
+            fill: false,
+            yAxisID: 'yV',
+            spanGaps: true,
+        });
+    }
 
-    const scales = {
+    const scales = electrical
+        ? {
+            x: {
+                ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+                grid: { color: 'rgba(127,127,127,0.12)' },
+            },
+        }
+        : {
         x: {
             ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
             grid: { color: 'rgba(127,127,127,0.12)' },
@@ -2342,7 +2444,7 @@ function renderSensorHistoryChart(data) {
             grid: { color: 'rgba(127,127,127,0.12)' },
         },
     };
-    if (hasHumidity) {
+    if (!electrical && hasHumidity) {
         scales.yHum = {
             type: 'linear',
             position: 'right',
@@ -2350,6 +2452,34 @@ function renderSensorHistoryChart(data) {
             max: 100,
             title: { display: true, text: '% RH', color: '#1f7a8c' },
             ticks: { color: '#1f7a8c' },
+            grid: { drawOnChartArea: false },
+        };
+    }
+    if (electrical && hasPower) {
+        scales.yW = {
+            type: 'linear',
+            position: 'left',
+            title: { display: true, text: 'W', color: '#c45c26' },
+            ticks: { color: '#c45c26' },
+            grid: { color: 'rgba(127,127,127,0.12)' },
+        };
+    }
+    if (electrical && hasCurrent) {
+        scales.yA = {
+            type: 'linear',
+            position: 'right',
+            title: { display: true, text: 'A', color: '#1f7a8c' },
+            ticks: { color: '#1f7a8c' },
+            grid: { drawOnChartArea: false },
+        };
+    }
+    if (electrical && hasVoltage) {
+        scales.yV = {
+            type: 'linear',
+            position: 'right',
+            offset: true,
+            title: { display: true, text: 'V', color: '#6b5b95' },
+            ticks: { color: '#6b5b95' },
             grid: { drawOnChartArea: false },
         };
     }
@@ -2371,7 +2501,7 @@ function renderSensorHistoryChart(data) {
                         label(ctx) {
                             const v = ctx.parsed.y;
                             if (v == null || Number.isNaN(v)) return `${ctx.dataset.label}: —`;
-                            const unit = ctx.dataset.yAxisID === 'yHum' ? '%' : '°';
+                            const unit = sensorHistoryTooltipUnit(ctx.dataset.yAxisID);
                             return `${ctx.dataset.label}: ${v}${unit}`;
                         },
                     },
@@ -6283,7 +6413,7 @@ function homePlugElectricalText(d) {
 function homePlugElectricalMetaHtml(d) {
     const text = homePlugElectricalText(d);
     if (!text) return '';
-    return `<span class="home-device-meta home-device-power" data-home-power-w title="Live electrical readings">${escapeHtml(text)}</span>`;
+    return `<button type="button" class="home-device-meta home-device-power home-device-meta--history" data-home-power-w data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Power history">${escapeHtml(text)}</button>`;
 }
 
 function patchHomePlugMeter(card, device) {
@@ -6295,15 +6425,20 @@ function patchHomePlugMeter(card, device) {
         return;
     }
     if (!el) {
-        el = document.createElement('span');
-        el.className = 'home-device-meta home-device-power';
+        el = document.createElement('button');
+        el.type = 'button';
+        el.className = 'home-device-meta home-device-power home-device-meta--history';
         el.setAttribute('data-home-power-w', '');
-        el.title = 'Live electrical readings';
+        el.title = 'Power history';
         const anchor = card.querySelector('[data-home-pending-off]') || card.querySelector('[data-home-toggle]');
         if (anchor) anchor.insertAdjacentElement('afterend', el);
         else card.querySelector('.home-device-actions')?.prepend(el);
     }
-    if (el && el.textContent !== text) el.textContent = text;
+    if (!el) return;
+    el.title = 'Power history';
+    el.setAttribute('data-sensor-history', String(device.id || ''));
+    el.setAttribute('data-sensor-history-name', String(device.name || ''));
+    if (el.textContent !== text) el.textContent = text;
 }
 
 function homeVacuumStatusName(d) {

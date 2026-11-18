@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * 30-minute temperature / humidity history for climate sensors and heaters.
+ * 30-minute history for climate sensors, heaters, and metering plugs.
  * Per-device JSON ring buffers capped at one year.
+ * Samples are [time, °C, humidity, watts, volts, amps]. Climate rows omit the last three.
  */
 final class YarboSensorHistory
 {
@@ -102,6 +103,16 @@ final class YarboSensorHistory
             }
             $byId[$id] = $row;
         }
+        foreach ($this->homeMeterRows() as $row) {
+            $id = $row['id'];
+            if (!isset($byId[$id])) {
+                $byId[$id] = $row;
+                continue;
+            }
+            $byId[$id]['power_w'] = $row['power_w'];
+            $byId[$id]['voltage_v'] = $row['voltage_v'];
+            $byId[$id]['current_a'] = $row['current_a'];
+        }
 
         return array_values($byId);
     }
@@ -156,6 +167,67 @@ final class YarboSensorHistory
         }
 
         return array_values($byId);
+    }
+
+    /**
+     * @return list<array{id: string, name: string, kind: string, temperature: null, humidity: null, power_w: ?float, voltage_v: ?float, current_a: ?float}>
+     */
+    private function homeMeterRows(): array
+    {
+        $byId = [];
+        foreach (['home.json' => 'last_devices', 'home-nodes-cache.json' => 'devices'] as $file => $key) {
+            foreach ($this->deviceRowsFromJson($file, $key) as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $mapped = $this->mapMeterRow($row);
+                if ($mapped === null) {
+                    continue;
+                }
+                $prev = $byId[$mapped['id']] ?? null;
+                if ($prev === null) {
+                    $byId[$mapped['id']] = $mapped;
+                    continue;
+                }
+                foreach (['power_w', 'voltage_v', 'current_a'] as $key) {
+                    if ($mapped[$key] !== null) {
+                        $prev[$key] = $mapped[$key];
+                    }
+                }
+                $byId[$mapped['id']] = $prev;
+            }
+        }
+
+        return array_values($byId);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array{id: string, name: string, kind: string, temperature: null, humidity: null, power_w: ?float, voltage_v: ?float, current_a: ?float}|null
+     */
+    private function mapMeterRow(array $row): ?array
+    {
+        $id = trim((string) ($row['id'] ?? ''));
+        if ($id === '' || strtolower(trim((string) ($row['kind'] ?? ''))) !== 'plug') {
+            return null;
+        }
+        $power = self::optionalFloat($row['power_w'] ?? null);
+        $volts = self::optionalFloat($row['voltage_v'] ?? null);
+        $amps = self::optionalFloat($row['current_a'] ?? null);
+        if ($power === null && $volts === null && $amps === null) {
+            return null;
+        }
+
+        return [
+            'id' => $id,
+            'name' => (string) ($row['name'] ?? $id),
+            'kind' => 'plug',
+            'temperature' => null,
+            'humidity' => null,
+            'power_w' => $power,
+            'voltage_v' => $volts,
+            'current_a' => $amps,
+        ];
     }
 
     /**
@@ -231,9 +303,12 @@ final class YarboSensorHistory
                 $src['id'],
                 $src['name'],
                 $src['kind'],
-                $src['temperature'],
-                $src['humidity'],
-                $now
+                $src['temperature'] ?? null,
+                $src['humidity'] ?? null,
+                $now,
+                isset($src['power_w']) ? self::optionalFloat($src['power_w']) : null,
+                isset($src['voltage_v']) ? self::optionalFloat($src['voltage_v']) : null,
+                isset($src['current_a']) ? self::optionalFloat($src['current_a']) : null,
             )) {
                 $sampled++;
             } else {
@@ -256,13 +331,16 @@ final class YarboSensorHistory
         string $kind,
         ?float $temperature,
         ?float $humidity = null,
-        ?int $now = null
+        ?int $now = null,
+        ?float $powerW = null,
+        ?float $voltageV = null,
+        ?float $currentA = null,
     ): bool {
         $id = trim($id);
         if ($id === '') {
             return false;
         }
-        if ($temperature === null && $humidity === null) {
+        if ($temperature === null && $humidity === null && $powerW === null && $voltageV === null && $currentA === null) {
             return false;
         }
         $now ??= time();
@@ -276,11 +354,17 @@ final class YarboSensorHistory
         if ($lastTs > 0 && ($now - $lastTs) < self::SAMPLE_MIN_GAP_S) {
             return false;
         }
-        $samples[] = [
+        $sample = [
             $now,
             $temperature !== null ? round($temperature, 2) : null,
             $humidity !== null ? round($humidity, 1) : null,
         ];
+        if ($powerW !== null || $voltageV !== null || $currentA !== null) {
+            $sample[] = $powerW !== null ? round($powerW, 1) : null;
+            $sample[] = $voltageV !== null ? round($voltageV, 1) : null;
+            $sample[] = $currentA !== null ? round($currentA, 3) : null;
+        }
+        $samples[] = $sample;
         $store['id'] = $id;
         $store['name'] = $name !== '' ? $name : (string) ($store['name'] ?? $id);
         $store['kind'] = $kind !== '' ? $kind : (string) ($store['kind'] ?? 'sensor');
@@ -291,8 +375,28 @@ final class YarboSensorHistory
     }
 
     /**
+     * @param array<int|string, mixed> $row
+     * @return array{0: int, 1: ?float, 2: ?float, 3: ?float, 4: ?float, 5: ?float}|null
+     */
+    public static function sampleTuple(array $row): ?array
+    {
+        if (!array_key_exists(0, $row)) {
+            return null;
+        }
+
+        return [
+            (int) $row[0],
+            self::optionalFloat($row[1] ?? null),
+            self::optionalFloat($row[2] ?? null),
+            self::optionalFloat($row[3] ?? null),
+            self::optionalFloat($row[4] ?? null),
+            self::optionalFloat($row[5] ?? null),
+        ];
+    }
+
+    /**
      * @param list<mixed> $samples
-     * @return list<array{0: int, 1: ?float, 2: ?float}>
+     * @return list<array{0: int, 1: ?float, 2: ?float, 3: ?float, 4: ?float, 5: ?float}>
      */
     public function pruneSamples(array $samples, ?int $now = null): array
     {
@@ -307,11 +411,14 @@ final class YarboSensorHistory
             if ($ts < $cut) {
                 continue;
             }
-            $out[] = [
-                $ts,
-                self::optionalFloat($row[1] ?? null),
-                self::optionalFloat($row[2] ?? null),
-            ];
+            $point = self::sampleTuple($row);
+            if ($point === null) {
+                continue;
+            }
+            if ($point[1] === null && $point[2] === null && $point[3] === null && $point[4] === null && $point[5] === null) {
+                continue;
+            }
+            $out[] = $point;
         }
         if (count($out) > self::MAX_SAMPLES) {
             $out = array_slice($out, -self::MAX_SAMPLES);
@@ -393,10 +500,21 @@ final class YarboSensorHistory
             ? $this->dailyPoints($inRange)
             : $this->rawPoints($inRange);
         $hasHumidity = false;
+        $hasPower = false;
+        $hasVoltage = false;
+        $hasCurrent = false;
         foreach ($points as $p) {
             if (isset($p['humidity']) && $p['humidity'] !== null) {
                 $hasHumidity = true;
-                break;
+            }
+            if (isset($p['power_w']) && $p['power_w'] !== null) {
+                $hasPower = true;
+            }
+            if (isset($p['voltage_v']) && $p['voltage_v'] !== null) {
+                $hasVoltage = true;
+            }
+            if (isset($p['current_a']) && $p['current_a'] !== null) {
+                $hasCurrent = true;
             }
         }
 
@@ -409,6 +527,9 @@ final class YarboSensorHistory
             'from' => $from,
             'to' => $to,
             'has_humidity' => $hasHumidity,
+            'has_power' => $hasPower,
+            'has_voltage' => $hasVoltage,
+            'has_current' => $hasCurrent,
             'points' => $points,
             'trends' => $this->trends($points, $hasHumidity),
         ];
@@ -545,16 +666,23 @@ final class YarboSensorHistory
             if (!is_array($row) || !isset($row[0])) {
                 continue;
             }
-            $rows[] = [(int) $row[0], self::optionalFloat($row[1] ?? null), self::optionalFloat($row[2] ?? null)];
+            $tuple = self::sampleTuple($row);
+            if ($tuple !== null) {
+                $rows[] = $tuple;
+            }
         }
         usort($rows, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
         foreach ($extra as $row) {
             if (!is_array($row) || !isset($row[0])) {
                 continue;
             }
-            $ts = (int) $row[0];
-            $temp = self::optionalFloat($row[1] ?? null);
-            $hum = self::optionalFloat($row[2] ?? null);
+            $incoming = self::sampleTuple($row);
+            if ($incoming === null) {
+                continue;
+            }
+            $ts = $incoming[0];
+            $temp = $incoming[1];
+            $hum = $incoming[2];
             $best = null;
             $bestDelta = 1201;
             foreach ($rows as $i => $have) {
@@ -570,7 +698,7 @@ final class YarboSensorHistory
                 $bestDelta = $delta;
             }
             if ($best === null) {
-                $rows[] = [$ts, $temp, $hum];
+                $rows[] = $incoming;
                 usort($rows, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
                 continue;
             }
@@ -579,6 +707,11 @@ final class YarboSensorHistory
             }
             if ($rows[$best][2] === null && $hum !== null) {
                 $rows[$best][2] = $hum;
+            }
+            for ($i = 3; $i <= 5; $i++) {
+                if (($rows[$best][$i] ?? null) === null && $incoming[$i] !== null) {
+                    $rows[$best][$i] = $incoming[$i];
+                }
             }
         }
         usort($rows, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
@@ -598,6 +731,9 @@ final class YarboSensorHistory
                 't' => (int) $row[0],
                 'temperature' => $row[1],
                 'humidity' => $row[2],
+                'power_w' => $row[3] ?? null,
+                'voltage_v' => $row[4] ?? null,
+                'current_a' => $row[5] ?? null,
             ];
         }
 
@@ -620,7 +756,7 @@ final class YarboSensorHistory
             }
         } catch (\Throwable) {
         }
-        /** @var array<string, array{t: int, temps: list<float>, hums: list<float>}> $buckets */
+        /** @var array<string, array{t: int, temps: list<float>, hums: list<float>, watts: list<float>, volts: list<float>, amps: list<float>}> $buckets */
         $buckets = [];
         foreach ($rows as $row) {
             $ts = (int) $row[0];
@@ -631,6 +767,9 @@ final class YarboSensorHistory
                     't' => $noon ? $noon->getTimestamp() : $ts,
                     'temps' => [],
                     'hums' => [],
+                    'watts' => [],
+                    'volts' => [],
+                    'amps' => [],
                 ];
             }
             if ($row[1] !== null) {
@@ -639,12 +778,24 @@ final class YarboSensorHistory
             if ($row[2] !== null) {
                 $buckets[$day]['hums'][] = (float) $row[2];
             }
+            if (($row[3] ?? null) !== null) {
+                $buckets[$day]['watts'][] = (float) $row[3];
+            }
+            if (($row[4] ?? null) !== null) {
+                $buckets[$day]['volts'][] = (float) $row[4];
+            }
+            if (($row[5] ?? null) !== null) {
+                $buckets[$day]['amps'][] = (float) $row[5];
+            }
         }
         ksort($buckets);
         $out = [];
         foreach ($buckets as $b) {
             $temps = $b['temps'];
             $hums = $b['hums'];
+            $watts = $b['watts'];
+            $volts = $b['volts'];
+            $amps = $b['amps'];
             $out[] = [
                 't' => $b['t'],
                 'temperature' => $temps !== [] ? round(array_sum($temps) / count($temps), 2) : null,
@@ -653,6 +804,11 @@ final class YarboSensorHistory
                 'temp_max' => $temps !== [] ? round(max($temps), 2) : null,
                 'humidity_min' => $hums !== [] ? round(min($hums), 1) : null,
                 'humidity_max' => $hums !== [] ? round(max($hums), 1) : null,
+                'power_w' => $watts !== [] ? round(array_sum($watts) / count($watts), 1) : null,
+                'power_min' => $watts !== [] ? round(min($watts), 1) : null,
+                'power_max' => $watts !== [] ? round(max($watts), 1) : null,
+                'voltage_v' => $volts !== [] ? round(array_sum($volts) / count($volts), 1) : null,
+                'current_a' => $amps !== [] ? round(array_sum($amps) / count($amps), 3) : null,
             ];
         }
 
@@ -667,6 +823,9 @@ final class YarboSensorHistory
     {
         $temps = [];
         $hums = [];
+        $watts = [];
+        $volts = [];
+        $amps = [];
         foreach ($points as $p) {
             if (isset($p['temperature']) && is_numeric($p['temperature'])) {
                 $temps[] = (float) $p['temperature'];
@@ -674,11 +833,23 @@ final class YarboSensorHistory
             if ($hasHumidity && isset($p['humidity']) && is_numeric($p['humidity'])) {
                 $hums[] = (float) $p['humidity'];
             }
+            if (isset($p['power_w']) && is_numeric($p['power_w'])) {
+                $watts[] = (float) $p['power_w'];
+            }
+            if (isset($p['voltage_v']) && is_numeric($p['voltage_v'])) {
+                $volts[] = (float) $p['voltage_v'];
+            }
+            if (isset($p['current_a']) && is_numeric($p['current_a'])) {
+                $amps[] = (float) $p['current_a'];
+            }
         }
 
         return [
             'temperature' => $this->metricTrend($temps),
             'humidity' => $hasHumidity ? $this->metricTrend($hums) : null,
+            'power_w' => $this->metricTrend($watts, 5.0),
+            'voltage_v' => $this->metricTrend($volts, 0.5),
+            'current_a' => $this->metricTrend($amps, 0.05),
         ];
     }
 
@@ -686,7 +857,7 @@ final class YarboSensorHistory
      * @param list<float> $values
      * @return array{latest: ?float, avg: ?float, min: ?float, max: ?float, delta: ?float, slope: string}|null
      */
-    private function metricTrend(array $values): ?array
+    private function metricTrend(array $values, float $flat = 0.3): ?array
     {
         if ($values === []) {
             return null;
@@ -695,9 +866,9 @@ final class YarboSensorHistory
         $last = $values[count($values) - 1];
         $delta = round($last - $first, 2);
         $slope = 'flat';
-        if ($delta > 0.3) {
+        if ($delta > $flat) {
             $slope = 'up';
-        } elseif ($delta < -0.3) {
+        } elseif ($delta < -$flat) {
             $slope = 'down';
         }
 

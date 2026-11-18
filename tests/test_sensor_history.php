@@ -92,6 +92,32 @@ $heater = $hist->series('matter:42', $now - 3600, $now + 2000, '30m');
 assert_true($heater['has_humidity'] === false, 'heater has no humidity');
 assert_true(($heater['trends']['humidity'] ?? null) === null, 'heater humidity trend null');
 
+file_put_contents($root . '/data/home-nodes-cache.json', json_encode([
+    'v' => 5,
+    'devices' => [[
+        'id' => '82:1',
+        'name' => 'Compressor',
+        'kind' => 'plug',
+        'on' => true,
+        'power_w' => 1043.6,
+        'voltage_v' => 229.4,
+        'current_a' => 4.56,
+    ]],
+], JSON_UNESCAPED_SLASHES));
+$meterSources = $hist->listSources();
+$meterIds = array_map(static fn ($s) => $s['id'], $meterSources);
+assert_true(in_array('82:1', $meterIds, true), 'metering plug listed');
+assert_true($hist->appendSample('82:1', 'Compressor', 'plug', null, null, $now, 1043.6, 229.4, 4.56), 'plug sample');
+assert_true(!$hist->appendSample('82:1', 'Compressor', 'plug', null, null, $now + 60, 10.0, 230.0, 0.1), 'plug gap blocks early sample');
+$plug = $hist->series('82:1', $now - 3600, $now + 2000, '30m');
+assert_true($plug['has_power'] === true && $plug['has_voltage'] === true && $plug['has_current'] === true, 'plug series flags');
+assert_true(($plug['points'][0]['power_w'] ?? null) === 1043.6, 'plug watts');
+assert_true(($plug['points'][0]['voltage_v'] ?? null) === 229.4, 'plug volts');
+assert_true(abs((float) ($plug['points'][0]['current_a'] ?? 0) - 4.56) < 0.001, 'plug amps');
+assert_true($plug['has_humidity'] === false, 'plug is not a climate series');
+$keptMeter = $hist->pruneSamples([[$now, null, null, 10.5, 230.0, 0.05]], $now + 10);
+assert_true(($keptMeter[0][3] ?? null) === 10.5, 'prune keeps watts');
+
 $daily = $hist->series('unifi:sensor:living', $now - 86400, $now + 2000, '1d');
 assert_true($daily['bucket'] === '1d', 'daily bucket');
 assert_true(count($daily['points']) >= 1, 'daily points');
@@ -118,5 +144,8 @@ assert_true(str_contains($update, 'yarbo_ensure_chart_js'), 'update installs Cha
 assert_true(str_contains($ensure, 'chart.js@'), 'chart ensure URL');
 assert_true(is_file(__DIR__ . '/../public/vendor/chart.umd.min.js'), 'chart.umd.min.js present');
 assert_true(str_contains($change, '## [4.0.247]'), 'changelog 4.0.247');
+assert_true(str_contains($js, 'Power history'), 'plug meter opens history');
+assert_true(str_contains($js, 'has_power'), 'chart reads plug watts');
+assert_true(str_contains($change, '## [4.0.379]'), 'changelog 4.0.379');
 
 echo "ok: sensor history\n";
