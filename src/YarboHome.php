@@ -4576,6 +4576,12 @@ final class YarboHome
         if (array_key_exists('humidity', $live) && is_numeric($live['humidity'])) {
             $device['humidity'] = round((float) $live['humidity'], 1);
         }
+        foreach (['power_w' => 1, 'voltage_v' => 1, 'current_a' => 3] as $key => $precision) {
+            if (!array_key_exists($key, $live) || !is_numeric($live[$key])) {
+                continue;
+            }
+            $device[$key] = round((float) $live[$key], $precision);
+        }
         $eps = $live['climate_endpoints'] ?? null;
         if (is_array($eps) && $eps !== []) {
             $device['climate_endpoints'] = array_values(array_map(static fn ($ep): int => (int) $ep, $eps));

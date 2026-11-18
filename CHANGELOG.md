@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.375] - 2026-11-18
+
+### Fixed
+
+- Plug **motor mode** and the live **W · V · A** line. A metering plug (IKEA INSPELNING, GRILLPLATS, and the same) was read once at pairing, then those numbers never moved: voltage sat on the first reading, watts and amps stayed blank, and Off went through while the motor was still drawing. The Matter agent now reads the meter every few seconds, Home uses that reading, and Off waits until the draw drops below the limit. Matter agent **v119**.
+
 ## [4.0.374] - 2026-11-18
 
 ### Fixed

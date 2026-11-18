@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 118
+AGENT_VERSION = 119
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -250,9 +250,21 @@ LIGHT_POLL_FALLBACK_S = 8.0
 MOTION_HOLD_S = 60.0
 OCC_POLL_INTERVAL_S = 20.0
 OCC_POLL_TIMEOUT = 1.5
+# Metering plugs (INSPELNING / GRILLPLATS) do not keep pushing watts. Without a
+# read, voltage stays on the pairing sample and motor mode cannot see the load.
+PLUG_POWER_POLL_S = 4.0
+ELECTRICAL_POLL_ATTRS = (
+    ATTR_ACTIVE_POWER,
+    ATTR_VOLTAGE,
+    ATTR_ACTIVE_CURRENT,
+    ATTR_RMS_VOLTAGE,
+    ATTR_RMS_CURRENT,
+)
 ATTR_PIR_OCCUPIED_TO_UNOCCUPIED = 0x0010
 _occ_poll_at = 0.0
 _occ_cursor = 0
+_plug_power_at = 0.0
+_plug_power_cursor = 0
 _reading_poll = False
 _occupancy_idle: set[str] = set()
 _command_slots = threading.BoundedSemaphore(2)
@@ -4876,6 +4888,10 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
                         item[name] = prev[name]
                 item["_patched_at"] = patched_at
                 item["_sticky_keys"] = [str(key) for key in keys if not str(key).startswith("_")]
+            if prev is not None and prev.get("_meter_at"):
+                for key in ("power_w", "voltage_v", "current_a", "meter_endpoint", "_meter_at"):
+                    if key in prev and prev.get(key) is not None:
+                        item[key] = prev[key]
             merged.append(item)
         if merged:
             merged = merge_split_climate_sensors(merged)
@@ -6373,7 +6389,7 @@ def start_state_poll() -> None:
     _state_poll_started = True
 
     def loop() -> None:
-        global _light_poll_at, _occ_poll_at
+        global _light_poll_at, _occ_poll_at, _plug_power_at
         while True:
             try:
                 # Listen dump can take tens of seconds on a Hue Bridge. Do not
@@ -6393,6 +6409,9 @@ def start_state_poll() -> None:
                     gap = LIGHT_POLL_LISTEN_S if _listening else LIGHT_POLL_FALLBACK_S
                     _light_poll_at = time.time() + gap
                 poll_vacuum_attributes()
+                if now >= _plug_power_at:
+                    poll_plug_power()
+                    _plug_power_at = time.time() + PLUG_POWER_POLL_S
                 if now >= _occ_poll_at:
                     poll_occupancy_attributes()
                     _occ_poll_at = time.time() + OCC_POLL_INTERVAL_S
@@ -7123,6 +7142,8 @@ def apply_attribute_event(data: Any) -> None:
                 parts.append("OK")
             if parts:
                 fields["status"] = " · ".join(parts)
+        if "power_w" in fields or "voltage_v" in fields or "current_a" in fields:
+            fields["_meter_at"] = time.time()
         if "power_w" in fields:
             note_motor_high_power(device_id, fields.get("power_w"))
             maybe_motor_pending_off(device_id, fields.get("power_w"))
@@ -8075,6 +8096,83 @@ def occupancy_poll_groups() -> dict[int, list[int]]:
         if endpoint not in bucket:
             bucket.append(endpoint)
     return groups
+
+
+def electrical_meter_endpoint(attributes: dict[str, Any]) -> int | None:
+    """Endpoint that actually measures power. GRILLPLATS uses a sibling of the plug."""
+    found: int | None = None
+    for endpoint in endpoint_ids(attributes):
+        if endpoint <= 0:
+            continue
+        if endpoint_has_cluster(attributes, endpoint, ELECTRICAL_POWER) or endpoint_has_cluster(
+            attributes, endpoint, ELECTRICAL_MEASUREMENT
+        ):
+            found = endpoint
+    return found
+
+
+def plug_meter_targets() -> list[tuple[int, int]]:
+    """(node_id, meter endpoint) for plugs whose watts motor mode and the tile need live."""
+    motor = set(motor_mode_map())
+    targets: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for row in current_live_devices():
+        if not isinstance(row, dict) or str(row.get("kind") or "") != "plug":
+            continue
+        if row.get("available") is False:
+            continue
+        device_id = str(row.get("id") or "")
+        metered = device_id in motor or row.get("meter_endpoint") not in (None, "", 0)
+        if not metered:
+            metered = any(row.get(key) is not None for key in ("power_w", "voltage_v", "current_a"))
+        if not metered:
+            continue
+        try:
+            node_id = int(row.get("node_id") or 0)
+        except (TypeError, ValueError):
+            node_id = 0
+        try:
+            endpoint = int(row.get("meter_endpoint") or row.get("endpoint") or 0)
+        except (TypeError, ValueError):
+            endpoint = 0
+        if node_id <= 0 or endpoint <= 0:
+            continue
+        key = (node_id, endpoint)
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append(key)
+    return targets
+
+
+def poll_plug_power() -> None:
+    """One short meter read. A whole-house electrical read is what made taps wait."""
+    global _plug_power_cursor
+    if poll_paused():
+        return
+    targets = plug_meter_targets()
+    if not targets:
+        return
+    now = time.time()
+    ready = [item for item in targets if not _poll_node_cooling(item[0], now)]
+    if not ready:
+        return
+    node_id, endpoint = ready[_plug_power_cursor % len(ready)]
+    _plug_power_cursor += 1
+    paths = [attr_key(endpoint, ELECTRICAL_POWER, attr) for attr in ELECTRICAL_POLL_ATTRS]
+    if poll_paused() or not paths:
+        return
+    rpc = _poll_read(node_id, paths)
+    if rpc.get("ok"):
+        _poll_note_result(node_id, rpc)
+        return
+    # A missing RMS attribute must not hide ActivePower on the same read.
+    for path in paths:
+        if poll_paused():
+            return
+        one = _poll_read(node_id, [path])
+        if one.get("ok"):
+            _poll_note_result(node_id, one)
 
 
 def poll_occupancy_attributes() -> None:
@@ -10900,6 +10998,9 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 for key in ("power_w", "voltage_v", "current_a"):
                     if key in electrical and electrical[key] is not None:
                         row[key] = electrical[key]
+                meter_ep = electrical_meter_endpoint(attributes)
+                if meter_ep:
+                    row["meter_endpoint"] = meter_ep
             devices.append(row)
         if len(devices) == before and node_id > 0 and attributes:
             stub_kind = classify_by_name("light", source, vendor, product)

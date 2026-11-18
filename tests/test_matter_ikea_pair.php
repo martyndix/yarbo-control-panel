@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 118, 'min agent 118');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 119, 'min agent 119');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -50,7 +50,7 @@ assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "commission_start' || \$action === 'commission_status'"), 'pairing start survives a browser abort');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 118'), 'agent v118');
+assert_true(str_contains($agent, 'AGENT_VERSION = 119'), 'agent v119');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
