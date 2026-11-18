@@ -1046,6 +1046,56 @@ def main() -> int:
         raise SystemExit(f"fresh occupancy report did not count as motion {woke}")
     agent._reading_poll = False
 
+    calls: list[dict] = []
+    cleared: list[str] = []
+    orig_dispatch = agent.dispatch
+    orig_map = agent.motor_mode_map
+    orig_pending = agent.motor_pending_off_map
+    orig_clear = agent.clear_motor_pending_off
+    try:
+        agent.dispatch = lambda body: calls.append(dict(body)) or {"ok": True, "on": body.get("action") == "on"}
+        agent.motor_mode_map = lambda: {"83:1": 100}
+        agent.motor_pending_off_map = lambda: {"83:1": 100} if not cleared else {}
+        agent.clear_motor_pending_off = lambda device_id: cleared.append(str(device_id))
+        agent.remember_live_devices([{
+            "id": "83:1",
+            "kind": "plug",
+            "on": True,
+            "power_w": 1043.6,
+            "voltage_v": 229.0,
+            "current_a": 4.56,
+            "node_id": 83,
+            "endpoint": 1,
+            "meter_endpoint": 1,
+            "available": True,
+        }])
+        agent._motor_high_until["83:1"] = time.time() + 30
+        agent.apply_attribute_event({"node_id": 83, "attribute_path": "1/6/0", "value": False})
+        apple_off = agent.live_row("83:1") or {}
+        if apple_off.get("on") is not False:
+            raise SystemExit(f"apple home off must stay off {apple_off}")
+        if any(str(item.get("action") or "") == "on" for item in calls):
+            raise SystemExit(f"apple home off must not be turned back on {calls}")
+        if cleared != ["83:1"]:
+            raise SystemExit(f"apple home off must clear a queued off {cleared}")
+        agent.remember_live_devices([{
+            "id": "83:1",
+            "kind": "plug",
+            "on": True,
+            "power_w": 12.5,
+            "node_id": 83,
+            "endpoint": 1,
+        }])
+        kept_off = agent.live_row("83:1") or {}
+        if kept_off.get("on") is not False:
+            raise SystemExit(f"a node list must not show the plug on after apple home off {kept_off}")
+    finally:
+        agent.dispatch = orig_dispatch
+        agent.motor_mode_map = orig_map
+        agent.motor_pending_off_map = orig_pending
+        agent.clear_motor_pending_off = orig_clear
+        agent._motor_high_until.pop("83:1", None)
+
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0
 

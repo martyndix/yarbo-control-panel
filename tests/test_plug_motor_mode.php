@@ -136,7 +136,8 @@ assert_true(str_contains($js, 'function patchHomePlugMeter'), 'JS repaints watts
 assert_true(str_contains($agent, 'PLUG_POWER_ON_S = 3.0'), 'agent rereads an on plug every pass');
 assert_true(str_contains($agent, 'PLUG_POWER_OFF_S = 20.0'), 'agent rereads an off plug on a slower timer');
 assert_true(str_contains($js, "action: 'motor_mode'"), 'JS saves motor mode');
-assert_true(str_contains($agent, 'maybe_motor_mode_reon'), 'agent re-On for Apple Home');
+assert_true(str_contains($agent, 'Apple Home Off stays off'), 'Apple Home Off is not turned back on');
+assert_true(str_contains($agent, 'attr_key(switch_ep, ON_OFF, ATTR_ON_OFF)'), 'agent rereads plug On/Off');
 assert_true(str_contains($agent, 'maybe_motor_pending_off'), 'agent completes queued Off');
 assert_true(str_contains($agent, 'motor_mode_w'), 'agent reads motor_mode_w');
 assert_true(str_contains($agent, 'ATTR_RMS_VOLTAGE'), 'agent reads RMS voltage');
