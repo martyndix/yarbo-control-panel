@@ -19,7 +19,7 @@ function assert_true(bool $ok, string $message): void
 assert_true(YarboHome::normalizeMatterPairingCode('2462-204-0808') === '24622040808', 'dashed code');
 assert_true(YarboHome::normalizeMatterPairingCode('2462 204 0808') === '24622040808', 'spaced code');
 assert_true(YarboHome::normalizeMatterPairingCode('MT:abc') === 'MT:abc', 'MT code kept');
-assert_true(YarboMatterAgentClient::MIN_VERSION === 114, 'min agent 114');
+assert_true(YarboMatterAgentClient::MIN_VERSION === 115, 'min agent 115');
 
 $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
@@ -50,7 +50,7 @@ assert_true(str_contains($home, 'Look for devices only finds Hue lights'), 'scan
 assert_true(str_contains($api, "'commission_start'"), 'API commission_start');
 assert_true(str_contains($api, "commission_start' || \$action === 'commission_status'"), 'pairing start survives a browser abort');
 assert_true(str_contains($api, "'commission_status'"), 'API commission_status');
-assert_true(str_contains($agent, 'AGENT_VERSION = 114'), 'agent v114');
+assert_true(str_contains($agent, 'AGENT_VERSION = 115'), 'agent v115');
 assert_true(str_contains($agent, 'normalize_pairing_code'), 'agent normalizes codes');
 assert_true(str_contains($agent, 'friendly_commission_error'), 'friendly commission errors');
 assert_true(str_contains($agent, 'prepare_for_commission'), 'warm Matter before pair');
@@ -160,7 +160,7 @@ assert_true(str_contains($change, '## [4.0.364]'), 'changelog 4.0.364');
 assert_true(str_contains($change, '## [4.0.363]'), 'changelog 4.0.363');
 assert_true(str_contains($docs, '4.0.364+'), 'docs 4.0.364 pairing start survives abort');
 $panel = (string) file_get_contents(__DIR__ . '/../scripts/panel.sh');
-assert_true(str_contains($panel, 'PHP_CLI_SERVER_WORKERS=4'), 'panel PHP can serve Home and Add device together');
+assert_true(str_contains($panel, 'PHP_CLI_SERVER_WORKERS=8'), 'panel PHP can serve Home and a command together');
 assert_true(str_contains($change, '## [4.0.362]'), 'changelog 4.0.362');
 assert_true(str_contains($agent, 'clear_unreachable_fd_routes'), 'drop v92 unreachable fd routes');
 assert_true(str_contains($agent, 'install_border_router_route'), 'route fd prefix via border router');

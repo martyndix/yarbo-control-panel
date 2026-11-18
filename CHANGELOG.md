@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.369] - 2026-11-18
+
+### Fixed
+
+- The Home page no longer ends in **Fetch is aborted** and then refuses to load. A slow light command held one of the four PHP workers for up to a minute after the browser had already given up, and starting that command aborted the Home refresh so the browser started another. After a while every worker was stuck and a reload sat until Safari aborted it. Commands now return in a few seconds, a tap does not cancel the refresh already on the way, the Home list no longer shells out to scan processes, and the Matter poll waits for subscriptions instead of reading the whole house every few seconds. Matter agent **v115**.
+
 ## [4.0.368] - 2026-11-18
 
 ### Fixed

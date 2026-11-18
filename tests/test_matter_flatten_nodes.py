@@ -538,7 +538,7 @@ def main() -> int:
     cmd_calls: list[tuple] = []
     busy_during_send: list[bool] = []
 
-    def fake_cmd_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True):
+    def fake_cmd_rpc(command, args=None, timeout=20.0, channel="cmd", listen=True, **_kwargs):
         cmd_calls.append((command, channel))
         busy_during_send.append(agent.command_in_flight())
         return {"ok": True, "result": None}

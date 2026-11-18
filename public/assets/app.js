@@ -5023,7 +5023,9 @@ function abortPanelGets() {
 function beginHomeControl() {
     homeControlBusy += 1;
     noteCommandQuiet();
-    abortPanelGets();
+    // Do not abort the Home or status GET. The PHP worker keeps running
+    // after the browser abort, and the retry starts another, until every
+    // worker is busy and the page will not load.
 }
 
 function endHomeControl() {
@@ -5072,6 +5074,11 @@ async function homeApi(body, timeoutMs = 20000) {
             ...extra,
         }, timeoutMs);
         return parseJsonResponse(res);
+    } catch (err) {
+        if (body && isAbortError(err)) {
+            throw new Error('The panel is busy — try again');
+        }
+        throw err;
     } finally {
         if (isCommand || isAssign) endHomeControl();
     }

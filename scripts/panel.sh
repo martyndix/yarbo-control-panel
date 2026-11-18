@@ -278,8 +278,9 @@ pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
 echo "==> Starting panel on http://${HOST}:${PORT}"
 echo "    Keep this process running. Hard-refresh the browser after start."
 echo "    Close the official Yarbo app while testing controls/drive."
-# A few workers so Add device is not stuck behind a slow Home list on the one PHP process.
-PHP_CLI_SERVER_WORKERS=4 "$PHP_BIN" -d max_execution_time=1200 -S "${HOST}:${PORT}" -t "${ROOT}/public" &
+# Enough workers that a couple of slow Matter commands cannot block
+# the Home list and a page reload at the same time.
+PHP_CLI_SERVER_WORKERS=8 "$PHP_BIN" -d max_execution_time=1200 -S "${HOST}:${PORT}" -t "${ROOT}/public" &
 PHP_PID=$!
 
 # Wait until the HTTP listener accepts before binding HTTPS in front of it.
