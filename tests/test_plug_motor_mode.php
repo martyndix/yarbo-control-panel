@@ -136,6 +136,27 @@ assert_true(str_contains($agent, 'maybe_motor_pending_off'), 'agent completes qu
 assert_true(str_contains($agent, 'motor_mode_w'), 'agent reads motor_mode_w');
 assert_true(str_contains($agent, 'ATTR_RMS_VOLTAGE'), 'agent reads RMS voltage');
 assert_true(str_contains($agent, 'node_electrical_metrics'), 'agent merges sibling electrical endpoint');
+assert_true(str_contains($agent, 'def poll_plug_power'), 'agent rereads plug meters');
+$overlaid = YarboHome::overlayDeviceStates(
+    [[
+        'id' => $plugId,
+        'kind' => 'plug',
+        'on' => true,
+        'voltage_v' => 230.0,
+    ]],
+    [[
+        'id' => $plugId,
+        'on' => true,
+        'power_w' => 840,
+        'voltage_v' => 229.4,
+        'current_a' => 3.66,
+    ]],
+    false,
+);
+$overPlug = $overlaid[0] ?? [];
+assert_true(($overPlug['power_w'] ?? null) === 840.0 || ($overPlug['power_w'] ?? null) === 840, 'live watts replace a blank meter');
+assert_true(($overPlug['voltage_v'] ?? null) === 229.4, 'live volts replace a stuck voltage');
+assert_true(abs((float) ($overPlug['current_a'] ?? 0) - 3.66) < 0.001, 'live amps reach the Home row');
 assert_true(str_contains($homePhp, 'scheduleMotorPendingOff'), 'Home queues Off');
 assert_true(str_contains($homePhp, 'plugReportsPowerMetrics'), 'Home gates motor mode on watts');
 assert_true(str_contains($api, 'needs a plug that reports watts'), 'API rejects motor mode without watts');

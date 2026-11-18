@@ -987,6 +987,21 @@ def main() -> int:
         raise SystemExit(f"grillplats power {grill}")
     if grill.get("voltage_v") != 231.0 or grill.get("current_a") != 0.055:
         raise SystemExit(f"grillplats V/A from sibling electrical endpoint {grill}")
+    if grill.get("meter_endpoint") != 2:
+        raise SystemExit(f"grillplats meter is the sibling endpoint {grill.get('meter_endpoint')}")
+    if plug_row.get("meter_endpoint") != 1:
+        raise SystemExit(f"inspelning meter is on the plug endpoint {plug_row.get('meter_endpoint')}")
+    agent.remember_live_devices([dict(grill)])
+    agent.apply_attribute_event({"node_id": 83, "attribute_path": "2/144/8", "value": 840000})
+    agent.apply_attribute_event({"node_id": 83, "attribute_path": "2/144/11", "value": 229000})
+    agent.apply_attribute_event({"node_id": 83, "attribute_path": "2/144/12", "value": 3660})
+    live_plug = agent.live_row("83:1") or {}
+    if live_plug.get("power_w") != 840.0 or live_plug.get("voltage_v") != 229.0 or live_plug.get("current_a") != 3.66:
+        raise SystemExit(f"sibling meter read must land on the plug {live_plug}")
+    agent.remember_live_devices([dict(grill)])
+    kept = agent.live_row("83:1") or {}
+    if kept.get("power_w") != 840.0 or kept.get("voltage_v") != 229.0:
+        raise SystemExit(f"a fresh node list must not freeze the meter {kept}")
     if "83:2" in sensor_rows:
         raise SystemExit(f"electrical sensor endpoint must not be its own Home row {sensor_rows.keys()}")
     occ = sensor_rows.get("84:1") or {}
