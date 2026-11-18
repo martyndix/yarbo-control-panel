@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 120
+AGENT_VERSION = 121
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -1095,30 +1095,15 @@ def maybe_motor_pending_off(device_id: str, power_w: float | None) -> None:
 
 
 def maybe_motor_mode_reon(device_id: str, turned_on: bool) -> None:
-    """If anything turns a motor-mode plug off while loaded, turn it back on (keep queued Off)."""
-    if turned_on:
+    """Apple Home Off stays off. A high watt reading must not turn the plug back on.
+
+    Panel, automation, and auto-off still queue Off until the load drops. If one of
+    those was waiting, the plug is already off, so drop the queue and let the tile show Off.
+    """
+    if turned_on or device_id == "":
         return
-    limit = motor_mode_map().get(device_id)
-    if not limit:
-        return
-    live = live_row(device_id) or {}
-    power = live.get("power_w")
-    try:
-        power_f = float(power) if power is not None else None
-    except (TypeError, ValueError):
-        power_f = None
-    sticky = float(_motor_high_until.get(device_id) or 0)
-    if not ((power_f is not None and power_f >= float(limit)) or time.time() < sticky):
-        return
-    if not _motor_reon_lock.acquire(blocking=False):
-        return
-    try:
-        log(f"motor mode: restoring On for {device_id} (limit {limit} W)")
-        dispatch({"op": "command", "id": device_id, "action": "on", "kind": "plug"})
-    except Exception as exc:  # noqa: BLE001
-        log(f"motor mode re-on failed for {device_id}: {exc}")
-    finally:
-        _motor_reon_lock.release()
+    if device_id in motor_pending_off_map():
+        clear_motor_pending_off(device_id)
 
 
 def names_for_node(node_id: int) -> list[str]:
@@ -4898,6 +4883,15 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
                 for key in ("power_w", "voltage_v", "current_a", "meter_endpoint", "_meter_at"):
                     if key in prev and prev.get(key) is not None:
                         item[key] = prev[key]
+            # A node list often still says On after Apple Home has turned the plug off.
+            if (
+                prev is not None
+                and prev.get("_on_at")
+                and str(prev.get("kind") or item.get("kind") or "") == "plug"
+                and "on" in prev
+            ):
+                item["on"] = prev["on"]
+                item["_on_at"] = prev["_on_at"]
             merged.append(item)
         if merged:
             merged = merge_split_climate_sensors(merged)
@@ -6951,6 +6945,7 @@ def apply_color_attribute(device_id: str, attr: int, value: Any) -> dict[str, An
 
 
 def apply_attribute_event(data: Any) -> None:
+    global _plug_power_off_at
     parsed = parse_attribute_event(data)
     if parsed is None:
         return
@@ -7159,12 +7154,15 @@ def apply_attribute_event(data: Any) -> None:
             maybe_motor_pending_off(device_id, fields.get("power_w"))
         was_on = None
         if "on" in fields:
+            fields["_on_at"] = time.time()
             live_before = live_row(device_id) or {}
             was_on = bool(live_before.get("on"))
         patch_live_device(device_id, fields)
         if "temperature" in fields or "humidity" in fields:
             coalesce_live_climate()
         if "on" in fields and was_on is True and fields.get("on") is False:
+            # Read watts soon so an Off tile does not keep the last running load.
+            _plug_power_off_at = 0.0
             maybe_motor_mode_reon(device_id, False)
 
 
@@ -8121,10 +8119,10 @@ def electrical_meter_endpoint(attributes: dict[str, Any]) -> int | None:
     return found
 
 
-def plug_meter_targets() -> list[tuple[int, int, bool]]:
-    """(node_id, meter endpoint, on) for plugs whose watts the tile and motor mode need."""
+def plug_meter_targets() -> list[tuple[int, int, bool, int]]:
+    """(node_id, meter endpoint, on, plug endpoint) for plugs whose watts and On/Off the tile needs."""
     motor = set(motor_mode_map())
-    targets: list[tuple[int, int, bool]] = []
+    targets: list[tuple[int, int, bool, int]] = []
     seen: set[tuple[int, int]] = set()
     for row in current_live_devices():
         if not isinstance(row, dict) or str(row.get("kind") or "") != "plug":
@@ -8145,18 +8143,29 @@ def plug_meter_targets() -> list[tuple[int, int, bool]]:
             endpoint = int(row.get("meter_endpoint") or row.get("endpoint") or 0)
         except (TypeError, ValueError):
             endpoint = 0
+        try:
+            plug_endpoint = int(row.get("endpoint") or 0)
+        except (TypeError, ValueError):
+            plug_endpoint = 0
+        if plug_endpoint <= 0:
+            plug_endpoint = endpoint
         if node_id <= 0 or endpoint <= 0:
             continue
         key = (node_id, endpoint)
         if key in seen:
             continue
         seen.add(key)
-        targets.append((node_id, endpoint, bool(row.get("on"))))
+        targets.append((node_id, endpoint, bool(row.get("on")), plug_endpoint))
     return targets
 
 
-def read_plug_meter(node_id: int, endpoint: int) -> None:
-    """Active power, voltage, and current. RMS is a second read so a missing RMS attr cannot hide watts."""
+def read_plug_meter(node_id: int, endpoint: int, plug_endpoint: int = 0) -> None:
+    """On/Off, then active power, voltage, and current. RMS is separate so a missing RMS attr cannot hide watts."""
+    switch_ep = plug_endpoint or endpoint
+    if not poll_paused():
+        state = _poll_read(node_id, [attr_key(switch_ep, ON_OFF, ATTR_ON_OFF)])
+        if state.get("ok"):
+            _poll_note_result(node_id, state)
     primary = [attr_key(endpoint, ELECTRICAL_POWER, attr) for attr in ELECTRICAL_POLL_ATTRS]
     if poll_paused() or not primary:
         return
@@ -8191,14 +8200,14 @@ def poll_plug_power(live: bool) -> None:
     if not targets:
         return
     if live:
-        for node_id, endpoint, _on in targets:
+        for node_id, endpoint, _on, plug_endpoint in targets:
             if poll_paused():
                 return
-            read_plug_meter(node_id, endpoint)
+            read_plug_meter(node_id, endpoint, plug_endpoint)
         return
-    node_id, endpoint, _on = targets[_plug_power_cursor % len(targets)]
+    node_id, endpoint, _on, plug_endpoint = targets[_plug_power_cursor % len(targets)]
     _plug_power_cursor += 1
-    read_plug_meter(node_id, endpoint)
+    read_plug_meter(node_id, endpoint, plug_endpoint)
 
 
 def poll_occupancy_attributes() -> None:

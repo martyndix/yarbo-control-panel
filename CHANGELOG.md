@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.377] - 2026-11-18
+
+### Fixed
+
+- Turning a metering plug **off in Apple Home** now turns it off, and the Home tile shows **Off**. A high watt reading was turning the plug straight back on, so the off never stuck and the tile stayed on. An off that this panel queued still waits until the load drops. Matter agent **v121**.
+
 ## [4.0.376] - 2026-11-18
 
 ### Fixed
