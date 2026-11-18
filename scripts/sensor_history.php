@@ -2,7 +2,7 @@
 <?php
 
 /**
- * Sample temperature / humidity every ~30 minutes into data/sensor-history/.
+ * Sample temperature, humidity, and plug watts / volts / amps every ~30 minutes.
  * Started by scripts/panel.sh. Use --once for a single pass (panel update).
  *
  * Wakes often and only records a successful run when at least one sample is

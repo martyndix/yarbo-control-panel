@@ -3805,6 +3805,13 @@ button.home-device-meta--history {
     color: inherit;
 }
 
+button.home-device-power.home-device-meta--history {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    padding: 0.05rem 0.4rem;
+    border-radius: 6px;
+}
+
 button.home-heater-room:hover,
 button.home-device-meta--history:hover {
     text-decoration: underline;
