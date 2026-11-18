@@ -110,6 +110,7 @@ final class YarboMatterFabric
     private const DEVTYPE_HEATING_COOLING = 0x0301;
     private const DEVTYPE_TEMP_SENSOR = 0x0302;
     private const DEVTYPE_HUMIDITY_SENSOR = 0x0303;
+    private const DEVTYPE_RELATIVE_HUMIDITY_SENSOR = 0x0307;
     private const DEVTYPE_CONTACT_SENSOR = 0x0015;
     private const DEVTYPE_OCCUPANCY_SENSOR = 0x0107;
     private const DEVTYPE_RVC = 0x0074;
@@ -268,6 +269,231 @@ final class YarboMatterFabric
     }
 
     /**
+     * Drop a trailing Temperature / Humidity label so both halves share one title.
+     */
+    public static function climateNameStem(string $name): string
+    {
+        $text = trim($name);
+        $prev = null;
+        while ($text !== '' && $text !== $prev) {
+            $prev = $text;
+            $stripped = preg_replace('/(?:\s*[-–—:\/|]\s*|\s+)(temperature|temp|humidity|humid|rh)\.?$/iu', '', $text);
+            $text = trim(is_string($stripped) ? $stripped : $text, " \t\n\r\0\x0B-–—:/|");
+        }
+
+        return $text;
+    }
+
+    /**
+     * @param list<string> $labels
+     */
+    public static function combinedClimateName(array $labels, string $product = ''): string
+    {
+        $stems = [];
+        $seen = [];
+        foreach ($labels as $label) {
+            $stem = self::climateNameStem($label);
+            $key = strtolower($stem);
+            if ($stem !== '' && !isset($seen[$key])) {
+                $seen[$key] = true;
+                $stems[] = $stem;
+            }
+        }
+        if (count($stems) === 1) {
+            return $stems[0];
+        }
+        if (count($stems) >= 2) {
+            $first = $stems[0];
+            $second = $stems[1];
+            $count = 0;
+            $limit = min(strlen($first), strlen($second));
+            while ($count < $limit && strtolower($first[$count]) === strtolower($second[$count])) {
+                $count++;
+            }
+            $prefix = trim(substr($first, 0, $count), " \t\n\r\0\x0B-–—:/|");
+            if (strlen($prefix) >= 3) {
+                return $prefix;
+            }
+        }
+        $product = trim($product);
+        if ($product !== '' && !in_array(strtolower($product), ['sensor', 'matter'], true)) {
+            return $product;
+        }
+
+        return $stems[0] ?? ($labels[0] ?? 'Sensor');
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private static function climateNodeId(array $row): int
+    {
+        $nodeId = (int) ($row['node_id'] ?? 0);
+        if ($nodeId > 0) {
+            return $nodeId;
+        }
+        $id = (string) ($row['id'] ?? '');
+        $head = explode(':', $id, 2)[0];
+
+        return ctype_digit($head) ? (int) $head : 0;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private static function climateEndpoint(array $row): int
+    {
+        $endpoint = (int) ($row['endpoint'] ?? 0);
+        if ($endpoint > 0) {
+            return $endpoint;
+        }
+        $id = (string) ($row['id'] ?? '');
+        if (!str_contains($id, ':')) {
+            return 0;
+        }
+        $tail = explode(':', $id, 2)[1];
+
+        return ctype_digit($tail) ? (int) $tail : 0;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private static function isSplitClimateRow(array $row): bool
+    {
+        $kind = strtolower(trim((string) ($row['kind'] ?? '')));
+        if ($kind !== 'sensor' && $kind !== '') {
+            return false;
+        }
+        if (!empty($row['has_open']) || !empty($row['has_motion']) || !empty($row['has_on_off'])) {
+            return false;
+        }
+        if (array_key_exists('open', $row) && $row['open'] !== null) {
+            return false;
+        }
+        if (array_key_exists('motion', $row) && $row['motion'] !== null) {
+            return false;
+        }
+
+        return array_key_exists('temperature', $row) && $row['temperature'] !== null
+            || array_key_exists('humidity', $row) && $row['humidity'] !== null;
+    }
+
+    /**
+     * One row when one Matter node exposes temperature and humidity on separate endpoints.
+     *
+     * @param list<array<string, mixed>> $devices
+     * @return list<array<string, mixed>>
+     */
+    public static function mergeSplitClimateSensors(array $devices): array
+    {
+        $groups = [];
+        foreach ($devices as $row) {
+            if (!is_array($row) || !self::isSplitClimateRow($row)) {
+                continue;
+            }
+            $nodeId = self::climateNodeId($row);
+            if ($nodeId <= 0) {
+                continue;
+            }
+            $groups[$nodeId][] = $row;
+        }
+        $drop = [];
+        $mergedById = [];
+        foreach ($groups as $nodeId => $rows) {
+            if (count($rows) < 2) {
+                continue;
+            }
+            $hasTemp = false;
+            $hasHum = false;
+            $both = true;
+            foreach ($rows as $row) {
+                $temp = array_key_exists('temperature', $row) && $row['temperature'] !== null;
+                $hum = array_key_exists('humidity', $row) && $row['humidity'] !== null;
+                $hasTemp = $hasTemp || $temp;
+                $hasHum = $hasHum || $hum;
+                $both = $both && $temp && $hum;
+            }
+            if (!$hasTemp || !$hasHum || $both) {
+                continue;
+            }
+            usort($rows, static function (array $a, array $b): int {
+                return self::climateEndpoint($a) <=> self::climateEndpoint($b);
+            });
+            $base = $rows[0];
+            $endpoints = [];
+            $available = false;
+            foreach ($rows as $row) {
+                $endpoint = self::climateEndpoint($row);
+                if ($endpoint > 0 && !in_array($endpoint, $endpoints, true)) {
+                    $endpoints[] = $endpoint;
+                }
+                if (($base['temperature'] ?? null) === null && ($row['temperature'] ?? null) !== null) {
+                    $base['temperature'] = $row['temperature'];
+                }
+                if (($base['humidity'] ?? null) === null && ($row['humidity'] ?? null) !== null) {
+                    $base['humidity'] = $row['humidity'];
+                }
+                if (($row['available'] ?? true) !== false) {
+                    $available = true;
+                }
+            }
+            $labels = [];
+            foreach ($rows as $row) {
+                $labels[] = (string) ($row['name'] ?? '');
+            }
+            $base['available'] = $available;
+            $base['name'] = self::combinedClimateName($labels, (string) ($base['product'] ?? ''));
+            $parts = [];
+            if (($base['temperature'] ?? null) !== null) {
+                $parts[] = $base['temperature'] . '°';
+            }
+            if (isset($base['humidity']) && is_numeric($base['humidity'])) {
+                $parts[] = (string) (int) round((float) $base['humidity']) . '% RH';
+            }
+            $base['status'] = implode(' · ', $parts);
+            $base['kind'] = 'sensor';
+            $base['on'] = false;
+            $base['climate_endpoints'] = $endpoints;
+            $base['node_id'] = $nodeId;
+            if ($endpoints !== []) {
+                $base['endpoint'] = $endpoints[0];
+            }
+            $canon = (string) ($base['id'] ?? ($nodeId . ':' . ($endpoints[0] ?? 1)));
+            $base['id'] = $canon;
+            $mergedById[$canon] = $base;
+            foreach ($endpoints as $endpoint) {
+                $key = $nodeId . ':' . $endpoint;
+                if ($key !== $canon) {
+                    $drop[$key] = true;
+                }
+            }
+        }
+        $out = [];
+        $emitted = [];
+        foreach ($devices as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            if (isset($drop[$id])) {
+                continue;
+            }
+            if (isset($mergedById[$id])) {
+                if (isset($emitted[$id])) {
+                    continue;
+                }
+                $emitted[$id] = true;
+                $out[] = $mergedById[$id];
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
      * @param list<array<string, mixed>> $nodes
      * @return list<array<string, mixed>>
      */
@@ -422,6 +648,7 @@ final class YarboMatterFabric
                 ];
             }
         }
+        $devices = self::mergeSplitClimateSensors($devices);
         usort(
             $devices,
             static function (array $a, array $b): int {
@@ -545,6 +772,7 @@ final class YarboMatterFabric
         foreach ($ids as $id) {
             if ($id === self::DEVTYPE_TEMP_SENSOR
                 || $id === self::DEVTYPE_HUMIDITY_SENSOR
+                || $id === self::DEVTYPE_RELATIVE_HUMIDITY_SENSOR
                 || $id === self::DEVTYPE_CONTACT_SENSOR
                 || $id === self::DEVTYPE_OCCUPANCY_SENSOR) {
                 return 'sensor';

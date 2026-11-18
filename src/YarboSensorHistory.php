@@ -377,7 +377,10 @@ final class YarboSensorHistory
         if ($bucket === 'day' || $bucket === 'daily') {
             $bucket = '1d';
         }
-        $samples = $this->pruneSamples(is_array($store['samples'] ?? null) ? $store['samples'] : [], $to);
+        $samples = $this->pruneSamples(
+            $this->samplesWithClimateSiblings($id, is_array($store['samples'] ?? null) ? $store['samples'] : []),
+            $to
+        );
         $inRange = [];
         foreach ($samples as $row) {
             $ts = (int) $row[0];
@@ -471,6 +474,116 @@ final class YarboSensorHistory
         }
 
         return true;
+    }
+
+    /**
+     * Fold temperature and humidity files that used to be separate endpoints.
+     *
+     * @param list<mixed> $samples
+     * @return list<array{0: int, 1: ?float, 2: ?float}>
+     */
+    private function samplesWithClimateSiblings(string $id, array $samples): array
+    {
+        if (!preg_match('/^(\d+):\d+$/', $id, $match)) {
+            return $samples;
+        }
+        $node = $match[1];
+        $live = [];
+        foreach ($this->listSources() as $src) {
+            $live[$src['id']] = true;
+        }
+        $dir = $this->dir();
+        if (!is_dir($dir)) {
+            return $samples;
+        }
+        $folded = [];
+        foreach (glob($dir . '/*.json') ?: [] as $path) {
+            $base = basename((string) $path, '.json');
+            if (!preg_match('/^(\d+)_(\d+)$/', $base, $file)) {
+                continue;
+            }
+            if ($file[1] !== $node) {
+                continue;
+            }
+            $otherId = $file[1] . ':' . $file[2];
+            if ($otherId === $id || isset($live[$otherId])) {
+                continue;
+            }
+            $other = $this->loadRaw((string) $path);
+            $extra = is_array($other['samples'] ?? null) ? $other['samples'] : [];
+            if ($extra === []) {
+                continue;
+            }
+            $samples = self::mergeClimateSamples($samples, $extra);
+            $folded[] = (string) $path;
+        }
+        if ($folded !== []) {
+            $store = $this->load($id);
+            $store['id'] = $id;
+            $store['samples'] = $samples;
+            if ($this->write($id, $store)) {
+                foreach ($folded as $path) {
+                    if ($path !== $this->pathFor($id)) {
+                        @unlink($path);
+                    }
+                }
+            }
+        }
+
+        return $samples;
+    }
+
+    /**
+     * @param list<mixed> $primary
+     * @param list<mixed> $extra
+     * @return list<array{0: int, 1: ?float, 2: ?float}>
+     */
+    public static function mergeClimateSamples(array $primary, array $extra): array
+    {
+        $rows = [];
+        foreach ($primary as $row) {
+            if (!is_array($row) || !isset($row[0])) {
+                continue;
+            }
+            $rows[] = [(int) $row[0], self::optionalFloat($row[1] ?? null), self::optionalFloat($row[2] ?? null)];
+        }
+        usort($rows, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+        foreach ($extra as $row) {
+            if (!is_array($row) || !isset($row[0])) {
+                continue;
+            }
+            $ts = (int) $row[0];
+            $temp = self::optionalFloat($row[1] ?? null);
+            $hum = self::optionalFloat($row[2] ?? null);
+            $best = null;
+            $bestDelta = 1201;
+            foreach ($rows as $i => $have) {
+                $delta = abs($have[0] - $ts);
+                if ($delta > 1200 || $delta >= $bestDelta) {
+                    continue;
+                }
+                $fills = ($have[1] === null && $temp !== null) || ($have[2] === null && $hum !== null);
+                if (!$fills && $delta > 0) {
+                    continue;
+                }
+                $best = $i;
+                $bestDelta = $delta;
+            }
+            if ($best === null) {
+                $rows[] = [$ts, $temp, $hum];
+                usort($rows, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+                continue;
+            }
+            if ($rows[$best][1] === null && $temp !== null) {
+                $rows[$best][1] = $temp;
+            }
+            if ($rows[$best][2] === null && $hum !== null) {
+                $rows[$best][2] = $hum;
+            }
+        }
+        usort($rows, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+
+        return $rows;
     }
 
     /**

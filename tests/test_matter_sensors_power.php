@@ -6,6 +6,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use Yarbo\YarboHome;
 use Yarbo\YarboMatterFabric;
+use Yarbo\YarboSensorHistory;
 
 function assert_true(bool $ok, string $message): void
 {
@@ -92,6 +93,63 @@ assert_true(($clim['kind'] ?? '') === 'sensor', 'climate kind');
 assert_true(($clim['temperature'] ?? null) === 21.4, 'climate temp');
 assert_true(($clim['humidity'] ?? null) === 47.5, 'climate humidity');
 assert_true(str_contains((string) ($clim['status'] ?? ''), '°'), 'climate status temp');
+
+$timmer = [
+    'node_id' => 90,
+    'available' => true,
+    'attributes' => [
+        '0/40/1' => 'IKEA of Sweden',
+        '0/40/3' => 'TIMMERFLOTTE',
+        '1/29/0' => [['deviceType' => 0x0302, 'revision' => 1]],
+        '1/40/5' => 'Workshop Temperature',
+        '1/1026/0' => 2340,
+        '2/29/0' => [['deviceType' => 0x0307, 'revision' => 1]],
+        '2/40/5' => 'Workshop Humidity',
+        '2/1029/0' => 4900,
+        '3/29/0' => [['deviceType' => 0x0015, 'revision' => 1]],
+        '3/40/5' => 'Workshop Door',
+        '3/69/0' => true,
+    ],
+];
+$timmerById = [];
+foreach (YarboMatterFabric::flatten([$timmer]) as $row) {
+    $timmerById[(string) ($row['id'] ?? '')] = $row;
+}
+$workshop = $timmerById['90:1'] ?? [];
+assert_true(!isset($timmerById['90:2']), 'humidity endpoint is not its own row');
+assert_true(($workshop['name'] ?? '') === 'Workshop', 'shared climate name');
+assert_true(($workshop['temperature'] ?? null) === 23.4, 'combined temperature');
+assert_true(($workshop['humidity'] ?? null) === 49.0, 'combined humidity');
+assert_true(str_contains((string) ($workshop['status'] ?? ''), '°'), 'combined status temp');
+assert_true(str_contains((string) ($workshop['status'] ?? ''), 'RH'), 'combined status humidity');
+assert_true(($workshop['climate_endpoints'] ?? null) === [1, 2], 'climate endpoints');
+assert_true(YarboHome::isOpenCloseSensor($workshop) === false, 'climate row stays off open/close');
+$door = $timmerById['90:3'] ?? [];
+assert_true(($door['has_open'] ?? false) === true, 'door on the same node stays');
+assert_true(($door['open'] ?? null) === false, 'door StateValue true is closed');
+$overlaid = YarboHome::overlayDeviceStates([
+    [
+        'id' => '90:1',
+        'node_id' => 90,
+        'endpoint' => 1,
+        'name' => 'Workshop Temperature',
+        'kind' => 'sensor',
+        'temperature' => 23.4,
+    ],
+    [
+        'id' => '90:2',
+        'node_id' => 90,
+        'endpoint' => 2,
+        'name' => 'Workshop Humidity',
+        'kind' => 'sensor',
+        'humidity' => 49.0,
+    ],
+], [$workshop]);
+assert_true(count($overlaid) === 1, 'saved split rows collapse to one');
+assert_true(($overlaid[0]['id'] ?? '') === '90:1', 'canonical climate id');
+assert_true(($overlaid[0]['temperature'] ?? null) === 23.4, 'overlay keeps temperature');
+assert_true(($overlaid[0]['humidity'] ?? null) === 49.0, 'overlay copies humidity');
+assert_true(($overlaid[0]['name'] ?? '') === 'Workshop', 'overlay uses the shared name');
 
 $cont = $byId['81:1'] ?? [];
 assert_true(($cont['kind'] ?? '') === 'sensor', 'contact kind');
@@ -214,7 +272,37 @@ assert_true(str_contains($agent, 'ELECTRICAL_POWER = 0x0090'), 'agent Electrical
 assert_true(str_contains($agent, 'BOOLEAN_STATE = 0x0045'), 'agent Boolean State cluster');
 assert_true(str_contains($agent, 'OCCUPANCY_SENSING = 0x0406'), 'agent Occupancy Sensing cluster');
 assert_true(str_contains($agent, 'HUMIDITY_MEASUREMENT = 0x0405'), 'agent Humidity cluster');
-assert_true(str_contains($agent, 'AGENT_VERSION = 117'), 'agent v117');
+assert_true(str_contains($agent, 'AGENT_VERSION = 118'), 'agent v118');
+
+$histRoot = sys_get_temp_dir() . '/yarbo-climate-hist-' . bin2hex(random_bytes(3));
+mkdir($histRoot . '/data/sensor-history', 0775, true);
+file_put_contents($histRoot . '/data/hub-config.json', json_encode(['modules' => ['home' => true]], JSON_UNESCAPED_SLASHES));
+$history = new YarboSensorHistory($histRoot);
+file_put_contents($history->pathFor('90:1'), json_encode([
+    'id' => '90:1',
+    'name' => 'Workshop Temperature',
+    'kind' => 'sensor',
+    'updated_at' => time(),
+    'samples' => [[1000, 23.4, null], [3000, 23.6, null]],
+], JSON_UNESCAPED_SLASHES));
+file_put_contents($history->pathFor('90:2'), json_encode([
+    'id' => '90:2',
+    'name' => 'Workshop Humidity',
+    'kind' => 'sensor',
+    'updated_at' => time(),
+    'samples' => [[1010, null, 49], [3010, null, 50]],
+], JSON_UNESCAPED_SLASHES));
+$series = $history->series('90:1', 1, 5000, '30m');
+assert_true(($series['has_humidity'] ?? false) === true, 'one graph includes humidity');
+$sawTemp = false;
+$sawHum = false;
+foreach ($series['points'] ?? [] as $point) {
+    if (($point['temperature'] ?? null) !== null && ($point['humidity'] ?? null) !== null) {
+        $sawTemp = true;
+        $sawHum = true;
+    }
+}
+assert_true($sawTemp && $sawHum, 'split history files draw on one chart');
 assert_true(str_contains($js, 'home-device-power'), 'Home shows plug watts');
 assert_true(str_contains($js, 'homeIsSensorKind(d)'), 'Home renders Matter sensors');
 assert_true(str_contains($js, 'homeMemberHasMotion'), 'Home person emoji uses motion');
