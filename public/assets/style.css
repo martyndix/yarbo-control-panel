@@ -3632,6 +3632,17 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     display: none;
 }
 
+.home-device-actions .home-tv-pin {
+    width: 4.5rem;
+    min-height: 1.7rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.8rem;
+}
+
 .home-device-actions .home-device-meta {
     display: inline-block;
     margin: 0;
