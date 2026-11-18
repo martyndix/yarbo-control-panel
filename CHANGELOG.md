@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.383] - 2026-11-18
+
+### Changed
+
+- A Bilresa When now reads as a sentence: **pressed starts it**, and the next choice **turns it off** (or **never**). Never means that button will not cancel what Then turned on.
+
 ## [4.0.382] - 2026-11-18
 
 ### Fixed

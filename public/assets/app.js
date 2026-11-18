@@ -8626,7 +8626,14 @@ function homeAutoWhenPhrase(trigger, names) {
         return `${name} ${labels[event] || event} ${homeAutoFormatDuration(trigger.for_sec)}`;
     }
     if (event === 'motion' && /motion$/i.test(String(name).trim())) return name;
-    return `${name} ${labels[event] || event}`;
+    let text = `${name} ${labels[event] || event}`;
+    if (['press', 'double', 'hold'].includes(event)) {
+        const stop = String(trigger.stop_event || '');
+        if (['press', 'double', 'hold'].includes(stop) && stop !== event) {
+            text += `, ${labels[stop]} turns it off`;
+        }
+    }
+    return text;
 }
 
 function homeAutoThenLookIndex(el) {
@@ -9661,17 +9668,33 @@ function homeAutoWhenChipHtml(trigger, index = 0) {
     const events = homeAutoWhenEvents(d || { id: trigger.id, kind: 'light' });
     const eventName = trigger.event || 'turns_on';
     const dur = homeAutoDurationEvent(eventName) ? homeAutoDurationParts(trigger.for_sec || 300) : null;
-    const buttonStop = events.some(([v]) => v === 'press')
-        ? `<select data-auto-stop aria-label="Stop gesture"><option value="">no stop</option>${events.filter(([v]) => v !== eventName).map(([v, label]) =>
-            `<option value="${v}" ${v === trigger.stop_event ? 'selected' : ''}>stop on ${label}</option>`
-        ).join('')}</select>`
-        : '';
+    if (events.some(([value]) => value === 'press')) {
+        const start = ['press', 'double', 'hold'].includes(eventName) ? eventName : 'press';
+        const stop = ['press', 'double', 'hold'].includes(trigger.stop_event) && trigger.stop_event !== start
+            ? trigger.stop_event
+            : '';
+        const startOpts = events.map(([value, label]) =>
+            `<option value="${value}" ${value === start ? 'selected' : ''}>${label}</option>`
+        ).join('');
+        const stopOpts = `<option value="" ${stop === '' ? 'selected' : ''}>never</option>${events.filter(([value]) => value !== start).map(([value, label]) =>
+            `<option value="${value}" ${value === stop ? 'selected' : ''}>${label}</option>`
+        ).join('')}`;
+        return `<div class="auto-chip auto-chip--button" data-auto-when ${iAttr}>
+            ${homeAutoChipNameHtml(d || { name: trigger.id })}
+            <select data-auto-event aria-label="Starts the automation when">${startOpts}</select>
+            <span class="auto-chip-join">starts it</span>
+            <select data-auto-stop aria-label="Turns it off when">${stopOpts}</select>
+            <span class="auto-chip-join">turns it off</span>
+            <button type="button" class="auto-chip-x" data-auto-clear-when="${index}" aria-label="Remove">✕</button>
+            <span class="auto-chip-meta">The first choice runs Then. The second turns off what Then turned on. Never means this button will not turn it off.</span>
+            ${homeAutoChipMetaHtml(d)}
+        </div>`;
+    }
     return `<div class="auto-chip" data-auto-when ${iAttr}>
         ${homeAutoChipNameHtml(d || { name: trigger.id })}
         <select data-auto-event>${events.map(([v, label]) =>
             `<option value="${v}" ${v === eventName ? 'selected' : ''}>${label}</option>`
         ).join('')}</select>
-        ${buttonStop}
         ${dur ? `<input type="number" min="1" data-auto-for value="${dur.value}">
             <select data-auto-for-unit>
                 <option value="1" ${dur.unit === 1 ? 'selected' : ''}>sec</option>
