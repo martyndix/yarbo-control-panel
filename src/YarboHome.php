@@ -1367,7 +1367,9 @@ final class YarboHome
                 $this->cancelMotorPendingOff($id);
             }
         }
-        $timeout = $kind === self::KIND_HEATER ? 80.0 : 60.0;
+        // Long enough for a heater write, short enough that a stuck Matter
+        // server cannot occupy a panel worker until the browser aborts.
+        $timeout = $kind === self::KIND_HEATER ? 20.0 : 12.0;
         // Vacuum Start needs the current agent binary after Settings update.
         if ($kind === self::KIND_VACUUM) {
             $probe = $agent->ping();
@@ -1386,7 +1388,7 @@ final class YarboHome
             $pct = (int) ($body['brightness'] ?? 0);
             $action = $pct > 0 ? 'on' : 'off';
             $body = ['op' => 'command', 'id' => $id, 'action' => $action];
-            $result = $agent->request($body, 60.0);
+            $result = $agent->request($body, $timeout);
         }
         $dropColor = [];
         $adaptiveCmd = !empty($input['adaptive']) || !empty($body['adaptive']);
@@ -1398,7 +1400,7 @@ final class YarboHome
             if ($adaptiveCmd) {
                 $body['adaptive'] = true;
             }
-            $result = $agent->request($body, 60.0);
+            $result = $agent->request($body, $timeout);
         }
         if (in_array($action, ['color', 'color_temp', 'kelvin'], true) && !($result['ok'] ?? false)
             && YarboMatterFabric::isUnsupportedCluster((string) ($result['error'] ?? ''))) {
@@ -1411,7 +1413,7 @@ final class YarboHome
                 : ['color_ct' => false];
             $action = 'on';
             $body = ['op' => 'command', 'id' => $id, 'action' => 'on'];
-            $result = $agent->request($body, 60.0);
+            $result = $agent->request($body, $timeout);
         }
         if (!($result['ok'] ?? false)) {
             return ['ok' => false, 'error' => $this->friendlyMatterError((string) ($result['error'] ?? 'Command failed'))];

@@ -1162,7 +1162,7 @@ final class YarboUnifi
         $wanted = array_fill_keys($config['show_on_home'], true);
         $tickedRelays = $this->tickedRelayIds($config['show_on_home']);
         $rows = [];
-        foreach ($this->dashboardPayload(false)['devices'] as $device) {
+        foreach ($this->inventoryDeviceRows() as $device) {
             if (!is_array($device)) {
                 continue;
             }
@@ -1196,7 +1196,7 @@ final class YarboUnifi
     {
         $this->kickAccessDoorRefresh();
         $rows = [];
-        foreach ($this->dashboardPayload(false)['devices'] as $device) {
+        foreach ($this->inventoryDeviceRows() as $device) {
             if (!is_array($device)) {
                 continue;
             }
@@ -1207,6 +1207,23 @@ final class YarboUnifi
         }
 
         return $rows;
+    }
+
+    /**
+     * Device rows from the last inventory. Skips the radio/AirPlay slice,
+     * which shells out to ps and ss. Home asks for these rows every few seconds.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function inventoryDeviceRows(): array
+    {
+        $inventory = $this->readInventory();
+        $pendingCmds = $inventory['light_commands'] ?? [];
+        if (is_array($pendingCmds) && $pendingCmds !== [] && isset($inventory['lights']) && is_array($inventory['lights'])) {
+            $inventory['light_commands'] = $this->applyPendingLightCommands($inventory['lights'], $pendingCmds);
+        }
+
+        return $this->catalogFromInventory($inventory, $this->load()['show_on_home']);
     }
 
     /**

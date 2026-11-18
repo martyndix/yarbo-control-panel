@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 114
+AGENT_VERSION = 115
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -234,7 +234,13 @@ _poll_node_backoff: dict[int, float] = {}
 _poll_color_at = 0.0
 _poll_cursor = 0
 _vacuum_poll_at = 0.0
+_light_poll_at = 0.0
 VACUUM_POLL_INTERVAL_S = 20.0
+# While subscriptions are up, a full-house read every few seconds is what
+# fills the Matter server until taps and the page itself time out.
+LIGHT_POLL_LISTEN_S = 45.0
+LIGHT_POLL_FALLBACK_S = 8.0
+_command_slots = threading.BoundedSemaphore(2)
 _commission_job_lock = threading.Lock()
 _commission_job: dict[str, Any] | None = None
 _command_busy = 0
@@ -280,6 +286,9 @@ class MatterWs:
         header.extend(key)
         masked = bytes(b ^ key[i % 4] for i, b in enumerate(payload))
         with self._out:
+            # A wedged Matter server must not pin this thread forever. PHP
+            # would keep a panel worker until the browser gives up.
+            self.sock.settimeout(8.0)
             self.sock.sendall(header + masked)
 
     def recv_json(self, timeout: float) -> dict[str, Any] | None:
@@ -6338,6 +6347,7 @@ def start_state_poll() -> None:
     _state_poll_started = True
 
     def loop() -> None:
+        global _light_poll_at
         while True:
             try:
                 # Listen dump can take tens of seconds on a Hue Bridge. Do not
@@ -6349,7 +6359,13 @@ def start_state_poll() -> None:
                     time.sleep(0.4)
                     continue
                 kick_listening()
-                poll_light_attributes()
+                # Subscriptions already push On/Off. Reading the whole house
+                # on every pass is what made the panel abort and then stop loading.
+                now = time.time()
+                if now >= _light_poll_at:
+                    poll_light_attributes()
+                    gap = LIGHT_POLL_LISTEN_S if _listening else LIGHT_POLL_FALLBACK_S
+                    _light_poll_at = time.time() + gap
                 poll_vacuum_attributes()
                 maybe_scan_new_endpoints()
             except Exception as exc:  # noqa: BLE001
@@ -7590,6 +7606,11 @@ def color_payload(attributes: dict[str, Any], endpoint: int, type_ids: list[int]
 
 
 def device_command(node_id: int, endpoint: int, cluster: int, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    # Two taps can be in flight. A third returns immediately so the panel
+    # worker is not stuck behind a Matter server that has stopped answering.
+    if not _command_slots.acquire(timeout=0.4):
+        return {"ok": False, "error": "Matter server is busy — try again"}
+
     def send(nid: int | None = None) -> dict[str, Any]:
         use = node_id if nid is None else nid
         rpc = matter_rpc(
@@ -7601,11 +7622,15 @@ def device_command(node_id: int, endpoint: int, cluster: int, name: str, payload
                 "command_name": name,
                 "payload": payload,
             },
-            timeout=12.0,
+            timeout=8.0,
+            retries=1,
         )
         return rpc if not rpc.get("ok") else {"ok": True}
 
-    return command_with_reconnect(node_id, send)
+    try:
+        return command_with_reconnect(node_id, send)
+    finally:
+        _command_slots.release()
 
 
 def _endpoint_has_on_off(attributes: dict[str, Any], endpoint: int) -> bool:

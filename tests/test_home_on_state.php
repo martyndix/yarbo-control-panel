@@ -784,12 +784,18 @@ $homePhp = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 assert_true(str_contains($homePhp, "\$body['kind'] = \$kind"), 'PHP Home command must pass kind to the Matter agent');
 assert_true(str_contains($homePhp, "\$input['kind'] ?? \$input['device_kind']"), 'PHP Home command reads kind from the page');
 assert_true(str_contains($homePhp, 'cachedDeviceSetpoint'), 'heater On uses the last heating temperature');
-assert_true(str_contains($homePhp, '? 80.0 : 60.0'), 'heater Matter writes get a longer PHP wait');
+assert_true(str_contains($homePhp, '? 20.0 : 12.0'), 'a stuck Matter write must free the PHP worker before the browser aborts');
+assert_true(
+    preg_match('/function beginHomeControl\(\) \{.*?\n\}/s', $js, $beginHome) === 1
+        && !str_contains($beginHome[0], 'abortPanelGets'),
+    'starting a command must not abort the Home refresh already in flight'
+);
+assert_true(str_contains($js, "throw new Error('The panel is busy — try again')"), 'a timed-out Home command must not toast Fetch is aborted');
 assert_true(str_contains($homePhp, "['op' => 'states'], 2.5, false)"), 'live mill list waits long enough for states');
 assert_true(str_contains($homePhp, 'unionDeviceLists'), 'pairing merges the new node into last_devices');
 assert_true(str_contains($homePhp, 'function scanDevices'), 'Look for devices re-interviews the Hue Bridge');
 assert_true(str_contains($homePhp, "['op' => 'scan'], 130.0"), 'Look for devices waits for Hue Bridge child lights');
-assert_true(str_contains($homePhp, 'Check Hidden, then tap Look for devices again'), 'scan tells you to check Hidden and not re-pair');
+assert_true(str_contains($homePhp, 'Check Hidden, then try again. Do not pair the Hue Bridge a second time.'), 'scan tells you to check Hidden and not re-pair');
 assert_true(str_contains($homePhp, 'function looksLikeUnreadyHueLight'), 'name-only Hue rows are marked unready');
 assert_true(YarboHome::looksLikeUnreadyHueLight([
     'id' => '1:12',
