@@ -200,6 +200,8 @@ final class YarboVestaboard
             'rotate_at' => null,
             'rotate_started_at' => null,
             'smart_display' => true,
+            'idle_default' => 'powerwall',
+            'weather_unit' => 'c',
             'live_resume' => null,
             'activity_focus' => null,
             'activity_swap_at' => null,
@@ -274,6 +276,8 @@ final class YarboVestaboard
             'smart_display' => array_key_exists('smart_display', $decoded)
                 ? (bool) $decoded['smart_display']
                 : true,
+            'idle_default' => self::normalizeIdleDefault($decoded['idle_default'] ?? 'powerwall'),
+            'weather_unit' => self::normalizeWeatherUnit($decoded['weather_unit'] ?? 'c'),
             'live_resume' => $this->normalizeLiveResume($decoded['live_resume'] ?? null),
             'activity_focus' => $this->normalizeActivityFocus($decoded['activity_focus'] ?? null),
             'activity_swap_at' => isset($decoded['activity_swap_at']) && is_string($decoded['activity_swap_at'])
@@ -451,6 +455,12 @@ final class YarboVestaboard
             'smart_display' => array_key_exists('smart_display', $input) || array_key_exists('vestaboard_smart_display', $input)
                 ? (bool) ($input['smart_display'] ?? $input['vestaboard_smart_display'])
                 : (bool) ($current['smart_display'] ?? true),
+            'idle_default' => array_key_exists('idle_default', $input) || array_key_exists('vestaboard_idle_default', $input)
+                ? self::normalizeIdleDefault($input['idle_default'] ?? $input['vestaboard_idle_default'] ?? 'powerwall')
+                : self::normalizeIdleDefault($current['idle_default'] ?? 'powerwall'),
+            'weather_unit' => array_key_exists('weather_unit', $input) || array_key_exists('vestaboard_weather_unit', $input)
+                ? self::normalizeWeatherUnit($input['weather_unit'] ?? $input['vestaboard_weather_unit'] ?? 'c')
+                : self::normalizeWeatherUnit($current['weather_unit'] ?? 'c'),
             'live_resume' => array_key_exists('live_resume', $input)
                 ? $this->normalizeLiveResume($input['live_resume'])
                 : $this->normalizeLiveResume($current['live_resume'] ?? null),
@@ -535,6 +545,8 @@ final class YarboVestaboard
             'night_hours_available' => $this->nightHoursAvailable(),
             'night_watch' => $this->nightWatchSummary(),
             'smart_display' => (bool) ($config['smart_display'] ?? true),
+            'idle_default' => self::normalizeIdleDefault($config['idle_default'] ?? 'powerwall'),
+            'weather_unit' => self::normalizeWeatherUnit($config['weather_unit'] ?? 'c'),
             'connection_warning' => $this->connectionWarning(),
         ] + $this->rotatePublicFields($config);
     }
@@ -1384,6 +1396,9 @@ final class YarboVestaboard
         if ($id === YarboHub::LIVE_BATTERIES) {
             return YarboHub::allViewAvailable($modules);
         }
+        if ($id === YarboHub::LIVE_WEATHER) {
+            return true;
+        }
         if ($id === YarboHub::MODULE_YARBO
             || $id === YarboHub::MODULE_POWERWALL
             || $id === YarboHub::MODULE_LYMOW) {
@@ -1444,7 +1459,7 @@ final class YarboVestaboard
     private function stopRotateToDefault(): bool
     {
         $hub = new YarboHub($this->projectRoot);
-        $default = YarboHub::firstEnabledVestaboardLive($hub->load()['modules']);
+        $default = $this->idleLiveId();
         $this->save([
             'rotate_enabled' => false,
             'rotate_started_at' => null,
@@ -1535,8 +1550,9 @@ final class YarboVestaboard
             // Rotate stays enabled; dwell resumes after the override.
             $resume = $current === YarboHub::LIVE_BATTERIES || $current === YarboHub::MODULE_POWERWALL
                 || $current === YarboHub::MODULE_YARBO || $current === YarboHub::MODULE_LYMOW
+                || $current === YarboHub::LIVE_WEATHER
                 ? $current
-                : YarboHub::firstEnabledVestaboardLive($modules);
+                : $this->idleLiveId();
         }
 
         $changed = false;
@@ -1726,6 +1742,7 @@ final class YarboVestaboard
             YarboHub::MODULE_POWERWALL,
             YarboHub::MODULE_LYMOW,
             YarboHub::LIVE_BATTERIES,
+            YarboHub::LIVE_WEATHER,
         ], true)) {
             return $id;
         }
@@ -1754,6 +1771,9 @@ final class YarboVestaboard
     {
         $hub = new YarboHub($this->projectRoot);
         $live = $hub->vestaboardLive();
+        if ($live === YarboHub::LIVE_WEATHER) {
+            return $this->weatherLayout();
+        }
         // Dashboard / status must never block on Tesla or Lymow cloud — use cache only.
         // The Vestaboard watcher calls refreshIfStale() on its own schedule.
         if ($live === YarboHub::LIVE_BATTERIES) {
@@ -1772,6 +1792,153 @@ final class YarboVestaboard
         }
 
         return $this->layoutFromTelemetry();
+    }
+
+    /**
+     * Saved idle page. Weather does not need a dashboard module. Powerwall falls
+     * through to Yarbo or Lymow when that module is off.
+     */
+    public function idleLiveId(): string
+    {
+        $hub = new YarboHub($this->projectRoot);
+        $prefer = self::normalizeIdleDefault($this->load()['idle_default'] ?? 'powerwall');
+
+        return YarboHub::resolveIdleVestaboardLive($hub->load()['modules'], $prefer);
+    }
+
+    /**
+     * After Settings saves a new idle default, move the Note there unless Smart
+     * Display is currently covering a job.
+     */
+    public function applyIdleDefaultChange(string $previous): bool
+    {
+        $now = self::normalizeIdleDefault($this->load()['idle_default'] ?? 'powerwall');
+        if ($now === self::normalizeIdleDefault($previous)) {
+            return false;
+        }
+        if ($this->normalizeActivityFocus($this->load()['activity_focus'] ?? null) !== null) {
+            return false;
+        }
+
+        return (new YarboHub($this->projectRoot))->save([
+            'vestaboard_live' => $this->idleLiveId(),
+        ]);
+    }
+
+    public static function normalizeIdleDefault(mixed $raw): string
+    {
+        return strtolower(trim((string) $raw)) === 'weather' ? 'weather' : 'powerwall';
+    }
+
+    public static function normalizeWeatherUnit(mixed $raw): string
+    {
+        $unit = strtolower(trim((string) $raw));
+
+        return $unit === 'f' || $unit === 'fahrenheit' ? 'f' : 'c';
+    }
+
+    /**
+     * Current weather at the panel coordinates, with a colour chip and the date.
+     *
+     * @return array{ok: bool, online: bool, lines: list<string>, codes: list<list<int>>, verb: string}
+     */
+    public function weatherLayout(): array
+    {
+        $coords = (new YarboHomeAutomations($this->projectRoot))->resolveCoords();
+        $lat = isset($coords['latitude']) && is_numeric($coords['latitude']) ? (float) $coords['latitude'] : null;
+        $lon = isset($coords['longitude']) && is_numeric($coords['longitude']) ? (float) $coords['longitude'] : null;
+        $weather = (new YarboWeather($this->projectRoot))->forCoords($lat, $lon);
+        $temp = $weather['temp_c'] ?? null;
+        if (!($weather['ok'] ?? false) || !is_numeric($temp)) {
+            $packed = $this->pack('', 'OFFLINE', 'NO FORECAST', self::COLOR_RED, 0, 0, 'WEATHER');
+            $packed['verb'] = 'WEATHER';
+
+            return ['ok' => true, 'online' => false] + $packed;
+        }
+        $unit = self::normalizeWeatherUnit($this->load()['weather_unit'] ?? 'c');
+        $icon = (string) ($weather['icon'] ?? 'cloudy');
+        $packed = $this->pack(
+            $this->formatWeatherTemp((float) $temp, $unit),
+            $this->weatherConditionLabel($icon, (string) ($weather['label'] ?? '')),
+            $this->weatherDateLine(),
+            $this->weatherChip($icon),
+            0,
+            0,
+            'WEATHER'
+        );
+        $packed['verb'] = 'WEATHER';
+
+        return ['ok' => true, 'online' => true] + $packed;
+    }
+
+    private function formatWeatherTemp(float $celsius, string $unit): string
+    {
+        if ($unit === 'f') {
+            $n = (int) round($celsius * 9 / 5 + 32);
+
+            return $n . 'F';
+        }
+
+        return ((int) round($celsius)) . 'C';
+    }
+
+    private function weatherConditionLabel(string $icon, string $label): string
+    {
+        $upper = strtoupper($label);
+        if ($icon === 'drizzle' && str_contains($upper, 'FREEZING')) {
+            return 'FRZ DRIZZLE';
+        }
+        if ($icon === 'rain' && str_contains($upper, 'FREEZING')) {
+            return 'FREEZING RAIN';
+        }
+        if ($icon === 'rain' && str_contains($upper, 'SHOWER')) {
+            return 'RAIN SHOWERS';
+        }
+        if ($icon === 'rain' && str_contains($upper, 'LIGHT')) {
+            return 'LIGHT RAIN';
+        }
+        if ($icon === 'snow' && str_contains($upper, 'SHOWER')) {
+            return 'SNOW SHOWERS';
+        }
+        if ($icon === 'thunder' && str_contains($upper, 'HAIL')) {
+            return 'THUNDER HAIL';
+        }
+
+        return match ($icon) {
+            'clear', 'clear_night' => 'CLEAR',
+            'mainly_clear' => 'MOSTLY CLEAR',
+            'partly_cloudy' => 'PARTLY CLOUDY',
+            'cloudy' => 'OVERCAST',
+            'fog' => 'FOG',
+            'drizzle' => 'DRIZZLE',
+            'rain' => 'RAIN',
+            'snow' => 'SNOW',
+            'thunder' => 'THUNDER',
+            default => 'CLOUDS',
+        };
+    }
+
+    private function weatherChip(string $icon): int
+    {
+        return match ($icon) {
+            'clear', 'mainly_clear' => self::COLOR_YELLOW,
+            'clear_night' => self::COLOR_VIOLET,
+            'drizzle', 'rain' => self::COLOR_BLUE,
+            'thunder' => self::COLOR_ORANGE,
+            default => self::COLOR_WHITE,
+        };
+    }
+
+    private function weatherDateLine(): string
+    {
+        $name = $this->resolveQuietTimezone();
+        try {
+            $tz = new \DateTimeZone($name !== '' ? $name : 'UTC');
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('UTC');
+        }
+
+        return strtoupper((new \DateTimeImmutable('now', $tz))->format('D j M'));
     }
 
     /**
@@ -2961,7 +3128,8 @@ final class YarboVestaboard
         return $this->codesLookLikeOwnPowerwall($codes)
             || $this->codesLookLikeOwnLymow($codes)
             || $this->codesLookLikeOwnYarbo($codes)
-            || $this->codesLookLikeOwnBatteries($codes);
+            || $this->codesLookLikeOwnBatteries($codes)
+            || $this->codesLookLikeOwnWeather($codes);
     }
 
     /**
@@ -3044,6 +3212,19 @@ final class YarboVestaboard
         return str_starts_with($row0, 'YARBO')
             && str_starts_with($row1, 'POWERWALL')
             && str_starts_with($row2, 'LYMOW');
+    }
+
+    /**
+     * WEATHER + a condition row is this panel's weather page, not an app scribble.
+     *
+     * @param list<list<int>> $codes
+     */
+    private function codesLookLikeOwnWeather(array $codes): bool
+    {
+        $lines = self::linesFromCodes($codes);
+        $row0 = strtoupper(trim($lines[0] ?? ''));
+
+        return str_starts_with($row0, 'WEATHER');
     }
 
     /**

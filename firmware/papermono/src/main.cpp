@@ -1082,13 +1082,14 @@ bool noteChoiceEnabled(int i)
     if (i == 1) return powerwallOn;
     if (i == 2) return lymowOn;
     if (i == 3) return ((yarboOn ? 1 : 0) + (powerwallOn ? 1 : 0) + (lymowOn ? 1 : 0)) >= 2;
+    if (i == 4) return true;
     return yarboOn;
 }
 
 int noteChoiceCount()
 {
     int n = 0;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         if (noteChoiceEnabled(i)) n++;
     }
     return n;
@@ -1097,7 +1098,7 @@ int noteChoiceCount()
 int noteChoiceRaw(int shown)
 {
     int seen = 0;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         if (!noteChoiceEnabled(i)) continue;
         if (seen == shown) return i;
         seen++;
@@ -1111,6 +1112,7 @@ const char *noteChoiceId(int i)
     if (raw == 1) return "powerwall";
     if (raw == 2) return "lymow";
     if (raw == 3) return "batteries";
+    if (raw == 4) return "weather";
     return "yarbo";
 }
 
@@ -1120,6 +1122,7 @@ const char *noteChoiceLabel(int i)
     if (raw == 1) return "POWER";
     if (raw == 2) return "LYMOW";
     if (raw == 3) return "ALL";
+    if (raw == 4) return "WEATHER";
     return "YARBO";
 }
 
@@ -1284,14 +1287,17 @@ void drawRobotListButton(int x, int y, int w, int h, const String &name, const S
     M5.Display.setTextDatum(TL_DATUM);
 }
 
-void layoutButtons(int &bw, int &bh, int &gap, int &y0)
+void layoutButtons(int &bw, int &bh, int &gap, int &y0, int rows = 2)
 {
     int W = M5.Display.width();
     int H = M5.Display.height();
     gap = 12;
     bw = (W - 36) / 2;
-    bh = 88;
-    y0 = H - (bh * 2) - gap - 36;
+    if (rows < 1) rows = 1;
+    if (rows > 3) rows = 3;
+    bh = rows > 2 ? 72 : 88;
+    int stack = bh * rows + gap * (rows - 1);
+    y0 = H - stack - 36;
 }
 
 String headerBrand()
@@ -2826,8 +2832,10 @@ void drawNotePage(bool forceFull)
         M5.Display.drawString(lastError.substring(0, 28), 16, noteHintY);
     }
     int bw, bh, btnGap, y0;
-    layoutButtons(bw, bh, btnGap, y0);
     int n = noteChoiceCount();
+    int rows = (n + 1) / 2;
+    if (rows < 1) rows = 1;
+    layoutButtons(bw, bh, btnGap, y0, rows);
     for (int i = 0; i < n; i++) {
         bool left = (i % 2) == 0;
         int row = i / 2;
@@ -6152,16 +6160,17 @@ void handleNoteTouch(int x, int y)
         return;
     }
     int bw, bh, gap, y0;
-    layoutButtons(bw, bh, gap, y0);
+    int n = noteChoiceCount();
+    int rows = (n + 1) / 2;
+    if (rows < 1) rows = 1;
+    layoutButtons(bw, bh, gap, y0, rows);
     if (y >= y0) {
-        bool left = x < 16 + bw + gap / 2;
-        bool top = y < y0 + bh + gap / 2;
-        int which = 0;
-        if (top && left) which = 0;
-        else if (top && !left) which = 1;
-        else if (!top && left) which = 2;
-        else which = 3;
-        if (which < noteChoiceCount()) {
+        int col = x < 16 + bw + gap / 2 ? 0 : 1;
+        int row = (y - y0) / (bh + gap);
+        if (row < 0) row = 0;
+        if (row >= rows) row = rows - 1;
+        int which = row * 2 + col;
+        if (which < n) {
             setVestaboardLive(noteChoiceId(which));
         }
         return;

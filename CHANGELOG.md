@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.380] - 2026-11-18
+
+### Added
+
+- **Vestaboard weather.** A live page shows the temperature, a short condition with a colour chip, and the date. Settings → Vestaboard chooses Celsius or Fahrenheit, and the idle page can be Powerwall or Weather. Smart Display still follows a robot that is out, then returns to the page it left. PaperMono NOTE adds a **WEATHER** button. Firmware **0.1.98**.
+
 ## [4.0.379] - 2026-11-18
 
 ### Added
